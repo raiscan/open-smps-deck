@@ -25,7 +25,15 @@ public class SmpsImporter {
      */
     public Song importFile(File file) throws IOException {
         byte[] data = Files.readAllBytes(file.toPath());
-        return importData(data, file.getName());
+        String name = file.getName();
+        // Strip known SMPS extensions
+        for (String ext : new String[]{".bin", ".s3k", ".sm2", ".smp"}) {
+            if (name.toLowerCase().endsWith(ext)) {
+                name = name.substring(0, name.length() - ext.length());
+                break;
+            }
+        }
+        return importData(data, name);
     }
 
     /**

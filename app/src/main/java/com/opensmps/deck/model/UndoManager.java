@@ -27,8 +27,7 @@ public class UndoManager {
      */
     public void recordEdit(Pattern pattern, int channel) {
         byte[] snapshot = pattern.getTrackData(channel).clone();
-        List<Edit> group = List.of(new Edit(pattern, channel, snapshot));
-        undoStack.push(new ArrayList<>(group));
+        undoStack.push(List.of(new Edit(pattern, channel, snapshot)));
         redoStack.clear();
         trimStack();
     }

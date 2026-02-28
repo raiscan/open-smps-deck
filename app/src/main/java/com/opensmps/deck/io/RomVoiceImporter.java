@@ -7,7 +7,7 @@ import java.io.File;
 import java.util.*;
 
 /**
- * Scans a directory of SMPS binary (.bin) files and extracts all FM voices
+ * Scans a directory of SMPS files (.bin, .s3k, .sm2, .smp) and extracts all FM voices
  * with deduplication. Uses {@link SmpsImporter} for parsing.
  */
 public class RomVoiceImporter {
@@ -15,17 +15,21 @@ public class RomVoiceImporter {
     private final SmpsImporter importer = new SmpsImporter();
 
     /**
-     * Scan all .bin files in a directory and extract deduplicated FM voices.
+     * Scan all SMPS files in a directory and extract deduplicated FM voices.
      */
     public List<ImportableVoice> scanDirectory(File directory) {
         if (directory == null || !directory.isDirectory()) return List.of();
 
-        File[] binFiles = directory.listFiles((dir, name) -> name.toLowerCase().endsWith(".bin"));
-        if (binFiles == null || binFiles.length == 0) return List.of();
+        File[] files = directory.listFiles((d, name) -> {
+            String lower = name.toLowerCase();
+            return lower.endsWith(".bin") || lower.endsWith(".s3k")
+                    || lower.endsWith(".sm2") || lower.endsWith(".smp");
+        });
+        if (files == null || files.length == 0) return List.of();
 
         Map<String, ImportableVoice> uniqueVoices = new LinkedHashMap<>();
 
-        for (File file : binFiles) {
+        for (File file : files) {
             try {
                 Song song = importer.importFile(file);
                 String songName = file.getName().replaceAll("\\.[^.]+$", "");

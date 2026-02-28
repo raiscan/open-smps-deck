@@ -53,6 +53,17 @@ public class MainWindow {
     private Tab createSongTabUI(SongTab songTab) {
         songTab.buildContent();
 
+        // Wire transport callbacks for keyboard shortcuts in TrackerGrid
+        songTab.getTrackerGrid().setOnTogglePlayback(() -> {
+            if (playbackEngine.isPlaying()) {
+                playbackEngine.stop();
+            } else {
+                playbackEngine.loadSong(songTab.getSong());
+                playbackEngine.play();
+            }
+        });
+        songTab.getTrackerGrid().setOnStopPlayback(() -> playbackEngine.stop());
+
         BorderPane content = new BorderPane();
         content.setCenter(songTab.getTrackerGrid());
         content.setBottom(songTab.getOrderListPanel());
@@ -105,6 +116,12 @@ public class MainWindow {
 
         // Initial song tab
         addNewTab(new SongTab());
+
+        // Wire transport to the first tab's song (instead of relying on listener)
+        SongTab firstTab = getActiveSongTab();
+        if (firstTab != null) {
+            transportBar.setSong(firstTab.getSong());
+        }
 
         // [+] button tab (not closable)
         Tab plusTab = new Tab("+");
@@ -254,8 +271,13 @@ public class MainWindow {
     private void onImportSmps() {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Import SMPS Binary");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("SMPS Binary", "*.bin"));
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("All SMPS Files", "*.bin", "*.s3k", "*.sm2", "*.smp"),
+                new FileChooser.ExtensionFilter("SMPS Binary", "*.bin"),
+                new FileChooser.ExtensionFilter("SMPSPlay S3K", "*.s3k"),
+                new FileChooser.ExtensionFilter("SMPSPlay S2", "*.sm2"),
+                new FileChooser.ExtensionFilter("SMPSPlay S1", "*.smp")
+        );
         File file = fileChooser.showOpenDialog(stage);
         if (file != null) {
             try {

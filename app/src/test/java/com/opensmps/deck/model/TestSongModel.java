@@ -75,7 +75,7 @@ class TestSongModel {
         assertEquals(0xFF, voice.getOpParam(3, 4));
 
         // Verify the raw data reflects the writes
-        byte[] raw = voice.getRawData();
+        byte[] raw = voice.getDataUnsafe();
         assertEquals((byte) 0x71, raw[1]);
         assertEquals((byte) 0xAB, raw[16]);
         assertEquals((byte) 0xFF, raw[23]);
@@ -101,7 +101,7 @@ class TestSongModel {
         assertEquals(7, voice.getAlgorithm(), "Setting feedback should not change algo");
 
         // byte[0] should be 0b00101_111 = 0x2F
-        assertEquals(0x2F, voice.getRawData()[0] & 0xFF);
+        assertEquals(0x2F, voice.getDataUnsafe()[0] & 0xFF);
     }
 
     @Test

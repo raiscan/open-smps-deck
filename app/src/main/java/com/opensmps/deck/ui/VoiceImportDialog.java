@@ -33,7 +33,7 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
 
     public VoiceImportDialog() {
         setTitle("Import Voices from SMPS Files");
-        setHeaderText("Select a directory containing SMPS .bin files:");
+        setHeaderText("Select a directory containing SMPS files (.bin, .s3k, .sm2, .smp):");
 
         DialogPane pane = getDialogPane();
         pane.setPrefWidth(600);
@@ -59,9 +59,14 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         VBox.setVgrow(table, Priority.ALWAYS);
 
+        TableColumn<ImportableVoice, String> nameCol = new TableColumn<>("Name");
+        nameCol.setCellValueFactory(c -> new SimpleStringProperty(
+                c.getValue().sourceSong() + " #" + c.getValue().originalIndex()));
+        nameCol.setPrefWidth(200);
+
         TableColumn<ImportableVoice, String> songCol = new TableColumn<>("Source Song");
         songCol.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().sourceSong()));
-        songCol.setPrefWidth(180);
+        songCol.setPrefWidth(140);
 
         TableColumn<ImportableVoice, Number> idxCol = new TableColumn<>("Index");
         idxCol.setCellValueFactory(c -> new SimpleIntegerProperty(c.getValue().originalIndex()));
@@ -71,7 +76,7 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
         algoCol.setCellValueFactory(c -> new SimpleIntegerProperty(c.getValue().algorithm()));
         algoCol.setPrefWidth(60);
 
-        table.getColumns().addAll(List.of(songCol, idxCol, algoCol));
+        table.getColumns().addAll(List.of(nameCol, songCol, idxCol, algoCol));
 
         // Filter logic
         filterField.textProperty().addListener((obs, oldVal, newVal) -> {

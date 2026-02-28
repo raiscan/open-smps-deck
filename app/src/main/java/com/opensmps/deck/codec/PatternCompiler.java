@@ -152,7 +152,7 @@ public class PatternCompiler {
 
             // -- Voice table --
             for (FmVoice voice : song.getVoiceBank()) {
-                out.write(voice.getRawData());
+                out.write(voice.getDataUnsafe());
             }
 
             return out.toByteArray();

@@ -22,6 +22,7 @@ public class TransportBar extends HBox {
     private final Button stopButton;
     private final Button pauseButton;
     private final Spinner<Integer> tempoSpinner;
+    private final Spinner<Integer> dtSpinner;
     private final ComboBox<SmpsMode> modeSelector;
     private boolean paused = false;
 
@@ -63,7 +64,7 @@ public class TransportBar extends HBox {
         // Dividing timing
         Label dtLabel = new Label("Div:");
         dtLabel.setStyle("-fx-text-fill: #cccccc;");
-        Spinner<Integer> dtSpinner = new Spinner<>(1, 8, song.getDividingTiming());
+        dtSpinner = new Spinner<>(1, 8, song.getDividingTiming());
         dtSpinner.setPrefWidth(60);
         dtSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
             song.setDividingTiming(newVal);
@@ -96,6 +97,7 @@ public class TransportBar extends HBox {
     public void setSong(Song song) {
         this.song = song;
         tempoSpinner.getValueFactory().setValue(song.getTempo());
+        dtSpinner.getValueFactory().setValue(song.getDividingTiming());
         modeSelector.setValue(song.getSmpsMode());
     }
 

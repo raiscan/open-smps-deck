@@ -549,9 +549,7 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
     public void stopDac(Object source) {
         int ch = 5;
         if (isSfx(source)) {
-            // Don't release lock here, just stop sound.
-            // Lock is released when track ends or channel unused?
-            // Actually, stopDac is just stopping sound.
+            // Lock release is handled by releaseLocks() when the sequencer's tracks complete.
             super.stopDac(source);
         } else {
             if (fmLocks[ch] == null) {

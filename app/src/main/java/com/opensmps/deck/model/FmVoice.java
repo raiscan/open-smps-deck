@@ -54,9 +54,11 @@ public class FmVoice {
     }
 
     /**
-     * Returns the internal data array directly (for performance-sensitive code).
+     * Get the internal data array WITHOUT defensive copy.
+     * WARNING: Do not retain or mutate the returned reference.
+     * Use only for performance-sensitive read-only streaming.
      */
-    public byte[] getRawData() {
+    public byte[] getDataUnsafe() {
         return data;
     }
 
