@@ -5,6 +5,7 @@ import com.opensmps.deck.codec.PasteResolver;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
 import com.opensmps.deck.model.ClipboardData;
+import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.PsgEnvelope;
@@ -48,6 +49,30 @@ public class TrackerGrid extends ScrollPane {
     static final int COL_INSTRUMENT = 1;
     static final int COL_EFFECT = 2;
     private static final int COL_COUNT = 3;
+
+    /** Channel index for the DAC channel (FM6 used as DAC on Mega Drive). */
+    private static final int DAC_CHANNEL = 5;
+
+    /**
+     * Maps keyboard characters to sequential DAC sample indices.
+     * Uses the lower piano-row layout: Z=0, S=1, X=2, D=3, C=4, V=5, G=6, B=7, H=8, N=9, J=10, M=11.
+     */
+    private static final int[] DAC_KEY_MAP = new int[128];
+    static {
+        Arrays.fill(DAC_KEY_MAP, -1);
+        DAC_KEY_MAP['Z'] = 0;
+        DAC_KEY_MAP['S'] = 1;
+        DAC_KEY_MAP['X'] = 2;
+        DAC_KEY_MAP['D'] = 3;
+        DAC_KEY_MAP['C'] = 4;
+        DAC_KEY_MAP['V'] = 5;
+        DAC_KEY_MAP['G'] = 6;
+        DAC_KEY_MAP['B'] = 7;
+        DAC_KEY_MAP['H'] = 8;
+        DAC_KEY_MAP['N'] = 9;
+        DAC_KEY_MAP['J'] = 10;
+        DAC_KEY_MAP['M'] = 11;
+    }
 
     private final Canvas canvas;
     private InstrumentPanel instrumentPanel;
@@ -215,7 +240,7 @@ public class TrackerGrid extends ScrollPane {
 
                 if (row < channelRows.size()) {
                     SmpsDecoder.TrackerRow tr = channelRows.get(row);
-                    renderCell(gc, tr, x, y, ch == cursorChannel && row == cursorRow);
+                    renderCell(gc, tr, x, y, ch, ch == cursorChannel && row == cursorRow);
                 } else {
                     // Empty cell
                     gc.setFill(Color.web("#333333"));
@@ -233,7 +258,7 @@ public class TrackerGrid extends ScrollPane {
         }
     }
 
-    private void renderCell(GraphicsContext gc, SmpsDecoder.TrackerRow row, double x, double y, boolean isCursor) {
+    private void renderCell(GraphicsContext gc, SmpsDecoder.TrackerRow row, double x, double y, int channel, boolean isCursor) {
         double textY = y + ROW_HEIGHT - 5;
 
         // Draw cursor column underline indicator when this cell is focused
@@ -253,16 +278,34 @@ public class TrackerGrid extends ScrollPane {
             }
         }
 
-        // Note
+        // Note — DAC channel shows sample name abbreviations instead of musical notes
         if (row.note() != null && !row.note().isEmpty()) {
-            if (row.note().equals("---")) {
+            String displayNote = row.note();
+            boolean isDacNote = false;
+
+            if (channel == DAC_CHANNEL && song != null && !song.getDacSamples().isEmpty()) {
+                // Try to format as DAC sample name
+                if (!displayNote.equals("---") && !displayNote.equals("===") && !displayNote.equals("???")) {
+                    // Reverse-lookup: the decoded note string came from a 0x81+ byte.
+                    // Re-derive the note byte from the display string to get the DAC index.
+                    String dacDisplay = formatDacNoteFromDisplay(displayNote);
+                    if (dacDisplay != null) {
+                        displayNote = dacDisplay;
+                        isDacNote = true;
+                    }
+                }
+            }
+
+            if (displayNote.equals("---")) {
                 gc.setFill(Color.web("#666688"));
-            } else if (row.note().equals("===")) {
+            } else if (displayNote.equals("===")) {
                 gc.setFill(Color.web("#88aa88"));
+            } else if (isDacNote) {
+                gc.setFill(Color.web("#dd99ff")); // purple tint for DAC samples
             } else {
                 gc.setFill(Color.web("#ccddee"));
             }
-            gc.fillText(row.note(), x, textY);
+            gc.fillText(displayNote, x, textY);
         }
 
         // Instrument (skip if pending hex digit is being shown at this cursor position)
@@ -427,9 +470,16 @@ public class TrackerGrid extends ScrollPane {
                     String text = e.getText();
                     if (text != null && !text.isEmpty()) {
                         char key = text.charAt(0);
-                        int noteValue = SmpsEncoder.encodeNoteFromKey(key, currentOctave);
-                        if (noteValue > 0) {
-                            insertNote(noteValue);
+                        if (isDacChannelActive()) {
+                            int dacIndex = dacIndexFromKey(key);
+                            if (dacIndex >= 0 && dacIndex < song.getDacSamples().size()) {
+                                insertNote(0x81 + dacIndex);
+                            }
+                        } else {
+                            int noteValue = SmpsEncoder.encodeNoteFromKey(key, currentOctave);
+                            if (noteValue > 0) {
+                                insertNote(noteValue);
+                            }
                         }
                     }
                 }
@@ -840,6 +890,82 @@ public class TrackerGrid extends ScrollPane {
         }
         refreshDisplay();
         markDirty();
+    }
+
+    // --- DAC helpers ---
+
+    /**
+     * Returns true when the cursor is on the DAC channel and the song
+     * has at least one DAC sample defined, enabling DAC-specific behavior.
+     */
+    private boolean isDacChannelActive() {
+        return cursorChannel == DAC_CHANNEL
+                && song != null
+                && !song.getDacSamples().isEmpty();
+    }
+
+    /**
+     * Maps a keyboard character to a sequential DAC sample index (0-11),
+     * or -1 if the key is not mapped.
+     */
+    private static int dacIndexFromKey(char key) {
+        char upper = Character.toUpperCase(key);
+        if (upper < 128) {
+            return DAC_KEY_MAP[upper];
+        }
+        return -1;
+    }
+
+    /**
+     * Formats a DAC note byte for display. If the note byte corresponds to a
+     * valid DAC sample, returns the first 3 characters of the sample name
+     * (uppercased). Otherwise returns "D" + 2-digit hex index (e.g. "D00").
+     */
+    private String formatDacNote(int noteByte) {
+        int dacIdx = (noteByte & 0xFF) - 0x81;
+        if (dacIdx < 0) return null;
+        if (song != null) {
+            List<DacSample> samples = song.getDacSamples();
+            if (dacIdx < samples.size()) {
+                String name = samples.get(dacIdx).getName();
+                if (name != null && !name.isEmpty()) {
+                    String abbrev = name.length() >= 3
+                            ? name.substring(0, 3).toUpperCase()
+                            : name.toUpperCase();
+                    return abbrev;
+                }
+            }
+        }
+        return String.format("D%02X", dacIdx);
+    }
+
+    /** Note names matching SmpsDecoder's format for reverse lookup. */
+    private static final String[] REVERSE_NOTE_NAMES = {
+        "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
+    };
+
+    /**
+     * Reverse-maps a decoded note display string (e.g. "C-0") back to a note byte,
+     * then formats it as a DAC sample name. Returns null if the string is not a valid note.
+     */
+    private String formatDacNoteFromDisplay(String noteDisplay) {
+        if (noteDisplay == null || noteDisplay.length() < 3) return null;
+        String notePart = noteDisplay.substring(0, 2);
+        char octaveChar = noteDisplay.charAt(2);
+        if (octaveChar < '0' || octaveChar > '9') return null;
+        int octave = octaveChar - '0';
+
+        int semitone = -1;
+        for (int i = 0; i < REVERSE_NOTE_NAMES.length; i++) {
+            if (REVERSE_NOTE_NAMES[i].equals(notePart)) {
+                semitone = i;
+                break;
+            }
+        }
+        if (semitone < 0) return null;
+
+        int noteByte = 0x81 + octave * 12 + semitone;
+        return formatDacNote(noteByte);
     }
 
     // --- Mute / Solo ---
