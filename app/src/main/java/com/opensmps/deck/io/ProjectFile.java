@@ -8,11 +8,25 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
+/**
+ * Saves and loads OpenSMPS Deck project files ({@code .osmpsd}).
+ *
+ * <p>Projects are stored as JSON with hex-encoded binary data for track
+ * bytes and voice/envelope data. The format is versioned for future
+ * compatibility.
+ */
 public class ProjectFile {
 
     private static final int VERSION = 1;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
+    /**
+     * Saves a song to a {@code .osmpsd} project file as pretty-printed JSON.
+     *
+     * @param song the song to save
+     * @param file the destination file
+     * @throws IOException if writing fails
+     */
     public static void save(Song song, File file) throws IOException {
         JsonObject root = new JsonObject();
         root.addProperty("version", VERSION);
@@ -74,6 +88,13 @@ public class ProjectFile {
         Files.writeString(file.toPath(), GSON.toJson(root), StandardCharsets.UTF_8);
     }
 
+    /**
+     * Loads a song from a {@code .osmpsd} project file.
+     *
+     * @param file the project file to load
+     * @return the loaded song
+     * @throws IOException if reading or parsing fails
+     */
     public static Song load(File file) throws IOException {
         String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();

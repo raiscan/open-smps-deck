@@ -3,6 +3,16 @@ package com.opensmps.deck.model;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Top-level model for an SMPS song project.
+ *
+ * <p>Contains the voice bank, PSG envelopes, patterns (each holding raw
+ * SMPS track data per channel), and the order list that sequences patterns
+ * for playback. The internal representation is SMPS-native: track data is
+ * stored as raw bytecode matching the Z80 driver convention.
+ *
+ * <p>Default state: one empty pattern, one order row, S2 mode, tempo 0x80.
+ */
 public class Song {
 
     private String name = "Untitled";

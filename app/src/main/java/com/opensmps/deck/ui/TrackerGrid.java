@@ -15,6 +15,13 @@ import javafx.scene.text.Font;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Canvas-based tracker grid displaying decoded SMPS track data.
+ *
+ * <p>Renders 10 channels side-by-side with row numbers, note names,
+ * durations, instruments, and effects. Handles keyboard input for
+ * note entry, navigation, selection, copy/paste, transpose, and undo.
+ */
 public class TrackerGrid extends ScrollPane {
 
     private static final int ROW_HEIGHT = 20;

@@ -8,6 +8,12 @@ import javafx.scene.control.Label;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 
+/**
+ * Main application window with BorderPane layout.
+ *
+ * <p>Layout: TransportBar (top), TrackerGrid (center),
+ * OrderListPanel (bottom), instrument placeholder (right).
+ */
 public class MainWindow {
 
     private final Stage stage;

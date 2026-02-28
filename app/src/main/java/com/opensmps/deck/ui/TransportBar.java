@@ -10,6 +10,10 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 
+/**
+ * Transport controls bar with Play/Stop/Pause, tempo/timing spinners,
+ * and SMPS mode selector.
+ */
 public class TransportBar extends HBox {
 
     private final PlaybackEngine playbackEngine;

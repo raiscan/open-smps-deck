@@ -9,6 +9,10 @@ import javafx.scene.layout.*;
 
 import java.util.function.IntConsumer;
 
+/**
+ * Order list panel showing the sequence of patterns for playback.
+ * Supports add, remove, duplicate, and loop-point operations.
+ */
 public class OrderListPanel extends VBox {
 
     private static final String[] CHANNEL_NAMES = {

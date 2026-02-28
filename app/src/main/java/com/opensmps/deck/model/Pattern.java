@@ -1,5 +1,13 @@
 package com.opensmps.deck.model;
 
+/**
+ * A pattern containing raw SMPS track data for each of the 10 channels.
+ *
+ * <p>Channel layout: FM1-FM5 (0-4), DAC/FM6 (5), PSG1-PSG3 (6-8), PSG Noise (9).
+ * Each channel's data is a raw SMPS bytecode byte array interpreted by
+ * {@link com.opensmps.deck.codec.SmpsDecoder} for display and
+ * {@link com.opensmps.deck.codec.SmpsEncoder} for editing.
+ */
 public class Pattern {
 
     public static final int CHANNEL_COUNT = 10;
