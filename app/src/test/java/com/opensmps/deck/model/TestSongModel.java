@@ -423,4 +423,11 @@ class TestSongModel {
         assertEquals(1, FmVoice.displayToSmps(2)); // Display Op3 -> SMPS 1
         assertEquals(3, FmVoice.displayToSmps(3)); // Display Op4 -> SMPS 3
     }
+
+    @Test
+    void testPsgEnvelopeZeroSteps() {
+        PsgEnvelope env = new PsgEnvelope("Empty", new byte[]{(byte) 0x80});
+        assertEquals(0, env.getStepCount());
+        assertArrayEquals(new byte[]{(byte) 0x80}, env.getData());
+    }
 }

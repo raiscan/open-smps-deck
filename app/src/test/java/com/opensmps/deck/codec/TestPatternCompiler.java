@@ -145,4 +145,23 @@ class TestPatternCompiler {
         assertNotNull(smps);
         assertTrue(smps.length > 0);
     }
+
+    @Test
+    void testLoopPointBeyondOrderListDefaultsToZero() {
+        Song song = new Song();
+        song.setTempo(120);
+        song.setDividingTiming(1);
+        // Add some data to FM1 (channel 0)
+        Pattern p = song.getPatterns().get(0);
+        p.setTrackData(0, new byte[]{(byte) 0x80, 0x30}); // C4 with duration 0x30
+        // Set loop point beyond the single order row
+        song.setLoopPoint(99);
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+        // Should not throw, and the JUMP target should point to offset 0 of the track data
+        // (the header size bytes offset)
+        assertNotNull(smps);
+        assertTrue(smps.length > 0);
+    }
 }

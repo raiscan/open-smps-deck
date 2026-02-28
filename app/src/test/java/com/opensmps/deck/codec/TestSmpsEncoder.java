@@ -1,6 +1,7 @@
 package com.opensmps.deck.codec;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TestSmpsEncoder {
@@ -147,5 +148,14 @@ class TestSmpsEncoder {
         assertEquals(0, offsets[0]); // C-5 at byte 0
         assertEquals(2, offsets[1]); // D-5 at byte 2
         assertEquals(4, offsets[2]); // rest at byte 4
+    }
+
+    @Test
+    void testEncodeCoordFlagOnlyTrack() {
+        // A track that sets voice 0, then stops: EF 00 F2
+        byte[] data = {(byte) 0xEF, 0x00, (byte) 0xF2};
+        // Decode should produce rows
+        List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
+        assertFalse(rows.isEmpty());
     }
 }

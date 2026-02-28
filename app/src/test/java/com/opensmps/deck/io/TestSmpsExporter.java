@@ -53,4 +53,29 @@ public class TestSmpsExporter {
 
         assertArrayEquals(compiled, fromFile);
     }
+
+    @Test
+    void testExportContainsVoiceData() throws IOException {
+        Song song = new Song();
+        song.setTempo(120);
+        song.setDividingTiming(1);
+        // Add an FM voice
+        byte[] voiceData = new byte[25];
+        voiceData[0] = 0x32; // algo=2, fb=6
+        song.getVoiceBank().add(new FmVoice("Lead", voiceData));
+        // Add some FM1 data
+        song.getPatterns().get(0).setTrackData(0,
+                new byte[]{(byte) 0x80, 0x30});
+
+        File file = new File(tempDir, "test-voice.bin");
+        new SmpsExporter().export(song, file);
+
+        byte[] exported = Files.readAllBytes(file.toPath());
+        // Voice pointer is at bytes 0-1 (LE)
+        int voicePtr = (exported[0] & 0xFF) | ((exported[1] & 0xFF) << 8);
+        assertTrue(voicePtr > 0, "Voice pointer should be non-zero");
+        assertTrue(voicePtr + 25 <= exported.length, "Voice data should fit within exported file");
+        // Verify the voice data at the pointer offset matches
+        assertEquals(0x32, exported[voicePtr] & 0xFF, "First voice byte (FB_ALG) should match");
+    }
 }

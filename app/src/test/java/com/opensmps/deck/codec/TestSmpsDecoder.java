@@ -118,4 +118,14 @@ class TestSmpsDecoder {
         assertEquals(0x18, rows.get(0).duration());
         assertEquals(0x18, rows.get(1).duration()); // reused
     }
+
+    @Test
+    void testTrailingEffectProducesRow() {
+        // SET_VOICE (0xEF) + voice index 1, no note following
+        byte[] data = {(byte) 0xEF, 0x01};
+        List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
+        assertFalse(rows.isEmpty(), "Trailing effect should produce at least one row");
+        // The row should show the effect (SET_VOICE goes to instrument column)
+        assertNotNull(rows.get(0).effect());
+    }
 }
