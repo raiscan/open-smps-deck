@@ -1,5 +1,12 @@
 package com.opensmps.smps;
 
+/**
+ * Base class for SMPS song data, providing header parsing and accessor methods
+ * for all song metadata (channel pointers, key/volume offsets, voice table location).
+ *
+ * <p>Subclasses implement game-specific header layouts and voice/envelope lookup.
+ * The raw binary data is stored in {@link #data} and parsed via {@link #parseHeader()}.
+ */
 public abstract class AbstractSmpsData {
     protected final byte[] data;
     protected int voicePtr;

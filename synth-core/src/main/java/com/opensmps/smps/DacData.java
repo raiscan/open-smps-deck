@@ -2,6 +2,13 @@ package com.opensmps.smps;
 
 import java.util.Map;
 
+/**
+ * Holds DAC (Digital-to-Analog Converter) sample data for SMPS playback.
+ *
+ * <p>Contains the raw PCM samples indexed by sample ID, a mapping from
+ * DAC note numbers to sample/rate pairs, and the base CPU cycle count
+ * used to calculate the DAC playback rate from the Z80 djnz loop timing.
+ */
 public class DacData {
     public final Map<Integer, byte[]> samples;
     public final Map<Integer, DacEntry> mapping;

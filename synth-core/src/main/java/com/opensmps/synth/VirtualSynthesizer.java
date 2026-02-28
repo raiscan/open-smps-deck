@@ -4,6 +4,14 @@ import com.opensmps.smps.DacData;
 
 import java.util.Arrays;
 
+/**
+ * Software emulation of the Mega Drive audio hardware: YM2612 FM synthesis
+ * chip (6 channels + DAC) and SN76489 PSG chip (3 square + 1 noise).
+ *
+ * <p>Renders stereo audio by mixing FM and PSG output with master gain
+ * headroom to prevent clipping. Uses the GPGX PSG core for accurate
+ * timing and pitch parity with Genesis hardware.
+ */
 public class VirtualSynthesizer implements Synthesizer {
     private final PsgChipGPGX psg;
     private final Ym2612Chip ym;
