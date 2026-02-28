@@ -14,6 +14,7 @@ public class MainWindow {
     private final BorderPane root;
     private final Song currentSong;
     private final PlaybackEngine playbackEngine;
+    private TrackerGrid trackerGrid;
 
     public MainWindow(Stage stage) {
         this.stage = stage;
@@ -30,11 +31,10 @@ public class MainWindow {
         TransportBar transportBar = new TransportBar(playbackEngine, currentSong);
         root.setTop(transportBar);
 
-        // Center: Tracker grid placeholder
-        StackPane gridPlaceholder = new StackPane();
-        gridPlaceholder.setStyle("-fx-background-color: #1a1a2e;");
-        gridPlaceholder.getChildren().add(createLabel("Tracker Grid"));
-        root.setCenter(gridPlaceholder);
+        // Center: Tracker grid
+        trackerGrid = new TrackerGrid();
+        trackerGrid.setSong(currentSong);
+        root.setCenter(trackerGrid);
 
         // Bottom: Order list placeholder
         StackPane orderPlaceholder = new StackPane();
@@ -80,6 +80,10 @@ public class MainWindow {
 
     public BorderPane getRoot() {
         return root;
+    }
+
+    public TrackerGrid getTrackerGrid() {
+        return trackerGrid;
     }
 
     private Label createLabel(String text) {
