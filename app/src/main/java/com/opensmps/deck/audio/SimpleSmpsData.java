@@ -74,7 +74,7 @@ public class SimpleSmpsData extends AbstractSmpsData {
 
     @Override
     public int read16(int offset) {
-        if (offset + 1 >= data.length) return 0;
+        if (offset + 2 > data.length) return 0;
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 

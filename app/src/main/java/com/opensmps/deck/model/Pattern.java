@@ -66,6 +66,6 @@ public class Pattern {
         if (channel < 0 || channel >= CHANNEL_COUNT) {
             throw new IndexOutOfBoundsException("Channel " + channel + " out of range 0-" + (CHANNEL_COUNT - 1));
         }
-        tracks[channel] = data;
+        tracks[channel] = data != null ? data.clone() : new byte[0];
     }
 }

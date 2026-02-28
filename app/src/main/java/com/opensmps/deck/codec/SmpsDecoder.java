@@ -35,17 +35,6 @@ public class SmpsDecoder {
     }
 
     /**
-     * Get the parameter count for a coordination flag byte.
-     * Delegates to {@link SmpsCoordFlags#getParamCount(int)}.
-     *
-     * @param flagByte the flag byte (0xE0-0xFF)
-     * @return the number of parameter bytes
-     */
-    public static int getCoordFlagParamCount(int flagByte) {
-        return SmpsCoordFlags.getParamCount(flagByte);
-    }
-
-    /**
      * Decode raw SMPS track data into a list of TrackerRows.
      * Each note/rest produces one row. Coordination flags are attached to the
      * following note's effect column, or as standalone rows if no note follows.

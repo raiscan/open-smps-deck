@@ -89,7 +89,7 @@ public final class InstrumentRemapper {
      */
     public static byte[] rewrite(byte[] data, Map<Integer, Integer> voiceMap, Map<Integer, Integer> psgMap) {
         if (data == null || data.length == 0) {
-            return data == null ? new byte[0] : new byte[0];
+            return new byte[0];
         }
 
         byte[] result = data.clone();

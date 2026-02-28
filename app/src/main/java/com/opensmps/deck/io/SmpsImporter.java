@@ -177,7 +177,7 @@ public class SmpsImporter {
     }
 
     private int readLE16(byte[] data, int offset) {
-        if (offset + 1 >= data.length) return 0;
+        if (offset + 2 > data.length) return 0;
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 }

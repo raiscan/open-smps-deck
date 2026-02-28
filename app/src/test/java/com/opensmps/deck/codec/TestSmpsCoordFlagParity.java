@@ -11,16 +11,6 @@ import static org.junit.jupiter.api.Assertions.*;
 class TestSmpsCoordFlagParity {
 
     @Test
-    void decoderParamCountMatchesSharedTable() {
-        // Verify SmpsDecoder.getCoordFlagParamCount delegates correctly
-        for (int flag = 0xE0; flag <= 0xFF; flag++) {
-            assertEquals(SmpsCoordFlags.getParamCount(flag),
-                SmpsDecoder.getCoordFlagParamCount(flag),
-                String.format("Param count mismatch for flag 0x%02X", flag));
-        }
-    }
-
-    @Test
     void encodeVoiceChangeUsesEF() {
         byte[] bytes = SmpsEncoder.encodeVoiceChange(3);
         assertEquals((byte) SmpsCoordFlags.SET_VOICE, bytes[0],

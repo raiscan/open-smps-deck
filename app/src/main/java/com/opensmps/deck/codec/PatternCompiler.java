@@ -43,7 +43,10 @@ public class PatternCompiler {
      */
     public byte[] compile(Song song) {
         // Defensive snapshot — compile reads orderList and patterns which the UI thread may modify
-        List<int[]> orderList = new ArrayList<>(song.getOrderList());
+        List<int[]> orderList = new ArrayList<>();
+        for (int[] row : song.getOrderList()) {
+            orderList.add(row.clone());
+        }
         List<Pattern> patterns = new ArrayList<>(song.getPatterns());
 
         // 1. Determine active channels and build compiled track data for each
