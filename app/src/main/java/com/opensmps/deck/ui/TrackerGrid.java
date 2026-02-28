@@ -1,7 +1,7 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
-import com.opensmps.deck.codec.InstrumentRemapper;
+import com.opensmps.deck.codec.PasteResolver;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
 import com.opensmps.deck.model.ClipboardData;
@@ -10,6 +10,7 @@ import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.UndoManager;
+import com.opensmps.smps.SmpsCoordFlags;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ScrollPane;
@@ -42,14 +43,24 @@ public class TrackerGrid extends ScrollPane {
     private static final Font MONO_FONT = Font.font("Monospaced", 13);
     private static final Font HEADER_FONT = Font.font("Monospaced", 12);
 
+    /** Sub-column positions within a channel cell. */
+    static final int COL_NOTE = 0;
+    static final int COL_INSTRUMENT = 1;
+    static final int COL_EFFECT = 2;
+    private static final int COL_COUNT = 3;
+
     private final Canvas canvas;
     private InstrumentPanel instrumentPanel;
     private Song song;
     private int currentPatternIndex = 0;
     private int cursorRow = 0;
     private int cursorChannel = 0;
+    private int cursorColumn = COL_NOTE;
     private int currentOctave = 4;
     private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
+
+    /** First hex digit waiting for second, or -1 if not in hex entry mode. */
+    private int pendingHexDigit = -1;
 
     // Selection state
     private int selStartRow = -1, selStartChannel = -1;
@@ -113,7 +124,7 @@ public class TrackerGrid extends ScrollPane {
         decodedChannels.clear();
         int maxRows = 0;
         for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackData(ch));
+            List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackDataDirect(ch));
             decodedChannels.add(rows);
             maxRows = Math.max(maxRows, rows.size());
         }
@@ -225,6 +236,23 @@ public class TrackerGrid extends ScrollPane {
     private void renderCell(GraphicsContext gc, SmpsDecoder.TrackerRow row, double x, double y, boolean isCursor) {
         double textY = y + ROW_HEIGHT - 5;
 
+        // Draw cursor column underline indicator when this cell is focused
+        if (isCursor) {
+            gc.setStroke(Color.web("#88ccff"));
+            gc.setLineWidth(2);
+            double underlineY = y + ROW_HEIGHT - 1;
+            switch (cursorColumn) {
+                case COL_NOTE -> gc.strokeLine(x, underlineY, x + 36, underlineY);
+                case COL_INSTRUMENT -> gc.strokeLine(x + 40, underlineY, x + 62, underlineY);
+                case COL_EFFECT -> gc.strokeLine(x + 65, underlineY, x + CHANNEL_WIDTH - 8, underlineY);
+            }
+            // Show pending hex digit indicator
+            if (pendingHexDigit >= 0 && cursorColumn == COL_INSTRUMENT) {
+                gc.setFill(Color.web("#ffcc44"));
+                gc.fillText(String.format("%X_", pendingHexDigit), x + 40, textY);
+            }
+        }
+
         // Note
         if (row.note() != null && !row.note().isEmpty()) {
             if (row.note().equals("---")) {
@@ -237,10 +265,12 @@ public class TrackerGrid extends ScrollPane {
             gc.fillText(row.note(), x, textY);
         }
 
-        // Instrument
-        if (row.instrument() != null && !row.instrument().isEmpty()) {
-            gc.setFill(Color.web("#aacc88"));
-            gc.fillText(row.instrument(), x + 40, textY);
+        // Instrument (skip if pending hex digit is being shown at this cursor position)
+        if (!(isCursor && pendingHexDigit >= 0 && cursorColumn == COL_INSTRUMENT)) {
+            if (row.instrument() != null && !row.instrument().isEmpty()) {
+                gc.setFill(Color.web("#aacc88"));
+                gc.fillText(row.instrument(), x + 40, textY);
+            }
         }
 
         // Effect
@@ -254,6 +284,7 @@ public class TrackerGrid extends ScrollPane {
 
     public int getCursorRow() { return cursorRow; }
     public int getCursorChannel() { return cursorChannel; }
+    public int getCursorColumn() { return cursorColumn; }
 
     public void setCursorRow(int row) {
         this.cursorRow = row;
@@ -402,7 +433,7 @@ public class TrackerGrid extends ScrollPane {
             }
         } else {
             for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-                List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackData(ch));
+                List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackDataDirect(ch));
                 max = Math.max(max, rows.size());
             }
         }
@@ -439,7 +470,7 @@ public class TrackerGrid extends ScrollPane {
         if (song == null) return;
         if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
-        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
         byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
         byte[] insertBytes = prependInstrumentIfSelected(noteBytes);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, insertBytes);
@@ -454,7 +485,7 @@ public class TrackerGrid extends ScrollPane {
         if (song == null) return;
         if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
-        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
         byte[] restBytes = SmpsEncoder.encodeRest(currentDuration);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, restBytes);
         undoManager.recordEdit(pattern, cursorChannel);
@@ -468,7 +499,7 @@ public class TrackerGrid extends ScrollPane {
         if (song == null) return;
         if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
-        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
         byte[] newData = SmpsEncoder.deleteRow(trackData, cursorRow);
         undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
@@ -540,7 +571,7 @@ public class TrackerGrid extends ScrollPane {
 
         byte[][] channelData = new byte[chCount][];
         for (int ch = 0; ch < chCount; ch++) {
-            byte[] trackData = pattern.getTrackData(minCh + ch);
+            byte[] trackData = pattern.getTrackDataDirect(minCh + ch);
             channelData[ch] = SmpsEncoder.extractRowRange(trackData, minRow, rowCount);
         }
 
@@ -567,7 +598,7 @@ public class TrackerGrid extends ScrollPane {
 
         // Delete rows from bottom to top (since rows shift after each delete)
         for (int ch = minCh; ch <= maxCh; ch++) {
-            byte[] trackData = pattern.getTrackData(ch);
+            byte[] trackData = pattern.getTrackDataDirect(ch);
             for (int row = maxRow; row >= minRow; row--) {
                 trackData = SmpsEncoder.deleteRow(trackData, row);
             }
@@ -615,7 +646,7 @@ public class TrackerGrid extends ScrollPane {
             int targetChannel = cursorChannel + ch;
             if (targetChannel >= Pattern.CHANNEL_COUNT) break;
 
-            byte[] trackData = pattern.getTrackData(targetChannel);
+            byte[] trackData = pattern.getTrackDataDirect(targetChannel);
             byte[] pasteData = pasteChannelData[ch];
 
             // Insert pasted bytes at cursor row
@@ -628,35 +659,21 @@ public class TrackerGrid extends ScrollPane {
 
     private byte[][] resolveCrossPaste(byte[][] channelData, List<FmVoice> srcVoices,
                                         List<PsgEnvelope> srcPsgEnvelopes, Song dstSong) {
-        Set<Integer> allVoices = new LinkedHashSet<>();
-        Set<Integer> allPsg = new LinkedHashSet<>();
-        for (byte[] data : channelData) {
-            InstrumentRemapper.ScanResult scan = InstrumentRemapper.scan(data);
-            allVoices.addAll(scan.voiceIndices());
-            allPsg.addAll(scan.psgIndices());
+        PasteResolver.ScanResult scan = PasteResolver.scanAndAutoRemap(
+                channelData, srcVoices, srcPsgEnvelopes, dstSong);
+
+        if (PasteResolver.hasNoInstruments(scan)) return channelData;
+
+        if (PasteResolver.isFullyResolved(scan)) {
+            return PasteResolver.rewriteAll(channelData, scan.voiceMap(), scan.psgMap());
         }
 
-        if (allVoices.isEmpty() && allPsg.isEmpty()) return channelData;
-
-        Map<Integer, Integer> voiceMap = InstrumentRemapper.autoRemap(
-                srcVoices, dstSong.getVoiceBank(), allVoices);
-        Map<Integer, Integer> psgMap = InstrumentRemapper.autoRemapPsg(
-                srcPsgEnvelopes, dstSong.getPsgEnvelopes(), allPsg);
-
-        Set<Integer> unresolvedVoices = new LinkedHashSet<>(allVoices);
-        unresolvedVoices.removeAll(voiceMap.keySet());
-        Set<Integer> unresolvedPsg = new LinkedHashSet<>(allPsg);
-        unresolvedPsg.removeAll(psgMap.keySet());
-
-        if (unresolvedVoices.isEmpty() && unresolvedPsg.isEmpty()) {
-            return rewriteAll(channelData, voiceMap, psgMap);
-        }
-
+        // Unresolved instruments require user interaction via dialog
         Song srcProxy = new Song();
         srcProxy.getVoiceBank().addAll(srcVoices);
         srcProxy.getPsgEnvelopes().addAll(srcPsgEnvelopes);
         InstrumentResolveDialog dialog = new InstrumentResolveDialog(
-                srcProxy, dstSong, unresolvedVoices, unresolvedPsg);
+                srcProxy, dstSong, scan.unresolvedVoices(), scan.unresolvedPsg());
         Optional<InstrumentResolveDialog.Resolution> result = dialog.showAndWait();
         if (result.isEmpty()) return null;
 
@@ -665,18 +682,12 @@ public class TrackerGrid extends ScrollPane {
         // A full undo system for voice bank changes is planned for a future phase.
         dstSong.getVoiceBank().addAll(res.voicesToCopy());
         dstSong.getPsgEnvelopes().addAll(res.envelopesToCopy());
+        Map<Integer, Integer> voiceMap = scan.voiceMap();
+        Map<Integer, Integer> psgMap = scan.psgMap();
         voiceMap.putAll(res.voiceMap());
         psgMap.putAll(res.psgMap());
 
-        return rewriteAll(channelData, voiceMap, psgMap);
-    }
-
-    private byte[][] rewriteAll(byte[][] channelData, Map<Integer, Integer> voiceMap, Map<Integer, Integer> psgMap) {
-        byte[][] result = new byte[channelData.length][];
-        for (int i = 0; i < channelData.length; i++) {
-            result[i] = InstrumentRemapper.rewrite(channelData[i], voiceMap, psgMap);
-        }
-        return result;
+        return PasteResolver.rewriteAll(channelData, voiceMap, psgMap);
     }
 
     private void transposeSelection(int semitones) {
@@ -697,14 +708,14 @@ public class TrackerGrid extends ScrollPane {
             }
             undoManager.recordMultiEdit(pattern, channels);
             for (int ch = minCh; ch <= maxCh; ch++) {
-                byte[] trackData = pattern.getTrackData(ch);
+                byte[] trackData = pattern.getTrackDataDirect(ch);
                 byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
                 pattern.setTrackData(ch, transposed);
             }
         } else {
             // Transpose single cell at cursor
             undoManager.recordEdit(pattern, cursorChannel);
-            byte[] trackData = pattern.getTrackData(cursorChannel);
+            byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
             byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, cursorRow, 1, semitones);
             pattern.setTrackData(cursorChannel, transposed);
         }

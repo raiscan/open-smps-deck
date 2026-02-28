@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
@@ -32,6 +33,7 @@ public class InstrumentPanel extends VBox {
             "-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc; -fx-font-size: 12px;";
 
     private Song song;
+    private PlaybackEngine playbackEngine;
     private final ListView<String> voiceListView;
     private final ListView<String> envelopeListView;
     private final ObservableList<String> voiceItems;
@@ -40,6 +42,13 @@ public class InstrumentPanel extends VBox {
 
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
+
+    /**
+     * Sets the playback engine used for voice/envelope preview in editors.
+     *
+     * @param engine the playback engine
+     */
+    public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
 
     /**
      * Creates a new instrument panel bound to the given song model.
@@ -143,6 +152,7 @@ public class InstrumentPanel extends VBox {
         FmVoice newVoice = new FmVoice("Voice " + index, data);
 
         FmVoiceEditor editor = new FmVoiceEditor(newVoice);
+        editor.setPreviewEngine(playbackEngine);
         Optional<FmVoice> result = editor.showAndWait();
         if (result.isPresent()) {
             song.getVoiceBank().add(result.get());
@@ -160,6 +170,7 @@ public class InstrumentPanel extends VBox {
 
         FmVoice existing = song.getVoiceBank().get(index);
         FmVoiceEditor editor = new FmVoiceEditor(existing);
+        editor.setPreviewEngine(playbackEngine);
         Optional<FmVoice> result = editor.showAndWait();
         if (result.isPresent()) {
             song.getVoiceBank().set(index, result.get());
@@ -188,6 +199,7 @@ public class InstrumentPanel extends VBox {
         PsgEnvelope newEnvelope = new PsgEnvelope("Env " + index, data);
 
         PsgEnvelopeEditor editor = new PsgEnvelopeEditor(newEnvelope);
+        editor.setPreviewEngine(playbackEngine);
         Optional<PsgEnvelope> result = editor.showAndWait();
         if (result.isPresent()) {
             song.getPsgEnvelopes().add(result.get());
@@ -205,6 +217,7 @@ public class InstrumentPanel extends VBox {
 
         PsgEnvelope existing = song.getPsgEnvelopes().get(index);
         PsgEnvelopeEditor editor = new PsgEnvelopeEditor(existing);
+        editor.setPreviewEngine(playbackEngine);
         Optional<PsgEnvelope> result = editor.showAndWait();
         if (result.isPresent()) {
             song.getPsgEnvelopes().set(index, result.get());

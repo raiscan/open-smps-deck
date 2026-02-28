@@ -26,7 +26,7 @@ public class UndoManager {
      * Call this with the current track data, then apply the mutation.
      */
     public void recordEdit(Pattern pattern, int channel) {
-        byte[] snapshot = pattern.getTrackData(channel).clone();
+        byte[] snapshot = pattern.getTrackDataDirect(channel).clone();
         undoStack.push(List.of(new Edit(pattern, channel, snapshot)));
         redoStack.clear();
         trimStack();
@@ -39,7 +39,7 @@ public class UndoManager {
     public void recordMultiEdit(Pattern pattern, int... channels) {
         List<Edit> group = new ArrayList<>(channels.length);
         for (int ch : channels) {
-            byte[] snapshot = pattern.getTrackData(ch).clone();
+            byte[] snapshot = pattern.getTrackDataDirect(ch).clone();
             group.add(new Edit(pattern, ch, snapshot));
         }
         undoStack.push(group);
@@ -58,7 +58,7 @@ public class UndoManager {
         // Save current state of all channels for redo
         List<Edit> redoGroup = new ArrayList<>(group.size());
         for (Edit edit : group) {
-            byte[] currentData = edit.pattern().getTrackData(edit.channel()).clone();
+            byte[] currentData = edit.pattern().getTrackDataDirect(edit.channel()).clone();
             redoGroup.add(new Edit(edit.pattern(), edit.channel(), currentData));
         }
         redoStack.push(redoGroup);
@@ -81,7 +81,7 @@ public class UndoManager {
         // Save current state for undo
         List<Edit> undoGroup = new ArrayList<>(group.size());
         for (Edit edit : group) {
-            byte[] currentData = edit.pattern().getTrackData(edit.channel()).clone();
+            byte[] currentData = edit.pattern().getTrackDataDirect(edit.channel()).clone();
             undoGroup.add(new Edit(edit.pattern(), edit.channel(), currentData));
         }
         undoStack.push(undoGroup);

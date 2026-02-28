@@ -75,7 +75,7 @@ public class ProjectFile {
             p.addProperty("rows", pat.getRows());
             JsonObject tracks = new JsonObject();
             for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-                byte[] data = pat.getTrackData(ch);
+                byte[] data = pat.getTrackDataDirect(ch);
                 if (data != null && data.length > 0) {
                     tracks.addProperty(String.valueOf(ch), bytesToHex(data));
                 }

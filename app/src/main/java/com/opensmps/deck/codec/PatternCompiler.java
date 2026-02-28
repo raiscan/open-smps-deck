@@ -170,7 +170,7 @@ public class PatternCompiler {
         for (int[] orderRow : orderList) {
             int patternIndex = orderRow[channel];
             if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                byte[] data = patterns.get(patternIndex).getTrackData(channel);
+                byte[] data = patterns.get(patternIndex).getTrackDataDirect(channel);
                 if (data != null && data.length > 0) {
                     return true;
                 }
@@ -190,7 +190,7 @@ public class PatternCompiler {
             int patternIndex = orderRow[channel];
             byte[] data;
             if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                data = patterns.get(patternIndex).getTrackData(channel);
+                data = patterns.get(patternIndex).getTrackDataDirect(channel);
             } else {
                 data = new byte[0];
             }
@@ -225,7 +225,7 @@ public class PatternCompiler {
             int patternIndex = orderList.get(row)[channel];
             byte[] data;
             if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                data = patterns.get(patternIndex).getTrackData(channel);
+                data = patterns.get(patternIndex).getTrackDataDirect(channel);
             } else {
                 data = new byte[0];
             }

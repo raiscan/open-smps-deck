@@ -1,5 +1,12 @@
 package com.opensmps.smps;
 
+/**
+ * Minimal SMPS data implementation for synth-core tests.
+ *
+ * <p>Note: This duplicates parsing logic from {@code com.opensmps.deck.audio.SimpleSmpsData}
+ * in the app module. The duplication exists because synth-core cannot depend on app.
+ * Changes to the SMPS header format must be reflected in both classes.
+ */
 public class StubSmpsData extends AbstractSmpsData {
     private byte[][] psgEnvelopes;
 

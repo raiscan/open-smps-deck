@@ -42,16 +42,24 @@ public class Pattern {
     }
 
     /**
-     * Get the raw SMPS track data for a channel.
+     * Get the raw SMPS track data for a channel (defensive copy).
      *
      * @param channel channel index (0-9)
-     * @return the track data byte array
+     * @return a copy of the track data byte array
      * @throws IndexOutOfBoundsException if channel is out of range
      */
     public byte[] getTrackData(int channel) {
         if (channel < 0 || channel >= CHANNEL_COUNT) {
             throw new IndexOutOfBoundsException("Channel " + channel + " out of range 0-" + (CHANNEL_COUNT - 1));
         }
+        return tracks[channel].clone();
+    }
+
+    /**
+     * Returns the raw internal track data array without copying.
+     * Callers must NOT modify the returned array.
+     */
+    public byte[] getTrackDataDirect(int channel) {
         return tracks[channel];
     }
 

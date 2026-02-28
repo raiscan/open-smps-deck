@@ -54,6 +54,7 @@ public class MainWindow {
     private Tab createSongTabUI(SongTab songTab) {
         songTab.buildContent();
         songTab.getTrackerGrid().setPlaybackEngine(playbackEngine);
+        songTab.getInstrumentPanel().setPlaybackEngine(playbackEngine);
 
         // Wire transport callbacks for keyboard shortcuts in TrackerGrid
         songTab.getTrackerGrid().setOnTogglePlayback(() -> {

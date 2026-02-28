@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.model.PsgEnvelope;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -38,6 +39,7 @@ public class PsgEnvelopeEditor extends Dialog<PsgEnvelope> {
     private final PsgEnvelope envelope;
     private final Canvas canvas;
     private final Label stepCountLabel;
+    private PlaybackEngine previewEngine;
 
     /**
      * Creates a new PSG envelope editor dialog.
@@ -99,7 +101,11 @@ public class PsgEnvelopeEditor extends Dialog<PsgEnvelope> {
         stepCountLabel.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
         updateStepCountLabel();
 
-        controlsRow.getChildren().addAll(addButton, removeButton, stepCountLabel);
+        Button previewButton = new Button("\u266B Preview");
+        previewButton.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: " + TEXT_COLOR + ";");
+        previewButton.setOnAction(e -> previewEnvelope());
+
+        controlsRow.getChildren().addAll(addButton, removeButton, stepCountLabel, previewButton);
 
         mainLayout.getChildren().addAll(nameRow, canvas, controlsRow);
         dialogPane.setContent(mainLayout);
@@ -109,6 +115,46 @@ public class PsgEnvelopeEditor extends Dialog<PsgEnvelope> {
 
         // Initial draw
         drawBarGraph();
+    }
+
+    /**
+     * Sets the playback engine used for envelope preview.
+     *
+     * @param engine the playback engine (may be null to disable preview)
+     */
+    public void setPreviewEngine(PlaybackEngine engine) {
+        this.previewEngine = engine;
+    }
+
+    /**
+     * Plays a short PSG tone on channel 0 to preview the sound.
+     * Stops any active playback first to ensure the PSG channel is available.
+     */
+    private void previewEnvelope() {
+        if (previewEngine == null) return;
+
+        // Stop any active playback so PSG channel 0 lock is released
+        previewEngine.stop();
+
+        var driver = previewEngine.getDriver();
+
+        // PSG channel 0: set frequency for middle C (~262Hz)
+        // SN76489 freq value for ~262Hz at 3.58MHz clock: 3579545/(32*262) = 427 = 0x1AB
+        int freq = 0x1AB;
+        driver.writePsg(this, 0x80 | (freq & 0x0F));        // Latch tone 0 + low 4 bits
+        driver.writePsg(this, (freq >> 4) & 0x3F);           // High 6 bits
+        driver.writePsg(this, 0x90 | 0x00);                  // Volume 0 (max) on channel 0
+
+        // Ensure audio output is running so the preview is audible
+        previewEngine.play();
+
+        // Schedule silence after 500ms
+        Thread silenceThread = new Thread(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            driver.writePsg(this, 0x9F); // Volume 0xF (silent) on channel 0
+        });
+        silenceThread.setDaemon(true);
+        silenceThread.start();
     }
 
     private void setupCanvasInteraction() {
