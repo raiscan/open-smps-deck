@@ -1,6 +1,7 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.io.ImportableVoice;
+import com.opensmps.deck.io.OsmpsVoiceFile;
 import com.opensmps.deck.io.ProjectFile;
 import com.opensmps.deck.io.Rym2612Importer;
 import com.opensmps.deck.io.SmpsExporter;
@@ -263,9 +264,10 @@ final class MainWindowFileActions {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Import Voice Bank");
         fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Voice Files", "*.ovm", "*.rym2612"),
+                new FileChooser.ExtensionFilter("Voice Files", "*.ovm", "*.rym2612", "*.osmpsvoice"),
                 new FileChooser.ExtensionFilter("OpenSMPS Voice Bank", "*.ovm"),
-                new FileChooser.ExtensionFilter("RYM2612 Patch", "*.rym2612")
+                new FileChooser.ExtensionFilter("RYM2612 Patch", "*.rym2612"),
+                new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice")
         );
         File file = fileChooser.showOpenDialog(stage);
         if (file == null) return;
@@ -273,7 +275,11 @@ final class MainWindowFileActions {
         try {
             Song song = songTab.getSong();
             boolean changed = false;
-            if (file.getName().toLowerCase().endsWith(".rym2612")) {
+            if (file.getName().toLowerCase().endsWith(".osmpsvoice")) {
+                FmVoice voice = OsmpsVoiceFile.load(file);
+                song.getVoiceBank().add(voice);
+                changed = true;
+            } else if (file.getName().toLowerCase().endsWith(".rym2612")) {
                 FmVoice voice = Rym2612Importer.importFile(file);
                 song.getVoiceBank().add(voice);
                 changed = true;
