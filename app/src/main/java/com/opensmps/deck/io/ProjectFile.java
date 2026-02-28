@@ -1,0 +1,158 @@
+package com.opensmps.deck.io;
+
+import com.google.gson.*;
+import com.opensmps.deck.model.*;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+
+public class ProjectFile {
+
+    private static final int VERSION = 1;
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+
+    public static void save(Song song, File file) throws IOException {
+        JsonObject root = new JsonObject();
+        root.addProperty("version", VERSION);
+        root.addProperty("name", song.getName());
+        root.addProperty("smpsMode", song.getSmpsMode().name());
+        root.addProperty("tempo", song.getTempo());
+        root.addProperty("dividingTiming", song.getDividingTiming());
+        root.addProperty("loopPoint", song.getLoopPoint());
+
+        // Voice bank
+        JsonArray voices = new JsonArray();
+        for (FmVoice voice : song.getVoiceBank()) {
+            JsonObject v = new JsonObject();
+            v.addProperty("name", voice.getName());
+            v.addProperty("data", bytesToHex(voice.getData()));
+            voices.add(v);
+        }
+        root.add("voiceBank", voices);
+
+        // PSG envelopes
+        JsonArray envelopes = new JsonArray();
+        for (PsgEnvelope env : song.getPsgEnvelopes()) {
+            JsonObject e = new JsonObject();
+            e.addProperty("name", env.getName());
+            e.addProperty("data", bytesToHex(env.getData()));
+            envelopes.add(e);
+        }
+        root.add("psgEnvelopes", envelopes);
+
+        // Order list
+        JsonArray orders = new JsonArray();
+        for (int[] row : song.getOrderList()) {
+            JsonArray orderRow = new JsonArray();
+            for (int val : row) {
+                orderRow.add(val);
+            }
+            orders.add(orderRow);
+        }
+        root.add("orderList", orders);
+
+        // Patterns
+        JsonArray patterns = new JsonArray();
+        for (Pattern pat : song.getPatterns()) {
+            JsonObject p = new JsonObject();
+            p.addProperty("id", pat.getId());
+            p.addProperty("rows", pat.getRows());
+            JsonObject tracks = new JsonObject();
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                byte[] data = pat.getTrackData(ch);
+                if (data != null && data.length > 0) {
+                    tracks.addProperty(String.valueOf(ch), bytesToHex(data));
+                }
+            }
+            p.add("tracks", tracks);
+            patterns.add(p);
+        }
+        root.add("patterns", patterns);
+
+        Files.writeString(file.toPath(), GSON.toJson(root), StandardCharsets.UTF_8);
+    }
+
+    public static Song load(File file) throws IOException {
+        String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+
+        Song song = new Song();
+        // Clear defaults added by constructor
+        song.getPatterns().clear();
+        song.getOrderList().clear();
+
+        song.setName(root.get("name").getAsString());
+        song.setSmpsMode(SmpsMode.valueOf(root.get("smpsMode").getAsString()));
+        song.setTempo(root.get("tempo").getAsInt());
+        song.setDividingTiming(root.get("dividingTiming").getAsInt());
+        song.setLoopPoint(root.get("loopPoint").getAsInt());
+
+        // Voice bank
+        for (JsonElement elem : root.getAsJsonArray("voiceBank")) {
+            JsonObject v = elem.getAsJsonObject();
+            song.getVoiceBank().add(new FmVoice(
+                    v.get("name").getAsString(),
+                    hexToBytes(v.get("data").getAsString())
+            ));
+        }
+
+        // PSG envelopes
+        for (JsonElement elem : root.getAsJsonArray("psgEnvelopes")) {
+            JsonObject e = elem.getAsJsonObject();
+            song.getPsgEnvelopes().add(new PsgEnvelope(
+                    e.get("name").getAsString(),
+                    hexToBytes(e.get("data").getAsString())
+            ));
+        }
+
+        // Order list
+        for (JsonElement elem : root.getAsJsonArray("orderList")) {
+            JsonArray row = elem.getAsJsonArray();
+            int[] orderRow = new int[Pattern.CHANNEL_COUNT];
+            for (int i = 0; i < Math.min(row.size(), orderRow.length); i++) {
+                orderRow[i] = row.get(i).getAsInt();
+            }
+            song.getOrderList().add(orderRow);
+        }
+
+        // Patterns
+        for (JsonElement elem : root.getAsJsonArray("patterns")) {
+            JsonObject p = elem.getAsJsonObject();
+            Pattern pat = new Pattern(p.get("id").getAsInt(), p.get("rows").getAsInt());
+            JsonObject tracks = p.getAsJsonObject("tracks");
+            for (String key : tracks.keySet()) {
+                int ch = Integer.parseInt(key);
+                String hex = tracks.get(key).getAsString();
+                if (!hex.isEmpty()) {
+                    pat.setTrackData(ch, hexToBytes(hex));
+                }
+            }
+            song.getPatterns().add(pat);
+        }
+
+        return song;
+    }
+
+    /** Convert bytes to space-separated uppercase hex. */
+    static String bytesToHex(byte[] data) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < data.length; i++) {
+            if (i > 0) sb.append(' ');
+            sb.append(String.format("%02X", data[i] & 0xFF));
+        }
+        return sb.toString();
+    }
+
+    /** Parse space-separated hex string back to bytes. */
+    static byte[] hexToBytes(String hex) {
+        if (hex == null || hex.isBlank()) return new byte[0];
+        String[] parts = hex.trim().split("\\s+");
+        byte[] result = new byte[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            result[i] = (byte) Integer.parseInt(parts[i], 16);
+        }
+        return result;
+    }
+}
