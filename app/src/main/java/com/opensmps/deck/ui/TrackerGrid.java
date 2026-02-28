@@ -91,6 +91,7 @@ public class TrackerGrid extends ScrollPane {
     private int cursorColumn = COL_NOTE;
     private int playbackRow = -1;
     private int playbackOrderRow = -1;
+    private boolean autoScrollActive = true;
     private int currentOctave = 4;
     private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
 
@@ -366,11 +367,41 @@ public class TrackerGrid extends ScrollPane {
     /** Set the playback highlight row within the current pattern. */
     public void setPlaybackRow(int row) {
         this.playbackRow = row;
+        if (autoScrollActive && row >= 0) {
+            scrollToRow(row);
+        }
         refreshDisplay();
+    }
+
+    /**
+     * Scrolls the viewport so the given row is visible, centering it
+     * if it has moved outside the visible area.
+     */
+    private void scrollToRow(int row) {
+        double totalHeight = canvas.getHeight();
+        double viewportHeight = getViewportBounds().getHeight();
+        if (totalHeight <= viewportHeight || viewportHeight <= 0) return;
+
+        double rowY = HEADER_HEIGHT + row * ROW_HEIGHT;
+        double currentVvalue = getVvalue();
+        double scrollableHeight = totalHeight - viewportHeight;
+        double viewTop = currentVvalue * scrollableHeight;
+        double viewBottom = viewTop + viewportHeight;
+
+        // Only scroll if the row is outside the visible area (with some margin)
+        if (rowY < viewTop + HEADER_HEIGHT || rowY + ROW_HEIGHT > viewBottom) {
+            // Center the playback row in the viewport
+            double targetTop = rowY - viewportHeight / 2;
+            targetTop = Math.max(0, Math.min(targetTop, scrollableHeight));
+            setVvalue(targetTop / scrollableHeight);
+        }
     }
 
     /** Set the playback order row for order list highlighting. */
     public void setPlaybackOrderRow(int orderRow) {
+        if (this.playbackOrderRow != orderRow) {
+            autoScrollActive = true;
+        }
         this.playbackOrderRow = orderRow;
     }
 
@@ -383,6 +414,7 @@ public class TrackerGrid extends ScrollPane {
     public void clearPlaybackCursor() {
         this.playbackRow = -1;
         this.playbackOrderRow = -1;
+        this.autoScrollActive = true;
         refreshDisplay();
     }
 
@@ -533,6 +565,7 @@ public class TrackerGrid extends ScrollPane {
         int maxRow = getMaxRowCount() - 1;
         cursorRow = Math.max(0, Math.min(cursorRow + rowDelta, maxRow));
         cursorChannel = Math.max(0, Math.min(cursorChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
+        autoScrollActive = false;
         refreshDisplay();
     }
 
