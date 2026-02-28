@@ -174,4 +174,70 @@ class TestSmpsSequencer {
         int read = seq.read(buf);
         assertEquals(buf.length, read);
     }
+
+    /**
+     * Creates a minimal SMPS sequencer with 1 FM channel mapped to DAC channel 5.
+     * Track data starts at offset 0x23: note (0x90), duration (0x10), stop (0xF2).
+     */
+    private SmpsSequencer createSingleDacTrackSequencer() {
+        byte[] smps = new byte[0x26];
+
+        smps[0] = 0x0A; smps[1] = 0x00; // voice ptr
+        smps[2] = 1; smps[3] = 0;        // 1 FM, 0 PSG
+        smps[4] = 1; smps[5] = (byte) 0xC0; // timing, tempo
+
+        smps[6] = 0x23; smps[7] = 0x00;  // track ptr
+        smps[8] = 0x00; smps[9] = 0x00;  // transpose, volume
+
+        // Minimal voice
+        smps[0x0A] = 0x00;
+        for (int i = 0x0B; i <= 0x0E; i++) smps[i] = 0x01;
+        for (int i = 0x0F; i <= 0x12; i++) smps[i] = 0x1F;
+        for (int i = 0x13; i <= 0x1E; i++) smps[i] = 0x00;
+        smps[0x1F] = 0x00; smps[0x20] = 0x00; smps[0x21] = 0x00; smps[0x22] = 0x00;
+
+        smps[0x23] = (byte) 0x90; // note
+        smps[0x24] = 0x10;        // duration
+        smps[0x25] = (byte) 0xF2; // stop
+
+        StubSmpsData data = new StubSmpsData(smps, 0);
+        SmpsSequencerConfig config = new SmpsSequencerConfig(
+                Collections.emptyMap(), 0x100,
+                new int[]{ 0x16, 0, 1, 2, 4, 5, 6 },
+                new int[]{ 0x80, 0xA0, 0xC0 }
+        );
+
+        DacData dacData = new DacData(Collections.emptyMap(), Collections.emptyMap());
+        return new SmpsSequencer(data, dacData, config);
+    }
+
+    @Test
+    void getTrackPositionReturnsByteOffset() {
+        SmpsSequencer seq = createSingleDacTrackSequencer();
+
+        // Before any playback, the DAC track position should be at 0x23
+        assertEquals(0x23, seq.getTrackPosition(SmpsSequencer.TrackType.DAC, 5),
+                "DAC track position should start at 0x23");
+
+        // Advance playback so the sequencer reads the note+duration bytes
+        short[] buf = new short[4410];
+        seq.read(buf);
+
+        // After consuming note byte (0x23) and duration byte (0x24), position should be exactly 0x25
+        assertEquals(0x25, seq.getTrackPosition(SmpsSequencer.TrackType.DAC, 5),
+                "DAC track position should be 0x25 after reading note and duration bytes");
+    }
+
+    @Test
+    void getTrackPositionReturnsNegativeForMissingChannel() {
+        SmpsSequencer seq = createSingleDacTrackSequencer();
+
+        // Query FM channel 0 which doesn't exist in this song (only DAC ch5 exists)
+        assertEquals(-1, seq.getTrackPosition(SmpsSequencer.TrackType.FM, 0),
+                "Should return -1 for a channel not present in the song");
+
+        // Query PSG channel 0 which also doesn't exist
+        assertEquals(-1, seq.getTrackPosition(SmpsSequencer.TrackType.PSG, 0),
+                "Should return -1 for a PSG channel not present in the song");
+    }
 }

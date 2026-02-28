@@ -612,6 +612,21 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
         return Collections.unmodifiableList(tracks);
     }
 
+    /**
+     * Returns the current byte offset for the track matching the given
+     * channel type and hardware channel ID.
+     * Returns {@code -1} if no matching track exists, or if the track
+     * has finished playing ({@code active == false}).
+     */
+    public int getTrackPosition(TrackType type, int channelId) {
+        for (Track t : tracks) {
+            if (t.type == type && t.channelId == channelId && t.active) {
+                return t.pos;
+            }
+        }
+        return -1;
+    }
+
     private void calculateTempo() {
         if (sfxMode) {
             this.tempoWeight = config.getTempoModBase(); // 0x100: Tick every frame
