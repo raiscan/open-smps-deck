@@ -5,6 +5,7 @@ import com.opensmps.deck.model.Song;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -31,6 +32,8 @@ public class TrackerGrid extends ScrollPane {
     private int currentPatternIndex = 0;
     private int cursorRow = 0;
     private int cursorChannel = 0;
+    private int currentOctave = 4;
+    private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
 
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
@@ -41,6 +44,7 @@ public class TrackerGrid extends ScrollPane {
         setFitToWidth(true);
         setPannable(true);
         setStyle("-fx-background: #1a1a2e;");
+        setupKeyboardHandling();
     }
 
     public void setSong(Song song) {
@@ -189,5 +193,104 @@ public class TrackerGrid extends ScrollPane {
     public void setCursorChannel(int channel) {
         this.cursorChannel = channel;
         refreshDisplay();
+    }
+
+    public int getCurrentOctave() { return currentOctave; }
+    public void setCurrentOctave(int octave) { this.currentOctave = octave; }
+    public int getCurrentDuration() { return currentDuration; }
+    public void setCurrentDuration(int duration) { this.currentDuration = duration; }
+
+    private void setupKeyboardHandling() {
+        canvas.setFocusTraversable(true);
+
+        // Request focus when clicked
+        canvas.setOnMouseClicked(e -> canvas.requestFocus());
+
+        canvas.setOnKeyPressed(this::handleKeyPressed);
+    }
+
+    private void handleKeyPressed(KeyEvent e) {
+        switch (e.getCode()) {
+            case UP -> moveCursor(-1, 0);
+            case DOWN -> moveCursor(1, 0);
+            case LEFT -> moveCursor(0, -1);
+            case RIGHT -> moveCursor(0, 1);
+            case DELETE -> deleteAtCursor();
+            case INSERT -> insertEmptyRow();
+            case BACK_SPACE -> deleteAndPullUp();
+            case PAGE_UP -> { currentOctave = Math.min(currentOctave + 1, 7); }
+            case PAGE_DOWN -> { currentOctave = Math.max(currentOctave - 1, 0); }
+            case PERIOD -> insertRest();
+            default -> {
+                // Check for note keys
+                String text = e.getText();
+                if (text != null && !text.isEmpty()) {
+                    char key = text.charAt(0);
+                    int noteValue = SmpsEncoder.encodeNoteFromKey(key, currentOctave);
+                    if (noteValue > 0) {
+                        insertNote(noteValue);
+                    }
+                }
+            }
+        }
+    }
+
+    private void moveCursor(int rowDelta, int channelDelta) {
+        int maxRow = getMaxRowCount() - 1;
+        cursorRow = Math.max(0, Math.min(cursorRow + rowDelta, maxRow));
+        cursorChannel = Math.max(0, Math.min(cursorChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
+        refreshDisplay();
+    }
+
+    private int getMaxRowCount() {
+        if (song == null || song.getPatterns().isEmpty()) return 1;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        int max = pattern.getRows();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackData(ch));
+            max = Math.max(max, rows.size());
+        }
+        return Math.max(max, 1);
+    }
+
+    private void insertNote(int noteValue) {
+        if (song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
+        byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, noteBytes);
+        pattern.setTrackData(cursorChannel, newData);
+        cursorRow++;
+        refreshDisplay();
+    }
+
+    private void insertRest() {
+        if (song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] restBytes = SmpsEncoder.encodeRest(currentDuration);
+        byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, restBytes);
+        pattern.setTrackData(cursorChannel, newData);
+        cursorRow++;
+        refreshDisplay();
+    }
+
+    private void deleteAtCursor() {
+        if (song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        byte[] trackData = pattern.getTrackData(cursorChannel);
+        byte[] newData = SmpsEncoder.deleteRow(trackData, cursorRow);
+        pattern.setTrackData(cursorChannel, newData);
+        refreshDisplay();
+    }
+
+    private void insertEmptyRow() {
+        // Insert a rest at the cursor position (pushing down)
+        insertRest();
+    }
+
+    private void deleteAndPullUp() {
+        // Same as delete but cursor doesn't move
+        deleteAtCursor();
     }
 }

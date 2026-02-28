@@ -60,6 +60,12 @@ public class SmpsDecoder {
         return NOTE_NAMES[semitone] + octave;
     }
 
+    /** Get the parameter count for a coordination flag. */
+    public static int getCoordFlagParamCount(int flagIndex) {
+        if (flagIndex < 0 || flagIndex >= COORD_FLAG_PARAMS.length) return 0;
+        return COORD_FLAG_PARAMS[flagIndex];
+    }
+
     /**
      * Decode raw SMPS track data into a list of TrackerRows.
      * Each note/rest produces one row. Coordination flags are attached to the
