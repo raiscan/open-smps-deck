@@ -90,18 +90,29 @@ public class VoiceBankFile {
         String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
 
-        int fileVersion = root.get("version").getAsInt();
+        JsonElement versionElem = root.get("version");
+        if (versionElem == null) {
+            throw new IOException("Voice bank file is missing required 'version' field: " + file.getName());
+        }
+        int fileVersion = versionElem.getAsInt();
         if (fileVersion > VERSION) {
             throw new IOException(
                     "Voice bank file version " + fileVersion + " is newer than supported version " + VERSION
                     + ". Please update OpenSMPS Deck.");
         }
 
+        requireField(root, "name", file);
         String name = root.get("name").getAsString();
 
+        JsonArray voicesArray = root.getAsJsonArray("voices");
+        if (voicesArray == null) {
+            throw new IOException("Voice bank file is missing required 'voices' array: " + file.getName());
+        }
         List<FmVoice> voices = new ArrayList<>();
-        for (JsonElement elem : root.getAsJsonArray("voices")) {
+        for (JsonElement elem : voicesArray) {
             JsonObject v = elem.getAsJsonObject();
+            requireField(v, "name", "voices entry", file);
+            requireField(v, "data", "voices entry", file);
             voices.add(new FmVoice(
                     v.get("name").getAsString(),
                     hexToBytes(v.get("data").getAsString())
@@ -109,14 +120,31 @@ public class VoiceBankFile {
         }
 
         List<PsgEnvelope> psgEnvelopes = new ArrayList<>();
-        for (JsonElement elem : root.getAsJsonArray("psgEnvelopes")) {
-            JsonObject e = elem.getAsJsonObject();
-            psgEnvelopes.add(new PsgEnvelope(
-                    e.get("name").getAsString(),
-                    hexToBytes(e.get("data").getAsString())
-            ));
+        JsonArray psgArray = root.getAsJsonArray("psgEnvelopes");
+        if (psgArray != null) {
+            for (JsonElement elem : psgArray) {
+                JsonObject e = elem.getAsJsonObject();
+                requireField(e, "name", "psgEnvelopes entry", file);
+                requireField(e, "data", "psgEnvelopes entry", file);
+                psgEnvelopes.add(new PsgEnvelope(
+                        e.get("name").getAsString(),
+                        hexToBytes(e.get("data").getAsString())
+                ));
+            }
         }
 
         return new LoadResult(name, voices, psgEnvelopes);
+    }
+
+    private static void requireField(JsonObject obj, String field, File file) throws IOException {
+        if (obj.get(field) == null) {
+            throw new IOException("Voice bank file is missing required '" + field + "' field: " + file.getName());
+        }
+    }
+
+    private static void requireField(JsonObject obj, String field, String context, File file) throws IOException {
+        if (obj.get(field) == null) {
+            throw new IOException("Missing required '" + field + "' in " + context + ": " + file.getName());
+        }
     }
 }

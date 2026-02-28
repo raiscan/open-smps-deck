@@ -1,5 +1,6 @@
 package com.opensmps.deck.audio;
 
+import com.opensmps.deck.model.FmVoice;
 import com.opensmps.smps.AbstractSmpsData;
 
 /**
@@ -66,10 +67,10 @@ public class SimpleSmpsData extends AbstractSmpsData {
     @Override
     public byte[] getVoice(int voiceId) {
         if (voicePtr == 0 || voicePtr >= data.length) return null;
-        int offset = voicePtr + voiceId * 25;
-        if (offset + 25 > data.length) return null;
-        byte[] voice = new byte[25];
-        System.arraycopy(data, offset, voice, 0, 25);
+        int offset = voicePtr + voiceId * FmVoice.VOICE_SIZE;
+        if (offset + FmVoice.VOICE_SIZE > data.length) return null;
+        byte[] voice = new byte[FmVoice.VOICE_SIZE];
+        System.arraycopy(data, offset, voice, 0, FmVoice.VOICE_SIZE);
         return voice;
     }
 

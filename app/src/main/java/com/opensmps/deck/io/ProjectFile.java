@@ -113,7 +113,11 @@ public class ProjectFile {
         String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
 
-        int fileVersion = root.get("version").getAsInt();
+        JsonElement versionElem = root.get("version");
+        if (versionElem == null) {
+            throw new IOException("Project file is missing required 'version' field: " + file.getName());
+        }
+        int fileVersion = versionElem.getAsInt();
         if (fileVersion > VERSION) {
             throw new IOException(
                 "Project file version " + fileVersion + " is newer than supported version " + VERSION
@@ -125,6 +129,12 @@ public class ProjectFile {
         song.getPatterns().clear();
         song.getOrderList().clear();
 
+        requireField(root, "name", file);
+        requireField(root, "smpsMode", file);
+        requireField(root, "tempo", file);
+        requireField(root, "dividingTiming", file);
+        requireField(root, "loopPoint", file);
+
         song.setName(root.get("name").getAsString());
         song.setSmpsMode(SmpsMode.valueOf(root.get("smpsMode").getAsString()));
         song.setTempo(root.get("tempo").getAsInt());
@@ -132,8 +142,14 @@ public class ProjectFile {
         song.setLoopPoint(root.get("loopPoint").getAsInt());
 
         // Voice bank
-        for (JsonElement elem : root.getAsJsonArray("voiceBank")) {
+        JsonArray voiceBankArray = root.getAsJsonArray("voiceBank");
+        if (voiceBankArray == null) {
+            throw new IOException("Project file is missing required 'voiceBank' array: " + file.getName());
+        }
+        for (JsonElement elem : voiceBankArray) {
             JsonObject v = elem.getAsJsonObject();
+            requireField(v, "name", "voiceBank entry", file);
+            requireField(v, "data", "voiceBank entry", file);
             song.getVoiceBank().add(new FmVoice(
                     v.get("name").getAsString(),
                     hexToBytes(v.get("data").getAsString())
@@ -141,8 +157,14 @@ public class ProjectFile {
         }
 
         // PSG envelopes
-        for (JsonElement elem : root.getAsJsonArray("psgEnvelopes")) {
+        JsonArray psgEnvelopesArray = root.getAsJsonArray("psgEnvelopes");
+        if (psgEnvelopesArray == null) {
+            throw new IOException("Project file is missing required 'psgEnvelopes' array: " + file.getName());
+        }
+        for (JsonElement elem : psgEnvelopesArray) {
             JsonObject e = elem.getAsJsonObject();
+            requireField(e, "name", "psgEnvelopes entry", file);
+            requireField(e, "data", "psgEnvelopes entry", file);
             song.getPsgEnvelopes().add(new PsgEnvelope(
                     e.get("name").getAsString(),
                     hexToBytes(e.get("data").getAsString())
@@ -150,7 +172,11 @@ public class ProjectFile {
         }
 
         // Order list
-        for (JsonElement elem : root.getAsJsonArray("orderList")) {
+        JsonArray orderListArray = root.getAsJsonArray("orderList");
+        if (orderListArray == null) {
+            throw new IOException("Project file is missing required 'orderList' array: " + file.getName());
+        }
+        for (JsonElement elem : orderListArray) {
             JsonArray row = elem.getAsJsonArray();
             int[] orderRow = new int[Pattern.CHANNEL_COUNT];
             for (int i = 0; i < Math.min(row.size(), orderRow.length); i++) {
@@ -160,15 +186,23 @@ public class ProjectFile {
         }
 
         // Patterns
-        for (JsonElement elem : root.getAsJsonArray("patterns")) {
+        JsonArray patternsArray = root.getAsJsonArray("patterns");
+        if (patternsArray == null) {
+            throw new IOException("Project file is missing required 'patterns' array: " + file.getName());
+        }
+        for (JsonElement elem : patternsArray) {
             JsonObject p = elem.getAsJsonObject();
+            requireField(p, "id", "patterns entry", file);
+            requireField(p, "rows", "patterns entry", file);
             Pattern pat = new Pattern(p.get("id").getAsInt(), p.get("rows").getAsInt());
             JsonObject tracks = p.getAsJsonObject("tracks");
-            for (String key : tracks.keySet()) {
-                int ch = Integer.parseInt(key);
-                String hex = tracks.get(key).getAsString();
-                if (!hex.isEmpty()) {
-                    pat.setTrackData(ch, hexToBytes(hex));
+            if (tracks != null) {
+                for (String key : tracks.keySet()) {
+                    int ch = Integer.parseInt(key);
+                    String hex = tracks.get(key).getAsString();
+                    if (!hex.isEmpty()) {
+                        pat.setTrackData(ch, hexToBytes(hex));
+                    }
                 }
             }
             song.getPatterns().add(pat);
@@ -178,6 +212,9 @@ public class ProjectFile {
         if (root.has("dacSamples")) {
             for (JsonElement elem : root.getAsJsonArray("dacSamples")) {
                 JsonObject s = elem.getAsJsonObject();
+                requireField(s, "name", "dacSamples entry", file);
+                requireField(s, "data", "dacSamples entry", file);
+                requireField(s, "rate", "dacSamples entry", file);
                 song.getDacSamples().add(new DacSample(
                         s.get("name").getAsString(),
                         hexToBytes(s.get("data").getAsString()),
@@ -187,5 +224,17 @@ public class ProjectFile {
         }
 
         return song;
+    }
+
+    private static void requireField(JsonObject obj, String field, File file) throws IOException {
+        if (obj.get(field) == null) {
+            throw new IOException("Project file is missing required '" + field + "' field: " + file.getName());
+        }
+    }
+
+    private static void requireField(JsonObject obj, String field, String context, File file) throws IOException {
+        if (obj.get(field) == null) {
+            throw new IOException("Missing required '" + field + "' in " + context + ": " + file.getName());
+        }
     }
 }
