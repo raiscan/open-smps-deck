@@ -198,6 +198,21 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
         }
     }
 
+    /**
+     * Returns the byte position of the given channel in the first active
+     * music (non-SFX) sequencer, or {@code -1} if unavailable.
+     */
+    public int getTrackPosition(SmpsSequencer.TrackType type, int channelId) {
+        synchronized (sequencersLock) {
+            for (SmpsSequencer seq : sequencers) {
+                if (!isSfx(seq)) {
+                    return seq.getTrackPosition(type, channelId);
+                }
+            }
+            return -1;
+        }
+    }
+
     @Override
     public int read(short[] buffer) {
         int frames = buffer.length / 2;
