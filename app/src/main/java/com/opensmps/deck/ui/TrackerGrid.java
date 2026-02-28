@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.codec.InstrumentRemapper;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
@@ -13,6 +14,7 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -58,6 +60,11 @@ public class TrackerGrid extends ScrollPane {
     private Runnable onStopPlayback;
     private Runnable onDirty;
 
+    // Mute/solo state
+    private final boolean[] channelMuted = new boolean[Pattern.CHANNEL_COUNT];
+    private int soloChannel = -1;
+    private PlaybackEngine playbackEngine;
+
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
 
@@ -77,6 +84,7 @@ public class TrackerGrid extends ScrollPane {
     public void setOnTogglePlayback(Runnable callback) { this.onTogglePlayback = callback; }
     public void setOnStopPlayback(Runnable callback) { this.onStopPlayback = callback; }
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
+    public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
 
     public void setSong(Song song) {
@@ -131,10 +139,23 @@ public class TrackerGrid extends ScrollPane {
         gc.setFill(Color.web("#2a2a2a"));
         gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
         gc.setFont(HEADER_FONT);
-        gc.setFill(Color.web("#88aacc"));
         for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
             double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+            boolean effectivelyMuted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
+            if (soloChannel == ch) {
+                gc.setFill(Color.web("#ffcc00")); // gold for solo
+            } else if (effectivelyMuted) {
+                gc.setFill(Color.web("#555555")); // grey for muted
+            } else {
+                gc.setFill(Color.web("#88aacc")); // normal
+            }
             gc.fillText(CHANNEL_NAMES[ch], x, HEADER_HEIGHT - 6);
+            if (effectivelyMuted) {
+                gc.setStroke(Color.web("#555555"));
+                gc.setLineWidth(1);
+                double textY = HEADER_HEIGHT - 6;
+                gc.strokeLine(x, textY - 4, x + CHANNEL_WIDTH - 8, textY - 4);
+            }
         }
 
         // Draw rows
@@ -250,10 +271,26 @@ public class TrackerGrid extends ScrollPane {
     private void setupKeyboardHandling() {
         canvas.setFocusTraversable(true);
 
-        // Request focus when clicked
-        canvas.setOnMouseClicked(e -> canvas.requestFocus());
+        // Request focus when clicked; handle header clicks for mute/solo
+        canvas.setOnMouseClicked(e -> {
+            canvas.requestFocus();
+            handleMouseClicked(e);
+        });
 
         canvas.setOnKeyPressed(this::handleKeyPressed);
+    }
+
+    private void handleMouseClicked(MouseEvent e) {
+        if (e.getY() < HEADER_HEIGHT) {
+            int ch = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
+            if (ch >= 0 && ch < Pattern.CHANNEL_COUNT) {
+                if (e.isControlDown()) {
+                    toggleSolo(ch);
+                } else {
+                    toggleMute(ch);
+                }
+            }
+        }
     }
 
     private void handleKeyPressed(KeyEvent e) {
@@ -667,6 +704,50 @@ public class TrackerGrid extends ScrollPane {
         }
         refreshDisplay();
         markDirty();
+    }
+
+    // --- Mute / Solo ---
+
+    private void applyMuteState() {
+        if (playbackEngine == null) return;
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            boolean muted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
+            if (ch < 6) {
+                playbackEngine.setFmMute(ch, muted);
+            } else {
+                playbackEngine.setPsgMute(ch - 6, muted);
+            }
+        }
+    }
+
+    private void toggleMute(int channel) {
+        if (channel < 0 || channel >= Pattern.CHANNEL_COUNT) return;
+        if (soloChannel >= 0) {
+            soloChannel = -1;
+        }
+        channelMuted[channel] = !channelMuted[channel];
+        applyMuteState();
+        refreshDisplay();
+    }
+
+    private void toggleSolo(int channel) {
+        if (channel < 0 || channel >= Pattern.CHANNEL_COUNT) return;
+        if (soloChannel == channel) {
+            soloChannel = -1;
+        } else {
+            soloChannel = channel;
+        }
+        applyMuteState();
+        refreshDisplay();
+    }
+
+    /**
+     * Returns whether a channel is effectively muted (by explicit mute or solo exclusion).
+     * Useful for WAV export to respect the current mute/solo state.
+     */
+    public boolean isChannelMuted(int channel) {
+        if (soloChannel >= 0) return channel != soloChannel;
+        return channel >= 0 && channel < channelMuted.length && channelMuted[channel];
     }
 
     public UndoManager getUndoManager() { return undoManager; }
