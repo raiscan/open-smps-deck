@@ -1,4 +1,4 @@
-package com.opensmps.deck.ui;
+package com.opensmps.deck.codec;
 
 import org.junit.jupiter.api.Test;
 import java.util.List;

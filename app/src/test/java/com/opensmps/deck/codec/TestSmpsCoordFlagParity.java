@@ -1,4 +1,4 @@
-package com.opensmps.deck.ui;
+package com.opensmps.deck.codec;
 
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
