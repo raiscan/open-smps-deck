@@ -97,6 +97,23 @@ public class TestProjectFile {
     }
 
     @Test
+    void testLoadRejectsFutureVersion() throws Exception {
+        // Create a valid project file, then manually bump the version
+        Song song = new Song();
+        File file = File.createTempFile("test-version", ".osmpsd");
+        file.deleteOnExit();
+        ProjectFile.save(song, file);
+
+        // Read the JSON, bump version to 999, write back
+        String json = java.nio.file.Files.readString(file.toPath());
+        json = json.replaceFirst("\"version\": 1", "\"version\": 999");
+        java.nio.file.Files.writeString(file.toPath(), json);
+
+        // Should throw IOException
+        assertThrows(java.io.IOException.class, () -> ProjectFile.load(file));
+    }
+
+    @Test
     void testEmptyHexConversion() {
         assertEquals("", ProjectFile.bytesToHex(new byte[0]));
         assertArrayEquals(new byte[0], ProjectFile.hexToBytes(""));

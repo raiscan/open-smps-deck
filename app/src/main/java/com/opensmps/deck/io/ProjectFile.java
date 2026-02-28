@@ -99,6 +99,13 @@ public class ProjectFile {
         String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
 
+        int fileVersion = root.get("version").getAsInt();
+        if (fileVersion > VERSION) {
+            throw new IOException(
+                "Project file version " + fileVersion + " is newer than supported version " + VERSION
+                + ". Please update OpenSMPS Deck.");
+        }
+
         Song song = new Song();
         // Clear defaults added by constructor
         song.getPatterns().clear();
