@@ -140,6 +140,12 @@ class TestWavExporter {
         WavExporter exporter = new WavExporter();
         exporter.setLoopCount(2);
         exporter.setMaxDurationSeconds(30);
+        // Use inset mode so the fade is applied over the last fadeDurationSeconds
+        // of the rendered PCM. Extend mode would not produce additional audio for
+        // terminating songs (the driver is already complete after the loops).
+        exporter.setFadeEnabled(true);
+        exporter.setFadeExtend(false);
+        exporter.setFadeDurationSeconds(3.0);
         exporter.export(song, wavFile);
 
         byte[] wav = Files.readAllBytes(wavFile.toPath());
@@ -183,9 +189,9 @@ class TestWavExporter {
             acRms[q] = Math.sqrt(sumSquares / count);
         }
 
-        // With loopCount=2, the final loop gets a linear fade from 1.0 to 0.0.
-        // The last quarter of the file (end of the faded second loop) should be
-        // quieter than the first quarter (start of the un-faded first loop).
+        // With inset fade, the last fadeDurationSeconds of audio get a linear
+        // fade from 1.0 to 0.0. The last quarter of the file should be quieter
+        // than the first quarter (start of the un-faded first loop).
         assertTrue(acRms[3] < acRms[0],
                 "Last quarter AC RMS (" + acRms[3] + ") should be less than first quarter AC RMS ("
                         + acRms[0] + ")");
@@ -262,6 +268,108 @@ class TestWavExporter {
         assertTrue(mutedAcRms < unmutedAcRms,
                 "Muted AC RMS (" + mutedAcRms + ") should be less than unmuted AC RMS ("
                         + unmutedAcRms + ")");
+    }
+
+    @Test
+    void testFadeEnabledFalseProducesCleanOutput() throws IOException {
+        Song song = createTerminatingSong();
+        File withFade = new File(tempDir, "with-fade.wav");
+        File noFade = new File(tempDir, "no-fade.wav");
+
+        WavExporter exporter1 = new WavExporter();
+        exporter1.setLoopCount(2);
+        exporter1.setMaxDurationSeconds(30);
+        exporter1.setFadeEnabled(true);
+        exporter1.setFadeDurationSeconds(3.0);
+        exporter1.setFadeExtend(false);  // inset mode
+        exporter1.export(song, withFade);
+
+        WavExporter exporter2 = new WavExporter();
+        exporter2.setLoopCount(2);
+        exporter2.setMaxDurationSeconds(30);
+        exporter2.setFadeEnabled(false);
+        exporter2.export(song, noFade);
+
+        double fadedRms = computeLastQuarterAcRms(Files.readAllBytes(withFade.toPath()));
+        double cleanRms = computeLastQuarterAcRms(Files.readAllBytes(noFade.toPath()));
+        assertTrue(cleanRms > fadedRms,
+                "No-fade last-quarter AC RMS (" + cleanRms + ") should exceed faded ("
+                        + fadedRms + ")");
+    }
+
+    @Test
+    void testExtendModeProducesLongerOutput() throws IOException {
+        Song song = createTerminatingSong();
+        File extendFile = new File(tempDir, "extend.wav");
+        File insetFile = new File(tempDir, "inset.wav");
+
+        WavExporter extendExporter = new WavExporter();
+        extendExporter.setLoopCount(2);
+        extendExporter.setMaxDurationSeconds(30);
+        extendExporter.setFadeEnabled(true);
+        extendExporter.setFadeDurationSeconds(2.0);
+        extendExporter.setFadeExtend(true);
+        extendExporter.export(song, extendFile);
+
+        WavExporter insetExporter = new WavExporter();
+        insetExporter.setLoopCount(2);
+        insetExporter.setMaxDurationSeconds(30);
+        insetExporter.setFadeEnabled(true);
+        insetExporter.setFadeDurationSeconds(2.0);
+        insetExporter.setFadeExtend(false);
+        insetExporter.export(song, insetFile);
+
+        assertTrue(extendFile.length() > insetFile.length(),
+                "Extend mode (" + extendFile.length()
+                        + ") should produce longer file than inset mode ("
+                        + insetFile.length() + ")");
+    }
+
+    @Test
+    void testFadeDurationGetterSetter() {
+        WavExporter exporter = new WavExporter();
+        exporter.setFadeDurationSeconds(5.0);
+        assertEquals(5.0, exporter.getFadeDurationSeconds(), 0.001);
+
+        exporter.setFadeDurationSeconds(0.0);
+        assertEquals(0.1, exporter.getFadeDurationSeconds(), 0.001,
+                "Should clamp to minimum 0.1");
+
+        exporter.setFadeDurationSeconds(-1.0);
+        assertEquals(0.1, exporter.getFadeDurationSeconds(), 0.001,
+                "Negative values should clamp to 0.1");
+    }
+
+    /**
+     * Computes AC RMS (DC-removed) of the last quarter of PCM data in a WAV file.
+     */
+    private double computeLastQuarterAcRms(byte[] wav) {
+        int pcmStart = 44;
+        int sampleCount = (wav.length - pcmStart) / 2;
+        if (sampleCount <= 0) return 0.0;
+        int quarterSamples = sampleCount / 4;
+        int startByte = pcmStart + (sampleCount - quarterSamples) * 2;
+
+        long sum = 0;
+        int count = 0;
+        for (int i = 0; i < quarterSamples; i++) {
+            int bytePos = startByte + i * 2;
+            if (bytePos + 1 >= wav.length) break;
+            short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+            sum += sample;
+            count++;
+        }
+        double mean = (double) sum / count;
+
+        double sumSquares = 0;
+        for (int i = 0; i < quarterSamples; i++) {
+            int bytePos = startByte + i * 2;
+            if (bytePos + 1 >= wav.length) break;
+            short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+            double ac = sample - mean;
+            sumSquares += ac * ac;
+        }
+        return Math.sqrt(sumSquares / count);
     }
 
     /**

@@ -7,7 +7,9 @@ import java.io.*;
 
 /**
  * Exports a Song to WAV format by offline rendering through the SMPS driver.
- * Supports configurable loop count with linear fade-out on the final loop.
+ * Supports configurable loop count and three fade-out modes: extend (renders
+ * additional audio beyond the loops with a linear fade), inset (applies a
+ * linear fade to the tail of the already-rendered PCM), or disabled (no fade).
  */
 public class WavExporter {
 
@@ -20,6 +22,9 @@ public class WavExporter {
     private int loopCount = 2;
     private int maxDurationSeconds = DEFAULT_MAX_DURATION_SECONDS;
     private boolean[] mutedChannels;
+    private boolean fadeEnabled = true;
+    private double fadeDurationSeconds = 3.0;
+    private boolean fadeExtend = true;
 
     public void setMutedChannels(boolean[] mutedChannels) {
         this.mutedChannels = mutedChannels != null ? mutedChannels.clone() : null;
@@ -41,12 +46,52 @@ public class WavExporter {
         this.maxDurationSeconds = Math.max(1, seconds);
     }
 
+    public void setFadeEnabled(boolean fadeEnabled) {
+        this.fadeEnabled = fadeEnabled;
+    }
+
+    public boolean isFadeEnabled() {
+        return fadeEnabled;
+    }
+
+    /**
+     * Set the fade-out duration in seconds. Values below 0.1 are clamped to 0.1.
+     */
+    public void setFadeDurationSeconds(double seconds) {
+        this.fadeDurationSeconds = Math.max(0.1, seconds);
+    }
+
+    public double getFadeDurationSeconds() {
+        return fadeDurationSeconds;
+    }
+
+    /**
+     * Set whether the fade extends beyond the rendered loops (true) or is
+     * applied within the last portion of the rendered audio (false, inset mode).
+     */
+    public void setFadeExtend(boolean extend) {
+        this.fadeExtend = extend;
+    }
+
+    public boolean isFadeExtend() {
+        return fadeExtend;
+    }
+
     /**
      * Export the given song as a WAV audio file.
      *
      * <p>Renders the song through the SMPS driver {@code loopCount} times.
-     * On the final loop (when {@code loopCount > 1}), a linear fade-out is
-     * applied so the audio tapers to silence rather than cutting off abruptly.
+     * When {@code fadeEnabled} is true, a linear fade-out is applied according
+     * to the configured mode:
+     * <ul>
+     *   <li><b>Extend mode</b> ({@code fadeExtend=true}): renders additional
+     *       {@code fadeDurationSeconds} of audio after the loops complete,
+     *       applying a linear fade per buffer during the extension.</li>
+     *   <li><b>Inset mode</b> ({@code fadeExtend=false}): applies a linear
+     *       fade-out to the last {@code fadeDurationSeconds} of the already
+     *       rendered PCM data.</li>
+     * </ul>
+     * When {@code fadeEnabled} is false, no fade processing is applied.
      *
      * @param song       the song to export
      * @param outputFile the destination WAV file
@@ -56,28 +101,15 @@ public class WavExporter {
         PlaybackEngine engine = new PlaybackEngine();
 
         ByteArrayOutputStream pcmData = new ByteArrayOutputStream();
-        int maxFrames = SAMPLE_RATE * maxDurationSeconds;
+        long maxFrames = (long) SAMPLE_RATE * maxDurationSeconds;
         int totalFrames = 0;
-        int fadeStartFrame = -1;
-        int fadeLengthFrames = 0;
 
         for (int loop = 0; loop < loopCount; loop++) {
             engine.loadSong(song);
 
-            if (mutedChannels != null) {
-                for (int ch = 0; ch < mutedChannels.length; ch++) {
-                    if (mutedChannels[ch]) {
-                        if (ch < 6) {
-                            engine.setFmMute(ch, true);
-                        } else {
-                            engine.setPsgMute(ch - 6, true);
-                        }
-                    }
-                }
-            }
+            applyMutes(engine);
 
             short[] buffer = new short[BUFFER_FRAMES * CHANNELS];
-            int loopStartFrame = totalFrames;
 
             while (totalFrames < maxFrames) {
                 engine.renderBuffer(buffer);
@@ -89,18 +121,50 @@ public class WavExporter {
                 }
                 totalFrames += BUFFER_FRAMES;
             }
+        }
 
-            if (loop == loopCount - 1 && loopCount > 1) {
-                fadeStartFrame = loopStartFrame;
-                fadeLengthFrames = totalFrames - loopStartFrame;
+        // Extend mode: render additional seconds with fade applied per-buffer.
+        // If the driver has already completed (terminating song), reload the
+        // song so there is fresh audio to fade out over the extension period.
+        if (fadeEnabled && fadeExtend) {
+            if (engine.getDriver().isComplete()) {
+                engine.loadSong(song);
+                applyMutes(engine);
+            }
+
+            int fadeTotalFrames = (int) (fadeDurationSeconds * SAMPLE_RATE);
+            int fadeRendered = 0;
+            short[] buffer = new short[BUFFER_FRAMES * CHANNELS];
+
+            while (fadeRendered < fadeTotalFrames && totalFrames < maxFrames) {
+                engine.renderBuffer(buffer);
+                if (engine.getDriver().isComplete()) break;
+
+                for (int i = 0; i < buffer.length; i += 2) {
+                    int frameInFade = fadeRendered + (i / CHANNELS);
+                    float gain = 1.0f - (float) frameInFade / fadeTotalFrames;
+                    if (gain < 0) gain = 0;
+                    buffer[i] = (short) (buffer[i] * gain);
+                    buffer[i + 1] = (short) (buffer[i + 1] * gain);
+                }
+
+                for (short sample : buffer) {
+                    pcmData.write(sample & 0xFF);
+                    pcmData.write((sample >> 8) & 0xFF);
+                }
+                fadeRendered += BUFFER_FRAMES;
+                totalFrames += BUFFER_FRAMES;
             }
         }
 
         byte[] pcm = pcmData.toByteArray();
 
-        // Apply fade-out on final loop
-        if (fadeStartFrame >= 0 && fadeLengthFrames > 0) {
-            applyFadeOut(pcm, fadeStartFrame, fadeLengthFrames);
+        // Inset mode: fade the last N seconds of already-rendered PCM
+        if (fadeEnabled && !fadeExtend) {
+            int fadeSampleCount = (int) (fadeDurationSeconds * SAMPLE_RATE);
+            int clampedFadeFrames = Math.min(fadeSampleCount, totalFrames);
+            int fadeStartFrame = totalFrames - clampedFadeFrames;
+            applyFadeOut(pcm, fadeStartFrame, clampedFadeFrames);
         }
 
         // Write WAV file
@@ -108,6 +172,19 @@ public class WavExporter {
                 new BufferedOutputStream(new FileOutputStream(outputFile)))) {
             writeWavHeader(dos, pcm.length);
             dos.write(pcm);
+        }
+    }
+
+    private void applyMutes(PlaybackEngine engine) {
+        if (mutedChannels == null) return;
+        for (int ch = 0; ch < mutedChannels.length; ch++) {
+            if (mutedChannels[ch]) {
+                if (ch < 6) {
+                    engine.setFmMute(ch, true);
+                } else {
+                    engine.setPsgMute(ch - 6, true);
+                }
+            }
         }
     }
 
