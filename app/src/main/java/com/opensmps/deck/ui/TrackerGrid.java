@@ -38,6 +38,7 @@ public class TrackerGrid extends ScrollPane {
     private static final Font HEADER_FONT = Font.font("Monospaced", 12);
 
     private final Canvas canvas;
+    private InstrumentPanel instrumentPanel;
     private Song song;
     private int currentPatternIndex = 0;
     private int cursorRow = 0;
@@ -61,6 +62,10 @@ public class TrackerGrid extends ScrollPane {
         setPannable(true);
         setStyle("-fx-background: #1a1a2e;");
         setupKeyboardHandling();
+    }
+
+    public void setInstrumentPanel(InstrumentPanel panel) {
+        this.instrumentPanel = panel;
     }
 
     public void setSong(Song song) {
@@ -322,12 +327,39 @@ public class TrackerGrid extends ScrollPane {
         return Math.max(max, 1);
     }
 
+    private byte[] prependInstrumentIfSelected(byte[] noteBytes) {
+        if (instrumentPanel == null) return noteBytes;
+
+        byte[] instrBytes = null;
+        if (cursorChannel <= 5) {
+            // FM channel: use voice index
+            int voiceIdx = instrumentPanel.getCurrentVoiceIndex();
+            if (voiceIdx >= 0) {
+                instrBytes = SmpsEncoder.encodeVoiceChange(voiceIdx);
+            }
+        } else {
+            // PSG channel: use envelope index
+            int envIdx = instrumentPanel.getCurrentEnvelopeIndex();
+            if (envIdx >= 0) {
+                instrBytes = SmpsEncoder.encodePsgEnvelope(envIdx);
+            }
+        }
+
+        if (instrBytes == null) return noteBytes;
+
+        byte[] combined = new byte[instrBytes.length + noteBytes.length];
+        System.arraycopy(instrBytes, 0, combined, 0, instrBytes.length);
+        System.arraycopy(noteBytes, 0, combined, instrBytes.length, noteBytes.length);
+        return combined;
+    }
+
     private void insertNote(int noteValue) {
         if (song == null) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
-        byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, noteBytes);
+        byte[] insertBytes = prependInstrumentIfSelected(noteBytes);
+        byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, insertBytes);
         undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
         cursorRow++;

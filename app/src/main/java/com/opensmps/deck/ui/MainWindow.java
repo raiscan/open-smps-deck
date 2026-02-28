@@ -56,6 +56,9 @@ public class MainWindow {
         // Right: Instrument panel
         instrumentPanel = new InstrumentPanel(currentSong);
         root.setRight(instrumentPanel);
+
+        // Wire instrument selection to tracker grid note entry
+        trackerGrid.setInstrumentPanel(instrumentPanel);
     }
 
     private void setupStage() {
