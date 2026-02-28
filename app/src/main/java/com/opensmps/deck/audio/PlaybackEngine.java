@@ -1,12 +1,17 @@
 package com.opensmps.deck.audio;
 
 import com.opensmps.deck.codec.PatternCompiler;
+import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.SmpsMode;
 import com.opensmps.driver.AudioOutput;
 import com.opensmps.driver.SmpsDriver;
+import com.opensmps.smps.DacData;
 import com.opensmps.smps.SmpsSequencer;
 import com.opensmps.smps.SmpsSequencerConfig;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Coordinates song compilation and playback.
@@ -43,6 +48,24 @@ public class PlaybackEngine {
                 envs[i] = song.getPsgEnvelopes().get(i).getData();
             }
             data.setPsgEnvelopes(envs);
+        }
+
+        // Wire DAC samples from Song model into the driver's synthesizer
+        if (!song.getDacSamples().isEmpty()) {
+            Map<Integer, byte[]> sampleBank = new HashMap<>();
+            Map<Integer, DacData.DacEntry> mapping = new HashMap<>();
+            for (int i = 0; i < song.getDacSamples().size(); i++) {
+                DacSample dac = song.getDacSamples().get(i);
+                int sampleId = i;
+                sampleBank.put(sampleId, dac.getDataDirect());
+                mapping.put(0x81 + i, new DacData.DacEntry(sampleId, dac.getRate()));
+            }
+            int baseCycles = switch (song.getSmpsMode()) {
+                case S1 -> 301;
+                case S2 -> 288;
+                case S3K -> 297;
+            };
+            driver.setDacData(new DacData(sampleBank, mapping, baseCycles));
         }
 
         SmpsSequencerConfig config = buildConfig(song.getSmpsMode());
