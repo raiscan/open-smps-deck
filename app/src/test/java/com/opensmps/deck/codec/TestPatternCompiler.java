@@ -166,6 +166,111 @@ class TestPatternCompiler {
     }
 
     @Test
+    void testS1ModeCompensatesNoteOffset() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S1);
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // Put a known note 0xA1 (C-2 in S2 numbering) in FM channel 0
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+
+        // Track data starts after header: 6 (base) + 4 (1 FM track header) = offset 10
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // Track data: EF 00 <note> 30 F6 xx xx
+        // The note is at trackStart + 2 (after EF 00)
+        int compiledNote = smps[trackStart + 2] & 0xFF;
+        assertEquals(0xA2, compiledNote,
+            "S1 mode should shift note 0xA1 -> 0xA2 (+1 compensation)");
+
+        // Duration byte should NOT be shifted
+        assertEquals(0x30, smps[trackStart + 3] & 0xFF,
+            "Duration byte should remain unchanged");
+
+        // Coordination flag byte EF should NOT be shifted
+        assertEquals(SmpsCoordFlags.SET_VOICE, smps[trackStart] & 0xFF,
+            "Coordination flag SET_VOICE should remain unchanged");
+    }
+
+    @Test
+    void testS2ModeNoCompensation() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S2);
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // Same note data as above
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledNote = smps[trackStart + 2] & 0xFF;
+        assertEquals(0xA1, compiledNote,
+            "S2 mode should leave note 0xA1 unchanged (no compensation)");
+    }
+
+    @Test
+    void testS3kModeCompensatesNoteOffset() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S3K);
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0xBD, 0x30 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledNote = smps[trackStart] & 0xFF;
+        assertEquals(0xBE, compiledNote,
+            "S3K mode should shift note 0xBD -> 0xBE (+1 compensation)");
+    }
+
+    @Test
+    void testNoteCompensationDoesNotShiftRest() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S1);
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // 0x80 is a rest -- should NOT be shifted
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0x80, 0x30 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledByte = smps[trackStart] & 0xFF;
+        assertEquals(0x80, compiledByte,
+            "Rest byte 0x80 should NOT be shifted by note compensation");
+    }
+
+    @Test
+    void testNoteCompensationClampsAtMax() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S1);
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // 0xDF is the maximum note value -- shifting +1 would exceed range
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0xDF, 0x30 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledNote = smps[trackStart] & 0xFF;
+        assertEquals(0xDF, compiledNote,
+            "Note at max 0xDF should be clamped to 0xDF, not overflow into coord flag range");
+    }
+
+    @Test
     void testCompileMultiPatternSongHasCorrectOrderJumps() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));

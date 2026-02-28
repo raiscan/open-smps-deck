@@ -23,6 +23,7 @@ public class Song {
 
     private final List<FmVoice> voiceBank = new ArrayList<>();
     private final List<PsgEnvelope> psgEnvelopes = new ArrayList<>();
+    private final List<DacSample> dacSamples = new ArrayList<>();
     private final List<Pattern> patterns = new ArrayList<>();
     private final List<int[]> orderList = new ArrayList<>(); // int[10] per row
 
@@ -78,6 +79,10 @@ public class Song {
 
     public List<PsgEnvelope> getPsgEnvelopes() {
         return psgEnvelopes;
+    }
+
+    public List<DacSample> getDacSamples() {
+        return dacSamples;
     }
 
     public List<Pattern> getPatterns() {

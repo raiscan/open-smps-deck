@@ -2,6 +2,7 @@ package com.opensmps.deck.codec;
 
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
+import com.opensmps.deck.model.SmpsMode;
 import com.opensmps.deck.model.Song;
 import com.opensmps.smps.SmpsCoordFlags;
 
@@ -36,12 +37,35 @@ public class PatternCompiler {
     private static final int CMD_JUMP = SmpsCoordFlags.JUMP;
 
     /**
-     * Compiles the given song into an SMPS binary byte array.
+     * Compiles the given song into an SMPS binary byte array using
+     * the song's own {@link SmpsMode}.
      *
      * @param song the song to compile
      * @return the compiled SMPS binary data
      */
     public byte[] compile(Song song) {
+        return compile(song, song.getSmpsMode());
+    }
+
+    /**
+     * Compiles the given song into an SMPS binary byte array for
+     * the specified target mode.
+     *
+     * <p>When targeting S1 or S3K, note bytes (0x81-0xDF) are shifted
+     * +1 to compensate for the lower {@code baseNoteOffset} used by
+     * those drivers at playback time. This ensures the same pitch
+     * regardless of target mode.
+     *
+     * @param song the song to compile
+     * @param mode the target SMPS driver mode
+     * @return the compiled SMPS binary data
+     */
+    public byte[] compile(Song song, SmpsMode mode) {
+        int noteCompensation = switch (mode) {
+            case S1, S3K -> 1;  // shift notes up by 1 to compensate for lower base
+            case S2 -> 0;       // S2 is the native format
+        };
+
         // Defensive snapshot — compile reads orderList and patterns which the UI thread may modify
         List<int[]> orderList = new ArrayList<>();
         for (int[] row : song.getOrderList()) {
@@ -65,7 +89,7 @@ public class PatternCompiler {
                 activePsgChannels.add(ch);
             }
 
-            byte[] trackData = buildTrackData(orderList, patterns, ch);
+            byte[] trackData = buildTrackData(orderList, patterns, ch, noteCompensation);
             int loopTarget = calculateLoopTarget(song.getLoopPoint(), orderList, patterns, ch);
             // Append F6 (JUMP) + 2-byte LE placeholder (track-relative offset, patched later)
             byte[] withJump = new byte[trackData.length + 3];
@@ -181,9 +205,13 @@ public class PatternCompiler {
 
     /**
      * Builds concatenated track data for a channel across all order rows,
-     * stripping trailing F2 (track end) bytes between patterns.
+     * stripping trailing F2 (track end) bytes between patterns and applying
+     * note compensation for the target SMPS mode.
+     *
+     * @param noteCompensation offset to add to note bytes (0x81-0xDF); 0 for S2, +1 for S1/S3K
      */
-    private byte[] buildTrackData(List<int[]> orderList, List<Pattern> patterns, int channel) {
+    private byte[] buildTrackData(List<int[]> orderList, List<Pattern> patterns, int channel,
+                                  int noteCompensation) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
 
         for (int[] orderRow : orderList) {
@@ -203,12 +231,54 @@ public class PatternCompiler {
             while (end > 0 && (data[end - 1] & 0xFF) == CMD_TRACK_END) {
                 end--;
             }
+
             if (end > 0) {
-                buf.write(data, 0, end);
+                if (noteCompensation == 0) {
+                    // No compensation needed — copy directly
+                    buf.write(data, 0, end);
+                } else {
+                    // Walk the bytecode to find and adjust note bytes
+                    applyNoteCompensation(buf, data, end, noteCompensation);
+                }
             }
         }
 
         return buf.toByteArray();
+    }
+
+    /**
+     * Walks SMPS bytecode, applies note compensation to note bytes (0x81-0xDF),
+     * and writes the result to the output buffer. Coordination flag bytes
+     * (0xE0-0xFF) and their parameters, duration bytes (0x01-0x7F), and rest
+     * bytes (0x80) are written unchanged.
+     */
+    private void applyNoteCompensation(ByteArrayOutputStream buf, byte[] data, int end,
+                                       int noteCompensation) {
+        int pos = 0;
+        while (pos < end) {
+            int b = data[pos] & 0xFF;
+
+            if (b >= 0xE0) {
+                // Coordination flag — write flag byte + all parameter bytes unchanged
+                buf.write(b);
+                pos++;
+                int paramCount = SmpsCoordFlags.getParamCount(b);
+                for (int p = 0; p < paramCount && pos < end; p++) {
+                    buf.write(data[pos] & 0xFF);
+                    pos++;
+                }
+            } else if (b >= 0x81 && b <= 0xDF) {
+                // Note byte — apply compensation and clamp
+                int adjusted = b + noteCompensation;
+                adjusted = Math.max(0x81, Math.min(0xDF, adjusted));
+                buf.write(adjusted);
+                pos++;
+            } else {
+                // Rest (0x80) or duration (0x01-0x7F) or zero — write unchanged
+                buf.write(b);
+                pos++;
+            }
+        }
     }
 
     /**
