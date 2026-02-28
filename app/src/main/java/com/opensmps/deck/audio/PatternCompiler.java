@@ -60,7 +60,7 @@ public class PatternCompiler {
 
             byte[] trackData = buildTrackData(song, ch);
             int loopTarget = calculateLoopTarget(song, ch);
-            // Append F4 + 2-byte LE placeholder (track-relative offset, patched later)
+            // Append F6 (JUMP) + 2-byte LE placeholder (track-relative offset, patched later)
             byte[] withJump = new byte[trackData.length + 3];
             System.arraycopy(trackData, 0, withJump, 0, trackData.length);
             withJump[trackData.length] = (byte) CMD_JUMP;
@@ -91,10 +91,10 @@ public class PatternCompiler {
         int voiceTableOffset = cursor;
         int voiceDataLength = song.getVoiceBank().size() * FmVoice.VOICE_SIZE;
 
-        // 5. Patch F4 loop targets: convert from track-relative to file-relative
+        // 5. Patch F6 (JUMP) loop targets: convert from track-relative to file-relative
         for (int i = 0; i < compiledTracks.size(); i++) {
             byte[] track = compiledTracks.get(i);
-            // The last 3 bytes are F4 + 2-byte LE pointer
+            // The last 3 bytes are F6 (JUMP) + 2-byte LE pointer
             int jumpPos = track.length - 3;
             int trackRelTarget = (track[jumpPos + 1] & 0xFF)
                     | ((track[jumpPos + 2] & 0xFF) << 8);

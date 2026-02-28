@@ -26,7 +26,6 @@ public class PlaybackEngine {
     /** Compile song and load into sequencer. Does NOT start playback. */
     public void loadSong(Song song) {
         driver.stopAll();
-        driver.silenceAll();
 
         byte[] smps = compiler.compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps);
