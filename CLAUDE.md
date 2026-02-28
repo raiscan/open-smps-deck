@@ -129,9 +129,9 @@ PatternCompiler applies +1 note compensation for S1/S3K modes to match the lower
 
 ## Synth Core Origin
 
-The `synth-core` module is extracted from the OpenGGF sonic-engine project (`com.openggf.audio.*`). The chip emulators are ported from SMPSPlay's libvgm/GPGX cores. When making changes to the synth core, reference:
-- `docs/SMPS-rips/SMPSPlay/` in the sonic-engine repo for SMPS driver reference
-- libvgm source for chip accuracy
+The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999/OpenGGF) (`com.openggf.audio.*`). The chip emulators are ported from libvgm (YM2612) and Gens Plus GX (PSG). When making changes to the synth core, reference:
+- `docs/SMPS-rips/SMPSPlay/` in the OpenGGF repo for SMPS driver reference
+- libvgm and Genesis Plus GX source for chip accuracy
 
 ## Code Style
 

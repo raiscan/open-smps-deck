@@ -4,7 +4,7 @@ A standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG m
 
 OpenSMPS Deck produces SMPS-compatible output that can be:
 - Injected directly into Sonic 1, 2, or 3&K ROMs
-- Played by the [OpenGGF](https://github.com/jamesj999/OpenGGF) game engine
+- Played by [OpenGGF](https://github.com/jamesj999/OpenGGF)
 - Used with SMPSPlay and other community tools
 
 **Key principle:** The internal model IS SMPS bytecode. The tracker grid is a decoded view over raw SMPS data. What you hear is exactly what exports.
@@ -164,7 +164,7 @@ Song model, codec, I/O, and JavaFX UI.
 
 ## Synth Core Origin
 
-The `synth-core` module is extracted from the [OpenGGF sonic-engine](https://github.com/jamesj999/OpenGGF) project. The chip emulators are ported from SMPSPlay's libvgm/GPGX cores and aim for hardware-accurate synthesis.
+The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999/OpenGGF). The chip emulators are ported from [libvgm](https://github.com/ValleyBell/libvgm) and [Gens Plus GX](https://github.com/ekeeke/Genesis-Plus-GX), aiming for hardware-accurate synthesis.
 
 ## Testing
 
@@ -191,6 +191,7 @@ This project is licensed under the GNU General Public License v3.0 — see the [
 ## Acknowledgments
 
 - **SMPS** format documentation from the Sonic Retro community
-- **SMPSPlay** by Valley Bell — reference SMPS driver implementation
-- **libvgm** — hardware-accurate chip emulator cores
-- **OpenGGF** — parent project providing the synth core foundation
+- **[libvgm](https://github.com/ValleyBell/libvgm)** — YM2612 chip emulator core
+- **[Gens Plus GX](https://github.com/ekeeke/Genesis-Plus-GX)** — PSG chip emulator core
+- **[SMPSPlay](https://github.com/ValleyBell/SMPSPlay)** by Valley Bell — reference SMPS driver implementation
+- **[OpenGGF](https://github.com/jamesj999/OpenGGF)** — parent project providing the synth core foundation
