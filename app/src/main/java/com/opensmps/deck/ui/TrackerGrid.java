@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.codec.InstrumentRemapper;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
 import com.opensmps.deck.model.ClipboardData;
@@ -13,8 +14,7 @@ import javafx.scene.input.KeyEvent;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * Canvas-based tracker grid displaying decoded SMPS track data.
@@ -514,9 +514,23 @@ public class TrackerGrid extends ScrollPane {
         if (clipboard == null || song == null) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
+        // Build paste data from clipboard
+        int chCount = clipboard.getChannelCount();
+        byte[][] pasteChannelData = new byte[chCount][];
+        for (int ch = 0; ch < chCount; ch++) {
+            pasteChannelData[ch] = clipboard.getChannelData(ch);
+        }
+
+        // Cross-song paste: resolve instrument references
+        Song srcSong = clipboard.getSourceSong();
+        if (srcSong != null && srcSong != song) {
+            pasteChannelData = resolveCrossPaste(pasteChannelData, srcSong, song);
+            if (pasteChannelData == null) return; // user cancelled
+        }
+
         // Collect affected channel indices for atomic undo
         int count = 0;
-        for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
+        for (int ch = 0; ch < chCount; ch++) {
             if (cursorChannel + ch < Pattern.CHANNEL_COUNT) count++;
         }
         int[] affectedChannels = new int[count];
@@ -527,18 +541,65 @@ public class TrackerGrid extends ScrollPane {
         // Record undo atomically for all affected channels BEFORE any mutations
         undoManager.recordMultiEdit(pattern, affectedChannels);
 
-        for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
+        for (int ch = 0; ch < chCount; ch++) {
             int targetChannel = cursorChannel + ch;
             if (targetChannel >= Pattern.CHANNEL_COUNT) break;
 
             byte[] trackData = pattern.getTrackData(targetChannel);
-            byte[] pasteData = clipboard.getChannelData(ch);
+            byte[] pasteData = pasteChannelData[ch];
 
             // Insert pasted bytes at cursor row
             byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteData);
             pattern.setTrackData(targetChannel, newData);
         }
         refreshDisplay();
+    }
+
+    private byte[][] resolveCrossPaste(byte[][] channelData, Song srcSong, Song dstSong) {
+        Set<Integer> allVoices = new LinkedHashSet<>();
+        Set<Integer> allPsg = new LinkedHashSet<>();
+        for (byte[] data : channelData) {
+            InstrumentRemapper.ScanResult scan = InstrumentRemapper.scan(data);
+            allVoices.addAll(scan.voiceIndices());
+            allPsg.addAll(scan.psgIndices());
+        }
+
+        if (allVoices.isEmpty() && allPsg.isEmpty()) return channelData;
+
+        Map<Integer, Integer> voiceMap = InstrumentRemapper.autoRemap(
+                srcSong.getVoiceBank(), dstSong.getVoiceBank(), allVoices);
+        Map<Integer, Integer> psgMap = InstrumentRemapper.autoRemapPsg(
+                srcSong.getPsgEnvelopes(), dstSong.getPsgEnvelopes(), allPsg);
+
+        Set<Integer> unresolvedVoices = new LinkedHashSet<>(allVoices);
+        unresolvedVoices.removeAll(voiceMap.keySet());
+        Set<Integer> unresolvedPsg = new LinkedHashSet<>(allPsg);
+        unresolvedPsg.removeAll(psgMap.keySet());
+
+        if (unresolvedVoices.isEmpty() && unresolvedPsg.isEmpty()) {
+            return rewriteAll(channelData, voiceMap, psgMap);
+        }
+
+        InstrumentResolveDialog dialog = new InstrumentResolveDialog(
+                srcSong, dstSong, unresolvedVoices, unresolvedPsg);
+        Optional<InstrumentResolveDialog.Resolution> result = dialog.showAndWait();
+        if (result.isEmpty()) return null;
+
+        InstrumentResolveDialog.Resolution res = result.get();
+        dstSong.getVoiceBank().addAll(res.voicesToCopy());
+        dstSong.getPsgEnvelopes().addAll(res.envelopesToCopy());
+        voiceMap.putAll(res.voiceMap());
+        psgMap.putAll(res.psgMap());
+
+        return rewriteAll(channelData, voiceMap, psgMap);
+    }
+
+    private byte[][] rewriteAll(byte[][] channelData, Map<Integer, Integer> voiceMap, Map<Integer, Integer> psgMap) {
+        byte[][] result = new byte[channelData.length][];
+        for (int i = 0; i < channelData.length; i++) {
+            result[i] = InstrumentRemapper.rewrite(channelData[i], voiceMap, psgMap);
+        }
+        return result;
     }
 
     private void transposeSelection(int semitones) {
