@@ -45,6 +45,13 @@ public final class AdsrEnvelopeCalculator {
      * @return list of {normalizedTime, normalizedLevel} points, time 0-1, level 0-1
      */
     public static List<double[]> compute(int ar, int d1r, int d2r, int d1l, int rr, double keyOffFrac) {
+        ar = Math.max(0, Math.min(31, ar));
+        d1r = Math.max(0, Math.min(31, d1r));
+        d2r = Math.max(0, Math.min(31, d2r));
+        d1l = Math.max(0, Math.min(15, d1l));
+        rr = Math.max(0, Math.min(15, rr));
+        keyOffFrac = Math.max(0.0, Math.min(1.0, keyOffFrac));
+
         List<double[]> points = new ArrayList<>(RESOLUTION);
 
         // AR=0 special case: never attacks, all levels 0

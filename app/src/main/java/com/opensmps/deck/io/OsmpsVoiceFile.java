@@ -25,7 +25,7 @@ import java.nio.file.Files;
  *
  * <p>Hex data is encoded as space-separated uppercase hex bytes (e.g. "3C 71 22").
  */
-public class OsmpsVoiceFile {
+public final class OsmpsVoiceFile {
 
     private static final int VERSION = 1;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();

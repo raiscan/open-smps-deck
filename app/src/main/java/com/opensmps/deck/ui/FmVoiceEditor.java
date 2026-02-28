@@ -41,13 +41,17 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
     private static final double CANVAS_WIDTH = 200;
     private static final double CANVAS_HEIGHT = 120;
     private static final double ENVELOPE_CANVAS_HEIGHT = 100;
+    private static final double KEY_OFF_FRACTION = 0.7;
 
     private static byte[] voiceClipboard;
 
     private final FmVoice voice;
     private final Canvas algorithmCanvas;
-    private Canvas envelopeCanvas;
+    private final Canvas envelopeCanvas;
     private final VBox[] operatorColumns = new VBox[4];
+    private final HBox operatorRow;
+    private ComboBox<Integer> algoCombo;
+    private ComboBox<Integer> fbCombo;
     private PlaybackEngine previewEngine;
 
     /**
@@ -95,7 +99,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         envelopeWrapper.setPadding(new Insets(4));
 
         // Operator columns
-        HBox operatorRow = new HBox(8);
+        operatorRow = new HBox(8);
         operatorRow.setAlignment(Pos.TOP_LEFT);
         for (int display = 0; display < 4; display++) {
             operatorColumns[display] = buildOperatorColumn(display);
@@ -183,6 +187,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         }
         voice.setAlgorithm(source.getAlgorithm());
         voice.setFeedback(source.getFeedback());
+        algoCombo.setValue(voice.getAlgorithm());
+        fbCombo.setValue(voice.getFeedback());
+        rebuildOperatorColumns();
         drawAlgorithmDiagram();
         updateOperatorBorders();
         redrawEnvelopePreview();
@@ -224,6 +231,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
                 voice.setRs(op, 0);
                 voice.setAm(op, false);
             }
+            algoCombo.setValue(voice.getAlgorithm());
+            fbCombo.setValue(voice.getFeedback());
+            rebuildOperatorColumns();
             drawAlgorithmDiagram();
             updateOperatorBorders();
             redrawEnvelopePreview();
@@ -287,7 +297,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
 
         // Algorithm combo
         Label algoLabel = createHeaderLabel("Algorithm:");
-        ComboBox<Integer> algoCombo = new ComboBox<>();
+        algoCombo = new ComboBox<>();
         for (int i = 0; i <= 7; i++) algoCombo.getItems().add(i);
         algoCombo.setValue(voice.getAlgorithm());
         algoCombo.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: " + TEXT_COLOR + ";");
@@ -302,7 +312,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
 
         // Feedback combo
         Label fbLabel = createHeaderLabel("Feedback:");
-        ComboBox<Integer> fbCombo = new ComboBox<>();
+        fbCombo = new ComboBox<>();
         for (int i = 0; i <= 7; i++) fbCombo.getItems().add(i);
         fbCombo.setValue(voice.getFeedback());
         fbCombo.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: " + TEXT_COLOR + ";");
@@ -393,6 +403,17 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         return row;
     }
 
+    /**
+     * Rebuilds all 4 operator columns from current voice data, refreshing all slider positions.
+     */
+    private void rebuildOperatorColumns() {
+        operatorRow.getChildren().clear();
+        for (int display = 0; display < 4; display++) {
+            operatorColumns[display] = buildOperatorColumn(display);
+            operatorRow.getChildren().add(operatorColumns[display]);
+        }
+    }
+
     private void updateOperatorBorders() {
         for (int display = 0; display < 4; display++) {
             int smpsOp = FmVoice.displayToSmps(display);
@@ -420,7 +441,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         gc.setFill(Color.web(PANEL_COLOR));
         gc.fillRect(0, 0, w, h);
 
-        double keyOffFrac = 0.7;
+        double keyOffFrac = KEY_OFF_FRACTION;
 
         // Draw key-off marker
         double keyOffX = keyOffFrac * w;
