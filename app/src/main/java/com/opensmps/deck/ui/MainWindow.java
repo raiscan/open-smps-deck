@@ -15,6 +15,7 @@ public class MainWindow {
     private final Song currentSong;
     private final PlaybackEngine playbackEngine;
     private TrackerGrid trackerGrid;
+    private OrderListPanel orderListPanel;
 
     public MainWindow(Stage stage) {
         this.stage = stage;
@@ -36,12 +37,16 @@ public class MainWindow {
         trackerGrid.setSong(currentSong);
         root.setCenter(trackerGrid);
 
-        // Bottom: Order list placeholder
-        StackPane orderPlaceholder = new StackPane();
-        orderPlaceholder.setPrefHeight(150);
-        orderPlaceholder.setStyle("-fx-background-color: #1e1e1e;");
-        orderPlaceholder.getChildren().add(createLabel("Order List"));
-        root.setBottom(orderPlaceholder);
+        // Bottom: Order list
+        orderListPanel = new OrderListPanel(currentSong);
+        orderListPanel.setOnOrderRowSelected(rowIndex -> {
+            if (!currentSong.getOrderList().isEmpty()) {
+                int[] orderRow = currentSong.getOrderList().get(rowIndex);
+                // Use the first channel's pattern index to display
+                trackerGrid.setCurrentPatternIndex(orderRow[0]);
+            }
+        });
+        root.setBottom(orderListPanel);
 
         // Right: Instrument panel placeholder
         StackPane instrumentPlaceholder = new StackPane();
@@ -84,6 +89,10 @@ public class MainWindow {
 
     public TrackerGrid getTrackerGrid() {
         return trackerGrid;
+    }
+
+    public OrderListPanel getOrderListPanel() {
+        return orderListPanel;
     }
 
     private Label createLabel(String text) {
