@@ -1,8 +1,11 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
+import com.opensmps.deck.io.ImportableVoice;
 import com.opensmps.deck.io.ProjectFile;
 import com.opensmps.deck.io.SmpsExporter;
+import com.opensmps.deck.io.SmpsImporter;
+import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Song;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -137,8 +140,15 @@ public class MainWindow {
         MenuItem exportItem = new MenuItem("Export SMPS...");
         exportItem.setOnAction(e -> onExportSmps());
 
+        MenuItem importVoicesItem = new MenuItem("Import Voices...");
+        importVoicesItem.setOnAction(e -> onImportVoices());
+
+        MenuItem importSmpsItem = new MenuItem("Import SMPS...");
+        importSmpsItem.setOnAction(e -> onImportSmps());
+
         fileMenu.getItems().addAll(newItem, openItem, new SeparatorMenuItem(),
-                saveItem, saveAsItem, separator, exportItem);
+                saveItem, saveAsItem, separator, exportItem,
+                new SeparatorMenuItem(), importVoicesItem, importSmpsItem);
 
         menuBar.getMenus().add(fileMenu);
         return menuBar;
@@ -222,6 +232,39 @@ public class MainWindow {
                 exporter.export(tab.getSong(), file);
             } catch (IOException ex) {
                 showError("Failed to export SMPS", ex.getMessage());
+            }
+        }
+    }
+
+    private void onImportVoices() {
+        SongTab songTab = getActiveSongTab();
+        if (songTab == null) return;
+
+        VoiceImportDialog dialog = new VoiceImportDialog();
+        java.util.Optional<java.util.List<ImportableVoice>> result = dialog.showAndWait();
+        if (result.isPresent() && !result.get().isEmpty()) {
+            for (ImportableVoice iv : result.get()) {
+                songTab.getSong().getVoiceBank().add(
+                        new FmVoice(iv.sourceSong() + " #" + iv.originalIndex(), iv.voiceData()));
+            }
+            songTab.getInstrumentPanel().refresh();
+        }
+    }
+
+    private void onImportSmps() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Import SMPS Binary");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("SMPS Binary", "*.bin"));
+        File file = fileChooser.showOpenDialog(stage);
+        if (file != null) {
+            try {
+                SmpsImporter smpsImporter = new SmpsImporter();
+                Song song = smpsImporter.importFile(file);
+                SongTab songTab = new SongTab(song);
+                addNewTab(songTab);
+            } catch (Exception ex) {
+                showError("Failed to import SMPS", ex.getMessage());
             }
         }
     }
