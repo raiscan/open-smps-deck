@@ -462,13 +462,18 @@ public class TrackerGrid extends ScrollPane {
         if (clipboard == null || song == null) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
-        // Record undo for all affected channels
+        // Collect affected channel indices for atomic undo
+        int count = 0;
         for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
-            int targetChannel = cursorChannel + ch;
-            if (targetChannel < Pattern.CHANNEL_COUNT) {
-                undoManager.recordEdit(pattern, targetChannel);
-            }
+            if (cursorChannel + ch < Pattern.CHANNEL_COUNT) count++;
         }
+        int[] affectedChannels = new int[count];
+        for (int i = 0; i < count; i++) {
+            affectedChannels[i] = cursorChannel + i;
+        }
+
+        // Record undo atomically for all affected channels BEFORE any mutations
+        undoManager.recordMultiEdit(pattern, affectedChannels);
 
         for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
             int targetChannel = cursorChannel + ch;
