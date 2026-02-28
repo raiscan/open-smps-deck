@@ -70,4 +70,35 @@ public class PsgEnvelope {
         }
         data[index] = (byte) (value & 0xFF);
     }
+
+    /** Add a volume step at the end (before the 0x80 terminator). */
+    public void addStep(int volume) {
+        int count = getStepCount();
+        byte[] newData = new byte[count + 2]; // steps + new step + terminator
+        System.arraycopy(data, 0, newData, 0, count);
+        newData[count] = (byte) (volume & 0xFF);
+        newData[count + 1] = (byte) 0x80;
+        this.data = newData;
+    }
+
+    /** Remove the step at the given index. */
+    public void removeStep(int index) {
+        int count = getStepCount();
+        if (index < 0 || index >= count) {
+            throw new IndexOutOfBoundsException("Step index " + index + " out of range [0, " + count + ")");
+        }
+        byte[] newData = new byte[count]; // (count - 1) steps + terminator
+        System.arraycopy(data, 0, newData, 0, index);
+        System.arraycopy(data, index + 1, newData, index, count - index - 1);
+        newData[count - 1] = (byte) 0x80;
+        this.data = newData;
+    }
+
+    /** Replace the envelope data entirely. */
+    public void setData(byte[] newData) {
+        if (newData == null) {
+            throw new IllegalArgumentException("PSG envelope data must not be null");
+        }
+        this.data = newData.clone();
+    }
 }

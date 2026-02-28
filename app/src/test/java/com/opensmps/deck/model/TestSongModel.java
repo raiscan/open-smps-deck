@@ -369,6 +369,51 @@ class TestSongModel {
     }
 
     @Test
+    void testPsgEnvelopeAddStep() {
+        byte[] data = {0, 1, 2, (byte) 0x80};
+        PsgEnvelope env = new PsgEnvelope("Test", data);
+        assertEquals(3, env.getStepCount());
+        env.addStep(4);
+        assertEquals(4, env.getStepCount());
+        assertEquals(4, env.getStep(3));
+        byte[] raw = env.getData();
+        assertEquals((byte) 0x80, raw[4]);
+    }
+
+    @Test
+    void testPsgEnvelopeRemoveStep() {
+        byte[] data = {0, 1, 2, (byte) 0x80};
+        PsgEnvelope env = new PsgEnvelope("Test", data);
+        env.removeStep(1);
+        assertEquals(2, env.getStepCount());
+        assertEquals(0, env.getStep(0));
+        assertEquals(2, env.getStep(1));
+        byte[] raw = env.getData();
+        assertEquals((byte) 0x80, raw[2]);
+    }
+
+    @Test
+    void testPsgEnvelopeRemoveLastStep() {
+        byte[] data = {5, (byte) 0x80};
+        PsgEnvelope env = new PsgEnvelope("Test", data);
+        env.removeStep(0);
+        assertEquals(0, env.getStepCount());
+        byte[] raw = env.getData();
+        assertEquals(1, raw.length);
+        assertEquals((byte) 0x80, raw[0]);
+    }
+
+    @Test
+    void testPsgEnvelopeSetData() {
+        byte[] data = {0, (byte) 0x80};
+        PsgEnvelope env = new PsgEnvelope("Test", data);
+        byte[] newData = {3, 2, 1, 0, (byte) 0x80};
+        env.setData(newData);
+        assertEquals(4, env.getStepCount());
+        assertEquals(3, env.getStep(0));
+    }
+
+    @Test
     void testFmVoiceDisplayOrder() {
         // SMPS order: Op1=0, Op3=1, Op2=2, Op4=3
         // Display order: Op1=0, Op2=1, Op3=2, Op4=3
