@@ -89,6 +89,8 @@ public class TrackerGrid extends ScrollPane {
     private int cursorRow = 0;
     private int cursorChannel = 0;
     private int cursorColumn = COL_NOTE;
+    private int playbackRow = -1;
+    private int playbackOrderRow = -1;
     private int currentOctave = 4;
     private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
 
@@ -211,6 +213,12 @@ public class TrackerGrid extends ScrollPane {
         gc.setFont(MONO_FONT);
         for (int row = 0; row < rowCount; row++) {
             double y = HEADER_HEIGHT + row * ROW_HEIGHT;
+
+            // Playback cursor highlight (teal bar, semi-transparent)
+            if (row == playbackRow && playbackRow >= 0) {
+                gc.setFill(Color.rgb(0, 180, 180, 0.25));
+                gc.fillRect(0, y, canvas.getWidth(), ROW_HEIGHT);
+            }
 
             // Row number
             boolean isCurrentRow = (row == cursorRow);
@@ -354,6 +362,29 @@ public class TrackerGrid extends ScrollPane {
     public void setCurrentOctave(int octave) { this.currentOctave = octave; }
     public int getCurrentDuration() { return currentDuration; }
     public void setCurrentDuration(int duration) { this.currentDuration = duration; }
+
+    /** Set the playback highlight row within the current pattern. */
+    public void setPlaybackRow(int row) {
+        this.playbackRow = row;
+        refreshDisplay();
+    }
+
+    /** Set the playback order row for order list highlighting. */
+    public void setPlaybackOrderRow(int orderRow) {
+        this.playbackOrderRow = orderRow;
+    }
+
+    /** Get the current playback order row, or -1 if not playing. */
+    public int getPlaybackOrderRow() {
+        return playbackOrderRow;
+    }
+
+    /** Clear the playback cursor (called on stop). */
+    public void clearPlaybackCursor() {
+        this.playbackRow = -1;
+        this.playbackOrderRow = -1;
+        refreshDisplay();
+    }
 
     private void setupKeyboardHandling() {
         canvas.setFocusTraversable(true);

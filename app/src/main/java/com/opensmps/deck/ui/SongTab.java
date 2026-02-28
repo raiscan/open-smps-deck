@@ -15,6 +15,8 @@ public class SongTab {
     private Song song;
     private File file;
     private boolean dirty;
+    private Runnable onDirtyChanged;
+    private Runnable onEdited;
 
     private TrackerGrid trackerGrid;
     private OrderListPanel orderListPanel;
@@ -35,7 +37,33 @@ public class SongTab {
     public void setFile(File file) { this.file = file; }
 
     public boolean isDirty() { return dirty; }
-    public void setDirty(boolean dirty) { this.dirty = dirty; }
+
+    /**
+     * Sets the dirty flag for this tab and notifies listeners on change.
+     */
+    public void setDirty(boolean dirty) {
+        if (this.dirty == dirty) return;
+        this.dirty = dirty;
+        if (onDirtyChanged != null) {
+            onDirtyChanged.run();
+        }
+    }
+
+    /**
+     * Sets a callback invoked whenever the dirty state changes.
+     */
+    public void setOnDirtyChanged(Runnable callback) {
+        this.onDirtyChanged = callback;
+    }
+
+    /**
+     * Sets a callback invoked on every song edit. Unlike {@link #setOnDirtyChanged},
+     * this fires on every edit even when the tab is already dirty, so that
+     * playback can recompile the song in real-time.
+     */
+    public void setOnEdited(Runnable callback) {
+        this.onEdited = callback;
+    }
 
     public TrackerGrid getTrackerGrid() { return trackerGrid; }
     public OrderListPanel getOrderListPanel() { return orderListPanel; }
@@ -60,9 +88,14 @@ public class SongTab {
         orderListPanel = new OrderListPanel(song);
         instrumentPanel = new InstrumentPanel(song);
         trackerGrid.setInstrumentPanel(instrumentPanel);
-        trackerGrid.setOnDirty(() -> setDirty(true));
-        instrumentPanel.setOnDirty(() -> setDirty(true));
-        orderListPanel.setOnDirty(() -> setDirty(true));
+
+        Runnable dirtyAndEdited = () -> {
+            setDirty(true);
+            if (onEdited != null) onEdited.run();
+        };
+        trackerGrid.setOnDirty(dirtyAndEdited);
+        instrumentPanel.setOnDirty(dirtyAndEdited);
+        orderListPanel.setOnDirty(dirtyAndEdited);
     }
 
     /**

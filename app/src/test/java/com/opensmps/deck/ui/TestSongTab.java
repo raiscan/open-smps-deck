@@ -59,4 +59,28 @@ class TestSongTab {
         tab.setDirty(true);
         assertEquals("Untitled *", tab.getTitle());
     }
+
+    @Test
+    void testDirtyChangeCallbackFiresOnlyOnStateChange() {
+        SongTab tab = new SongTab();
+        final int[] count = {0};
+        tab.setOnDirtyChanged(() -> count[0]++);
+
+        tab.setDirty(true);
+        tab.setDirty(true);
+        tab.setDirty(false);
+
+        assertEquals(2, count[0]);
+    }
+
+    @Test
+    void testOnEditedCallbackCanBeSet() {
+        SongTab tab = new SongTab();
+        final int[] count = {0};
+        tab.setOnEdited(() -> count[0]++);
+        // onEdited is wired through buildContent's dirtyAndEdited lambda,
+        // but the setter itself should accept a Runnable without error.
+        assertNotNull(tab);
+        assertEquals(0, count[0]);
+    }
 }
