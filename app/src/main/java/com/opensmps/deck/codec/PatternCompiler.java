@@ -42,6 +42,10 @@ public class PatternCompiler {
      * @return the compiled SMPS binary data
      */
     public byte[] compile(Song song) {
+        // Defensive snapshot — compile reads orderList and patterns which the UI thread may modify
+        List<int[]> orderList = new ArrayList<>(song.getOrderList());
+        List<Pattern> patterns = new ArrayList<>(song.getPatterns());
+
         // 1. Determine active channels and build compiled track data for each
         List<Integer> activeFmChannels = new ArrayList<>();
         List<Integer> activePsgChannels = new ArrayList<>();
@@ -49,7 +53,7 @@ public class PatternCompiler {
         List<Integer> loopOffsets = new ArrayList<>();    // track-relative loop target for each
 
         for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
-            if (!isChannelActive(song, ch)) {
+            if (!isChannelActive(orderList, patterns, ch)) {
                 continue;
             }
             if (ch < FM_CHANNEL_COUNT) {
@@ -58,8 +62,8 @@ public class PatternCompiler {
                 activePsgChannels.add(ch);
             }
 
-            byte[] trackData = buildTrackData(song, ch);
-            int loopTarget = calculateLoopTarget(song, ch);
+            byte[] trackData = buildTrackData(orderList, patterns, ch);
+            int loopTarget = calculateLoopTarget(song.getLoopPoint(), orderList, patterns, ch);
             // Append F6 (JUMP) + 2-byte LE placeholder (track-relative offset, patched later)
             byte[] withJump = new byte[trackData.length + 3];
             System.arraycopy(trackData, 0, withJump, 0, trackData.length);
@@ -159,10 +163,7 @@ public class PatternCompiler {
      * Checks whether a channel has any non-empty track data across all
      * patterns referenced by the order list.
      */
-    private boolean isChannelActive(Song song, int channel) {
-        List<int[]> orderList = song.getOrderList();
-        List<Pattern> patterns = song.getPatterns();
-
+    private boolean isChannelActive(List<int[]> orderList, List<Pattern> patterns, int channel) {
         for (int[] orderRow : orderList) {
             int patternIndex = orderRow[channel];
             if (patternIndex >= 0 && patternIndex < patterns.size()) {
@@ -179,9 +180,7 @@ public class PatternCompiler {
      * Builds concatenated track data for a channel across all order rows,
      * stripping trailing F2 (track end) bytes between patterns.
      */
-    private byte[] buildTrackData(Song song, int channel) {
-        List<int[]> orderList = song.getOrderList();
-        List<Pattern> patterns = song.getPatterns();
+    private byte[] buildTrackData(List<int[]> orderList, List<Pattern> patterns, int channel) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
 
         for (int[] orderRow : orderList) {
@@ -214,11 +213,7 @@ public class PatternCompiler {
      * The loop point is the cumulative byte position at which the loop-point
      * order row's data begins within the concatenated track.
      */
-    private int calculateLoopTarget(Song song, int channel) {
-        int loopRow = song.getLoopPoint();
-        List<int[]> orderList = song.getOrderList();
-        List<Pattern> patterns = song.getPatterns();
-
+    private int calculateLoopTarget(int loopRow, List<int[]> orderList, List<Pattern> patterns, int channel) {
         int offset = 0;
         for (int row = 0; row < orderList.size(); row++) {
             if (row == loopRow) {
