@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.audio.AdsrEnvelopeCalculator;
 import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.io.OsmpsVoiceFile;
 import com.opensmps.deck.model.FmVoice;
@@ -39,11 +40,13 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
 
     private static final double CANVAS_WIDTH = 200;
     private static final double CANVAS_HEIGHT = 120;
+    private static final double ENVELOPE_CANVAS_HEIGHT = 100;
 
     private static byte[] voiceClipboard;
 
     private final FmVoice voice;
     private final Canvas algorithmCanvas;
+    private Canvas envelopeCanvas;
     private final VBox[] operatorColumns = new VBox[4];
     private PlaybackEngine previewEngine;
 
@@ -84,6 +87,13 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         // Button bar (Copy / Paste / Init)
         HBox buttonBar = buildButtonBar();
 
+        // Envelope preview canvas
+        envelopeCanvas = new Canvas(680, ENVELOPE_CANVAS_HEIGHT);
+        StackPane envelopeWrapper = new StackPane(envelopeCanvas);
+        envelopeWrapper.setStyle("-fx-background-color: " + PANEL_COLOR + "; "
+                + "-fx-border-color: #333333; -fx-border-width: 1;");
+        envelopeWrapper.setPadding(new Insets(4));
+
         // Operator columns
         HBox operatorRow = new HBox(8);
         operatorRow.setAlignment(Pos.TOP_LEFT);
@@ -97,9 +107,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         scrollPane.setStyle("-fx-background: " + BG_COLOR + "; -fx-background-color: " + BG_COLOR + ";");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
-        mainLayout.getChildren().addAll(topRow, canvasWrapper, buttonBar, scrollPane);
+        mainLayout.getChildren().addAll(topRow, canvasWrapper, buttonBar, envelopeWrapper, scrollPane);
         dialogPane.setContent(mainLayout);
-        dialogPane.setPrefSize(720, 620);
+        dialogPane.setPrefSize(720, 740);
 
         // Result converter
         setResultConverter(button -> button == ButtonType.OK ? voice : null);
@@ -107,6 +117,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         // Initial draw
         drawAlgorithmDiagram();
         updateOperatorBorders();
+        redrawEnvelopePreview();
     }
 
     /**
@@ -174,6 +185,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         voice.setFeedback(source.getFeedback());
         drawAlgorithmDiagram();
         updateOperatorBorders();
+        redrawEnvelopePreview();
     }
 
     private HBox buildButtonBar() {
@@ -214,6 +226,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             }
             drawAlgorithmDiagram();
             updateOperatorBorders();
+            redrawEnvelopePreview();
         });
 
         Button previewBtn = new Button("\u266B Preview");
@@ -283,6 +296,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
                 voice.setAlgorithm(newVal);
                 drawAlgorithmDiagram();
                 updateOperatorBorders();
+                redrawEnvelopePreview();
             }
         });
 
@@ -372,6 +386,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             int intVal = newVal.intValue();
             valueLabel.setText(String.valueOf(intVal));
             onChange.accept(intVal);
+            redrawEnvelopePreview();
         });
 
         row.getChildren().addAll(nameLabel, slider, valueLabel);
@@ -389,6 +404,75 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
                     && operatorColumns[display].getChildren().get(0) instanceof Label headerLabel) {
                 headerLabel.setStyle("-fx-text-fill: " + (carrier ? CARRIER_COLOR : HEADER_COLOR) + ";");
             }
+        }
+    }
+
+    /**
+     * Redraws all 4 operator ADSR envelopes on the envelope canvas.
+     * Carriers are drawn in cyan, modulators in gray, both at 50% opacity.
+     */
+    private void redrawEnvelopePreview() {
+        GraphicsContext gc = envelopeCanvas.getGraphicsContext2D();
+        double w = envelopeCanvas.getWidth();
+        double h = envelopeCanvas.getHeight();
+
+        // Clear background
+        gc.setFill(Color.web(PANEL_COLOR));
+        gc.fillRect(0, 0, w, h);
+
+        double keyOffFrac = 0.7;
+
+        // Draw key-off marker
+        double keyOffX = keyOffFrac * w;
+        gc.setStroke(Color.web("#555555"));
+        gc.setLineDashes(4, 4);
+        gc.setLineWidth(1);
+        gc.strokeLine(keyOffX, 0, keyOffX, h);
+        gc.setLineDashes((double[]) null);
+
+        // Draw "Key Off" label
+        gc.setFill(Color.web("#555555"));
+        gc.setFont(Font.font("System", 10));
+        gc.fillText("Key Off", keyOffX + 3, 12);
+
+        // Draw grid lines
+        gc.setStroke(Color.web("#333333"));
+        gc.setLineWidth(0.5);
+        gc.strokeLine(0, 2, w, 2);           // 0 dB (top)
+        gc.strokeLine(0, h / 2, w, h / 2);  // ~-48 dB (middle)
+        gc.strokeLine(0, h - 2, w, h - 2);  // -96 dB (bottom)
+
+        // Draw each operator envelope
+        gc.setLineWidth(1.5);
+        for (int display = 0; display < 4; display++) {
+            int smpsOp = FmVoice.displayToSmps(display);
+            boolean carrier = voice.isCarrier(smpsOp);
+
+            int ar = voice.getAr(smpsOp);
+            int d1r = voice.getD1r(smpsOp);
+            int d2r = voice.getD2r(smpsOp);
+            int d1l = voice.getD1l(smpsOp);
+            int rr = voice.getRr(smpsOp);
+
+            java.util.List<double[]> points = AdsrEnvelopeCalculator.compute(
+                    ar, d1r, d2r, d1l, rr, keyOffFrac);
+
+            Color lineColor = carrier
+                    ? Color.web(CARRIER_COLOR, 0.5)
+                    : Color.web(MODULATOR_COLOR, 0.5);
+            gc.setStroke(lineColor);
+
+            gc.beginPath();
+            for (int i = 0; i < points.size(); i++) {
+                double px = points.get(i)[0] * w;
+                double py = h - points.get(i)[1] * (h - 4) - 2; // Invert Y, 2px margin
+                if (i == 0) {
+                    gc.moveTo(px, py);
+                } else {
+                    gc.lineTo(px, py);
+                }
+            }
+            gc.stroke();
         }
     }
 
