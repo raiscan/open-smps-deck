@@ -255,6 +255,10 @@ public class TrackerGrid extends ScrollPane {
                 case RIGHT -> extendSelection(0, 1);
                 case EQUALS, ADD -> transposeSelection(12); // Shift+= (Shift++) = octave up
                 case MINUS, SUBTRACT -> transposeSelection(-12); // Shift+- = octave down
+                case TAB -> {
+                    cursorChannel = (cursorChannel - 1 + Pattern.CHANNEL_COUNT) % Pattern.CHANNEL_COUNT;
+                    refreshDisplay();
+                }
                 default -> {}
             }
             e.consume();
@@ -266,6 +270,12 @@ public class TrackerGrid extends ScrollPane {
             switch (e.getCode()) {
                 case C -> copySelection();
                 case V -> pasteAtCursor();
+                case X -> {
+                    if (hasSelection()) {
+                        copySelection();
+                        deleteSelection();
+                    }
+                }
                 case A -> selectAll();
                 case Z -> { if (undoManager.undo()) refreshDisplay(); }
                 case Y -> { if (undoManager.redo()) refreshDisplay(); }
@@ -288,6 +298,17 @@ public class TrackerGrid extends ScrollPane {
             case PERIOD -> insertRest();
             case EQUALS, ADD -> transposeSelection(1); // + = semitone up
             case MINUS, SUBTRACT -> transposeSelection(-1); // - = semitone down
+            case TAB -> {
+                cursorChannel = (cursorChannel + 1) % Pattern.CHANNEL_COUNT;
+                refreshDisplay();
+            }
+            case F1 -> currentOctave = 1;
+            case F2 -> currentOctave = 2;
+            case F3 -> currentOctave = 3;
+            case F4 -> currentOctave = 4;
+            case F5 -> currentOctave = 5;
+            case F6 -> currentOctave = 6;
+            case F7 -> currentOctave = 7;
             case ESCAPE -> clearSelection();
             default -> {
                 String text = e.getText();
@@ -456,6 +477,36 @@ public class TrackerGrid extends ScrollPane {
         }
 
         clipboard = new ClipboardData(channelData, rowCount);
+    }
+
+    private void deleteSelection() {
+        if (!hasSelection() || song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+
+        int minCh = getSelMinChannel();
+        int maxCh = getSelMaxChannel();
+        int minRow = getSelMinRow();
+        int maxRow = getSelMaxRow();
+
+        // Record undo for all affected channels
+        int chCount = maxCh - minCh + 1;
+        int[] channels = new int[chCount];
+        for (int i = 0; i < chCount; i++) {
+            channels[i] = minCh + i;
+        }
+        undoManager.recordMultiEdit(pattern, channels);
+
+        // Delete rows from bottom to top (since rows shift after each delete)
+        for (int ch = minCh; ch <= maxCh; ch++) {
+            byte[] trackData = pattern.getTrackData(ch);
+            for (int row = maxRow; row >= minRow; row--) {
+                trackData = SmpsEncoder.deleteRow(trackData, row);
+            }
+            pattern.setTrackData(ch, trackData);
+        }
+
+        clearSelection();
+        refreshDisplay();
     }
 
     private void pasteAtCursor() {
