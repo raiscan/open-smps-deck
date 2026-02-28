@@ -247,6 +247,74 @@ public class SmpsEncoder {
     }
 
     /**
+     * Set or replace the instrument change command for a decoded row.
+     *
+     * <p>If the row already has a SET_VOICE (EF) or PSG_INSTRUMENT (F5) command
+     * in the coordination flags preceding it, the parameter byte is updated in-place.
+     * Otherwise, the instrument bytes are inserted immediately before the row's
+     * note/rest byte.
+     *
+     * @param trackData current track byte array
+     * @param rowIndex the decoded row index to modify
+     * @param instrFlag the coordination flag byte (e.g. SmpsCoordFlags.SET_VOICE or PSG_INSTRUMENT)
+     * @param instrValue the instrument index (0x00-0xFF)
+     * @return the new track byte array, or the original if rowIndex is out of range
+     */
+    public static byte[] setRowInstrument(byte[] trackData, int rowIndex, int instrFlag, int instrValue) {
+        if (trackData == null || trackData.length == 0) return trackData;
+
+        int[] rowOffsets = findRowByteOffsets(trackData);
+        if (rowIndex >= rowOffsets.length) return trackData;
+
+        int rowStart = rowOffsets[rowIndex];
+
+        // Determine the region before this row that could contain coordination flags.
+        // Flags for this row sit between the previous row's end and this row's note byte.
+        int scanStart;
+        if (rowIndex > 0) {
+            // End of previous row: its note byte + optional duration
+            int prevNotePos = rowOffsets[rowIndex - 1];
+            scanStart = prevNotePos + 1;
+            if (scanStart < trackData.length) {
+                int next = trackData[scanStart] & 0xFF;
+                if (next >= 0x01 && next <= 0x7F) {
+                    scanStart++; // skip duration byte
+                }
+            }
+        } else {
+            scanStart = 0;
+        }
+
+        // Scan for an existing matching instrument flag in [scanStart, rowStart)
+        int pos = scanStart;
+        while (pos < rowStart) {
+            int b = trackData[pos] & 0xFF;
+            if (b >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(b);
+                if (b == instrFlag && paramCount >= 1 && pos + 1 < trackData.length) {
+                    // Found existing instrument flag -- update its parameter in-place
+                    byte[] result = trackData.clone();
+                    result[pos + 1] = (byte) instrValue;
+                    return result;
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+
+        // No existing flag found -- insert instrFlag + instrValue before the row's note byte
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(trackData, 0, rowStart);
+        out.write(instrFlag);
+        out.write(instrValue);
+        if (rowStart < trackData.length) {
+            out.write(trackData, rowStart, trackData.length - rowStart);
+        }
+        return out.toByteArray();
+    }
+
+    /**
      * Find the byte offset for each decoded row in the track data.
      * Uses {@link SmpsCoordFlags#getParamCount(int)} for consistent flag parsing.
      */

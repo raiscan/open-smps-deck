@@ -337,6 +337,8 @@ public class TrackerGrid extends ScrollPane {
                 case EQUALS, ADD -> transposeSelection(12); // Shift+= (Shift++) = octave up
                 case MINUS, SUBTRACT -> transposeSelection(-12); // Shift+- = octave down
                 case TAB -> {
+                    cancelPendingHex();
+                    cursorColumn = COL_NOTE;
                     cursorChannel = (cursorChannel - 1 + Pattern.CHANNEL_COUNT) % Pattern.CHANNEL_COUNT;
                     refreshDisplay();
                 }
@@ -368,20 +370,32 @@ public class TrackerGrid extends ScrollPane {
             return;
         }
 
+        // Hex digit entry for instrument column: 0-9
+        if (cursorColumn == COL_INSTRUMENT) {
+            int hexDigit = hexDigitFromKeyEvent(e);
+            if (hexDigit >= 0) {
+                handleHexDigit(hexDigit);
+                e.consume();
+                return;
+            }
+        }
+
         switch (e.getCode()) {
-            case UP -> { clearSelection(); moveCursor(-1, 0); }
-            case DOWN -> { clearSelection(); moveCursor(1, 0); }
-            case LEFT -> { clearSelection(); moveCursor(0, -1); }
-            case RIGHT -> { clearSelection(); moveCursor(0, 1); }
-            case DELETE -> deleteAtCursor();
-            case INSERT -> insertEmptyRow();
-            case BACK_SPACE -> deleteAndPullUp();
-            case PAGE_UP -> { currentOctave = Math.min(currentOctave + 1, 7); }
-            case PAGE_DOWN -> { currentOctave = Math.max(currentOctave - 1, 0); }
-            case PERIOD -> insertRest();
-            case EQUALS, ADD -> transposeSelection(1); // + = semitone up
-            case MINUS, SUBTRACT -> transposeSelection(-1); // - = semitone down
+            case UP -> { cancelPendingHex(); clearSelection(); moveCursor(-1, 0); }
+            case DOWN -> { cancelPendingHex(); clearSelection(); moveCursor(1, 0); }
+            case LEFT -> { cancelPendingHex(); clearSelection(); moveCursorColumn(-1); }
+            case RIGHT -> { cancelPendingHex(); clearSelection(); moveCursorColumn(1); }
+            case DELETE -> { cancelPendingHex(); deleteAtCursor(); }
+            case INSERT -> { cancelPendingHex(); insertEmptyRow(); }
+            case BACK_SPACE -> { cancelPendingHex(); deleteAndPullUp(); }
+            case PAGE_UP -> { cancelPendingHex(); currentOctave = Math.min(currentOctave + 1, 7); }
+            case PAGE_DOWN -> { cancelPendingHex(); currentOctave = Math.max(currentOctave - 1, 0); }
+            case PERIOD -> { cancelPendingHex(); insertRest(); }
+            case EQUALS, ADD -> { cancelPendingHex(); transposeSelection(1); }
+            case MINUS, SUBTRACT -> { cancelPendingHex(); transposeSelection(-1); }
             case TAB -> {
+                cancelPendingHex();
+                cursorColumn = COL_NOTE;
                 cursorChannel = (cursorChannel + 1) % Pattern.CHANNEL_COUNT;
                 refreshDisplay();
             }
@@ -394,21 +408,29 @@ public class TrackerGrid extends ScrollPane {
             case F7 -> currentOctave = 7;
             case F8 -> currentOctave = 8;
             case ENTER -> {
+                cancelPendingHex();
                 if (onPlayFromCursor != null) onPlayFromCursor.run();
                 e.consume();
             }
-            case SPACE -> { if (onTogglePlayback != null) onTogglePlayback.run(); }
+            case SPACE -> { cancelPendingHex(); if (onTogglePlayback != null) onTogglePlayback.run(); }
             case ESCAPE -> {
-                if (onStopPlayback != null) onStopPlayback.run();
-                clearSelection();
+                if (pendingHexDigit >= 0) {
+                    cancelPendingHex();
+                    refreshDisplay();
+                } else {
+                    if (onStopPlayback != null) onStopPlayback.run();
+                    clearSelection();
+                }
             }
             default -> {
-                String text = e.getText();
-                if (text != null && !text.isEmpty()) {
-                    char key = text.charAt(0);
-                    int noteValue = SmpsEncoder.encodeNoteFromKey(key, currentOctave);
-                    if (noteValue > 0) {
-                        insertNote(noteValue);
+                if (cursorColumn == COL_NOTE) {
+                    String text = e.getText();
+                    if (text != null && !text.isEmpty()) {
+                        char key = text.charAt(0);
+                        int noteValue = SmpsEncoder.encodeNoteFromKey(key, currentOctave);
+                        if (noteValue > 0) {
+                            insertNote(noteValue);
+                        }
                     }
                 }
             }
@@ -420,6 +442,103 @@ public class TrackerGrid extends ScrollPane {
         cursorRow = Math.max(0, Math.min(cursorRow + rowDelta, maxRow));
         cursorChannel = Math.max(0, Math.min(cursorChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
         refreshDisplay();
+    }
+
+    /**
+     * Move the cursor left/right through sub-columns (Note -> Instrument -> Effect),
+     * wrapping to the previous/next channel at the boundaries.
+     */
+    private void moveCursorColumn(int delta) {
+        int newCol = cursorColumn + delta;
+        if (newCol < 0) {
+            // Wrap to previous channel's last column
+            if (cursorChannel > 0) {
+                cursorChannel--;
+                cursorColumn = COL_EFFECT;
+            }
+            // else stay at first column of first channel
+        } else if (newCol >= COL_COUNT) {
+            // Wrap to next channel's first column
+            if (cursorChannel < Pattern.CHANNEL_COUNT - 1) {
+                cursorChannel++;
+                cursorColumn = COL_NOTE;
+            }
+            // else stay at last column of last channel
+        } else {
+            cursorColumn = newCol;
+        }
+        refreshDisplay();
+    }
+
+    /**
+     * Extract a hex digit (0-15) from a key event, or -1 if the key is not a hex digit.
+     * Handles both main keyboard digits (0-9) and letters A-F.
+     */
+    private static int hexDigitFromKeyEvent(KeyEvent e) {
+        return switch (e.getCode()) {
+            case DIGIT0, NUMPAD0 -> 0;
+            case DIGIT1, NUMPAD1 -> 1;
+            case DIGIT2, NUMPAD2 -> 2;
+            case DIGIT3, NUMPAD3 -> 3;
+            case DIGIT4, NUMPAD4 -> 4;
+            case DIGIT5, NUMPAD5 -> 5;
+            case DIGIT6, NUMPAD6 -> 6;
+            case DIGIT7, NUMPAD7 -> 7;
+            case DIGIT8, NUMPAD8 -> 8;
+            case DIGIT9, NUMPAD9 -> 9;
+            case A -> 0xA;
+            case B -> 0xB;
+            case C -> 0xC;
+            case D -> 0xD;
+            case E -> 0xE;
+            case F -> 0xF;
+            default -> -1;
+        };
+    }
+
+    /**
+     * Handle a hex digit entry for the instrument column.
+     * Two consecutive digits form a complete byte value (high nibble first).
+     * On the first digit, the value is stored as pending. On the second digit,
+     * the instrument change is applied to the current row.
+     */
+    private void handleHexDigit(int digit) {
+        if (pendingHexDigit < 0) {
+            // First digit: store as pending high nibble
+            pendingHexDigit = digit;
+            refreshDisplay();
+        } else {
+            // Second digit: combine and apply
+            int value = (pendingHexDigit << 4) | digit;
+            pendingHexDigit = -1;
+            applyInstrumentValue(value);
+        }
+    }
+
+    /** Cancel any pending hex digit entry without applying. */
+    private void cancelPendingHex() {
+        pendingHexDigit = -1;
+    }
+
+    /**
+     * Apply an instrument change (SET_VOICE for FM, PSG_INSTRUMENT for PSG)
+     * to the row at the cursor position.
+     */
+    private void applyInstrumentValue(int value) {
+        if (song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
+
+        int instrFlag = (cursorChannel <= 5)
+                ? SmpsCoordFlags.SET_VOICE
+                : SmpsCoordFlags.PSG_INSTRUMENT;
+
+        undoManager.recordEdit(pattern, cursorChannel);
+        byte[] newData = SmpsEncoder.setRowInstrument(trackData, cursorRow, instrFlag, value);
+        pattern.setTrackData(cursorChannel, newData);
+        refreshDisplay();
+        markDirty();
     }
 
     private int getMaxRowCount() {
