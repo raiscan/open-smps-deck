@@ -19,6 +19,11 @@ public class WavExporter {
 
     private int loopCount = 2;
     private int maxDurationSeconds = DEFAULT_MAX_DURATION_SECONDS;
+    private boolean[] mutedChannels;
+
+    public void setMutedChannels(boolean[] mutedChannels) {
+        this.mutedChannels = mutedChannels != null ? mutedChannels.clone() : null;
+    }
 
     public void setLoopCount(int loopCount) {
         this.loopCount = Math.max(1, loopCount);
@@ -58,6 +63,19 @@ public class WavExporter {
 
         for (int loop = 0; loop < loopCount; loop++) {
             engine.loadSong(song);
+
+            if (mutedChannels != null) {
+                for (int ch = 0; ch < mutedChannels.length; ch++) {
+                    if (mutedChannels[ch]) {
+                        if (ch < 6) {
+                            engine.setFmMute(ch, true);
+                        } else {
+                            engine.setPsgMute(ch - 6, true);
+                        }
+                    }
+                }
+            }
+
             short[] buffer = new short[BUFFER_FRAMES * CHANNELS];
             int loopStartFrame = totalFrames;
 

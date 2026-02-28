@@ -5,6 +5,8 @@ import com.opensmps.deck.model.Song;
 
 import java.io.File;
 import java.util.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Scans a directory of SMPS files (.bin, .s3k, .sm2, .smp) and extracts all FM voices
@@ -12,6 +14,7 @@ import java.util.*;
  */
 public class RomVoiceImporter {
 
+    private static final Logger LOG = Logger.getLogger(RomVoiceImporter.class.getName());
     private final SmpsImporter importer = new SmpsImporter();
 
     /**
@@ -44,7 +47,7 @@ public class RomVoiceImporter {
                     }
                 }
             } catch (Exception e) {
-                // Skip unparseable files
+                LOG.log(Level.WARNING, "Failed to scan file: " + file.getName(), e);
             }
         }
 

@@ -15,11 +15,6 @@ import java.util.function.IntConsumer;
  */
 public class OrderListPanel extends VBox {
 
-    private static final String[] CHANNEL_NAMES = {
-        "FM1", "FM2", "FM3", "FM4", "FM5", "DAC",
-        "PSG1", "PSG2", "PSG3", "Noise"
-    };
-
     private Song song;
     private final ListView<Integer> orderListView;
     private IntConsumer onOrderRowSelected;

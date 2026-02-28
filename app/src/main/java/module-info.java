@@ -3,6 +3,7 @@ module com.opensmps.deck {
     requires javafx.controls;
     requires javafx.graphics;
     requires com.google.gson;
+    requires java.logging;
 
     opens com.opensmps.deck to javafx.graphics;
 

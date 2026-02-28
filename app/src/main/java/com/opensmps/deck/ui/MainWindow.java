@@ -95,6 +95,7 @@ public class MainWindow {
 
     private void setupLayout() {
         MenuBar menuBar = createMenuBar();
+        // Placeholder song; replaced by first tab's song immediately below
         transportBar = new TransportBar(playbackEngine, new Song());
         VBox topContainer = new VBox(menuBar, transportBar);
         root.setTop(topContainer);
@@ -240,14 +241,18 @@ public class MainWindow {
         }
     }
 
+    private File showFileDialog(String title, String desc, String ext, boolean save) {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle(title);
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter(desc, ext));
+        return save ? fileChooser.showSaveDialog(stage) : fileChooser.showOpenDialog(stage);
+    }
+
     private void onExportSmps() {
         SongTab tab = getActiveSongTab();
         if (tab == null) return;
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Export SMPS Binary");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("SMPS Binary", "*.bin"));
-        File file = fileChooser.showSaveDialog(stage);
+        File file = showFileDialog("Export SMPS Binary", "SMPS Binary", "*.bin", true);
         if (file != null) {
             try {
                 SmpsExporter exporter = new SmpsExporter();
@@ -261,18 +266,41 @@ public class MainWindow {
     private void onExportWav() {
         SongTab tab = getActiveSongTab();
         if (tab == null) return;
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Export WAV Audio");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("WAV Audio", "*.wav"));
-        File file = fileChooser.showSaveDialog(stage);
+        File file = showFileDialog("Export WAV Audio", "WAV Audio", "*.wav", true);
         if (file != null) {
-            try {
-                WavExporter exporter = new WavExporter();
-                exporter.export(tab.getSong(), file);
-            } catch (IOException ex) {
-                showError("Failed to export WAV", ex.getMessage());
+            // Capture mute state from tracker grid
+            boolean[] mutedChannels = new boolean[10];
+            TrackerGrid grid = tab.getTrackerGrid();
+            for (int ch = 0; ch < 10; ch++) {
+                mutedChannels[ch] = grid.isChannelMuted(ch);
             }
+            Song song = tab.getSong();
+
+            // Show progress dialog
+            Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
+            progressAlert.setTitle("Exporting WAV");
+            progressAlert.setHeaderText("Rendering audio...");
+            progressAlert.setContentText("Please wait while the song is exported.");
+            progressAlert.getButtonTypes().clear();
+            progressAlert.show();
+
+            Thread exportThread = new Thread(() -> {
+                try {
+                    WavExporter exporter = new WavExporter();
+                    exporter.setMutedChannels(mutedChannels);
+                    exporter.export(song, file);
+                    Platform.runLater(() -> {
+                        progressAlert.close();
+                    });
+                } catch (IOException ex) {
+                    Platform.runLater(() -> {
+                        progressAlert.close();
+                        showError("Failed to export WAV", ex.getMessage());
+                    });
+                }
+            }, "WAV-Export");
+            exportThread.setDaemon(true);
+            exportThread.start();
         }
     }
 

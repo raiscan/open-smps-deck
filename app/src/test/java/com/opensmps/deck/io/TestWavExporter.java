@@ -9,6 +9,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -104,6 +105,27 @@ class TestWavExporter {
             int bitsPerSample = raf.read() | (raf.read() << 8);
             assertEquals(16, bitsPerSample, "Should be 16-bit audio");
         }
+    }
+
+    @Test
+    void testExportedAudioIsNonSilent(@TempDir Path tempDir) throws Exception {
+        Song song = createTestSong();
+        File output = tempDir.resolve("test.wav").toFile();
+        WavExporter exporter = new WavExporter();
+        exporter.setLoopCount(1);
+        exporter.setMaxDurationSeconds(1);
+        exporter.export(song, output);
+
+        byte[] wav = Files.readAllBytes(output.toPath());
+        // Check PCM data after 44-byte header for non-zero samples
+        boolean hasNonZero = false;
+        for (int i = 44; i < wav.length; i++) {
+            if (wav[i] != 0) {
+                hasNonZero = true;
+                break;
+            }
+        }
+        assertTrue(hasNonZero, "WAV audio data should contain non-zero samples");
     }
 
     /**
