@@ -41,11 +41,31 @@ public class Pattern {
         return CHANNEL_COUNT;
     }
 
+    /**
+     * Get the raw SMPS track data for a channel.
+     *
+     * @param channel channel index (0-9)
+     * @return the track data byte array
+     * @throws IndexOutOfBoundsException if channel is out of range
+     */
     public byte[] getTrackData(int channel) {
+        if (channel < 0 || channel >= CHANNEL_COUNT) {
+            throw new IndexOutOfBoundsException("Channel " + channel + " out of range 0-" + (CHANNEL_COUNT - 1));
+        }
         return tracks[channel];
     }
 
+    /**
+     * Set the raw SMPS track data for a channel.
+     *
+     * @param channel channel index (0-9)
+     * @param data the track data byte array
+     * @throws IndexOutOfBoundsException if channel is out of range
+     */
     public void setTrackData(int channel, byte[] data) {
+        if (channel < 0 || channel >= CHANNEL_COUNT) {
+            throw new IndexOutOfBoundsException("Channel " + channel + " out of range 0-" + (CHANNEL_COUNT - 1));
+        }
         tracks[channel] = data;
     }
 }

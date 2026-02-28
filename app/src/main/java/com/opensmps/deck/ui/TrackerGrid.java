@@ -308,9 +308,16 @@ public class TrackerGrid extends ScrollPane {
         if (song == null || song.getPatterns().isEmpty()) return 1;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         int max = pattern.getRows();
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackData(ch));
-            max = Math.max(max, rows.size());
+        // Use cached decoded channels if available, avoiding re-decode on every call
+        if (!decodedChannels.isEmpty()) {
+            for (List<SmpsDecoder.TrackerRow> rows : decodedChannels) {
+                max = Math.max(max, rows.size());
+            }
+        } else {
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(pattern.getTrackData(ch));
+                max = Math.max(max, rows.size());
+            }
         }
         return Math.max(max, 1);
     }
@@ -436,7 +443,7 @@ public class TrackerGrid extends ScrollPane {
             if (targetChannel >= Pattern.CHANNEL_COUNT) break;
 
             byte[] trackData = pattern.getTrackData(targetChannel);
-            byte[] pasteData = clipboard.getChannelData()[ch];
+            byte[] pasteData = clipboard.getChannelData(ch);
 
             // Insert pasted bytes at cursor row
             byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteData);
