@@ -20,7 +20,7 @@ public class OrderListPanel extends VBox {
         "PSG1", "PSG2", "PSG3", "Noise"
     };
 
-    private final Song song;
+    private Song song;
     private final ListView<Integer> orderListView;
     private IntConsumer onOrderRowSelected;
     private int selectedRow = 0;
@@ -87,6 +87,13 @@ public class OrderListPanel extends VBox {
     /** Set callback when user selects an order row. */
     public void setOnOrderRowSelected(IntConsumer callback) {
         this.onOrderRowSelected = callback;
+    }
+
+    /** Replace the song model and refresh the display. */
+    public void setSong(Song song) {
+        this.song = song;
+        this.selectedRow = 0;
+        refresh();
     }
 
     /** Refresh the list from the song model. */

@@ -31,7 +31,7 @@ public class InstrumentPanel extends VBox {
     private static final String BUTTON_STYLE =
             "-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc; -fx-font-size: 12px;";
 
-    private final Song song;
+    private Song song;
     private final ListView<String> voiceListView;
     private final ListView<String> envelopeListView;
     private final ObservableList<String> voiceItems;
@@ -96,6 +96,16 @@ public class InstrumentPanel extends VBox {
 
         getChildren().addAll(voiceSection, envelopeSection);
 
+        refresh();
+    }
+
+    /**
+     * Replace the song model and refresh the display.
+     *
+     * @param song the new song to display
+     */
+    public void setSong(Song song) {
+        this.song = song;
         refresh();
     }
 
