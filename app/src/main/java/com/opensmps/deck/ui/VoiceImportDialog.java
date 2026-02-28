@@ -32,8 +32,22 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
     private final FilteredList<ImportableVoice> filteredList;
 
     public VoiceImportDialog() {
-        setTitle("Import Voices from SMPS Files");
-        setHeaderText("Select a directory containing SMPS files (.bin, .s3k, .sm2, .smp):");
+        this(null);
+    }
+
+    /**
+     * Creates a voice import dialog, optionally pre-populated with the given voices.
+     * When {@code preloadedVoices} is non-null the directory picker is hidden and the
+     * table is populated immediately with the supplied voices.
+     *
+     * @param preloadedVoices voices to pre-populate, or {@code null} for directory-scan mode
+     */
+    public VoiceImportDialog(List<ImportableVoice> preloadedVoices) {
+        boolean preloaded = preloadedVoices != null;
+        setTitle(preloaded ? "Select Voices to Import" : "Import Voices from SMPS Files");
+        setHeaderText(preloaded
+                ? "Select voices to add to the song's voice bank:"
+                : "Select a directory containing SMPS files (.bin, .s3k, .sm2, .smp):");
 
         DialogPane pane = getDialogPane();
         pane.setPrefWidth(600);
@@ -42,7 +56,7 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
         VBox content = new VBox(10);
         content.setPadding(new Insets(10));
 
-        // Directory picker
+        // Directory picker (only shown in directory-scan mode)
         Label dirLabel = new Label("No directory selected");
         Button browseButton = new Button("Browse...");
         HBox dirRow = new HBox(8, dirLabel, browseButton);
@@ -88,7 +102,7 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
             });
         });
 
-        // Browse action
+        // Browse action (only wired in directory-scan mode)
         browseButton.setOnAction(e -> {
             DirectoryChooser chooser = new DirectoryChooser();
             chooser.setTitle("Select SMPS Directory");
@@ -104,7 +118,12 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
             }
         });
 
-        content.getChildren().addAll(dirRow, filterField, table);
+        if (preloaded) {
+            allVoices.setAll(preloadedVoices);
+            content.getChildren().addAll(filterField, table);
+        } else {
+            content.getChildren().addAll(dirRow, filterField, table);
+        }
         pane.setContent(content);
         pane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
 

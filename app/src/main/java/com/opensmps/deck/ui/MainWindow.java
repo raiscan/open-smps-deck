@@ -90,6 +90,12 @@ public class MainWindow {
         Tab tab = new Tab(songTab.getTitle(), content);
         tab.setUserData(songTab);
         tab.setClosable(true);
+        songTab.setOnDirtyChanged(() -> {
+            tab.setText(songTab.getTitle());
+            if (tab == tabPane.getSelectionModel().getSelectedItem()) {
+                updateTitle();
+            }
+        });
         return tab;
     }
 
@@ -105,6 +111,7 @@ public class MainWindow {
         MenuBar menuBar = createMenuBar();
         // Placeholder song; replaced by first tab's song immediately below
         transportBar = new TransportBar(playbackEngine, new Song());
+        transportBar.setOnSongChanged(this::markActiveSongDirty);
         VBox topContainer = new VBox(menuBar, transportBar);
         root.setTop(topContainer);
 
@@ -245,6 +252,7 @@ public class MainWindow {
         try {
             ProjectFile.save(tab.getSong(), file);
             tab.setFile(file);
+            tab.setDirty(false);
             // Update the tab text to reflect the new file name
             Tab uiTab = tabPane.getSelectionModel().getSelectedItem();
             if (uiTab != null) {
@@ -281,6 +289,10 @@ public class MainWindow {
     private void onExportWav() {
         SongTab tab = getActiveSongTab();
         if (tab == null) return;
+        if (tab.getSong().getPatterns().isEmpty()) {
+            showError("Cannot export", "Song has no patterns to export.");
+            return;
+        }
         File file = showFileDialog("Export WAV Audio", "WAV Audio", "*.wav", true);
         if (file != null) {
             // Capture mute state from tracker grid
@@ -374,12 +386,35 @@ public class MainWindow {
         try {
             Song song = songTab.getSong();
             if (file.getName().toLowerCase().endsWith(".rym2612")) {
+                // Single voice -- add directly without selection dialog
                 FmVoice voice = Rym2612Importer.importFile(file);
                 song.getVoiceBank().add(voice);
             } else {
                 VoiceBankFile.LoadResult result = VoiceBankFile.load(file);
-                song.getVoiceBank().addAll(result.voices());
-                song.getPsgEnvelopes().addAll(result.psgEnvelopes());
+                if (result.voices().size() <= 1) {
+                    // Single or empty bank -- add directly
+                    song.getVoiceBank().addAll(result.voices());
+                    song.getPsgEnvelopes().addAll(result.psgEnvelopes());
+                } else {
+                    // Multiple voices -- show selection dialog
+                    String bankName = result.name() != null ? result.name() : file.getName();
+                    java.util.List<ImportableVoice> importable = new java.util.ArrayList<>();
+                    for (int i = 0; i < result.voices().size(); i++) {
+                        FmVoice v = result.voices().get(i);
+                        importable.add(new ImportableVoice(
+                                bankName, i, v.getData(), v.getAlgorithm()));
+                    }
+                    VoiceImportDialog dialog = new VoiceImportDialog(importable);
+                    java.util.Optional<java.util.List<ImportableVoice>> selected = dialog.showAndWait();
+                    if (selected.isPresent() && !selected.get().isEmpty()) {
+                        for (ImportableVoice iv : selected.get()) {
+                            song.getVoiceBank().add(
+                                    new FmVoice(iv.sourceSong() + " #" + iv.originalIndex(), iv.voiceData()));
+                        }
+                    }
+                    // PSG envelopes from the bank are still added (they aren't voice-selectable)
+                    song.getPsgEnvelopes().addAll(result.psgEnvelopes());
+                }
             }
             songTab.getInstrumentPanel().refresh();
         } catch (Exception ex) {
@@ -411,9 +446,15 @@ public class MainWindow {
         SongTab tab = getActiveSongTab();
         String filename = "Untitled";
         if (tab != null) {
-            filename = tab.getFile() != null ? tab.getFile().getName() : tab.getSong().getName();
+            filename = tab.getTitle();
         }
         stage.setTitle("OpenSMPS Deck - " + filename);
+    }
+
+    private void markActiveSongDirty() {
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
+        tab.setDirty(true);
     }
 
     private void showError(String header, String content) {

@@ -55,7 +55,8 @@ public class TrackerGrid extends ScrollPane {
 
     /**
      * Maps keyboard characters to sequential DAC sample indices.
-     * Uses the lower piano-row layout: Z=0, S=1, X=2, D=3, C=4, V=5, G=6, B=7, H=8, N=9, J=10, M=11.
+     * Lower row: Z=0, S=1, X=2, D=3, C=4, V=5, G=6, B=7, H=8, N=9, J=10, M=11.
+     * Upper row: Q=12, W=13, E=14, R=15, T=16, Y=17, U=18.
      */
     private static final int[] DAC_KEY_MAP = new int[128];
     static {
@@ -72,6 +73,13 @@ public class TrackerGrid extends ScrollPane {
         DAC_KEY_MAP['N'] = 9;
         DAC_KEY_MAP['J'] = 10;
         DAC_KEY_MAP['M'] = 11;
+        DAC_KEY_MAP['Q'] = 12;
+        DAC_KEY_MAP['W'] = 13;
+        DAC_KEY_MAP['E'] = 14;
+        DAC_KEY_MAP['R'] = 15;
+        DAC_KEY_MAP['T'] = 16;
+        DAC_KEY_MAP['Y'] = 17;
+        DAC_KEY_MAP['U'] = 18;
     }
 
     private final Canvas canvas;
