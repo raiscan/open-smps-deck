@@ -31,7 +31,7 @@ Use the buttons below the bar graph to add or remove steps:
 | **+Step** | Append a new step at volume `0` (loudest) after the last step |
 | **-Step** | Remove the last step from the envelope |
 
-The **Steps** label between the buttons displays the current step count. An envelope with zero steps produces no sound -- the SMPS `0x80` terminator fires immediately and the channel goes silent.
+The **Steps** label between the buttons displays the current step count. An envelope with zero steps produces no sound -- the envelope ends immediately and the channel goes silent.
 
 ## Name
 

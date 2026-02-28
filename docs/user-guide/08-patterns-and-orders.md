@@ -54,7 +54,7 @@ If the loop point referenced a row at or beyond the new end of the list, it is a
 
 Click the **Loop** button to set the loop point to the currently selected row. The loop point row is marked with a loop arrow indicator in the order list display.
 
-When playback reaches the end of the order list, it jumps back to the loop point row and continues from there. This maps directly to the SMPS `F4` jump command in the exported binary. Every song has exactly one loop point; setting a new one replaces the previous one. The default loop point is row `00`.
+When playback reaches the end of the order list, it jumps back to the loop point row and continues from there. Every song has exactly one loop point; setting a new one replaces the previous one. The default loop point is row `00`.
 
 ## Per-Channel Pattern Assignment
 

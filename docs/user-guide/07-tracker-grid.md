@@ -120,11 +120,11 @@ Navigate to the **Instrument** column of any row using the `Left` and `Right` ar
 The entry process works in two stages:
 
 1. Type the first hex digit. It appears in yellow as a pending value with an underscore placeholder for the second digit (e.g. `3_`). The pending state is a visual indicator that the entry is incomplete.
-2. Type the second hex digit. The full two-digit value is committed to the row (e.g. `3A`), and the appropriate coordination flag is written into the bytecode.
+2. Type the second hex digit. The full two-digit value is committed to the row (e.g. `3A`), and the instrument change is applied to the channel data.
 
 Press `Escape` at any time while a digit is pending to cancel without applying any change.
 
-For FM channels (0--5), the instrument value sets the FM voice index via the SET_VOICE coordination flag. For PSG channels (6--9), it sets the PSG envelope index via the PSG_INSTRUMENT coordination flag.
+For FM channels (0--5), the instrument value selects an FM voice from the voice bank. For PSG channels (6--9), it selects a PSG envelope from the envelope list.
 
 Any navigation action (arrow keys, `Tab`, or other non-hex key) also cancels a pending hex digit.
 

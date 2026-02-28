@@ -180,7 +180,7 @@ Each channel needs an instrument assignment to know which voice (FM) or envelope
 
 3. Type `0` -- the first hex digit. It appears in yellow as a pending value with an underscore placeholder: `0_`. This visual indicator tells you the entry is incomplete.
 
-4. Type `0` -- the second hex digit. The full value `00` is committed, and the instrument column on row `00` now reads `00` in green. The tracker writes a SET_VOICE coordination flag into the bytecode.
+4. Type `0` -- the second hex digit. The full value `00` is committed, and the instrument column on row `00` now reads `00` in green. The tracker records a voice change command in the channel data.
 
 5. Press `Space` to play. The bass line now uses your custom Bass voice -- you should hear the clean, sustained tone you designed in the voice editor. It should sound warmer and more defined than the default voice. Press `Escape` to stop.
 
@@ -188,7 +188,7 @@ Each channel needs an instrument assignment to know which voice (FM) or envelope
 
 You only need to set the instrument once at the beginning of the channel. Every note that follows on FM1 will use voice `00` until you place a different instrument change on a later row.
 
-> **Reference:** [Tracker Grid](07-tracker-grid.md) details the two-stage hex entry process and explains how instrument changes map to SMPS coordination flags.
+> **Reference:** [Tracker Grid](07-tracker-grid.md) details the two-stage hex entry process and explains how instrument changes work across FM and PSG channels.
 
 ---
 
@@ -274,7 +274,7 @@ The PSG channels produce square-wave tones. Combined with a short decay envelope
 
 5. Move the cursor back to row `00` on PSG1 using the `Up` arrow. Press `Right` to reach the **Instrument** column.
 
-6. Type `0` then `0` to assign PSG envelope `00` (your Tick patch). On PSG channels, the instrument column sets the PSG envelope index via the PSG_INSTRUMENT coordination flag, rather than the FM voice index.
+6. Type `0` then `0` to assign PSG envelope `00` (your Tick patch). On PSG channels, the instrument column sets the PSG envelope index rather than the FM voice index.
 
 7. Press `Space` to play. You should hear all three channels together: the FM bass, the FM lead melody, and the PSG rhythmic tick. Press `Escape` to stop.
 
@@ -342,7 +342,7 @@ The order list controls the playback sequence. Each row plays in order from top 
 
 **What you should hear:** A two-section song that loops. The first section establishes the theme; the second section varies it by moving the melody higher. The loop is seamless -- after the second section, the original returns without any gap.
 
-The loop point maps directly to the SMPS `F4` jump command in the exported binary. Every SMPS song must loop -- there is no "play once and stop" option in the Mega Drive sound driver.
+Every SMPS song must loop -- there is no "play once and stop" option in the Mega Drive sound driver.
 
 > **Reference:** [Patterns and Orders](08-patterns-and-orders.md) explains loop points, row management, and how per-channel pattern indices enable flexible arrangements.
 
