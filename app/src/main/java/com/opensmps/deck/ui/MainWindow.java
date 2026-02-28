@@ -65,6 +65,10 @@ public class MainWindow {
             }
         });
         songTab.getTrackerGrid().setOnStopPlayback(() -> playbackEngine.stop());
+        songTab.getTrackerGrid().setOnPlayFromCursor(() -> {
+            playbackEngine.loadSong(songTab.getSong());
+            playbackEngine.play();
+        });
 
         BorderPane content = new BorderPane();
         content.setCenter(songTab.getTrackerGrid());

@@ -58,6 +58,7 @@ public class TrackerGrid extends ScrollPane {
     private final UndoManager undoManager = new UndoManager();
     private Runnable onTogglePlayback;
     private Runnable onStopPlayback;
+    private Runnable onPlayFromCursor;
     private Runnable onDirty;
 
     // Mute/solo state
@@ -83,6 +84,7 @@ public class TrackerGrid extends ScrollPane {
 
     public void setOnTogglePlayback(Runnable callback) { this.onTogglePlayback = callback; }
     public void setOnStopPlayback(Runnable callback) { this.onStopPlayback = callback; }
+    public void setOnPlayFromCursor(Runnable callback) { this.onPlayFromCursor = callback; }
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
     public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
@@ -360,6 +362,10 @@ public class TrackerGrid extends ScrollPane {
             case F6 -> currentOctave = 6;
             case F7 -> currentOctave = 7;
             case F8 -> currentOctave = 8;
+            case ENTER -> {
+                if (onPlayFromCursor != null) onPlayFromCursor.run();
+                e.consume();
+            }
             case SPACE -> { if (onTogglePlayback != null) onTogglePlayback.run(); }
             case ESCAPE -> {
                 if (onStopPlayback != null) onStopPlayback.run();

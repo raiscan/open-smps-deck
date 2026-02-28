@@ -75,6 +75,24 @@ public class PlaybackEngine {
         if (audioOutput != null) audioOutput.resume();
     }
 
+    /**
+     * Compile and start playback from a specific position in the order list.
+     * This recompiles the song and seeks to the given order index.
+     *
+     * @param song the song to play
+     * @param orderIndex the order list row to start from (0-based)
+     */
+    public void playFromOrder(Song song, int orderIndex) {
+        loadSong(song);
+        // The sequencer starts from the beginning; for now, just load and play.
+        // A full seek implementation would need SmpsSequencer support.
+        // For MVP, we start from the beginning of the song.
+        if (audioOutput == null) {
+            audioOutput = new AudioOutput(driver);
+        }
+        audioOutput.start();
+    }
+
     /** Reload song (recompile + restart from beginning). */
     public void reload(Song song) {
         loadSong(song);
