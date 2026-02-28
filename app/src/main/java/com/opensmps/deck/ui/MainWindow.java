@@ -4,6 +4,7 @@ import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.io.ProjectFile;
 import com.opensmps.deck.io.SmpsExporter;
 import com.opensmps.deck.model.Song;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.input.KeyCombination;
@@ -15,25 +16,22 @@ import java.io.File;
 import java.io.IOException;
 
 /**
- * Main application window with BorderPane layout.
+ * Main application window with tab-based multi-document layout.
  *
- * <p>Layout: MenuBar + TransportBar (top), TrackerGrid (center),
- * OrderListPanel (bottom), InstrumentPanel (right).
+ * <p>Layout: MenuBar + TransportBar (top), TabPane (center).
+ * Each tab wraps a {@link SongTab} with its own TrackerGrid, OrderListPanel,
+ * and InstrumentPanel.
  */
 public class MainWindow {
 
     private final Stage stage;
     private final BorderPane root;
-    private Song currentSong;
     private final PlaybackEngine playbackEngine;
-    private File currentFile;
-    private TrackerGrid trackerGrid;
-    private OrderListPanel orderListPanel;
-    private InstrumentPanel instrumentPanel;
+    private final TabPane tabPane = new TabPane();
+    private TransportBar transportBar;
 
     public MainWindow(Stage stage) {
         this.stage = stage;
-        this.currentSong = new Song();
         this.playbackEngine = new PlaybackEngine();
         this.root = new BorderPane();
 
@@ -41,35 +39,76 @@ public class MainWindow {
         setupStage();
     }
 
+    private SongTab getActiveSongTab() {
+        Tab selected = tabPane.getSelectionModel().getSelectedItem();
+        if (selected != null && selected.getUserData() instanceof SongTab st) {
+            return st;
+        }
+        return null;
+    }
+
+    private Tab createSongTabUI(SongTab songTab) {
+        songTab.buildContent();
+
+        BorderPane content = new BorderPane();
+        content.setCenter(songTab.getTrackerGrid());
+        content.setBottom(songTab.getOrderListPanel());
+        content.setRight(songTab.getInstrumentPanel());
+
+        songTab.getOrderListPanel().setOnOrderRowSelected(rowIndex -> {
+            Song song = songTab.getSong();
+            if (!song.getOrderList().isEmpty()) {
+                int[] orderRow = song.getOrderList().get(rowIndex);
+                songTab.getTrackerGrid().setCurrentPatternIndex(orderRow[0]);
+            }
+        });
+
+        Tab tab = new Tab(songTab.getTitle(), content);
+        tab.setUserData(songTab);
+        tab.setClosable(true);
+        return tab;
+    }
+
+    private void addNewTab(SongTab songTab) {
+        Tab tab = createSongTabUI(songTab);
+        // Insert before the [+] button tab (last tab)
+        int insertIndex = Math.max(0, tabPane.getTabs().size() - 1);
+        tabPane.getTabs().add(insertIndex, tab);
+        tabPane.getSelectionModel().select(tab);
+    }
+
     private void setupLayout() {
-        // Top: MenuBar + Transport bar in a VBox
         MenuBar menuBar = createMenuBar();
-        TransportBar transportBar = new TransportBar(playbackEngine, currentSong);
+        transportBar = new TransportBar(playbackEngine, new Song());
         VBox topContainer = new VBox(menuBar, transportBar);
         root.setTop(topContainer);
 
-        // Center: Tracker grid
-        trackerGrid = new TrackerGrid();
-        trackerGrid.setSong(currentSong);
-        root.setCenter(trackerGrid);
+        // TabPane with closable tabs
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.ALL_TABS);
 
-        // Bottom: Order list
-        orderListPanel = new OrderListPanel(currentSong);
-        orderListPanel.setOnOrderRowSelected(rowIndex -> {
-            if (!currentSong.getOrderList().isEmpty()) {
-                int[] orderRow = currentSong.getOrderList().get(rowIndex);
-                // Use the first channel's pattern index to display
-                trackerGrid.setCurrentPatternIndex(orderRow[0]);
+        // Tab selection listener: update transport and title
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+            if (newTab != null && "+".equals(newTab.getText()) && newTab.getUserData() == null) {
+                // [+] tab selected -- create new tab
+                Platform.runLater(() -> addNewTab(new SongTab()));
+            } else {
+                SongTab st = getActiveSongTab();
+                if (st != null) {
+                    transportBar.setSong(st.getSong());
+                    updateTitle();
+                }
             }
         });
-        root.setBottom(orderListPanel);
 
-        // Right: Instrument panel
-        instrumentPanel = new InstrumentPanel(currentSong);
-        root.setRight(instrumentPanel);
+        // Initial song tab
+        addNewTab(new SongTab());
 
-        // Wire instrument selection to tracker grid note entry
-        trackerGrid.setInstrumentPanel(instrumentPanel);
+        // [+] button tab (not closable)
+        Tab plusTab = new Tab("+");
+        plusTab.setClosable(false);
+        tabPane.getTabs().add(plusTab);
+
+        root.setCenter(tabPane);
     }
 
     private MenuBar createMenuBar() {
@@ -106,10 +145,7 @@ public class MainWindow {
     }
 
     private void onNew() {
-        currentSong = new Song();
-        currentFile = null;
-        refreshAllPanels();
-        updateTitle();
+        addNewTab(new SongTab());
     }
 
     private void onOpen() {
@@ -120,10 +156,10 @@ public class MainWindow {
         File file = fileChooser.showOpenDialog(stage);
         if (file != null) {
             try {
-                currentSong = ProjectFile.load(file);
-                currentFile = file;
-                refreshAllPanels();
-                updateTitle();
+                Song song = ProjectFile.load(file);
+                SongTab tab = new SongTab(song);
+                tab.setFile(file);
+                addNewTab(tab);
             } catch (IOException ex) {
                 showError("Failed to open project", ex.getMessage());
             }
@@ -131,32 +167,41 @@ public class MainWindow {
     }
 
     private void onSave() {
-        if (currentFile != null) {
-            saveToFile(currentFile);
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
+        if (tab.getFile() != null) {
+            saveToFile(tab, tab.getFile());
         } else {
             onSaveAs();
         }
     }
 
     private void onSaveAs() {
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Save Project As");
         fileChooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("OpenSMPS Deck Project", "*.osmpsd"));
-        if (currentFile != null) {
-            fileChooser.setInitialDirectory(currentFile.getParentFile());
-            fileChooser.setInitialFileName(currentFile.getName());
+        if (tab.getFile() != null) {
+            fileChooser.setInitialDirectory(tab.getFile().getParentFile());
+            fileChooser.setInitialFileName(tab.getFile().getName());
         }
         File file = fileChooser.showSaveDialog(stage);
         if (file != null) {
-            saveToFile(file);
+            saveToFile(tab, file);
         }
     }
 
-    private void saveToFile(File file) {
+    private void saveToFile(SongTab tab, File file) {
         try {
-            ProjectFile.save(currentSong, file);
-            currentFile = file;
+            ProjectFile.save(tab.getSong(), file);
+            tab.setFile(file);
+            // Update the tab text to reflect the new file name
+            Tab uiTab = tabPane.getSelectionModel().getSelectedItem();
+            if (uiTab != null) {
+                uiTab.setText(tab.getTitle());
+            }
             updateTitle();
         } catch (IOException ex) {
             showError("Failed to save project", ex.getMessage());
@@ -164,6 +209,8 @@ public class MainWindow {
     }
 
     private void onExportSmps() {
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Export SMPS Binary");
         fileChooser.getExtensionFilters().add(
@@ -172,27 +219,19 @@ public class MainWindow {
         if (file != null) {
             try {
                 SmpsExporter exporter = new SmpsExporter();
-                exporter.export(currentSong, file);
+                exporter.export(tab.getSong(), file);
             } catch (IOException ex) {
                 showError("Failed to export SMPS", ex.getMessage());
             }
         }
     }
 
-    private void refreshAllPanels() {
-        trackerGrid.setSong(currentSong);
-        orderListPanel.setSong(currentSong);
-        orderListPanel.setOnOrderRowSelected(rowIndex -> {
-            if (!currentSong.getOrderList().isEmpty()) {
-                int[] orderRow = currentSong.getOrderList().get(rowIndex);
-                trackerGrid.setCurrentPatternIndex(orderRow[0]);
-            }
-        });
-        instrumentPanel.setSong(currentSong);
-    }
-
     private void updateTitle() {
-        String filename = currentFile != null ? currentFile.getName() : "Untitled";
+        SongTab tab = getActiveSongTab();
+        String filename = "Untitled";
+        if (tab != null) {
+            filename = tab.getFile() != null ? tab.getFile().getName() : tab.getSong().getName();
+        }
         stage.setTitle("OpenSMPS Deck - " + filename);
     }
 
@@ -210,7 +249,7 @@ public class MainWindow {
                 ? getClass().getResource("/style.css").toExternalForm()
                 : "");
         stage.setScene(scene);
-        stage.setTitle("OpenSMPS Deck - " + currentSong.getName());
+        updateTitle();
         stage.setMinWidth(800);
         stage.setMinHeight(600);
     }
@@ -220,7 +259,8 @@ public class MainWindow {
     }
 
     public Song getCurrentSong() {
-        return currentSong;
+        SongTab tab = getActiveSongTab();
+        return tab != null ? tab.getSong() : null;
     }
 
     public PlaybackEngine getPlaybackEngine() {
@@ -236,14 +276,17 @@ public class MainWindow {
     }
 
     public TrackerGrid getTrackerGrid() {
-        return trackerGrid;
+        SongTab tab = getActiveSongTab();
+        return tab != null ? tab.getTrackerGrid() : null;
     }
 
     public OrderListPanel getOrderListPanel() {
-        return orderListPanel;
+        SongTab tab = getActiveSongTab();
+        return tab != null ? tab.getOrderListPanel() : null;
     }
 
     public InstrumentPanel getInstrumentPanel() {
-        return instrumentPanel;
+        SongTab tab = getActiveSongTab();
+        return tab != null ? tab.getInstrumentPanel() : null;
     }
 }

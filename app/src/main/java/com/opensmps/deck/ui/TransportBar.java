@@ -17,7 +17,7 @@ import javafx.scene.layout.Region;
 public class TransportBar extends HBox {
 
     private final PlaybackEngine playbackEngine;
-    private final Song song;
+    private Song song;
     private final Button playButton;
     private final Button stopButton;
     private final Button pauseButton;
@@ -91,6 +91,12 @@ public class TransportBar extends HBox {
             spacer2,
             modeLabel, modeSelector
         );
+    }
+
+    public void setSong(Song song) {
+        this.song = song;
+        tempoSpinner.getValueFactory().setValue(song.getTempo());
+        modeSelector.setValue(song.getSmpsMode());
     }
 
     private void onPlay() {
