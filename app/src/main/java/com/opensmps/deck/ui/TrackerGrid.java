@@ -35,6 +35,11 @@ public class TrackerGrid extends ScrollPane {
     private int currentOctave = 4;
     private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
 
+    // Selection state
+    private int selStartRow = -1, selStartChannel = -1;
+    private int selEndRow = -1, selEndChannel = -1;
+    private ClipboardData clipboard;
+
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
 
@@ -121,6 +126,21 @@ public class TrackerGrid extends ScrollPane {
             if (!isCurrentRow && row % 4 == 0) {
                 gc.setFill(Color.web("#1e1e34"));
                 gc.fillRect(0, y, canvas.getWidth(), ROW_HEIGHT);
+            }
+
+            // Selection highlight
+            if (hasSelection()) {
+                int minRow = getSelMinRow();
+                int maxRow = getSelMaxRow();
+                int minCh = getSelMinChannel();
+                int maxCh = getSelMaxChannel();
+                if (row >= minRow && row <= maxRow) {
+                    for (int ch = minCh; ch <= maxCh; ch++) {
+                        double selX = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
+                        gc.setFill(Color.web("#3344667F")); // semi-transparent blue
+                        gc.fillRect(selX, y, CHANNEL_WIDTH, ROW_HEIGHT);
+                    }
+                }
             }
 
             // Row number text
@@ -210,19 +230,48 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void handleKeyPressed(KeyEvent e) {
+        // Selection: Shift+Arrow
+        if (e.isShiftDown()) {
+            switch (e.getCode()) {
+                case UP -> extendSelection(-1, 0);
+                case DOWN -> extendSelection(1, 0);
+                case LEFT -> extendSelection(0, -1);
+                case RIGHT -> extendSelection(0, 1);
+                case EQUALS, ADD -> transposeSelection(12); // Shift+= (Shift++) = octave up
+                case MINUS, SUBTRACT -> transposeSelection(-12); // Shift+- = octave down
+                default -> {}
+            }
+            e.consume();
+            return;
+        }
+
+        // Ctrl shortcuts
+        if (e.isControlDown()) {
+            switch (e.getCode()) {
+                case C -> copySelection();
+                case V -> pasteAtCursor();
+                case A -> selectAll();
+                default -> {}
+            }
+            e.consume();
+            return;
+        }
+
         switch (e.getCode()) {
-            case UP -> moveCursor(-1, 0);
-            case DOWN -> moveCursor(1, 0);
-            case LEFT -> moveCursor(0, -1);
-            case RIGHT -> moveCursor(0, 1);
+            case UP -> { clearSelection(); moveCursor(-1, 0); }
+            case DOWN -> { clearSelection(); moveCursor(1, 0); }
+            case LEFT -> { clearSelection(); moveCursor(0, -1); }
+            case RIGHT -> { clearSelection(); moveCursor(0, 1); }
             case DELETE -> deleteAtCursor();
             case INSERT -> insertEmptyRow();
             case BACK_SPACE -> deleteAndPullUp();
             case PAGE_UP -> { currentOctave = Math.min(currentOctave + 1, 7); }
             case PAGE_DOWN -> { currentOctave = Math.max(currentOctave - 1, 0); }
             case PERIOD -> insertRest();
+            case EQUALS, ADD -> transposeSelection(1); // + = semitone up
+            case MINUS, SUBTRACT -> transposeSelection(-1); // - = semitone down
+            case ESCAPE -> clearSelection();
             default -> {
-                // Check for note keys
                 String text = e.getText();
                 if (text != null && !text.isEmpty()) {
                     char key = text.charAt(0);
@@ -292,5 +341,107 @@ public class TrackerGrid extends ScrollPane {
     private void deleteAndPullUp() {
         // Same as delete but cursor doesn't move
         deleteAtCursor();
+    }
+
+    private void extendSelection(int rowDelta, int channelDelta) {
+        if (selStartRow < 0) {
+            // Start new selection from cursor
+            selStartRow = cursorRow;
+            selStartChannel = cursorChannel;
+            selEndRow = cursorRow;
+            selEndChannel = cursorChannel;
+        }
+
+        selEndRow = Math.max(0, Math.min(selEndRow + rowDelta, getMaxRowCount() - 1));
+        selEndChannel = Math.max(0, Math.min(selEndChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
+        cursorRow = selEndRow;
+        cursorChannel = selEndChannel;
+        refreshDisplay();
+    }
+
+    private void clearSelection() {
+        selStartRow = -1;
+        selStartChannel = -1;
+        selEndRow = -1;
+        selEndChannel = -1;
+    }
+
+    private boolean hasSelection() {
+        return selStartRow >= 0;
+    }
+
+    private int getSelMinRow() { return Math.min(selStartRow, selEndRow); }
+    private int getSelMaxRow() { return Math.max(selStartRow, selEndRow); }
+    private int getSelMinChannel() { return Math.min(selStartChannel, selEndChannel); }
+    private int getSelMaxChannel() { return Math.max(selStartChannel, selEndChannel); }
+
+    private void selectAll() {
+        selStartRow = 0;
+        selStartChannel = 0;
+        selEndRow = getMaxRowCount() - 1;
+        selEndChannel = Pattern.CHANNEL_COUNT - 1;
+        refreshDisplay();
+    }
+
+    private void copySelection() {
+        if (!hasSelection() || song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+
+        int minCh = getSelMinChannel();
+        int maxCh = getSelMaxChannel();
+        int minRow = getSelMinRow();
+        int maxRow = getSelMaxRow();
+        int rowCount = maxRow - minRow + 1;
+        int chCount = maxCh - minCh + 1;
+
+        byte[][] channelData = new byte[chCount][];
+        for (int ch = 0; ch < chCount; ch++) {
+            byte[] trackData = pattern.getTrackData(minCh + ch);
+            channelData[ch] = SmpsEncoder.extractRowRange(trackData, minRow, rowCount);
+        }
+
+        clipboard = new ClipboardData(channelData, rowCount);
+    }
+
+    private void pasteAtCursor() {
+        if (clipboard == null || song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+
+        for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
+            int targetChannel = cursorChannel + ch;
+            if (targetChannel >= Pattern.CHANNEL_COUNT) break;
+
+            byte[] trackData = pattern.getTrackData(targetChannel);
+            byte[] pasteData = clipboard.getChannelData()[ch];
+
+            // Insert pasted bytes at cursor row
+            byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteData);
+            pattern.setTrackData(targetChannel, newData);
+        }
+        refreshDisplay();
+    }
+
+    private void transposeSelection(int semitones) {
+        if (song == null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+
+        if (hasSelection()) {
+            int minCh = getSelMinChannel();
+            int maxCh = getSelMaxChannel();
+            int minRow = getSelMinRow();
+            int rowCount = getSelMaxRow() - minRow + 1;
+
+            for (int ch = minCh; ch <= maxCh; ch++) {
+                byte[] trackData = pattern.getTrackData(ch);
+                byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
+                pattern.setTrackData(ch, transposed);
+            }
+        } else {
+            // Transpose single cell at cursor
+            byte[] trackData = pattern.getTrackData(cursorChannel);
+            byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, cursorRow, 1, semitones);
+            pattern.setTrackData(cursorChannel, transposed);
+        }
+        refreshDisplay();
     }
 }

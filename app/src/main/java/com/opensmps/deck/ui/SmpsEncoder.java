@@ -188,6 +188,57 @@ public class SmpsEncoder {
     }
 
     /**
+     * Transpose note bytes in a track within a specific row range.
+     * Non-note bytes (rests, coordination flags) are left unchanged.
+     *
+     * @param trackData the track byte array
+     * @param startRow first row to transpose (inclusive)
+     * @param rowCount number of rows to transpose
+     * @param semitones semitones to transpose (+/-)
+     * @return new track data with transposed notes
+     */
+    public static byte[] transposeTrackRange(byte[] trackData, int startRow, int rowCount, int semitones) {
+        if (trackData == null || trackData.length == 0) return trackData;
+        byte[] result = trackData.clone();
+        int[] offsets = findRowByteOffsets(result);
+
+        int endRow = Math.min(startRow + rowCount, offsets.length);
+        for (int row = startRow; row < endRow; row++) {
+            int offset = offsets[row];
+            int b = result[offset] & 0xFF;
+            if (b >= 0x81 && b <= 0xDF) {
+                result[offset] = (byte) transpose(b, semitones);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Extract the raw bytes for a range of decoded rows.
+     *
+     * @param trackData the track byte array
+     * @param startRow first row (inclusive)
+     * @param rowCount number of rows
+     * @return byte array containing just the selected rows' bytes
+     */
+    public static byte[] extractRowRange(byte[] trackData, int startRow, int rowCount) {
+        if (trackData == null || trackData.length == 0) return new byte[0];
+        int[] offsets = findRowByteOffsets(trackData);
+
+        if (startRow >= offsets.length) return new byte[0];
+
+        int startByte = offsets[startRow];
+        int endRow = Math.min(startRow + rowCount, offsets.length);
+        int endByte = (endRow < offsets.length) ? offsets[endRow] : trackData.length;
+
+        // Strip any trailing track-end marker from the extracted bytes
+        int len = endByte - startByte;
+        byte[] extracted = new byte[len];
+        System.arraycopy(trackData, startByte, extracted, 0, len);
+        return extracted;
+    }
+
+    /**
      * Find the byte offset for each decoded row in the track data.
      * Uses the same decoding logic as SmpsDecoder but only tracks offsets.
      */
