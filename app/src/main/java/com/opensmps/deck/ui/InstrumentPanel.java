@@ -1,6 +1,8 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
+import com.opensmps.deck.io.DacSampleImporter;
+import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
@@ -12,12 +14,15 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
 /**
- * Right-side panel managing the FM voice bank and PSG envelope lists.
+ * Right-side panel managing the FM voice bank, PSG envelope, and DAC sample lists.
  *
  * <p>Each section has a ListView displaying items as hex index + name,
  * and buttons for adding, editing, and deleting entries. Double-clicking
@@ -36,8 +41,10 @@ public class InstrumentPanel extends VBox {
     private PlaybackEngine playbackEngine;
     private final ListView<String> voiceListView;
     private final ListView<String> envelopeListView;
+    private final ListView<String> dacSampleListView;
     private final ObservableList<String> voiceItems;
     private final ObservableList<String> envelopeItems;
+    private final ObservableList<String> dacSampleItems;
     private Runnable onDirty;
     private Runnable onImportBank;
 
@@ -118,7 +125,30 @@ public class InstrumentPanel extends VBox {
         VBox.setVgrow(envelopeListView, Priority.ALWAYS);
         VBox.setVgrow(envelopeSection, Priority.ALWAYS);
 
-        getChildren().addAll(voiceSection, envelopeSection);
+        // --- DAC Samples section ---
+        Label dacHeader = createHeaderLabel("DAC Samples");
+
+        dacSampleItems = FXCollections.observableArrayList();
+        dacSampleListView = createListView(dacSampleItems);
+
+        dacSampleListView.setOnMouseClicked(event -> {
+            if (event.getClickCount() == 2) {
+                editSelectedDacSample();
+            }
+        });
+
+        HBox dacButtons = createButtonBar(
+                createButton("+", e -> addDacSample()),
+                createButton("Dup", e -> duplicateSelectedDacSample()),
+                createButton("Edit", e -> editSelectedDacSample()),
+                createButton("Del", e -> deleteSelectedDacSample())
+        );
+
+        VBox dacSection = new VBox(4, dacHeader, dacSampleListView, dacButtons);
+        VBox.setVgrow(dacSampleListView, Priority.ALWAYS);
+        VBox.setVgrow(dacSection, Priority.ALWAYS);
+
+        getChildren().addAll(voiceSection, envelopeSection, dacSection);
 
         refresh();
     }
@@ -139,6 +169,7 @@ public class InstrumentPanel extends VBox {
     public void refresh() {
         refreshVoiceList();
         refreshEnvelopeList();
+        refreshDacSampleList();
     }
 
     /**
@@ -249,6 +280,75 @@ public class InstrumentPanel extends VBox {
         markDirty();
     }
 
+    // --- DAC Sample operations ---
+
+    private void addDacSample() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Import DAC Sample");
+        chooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Audio Files", "*.wav", "*.pcm", "*.bin"),
+                new FileChooser.ExtensionFilter("All Files", "*.*")
+        );
+        File file = chooser.showOpenDialog(getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        try {
+            DacSample sample = DacSampleImporter.importFile(file, 0x0C);
+            song.getDacSamples().add(sample);
+            refreshDacSampleList();
+            dacSampleListView.getSelectionModel().selectLast();
+            markDirty();
+        } catch (IOException ex) {
+            Alert alert = new Alert(Alert.AlertType.ERROR,
+                    "Failed to import DAC sample: " + ex.getMessage(), ButtonType.OK);
+            alert.setTitle("Import Error");
+            alert.showAndWait();
+        }
+    }
+
+    private void duplicateSelectedDacSample() {
+        int index = dacSampleListView.getSelectionModel().getSelectedIndex();
+        if (index < 0) {
+            return;
+        }
+        DacSample original = song.getDacSamples().get(index);
+        DacSample copy = new DacSample(
+                original.getName() + " (copy)",
+                original.getData(),
+                original.getRate()
+        );
+        song.getDacSamples().add(copy);
+        refreshDacSampleList();
+        dacSampleListView.getSelectionModel().selectLast();
+        markDirty();
+    }
+
+    private void editSelectedDacSample() {
+        int index = dacSampleListView.getSelectionModel().getSelectedIndex();
+        if (index < 0) {
+            return;
+        }
+        DacSample existing = song.getDacSamples().get(index);
+        DacSampleEditor editor = new DacSampleEditor(existing);
+        Optional<DacSample> result = editor.showAndWait();
+        if (result.isPresent()) {
+            refreshDacSampleList();
+            dacSampleListView.getSelectionModel().select(index);
+            markDirty();
+        }
+    }
+
+    private void deleteSelectedDacSample() {
+        int index = dacSampleListView.getSelectionModel().getSelectedIndex();
+        if (index < 0) {
+            return;
+        }
+        song.getDacSamples().remove(index);
+        refreshDacSampleList();
+        markDirty();
+    }
+
     // --- List refresh helpers ---
 
     private void refreshVoiceList() {
@@ -264,6 +364,15 @@ public class InstrumentPanel extends VBox {
         envelopeItems.clear();
         for (int i = 0; i < envelopes.size(); i++) {
             envelopeItems.add(String.format("%02X: %s", i, envelopes.get(i).getName()));
+        }
+    }
+
+    private void refreshDacSampleList() {
+        List<DacSample> samples = song.getDacSamples();
+        dacSampleItems.clear();
+        for (int i = 0; i < samples.size(); i++) {
+            DacSample s = samples.get(i);
+            dacSampleItems.add(String.format("%02X: %s (rate=%02X)", i, s.getName(), s.getRate()));
         }
     }
 
