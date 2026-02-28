@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -144,6 +145,22 @@ class TestSongTabCoordinator {
         assertTrue(cleared[0], "Should clear playback cursor when not playing");
     }
 
+    @Test
+    void onSongEditedPreservesMuteStateAcrossReload() {
+        FakePlaybackGateway gateway = new FakePlaybackGateway();
+        gateway.playing = true;
+        SongTabCoordinator coordinator = new SongTabCoordinator(gateway);
+
+        // Set up a fake mute state provider: channel 2 is muted
+        coordinator.setMuteStateProvider(ch -> ch == 2);
+
+        coordinator.onSongEdited(new Song());
+
+        // After reload, channel 2 should be re-muted
+        assertTrue(gateway.getChannelMute(2), "Muted channel 2 should be restored after reload");
+        assertFalse(gateway.getChannelMute(0), "Unmuted channel 0 should remain unmuted after reload");
+    }
+
     private static final class FakePlaybackGateway implements SongTabCoordinator.PlaybackGateway {
         private final List<String> events = new ArrayList<>();
         private boolean playing;
@@ -199,6 +216,20 @@ class TestSongTabCoordinator {
         public PlaybackEngine.PlaybackPosition getPlaybackPosition() {
             events.add("getPlaybackPosition");
             return fakePosition;
+        }
+
+        private final boolean[] channelMutes = new boolean[10];
+
+        @Override
+        public void setChannelMute(int channel, boolean muted) {
+            events.add("setChannelMute");
+            if (channel >= 0 && channel < channelMutes.length) {
+                channelMutes[channel] = muted;
+            }
+        }
+
+        boolean getChannelMute(int channel) {
+            return channelMutes[channel];
         }
     }
 }

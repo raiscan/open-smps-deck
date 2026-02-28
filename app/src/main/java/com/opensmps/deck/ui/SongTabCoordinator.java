@@ -22,6 +22,15 @@ final class SongTabCoordinator {
         void reload(Song song);
         void playFromPosition(Song song, int orderIndex, int rowIndex);
         PlaybackEngine.PlaybackPosition getPlaybackPosition();
+        void setChannelMute(int channel, boolean muted);
+    }
+
+    /**
+     * Abstraction for querying channel mute state, allowing unit tests to
+     * supply a fake without requiring JavaFX or a real TrackerGrid.
+     */
+    interface MuteStateProvider {
+        boolean isChannelMuted(int channel);
     }
 
     /**
@@ -35,6 +44,7 @@ final class SongTabCoordinator {
 
     private final PlaybackGateway playback;
     private PlaybackCursorListener cursorListener;
+    private MuteStateProvider muteStateProvider;
 
     SongTabCoordinator(PlaybackGateway playback) {
         this.playback = playback;
@@ -42,6 +52,10 @@ final class SongTabCoordinator {
 
     void setPlaybackCursorListener(PlaybackCursorListener listener) {
         this.cursorListener = listener;
+    }
+
+    void setMuteStateProvider(MuteStateProvider provider) {
+        this.muteStateProvider = provider;
     }
 
     /**
@@ -90,10 +104,29 @@ final class SongTabCoordinator {
     /**
      * Called when the song model is edited. If currently playing, reloads
      * the song to reflect changes while preserving the playback position.
+     * Any active mute/solo state is snapshotted before reload and restored
+     * afterwards, since reload creates a fresh sequencer with all channels
+     * unmuted.
      */
     void onSongEdited(Song song) {
         if (playback.isPlaying()) {
+            // Snapshot mute state before reload
+            boolean[] muteSnapshot = null;
+            if (muteStateProvider != null) {
+                muteSnapshot = new boolean[10];
+                for (int ch = 0; ch < 10; ch++) {
+                    muteSnapshot[ch] = muteStateProvider.isChannelMuted(ch);
+                }
+            }
+
             playback.reload(song);
+
+            // Restore mute state after reload
+            if (muteSnapshot != null) {
+                for (int ch = 0; ch < 10; ch++) {
+                    playback.setChannelMute(ch, muteSnapshot[ch]);
+                }
+            }
         }
     }
 

@@ -73,6 +73,15 @@ public class MainWindow {
             public PlaybackEngine.PlaybackPosition getPlaybackPosition() {
                 return playbackEngine.getPlaybackPosition();
             }
+
+            @Override
+            public void setChannelMute(int channel, boolean muted) {
+                if (channel < 6) {
+                    playbackEngine.setFmMute(channel, muted);
+                } else {
+                    playbackEngine.setPsgMute(channel - 6, muted);
+                }
+            }
         });
         this.tabLifecycleCoordinator = new MainWindowTabLifecycleCoordinator();
 
@@ -93,6 +102,11 @@ public class MainWindow {
                     tab.getTrackerGrid().clearPlaybackCursor();
                 }
             }
+        });
+
+        songTabCoordinator.setMuteStateProvider(ch -> {
+            SongTab tab = getActiveSongTab();
+            return tab != null && tab.getTrackerGrid().isChannelMuted(ch);
         });
 
         javafx.animation.Timeline cursorPollTimer = new javafx.animation.Timeline(

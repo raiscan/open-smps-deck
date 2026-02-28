@@ -186,6 +186,17 @@ public class PlaybackEngine {
     }
 
     /**
+     * Mute or unmute a channel by unified index (0-5 = FM, 6-9 = PSG).
+     */
+    public void setChannelMute(int channel, boolean muted) {
+        if (channel < 6) {
+            setFmMute(channel, muted);
+        } else {
+            setPsgMute(channel - 6, muted);
+        }
+    }
+
+    /**
      * Returns the underlying synth driver.
      */
     public SmpsDriver getDriver() { return driver; }
