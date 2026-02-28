@@ -73,6 +73,14 @@ class TestSmpsEncoder {
     }
 
     @Test
+    void encodePsgEnvelopeBytes() {
+        byte[] bytes = SmpsEncoder.encodePsgEnvelope(7);
+        assertEquals(2, bytes.length);
+        assertEquals((byte) 0xF5, bytes[0]); // F5 = PSG Instrument in Z80 convention
+        assertEquals((byte) 0x07, bytes[1]);
+    }
+
+    @Test
     void transposeSemitoneUp() {
         assertEquals(0xBE, SmpsEncoder.transpose(0xBD, 1)); // C-5 -> C#5
     }

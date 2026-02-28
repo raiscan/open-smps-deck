@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -84,6 +85,15 @@ public class TestProjectFile {
         String hex = ProjectFile.bytesToHex(data);
         assertEquals("00 FF 7F 80", hex);
         assertArrayEquals(data, ProjectFile.hexToBytes(hex));
+    }
+
+    @Test
+    void testCorruptJsonThrows() {
+        File file = new File(tempDir, "corrupt.osmpsd");
+        assertThrows(Exception.class, () -> {
+            Files.writeString(file.toPath(), "{ not valid json !!!");
+            ProjectFile.load(file);
+        });
     }
 
     @Test

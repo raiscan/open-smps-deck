@@ -102,6 +102,42 @@ class TestPatternCompiler {
     }
 
     @Test
+    void testNonZeroLoopPoint() {
+        Song song = new Song();
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // Pattern 0: intro notes
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0xA1, 0x18, (byte) 0xA3, 0x18 });
+
+        // Pattern 1: loop body
+        Pattern loopPattern = new Pattern(1, 64);
+        loopPattern.setTrackData(0,
+            new byte[]{ (byte) 0xBD, 0x30 });
+        song.getPatterns().add(loopPattern);
+
+        // Order: pattern 0 -> pattern 1, loop back to row 1 (pattern 1)
+        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+        song.setLoopPoint(1); // loop to second order row
+
+        byte[] smps = new PatternCompiler().compile(song);
+
+        // Find the F6 (Jump) command
+        for (int i = 0; i < smps.length - 2; i++) {
+            if ((smps[i] & 0xFF) == SmpsCoordFlags.JUMP) {
+                int target = (smps[i + 1] & 0xFF) | ((smps[i + 2] & 0xFF) << 8);
+                // Target should point past the intro data (A1 18 A3 18 = 4 bytes)
+                // and into the loop body area
+                int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+                assertTrue(target > trackStart,
+                    "Loop target should point past intro into loop body");
+                return;
+            }
+        }
+        fail("No Jump (F6) command found in compiled output");
+    }
+
+    @Test
     void testEmptySongCompiles() {
         Song song = new Song();
         // No voices, no track data -- should still produce valid (if silent) output

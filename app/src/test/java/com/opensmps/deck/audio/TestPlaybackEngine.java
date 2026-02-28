@@ -43,6 +43,28 @@ class TestPlaybackEngine {
         engine.setPsgMute(0, false);
     }
 
+    @Test
+    void testS1ModeLoadAndRender() {
+        Song song = createTestSong();
+        song.setSmpsMode(com.opensmps.deck.model.SmpsMode.S1);
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+        short[] buffer = new short[2048];
+        int samples = engine.renderBuffer(buffer);
+        assertTrue(samples > 0, "S1 mode should render audio");
+    }
+
+    @Test
+    void testS3KModeLoadAndRender() {
+        Song song = createTestSong();
+        song.setSmpsMode(com.opensmps.deck.model.SmpsMode.S3K);
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+        short[] buffer = new short[2048];
+        int samples = engine.renderBuffer(buffer);
+        assertTrue(samples > 0, "S3K mode should render audio");
+    }
+
     private Song createTestSong() {
         Song song = new Song();
         song.setTempo(0x80);

@@ -144,6 +144,22 @@ class TestUndoManager {
     }
 
     @Test
+    void undoCapAt500() {
+        UndoManager mgr = new UndoManager();
+        Pattern pattern = new Pattern(0, 64);
+        pattern.setTrackData(0, new byte[]{});
+
+        // Push 510 edits
+        for (int i = 0; i < 510; i++) {
+            mgr.recordEdit(pattern, 0);
+            pattern.setTrackData(0, new byte[]{ (byte) i });
+        }
+
+        // Stack should be capped at 500
+        assertEquals(500, mgr.undoSize());
+    }
+
+    @Test
     void multiEditRedoIsAtomic() {
         UndoManager mgr = new UndoManager();
         Pattern pattern = new Pattern(0, 64);
