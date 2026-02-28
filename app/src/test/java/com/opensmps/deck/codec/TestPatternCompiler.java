@@ -233,6 +233,21 @@ class TestPatternCompiler {
     }
 
     @Test
+    void testDacChannelNoteIsNotShiftedByModeCompensation() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S1);
+        // Channel 5 is DAC: 0x81 means DAC sample index 0 and must remain unchanged.
+        song.getPatterns().get(0).setTrackData(5,
+                new byte[]{(byte) 0x81, 0x20, (byte) SmpsCoordFlags.STOP});
+
+        byte[] smps = new PatternCompiler().compile(song);
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledFirstByte = smps[trackStart] & 0xFF;
+        assertEquals(0x81, compiledFirstByte,
+                "DAC note bytes must not be shifted by S1/S3K note compensation");
+    }
+
+    @Test
     void testNoteCompensationDoesNotShiftRest() {
         Song song = new Song();
         song.setSmpsMode(SmpsMode.S1);
@@ -311,5 +326,76 @@ class TestPatternCompiler {
         // Verify second pattern's note is present after pattern 0's data
         // Pattern 0: A1 18 (2 bytes), pattern 1 starts at offset 2: BD 30
         assertEquals((byte) 0xBD, importedTrack[2], "Second note should be from pattern 1");
+    }
+
+    @Test
+    void testChannelTimelineResolvesPositionCorrectly() {
+        Song song = new Song();
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // FM channel 0: set voice 0, note C4 dur 0x30, note E4 dur 0x20
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30, (byte) 0xA4, 0x20 });
+
+        PatternCompiler compiler = new PatternCompiler();
+        PatternCompiler.CompilationResult result = compiler.compileDetailed(song);
+
+        assertNotNull(result);
+        PatternCompiler.ChannelTimeline timeline = result.getChannelTimeline(0);
+        assertNotNull(timeline, "Should have a timeline for FM channel 0");
+        assertTrue(timeline.getRowCount() > 0, "Timeline should have decoded rows");
+
+        // The track starts at some offset in the compiled binary (past header).
+        // resolvePosition with the track's own offset should resolve to order 0, row 0.
+        int trackOffset = timeline.getTrackOffset();
+
+        PatternCompiler.CursorPosition pos0 = timeline.resolvePosition(trackOffset);
+        assertNotNull(pos0);
+        assertEquals(0, pos0.orderIndex(), "First byte should resolve to order 0");
+        assertEquals(0, pos0.rowIndex(), "First byte should resolve to row 0");
+
+        // A position past the first row's bytes should resolve to a later row
+        PatternCompiler.CursorPosition posLater = timeline.resolvePosition(trackOffset + 4);
+        assertNotNull(posLater);
+        assertEquals(0, posLater.orderIndex(), "Single pattern song should be order 0");
+        assertTrue(posLater.rowIndex() >= 1,
+            "Position past first note should resolve to row 1 or later");
+    }
+
+    @Test
+    void testChannelTimelineResolvesMultiPatternPositions() {
+        Song song = new Song();
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // Pattern 0: one note
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0xA1, 0x18 });
+
+        // Pattern 1: another note
+        Pattern p1 = new Pattern(1, 64);
+        p1.setTrackData(0, new byte[]{ (byte) 0xBD, 0x30 });
+        song.getPatterns().add(p1);
+
+        // Order: pattern 0 -> pattern 1
+        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+        song.setLoopPoint(0);
+
+        PatternCompiler compiler = new PatternCompiler();
+        PatternCompiler.CompilationResult result = compiler.compileDetailed(song);
+
+        PatternCompiler.ChannelTimeline timeline = result.getChannelTimeline(0);
+        assertNotNull(timeline);
+
+        int trackOffset = timeline.getTrackOffset();
+
+        // First order row's data starts at trackOffset
+        PatternCompiler.CursorPosition firstRow = timeline.resolvePosition(trackOffset);
+        assertNotNull(firstRow);
+        assertEquals(0, firstRow.orderIndex(), "First note should be in order row 0");
+
+        // After pattern 0's 2 bytes (A1 18), pattern 1's data begins
+        PatternCompiler.CursorPosition secondOrder = timeline.resolvePosition(trackOffset + 2);
+        assertNotNull(secondOrder);
+        assertEquals(1, secondOrder.orderIndex(), "Second pattern should resolve to order row 1");
     }
 }
