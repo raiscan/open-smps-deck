@@ -2,6 +2,7 @@ package com.opensmps.deck.io;
 
 import com.opensmps.deck.model.FmVoice;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.IOException;
@@ -36,12 +37,24 @@ public final class Rym2612Importer {
      */
     public static FmVoice importFile(File file) throws IOException {
         try {
-            Document doc = DocumentBuilderFactory.newInstance()
-                    .newDocumentBuilder()
-                    .parse(file);
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            factory.setXIncludeAware(false);
+            factory.setExpandEntityReferences(false);
+
+            Document doc = factory.newDocumentBuilder().parse(file);
             doc.getDocumentElement().normalize();
 
             Element root = doc.getDocumentElement();
+            if (!"RYM2612Params".equals(root.getTagName())) {
+                throw new IOException(
+                        "Invalid RYM2612 file: expected root element 'RYM2612Params' but found '"
+                                + root.getTagName() + "'");
+            }
             String patchName = root.getAttribute("patchName");
 
             // Collect all PARAM elements into a map
