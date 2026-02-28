@@ -120,4 +120,46 @@ class TestUndoManager {
         assertEquals(1, mgr.undoSize());
         assertEquals(1, mgr.redoSize());
     }
+
+    @Test
+    void multiEditUndoIsAtomic() {
+        UndoManager mgr = new UndoManager();
+        Pattern pattern = new Pattern(0, 64);
+        byte[] ch0Original = { (byte) 0xBD, 0x18 };
+        byte[] ch1Original = { (byte) 0xBF, 0x20 };
+        pattern.setTrackData(0, ch0Original.clone());
+        pattern.setTrackData(1, ch1Original.clone());
+
+        // Record multi-channel edit, then mutate both channels
+        mgr.recordMultiEdit(pattern, 0, 1);
+        pattern.setTrackData(0, new byte[]{ (byte) 0xC1, 0x30 });
+        pattern.setTrackData(1, new byte[]{ (byte) 0xC3, 0x40 });
+
+        // Single undo should restore BOTH channels
+        assertEquals(1, mgr.undoSize(), "Multi-edit should be one undo step");
+        assertTrue(mgr.undo());
+        assertArrayEquals(ch0Original, pattern.getTrackData(0), "Channel 0 should be restored");
+        assertArrayEquals(ch1Original, pattern.getTrackData(1), "Channel 1 should be restored");
+        assertEquals(0, mgr.undoSize(), "Undo stack should be empty after one undo");
+    }
+
+    @Test
+    void multiEditRedoIsAtomic() {
+        UndoManager mgr = new UndoManager();
+        Pattern pattern = new Pattern(0, 64);
+        pattern.setTrackData(0, new byte[]{ (byte) 0xBD, 0x18 });
+        pattern.setTrackData(1, new byte[]{ (byte) 0xBF, 0x20 });
+
+        mgr.recordMultiEdit(pattern, 0, 1);
+        byte[] ch0New = { (byte) 0xC1, 0x30 };
+        byte[] ch1New = { (byte) 0xC3, 0x40 };
+        pattern.setTrackData(0, ch0New.clone());
+        pattern.setTrackData(1, ch1New.clone());
+
+        mgr.undo();
+        // Redo should restore both channels to the new state
+        assertTrue(mgr.redo());
+        assertArrayEquals(ch0New, pattern.getTrackData(0), "Channel 0 should be re-applied");
+        assertArrayEquals(ch1New, pattern.getTrackData(1), "Channel 1 should be re-applied");
+    }
 }
