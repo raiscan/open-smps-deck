@@ -136,6 +136,9 @@ public class TrackerGrid extends ScrollPane {
     public void setSong(Song song) {
         this.song = song;
         this.currentPatternIndex = 0;
+        Arrays.fill(channelMuted, false);
+        soloChannel = -1;
+        applyMuteState();
         refreshDisplay();
     }
 
