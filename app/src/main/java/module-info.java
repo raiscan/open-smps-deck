@@ -4,6 +4,8 @@ module com.opensmps.deck {
     requires javafx.graphics;
     requires com.google.gson;
     requires java.logging;
+    requires java.xml;
+    requires java.desktop;
 
     opens com.opensmps.deck to javafx.graphics;
 
