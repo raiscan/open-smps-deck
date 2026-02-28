@@ -31,9 +31,6 @@ Thumbs.db
 
 # ROM files (user-supplied, not committed)
 *.gen
-*.bin
-*.md
-!README.md
 
 # Temporary files
 *.tmp
