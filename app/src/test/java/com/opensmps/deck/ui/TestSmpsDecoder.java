@@ -59,8 +59,8 @@ class TestSmpsDecoder {
 
     @Test
     void decodeInstrumentChange() {
-        // Set FM voice 03, then C-5 with duration
-        byte[] data = { (byte) 0xE1, 0x03, (byte) 0xBD, 0x18 };
+        // Set FM voice 03 (EF 03), then C-5 with duration
+        byte[] data = { (byte) 0xEF, 0x03, (byte) 0xBD, 0x18 };
         List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
         assertEquals(1, rows.size());
         assertEquals("C-5", rows.get(0).note());

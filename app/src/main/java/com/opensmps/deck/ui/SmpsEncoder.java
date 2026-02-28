@@ -1,10 +1,18 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.smps.SmpsCoordFlags;
+
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Encodes user input into SMPS bytecode for insertion into track data.
+ *
+ * <p>Uses {@link SmpsCoordFlags} for all coordination flag byte values
+ * and parameter counts to ensure consistency with the Z80 driver.
+ */
 public class SmpsEncoder {
 
     /** Default duration for new notes (in frames). */
@@ -92,21 +100,21 @@ public class SmpsEncoder {
      * Encode a tie (sustain without re-keying).
      */
     public static byte[] encodeTie() {
-        return new byte[]{ (byte) 0xE7 };
+        return new byte[]{ (byte) SmpsCoordFlags.TIE };
     }
 
     /**
-     * Encode an FM voice change.
+     * Encode an FM voice change (EF xx).
      */
     public static byte[] encodeVoiceChange(int voiceId) {
-        return new byte[]{ (byte) 0xE1, (byte) voiceId };
+        return new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, (byte) voiceId };
     }
 
     /**
-     * Encode a PSG envelope change.
+     * Encode a PSG envelope/instrument change (F5 xx).
      */
     public static byte[] encodePsgEnvelope(int envelopeId) {
-        return new byte[]{ (byte) 0xE4, (byte) envelopeId };
+        return new byte[]{ (byte) SmpsCoordFlags.PSG_INSTRUMENT, (byte) envelopeId };
     }
 
     /**
@@ -240,7 +248,7 @@ public class SmpsEncoder {
 
     /**
      * Find the byte offset for each decoded row in the track data.
-     * Uses the same decoding logic as SmpsDecoder but only tracks offsets.
+     * Uses {@link SmpsCoordFlags#getParamCount(int)} for consistent flag parsing.
      */
     static int[] findRowByteOffsets(byte[] trackData) {
         if (trackData == null || trackData.length == 0) return new int[0];
@@ -251,7 +259,7 @@ public class SmpsEncoder {
         while (pos < trackData.length) {
             int b = trackData[pos] & 0xFF;
 
-            if (b == 0x00 || b == 0xF2) {
+            if (b == 0x00 || b == SmpsCoordFlags.STOP) {
                 break;
             } else if (b >= 0x80 && b <= 0xDF) {
                 // Note/rest -- this is a row
@@ -267,10 +275,9 @@ public class SmpsEncoder {
             } else if (b >= 0x01 && b <= 0x7F) {
                 pos++;
             } else if (b >= 0xE0) {
-                int flagIndex = b - 0xE0;
-                int paramCount = SmpsDecoder.getCoordFlagParamCount(flagIndex);
+                int paramCount = SmpsCoordFlags.getParamCount(b);
 
-                if (b == 0xE7) {
+                if (b == SmpsCoordFlags.TIE) {
                     // Tie is also a row
                     offsets.add(pos);
                     pos++;

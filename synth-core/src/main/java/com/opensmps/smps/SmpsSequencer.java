@@ -1179,38 +1179,8 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
         }
     }
 
-    // Pre-computed flag parameter length table for SMPS commands 0xE0-0xFF
-    // Lookup table is faster than switch statement in hot path
-    // Index = cmd - 0xE0 (range 0-31)
-    private static final byte[] FLAG_PARAM_LENGTH = new byte[32];
-    static {
-        // 1-parameter commands
-        FLAG_PARAM_LENGTH[0xE0 - 0xE0] = 1; // Pan
-        FLAG_PARAM_LENGTH[0xE1 - 0xE0] = 1; // Detune
-        FLAG_PARAM_LENGTH[0xE2 - 0xE0] = 1; // Set Communication
-        FLAG_PARAM_LENGTH[0xE5 - 0xE0] = 1; // Tick multiplier
-        FLAG_PARAM_LENGTH[0xE6 - 0xE0] = 1; // Volume
-        FLAG_PARAM_LENGTH[0xE8 - 0xE0] = 1; // Note fill
-        FLAG_PARAM_LENGTH[0xE9 - 0xE0] = 1; // Key displacement
-        FLAG_PARAM_LENGTH[0xEA - 0xE0] = 1; // Set main tempo
-        FLAG_PARAM_LENGTH[0xEB - 0xE0] = 1; // Set dividing timing
-        FLAG_PARAM_LENGTH[0xEC - 0xE0] = 1; // PSG volume
-        FLAG_PARAM_LENGTH[0xED - 0xE0] = 1; // (unused but keep for safety)
-        FLAG_PARAM_LENGTH[0xEF - 0xE0] = 1; // Set Voice
-        FLAG_PARAM_LENGTH[0xF3 - 0xE0] = 1; // PSG Noise
-        FLAG_PARAM_LENGTH[0xF5 - 0xE0] = 1; // PSG instrument
-
-        // 2-parameter commands
-        FLAG_PARAM_LENGTH[0xF6 - 0xE0] = 2; // Jump
-        FLAG_PARAM_LENGTH[0xF8 - 0xE0] = 2; // Call
-        FLAG_PARAM_LENGTH[0xFD - 0xE0] = 2; // Custom Fade Out
-
-        // 4-parameter commands
-        FLAG_PARAM_LENGTH[0xF0 - 0xE0] = 4; // Modulation
-        FLAG_PARAM_LENGTH[0xF7 - 0xE0] = 4; // Loop
-
-        // 0-parameter commands (E3, E4, E7, EE, F1, F2, F4, F9) are already 0 from array initialization
-    }
+    // Coordination flag parameter counts are defined in SmpsCoordFlags (single source of truth).
+    // This method delegates to SmpsCoordFlags, with game-specific overrides from config.
 
     private int flagParamLength(int cmd) {
         if (cmd >= 0xE0 && cmd <= 0xFF) {
@@ -1230,7 +1200,7 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
                     return override;
                 }
             }
-            return FLAG_PARAM_LENGTH[cmd - 0xE0];
+            return SmpsCoordFlags.getParamCount(cmd);
         }
         return 0;
     }

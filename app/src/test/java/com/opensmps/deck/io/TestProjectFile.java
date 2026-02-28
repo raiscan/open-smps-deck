@@ -32,7 +32,7 @@ public class TestProjectFile {
         original.getPsgEnvelopes().add(new PsgEnvelope("Pluck", envData));
 
         original.getPatterns().get(0).setTrackData(0,
-                new byte[]{ (byte) 0xE1, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2 });
+                new byte[]{ (byte) 0xEF, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2 });
         original.getPatterns().get(0).setTrackData(6,
                 new byte[]{ (byte) 0xA1, 0x20 });
 
@@ -69,7 +69,7 @@ public class TestProjectFile {
 
         // Patterns - track data
         assertArrayEquals(
-                new byte[]{ (byte) 0xE1, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2 },
+                new byte[]{ (byte) 0xEF, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2 },
                 loaded.getPatterns().get(0).getTrackData(0));
         assertArrayEquals(
                 new byte[]{ (byte) 0xA1, 0x20 },

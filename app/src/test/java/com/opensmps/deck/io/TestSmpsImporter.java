@@ -1,6 +1,7 @@
 package com.opensmps.deck.io;
 
 import com.opensmps.deck.model.*;
+import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,7 +21,7 @@ public class TestSmpsImporter {
         // Build a minimal SMPS binary:
         // Header: voice ptr at 0x12, 1 FM ch, 0 PSG, dividing=1, tempo=0x80
         // FM entry: track at 0x0A, key=0, vol=0
-        // Track at 0x0A: E1 00 A1 30 F2
+        // Track at 0x0A: EF 00 A1 30 F2
         // Voice at 0x12: 25 bytes
         byte[] smps = new byte[0x12 + 25];
         // Header
@@ -34,11 +35,11 @@ public class TestSmpsImporter {
         smps[8] = 0x00; // key offset
         smps[9] = 0x00; // vol offset
         // Track data at 0x0A
-        smps[0x0A] = (byte) 0xE1; // set voice
+        smps[0x0A] = (byte) SmpsCoordFlags.SET_VOICE; // EF = set voice
         smps[0x0B] = 0x00;        // voice 0
         smps[0x0C] = (byte) 0xA1; // note C4
         smps[0x0D] = 0x30;        // duration
-        smps[0x0E] = (byte) 0xF2; // track end
+        smps[0x0E] = (byte) SmpsCoordFlags.STOP; // F2 = track end
         // Voice at 0x12 (leave as zeros = default voice)
         smps[0x12] = 0x32; // algo=2, fb=6
 
@@ -56,7 +57,7 @@ public class TestSmpsImporter {
         byte[] track = song.getPatterns().get(0).getTrackData(0);
         assertNotNull(track);
         assertTrue(track.length > 0);
-        assertEquals((byte) 0xE1, track[0]); // first byte is set voice command
+        assertEquals((byte) SmpsCoordFlags.SET_VOICE, track[0]); // first byte is set voice (EF)
     }
 
     @Test
@@ -101,7 +102,7 @@ public class TestSmpsImporter {
         smps[9] = 0x00;
         smps[0x0A] = (byte) 0xA1;
         smps[0x0B] = 0x30;
-        smps[0x0C] = (byte) 0xF2;
+        smps[0x0C] = (byte) SmpsCoordFlags.STOP;
         return smps;
     }
 }

@@ -1,6 +1,7 @@
 package com.opensmps.deck.io;
 
 import com.opensmps.deck.model.*;
+import com.opensmps.smps.SmpsCoordFlags;
 
 import java.io.File;
 import java.io.IOException;
@@ -9,6 +10,9 @@ import java.nio.file.Files;
 /**
  * Imports raw SMPS binary files into Song models.
  * Works with SMPSPlay .bin rips and exported files.
+ *
+ * <p>Uses {@link SmpsCoordFlags} for all coordination flag parameter counts
+ * to ensure correct bytecode parsing aligned with the Z80 driver.
  */
 public class SmpsImporter {
 
@@ -142,7 +146,9 @@ public class SmpsImporter {
     }
 
     /**
-     * Find the end of a track by scanning for track-end markers (F2) or jumps (F4).
+     * Find the end of a track by scanning for track terminators.
+     * Uses {@link SmpsCoordFlags} for correct flag identification:
+     * F2 = Stop, F6 = Jump (both terminate the track).
      * Returns the offset AFTER the terminal command and its parameters.
      */
     private int findTrackEnd(byte[] data, int start) {
@@ -150,17 +156,17 @@ public class SmpsImporter {
         while (pos < data.length) {
             int cmd = data[pos] & 0xFF;
 
-            if (cmd == 0xF2) {
+            if (cmd == SmpsCoordFlags.STOP) {
                 return pos + 1; // F2 = track end, include it
             }
-            if (cmd == 0xF4) {
-                return pos + 3; // F4 + 2-byte pointer = jump (loop back)
+            if (cmd == SmpsCoordFlags.JUMP) {
+                return pos + 1 + SmpsCoordFlags.getParamCount(cmd); // F6 + 2-byte pointer
             }
 
             // Skip coordination flags with parameters
             if (cmd >= 0xE0 && cmd <= 0xFF) {
                 pos++; // skip the flag byte
-                pos += getCoordFlagParamLength(cmd);
+                pos += SmpsCoordFlags.getParamCount(cmd);
                 continue;
             }
 
@@ -168,39 +174,6 @@ public class SmpsImporter {
             pos++;
         }
         return data.length;
-    }
-
-    /**
-     * Get the parameter byte count for a coordination flag.
-     */
-    private int getCoordFlagParamLength(int cmd) {
-        return switch (cmd) {
-            case 0xE0 -> 1; // Pan
-            case 0xE1 -> 1; // Set voice
-            case 0xE2 -> 1; // Comm data
-            case 0xE3 -> 1; // Mod speed env (S3K)
-            case 0xE4 -> 1; // PSG instrument
-            case 0xE5 -> 1; // PSG detune
-            case 0xE6 -> 1; // Note cut
-            case 0xE7 -> 0; // Tie
-            case 0xE8 -> 1; // PSG noise
-            case 0xE9 -> 1; // Key offset
-            case 0xEA -> 1; // Detune
-            case 0xEB -> 1; // Decay
-            case 0xEC -> 0; // FM6 DAC toggle
-            case 0xED -> 1; // Tempo change
-            case 0xEE -> 1; // Modulation
-            case 0xEF -> 1; // Volume offset
-            case 0xF0 -> 4; // Enable modulation (4 params)
-            case 0xF1 -> 0; // Disable modulation
-            case 0xF2 -> 0; // Track end (shouldn't reach here)
-            case 0xF3 -> 3; // Loop (counter + 2-byte ptr)
-            case 0xF4 -> 2; // Jump (2-byte ptr) - shouldn't reach here
-            case 0xF5 -> 2; // Call (2-byte ptr)
-            case 0xF6 -> 0; // Return
-            case 0xF7 -> 1; // Loop counter decrement
-            default -> 0;   // Unknown, assume no params
-        };
     }
 
     private int readLE16(byte[] data, int offset) {

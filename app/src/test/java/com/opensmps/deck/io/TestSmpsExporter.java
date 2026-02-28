@@ -22,7 +22,7 @@ public class TestSmpsExporter {
         song.setTempo(0x80);
         song.getVoiceBank().add(new FmVoice("Test", new byte[25]));
         song.getPatterns().get(0).setTrackData(0,
-                new byte[]{(byte) 0xE1, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2});
+                new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2});
 
         File file = new File(tempDir, "test.bin");
         new SmpsExporter().export(song, file);

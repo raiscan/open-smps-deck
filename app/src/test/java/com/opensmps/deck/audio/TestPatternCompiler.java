@@ -1,6 +1,7 @@
 package com.opensmps.deck.audio;
 
 import com.opensmps.deck.model.*;
+import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,9 +18,9 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("Test", voiceData));
 
         // Put note data in FM channel 0 of pattern 0
-        // E1 00 (set voice 0), A1 (note C4), 30 (duration), F2 (track end)
+        // EF 00 (set voice 0), A1 (note C4), 30 (duration), F2 (track end)
         song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xE1, 0x00, (byte)0xA1, 0x30, (byte)0xF2 });
+            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -47,7 +48,7 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("Lead", voiceData));
 
         song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xE1, 0x00, (byte)0xA1, 0x30, (byte)0xF2 });
+            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
 
         byte[] smps = new PatternCompiler().compile(song);
 
@@ -69,18 +70,18 @@ class TestPatternCompiler {
 
         byte[] smps = new PatternCompiler().compile(song);
 
-        // Find F4 (jump) in compiled output
-        boolean hasF4 = false;
+        // Find F6 (jump) in compiled output
+        boolean hasJump = false;
         for (int i = 0; i < smps.length - 2; i++) {
-            if ((smps[i] & 0xFF) == 0xF4) {
-                hasF4 = true;
+            if ((smps[i] & 0xFF) == SmpsCoordFlags.JUMP) {
+                hasJump = true;
                 // The jump target should point back into the track data area
                 int target = (smps[i+1] & 0xFF) | ((smps[i+2] & 0xFF) << 8);
                 assertTrue(target >= 6, "Loop target should be in track data area");
                 break;
             }
         }
-        assertTrue(hasF4, "Should have loop jump (F4)");
+        assertTrue(hasJump, "Should have loop jump (F6)");
     }
 
     @Test
@@ -90,9 +91,9 @@ class TestPatternCompiler {
 
         // FM channel 0 and PSG channel 0 (index 6) both have data
         song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xA1, 0x30, (byte)0xF2 });
+            new byte[]{ (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
         song.getPatterns().get(0).setTrackData(6,
-            new byte[]{ (byte)0xA1, 0x30, (byte)0xF2 });
+            new byte[]{ (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
 
         byte[] smps = new PatternCompiler().compile(song);
 

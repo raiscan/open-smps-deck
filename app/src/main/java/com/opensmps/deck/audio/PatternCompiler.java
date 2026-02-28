@@ -3,6 +3,7 @@ package com.opensmps.deck.audio;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.Song;
+import com.opensmps.smps.SmpsCoordFlags;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,8 +32,8 @@ public class PatternCompiler {
     private static final int FM_TRACK_HEADER_SIZE = 4;
     private static final int PSG_TRACK_HEADER_SIZE = 6;
 
-    private static final int CMD_TRACK_END = 0xF2;
-    private static final int CMD_JUMP = 0xF4;
+    private static final int CMD_TRACK_END = SmpsCoordFlags.STOP;
+    private static final int CMD_JUMP = SmpsCoordFlags.JUMP;
 
     /**
      * Compiles the given song into an SMPS binary byte array.

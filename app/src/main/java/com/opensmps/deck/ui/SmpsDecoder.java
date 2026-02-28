@@ -1,8 +1,16 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.smps.SmpsCoordFlags;
+
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Decodes raw SMPS track bytecode into displayable tracker rows.
+ *
+ * <p>Uses {@link SmpsCoordFlags} for all coordination flag parameter counts
+ * and semantic identification (voice set, PSG instrument, tie, etc.).
+ */
 public class SmpsDecoder {
 
     /** A single decoded tracker row. */
@@ -12,40 +20,6 @@ public class SmpsDecoder {
     private static final String[] NOTE_NAMES = {
         "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
     };
-
-    /**
-     * Coordination flag parameter counts.
-     * Index = flag byte - 0xE0.
-     * -1 means unknown/variable (treat as 0 for safety).
-     */
-    private static final int[] COORD_FLAG_PARAMS = new int[32];
-    static {
-        // Default all to 0 (no params)
-        COORD_FLAG_PARAMS[0x00] = 1; // E0: Pan (1 param)
-        COORD_FLAG_PARAMS[0x01] = 1; // E1: Set FM voice (1 param)
-        COORD_FLAG_PARAMS[0x02] = 1; // E2: 1 param
-        COORD_FLAG_PARAMS[0x03] = 1; // E3: 1 param
-        COORD_FLAG_PARAMS[0x04] = 1; // E4: Set PSG envelope (1 param)
-        COORD_FLAG_PARAMS[0x05] = 1; // E5: 1 param
-        COORD_FLAG_PARAMS[0x06] = 1; // E6: 1 param
-        COORD_FLAG_PARAMS[0x07] = 0; // E7: Tie (0 params)
-        COORD_FLAG_PARAMS[0x08] = 0; // E8: 0 params
-        COORD_FLAG_PARAMS[0x09] = 1; // E9: Key offset (1 param)
-        COORD_FLAG_PARAMS[0x0A] = 1; // EA: Detune (1 param)
-        COORD_FLAG_PARAMS[0x0B] = 0; // EB: 0 params
-        COORD_FLAG_PARAMS[0x0C] = 0; // EC: 0 params
-        COORD_FLAG_PARAMS[0x0D] = 0; // ED: 0 params
-        COORD_FLAG_PARAMS[0x0E] = 0; // EE: 0 params
-        COORD_FLAG_PARAMS[0x0F] = 2; // EF: 2 params
-        COORD_FLAG_PARAMS[0x10] = 4; // F0: Modulation (4 params)
-        COORD_FLAG_PARAMS[0x11] = 0; // F1: Disable modulation (0 params)
-        COORD_FLAG_PARAMS[0x12] = 0; // F2: Track end (0 params)
-        COORD_FLAG_PARAMS[0x13] = 3; // F3: Loop (3 params)
-        COORD_FLAG_PARAMS[0x14] = 2; // F4: Jump (2 params)
-        COORD_FLAG_PARAMS[0x15] = 2; // F5: Call subroutine (2 params)
-        COORD_FLAG_PARAMS[0x16] = 0; // F6: Return (0 params)
-        // F7-FF: default 0
-    }
 
     /**
      * Decode a note byte (0x81-0xDF) into a display string like "C-5" or "D#3".
@@ -60,10 +34,15 @@ public class SmpsDecoder {
         return NOTE_NAMES[semitone] + octave;
     }
 
-    /** Get the parameter count for a coordination flag. */
-    public static int getCoordFlagParamCount(int flagIndex) {
-        if (flagIndex < 0 || flagIndex >= COORD_FLAG_PARAMS.length) return 0;
-        return COORD_FLAG_PARAMS[flagIndex];
+    /**
+     * Get the parameter count for a coordination flag byte.
+     * Delegates to {@link SmpsCoordFlags#getParamCount(int)}.
+     *
+     * @param flagByte the flag byte (0xE0-0xFF)
+     * @return the number of parameter bytes
+     */
+    public static int getCoordFlagParamCount(int flagByte) {
+        return SmpsCoordFlags.getParamCount(flagByte);
     }
 
     /**
@@ -83,7 +62,7 @@ public class SmpsDecoder {
         while (pos < trackData.length) {
             int b = trackData[pos] & 0xFF;
 
-            if (b == 0x00 || b == 0xF2) {
+            if (b == 0x00 || b == SmpsCoordFlags.STOP) {
                 // Track end — stop decoding
                 break;
             } else if (b >= 0x80 && b <= 0xDF) {
@@ -113,17 +92,15 @@ public class SmpsDecoder {
 
             } else if (b >= 0xE0) {
                 // Coordination flag
-                int flagIndex = b - 0xE0;
-                int paramCount = (flagIndex < COORD_FLAG_PARAMS.length)
-                    ? COORD_FLAG_PARAMS[flagIndex] : 0;
+                int paramCount = SmpsCoordFlags.getParamCount(b);
 
-                if (b == 0xE1 || b == 0xE4) {
-                    // Voice/envelope set — store as instrument
+                if (SmpsCoordFlags.isSetVoice(b) || SmpsCoordFlags.isPsgInstrument(b)) {
+                    // Voice/envelope set — store as instrument column
                     if (pos + 1 < trackData.length) {
                         pendingInstrument = String.format("%02X", trackData[pos + 1] & 0xFF);
                     }
                     pos += 1 + paramCount;
-                } else if (b == 0xE7) {
+                } else if (b == SmpsCoordFlags.TIE) {
                     // Tie — add as a row
                     String effect = pendingEffect.length() > 0 ? pendingEffect.toString().trim() : "";
                     rows.add(new TrackerRow("===", currentDuration, pendingInstrument, effect));

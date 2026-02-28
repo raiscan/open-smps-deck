@@ -68,7 +68,7 @@ class TestSmpsEncoder {
     void encodeVoiceChangeBytes() {
         byte[] bytes = SmpsEncoder.encodeVoiceChange(5);
         assertEquals(2, bytes.length);
-        assertEquals((byte) 0xE1, bytes[0]);
+        assertEquals((byte) 0xEF, bytes[0]); // EF = Set Voice in Z80 convention
         assertEquals((byte) 0x05, bytes[1]);
     }
 

@@ -63,9 +63,9 @@ class TestPlaybackEngine {
         voiceData[21] = 0x0F;  // Op4 D1L_RR (RR=15)
         song.getVoiceBank().add(new FmVoice("Sine", voiceData));
 
-        // Set voice, play C4, duration 48
+        // Set voice (EF), play C4, duration 48
         song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xE1, 0x00, (byte)0xA1, 0x30 });
+            new byte[]{ (byte)0xEF, 0x00, (byte)0xA1, 0x30 });
 
         return song;
     }
