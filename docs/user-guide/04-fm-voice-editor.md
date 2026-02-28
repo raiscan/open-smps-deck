@@ -198,23 +198,6 @@ The pasted data replaces all parameters but keeps voice B's name.
 
 You can click **Preview** repeatedly as you adjust sliders. Each press stops any previous preview and plays a fresh note with the current settings.
 
-## SMPS Voice Data
-
-Each FM voice is stored as exactly 25 bytes in SMPS format. Byte 0 encodes the algorithm in bits 0--2 and the feedback in bits 3--5. The remaining 24 bytes store four operators, each as a 6-byte block:
-
-| Byte Offset | Contents |
-|-------------|----------|
-| 0 | DT (bits 4--6) and MUL (bits 0--3) |
-| 1 | TL (bits 0--6) |
-| 2 | RS (bits 6--7) and AR (bits 0--4) |
-| 3 | AM (bit 7) and D1R (bits 0--4) |
-| 4 | D2R (bits 0--4) |
-| 5 | D1L (bits 4--7) and RR (bits 0--3) |
-
-The operator order in the SMPS binary is Op 1, Op 3, Op 2, Op 4 -- not the display order of 1, 2, 3, 4. The editor handles this mapping automatically, so you always see operators labeled in display order.
-
-You do not need to work with raw bytes -- the editor's sliders read and write them for you. This table is provided for reference when examining exported SMPS binaries or importing voices from external tools.
-
 ## Tips
 
 - Start from **Init** and change one parameter at a time. This is the fastest way to understand what each parameter does and to build voices methodically rather than tweaking randomly.
