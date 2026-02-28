@@ -102,7 +102,7 @@ public class WavExporter {
 
         ByteArrayOutputStream pcmData = new ByteArrayOutputStream();
         long maxFrames = (long) SAMPLE_RATE * maxDurationSeconds;
-        int totalFrames = 0;
+        long totalFrames = 0;
 
         for (int loop = 0; loop < loopCount; loop++) {
             engine.loadSong(song);
@@ -162,8 +162,8 @@ public class WavExporter {
         // Inset mode: fade the last N seconds of already-rendered PCM
         if (fadeEnabled && !fadeExtend) {
             int fadeSampleCount = (int) (fadeDurationSeconds * SAMPLE_RATE);
-            int clampedFadeFrames = Math.min(fadeSampleCount, totalFrames);
-            int fadeStartFrame = totalFrames - clampedFadeFrames;
+            int clampedFadeFrames = (int) Math.min(fadeSampleCount, totalFrames);
+            int fadeStartFrame = (int) (totalFrames - clampedFadeFrames);
             applyFadeOut(pcm, fadeStartFrame, clampedFadeFrames);
         }
 
@@ -179,11 +179,7 @@ public class WavExporter {
         if (mutedChannels == null) return;
         for (int ch = 0; ch < mutedChannels.length; ch++) {
             if (mutedChannels[ch]) {
-                if (ch < 6) {
-                    engine.setFmMute(ch, true);
-                } else {
-                    engine.setPsgMute(ch - 6, true);
-                }
+                engine.setChannelMute(ch, true);
             }
         }
     }

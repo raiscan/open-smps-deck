@@ -412,6 +412,7 @@ public class TrackerGrid extends ScrollPane {
 
     /** Clear the playback cursor (called on stop). */
     public void clearPlaybackCursor() {
+        if (playbackRow < 0 && playbackOrderRow < 0) return;
         this.playbackRow = -1;
         this.playbackOrderRow = -1;
         this.autoScrollActive = true;

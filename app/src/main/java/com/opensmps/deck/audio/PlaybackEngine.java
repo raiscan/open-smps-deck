@@ -218,7 +218,11 @@ public class PlaybackEngine {
      * so that play-from-cursor slices report positions relative to the
      * original song order list.
      *
-     * <p>Intended for UI polling from the application thread.
+     * <p>Must be called from the JavaFX application thread (or the same
+     * thread that calls {@link #reload} and {@link #loadSong}).  The read
+     * of {@code compilationResult} and the subsequent track-position query
+     * are not atomic, so calling from a different thread could pair a stale
+     * compilation result with the current sequencer state.
      */
     public PlaybackPosition getPlaybackPosition() {
         if (compilationResult == null) return null;

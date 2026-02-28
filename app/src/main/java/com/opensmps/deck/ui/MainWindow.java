@@ -76,11 +76,7 @@ public class MainWindow {
 
             @Override
             public void setChannelMute(int channel, boolean muted) {
-                if (channel < 6) {
-                    playbackEngine.setFmMute(channel, muted);
-                } else {
-                    playbackEngine.setPsgMute(channel - 6, muted);
-                }
+                playbackEngine.setChannelMute(channel, muted);
             }
         });
         this.tabLifecycleCoordinator = new MainWindowTabLifecycleCoordinator();
@@ -131,8 +127,8 @@ public class MainWindow {
     }
 
     private Tab createSongTabUI(SongTab songTab) {
-        songTab.buildContent();
         songTab.setOnEdited(() -> songTabCoordinator.onSongEdited(songTab.getSong()));
+        songTab.buildContent();
         songTab.getTrackerGrid().setPlaybackEngine(playbackEngine);
         songTab.getInstrumentPanel().setPlaybackEngine(playbackEngine);
         songTab.getInstrumentPanel().setOnImportBank(fileActions::onImportVoiceBank);
