@@ -2,6 +2,7 @@ package com.opensmps.deck.ui;
 
 import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.Song;
+import com.opensmps.deck.model.UndoManager;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ScrollPane;
@@ -39,6 +40,7 @@ public class TrackerGrid extends ScrollPane {
     private int selStartRow = -1, selStartChannel = -1;
     private int selEndRow = -1, selEndChannel = -1;
     private ClipboardData clipboard;
+    private final UndoManager undoManager = new UndoManager();
 
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
@@ -251,6 +253,8 @@ public class TrackerGrid extends ScrollPane {
                 case C -> copySelection();
                 case V -> pasteAtCursor();
                 case A -> selectAll();
+                case Z -> { if (undoManager.undo()) refreshDisplay(); }
+                case Y -> { if (undoManager.redo()) refreshDisplay(); }
                 default -> {}
             }
             e.consume();
@@ -308,6 +312,7 @@ public class TrackerGrid extends ScrollPane {
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, noteBytes);
+        undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
         cursorRow++;
         refreshDisplay();
@@ -319,6 +324,7 @@ public class TrackerGrid extends ScrollPane {
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] restBytes = SmpsEncoder.encodeRest(currentDuration);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, restBytes);
+        undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
         cursorRow++;
         refreshDisplay();
@@ -329,6 +335,7 @@ public class TrackerGrid extends ScrollPane {
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] newData = SmpsEncoder.deleteRow(trackData, cursorRow);
+        undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
         refreshDisplay();
     }
@@ -407,6 +414,14 @@ public class TrackerGrid extends ScrollPane {
         if (clipboard == null || song == null) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
+        // Record undo for all affected channels
+        for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
+            int targetChannel = cursorChannel + ch;
+            if (targetChannel < Pattern.CHANNEL_COUNT) {
+                undoManager.recordEdit(pattern, targetChannel);
+            }
+        }
+
         for (int ch = 0; ch < clipboard.getChannelCount(); ch++) {
             int targetChannel = cursorChannel + ch;
             if (targetChannel >= Pattern.CHANNEL_COUNT) break;
@@ -432,16 +447,22 @@ public class TrackerGrid extends ScrollPane {
             int rowCount = getSelMaxRow() - minRow + 1;
 
             for (int ch = minCh; ch <= maxCh; ch++) {
+                undoManager.recordEdit(pattern, ch);
+            }
+            for (int ch = minCh; ch <= maxCh; ch++) {
                 byte[] trackData = pattern.getTrackData(ch);
                 byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
                 pattern.setTrackData(ch, transposed);
             }
         } else {
             // Transpose single cell at cursor
+            undoManager.recordEdit(pattern, cursorChannel);
             byte[] trackData = pattern.getTrackData(cursorChannel);
             byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, cursorRow, 1, semitones);
             pattern.setTrackData(cursorChannel, transposed);
         }
         refreshDisplay();
     }
+
+    public UndoManager getUndoManager() { return undoManager; }
 }
