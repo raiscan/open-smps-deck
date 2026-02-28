@@ -326,6 +326,29 @@ class TestWavExporter {
     }
 
     @Test
+    void testHigherLoopCountProducesLongerOutput() throws IOException {
+        Song song = createTerminatingSong();
+        File oneLoop = new File(tempDir, "one-loop.wav");
+        File threeLoops = new File(tempDir, "three-loops.wav");
+
+        WavExporter exporter1 = new WavExporter();
+        exporter1.setLoopCount(1);
+        exporter1.setMaxDurationSeconds(30);
+        exporter1.setFadeEnabled(false);
+        exporter1.export(song, oneLoop);
+
+        WavExporter exporter3 = new WavExporter();
+        exporter3.setLoopCount(3);
+        exporter3.setMaxDurationSeconds(30);
+        exporter3.setFadeEnabled(false);
+        exporter3.export(song, threeLoops);
+
+        assertTrue(threeLoops.length() > oneLoop.length(),
+                "3-loop export (" + threeLoops.length()
+                        + ") should be longer than 1-loop export (" + oneLoop.length() + ")");
+    }
+
+    @Test
     void testFadeDurationGetterSetter() {
         WavExporter exporter = new WavExporter();
         exporter.setFadeDurationSeconds(5.0);
