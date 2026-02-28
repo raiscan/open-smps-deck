@@ -29,7 +29,12 @@ public class PlaybackEngine {
         driver.stopAll();
 
         byte[] smps = compiler.compile(song);
-        SimpleSmpsData data = new SimpleSmpsData(smps);
+        int baseNoteOffset = switch (song.getSmpsMode()) {
+            case S1 -> 0;
+            case S2 -> 1;
+            case S3K -> 0;
+        };
+        SimpleSmpsData data = new SimpleSmpsData(smps, baseNoteOffset);
 
         // Convert PSG envelopes from Song model to byte[][] for SmpsData
         if (!song.getPsgEnvelopes().isEmpty()) {

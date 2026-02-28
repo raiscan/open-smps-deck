@@ -4,14 +4,21 @@ import com.opensmps.smps.AbstractSmpsData;
 
 /**
  * Wraps a compiled SMPS binary blob for playback.
- * Uses S2 conventions: little-endian, baseNoteOffset=1.
+ * The baseNoteOffset is configurable per SMPS mode:
+ * S1=0, S2=1, S3K=0.
  */
 public class SimpleSmpsData extends AbstractSmpsData {
 
     private byte[][] psgEnvelopes;
+    private final int baseNoteOffset;
 
     public SimpleSmpsData(byte[] data) {
+        this(data, 1); // S2 default for backward compat
+    }
+
+    public SimpleSmpsData(byte[] data, int baseNoteOffset) {
         super(data, 0); // file-relative pointers (z80StartAddress=0)
+        this.baseNoteOffset = baseNoteOffset;
     }
 
     public void setPsgEnvelopes(byte[][] envelopes) {
@@ -80,6 +87,6 @@ public class SimpleSmpsData extends AbstractSmpsData {
 
     @Override
     public int getBaseNoteOffset() {
-        return 1; // S2 convention
+        return baseNoteOffset;
     }
 }

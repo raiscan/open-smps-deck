@@ -116,6 +116,30 @@ class TestPlaybackEngine {
                 "After reload, rendered audio should contain non-zero samples from restarted note");
     }
 
+    @Test
+    void testS1ModeUsesBaseNoteOffsetZero() {
+        Song song = createTestSong();
+        song.setSmpsMode(SmpsMode.S1);
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        short[] buffer = new short[2048];
+        int samples = engine.renderBuffer(buffer);
+        assertTrue(samples > 0, "S1 mode with baseNoteOffset=0 should render audio without crash");
+    }
+
+    @Test
+    void testS3KModeUsesBaseNoteOffsetZero() {
+        Song song = createTestSong();
+        song.setSmpsMode(SmpsMode.S3K);
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        short[] buffer = new short[2048];
+        int samples = engine.renderBuffer(buffer);
+        assertTrue(samples > 0, "S3K mode with baseNoteOffset=0 should render audio without crash");
+    }
+
     private Song createTestSong() {
         Song song = new Song();
         song.setTempo(0x80);
