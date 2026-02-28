@@ -8,6 +8,8 @@ import com.opensmps.smps.DacData;
  * Ported from SMPSPlay's libvgm/GPGX YM2612 core (ym2612.c).
  */
 public class Ym2612Chip {
+    private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(Ym2612Chip.class.getName());
+
     private static final double CLOCK = 7670453.0;
     private static final double DEFAULT_OUTPUT_RATE = 44100.0;
     // GPGX: Internal rate is CLOCK/144 (~53267 Hz)
@@ -2082,7 +2084,7 @@ public class Ym2612Chip {
             return;
         }
         traceEvents++;
-        System.out.println("YM2612 " + event
+        LOG.finest("YM2612 " + event
                 + " ch=" + chIdx
                 + " op=" + opIdx
                 + " key=" + sl.key
@@ -2105,23 +2107,21 @@ public class Ym2612Chip {
     }
 
     private void tickTimers() {
-        for (int i = 0; i < 1; i++) {
-            csmKeyFlag <<= 1;
-            if ((mode & 0x01) != 0) {
-                timerACount--;
-                if (timerACount <= 0) {
-                    if ((mode & 0x04) != 0) {
-                        status |= FM_STATUS_TIMERA_BIT_MASK;
-                    }
-                    timerACount = timerALoad;
-                    if ((mode & 0xC0) == 0x80) {
-                        csmKeyOn();
-                    }
+        csmKeyFlag <<= 1;
+        if ((mode & 0x01) != 0) {
+            timerACount--;
+            if (timerACount <= 0) {
+                if ((mode & 0x04) != 0) {
+                    status |= FM_STATUS_TIMERA_BIT_MASK;
+                }
+                timerACount = timerALoad;
+                if ((mode & 0xC0) == 0x80) {
+                    csmKeyOn();
                 }
             }
-            if ((csmKeyFlag & 2) != 0) {
-                csmKeyOff();
-            }
+        }
+        if ((csmKeyFlag & 2) != 0) {
+            csmKeyOff();
         }
         if ((mode & 0x02) != 0) {
             timerBCount -= 1;

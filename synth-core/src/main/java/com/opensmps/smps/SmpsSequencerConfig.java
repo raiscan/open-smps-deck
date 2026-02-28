@@ -120,7 +120,7 @@ public final class SmpsSequencerConfig {
      * Constructor with all options including tempo mode, coord flag overrides, and modulation settings.
      * @deprecated Use {@link Builder} instead.
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public SmpsSequencerConfig(
             Map<Integer, Integer> speedUpTempos,
             int tempoModBase,
@@ -169,7 +169,7 @@ public final class SmpsSequencerConfig {
      * Constructor without modulation/track-end overrides. Defaults to S2 behavior.
      * @deprecated Use {@link Builder} instead.
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public SmpsSequencerConfig(
             Map<Integer, Integer> speedUpTempos,
             int tempoModBase,
@@ -185,7 +185,7 @@ public final class SmpsSequencerConfig {
      * Backward-compatible constructor. Defaults to OVERFLOW tempo mode and no coord flag overrides.
      * @deprecated Use {@link Builder} instead.
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public SmpsSequencerConfig(
             Map<Integer, Integer> speedUpTempos,
             int tempoModBase,

@@ -1,5 +1,7 @@
 package com.opensmps.smps;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -19,8 +21,8 @@ public class DacData {
     }
 
     public DacData(Map<Integer, byte[]> samples, Map<Integer, DacEntry> mapping, int baseCycles) {
-        this.samples = samples;
-        this.mapping = mapping;
+        this.samples = Collections.unmodifiableMap(new HashMap<>(samples));
+        this.mapping = Collections.unmodifiableMap(new HashMap<>(mapping));
         this.baseCycles = baseCycles;
     }
 

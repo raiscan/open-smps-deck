@@ -64,20 +64,32 @@ public class AudioOutput {
         short[] samples = new short[BUFFER_SAMPLES * 2];
         byte[] byteBuffer = new byte[BUFFER_SAMPLES * 4];
 
-        while (running) {
-            if (paused) {
-                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
-                continue;
+        try {
+            while (running) {
+                if (paused) {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    continue;
+                }
+
+                driver.read(samples);
+
+                for (int i = 0; i < samples.length; i++) {
+                    byteBuffer[i * 2] = (byte) (samples[i] & 0xFF);
+                    byteBuffer[i * 2 + 1] = (byte) ((samples[i] >> 8) & 0xFF);
+                }
+
+                line.write(byteBuffer, 0, byteBuffer.length);
             }
-
-            driver.read(samples);
-
-            for (int i = 0; i < samples.length; i++) {
-                byteBuffer[i * 2] = (byte) (samples[i] & 0xFF);
-                byteBuffer[i * 2 + 1] = (byte) ((samples[i] >> 8) & 0xFF);
+        } finally {
+            if (line != null) {
+                line.stop();
+                line.close();
             }
-
-            line.write(byteBuffer, 0, byteBuffer.length);
         }
     }
 }
