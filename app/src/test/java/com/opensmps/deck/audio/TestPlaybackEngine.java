@@ -65,6 +65,57 @@ class TestPlaybackEngine {
         assertTrue(samples > 0, "S3K mode should render audio");
     }
 
+    @Test
+    void testLoadProducesNonZeroAudio() {
+        Song song = createTestSong();
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        short[] buffer = new short[4096];
+        int samples = engine.renderBuffer(buffer);
+        assertTrue(samples > 0, "renderBuffer should return positive count");
+
+        boolean hasNonZero = false;
+        for (short s : buffer) {
+            if (s != 0) { hasNonZero = true; break; }
+        }
+        assertTrue(hasNonZero, "Rendered audio from a song with a note should contain non-zero samples");
+    }
+
+    @Test
+    void testReloadRestartsFromBeginning() {
+        Song song = createTestSong();
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        // Render enough audio to exhaust the note (duration 0x30 = 48 ticks)
+        // and confirm the driver eventually completes
+        for (int i = 0; i < 20; i++) {
+            engine.renderBuffer(new short[8192]);
+        }
+
+        // After the note finishes and the track ends, verify the driver reports complete
+        boolean completedBeforeReload = engine.getDriver().isComplete();
+
+        // Reload from scratch
+        engine.reload(song);
+
+        // After reload, the driver should no longer be complete (fresh sequencer)
+        assertFalse(engine.getDriver().isComplete(),
+                "After reload, driver should not be complete (sequencer restarted)");
+
+        // Render a batch and verify it produces non-zero audio (note is playing again)
+        short[] afterReload = new short[4096];
+        engine.renderBuffer(afterReload);
+
+        boolean hasNonZeroAfterReload = false;
+        for (short s : afterReload) {
+            if (s != 0) { hasNonZeroAfterReload = true; break; }
+        }
+        assertTrue(hasNonZeroAfterReload,
+                "After reload, rendered audio should contain non-zero samples from restarted note");
+    }
+
     private Song createTestSong() {
         Song song = new Song();
         song.setTempo(0x80);

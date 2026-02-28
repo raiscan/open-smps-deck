@@ -119,4 +119,72 @@ public class TestProjectFile {
         assertArrayEquals(new byte[0], ProjectFile.hexToBytes(""));
         assertArrayEquals(new byte[0], ProjectFile.hexToBytes("  "));
     }
+
+    @Test
+    void testSaveLoadEmptySong() throws IOException {
+        // A default Song() with no voices, no PSG envelopes, no track data
+        Song original = new Song();
+
+        File file = new File(tempDir, "empty.osmpsd");
+        ProjectFile.save(original, file);
+        assertTrue(file.exists());
+
+        Song loaded = ProjectFile.load(file);
+
+        assertEquals("Untitled", loaded.getName());
+        assertEquals(SmpsMode.S2, loaded.getSmpsMode());
+        assertEquals(0x80, loaded.getTempo());
+        assertEquals(1, loaded.getDividingTiming());
+        assertEquals(0, loaded.getLoopPoint());
+        assertTrue(loaded.getVoiceBank().isEmpty(), "Empty song should have no voices");
+        assertTrue(loaded.getPsgEnvelopes().isEmpty(), "Empty song should have no PSG envelopes");
+        assertEquals(1, loaded.getPatterns().size(), "Should have 1 pattern");
+        assertEquals(1, loaded.getOrderList().size(), "Should have 1 order row");
+
+        // All channels in the pattern should be empty
+        Pattern p = loaded.getPatterns().get(0);
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            assertEquals(0, p.getTrackData(ch).length,
+                    "Channel " + ch + " should be empty in default song");
+        }
+    }
+
+    @Test
+    void testSaveLoadAllChannelsPopulated() throws IOException {
+        Song original = new Song();
+        original.setName("Full");
+        original.setSmpsMode(SmpsMode.S3K);
+        original.setTempo(0xC0);
+        original.setDividingTiming(3);
+
+        // Populate all 10 channels with distinct byte data
+        byte[][] channelData = new byte[Pattern.CHANNEL_COUNT][];
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            // Each channel gets unique 4-byte data: [ch, ch+0x80, ch+0x90, ch+0xA0]
+            channelData[ch] = new byte[]{
+                    (byte) (0x81 + ch), // valid note byte per channel
+                    (byte) (0x18 + ch), // unique duration
+                    (byte) (0x81 + ch + 1 < 0xE0 ? 0x81 + ch + 1 : 0xBD), // second note
+                    (byte) 0x30
+            };
+            original.getPatterns().get(0).setTrackData(ch, channelData[ch]);
+        }
+
+        File file = new File(tempDir, "full.osmpsd");
+        ProjectFile.save(original, file);
+
+        Song loaded = ProjectFile.load(file);
+
+        assertEquals("Full", loaded.getName());
+        assertEquals(SmpsMode.S3K, loaded.getSmpsMode());
+        assertEquals(0xC0, loaded.getTempo());
+        assertEquals(3, loaded.getDividingTiming());
+
+        // Verify each channel byte-for-byte
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            byte[] loadedTrack = loaded.getPatterns().get(0).getTrackData(ch);
+            assertArrayEquals(channelData[ch], loadedTrack,
+                    "Channel " + ch + " data should match byte-for-byte");
+        }
+    }
 }

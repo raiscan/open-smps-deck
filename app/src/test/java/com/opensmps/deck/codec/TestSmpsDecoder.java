@@ -137,4 +137,42 @@ class TestSmpsDecoder {
         assertEquals(1, rows.size(), "Decoding should stop at F2");
         assertEquals("C-5", rows.get(0).note());
     }
+
+    @Test
+    void decodeTruncatedModulationFlagDoesNotThrow() {
+        // Modulation flag 0xF0 expects 4 parameter bytes; provide fewer
+        // This should not throw -- the decoder should handle truncated data gracefully
+        byte[] data1 = { (byte) 0xF0 }; // flag byte only, no params
+        assertDoesNotThrow(() -> SmpsDecoder.decode(data1));
+
+        byte[] data2 = { (byte) 0xF0, 0x0A }; // only 1 of 4 params
+        assertDoesNotThrow(() -> SmpsDecoder.decode(data2));
+
+        byte[] data3 = { (byte) 0xF0, 0x0A, 0x01, 0x02 }; // only 3 of 4 params
+        assertDoesNotThrow(() -> SmpsDecoder.decode(data3));
+    }
+
+    @Test
+    void decodeBoundaryNotes() {
+        // 0x81 = lowest valid note (C-0)
+        assertEquals("C-0", SmpsDecoder.decodeNote(0x81));
+
+        // 0xDF = highest valid note
+        // 0xDF - 0x81 = 0x5E = 94, octave = 94/12 = 7, semitone = 94%12 = 10 => A#7
+        String highest = SmpsDecoder.decodeNote(0xDF);
+        assertNotNull(highest);
+        assertFalse(highest.contains("?"), "0xDF should decode as a valid note, not ???");
+
+        // Verify correct note name for 0xDF
+        int index = 0xDF - 0x81; // 94
+        int expectedOctave = index / 12; // 7
+        int expectedSemitone = index % 12; // 10 = A#
+        assertEquals("A#" + expectedOctave, highest);
+
+        // Just below range: 0x80 is rest
+        assertEquals("---", SmpsDecoder.decodeNote(0x80));
+
+        // Just above range: 0xE0 is a coordination flag, should decode as ???
+        assertEquals("???", SmpsDecoder.decodeNote(0xE0));
+    }
 }

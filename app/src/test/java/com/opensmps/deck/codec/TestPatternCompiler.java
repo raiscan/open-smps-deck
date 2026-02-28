@@ -164,4 +164,47 @@ class TestPatternCompiler {
         assertNotNull(smps);
         assertTrue(smps.length > 0);
     }
+
+    @Test
+    void testCompileMultiPatternSongHasCorrectOrderJumps() {
+        Song song = new Song();
+        song.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        // Pattern 0: note A
+        song.getPatterns().get(0).setTrackData(0,
+            new byte[]{ (byte) 0xA1, 0x18 }); // C-2 dur=0x18
+
+        // Pattern 1: note B
+        Pattern p1 = new Pattern(1, 64);
+        p1.setTrackData(0,
+            new byte[]{ (byte) 0xBD, 0x30 }); // C-5 dur=0x30
+        song.getPatterns().add(p1);
+
+        // Order: pattern 0, then pattern 1
+        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+        song.setLoopPoint(0);
+
+        PatternCompiler compiler = new PatternCompiler();
+        byte[] smps = compiler.compile(song);
+        assertNotNull(smps);
+        assertTrue(smps.length > 0);
+
+        // Re-import and verify both patterns' data are present
+        com.opensmps.deck.io.SmpsImporter importer = new com.opensmps.deck.io.SmpsImporter();
+        Song imported = importer.importData(smps, "multi-pattern");
+
+        byte[] importedTrack = imported.getPatterns().get(0).getTrackData(0);
+        assertNotNull(importedTrack);
+        // Track should contain data from both patterns concatenated:
+        // Pattern 0 data (A1 18) + Pattern 1 data (BD 30) + F6 jump
+        assertTrue(importedTrack.length >= 4,
+            "Imported track should contain data from both patterns");
+
+        // Verify first pattern's note (C-2 = 0xA1)
+        assertEquals((byte) 0xA1, importedTrack[0], "First note should be from pattern 0");
+
+        // Verify second pattern's note is present after pattern 0's data
+        // Pattern 0: A1 18 (2 bytes), pattern 1 starts at offset 2: BD 30
+        assertEquals((byte) 0xBD, importedTrack[2], "Second note should be from pattern 1");
+    }
 }
