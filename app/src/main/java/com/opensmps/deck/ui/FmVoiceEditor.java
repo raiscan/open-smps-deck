@@ -35,6 +35,8 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
     private static final double CANVAS_WIDTH = 200;
     private static final double CANVAS_HEIGHT = 120;
 
+    private static byte[] voiceClipboard;
+
     private final FmVoice voice;
     private final Canvas algorithmCanvas;
     private final VBox[] operatorColumns = new VBox[4];
@@ -73,6 +75,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         canvasWrapper.setMaxWidth(CANVAS_WIDTH + 12);
         canvasWrapper.setAlignment(Pos.CENTER_LEFT);
 
+        // Button bar (Copy / Paste / Init)
+        HBox buttonBar = buildButtonBar();
+
         // Operator columns
         HBox operatorRow = new HBox(8);
         operatorRow.setAlignment(Pos.TOP_LEFT);
@@ -86,7 +91,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         scrollPane.setStyle("-fx-background: " + BG_COLOR + "; -fx-background-color: " + BG_COLOR + ";");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
-        mainLayout.getChildren().addAll(topRow, canvasWrapper, scrollPane);
+        mainLayout.getChildren().addAll(topRow, canvasWrapper, buttonBar, scrollPane);
         dialogPane.setContent(mainLayout);
         dialogPane.setPrefSize(720, 620);
 
@@ -96,6 +101,67 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         // Initial draw
         drawAlgorithmDiagram();
         updateOperatorBorders();
+    }
+
+    private HBox buildButtonBar() {
+        HBox bar = new HBox(8);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setPadding(new Insets(4, 0, 4, 0));
+
+        Button copyBtn = new Button("Copy");
+        copyBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        copyBtn.setOnAction(e -> voiceClipboard = voice.getData());
+
+        Button pasteBtn = new Button("Paste");
+        pasteBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        pasteBtn.setOnAction(e -> {
+            if (voiceClipboard != null) {
+                FmVoice pasted = new FmVoice(voice.getName(), voiceClipboard);
+                // Copy all operator data
+                for (int op = 0; op < 4; op++) {
+                    voice.setMul(op, pasted.getMul(op));
+                    voice.setDt(op, pasted.getDt(op));
+                    voice.setTl(op, pasted.getTl(op));
+                    voice.setAr(op, pasted.getAr(op));
+                    voice.setD1r(op, pasted.getD1r(op));
+                    voice.setD2r(op, pasted.getD2r(op));
+                    voice.setD1l(op, pasted.getD1l(op));
+                    voice.setRr(op, pasted.getRr(op));
+                    voice.setRs(op, pasted.getRs(op));
+                    voice.setAm(op, pasted.getAm(op));
+                }
+                voice.setAlgorithm(pasted.getAlgorithm());
+                voice.setFeedback(pasted.getFeedback());
+                // Rebuild UI (close and reopen would be complex, so just update diagram)
+                drawAlgorithmDiagram();
+                updateOperatorBorders();
+            }
+        });
+
+        Button initBtn = new Button("Init");
+        initBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        initBtn.setOnAction(e -> {
+            // Reset to basic sine carrier patch (algo 0, all operators zeroed except TL)
+            voice.setAlgorithm(0);
+            voice.setFeedback(0);
+            for (int op = 0; op < 4; op++) {
+                voice.setMul(op, op == 3 ? 1 : 0);
+                voice.setDt(op, 0);
+                voice.setTl(op, op == 3 ? 0 : 127); // Only carrier audible
+                voice.setAr(op, 31);
+                voice.setD1r(op, 0);
+                voice.setD2r(op, 0);
+                voice.setD1l(op, 0);
+                voice.setRr(op, 15);
+                voice.setRs(op, 0);
+                voice.setAm(op, false);
+            }
+            drawAlgorithmDiagram();
+            updateOperatorBorders();
+        });
+
+        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn);
+        return bar;
     }
 
     private HBox buildTopRow() {
@@ -282,9 +348,8 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
                 connections = new int[][]{{0, 2}, {1, 2}, {2, 3}, {3, -1}};
             }
             case 2 -> {
-                // 1 feeds 2, 3 feeds 4, 2 and 3 both feed 4
-                // Actually: 1->2+3->4->OUT (2 and 3 both feed 4, 1 feeds only 2)
-                positions = new int[][]{{0, 0}, {1, 0}, {1, 2}, {2, 1}};
+                // 1->2->4, 3->4->OUT (Op3 is independent input)
+                positions = new int[][]{{0, 0}, {1, 0}, {0, 2}, {2, 1}};
                 connections = new int[][]{{0, 1}, {1, 3}, {2, 3}, {3, -1}};
             }
             case 3 -> {
