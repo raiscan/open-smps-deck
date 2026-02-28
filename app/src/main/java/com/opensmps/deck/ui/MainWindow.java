@@ -26,12 +26,9 @@ public class MainWindow {
     }
 
     private void setupLayout() {
-        // Top: Transport bar placeholder
-        HBox transportPlaceholder = new HBox();
-        transportPlaceholder.setPadding(new Insets(8));
-        transportPlaceholder.setStyle("-fx-background-color: #2a2a2a;");
-        transportPlaceholder.getChildren().add(createLabel("Transport"));
-        root.setTop(transportPlaceholder);
+        // Top: Transport bar
+        TransportBar transportBar = new TransportBar(playbackEngine, currentSong);
+        root.setTop(transportBar);
 
         // Center: Tracker grid placeholder
         StackPane gridPlaceholder = new StackPane();
