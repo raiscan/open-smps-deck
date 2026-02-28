@@ -1,6 +1,7 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
+import com.opensmps.deck.io.OsmpsVoiceFile;
 import com.opensmps.deck.model.FmVoice;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -11,6 +12,9 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.FileChooser;
+
+import java.io.File;
 
 /**
  * Dialog for editing an FM voice patch.
@@ -153,6 +157,25 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         keyOffThread.start();
     }
 
+    private void applyVoiceData(FmVoice source) {
+        for (int op = 0; op < 4; op++) {
+            voice.setMul(op, source.getMul(op));
+            voice.setDt(op, source.getDt(op));
+            voice.setTl(op, source.getTl(op));
+            voice.setAr(op, source.getAr(op));
+            voice.setD1r(op, source.getD1r(op));
+            voice.setD2r(op, source.getD2r(op));
+            voice.setD1l(op, source.getD1l(op));
+            voice.setRr(op, source.getRr(op));
+            voice.setRs(op, source.getRs(op));
+            voice.setAm(op, source.getAm(op));
+        }
+        voice.setAlgorithm(source.getAlgorithm());
+        voice.setFeedback(source.getFeedback());
+        drawAlgorithmDiagram();
+        updateOperatorBorders();
+    }
+
     private HBox buildButtonBar() {
         HBox bar = new HBox(8);
         bar.setAlignment(Pos.CENTER_LEFT);
@@ -167,24 +190,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         pasteBtn.setOnAction(e -> {
             if (voiceClipboard != null) {
                 FmVoice pasted = new FmVoice(voice.getName(), voiceClipboard);
-                // Copy all operator data
-                for (int op = 0; op < 4; op++) {
-                    voice.setMul(op, pasted.getMul(op));
-                    voice.setDt(op, pasted.getDt(op));
-                    voice.setTl(op, pasted.getTl(op));
-                    voice.setAr(op, pasted.getAr(op));
-                    voice.setD1r(op, pasted.getD1r(op));
-                    voice.setD2r(op, pasted.getD2r(op));
-                    voice.setD1l(op, pasted.getD1l(op));
-                    voice.setRr(op, pasted.getRr(op));
-                    voice.setRs(op, pasted.getRs(op));
-                    voice.setAm(op, pasted.getAm(op));
-                }
-                voice.setAlgorithm(pasted.getAlgorithm());
-                voice.setFeedback(pasted.getFeedback());
-                // Rebuild UI (close and reopen would be complex, so just update diagram)
-                drawAlgorithmDiagram();
-                updateOperatorBorders();
+                applyVoiceData(pasted);
             }
         });
 
@@ -214,7 +220,44 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
         previewBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
         previewBtn.setOnAction(e -> previewVoice());
 
-        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn);
+        Button savePresetBtn = new Button("Save Preset");
+        savePresetBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        savePresetBtn.setOnAction(e -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Save Voice Preset");
+            chooser.getExtensionFilters().add(
+                    new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
+            File file = chooser.showSaveDialog(getOwner());
+            if (file != null) {
+                try {
+                    OsmpsVoiceFile.save(voice, file);
+                } catch (java.io.IOException ex) {
+                    new Alert(Alert.AlertType.ERROR, "Failed to save preset: " + ex.getMessage(),
+                            ButtonType.OK).showAndWait();
+                }
+            }
+        });
+
+        Button loadPresetBtn = new Button("Load Preset");
+        loadPresetBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        loadPresetBtn.setOnAction(e -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Load Voice Preset");
+            chooser.getExtensionFilters().add(
+                    new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
+            File file = chooser.showOpenDialog(getOwner());
+            if (file != null) {
+                try {
+                    FmVoice loaded = OsmpsVoiceFile.load(file);
+                    applyVoiceData(loaded);
+                } catch (Exception ex) {
+                    new Alert(Alert.AlertType.ERROR, "Failed to load preset: " + ex.getMessage(),
+                            ButtonType.OK).showAndWait();
+                }
+            }
+        });
+
+        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn, savePresetBtn, loadPresetBtn);
         return bar;
     }
 
