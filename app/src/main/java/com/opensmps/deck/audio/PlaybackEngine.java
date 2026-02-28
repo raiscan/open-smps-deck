@@ -1,5 +1,6 @@
 package com.opensmps.deck.audio;
 
+import com.opensmps.deck.codec.PatternCompiler;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.SmpsMode;
 import com.opensmps.driver.AudioOutput;

@@ -1,4 +1,4 @@
-package com.opensmps.deck.audio;
+package com.opensmps.deck.codec;
 
 import com.opensmps.deck.io.SmpsImporter;
 import com.opensmps.deck.model.*;

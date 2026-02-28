@@ -1,6 +1,6 @@
 package com.opensmps.deck.io;
 
-import com.opensmps.deck.audio.PatternCompiler;
+import com.opensmps.deck.codec.PatternCompiler;
 import com.opensmps.deck.model.Song;
 
 import java.io.File;

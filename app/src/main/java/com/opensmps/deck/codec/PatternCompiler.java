@@ -1,4 +1,4 @@
-package com.opensmps.deck.audio;
+package com.opensmps.deck.codec;
 
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
