@@ -1,0 +1,41 @@
+# Maven build output
+target/
+
+# Java class files
+*.class
+
+# Package files
+*.jar
+*.war
+*.ear
+
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# ROM files (user-supplied, not committed)
+*.gen
+*.bin
+*.md
+!README.md
+
+# Temporary files
+*.tmp
+*.swp
+*~
