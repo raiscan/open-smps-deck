@@ -4,7 +4,7 @@ A standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG m
 
 OpenSMPS Deck produces SMPS-compatible output that can be:
 - Injected directly into Sonic 1, 2, or 3&K ROMs
-- Played by the [OpenGGF](https://github.com/raiscan/sonic-engine) game engine
+- Played by the [OpenGGF](https://github.com/jamesj999/OpenGGF) game engine
 - Used with SMPSPlay and other community tools
 
 **Key principle:** The internal model IS SMPS bytecode. The tracker grid is a decoded view over raw SMPS data. What you hear is exactly what exports.
@@ -164,7 +164,7 @@ Song model, codec, I/O, and JavaFX UI.
 
 ## Synth Core Origin
 
-The `synth-core` module is extracted from the [OpenGGF sonic-engine](https://github.com/raiscan/sonic-engine) project. The chip emulators are ported from SMPSPlay's libvgm/GPGX cores and aim for hardware-accurate synthesis.
+The `synth-core` module is extracted from the [OpenGGF sonic-engine](https://github.com/jamesj999/OpenGGF) project. The chip emulators are ported from SMPSPlay's libvgm/GPGX cores and aim for hardware-accurate synthesis.
 
 ## Testing
 
