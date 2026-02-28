@@ -128,6 +128,174 @@ class TestWavExporter {
         assertTrue(hasNonZero, "WAV audio data should contain non-zero samples");
     }
 
+    @Test
+    void testFadeOutActuallyAttenuates() throws IOException {
+        // Use a terminating song so WavExporter's multi-loop mechanism works.
+        // A looping (JUMP-based) song never signals completion, so the first
+        // WavExporter loop consumes all of maxDurationSeconds leaving no data
+        // for the second loop where fade-out is applied.
+        Song song = createTerminatingSong();
+        File wavFile = new File(tempDir, "test-fade.wav");
+
+        WavExporter exporter = new WavExporter();
+        exporter.setLoopCount(2);
+        exporter.setMaxDurationSeconds(30);
+        exporter.export(song, wavFile);
+
+        byte[] wav = Files.readAllBytes(wavFile.toPath());
+        assertTrue(wav.length > 44, "WAV file should have audio data beyond header");
+
+        // Parse PCM data after the 44-byte RIFF header
+        int pcmStart = 44;
+        int pcmLength = wav.length - pcmStart;
+        int sampleCount = pcmLength / 2;
+        assertTrue(sampleCount > 0, "Should have PCM samples");
+
+        // Divide into 4 quarters and compute AC RMS (subtract DC mean) of each.
+        // The YM2612 discrete chip model adds a constant DC offset (~384) that
+        // would mask the fade-out effect if we used raw RMS.
+        int samplesPerQuarter = sampleCount / 4;
+        double[] acRms = new double[4];
+        for (int q = 0; q < 4; q++) {
+            int start = pcmStart + q * samplesPerQuarter * 2;
+
+            // First pass: compute mean (DC component)
+            long sum = 0;
+            int count = 0;
+            for (int i = 0; i < samplesPerQuarter; i++) {
+                int bytePos = start + i * 2;
+                if (bytePos + 1 >= wav.length) break;
+                short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+                sum += sample;
+                count++;
+            }
+            double mean = (double) sum / count;
+
+            // Second pass: compute AC RMS (signal with DC removed)
+            double sumSquares = 0;
+            for (int i = 0; i < samplesPerQuarter; i++) {
+                int bytePos = start + i * 2;
+                if (bytePos + 1 >= wav.length) break;
+                short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+                double ac = sample - mean;
+                sumSquares += ac * ac;
+            }
+            acRms[q] = Math.sqrt(sumSquares / count);
+        }
+
+        // With loopCount=2, the final loop gets a linear fade from 1.0 to 0.0.
+        // The last quarter of the file (end of the faded second loop) should be
+        // quieter than the first quarter (start of the un-faded first loop).
+        assertTrue(acRms[3] < acRms[0],
+                "Last quarter AC RMS (" + acRms[3] + ") should be less than first quarter AC RMS ("
+                        + acRms[0] + ")");
+    }
+
+    @Test
+    void testSingleLoopNoFade() throws IOException {
+        Song song = createTestSong();
+        File wavFile = new File(tempDir, "test-single-loop.wav");
+
+        WavExporter exporter = new WavExporter();
+        exporter.setLoopCount(1);
+        exporter.setMaxDurationSeconds(2);
+        exporter.export(song, wavFile);
+
+        assertTrue(wavFile.exists(), "WAV file should be created");
+        byte[] wav = Files.readAllBytes(wavFile.toPath());
+        assertTrue(wav.length > 44, "WAV file should have data beyond the 44-byte header");
+
+        // Verify valid WAV header
+        assertEquals("RIFF", new String(wav, 0, 4), "Should start with RIFF marker");
+        assertEquals("WAVE", new String(wav, 8, 4), "Should contain WAVE marker");
+
+        // With loopCount=1, no fade is applied. Verify that audio data is non-zero.
+        boolean hasNonZero = false;
+        for (int i = 44; i < wav.length; i++) {
+            if (wav[i] != 0) {
+                hasNonZero = true;
+                break;
+            }
+        }
+        assertTrue(hasNonZero, "Single-loop WAV should contain non-zero audio data");
+    }
+
+    @Test
+    void testExportWithMutedChannels() throws IOException {
+        Song song = createAudibleSong();
+
+        // First, export with no muting to get a baseline RMS
+        File unmutedFile = new File(tempDir, "test-unmuted.wav");
+        WavExporter unmutedExporter = new WavExporter();
+        unmutedExporter.setLoopCount(1);
+        unmutedExporter.setMaxDurationSeconds(1);
+        unmutedExporter.export(song, unmutedFile);
+
+        // Then export with all channels muted
+        File mutedFile = new File(tempDir, "test-muted.wav");
+        WavExporter mutedExporter = new WavExporter();
+        mutedExporter.setLoopCount(1);
+        mutedExporter.setMaxDurationSeconds(1);
+
+        // Mute all 10 channels: FM 0-5 and PSG 0-3
+        boolean[] allMuted = new boolean[10];
+        java.util.Arrays.fill(allMuted, true);
+        mutedExporter.setMutedChannels(allMuted);
+        mutedExporter.export(song, mutedFile);
+
+        assertTrue(mutedFile.exists(), "WAV file should be created even with all channels muted");
+        byte[] mutedWav = Files.readAllBytes(mutedFile.toPath());
+        assertTrue(mutedWav.length > 44, "WAV should have data beyond header even when muted");
+
+        // Verify valid WAV header
+        assertEquals("RIFF", new String(mutedWav, 0, 4), "Should start with RIFF marker");
+        assertEquals("WAVE", new String(mutedWav, 8, 4), "Should contain WAVE marker");
+
+        // Compute AC RMS (DC-removed) for both exports. The YM2612 discrete chip
+        // model adds a constant DC offset (~384 after master gain) even when all
+        // channels are muted, so raw RMS would not reflect the actual signal level.
+        double unmutedAcRms = computeAcRms(Files.readAllBytes(unmutedFile.toPath()));
+        double mutedAcRms = computeAcRms(mutedWav);
+
+        // With all channels muted, the AC signal power should be substantially
+        // lower than the unmuted export which has an active FM note.
+        assertTrue(mutedAcRms < unmutedAcRms,
+                "Muted AC RMS (" + mutedAcRms + ") should be less than unmuted AC RMS ("
+                        + unmutedAcRms + ")");
+    }
+
+    /**
+     * Computes AC RMS (DC-removed root-mean-square) for PCM data in a WAV file.
+     * Subtracts the mean sample value before computing RMS, which removes the
+     * constant DC offset produced by the YM2612 discrete chip model.
+     */
+    private double computeAcRms(byte[] wav) {
+        int pcmStart = 44;
+        int sampleCount = (wav.length - pcmStart) / 2;
+        if (sampleCount <= 0) return 0.0;
+
+        // First pass: compute mean (DC component)
+        long sum = 0;
+        for (int i = 0; i < sampleCount; i++) {
+            int bytePos = pcmStart + i * 2;
+            if (bytePos + 1 >= wav.length) break;
+            short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+            sum += sample;
+        }
+        double mean = (double) sum / sampleCount;
+
+        // Second pass: compute AC RMS
+        double sumSquares = 0;
+        for (int i = 0; i < sampleCount; i++) {
+            int bytePos = pcmStart + i * 2;
+            if (bytePos + 1 >= wav.length) break;
+            short sample = (short) ((wav[bytePos] & 0xFF) | (wav[bytePos + 1] << 8));
+            double ac = sample - mean;
+            sumSquares += ac * ac;
+        }
+        return Math.sqrt(sumSquares / sampleCount);
+    }
+
     /**
      * Creates a minimal song with one FM channel playing a short note.
      * This produces valid SMPS data via PatternCompiler.
@@ -151,6 +319,114 @@ class TestWavExporter {
         // Set voice (EF 00), play note C4 (A1) duration 48 (30h)
         song.getPatterns().get(0).setTrackData(0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30});
+
+        return song;
+    }
+
+    /**
+     * Builds an SMPS voice (25 bytes) that produces audible output.
+     *
+     * <p>SMPS voice layout (operator order: Op1, Op3, Op2, Op4):
+     * <pre>
+     *   [0]     FB_ALGO
+     *   [1-4]   DT_MUL
+     *   [5-8]   RS_AR
+     *   [9-12]  AM_D1R
+     *   [13-16] D2R
+     *   [17-20] D1L_RR
+     *   [21-24] TL
+     * </pre>
+     *
+     * Uses algorithm 0 (only Op4 is the carrier). Op4 is set to full volume
+     * with instant attack (AR=31) and moderate release (RR=15). All modulator
+     * operators (Op1, Op2, Op3) are at max attenuation (TL=0x7F).
+     */
+    private byte[] buildAudibleVoice() {
+        byte[] v = new byte[25];
+        v[0] = 0x00;           // FB=0, ALGO=0 (Op1->Op2->Op3->Op4, only Op4 is carrier)
+        // DT_MUL: [1]=Op1, [2]=Op3, [3]=Op2, [4]=Op4
+        v[4] = 0x01;           // Op4 MUL=1 (fundamental frequency)
+        // RS_AR: [5]=Op1, [6]=Op3, [7]=Op2, [8]=Op4
+        v[8] = 0x1F;           // Op4 AR=31 (fastest attack)
+        // AM_D1R: [9]=Op1, [10]=Op3, [11]=Op2, [12]=Op4
+        v[12] = 0x00;          // Op4 D1R=0 (no first decay, sustain at max)
+        // D2R: [13]=Op1, [14]=Op3, [15]=Op2, [16]=Op4
+        v[16] = 0x00;          // Op4 D2R=0 (no second decay)
+        // D1L_RR: [17]=Op1, [18]=Op3, [19]=Op2, [20]=Op4
+        v[20] = 0x0F;          // Op4 D1L=0 (sustain at max), RR=15 (moderate release)
+        // TL: [21]=Op1, [22]=Op3, [23]=Op2, [24]=Op4
+        v[21] = 0x7F;          // Op1 TL=0x7F (silent)
+        v[22] = 0x7F;          // Op3 TL=0x7F (silent)
+        v[23] = 0x7F;          // Op2 TL=0x7F (silent)
+        v[24] = 0x00;          // Op4 TL=0x00 (full volume)
+        return v;
+    }
+
+    /**
+     * Creates a song with a properly configured FM voice that produces audible
+     * output. Unlike {@link #createTestSong()}, this method uses correct SMPS
+     * voice register indices and accounts for the SMPS DAC channel mapping.
+     *
+     * <p>The SMPS sequencer's FM channel order is {0x16, 0, 1, 2, 4, 5, 6},
+     * meaning the first FM pointer in the compiled header always maps to DAC
+     * (0x16). To route track data to an actual FM channel, the song must have
+     * at least 2 active FM-range channels: channel 0 occupies the DAC slot
+     * (with a rest), and channel 1 maps to FM channel 0.
+     */
+    private Song createAudibleSong() {
+        Song song = new Song();
+        song.setTempo(0x80);
+        song.getVoiceBank().add(new FmVoice("Sine", buildAudibleVoice()));
+
+        // Channel 0: rest (occupies the DAC slot in SMPS header)
+        song.getPatterns().get(0).setTrackData(0,
+                new byte[]{(byte) 0x80, 0x30});
+
+        // Channel 1: set voice 0, play note C4 (A1) for 48 ticks (maps to FM0)
+        song.getPatterns().get(0).setTrackData(1,
+                new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30});
+
+        return song;
+    }
+
+    /**
+     * Creates a song that terminates (hits STOP) rather than looping, with
+     * a properly configured FM voice for audible output.
+     * <p>
+     * The PatternCompiler always appends an F6 (JUMP) at the end of compiled
+     * track data, making standard songs loop forever within the SMPS sequencer.
+     * WavExporter's multi-loop mechanism relies on the driver reporting
+     * {@code isComplete()}, which only happens when all tracks hit F2 (STOP).
+     * <p>
+     * This method embeds an F2 byte inside the track data (before the trailing
+     * position) so the sequencer encounters it before reaching the compiler's
+     * appended JUMP. A dummy 0x80 (rest) byte follows the F2 to prevent the
+     * compiler from stripping it as a trailing F2.
+     */
+    private Song createTerminatingSong() {
+        Song song = new Song();
+        song.setTempo(0x80);
+        song.getVoiceBank().add(new FmVoice("Sine", buildAudibleVoice()));
+
+        // Channel 0: rest then STOP (occupies the DAC slot in SMPS header).
+        // Both channels must STOP for the sequencer to report isComplete().
+        song.getPatterns().get(0).setTrackData(0,
+                new byte[]{
+                        (byte) 0x80, 0x7F,     // rest, duration 127
+                        (byte) 0x80, 0x7F,     // rest, duration 127
+                        (byte) 0xF2,           // STOP
+                        (byte) 0x80            // dummy trailing byte
+                });
+
+        // Channel 1: FM note on FM0 (set voice, play 2x 127 ticks, then STOP)
+        song.getPatterns().get(0).setTrackData(1,
+                new byte[]{
+                        (byte) 0xEF, 0x00,     // set voice 0
+                        (byte) 0xA1, 0x7F,     // note C4, duration 127 ticks
+                        (byte) 0xA1, 0x7F,     // note C4, duration 127 ticks
+                        (byte) 0xF2,           // STOP
+                        (byte) 0x80            // dummy trailing byte
+                });
 
         return song;
     }
