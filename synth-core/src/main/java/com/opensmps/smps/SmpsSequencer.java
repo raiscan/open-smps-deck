@@ -11,6 +11,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Logger;
 
+/**
+ * Per-track SMPS sequencer. Reads SMPS bytecode and produces register writes.
+ */
 public class SmpsSequencer implements AudioStream, CoordFlagContext {
     private static final Logger LOGGER = Logger.getLogger(SmpsSequencer.class.getName());
     private final AbstractSmpsData smpsData;

@@ -15,7 +15,7 @@ import java.util.List;
 public class UndoManager {
 
     /** A single channel's snapshot before an edit. */
-    public record Edit(Pattern pattern, int channel, byte[] previousData) {}
+    public record Edit(Pattern pattern, int channel, byte[] data) {}
 
     private final Deque<List<Edit>> undoStack = new ArrayDeque<>();
     private final Deque<List<Edit>> redoStack = new ArrayDeque<>();
@@ -66,7 +66,7 @@ public class UndoManager {
 
         // Restore all channels in the group
         for (Edit edit : group) {
-            edit.pattern().setTrackData(edit.channel(), edit.previousData());
+            edit.pattern().setTrackData(edit.channel(), edit.data());
         }
         return true;
     }
@@ -89,7 +89,7 @@ public class UndoManager {
 
         // Apply redo data
         for (Edit edit : group) {
-            edit.pattern().setTrackData(edit.channel(), edit.previousData());
+            edit.pattern().setTrackData(edit.channel(), edit.data());
         }
         return true;
     }

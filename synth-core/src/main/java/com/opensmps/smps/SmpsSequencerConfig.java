@@ -7,6 +7,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+/**
+ * Configuration for SMPS sequencer behavior (tempo mode, base note, timing).
+ */
 public final class SmpsSequencerConfig {
 
     public enum TempoMode {

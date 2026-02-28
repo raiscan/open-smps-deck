@@ -1,9 +1,9 @@
 package com.opensmps.smps;
 
-public class TestSmpsData extends AbstractSmpsData {
+public class StubSmpsData extends AbstractSmpsData {
     private byte[][] psgEnvelopes;
 
-    public TestSmpsData(byte[] data, int z80StartAddress) {
+    public StubSmpsData(byte[] data, int z80StartAddress) {
         super(data, z80StartAddress);
     }
 

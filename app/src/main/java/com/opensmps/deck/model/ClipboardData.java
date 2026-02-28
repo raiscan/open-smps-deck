@@ -1,4 +1,4 @@
-package com.opensmps.deck.ui;
+package com.opensmps.deck.model;
 
 /**
  * Holds copied tracker data for paste operations.

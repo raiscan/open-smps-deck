@@ -91,7 +91,7 @@ class TestSmpsSequencer {
         smps[0x25] = (byte) 0xF2; // F2 = stop track
 
         // Build SMPS data and config
-        TestSmpsData data = new TestSmpsData(smps, 0);
+        StubSmpsData data = new StubSmpsData(smps, 0);
         data.setId(1);
 
         // S2-style config
@@ -157,7 +157,7 @@ class TestSmpsSequencer {
         smps[0x24] = 0x10;        // duration
         smps[0x25] = (byte) 0xF2; // stop
 
-        TestSmpsData data = new TestSmpsData(smps, 0);
+        StubSmpsData data = new StubSmpsData(smps, 0);
         SmpsSequencerConfig config = new SmpsSequencerConfig(
                 Collections.emptyMap(), 0x100,
                 new int[]{ 0x16, 0, 1, 2, 4, 5, 6 },

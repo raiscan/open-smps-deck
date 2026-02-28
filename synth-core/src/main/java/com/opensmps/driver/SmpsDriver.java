@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Z80 SMPS sound driver emulator. Sequences SMPS binary data and drives YM2612/PSG chip writes.
+ */
 public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
     private final Object sequencersLock = new Object();
     private final List<SmpsSequencer> sequencers = new ArrayList<>();

@@ -115,7 +115,7 @@ The `synth-core` module is extracted from the OpenGGF sonic-engine project (`com
 
 ## Testing
 
-- `TestSmpsData` in test sources provides a concrete `AbstractSmpsData` for unit tests
+- `StubSmpsData` in test sources provides a concrete `AbstractSmpsData` for unit tests
 - Chip emulator tests verify silence on init and audio output on key-on
 - Sequencer tests build SMPS binaries by hand and verify playback
 - Model tests verify round-trip data integrity

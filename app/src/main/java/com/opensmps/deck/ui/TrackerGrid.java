@@ -2,6 +2,7 @@ package com.opensmps.deck.ui;
 
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
+import com.opensmps.deck.model.ClipboardData;
 import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.UndoManager;
