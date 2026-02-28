@@ -66,25 +66,25 @@ class TestSongModel {
         voice.setOpParam(0, 0, 0x71);
         assertEquals(0x71, voice.getOpParam(0, 0));
 
-        // Set operator 2, param 3 (AM_D1R at byte[1 + 2*5 + 3] = byte[14])
+        // Set operator 2, param 3 (AM_D1R at byte[1 + 2*6 + 3] = byte[16])
         voice.setOpParam(2, 3, 0xAB);
         assertEquals(0xAB, voice.getOpParam(2, 3));
 
-        // Set operator 3, param 4 (D1L_RR at byte[1 + 3*5 + 4] = byte[20])
+        // Set operator 3, param 4 (D2R at byte[1 + 3*6 + 4] = byte[23])
         voice.setOpParam(3, 4, 0xFF);
         assertEquals(0xFF, voice.getOpParam(3, 4));
 
         // Verify the raw data reflects the writes
         byte[] raw = voice.getRawData();
         assertEquals((byte) 0x71, raw[1]);
-        assertEquals((byte) 0xAB, raw[14]);
-        assertEquals((byte) 0xFF, raw[20]);
+        assertEquals((byte) 0xAB, raw[16]);
+        assertEquals((byte) 0xFF, raw[23]);
 
         // Boundary checks
         assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(-1, 0));
         assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(4, 0));
         assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(0, -1));
-        assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(0, 5));
+        assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(0, 6));
     }
 
     @Test
@@ -248,5 +248,134 @@ class TestSongModel {
         assertEquals(1, song.getPsgEnvelopes().size());
         assertEquals("Env0", song.getPsgEnvelopes().get(0).getName());
         assertEquals(3, song.getPsgEnvelopes().get(0).getStepCount());
+    }
+
+    // --- FmVoice bit-field accessor tests ---
+
+    @Test
+    void testFmVoiceMulDt() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("MulDt", voiceData);
+
+        // DT_MUL byte: DT bits 4-6, MUL bits 0-3
+        voice.setMul(0, 0x0F);
+        assertEquals(0x0F, voice.getMul(0));
+        assertEquals(0, voice.getDt(0), "Setting MUL should not change DT");
+
+        voice.setDt(0, 0x07);
+        assertEquals(0x07, voice.getDt(0));
+        assertEquals(0x0F, voice.getMul(0), "Setting DT should not change MUL");
+
+        // Raw byte should be 0x7F (DT=7 << 4 | MUL=15)
+        assertEquals(0x7F, voice.getOpParam(0, 0));
+    }
+
+    @Test
+    void testFmVoiceTl() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("Tl", voiceData);
+
+        voice.setTl(1, 127);
+        assertEquals(127, voice.getTl(1));
+
+        // Bit 7 should always be masked off
+        voice.setTl(1, 0xFF);
+        assertEquals(0x7F, voice.getTl(1));
+    }
+
+    @Test
+    void testFmVoiceRsAr() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("RsAr", voiceData);
+
+        // RS_AR byte: RS bits 6-7, AR bits 0-4
+        voice.setAr(2, 0x1F);
+        assertEquals(0x1F, voice.getAr(2));
+        assertEquals(0, voice.getRs(2), "Setting AR should not change RS");
+
+        voice.setRs(2, 3);
+        assertEquals(3, voice.getRs(2));
+        assertEquals(0x1F, voice.getAr(2), "Setting RS should not change AR");
+
+        // Raw byte should be 0xDF (RS=3 << 6 | AR=31)
+        assertEquals(0xDF, voice.getOpParam(2, 2));
+    }
+
+    @Test
+    void testFmVoiceAmD1r() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("AmD1r", voiceData);
+
+        // AM_D1R byte: AM bit 7, D1R bits 0-4
+        voice.setD1r(3, 0x1F);
+        assertEquals(0x1F, voice.getD1r(3));
+        assertFalse(voice.getAm(3), "D1R should not set AM");
+
+        voice.setAm(3, true);
+        assertTrue(voice.getAm(3));
+        assertEquals(0x1F, voice.getD1r(3), "Setting AM should not change D1R");
+
+        // Raw byte should be 0x9F (AM=1 << 7 | D1R=31)
+        assertEquals(0x9F, voice.getOpParam(3, 3));
+
+        voice.setAm(3, false);
+        assertFalse(voice.getAm(3));
+        assertEquals(0x1F, voice.getD1r(3), "Clearing AM should not change D1R");
+    }
+
+    @Test
+    void testFmVoiceD1lRr() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("D1lRr", voiceData);
+
+        // D1L_RR byte: D1L bits 4-7, RR bits 0-3
+        voice.setRr(0, 0x0F);
+        assertEquals(0x0F, voice.getRr(0));
+        assertEquals(0, voice.getD1l(0), "Setting RR should not change D1L");
+
+        voice.setD1l(0, 0x0F);
+        assertEquals(0x0F, voice.getD1l(0));
+        assertEquals(0x0F, voice.getRr(0), "Setting D1L should not change RR");
+
+        // Raw byte should be 0xFF (D1L=15 << 4 | RR=15)
+        assertEquals(0xFF, voice.getOpParam(0, 5));
+    }
+
+    @Test
+    void testFmVoiceIsCarrier() {
+        byte[] voiceData = new byte[25];
+        FmVoice voice = new FmVoice("Carrier", voiceData);
+
+        // Algorithm 0: only Op4 (SMPS index 3) is carrier
+        voice.setAlgorithm(0);
+        assertFalse(voice.isCarrier(0));
+        assertFalse(voice.isCarrier(1));
+        assertFalse(voice.isCarrier(2));
+        assertTrue(voice.isCarrier(3));
+
+        // Algorithm 7: all operators are carriers
+        voice.setAlgorithm(7);
+        assertTrue(voice.isCarrier(0));
+        assertTrue(voice.isCarrier(1));
+        assertTrue(voice.isCarrier(2));
+        assertTrue(voice.isCarrier(3));
+
+        // Algorithm 4: Op2 (idx 2) and Op4 (idx 3) are carriers
+        voice.setAlgorithm(4);
+        assertFalse(voice.isCarrier(0));
+        assertFalse(voice.isCarrier(1));
+        assertTrue(voice.isCarrier(2));
+        assertTrue(voice.isCarrier(3));
+    }
+
+    @Test
+    void testFmVoiceDisplayOrder() {
+        // SMPS order: Op1=0, Op3=1, Op2=2, Op4=3
+        // Display order: Op1=0, Op2=1, Op3=2, Op4=3
+        // displayToSmps: display[0]=0, display[1]=2, display[2]=1, display[3]=3
+        assertEquals(0, FmVoice.displayToSmps(0)); // Display Op1 -> SMPS 0
+        assertEquals(2, FmVoice.displayToSmps(1)); // Display Op2 -> SMPS 2
+        assertEquals(1, FmVoice.displayToSmps(2)); // Display Op3 -> SMPS 1
+        assertEquals(3, FmVoice.displayToSmps(3)); // Display Op4 -> SMPS 3
     }
 }
