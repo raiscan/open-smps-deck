@@ -41,26 +41,55 @@ Click a channel header in the **Tracker Grid** to mute or unmute that channel. H
 
 When a solo is active, every channel except the soloed one is treated as muted. Toggling any individual mute while solo is active clears the solo first.
 
+## Live Reload on Edit
+
+When playback is active and you edit the song (change notes, instruments, order list, or voices), the engine automatically recompiles the song and resumes playback from the approximate current position. You do not need to stop and restart playback to hear your changes.
+
+Mute and solo state is preserved across live reloads. The playback cursor continues tracking the current position.
+
+## Playback Cursor
+
+During playback, a teal highlight bar tracks the currently playing row in the **Tracker Grid**. This is separate from the blue edit cursor -- you can continue editing at one position while watching playback progress at another.
+
+The playback cursor clears automatically when playback stops.
+
 ## WAV Export
 
 Select **File > Export WAV...** to render the song to a standard WAV audio file.
 
-### Render Settings
+After choosing the output file, a settings dialog appears with the following controls:
+
+| Control | Type | Default | Range |
+|---------|------|---------|-------|
+| **Loop Count** | Spinner | 2 | 1--99 |
+| **Enable Fade Out** | Checkbox | Checked | -- |
+| **Fade Duration** | Spinner (seconds) | 3.0 | 0.1--30.0 |
+| **Fade Mode** | Combo box | Extend | Extend / Inset |
+
+### Render Format
 
 | Setting | Value |
 |---------|-------|
 | Sample rate | 44,100 Hz |
 | Bit depth | 16-bit |
 | Channels | Stereo |
-| Loop count | 2 (default) |
-| Fade-out | Linear fade applied over the entire final loop |
 | Maximum duration | 600 seconds |
 
 The exporter creates a dedicated playback engine instance and renders the song offline -- it does not play through speakers. A progress dialog appears while the render is running. The dialog closes automatically when the export finishes.
 
-### How Looping and Fade-Out Work
+### Loop Count
 
-The song is rendered through the SMPS sequencer for the configured number of loops (default 2). When the loop count is greater than 1, the final loop receives a linear fade-out from full volume to silence. Songs that do not loop simply render once and stop.
+The song is rendered through the SMPS sequencer for the configured number of loops. Songs that do not loop (those using STOP instead of JUMP) render once regardless of the setting.
+
+### Fade Modes
+
+When **Enable Fade Out** is checked, one of two fade modes applies:
+
+- **Extend** -- After all loops complete, the engine continues rendering for the configured fade duration. A linear fade from full volume to silence runs over this extension. The total audio length equals all loops plus the fade duration. Use this for a clean transition to silence after the music finishes.
+
+- **Inset** -- The fade runs over the last N seconds of the already-rendered audio. The total audio length equals all loops (no extension). The final portion fades to silence in place. Use this to trim endings without adding extra time.
+
+When **Enable Fade Out** is unchecked, the fade duration and mode controls are disabled. The export produces clean audio with no fade applied.
 
 ### Muted Channels
 
