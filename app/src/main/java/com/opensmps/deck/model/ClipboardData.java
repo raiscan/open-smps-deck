@@ -9,8 +9,9 @@ public class ClipboardData {
     private final byte[][] channelData; // one byte[] per channel in the selection
     private final int channelCount;
     private final int rowCount;
+    private final Song sourceSong;
 
-    public ClipboardData(byte[][] channelData, int rowCount) {
+    public ClipboardData(byte[][] channelData, int rowCount, Song sourceSong) {
         // Defensive copy
         this.channelData = new byte[channelData.length][];
         for (int i = 0; i < channelData.length; i++) {
@@ -18,6 +19,11 @@ public class ClipboardData {
         }
         this.channelCount = channelData.length;
         this.rowCount = rowCount;
+        this.sourceSong = sourceSong;
+    }
+
+    public ClipboardData(byte[][] channelData, int rowCount) {
+        this(channelData, rowCount, null);
     }
 
     /**
@@ -35,4 +41,7 @@ public class ClipboardData {
 
     /** Get the number of rows in this clipboard selection. */
     public int getRowCount() { return rowCount; }
+
+    /** Get the source song this data was copied from, or null if unknown. */
+    public Song getSourceSong() { return sourceSong; }
 }

@@ -477,7 +477,7 @@ public class TrackerGrid extends ScrollPane {
             channelData[ch] = SmpsEncoder.extractRowRange(trackData, minRow, rowCount);
         }
 
-        clipboard = new ClipboardData(channelData, rowCount);
+        clipboard = new ClipboardData(channelData, rowCount, song);
     }
 
     private void deleteSelection() {
