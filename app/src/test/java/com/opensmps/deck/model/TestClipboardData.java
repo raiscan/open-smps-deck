@@ -35,16 +35,22 @@ class TestClipboardData {
     @Test
     void sourceSongStoredCorrectly() {
         Song song = new Song();
+        song.getVoiceBank().add(new FmVoice("Test Voice", new byte[FmVoice.VOICE_SIZE]));
         byte[][] data = {{0x01}};
         ClipboardData clip = new ClipboardData(data, 1, song);
-        assertSame(song, clip.getSourceSong());
+        assertTrue(clip.isCrossSong(), "isCrossSong should be true when sourceSong is provided");
+        assertNotNull(clip.getSourceVoices(), "getSourceVoices should be non-null for cross-song copy");
+        assertEquals(1, clip.getSourceVoices().size(), "Voice bank snapshot should have 1 entry");
+        assertNull(clip.getSourceSong(), "Deprecated getSourceSong should return null");
     }
 
     @Test
     void sourceSongNullByDefault() {
         byte[][] data = {{0x01}};
         ClipboardData clip = new ClipboardData(data, 1);
-        assertNull(clip.getSourceSong());
+        assertFalse(clip.isCrossSong(), "isCrossSong should be false when no source song");
+        assertNull(clip.getSourceVoices(), "getSourceVoices should be null for same-song copy");
+        assertNull(clip.getSourcePsgEnvelopes(), "getSourcePsgEnvelopes should be null for same-song copy");
     }
 
     @Test

@@ -4,7 +4,9 @@ import com.opensmps.deck.codec.InstrumentRemapper;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
 import com.opensmps.deck.model.ClipboardData;
+import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
+import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.UndoManager;
 import javafx.scene.canvas.Canvas;
@@ -52,6 +54,9 @@ public class TrackerGrid extends ScrollPane {
     private int selEndRow = -1, selEndChannel = -1;
     private ClipboardData clipboard;
     private final UndoManager undoManager = new UndoManager();
+    private Runnable onTogglePlayback;
+    private Runnable onStopPlayback;
+    private Runnable onDirty;
 
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
@@ -68,6 +73,11 @@ public class TrackerGrid extends ScrollPane {
     public void setInstrumentPanel(InstrumentPanel panel) {
         this.instrumentPanel = panel;
     }
+
+    public void setOnTogglePlayback(Runnable callback) { this.onTogglePlayback = callback; }
+    public void setOnStopPlayback(Runnable callback) { this.onStopPlayback = callback; }
+    public void setOnDirty(Runnable callback) { this.onDirty = callback; }
+    private void markDirty() { if (onDirty != null) onDirty.run(); }
 
     public void setSong(Song song) {
         this.song = song;
@@ -280,6 +290,8 @@ public class TrackerGrid extends ScrollPane {
                 case A -> selectAll();
                 case Z -> { if (undoManager.undo()) refreshDisplay(); }
                 case Y -> { if (undoManager.redo()) refreshDisplay(); }
+                case UP -> { currentOctave = Math.min(currentOctave + 1, 8); }
+                case DOWN -> { currentOctave = Math.max(currentOctave - 1, 0); }
                 default -> {}
             }
             e.consume();
@@ -310,7 +322,12 @@ public class TrackerGrid extends ScrollPane {
             case F5 -> currentOctave = 5;
             case F6 -> currentOctave = 6;
             case F7 -> currentOctave = 7;
-            case ESCAPE -> clearSelection();
+            case F8 -> currentOctave = 8;
+            case SPACE -> { if (onTogglePlayback != null) onTogglePlayback.run(); }
+            case ESCAPE -> {
+                if (onStopPlayback != null) onStopPlayback.run();
+                clearSelection();
+            }
             default -> {
                 String text = e.getText();
                 if (text != null && !text.isEmpty()) {
@@ -377,6 +394,7 @@ public class TrackerGrid extends ScrollPane {
 
     private void insertNote(int noteValue) {
         if (song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
@@ -386,10 +404,12 @@ public class TrackerGrid extends ScrollPane {
         pattern.setTrackData(cursorChannel, newData);
         cursorRow++;
         refreshDisplay();
+        markDirty();
     }
 
     private void insertRest() {
         if (song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] restBytes = SmpsEncoder.encodeRest(currentDuration);
@@ -398,20 +418,23 @@ public class TrackerGrid extends ScrollPane {
         pattern.setTrackData(cursorChannel, newData);
         cursorRow++;
         refreshDisplay();
+        markDirty();
     }
 
     private void deleteAtCursor() {
         if (song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         byte[] trackData = pattern.getTrackData(cursorChannel);
         byte[] newData = SmpsEncoder.deleteRow(trackData, cursorRow);
         undoManager.recordEdit(pattern, cursorChannel);
         pattern.setTrackData(cursorChannel, newData);
         refreshDisplay();
+        markDirty();
     }
 
     private void insertEmptyRow() {
-        // Insert a rest at the cursor position (pushing down)
+        // In SMPS, a rest is the equivalent of a blank row (every tick must have data)
         insertRest();
     }
 
@@ -462,6 +485,7 @@ public class TrackerGrid extends ScrollPane {
 
     private void copySelection() {
         if (!hasSelection() || song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
         int minCh = getSelMinChannel();
@@ -482,6 +506,7 @@ public class TrackerGrid extends ScrollPane {
 
     private void deleteSelection() {
         if (!hasSelection() || song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
         int minCh = getSelMinChannel();
@@ -508,10 +533,12 @@ public class TrackerGrid extends ScrollPane {
 
         clearSelection();
         refreshDisplay();
+        markDirty();
     }
 
     private void pasteAtCursor() {
         if (clipboard == null || song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
         // Build paste data from clipboard
@@ -522,9 +549,9 @@ public class TrackerGrid extends ScrollPane {
         }
 
         // Cross-song paste: resolve instrument references
-        Song srcSong = clipboard.getSourceSong();
-        if (srcSong != null && srcSong != song) {
-            pasteChannelData = resolveCrossPaste(pasteChannelData, srcSong, song);
+        if (clipboard.isCrossSong()) {
+            pasteChannelData = resolveCrossPaste(pasteChannelData,
+                    clipboard.getSourceVoices(), clipboard.getSourcePsgEnvelopes(), song);
             if (pasteChannelData == null) return; // user cancelled
         }
 
@@ -553,9 +580,11 @@ public class TrackerGrid extends ScrollPane {
             pattern.setTrackData(targetChannel, newData);
         }
         refreshDisplay();
+        markDirty();
     }
 
-    private byte[][] resolveCrossPaste(byte[][] channelData, Song srcSong, Song dstSong) {
+    private byte[][] resolveCrossPaste(byte[][] channelData, List<FmVoice> srcVoices,
+                                        List<PsgEnvelope> srcPsgEnvelopes, Song dstSong) {
         Set<Integer> allVoices = new LinkedHashSet<>();
         Set<Integer> allPsg = new LinkedHashSet<>();
         for (byte[] data : channelData) {
@@ -567,9 +596,9 @@ public class TrackerGrid extends ScrollPane {
         if (allVoices.isEmpty() && allPsg.isEmpty()) return channelData;
 
         Map<Integer, Integer> voiceMap = InstrumentRemapper.autoRemap(
-                srcSong.getVoiceBank(), dstSong.getVoiceBank(), allVoices);
+                srcVoices, dstSong.getVoiceBank(), allVoices);
         Map<Integer, Integer> psgMap = InstrumentRemapper.autoRemapPsg(
-                srcSong.getPsgEnvelopes(), dstSong.getPsgEnvelopes(), allPsg);
+                srcPsgEnvelopes, dstSong.getPsgEnvelopes(), allPsg);
 
         Set<Integer> unresolvedVoices = new LinkedHashSet<>(allVoices);
         unresolvedVoices.removeAll(voiceMap.keySet());
@@ -580,12 +609,17 @@ public class TrackerGrid extends ScrollPane {
             return rewriteAll(channelData, voiceMap, psgMap);
         }
 
+        Song srcProxy = new Song();
+        srcProxy.getVoiceBank().addAll(srcVoices);
+        srcProxy.getPsgEnvelopes().addAll(srcPsgEnvelopes);
         InstrumentResolveDialog dialog = new InstrumentResolveDialog(
-                srcSong, dstSong, unresolvedVoices, unresolvedPsg);
+                srcProxy, dstSong, unresolvedVoices, unresolvedPsg);
         Optional<InstrumentResolveDialog.Resolution> result = dialog.showAndWait();
         if (result.isEmpty()) return null;
 
         InstrumentResolveDialog.Resolution res = result.get();
+        // Note: voice bank additions from cross-paste are not undoable.
+        // A full undo system for voice bank changes is planned for a future phase.
         dstSong.getVoiceBank().addAll(res.voicesToCopy());
         dstSong.getPsgEnvelopes().addAll(res.envelopesToCopy());
         voiceMap.putAll(res.voiceMap());
@@ -604,6 +638,7 @@ public class TrackerGrid extends ScrollPane {
 
     private void transposeSelection(int semitones) {
         if (song == null) return;
+        if (currentPatternIndex >= song.getPatterns().size()) return;
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
 
         if (hasSelection()) {
@@ -612,9 +647,12 @@ public class TrackerGrid extends ScrollPane {
             int minRow = getSelMinRow();
             int rowCount = getSelMaxRow() - minRow + 1;
 
-            for (int ch = minCh; ch <= maxCh; ch++) {
-                undoManager.recordEdit(pattern, ch);
+            int chCount = maxCh - minCh + 1;
+            int[] channels = new int[chCount];
+            for (int i = 0; i < chCount; i++) {
+                channels[i] = minCh + i;
             }
+            undoManager.recordMultiEdit(pattern, channels);
             for (int ch = minCh; ch <= maxCh; ch++) {
                 byte[] trackData = pattern.getTrackData(ch);
                 byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
@@ -628,6 +666,7 @@ public class TrackerGrid extends ScrollPane {
             pattern.setTrackData(cursorChannel, transposed);
         }
         refreshDisplay();
+        markDirty();
     }
 
     public UndoManager getUndoManager() { return undoManager; }

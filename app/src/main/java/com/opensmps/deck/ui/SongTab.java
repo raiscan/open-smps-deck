@@ -60,6 +60,9 @@ public class SongTab {
         orderListPanel = new OrderListPanel(song);
         instrumentPanel = new InstrumentPanel(song);
         trackerGrid.setInstrumentPanel(instrumentPanel);
+        trackerGrid.setOnDirty(() -> setDirty(true));
+        instrumentPanel.setOnDirty(() -> setDirty(true));
+        orderListPanel.setOnDirty(() -> setDirty(true));
     }
 
     /**

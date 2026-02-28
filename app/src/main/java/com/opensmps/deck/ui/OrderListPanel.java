@@ -24,6 +24,10 @@ public class OrderListPanel extends VBox {
     private final ListView<Integer> orderListView;
     private IntConsumer onOrderRowSelected;
     private int selectedRow = 0;
+    private Runnable onDirty;
+
+    public void setOnDirty(Runnable callback) { this.onDirty = callback; }
+    private void markDirty() { if (onDirty != null) onDirty.run(); }
 
     public OrderListPanel(Song song) {
         this.song = song;
@@ -118,6 +122,7 @@ public class OrderListPanel extends VBox {
         }
 
         refresh();
+        markDirty();
     }
 
     private void removeRow() {
@@ -131,6 +136,7 @@ public class OrderListPanel extends VBox {
                 song.setLoopPoint(song.getOrderList().size() - 1);
             }
             refresh();
+            markDirty();
         }
     }
 
@@ -142,6 +148,7 @@ public class OrderListPanel extends VBox {
             song.getOrderList().add(idx + 1, copy);
             selectedRow = idx + 1;
             refresh();
+            markDirty();
         }
     }
 
@@ -150,6 +157,7 @@ public class OrderListPanel extends VBox {
         if (idx >= 0) {
             song.setLoopPoint(idx);
             refresh(); // Re-render to show loop marker
+            markDirty();
         }
     }
 

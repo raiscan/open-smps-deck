@@ -36,6 +36,10 @@ public class InstrumentPanel extends VBox {
     private final ListView<String> envelopeListView;
     private final ObservableList<String> voiceItems;
     private final ObservableList<String> envelopeItems;
+    private Runnable onDirty;
+
+    public void setOnDirty(Runnable callback) { this.onDirty = callback; }
+    private void markDirty() { if (onDirty != null) onDirty.run(); }
 
     /**
      * Creates a new instrument panel bound to the given song model.
@@ -144,6 +148,7 @@ public class InstrumentPanel extends VBox {
             song.getVoiceBank().add(result.get());
             refreshVoiceList();
             voiceListView.getSelectionModel().selectLast();
+            markDirty();
         }
     }
 
@@ -160,6 +165,7 @@ public class InstrumentPanel extends VBox {
             song.getVoiceBank().set(index, result.get());
             refreshVoiceList();
             voiceListView.getSelectionModel().select(index);
+            markDirty();
         }
     }
 
@@ -171,6 +177,7 @@ public class InstrumentPanel extends VBox {
 
         song.getVoiceBank().remove(index);
         refreshVoiceList();
+        markDirty();
     }
 
     // --- Envelope operations ---
@@ -186,6 +193,7 @@ public class InstrumentPanel extends VBox {
             song.getPsgEnvelopes().add(result.get());
             refreshEnvelopeList();
             envelopeListView.getSelectionModel().selectLast();
+            markDirty();
         }
     }
 
@@ -202,6 +210,7 @@ public class InstrumentPanel extends VBox {
             song.getPsgEnvelopes().set(index, result.get());
             refreshEnvelopeList();
             envelopeListView.getSelectionModel().select(index);
+            markDirty();
         }
     }
 
@@ -213,6 +222,7 @@ public class InstrumentPanel extends VBox {
 
         song.getPsgEnvelopes().remove(index);
         refreshEnvelopeList();
+        markDirty();
     }
 
     // --- List refresh helpers ---
