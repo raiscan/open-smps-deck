@@ -1,6 +1,7 @@
 package com.opensmps.deck.audio;
 
 import com.opensmps.deck.model.*;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -292,6 +293,29 @@ class TestPlaybackEngine {
     }
 
     @Test
+    void reloadPreservesApproximatePlaybackPosition() {
+        Song song = createTwoOrderSong();
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        // Render enough to advance through some of the song
+        for (int i = 0; i < 40; i++) {
+            engine.renderBuffer(new short[4096]);
+        }
+
+        PlaybackEngine.PlaybackPosition beforeReload = engine.getPlaybackPosition();
+        Assumptions.assumeTrue(beforeReload != null,
+                "Driver completed before position could be read");
+
+        engine.reload(song);
+
+        PlaybackEngine.PlaybackPosition afterReload = engine.getPlaybackPosition();
+        assertNotNull(afterReload, "Should have a position after reload");
+        assertEquals(beforeReload.orderIndex(), afterReload.orderIndex(),
+                "Reload should restart at the same order row");
+    }
+
+    @Test
     void getPlaybackPositionReturnsValidPositionAfterLoad() {
         Song song = createTestSong();
         PlaybackEngine engine = new PlaybackEngine();
@@ -304,8 +328,8 @@ class TestPlaybackEngine {
 
         PlaybackEngine.PlaybackPosition pos = engine.getPlaybackPosition();
         assertNotNull(pos, "Should return a position after loading a song with FM data");
-        assertTrue(pos.orderIndex() >= 0, "Order index should be non-negative");
-        assertTrue(pos.rowIndex() >= 0, "Row index should be non-negative");
+        assertEquals(0, pos.orderIndex(), "Single-pattern song should report order index 0");
+        assertEquals(0, pos.rowIndex(), "Single-pattern song should report row index 0");
     }
 
     @Test

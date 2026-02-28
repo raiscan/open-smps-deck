@@ -27,8 +27,8 @@ public class PlaybackEngine {
     private final PlaybackSliceBuilder playbackSliceBuilder;
     private AudioOutput audioOutput;
     private SmpsSequencer currentSequencer;
-    private PatternCompiler.CompilationResult compilationResult;
-    private int baseOrderIndex;
+    private volatile PatternCompiler.CompilationResult compilationResult;
+    private int baseOrderIndex; // only accessed from UI thread
 
     /**
      * Create a playback engine with a 44.1 kHz driver and default compiler.
@@ -154,9 +154,25 @@ public class PlaybackEngine {
         audioOutput.start();
     }
 
-    /** Reload song (recompile + restart from beginning). */
+    /** Reload song: recompile and seek to current order position. Resumes playback if active. */
     public void reload(Song song) {
-        loadSong(song);
+        PlaybackPosition pos = getPlaybackPosition();
+        boolean wasPlaying = isPlaying();
+
+        if (wasPlaying && audioOutput != null) {
+            audioOutput.stop();
+        }
+
+        if (pos != null) {
+            baseOrderIndex = pos.orderIndex();
+            loadSongImpl(createPlaybackSlice(song, pos.orderIndex(), pos.rowIndex()));
+        } else {
+            loadSong(song);
+        }
+
+        if (wasPlaying) {
+            play();
+        }
     }
 
     /** Set FM channel mute. */
@@ -180,7 +196,8 @@ public class PlaybackEngine {
     public boolean isPlaying() { return audioOutput != null && audioOutput.isRunning(); }
 
     /**
-     * Maps the sequencer's current byte position to order/row coordinates.
+     * Returns the current playback position in terms of the original song's
+     * order list and pattern row, or {@code null} if no song is loaded.
      *
      * <p>Returns {@code null} when no song is loaded, or when the active
      * track position cannot be resolved (e.g. the sequencer has not yet
@@ -189,6 +206,8 @@ public class PlaybackEngine {
      * <p>The returned {@code orderIndex} is adjusted by {@code baseOrderIndex}
      * so that play-from-cursor slices report positions relative to the
      * original song order list.
+     *
+     * <p>Intended for UI polling from the application thread.
      */
     public PlaybackPosition getPlaybackPosition() {
         if (compilationResult == null) return null;
@@ -232,19 +251,25 @@ public class PlaybackEngine {
      * track offset range contains it.  Each channel timeline knows
      * its trackOffset; the position must fall at or after it to be
      * a valid match.
+     *
+     * <p>When multiple timelines qualify (i.e. the position falls within
+     * more than one channel's range), the one with the highest
+     * {@code trackOffset} wins.  This selects the most specific match,
+     * since a higher offset means the position is closer to that
+     * channel's data start and therefore more likely to belong to it.
      */
     private PatternCompiler.CursorPosition resolveFromMatchingTimeline(int absolutePos) {
+        PatternCompiler.ChannelTimeline best = null;
         for (int ch = 0; ch < 10; ch++) {
-            PatternCompiler.ChannelTimeline timeline =
-                    compilationResult.getChannelTimeline(ch);
+            PatternCompiler.ChannelTimeline timeline = compilationResult.getChannelTimeline(ch);
             if (timeline == null || timeline.getRowCount() == 0) continue;
-            // Only resolve against a timeline whose track contains this position
             if (absolutePos >= timeline.getTrackOffset()) {
-                PatternCompiler.CursorPosition cursor = timeline.resolvePosition(absolutePos);
-                if (cursor != null) return cursor;
+                if (best == null || timeline.getTrackOffset() > best.getTrackOffset()) {
+                    best = timeline;
+                }
             }
         }
-        return null;
+        return best != null ? best.resolvePosition(absolutePos) : null;
     }
 
     /**
