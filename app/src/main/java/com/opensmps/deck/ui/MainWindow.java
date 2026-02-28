@@ -3,8 +3,10 @@ package com.opensmps.deck.ui;
 import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.io.ImportableVoice;
 import com.opensmps.deck.io.ProjectFile;
+import com.opensmps.deck.io.Rym2612Importer;
 import com.opensmps.deck.io.SmpsExporter;
 import com.opensmps.deck.io.SmpsImporter;
+import com.opensmps.deck.io.VoiceBankFile;
 import com.opensmps.deck.io.WavExporter;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Song;
@@ -55,6 +57,7 @@ public class MainWindow {
         songTab.buildContent();
         songTab.getTrackerGrid().setPlaybackEngine(playbackEngine);
         songTab.getInstrumentPanel().setPlaybackEngine(playbackEngine);
+        songTab.getInstrumentPanel().setOnImportBank(this::onImportVoiceBank);
 
         // Wire transport callbacks for keyboard shortcuts in TrackerGrid
         songTab.getTrackerGrid().setOnTogglePlayback(() -> {
@@ -174,9 +177,16 @@ public class MainWindow {
         MenuItem importSmpsItem = new MenuItem("Import SMPS...");
         importSmpsItem.setOnAction(e -> onImportSmps());
 
+        MenuItem importVoiceBankItem = new MenuItem("Import Voice Bank...");
+        importVoiceBankItem.setOnAction(e -> onImportVoiceBank());
+
+        MenuItem exportVoiceBankItem = new MenuItem("Export Voice Bank...");
+        exportVoiceBankItem.setOnAction(e -> onExportVoiceBank());
+
         fileMenu.getItems().addAll(newItem, openItem, new SeparatorMenuItem(),
                 saveItem, saveAsItem, separator, exportItem, exportWavItem,
-                new SeparatorMenuItem(), importVoicesItem, importSmpsItem);
+                new SeparatorMenuItem(), importVoicesItem, importSmpsItem,
+                new SeparatorMenuItem(), importVoiceBankItem, exportVoiceBankItem);
 
         menuBar.getMenus().add(fileMenu);
         return menuBar;
@@ -343,6 +353,56 @@ public class MainWindow {
                 addNewTab(songTab);
             } catch (Exception ex) {
                 showError("Failed to import SMPS", ex.getMessage());
+            }
+        }
+    }
+
+    private void onImportVoiceBank() {
+        SongTab songTab = getActiveSongTab();
+        if (songTab == null) return;
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Import Voice Bank");
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Voice Files", "*.ovm", "*.rym2612"),
+                new FileChooser.ExtensionFilter("OpenSMPS Voice Bank", "*.ovm"),
+                new FileChooser.ExtensionFilter("RYM2612 Patch", "*.rym2612")
+        );
+        File file = fileChooser.showOpenDialog(stage);
+        if (file == null) return;
+
+        try {
+            Song song = songTab.getSong();
+            if (file.getName().toLowerCase().endsWith(".rym2612")) {
+                FmVoice voice = Rym2612Importer.importFile(file);
+                song.getVoiceBank().add(voice);
+            } else {
+                VoiceBankFile.LoadResult result = VoiceBankFile.load(file);
+                song.getVoiceBank().addAll(result.voices());
+                song.getPsgEnvelopes().addAll(result.psgEnvelopes());
+            }
+            songTab.getInstrumentPanel().refresh();
+        } catch (Exception ex) {
+            showError("Failed to import voice bank", ex.getMessage());
+        }
+    }
+
+    private void onExportVoiceBank() {
+        SongTab songTab = getActiveSongTab();
+        if (songTab == null) return;
+
+        Song song = songTab.getSong();
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Export Voice Bank");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("OpenSMPS Voice Bank", "*.ovm"));
+        File file = fileChooser.showSaveDialog(stage);
+        if (file != null) {
+            try {
+                VoiceBankFile.save(song.getName(), song.getVoiceBank(),
+                        song.getPsgEnvelopes(), file);
+            } catch (IOException ex) {
+                showError("Failed to export voice bank", ex.getMessage());
             }
         }
     }

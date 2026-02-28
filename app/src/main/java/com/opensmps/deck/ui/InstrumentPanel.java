@@ -39,9 +39,17 @@ public class InstrumentPanel extends VBox {
     private final ObservableList<String> voiceItems;
     private final ObservableList<String> envelopeItems;
     private Runnable onDirty;
+    private Runnable onImportBank;
 
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
+
+    /**
+     * Sets the callback invoked when the "Import Bank..." button is clicked.
+     *
+     * @param callback the import bank action, typically delegating to MainWindow
+     */
+    public void setOnImportBank(Runnable callback) { this.onImportBank = callback; }
 
     /**
      * Sets the playback engine used for voice/envelope preview in editors.
@@ -78,7 +86,10 @@ public class InstrumentPanel extends VBox {
         HBox voiceButtons = createButtonBar(
                 createButton("+", e -> addVoice()),
                 createButton("Edit", e -> editSelectedVoice()),
-                createButton("Del", e -> deleteSelectedVoice())
+                createButton("Del", e -> deleteSelectedVoice()),
+                createButton("Import Bank...", e -> {
+                    if (onImportBank != null) onImportBank.run();
+                })
         );
 
         VBox voiceSection = new VBox(4, voiceHeader, voiceListView, voiceButtons);
