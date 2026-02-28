@@ -5,6 +5,7 @@ import com.opensmps.deck.io.ImportableVoice;
 import com.opensmps.deck.io.ProjectFile;
 import com.opensmps.deck.io.SmpsExporter;
 import com.opensmps.deck.io.SmpsImporter;
+import com.opensmps.deck.io.WavExporter;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Song;
 import javafx.application.Platform;
@@ -158,6 +159,9 @@ public class MainWindow {
         MenuItem exportItem = new MenuItem("Export SMPS...");
         exportItem.setOnAction(e -> onExportSmps());
 
+        MenuItem exportWavItem = new MenuItem("Export WAV...");
+        exportWavItem.setOnAction(e -> onExportWav());
+
         MenuItem importVoicesItem = new MenuItem("Import Voices...");
         importVoicesItem.setOnAction(e -> onImportVoices());
 
@@ -165,7 +169,7 @@ public class MainWindow {
         importSmpsItem.setOnAction(e -> onImportSmps());
 
         fileMenu.getItems().addAll(newItem, openItem, new SeparatorMenuItem(),
-                saveItem, saveAsItem, separator, exportItem,
+                saveItem, saveAsItem, separator, exportItem, exportWavItem,
                 new SeparatorMenuItem(), importVoicesItem, importSmpsItem);
 
         menuBar.getMenus().add(fileMenu);
@@ -250,6 +254,24 @@ public class MainWindow {
                 exporter.export(tab.getSong(), file);
             } catch (IOException ex) {
                 showError("Failed to export SMPS", ex.getMessage());
+            }
+        }
+    }
+
+    private void onExportWav() {
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Export WAV Audio");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("WAV Audio", "*.wav"));
+        File file = fileChooser.showSaveDialog(stage);
+        if (file != null) {
+            try {
+                WavExporter exporter = new WavExporter();
+                exporter.export(tab.getSong(), file);
+            } catch (IOException ex) {
+                showError("Failed to export WAV", ex.getMessage());
             }
         }
     }
