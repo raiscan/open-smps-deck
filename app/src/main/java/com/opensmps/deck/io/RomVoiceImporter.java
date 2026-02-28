@@ -40,7 +40,7 @@ public class RomVoiceImporter {
                 for (int i = 0; i < song.getVoiceBank().size(); i++) {
                     FmVoice voice = song.getVoiceBank().get(i);
                     byte[] data = voice.getData();
-                    String key = bytesToHexKey(data);
+                    String key = HexUtil.bytesToHex(data);
                     if (!uniqueVoices.containsKey(key)) {
                         int algorithm = data[0] & 0x07;
                         uniqueVoices.put(key, new ImportableVoice(songName, i, data, algorithm));
@@ -52,13 +52,5 @@ public class RomVoiceImporter {
         }
 
         return new ArrayList<>(uniqueVoices.values());
-    }
-
-    private static String bytesToHexKey(byte[] data) {
-        StringBuilder sb = new StringBuilder(data.length * 2);
-        for (byte b : data) {
-            sb.append(String.format("%02X", b & 0xFF));
-        }
-        return sb.toString();
     }
 }

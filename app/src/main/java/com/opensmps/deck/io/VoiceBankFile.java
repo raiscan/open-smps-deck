@@ -4,6 +4,9 @@ import com.google.gson.*;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.PsgEnvelope;
 
+import static com.opensmps.deck.io.HexUtil.bytesToHex;
+import static com.opensmps.deck.io.HexUtil.hexToBytes;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -115,26 +118,5 @@ public class VoiceBankFile {
         }
 
         return new LoadResult(name, voices, psgEnvelopes);
-    }
-
-    /** Convert bytes to space-separated uppercase hex. */
-    static String bytesToHex(byte[] data) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < data.length; i++) {
-            if (i > 0) sb.append(' ');
-            sb.append(String.format("%02X", data[i] & 0xFF));
-        }
-        return sb.toString();
-    }
-
-    /** Parse space-separated hex string back to bytes. */
-    static byte[] hexToBytes(String hex) {
-        if (hex == null || hex.isBlank()) return new byte[0];
-        String[] parts = hex.trim().split("\\s+");
-        byte[] result = new byte[parts.length];
-        for (int i = 0; i < parts.length; i++) {
-            result[i] = (byte) Integer.parseInt(parts[i], 16);
-        }
-        return result;
     }
 }

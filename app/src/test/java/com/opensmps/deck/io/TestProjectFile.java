@@ -83,9 +83,9 @@ public class TestProjectFile {
     @Test
     void testHexConversion() {
         byte[] data = { 0x00, (byte) 0xFF, 0x7F, (byte) 0x80 };
-        String hex = ProjectFile.bytesToHex(data);
+        String hex = HexUtil.bytesToHex(data);
         assertEquals("00 FF 7F 80", hex);
-        assertArrayEquals(data, ProjectFile.hexToBytes(hex));
+        assertArrayEquals(data, HexUtil.hexToBytes(hex));
     }
 
     @Test
@@ -116,9 +116,9 @@ public class TestProjectFile {
 
     @Test
     void testEmptyHexConversion() {
-        assertEquals("", ProjectFile.bytesToHex(new byte[0]));
-        assertArrayEquals(new byte[0], ProjectFile.hexToBytes(""));
-        assertArrayEquals(new byte[0], ProjectFile.hexToBytes("  "));
+        assertEquals("", HexUtil.bytesToHex(new byte[0]));
+        assertArrayEquals(new byte[0], HexUtil.hexToBytes(""));
+        assertArrayEquals(new byte[0], HexUtil.hexToBytes("  "));
     }
 
     @Test
