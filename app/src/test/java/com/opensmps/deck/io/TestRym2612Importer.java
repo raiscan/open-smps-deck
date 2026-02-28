@@ -109,4 +109,133 @@ class TestRym2612Importer {
         FmVoice voice = Rym2612Importer.importFile(writeTestFile(tempDir));
         assertEquals(25, voice.getData().length);
     }
+
+    @Test
+    void importRejectsDoctypeExternalEntities(@TempDir Path tempDir) throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE data [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+                <RYM2612Params patchName="&xxe;">
+                  <PARAM id="Algorithm" value="1.0"/>
+                </RYM2612Params>
+                """;
+        File file = tempDir.resolve("xxe.rym2612").toFile();
+        Files.writeString(file.toPath(), xml);
+        assertThrows(java.io.IOException.class, () -> Rym2612Importer.importFile(file));
+    }
+
+    @Test
+    void testImportCorruptXmlThrows(@TempDir Path tempDir) throws Exception {
+        File file = tempDir.resolve("corrupt.rym2612").toFile();
+        Files.writeString(file.toPath(), "not valid xml <<<");
+        assertThrows(java.io.IOException.class, () -> Rym2612Importer.importFile(file));
+    }
+
+    @Test
+    void testImportWrongRootElementThrows(@TempDir Path tempDir) throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <NotRym2612/>
+                """;
+        File file = tempDir.resolve("wrong_root.rym2612").toFile();
+        Files.writeString(file.toPath(), xml);
+        assertThrows(java.io.IOException.class, () -> Rym2612Importer.importFile(file));
+    }
+
+    @Test
+    void testImportMissingParamFieldsUseDefaults(@TempDir Path tempDir) throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <RYM2612Params patchName="Minimal">
+                  <PARAM id="Algorithm" value="2.0"/>
+                  <PARAM id="Feedback" value="3.0"/>
+                </RYM2612Params>
+                """;
+        File file = tempDir.resolve("minimal.rym2612").toFile();
+        Files.writeString(file.toPath(), xml);
+
+        FmVoice voice = Rym2612Importer.importFile(file);
+        assertEquals(25, voice.getData().length);
+        assertEquals(2, voice.getAlgorithm());
+        assertEquals(3, voice.getFeedback());
+
+        // All operator fields should default to 0 since no OP params were provided
+        for (int displayOp = 0; displayOp < FmVoice.OPERATOR_COUNT; displayOp++) {
+            int smpsOp = FmVoice.displayToSmps(displayOp);
+            assertEquals(0, voice.getMul(smpsOp), "OP" + (displayOp + 1) + " MUL");
+            assertEquals(0, voice.getDt(smpsOp), "OP" + (displayOp + 1) + " DT");
+            assertEquals(0, voice.getTl(smpsOp), "OP" + (displayOp + 1) + " TL");
+            assertEquals(0, voice.getAr(smpsOp), "OP" + (displayOp + 1) + " AR");
+            assertEquals(0, voice.getD1r(smpsOp), "OP" + (displayOp + 1) + " D1R");
+            assertEquals(0, voice.getD2r(smpsOp), "OP" + (displayOp + 1) + " D2R");
+            assertEquals(0, voice.getD1l(smpsOp), "OP" + (displayOp + 1) + " D1L");
+            assertEquals(0, voice.getRr(smpsOp), "OP" + (displayOp + 1) + " RR");
+        }
+    }
+
+    @Test
+    void testImportExtremeFloatValues(@TempDir Path tempDir) throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <RYM2612Params patchName="Extreme">
+                  <PARAM id="Algorithm" value="99.9"/>
+                  <PARAM id="Feedback" value="99.9"/>
+                  <PARAM id="OP1MUL" value="9999.0"/>
+                  <PARAM id="OP1DT" value="99.0"/>
+                  <PARAM id="OP1TL" value="999.0"/>
+                  <PARAM id="OP1RS" value="99.0"/>
+                  <PARAM id="OP1AR" value="99.0"/>
+                  <PARAM id="OP1AM" value="99.0"/>
+                  <PARAM id="OP1D1R" value="99.0"/>
+                  <PARAM id="OP1D2R" value="99.0"/>
+                  <PARAM id="OP1D2L" value="99.0"/>
+                  <PARAM id="OP1RR" value="99.0"/>
+                </RYM2612Params>
+                """;
+        File file = tempDir.resolve("extreme.rym2612").toFile();
+        Files.writeString(file.toPath(), xml);
+
+        FmVoice voice = Rym2612Importer.importFile(file);
+        // Algorithm and Feedback should be clamped to 0-7
+        assertTrue(voice.getAlgorithm() >= 0 && voice.getAlgorithm() <= 7,
+                "Algorithm should be clamped to 0-7, was: " + voice.getAlgorithm());
+        assertTrue(voice.getFeedback() >= 0 && voice.getFeedback() <= 7,
+                "Feedback should be clamped to 0-7, was: " + voice.getFeedback());
+
+        // OP1 fields should be clamped to their valid ranges
+        int smpsOp = FmVoice.displayToSmps(0);
+        assertTrue(voice.getMul(smpsOp) >= 0 && voice.getMul(smpsOp) <= 15,
+                "MUL should be clamped to 0-15, was: " + voice.getMul(smpsOp));
+        assertTrue(voice.getTl(smpsOp) >= 0 && voice.getTl(smpsOp) <= 127,
+                "TL should be clamped to 0-127, was: " + voice.getTl(smpsOp));
+        assertTrue(voice.getAr(smpsOp) >= 0 && voice.getAr(smpsOp) <= 31,
+                "AR should be clamped to 0-31, was: " + voice.getAr(smpsOp));
+        assertTrue(voice.getD1r(smpsOp) >= 0 && voice.getD1r(smpsOp) <= 31,
+                "D1R should be clamped to 0-31, was: " + voice.getD1r(smpsOp));
+        assertTrue(voice.getD2r(smpsOp) >= 0 && voice.getD2r(smpsOp) <= 31,
+                "D2R should be clamped to 0-31, was: " + voice.getD2r(smpsOp));
+        assertTrue(voice.getD1l(smpsOp) >= 0 && voice.getD1l(smpsOp) <= 15,
+                "D1L should be clamped to 0-15, was: " + voice.getD1l(smpsOp));
+        assertTrue(voice.getRr(smpsOp) >= 0 && voice.getRr(smpsOp) <= 15,
+                "RR should be clamped to 0-15, was: " + voice.getRr(smpsOp));
+    }
+
+    @Test
+    void testImportEmptyPatchName(@TempDir Path tempDir) throws Exception {
+        String xml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <RYM2612Params patchName="">
+                  <PARAM id="Algorithm" value="0.0"/>
+                  <PARAM id="Feedback" value="0.0"/>
+                </RYM2612Params>
+                """;
+        File file = tempDir.resolve("empty_name.rym2612").toFile();
+        Files.writeString(file.toPath(), xml);
+
+        FmVoice voice = Rym2612Importer.importFile(file);
+        assertNotNull(voice);
+        assertNotNull(voice.getName());
+        assertEquals("", voice.getName());
+        assertEquals(25, voice.getData().length);
+    }
 }
