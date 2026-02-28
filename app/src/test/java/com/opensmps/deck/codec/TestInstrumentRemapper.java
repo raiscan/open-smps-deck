@@ -1,6 +1,7 @@
 package com.opensmps.deck.codec;
 
 import com.opensmps.deck.model.FmVoice;
+import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
 import org.junit.jupiter.api.Test;
 import java.util.*;
@@ -62,5 +63,38 @@ class TestInstrumentRemapper {
         List<FmVoice> dst = List.of(new FmVoice("Other", dstData));
         Map<Integer, Integer> map = InstrumentRemapper.autoRemap(src, dst, Set.of(0));
         assertFalse(map.containsKey(0));
+    }
+
+    @Test
+    void testAutoRemapPsgByteIdentical() {
+        byte[] envData = {0x00, 0x01, 0x02, (byte) 0x80};
+        List<PsgEnvelope> src = List.of(new PsgEnvelope("Env1", envData));
+        List<PsgEnvelope> dst = List.of(new PsgEnvelope("Env2", envData.clone()));
+        Map<Integer, Integer> map = InstrumentRemapper.autoRemapPsg(src, dst, Set.of(0));
+        assertEquals(0, map.get(0));
+    }
+
+    @Test
+    void testAutoRemapPsgNoMatch() {
+        byte[] srcData = {0x00, 0x01, (byte) 0x80};
+        byte[] dstData = {0x03, 0x04, (byte) 0x80};
+        List<PsgEnvelope> src = List.of(new PsgEnvelope("Env1", srcData));
+        List<PsgEnvelope> dst = List.of(new PsgEnvelope("Env2", dstData));
+        Map<Integer, Integer> map = InstrumentRemapper.autoRemapPsg(src, dst, Set.of(0));
+        assertFalse(map.containsKey(0));
+    }
+
+    @Test
+    void testRewriteBothVoiceAndPsgInSameTrack() {
+        byte[] data = {
+            (byte) 0xEF, 0x02,        // SET_VOICE index 2
+            (byte) 0x80, 0x18,        // rest
+            (byte) 0xF5, 0x03         // PSG_INSTRUMENT index 3
+        };
+        Map<Integer, Integer> voiceMap = Map.of(2, 7);
+        Map<Integer, Integer> psgMap = Map.of(3, 5);
+        byte[] result = InstrumentRemapper.rewrite(data, voiceMap, psgMap);
+        assertEquals(7, result[1] & 0xFF, "voice index should be remapped");
+        assertEquals(5, result[5] & 0xFF, "PSG index should be remapped");
     }
 }

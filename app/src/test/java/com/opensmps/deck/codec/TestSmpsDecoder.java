@@ -128,4 +128,13 @@ class TestSmpsDecoder {
         // The row should show the effect (SET_VOICE goes to instrument column)
         assertNotNull(rows.get(0).effect());
     }
+
+    @Test
+    void decodeStopsAtF2() {
+        // C-5 dur 0x18, then STOP (F2), then D-5 dur 0x18 (should never be reached)
+        byte[] data = { (byte) 0xBD, 0x18, (byte) 0xF2, (byte) 0xBF, 0x18 };
+        List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
+        assertEquals(1, rows.size(), "Decoding should stop at F2");
+        assertEquals("C-5", rows.get(0).note());
+    }
 }
