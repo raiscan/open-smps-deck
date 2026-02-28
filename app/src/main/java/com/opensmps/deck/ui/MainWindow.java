@@ -2,9 +2,7 @@ package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.model.Song;
-import javafx.geometry.Insets;
 import javafx.scene.Scene;
-import javafx.scene.control.Label;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 
@@ -12,7 +10,7 @@ import javafx.stage.Stage;
  * Main application window with BorderPane layout.
  *
  * <p>Layout: TransportBar (top), TrackerGrid (center),
- * OrderListPanel (bottom), instrument placeholder (right).
+ * OrderListPanel (bottom), InstrumentPanel (right).
  */
 public class MainWindow {
 
@@ -22,6 +20,7 @@ public class MainWindow {
     private final PlaybackEngine playbackEngine;
     private TrackerGrid trackerGrid;
     private OrderListPanel orderListPanel;
+    private InstrumentPanel instrumentPanel;
 
     public MainWindow(Stage stage) {
         this.stage = stage;
@@ -54,12 +53,9 @@ public class MainWindow {
         });
         root.setBottom(orderListPanel);
 
-        // Right: Instrument panel placeholder
-        StackPane instrumentPlaceholder = new StackPane();
-        instrumentPlaceholder.setPrefWidth(250);
-        instrumentPlaceholder.setStyle("-fx-background-color: #252525;");
-        instrumentPlaceholder.getChildren().add(createLabel("Instruments"));
-        root.setRight(instrumentPlaceholder);
+        // Right: Instrument panel
+        instrumentPanel = new InstrumentPanel(currentSong);
+        root.setRight(instrumentPanel);
     }
 
     private void setupStage() {
@@ -101,9 +97,7 @@ public class MainWindow {
         return orderListPanel;
     }
 
-    private Label createLabel(String text) {
-        Label label = new Label(text);
-        label.setStyle("-fx-text-fill: #888888; -fx-font-size: 18px;");
-        return label;
+    public InstrumentPanel getInstrumentPanel() {
+        return instrumentPanel;
     }
 }
