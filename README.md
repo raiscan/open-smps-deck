@@ -164,7 +164,7 @@ Song model, codec, I/O, and JavaFX UI.
 
 ## Synth Core Origin
 
-The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999/OpenGGF). The chip emulators are hybrid ports of [libvgm](https://github.com/ValleyBell/libvgm) and [Gens Plus GX](https://github.com/ekeeke/Genesis-Plus-GX), aiming for hardware-accurate synthesis.
+The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999/OpenGGF). The chip emulators are hybrid ports of [libvgm](https://github.com/ValleyBell/libvgm) and [Genesis Plus GX](https://github.com/ekeeke/Genesis-Plus-GX), aiming for hardware-accurate synthesis.
 
 ## Testing
 
@@ -192,6 +192,6 @@ This project is licensed under the GNU General Public License v3.0 — see the [
 
 - **SMPS** format documentation from the Sonic Retro community
 - **[libvgm](https://github.com/ValleyBell/libvgm)** — chip emulator reference
-- **[Gens Plus GX](https://github.com/ekeeke/Genesis-Plus-GX)** — chip emulator reference
+- **[Genesis Plus GX](https://github.com/ekeeke/Genesis-Plus-GX)** — chip emulator reference
 - **[SMPSPlay](https://github.com/ValleyBell/SMPSPlay)** by Valley Bell — reference SMPS driver implementation
 - **[OpenGGF](https://github.com/jamesj999/OpenGGF)** — parent project providing the synth core foundation
