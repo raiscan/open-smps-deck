@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -147,6 +148,9 @@ public class TestProjectFile {
             assertEquals(0, p.getTrackData(ch).length,
                     "Channel " + ch + " should be empty in default song");
         }
+
+        // Empty song should have no DAC samples
+        assertTrue(loaded.getDacSamples().isEmpty(), "Empty song should have no DAC samples");
     }
 
     @Test
@@ -186,5 +190,41 @@ public class TestProjectFile {
             assertArrayEquals(channelData[ch], loadedTrack,
                     "Channel " + ch + " data should match byte-for-byte");
         }
+    }
+
+    @Test
+    void testSaveLoadDacSamples(@TempDir Path dacTempDir) throws Exception {
+        Song song = new Song();
+        song.getDacSamples().add(new DacSample("Kick", new byte[]{(byte) 0x80, 0x7F, 0x60}, 0x0C));
+        song.getDacSamples().add(new DacSample("Snare", new byte[]{0x40, (byte) 0xC0}, 0x10));
+
+        File file = dacTempDir.resolve("dac-test.osmpsd").toFile();
+        ProjectFile.save(song, file);
+        Song loaded = ProjectFile.load(file);
+
+        assertEquals(2, loaded.getDacSamples().size());
+        assertEquals("Kick", loaded.getDacSamples().get(0).getName());
+        assertEquals(0x0C, loaded.getDacSamples().get(0).getRate());
+        assertArrayEquals(new byte[]{(byte) 0x80, 0x7F, 0x60}, loaded.getDacSamples().get(0).getData());
+        assertEquals("Snare", loaded.getDacSamples().get(1).getName());
+        assertEquals(0x10, loaded.getDacSamples().get(1).getRate());
+        assertArrayEquals(new byte[]{0x40, (byte) 0xC0}, loaded.getDacSamples().get(1).getData());
+    }
+
+    @Test
+    void testLoadBackwardCompatNoDacSamples(@TempDir Path compatTempDir) throws Exception {
+        // Create a project file, then strip the dacSamples field to simulate an old file
+        Song song = new Song();
+        File file = compatTempDir.resolve("old-format.osmpsd").toFile();
+        ProjectFile.save(song, file);
+
+        // Remove the dacSamples key from the JSON
+        String json = Files.readString(file.toPath());
+        json = json.replaceAll(",?\\s*\"dacSamples\":\\s*\\[\\s*\\]", "");
+        Files.writeString(file.toPath(), json);
+
+        Song loaded = ProjectFile.load(file);
+        assertTrue(loaded.getDacSamples().isEmpty(),
+                "Loading an old file without dacSamples should result in empty list");
     }
 }

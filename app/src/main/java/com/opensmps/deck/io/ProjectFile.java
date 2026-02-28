@@ -85,6 +85,17 @@ public class ProjectFile {
         }
         root.add("patterns", patterns);
 
+        // DAC samples
+        JsonArray dacSamples = new JsonArray();
+        for (DacSample sample : song.getDacSamples()) {
+            JsonObject s = new JsonObject();
+            s.addProperty("name", sample.getName());
+            s.addProperty("rate", sample.getRate());
+            s.addProperty("data", bytesToHex(sample.getData()));
+            dacSamples.add(s);
+        }
+        root.add("dacSamples", dacSamples);
+
         Files.writeString(file.toPath(), GSON.toJson(root), StandardCharsets.UTF_8);
     }
 
@@ -158,6 +169,18 @@ public class ProjectFile {
                 }
             }
             song.getPatterns().add(pat);
+        }
+
+        // DAC samples (optional for backward compatibility)
+        if (root.has("dacSamples")) {
+            for (JsonElement elem : root.getAsJsonArray("dacSamples")) {
+                JsonObject s = elem.getAsJsonObject();
+                song.getDacSamples().add(new DacSample(
+                        s.get("name").getAsString(),
+                        hexToBytes(s.get("data").getAsString()),
+                        s.get("rate").getAsInt()
+                ));
+            }
         }
 
         return song;
