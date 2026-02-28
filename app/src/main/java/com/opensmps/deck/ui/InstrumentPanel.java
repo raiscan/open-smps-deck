@@ -2,6 +2,7 @@ package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
 import com.opensmps.deck.io.DacSampleImporter;
+import com.opensmps.deck.io.OsmpsVoiceFile;
 import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.PsgEnvelope;
@@ -94,6 +95,7 @@ public class InstrumentPanel extends VBox {
                 createButton("+", e -> addVoice()),
                 createButton("Edit", e -> editSelectedVoice()),
                 createButton("Del", e -> deleteSelectedVoice()),
+                createButton("Export", e -> exportSelectedVoiceAsPreset()),
                 createButton("Import Bank...", e -> {
                     if (onImportBank != null) onImportBank.run();
                 })
@@ -231,6 +233,29 @@ public class InstrumentPanel extends VBox {
         song.getVoiceBank().remove(index);
         refreshVoiceList();
         markDirty();
+    }
+
+    private void exportSelectedVoiceAsPreset() {
+        int index = getCurrentVoiceIndex();
+        if (index < 0) return;
+
+        FmVoice voice = song.getVoiceBank().get(index);
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export Voice Preset");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
+        chooser.setInitialFileName(voice.getName() + ".osmpsvoice");
+        File file = chooser.showSaveDialog(getScene().getWindow());
+        if (file != null) {
+            try {
+                OsmpsVoiceFile.save(voice, file);
+            } catch (IOException ex) {
+                Alert alert = new Alert(Alert.AlertType.ERROR,
+                        "Failed to export voice preset: " + ex.getMessage(), ButtonType.OK);
+                alert.setTitle("Export Error");
+                alert.showAndWait();
+            }
+        }
     }
 
     // --- Envelope operations ---
