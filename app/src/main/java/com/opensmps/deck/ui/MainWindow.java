@@ -108,7 +108,13 @@ public class MainWindow {
         javafx.animation.Timeline cursorPollTimer = new javafx.animation.Timeline(
             new javafx.animation.KeyFrame(
                 javafx.util.Duration.millis(67), // ~15 Hz
-                e -> songTabCoordinator.updatePlaybackCursor()
+                e -> {
+                    songTabCoordinator.updatePlaybackCursor();
+                    SongTab tab = getActiveSongTab();
+                    if (tab != null) {
+                        tab.getTrackerGrid().setPlaybackRowsByChannel(playbackEngine.getChannelPlaybackRows());
+                    }
+                }
             )
         );
         cursorPollTimer.setCycleCount(javafx.animation.Timeline.INDEFINITE);
@@ -143,9 +149,23 @@ public class MainWindow {
         });
 
         BorderPane content = new BorderPane();
-        content.setCenter(songTab.getTrackerGrid());
-        content.setBottom(songTab.getOrderListPanel());
-        content.setRight(songTab.getInstrumentPanel());
+
+        if (songTab.isHierarchical()) {
+            // Hierarchical layout: SongView (left), BreadcrumbBar+ChainStrip+TrackerGrid (center)
+            VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip());
+            BorderPane centerPane = new BorderPane();
+            centerPane.setTop(centerTop);
+            centerPane.setCenter(songTab.getTrackerGrid());
+
+            content.setLeft(songTab.getSongView());
+            content.setCenter(centerPane);
+            content.setRight(songTab.getInstrumentPanel());
+        } else {
+            // Legacy layout: TrackerGrid (center), OrderList (bottom)
+            content.setCenter(songTab.getTrackerGrid());
+            content.setBottom(songTab.getOrderListPanel());
+            content.setRight(songTab.getInstrumentPanel());
+        }
 
         songTab.getOrderListPanel().setOnOrderRowSelected(rowIndex -> {
             Song song = songTab.getSong();

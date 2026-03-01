@@ -1,5 +1,6 @@
 package com.opensmps.deck.ui;
 
+import com.opensmps.deck.model.ArrangementMode;
 import com.opensmps.deck.model.Song;
 import java.io.File;
 
@@ -21,6 +22,11 @@ public class SongTab {
     private TrackerGrid trackerGrid;
     private OrderListPanel orderListPanel;
     private InstrumentPanel instrumentPanel;
+
+    // Hierarchical mode components (null when in LEGACY_PATTERNS mode)
+    private SongView songView;
+    private ChainStrip chainStrip;
+    private BreadcrumbBar breadcrumbBar;
 
     public SongTab() {
         this(new Song());
@@ -68,6 +74,13 @@ public class SongTab {
     public TrackerGrid getTrackerGrid() { return trackerGrid; }
     public OrderListPanel getOrderListPanel() { return orderListPanel; }
     public InstrumentPanel getInstrumentPanel() { return instrumentPanel; }
+    public SongView getSongView() { return songView; }
+    public ChainStrip getChainStrip() { return chainStrip; }
+    public BreadcrumbBar getBreadcrumbBar() { return breadcrumbBar; }
+
+    public boolean isHierarchical() {
+        return song.getArrangementMode() == ArrangementMode.HIERARCHICAL;
+    }
 
     /**
      * Returns the display title for this tab.
@@ -96,6 +109,59 @@ public class SongTab {
         trackerGrid.setOnDirty(dirtyAndEdited);
         instrumentPanel.setOnDirty(dirtyAndEdited);
         orderListPanel.setOnDirty(dirtyAndEdited);
+
+        if (isHierarchical()) {
+            buildHierarchicalComponents();
+        }
+    }
+
+    private void buildHierarchicalComponents() {
+        songView = new SongView();
+        chainStrip = new ChainStrip();
+        breadcrumbBar = new BreadcrumbBar();
+
+        if (song.getHierarchicalArrangement() != null) {
+            songView.setArrangement(song.getHierarchicalArrangement());
+
+            // Default: show first channel's chain
+            var arr = song.getHierarchicalArrangement();
+            var chain = arr.getChain(0);
+            chainStrip.setChain(chain, arr.getPhraseLibrary());
+            breadcrumbBar.push("FM1 Chain", 0);
+
+            // SongView phrase selection → update ChainStrip
+            songView.setOnPhraseSelected(phraseId -> {
+                int ch = songView.getSelectedChannel();
+                chainStrip.setChain(arr.getChain(ch), arr.getPhraseLibrary());
+                String chName = ch < 6 ? "FM" + (ch + 1) : ch < 9 ? "PSG" + (ch - 5) : "Noise";
+                if (ch == 5) chName = "DAC";
+                breadcrumbBar.setCrumbs(java.util.List.of(
+                    new BreadcrumbBar.Crumb(chName + " Chain", 0)
+                ));
+            });
+
+            // SongView double-click → navigate to phrase
+            songView.setOnPhraseDoubleClicked((ch, entryIndex) -> {
+                var entry = arr.getChain(ch).getEntries().get(entryIndex);
+                var phrase = arr.getPhraseLibrary().getPhrase(entry.getPhraseId());
+                if (phrase != null) {
+                    breadcrumbBar.push(phrase.getName(), 1);
+                }
+            });
+
+            // ChainStrip entry selection
+            chainStrip.setOnEntrySelected(phraseId -> {
+                var phrase = arr.getPhraseLibrary().getPhrase(phraseId);
+                if (phrase != null) {
+                    breadcrumbBar.push(phrase.getName(), 1);
+                }
+            });
+
+            // BreadcrumbBar navigation
+            breadcrumbBar.setOnNavigate(depth -> {
+                // depth 0 = chain level, depth 1 = phrase level
+            });
+        }
     }
 
     /**
@@ -106,6 +172,9 @@ public class SongTab {
             trackerGrid.setSong(song);
             orderListPanel.setSong(song);
             instrumentPanel.setSong(song);
+        }
+        if (songView != null && song.getHierarchicalArrangement() != null) {
+            songView.setArrangement(song.getHierarchicalArrangement());
         }
     }
 }
