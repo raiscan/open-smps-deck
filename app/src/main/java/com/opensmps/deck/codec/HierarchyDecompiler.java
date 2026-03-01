@@ -65,8 +65,9 @@ public final class HierarchyDecompiler {
                 int loopTarget = (track[pos + 3] & 0xFF) | ((track[pos + 4] & 0xFF) << 8);
 
                 // The loop wraps the data from loopTarget to pos
-                // Flush any preceding non-loop data
                 if (loopTarget >= segStart && loopTarget <= pos) {
+                    // Loop body is within the current segment range
+                    // Flush any preceding non-loop data
                     if (loopTarget > segStart) {
                         segments.add(new int[]{segStart, loopTarget});
                         flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
@@ -81,6 +82,32 @@ public final class HierarchyDecompiler {
                         ChainEntry entry = new ChainEntry(loopPhrase.getId());
                         entry.setRepeatCount(Math.max(2, count));
                         chainEntries.add(entry);
+                    }
+                } else if (loopTarget < segStart && count > 1) {
+                    // Loop spans previously-flushed chain entries (e.g., wraps CALLs).
+                    // Flush any pending data before the loop end.
+                    if (pos > segStart) {
+                        segments.add(new int[]{segStart, pos});
+                        flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
+                        segments.clear();
+                    }
+                    // Find the first chain entry whose start offset >= loopTarget
+                    int firstLoopEntry = findEntryForOffset(loopTarget, entryStartOffsets);
+                    if (firstLoopEntry >= 0 && firstLoopEntry < chainEntries.size()) {
+                        // The entries from firstLoopEntry to end are the loop body (1st iteration).
+                        // Duplicate them for the remaining (count-1) iterations.
+                        int bodyEnd = chainEntries.size();
+                        List<ChainEntry> loopBody = new ArrayList<>(
+                            chainEntries.subList(firstLoopEntry, bodyEnd));
+                        for (int rep = 1; rep < count; rep++) {
+                            for (ChainEntry orig : loopBody) {
+                                ChainEntry dup = new ChainEntry(orig.getPhraseId());
+                                dup.setTransposeSemitones(orig.getTransposeSemitones());
+                                dup.setRepeatCount(orig.getRepeatCount());
+                                chainEntries.add(dup);
+                                entryStartOffsets.add(entryStartOffsets.get(firstLoopEntry));
+                            }
+                        }
                     }
                 }
                 pos += 5;
@@ -237,6 +264,32 @@ public final class HierarchyDecompiler {
         Phrase phrase = library.createPhrase("Phrase", type);
         phrase.setData(combined);
         chainEntries.add(new ChainEntry(phrase.getId()));
+    }
+
+    /**
+     * Find the first chain entry whose start offset is >= the given target.
+     */
+    private static int findEntryForOffset(int target, List<Integer> entryStartOffsets) {
+        // Exact match first
+        for (int i = 0; i < entryStartOffsets.size(); i++) {
+            if (entryStartOffsets.get(i) == target) {
+                return i;
+            }
+        }
+        // Closest entry at or after target
+        int bestIndex = -1;
+        int bestDist = Integer.MAX_VALUE;
+        for (int i = 0; i < entryStartOffsets.size(); i++) {
+            int offset = entryStartOffsets.get(i);
+            if (offset >= target) {
+                int dist = offset - target;
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIndex = i;
+                }
+            }
+        }
+        return bestIndex;
     }
 
     /**

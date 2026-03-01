@@ -12,14 +12,20 @@ public class SimpleSmpsData extends AbstractSmpsData {
 
     private byte[][] psgEnvelopes;
     private final int baseNoteOffset;
+    private final int psgBaseNoteOffset;
 
     public SimpleSmpsData(byte[] data) {
-        this(data, 1); // S2 default for backward compat
+        this(data, 1, 0); // S2 default: FM offset=1, PSG offset=0
     }
 
     public SimpleSmpsData(byte[] data, int baseNoteOffset) {
+        this(data, baseNoteOffset, 0); // PSG always uses offset 0
+    }
+
+    public SimpleSmpsData(byte[] data, int baseNoteOffset, int psgBaseNoteOffset) {
         super(data, 0); // file-relative pointers (z80StartAddress=0)
         this.baseNoteOffset = baseNoteOffset;
+        this.psgBaseNoteOffset = psgBaseNoteOffset;
     }
 
     public void setPsgEnvelopes(byte[][] envelopes) {
@@ -89,5 +95,10 @@ public class SimpleSmpsData extends AbstractSmpsData {
     @Override
     public int getBaseNoteOffset() {
         return baseNoteOffset;
+    }
+
+    @Override
+    public int getPsgBaseNoteOffset() {
+        return psgBaseNoteOffset;
     }
 }

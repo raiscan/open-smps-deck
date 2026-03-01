@@ -1,14 +1,49 @@
 package com.opensmps.deck.audio;
 
 import com.opensmps.deck.codec.PatternCompiler;
+import com.opensmps.deck.model.ChannelType;
+import com.opensmps.deck.model.ChainEntry;
 import com.opensmps.deck.model.FmVoice;
+import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.Song;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class TestSimpleSmpsData {
+
+    /**
+     * Adds a phrase with the given data to the hierarchical arrangement for the
+     * specified channel. Trailing F2 (STOP) bytes are stripped from the phrase
+     * data since the chain compiler appends its own termination.
+     */
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    /**
+     * Sets the loop entry index on all chains that have entries, so the
+     * compiled output contains an F6 JUMP instead of F2 STOP.
+     */
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
 
     /**
      * The single-arg constructor should default to S2 base note offset of 1.
@@ -31,6 +66,32 @@ class TestSimpleSmpsData {
     }
 
     /**
+     * PSG base note offset defaults to 0 in all constructors, since PSG
+     * drivers always use note - 0x81 (offset 0) regardless of SMPS mode.
+     */
+    @Test
+    void testPsgBaseNoteOffsetDefaultsToZero() {
+        byte[] minimalData = new byte[6];
+
+        // Single-arg: FM=1, PSG=0
+        SimpleSmpsData s2Default = new SimpleSmpsData(minimalData);
+        assertEquals(1, s2Default.getBaseNoteOffset());
+        assertEquals(0, s2Default.getPsgBaseNoteOffset(),
+            "PSG offset should be 0 even when FM offset is 1 (S2 default)");
+
+        // Two-arg: FM=0, PSG=0
+        SimpleSmpsData s1 = new SimpleSmpsData(minimalData, 0);
+        assertEquals(0, s1.getPsgBaseNoteOffset(),
+            "PSG offset should be 0 when FM offset is 0 (S1/S3K)");
+
+        // Three-arg: explicit PSG offset
+        SimpleSmpsData explicit = new SimpleSmpsData(minimalData, 1, 0);
+        assertEquals(1, explicit.getBaseNoteOffset());
+        assertEquals(0, explicit.getPsgBaseNoteOffset(),
+            "Three-arg constructor should respect explicit PSG offset");
+    }
+
+    /**
      * Compile a Song with a known voice, create SimpleSmpsData from the compiled
      * bytes, then verify that getVoice(0) returns the original 25-byte voice data.
      */
@@ -45,8 +106,9 @@ class TestSimpleSmpsData {
 
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("TestVoice", voiceBytes));
-        song.getPatterns().get(0).setTrackData(0,
-                new byte[]{(byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 0,
+                new byte[]{(byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30});
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps, 1);
@@ -70,8 +132,9 @@ class TestSimpleSmpsData {
     void testGetVoiceOutOfBoundsReturnsNull() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[FmVoice.VOICE_SIZE]));
-        song.getPatterns().get(0).setTrackData(0,
-                new byte[]{(byte) 0xA1, 0x30, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 0,
+                new byte[]{(byte) 0xA1, 0x30});
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps, 1);
@@ -100,11 +163,12 @@ class TestSimpleSmpsData {
         song.getVoiceBank().add(new FmVoice("V1", v1));
 
         // FM channel 0 active
-        song.getPatterns().get(0).setTrackData(0,
-                new byte[]{(byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 0,
+                new byte[]{(byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30});
         // PSG channel 0 (index 6) active
-        song.getPatterns().get(0).setTrackData(6,
-                new byte[]{(byte) 0xA1, 0x18, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 6,
+                new byte[]{(byte) 0xA1, 0x18});
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps, 1);
@@ -217,8 +281,9 @@ class TestSimpleSmpsData {
     void testFmKeyAndVolumeOffsets() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[FmVoice.VOICE_SIZE]));
-        song.getPatterns().get(0).setTrackData(0,
-                new byte[]{(byte) 0xA1, 0x30, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 0,
+                new byte[]{(byte) 0xA1, 0x30});
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps, 1);

@@ -10,8 +10,11 @@ import com.opensmps.smps.DacData;
 import com.opensmps.smps.SmpsSequencer;
 import com.opensmps.smps.SmpsSequencerConfig;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * Coordinates song compilation and playback.
@@ -21,6 +24,7 @@ public class PlaybackEngine {
 
     /** Resolved playback position in order list / pattern row coordinates. */
     public record PlaybackPosition(int orderIndex, int rowIndex) {}
+    private record ResolvedTrackCursor(int channel, PatternCompiler.CursorPosition cursor) {}
 
     private final SmpsDriver driver;
     private final PatternCompiler compiler;
@@ -29,6 +33,7 @@ public class PlaybackEngine {
     private SmpsSequencer currentSequencer;
     private volatile PatternCompiler.CompilationResult compilationResult;
     private int baseOrderIndex; // only accessed from UI thread
+    private PatternCompiler.CursorPosition lastResolvedCursor;
 
     /**
      * Create a playback engine with a 44.1 kHz driver and default compiler.
@@ -51,6 +56,7 @@ public class PlaybackEngine {
      */
     private void loadSongImpl(Song song) {
         driver.stopAll();
+        lastResolvedCursor = null;
 
         PatternCompiler.CompilationResult result = compiler.compileDetailed(song);
         this.compilationResult = result;
@@ -114,6 +120,7 @@ public class PlaybackEngine {
         if (audioOutput != null) audioOutput.stop();
         driver.stopAll();
         driver.silenceAll();
+        lastResolvedCursor = null;
     }
 
     /** Pause playback (audio thread sleeps). */
@@ -227,64 +234,119 @@ public class PlaybackEngine {
     public PlaybackPosition getPlaybackPosition() {
         if (compilationResult == null) return null;
 
-        // Collect all active sequencer byte positions.  The sequencer assigns
-        // hardware channel IDs using fmChannelOrder which may re-map the
-        // compiler's channel ordering (e.g. the first FM slot becomes DAC in
-        // S2 mode).  We query every track type and resolve each position
-        // against the timeline whose trackOffset matches.
-        int pos = findFirstActivePosition();
-        if (pos < 0) return null;
+        // Resolve all active tracks, then pick the nearest forward cursor.
+        // This keeps motion monotonic without letting the fastest channel
+        // drag the global cursor too far ahead of the rest.
+        List<ResolvedTrackCursor> candidates = collectResolvedTrackCursors();
+        if (candidates.isEmpty()) return null;
 
-        PatternCompiler.CursorPosition cursor = resolveFromMatchingTimeline(pos);
+        PatternCompiler.CursorPosition cursor = chooseGlobalCursor(candidates);
         if (cursor == null) return null;
+        lastResolvedCursor = cursor;
         return new PlaybackPosition(
                 cursor.orderIndex() + baseOrderIndex,
                 cursor.rowIndex());
     }
 
     /**
-     * Returns the byte position of the first active sequencer track,
-     * trying DAC first, then FM channels 0-5, then PSG channels 0-3.
-     * Returns {@code -1} if no active track is found.
+     * Returns per-channel pattern row indices for currently active tracks.
+     * Inactive or unresolved channels return {@code -1}.
      */
-    private int findFirstActivePosition() {
-        int pos = driver.getTrackPosition(SmpsSequencer.TrackType.DAC, 5);
-        if (pos >= 0) return pos;
-        for (int ch = 0; ch < 6; ch++) {
-            pos = driver.getTrackPosition(SmpsSequencer.TrackType.FM, ch);
-            if (pos >= 0) return pos;
+    public int[] getChannelPlaybackRows() {
+        int[] rows = new int[10];
+        Arrays.fill(rows, -1);
+        if (compilationResult == null) {
+            return rows;
         }
-        for (int ch = 0; ch < 4; ch++) {
-            pos = driver.getTrackPosition(SmpsSequencer.TrackType.PSG, ch);
-            if (pos >= 0) return pos;
+        for (ResolvedTrackCursor resolved : collectResolvedTrackCursors()) {
+            rows[resolved.channel()] = resolved.cursor().rowIndex();
         }
-        return -1;
+        return rows;
     }
 
-    /**
-     * Resolves a sequencer byte position against the timeline whose
-     * track offset range contains it.  Each channel timeline knows
-     * its trackOffset; the position must fall at or after it to be
-     * a valid match.
-     *
-     * <p>When multiple timelines qualify (i.e. the position falls within
-     * more than one channel's range), the one with the highest
-     * {@code trackOffset} wins.  This selects the most specific match,
-     * since a higher offset means the position is closer to that
-     * channel's data start and therefore more likely to belong to it.
-     */
-    private PatternCompiler.CursorPosition resolveFromMatchingTimeline(int absolutePos) {
+    private List<ResolvedTrackCursor> collectResolvedTrackCursors() {
+        List<ResolvedTrackCursor> out = new ArrayList<>(10);
+
+        addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.DAC, 5));
+        for (int fm = 0; fm < 6; fm++) {
+            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.FM, fm));
+        }
+        for (int psg = 0; psg < 4; psg++) {
+            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.PSG, psg));
+        }
+        return out;
+    }
+
+    private void addResolvedCursor(List<ResolvedTrackCursor> out,
+                                   SmpsSequencer.TrackRuntimeState state) {
+        ResolvedTrackCursor resolved = resolveFromMatchingTimeline(state);
+        if (resolved != null) {
+            out.add(resolved);
+        }
+    }
+
+    private ResolvedTrackCursor resolveFromMatchingTimeline(SmpsSequencer.TrackRuntimeState state) {
+        if (state == null) return null;
+
+        // While a row is still counting down, the sequencer position points at the
+        // next unread byte, not the current row start. Look back one byte so we
+        // resolve to the row that is still sounding (including rests).
+        int effectivePos = (state.remainingDuration() > 0)
+                ? Math.max(0, state.position() - 1)
+                : state.position();
+
         PatternCompiler.ChannelTimeline best = null;
         for (int ch = 0; ch < 10; ch++) {
             PatternCompiler.ChannelTimeline timeline = compilationResult.getChannelTimeline(ch);
             if (timeline == null || timeline.getRowCount() == 0) continue;
-            if (absolutePos >= timeline.getTrackOffset()) {
+            if (effectivePos >= timeline.getTrackOffset()) {
                 if (best == null || timeline.getTrackOffset() > best.getTrackOffset()) {
                     best = timeline;
                 }
             }
         }
-        return best != null ? best.resolvePosition(absolutePos) : null;
+        if (best == null) return null;
+        PatternCompiler.CursorPosition cursor = best.resolvePosition(effectivePos);
+        if (cursor == null) return null;
+        return new ResolvedTrackCursor(best.getChannel(), cursor);
+    }
+
+    private PatternCompiler.CursorPosition chooseGlobalCursor(List<ResolvedTrackCursor> candidates) {
+        if (candidates.isEmpty()) return null;
+        if (lastResolvedCursor == null) {
+            PatternCompiler.CursorPosition earliest = candidates.get(0).cursor();
+            for (int i = 1; i < candidates.size(); i++) {
+                PatternCompiler.CursorPosition candidate = candidates.get(i).cursor();
+                if (compareCursor(candidate, earliest) < 0) {
+                    earliest = candidate;
+                }
+            }
+            return earliest;
+        }
+
+        PatternCompiler.CursorPosition nearestForward = null;
+        boolean hasEqual = false;
+        for (ResolvedTrackCursor resolved : candidates) {
+            PatternCompiler.CursorPosition candidate = resolved.cursor();
+            int cmp = compareCursor(candidate, lastResolvedCursor);
+            if (cmp > 0) {
+                if (nearestForward == null || compareCursor(candidate, nearestForward) < 0) {
+                    nearestForward = candidate;
+                }
+            } else if (cmp == 0) {
+                hasEqual = true;
+            }
+        }
+        if (nearestForward != null) return nearestForward;
+        if (hasEqual) return lastResolvedCursor;
+        return lastResolvedCursor;
+    }
+
+    private int compareCursor(PatternCompiler.CursorPosition a, PatternCompiler.CursorPosition b) {
+        if (a.orderIndex() != b.orderIndex()) {
+            return Integer.compare(a.orderIndex(), b.orderIndex());
+        }
+        return Integer.compare(a.rowIndex(), b.rowIndex());
     }
 
     /**

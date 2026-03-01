@@ -1,5 +1,6 @@
 package com.opensmps.deck.io;
 
+import com.opensmps.deck.codec.HierarchyDecompiler;
 import com.opensmps.deck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 
@@ -60,7 +61,7 @@ public class SmpsImporter {
         // Try filename-encoded SeqBase (e.g., "song.1380.sm2")
         int seqBase = parseFilenameOffset(filename);
 
-        Song song = importData(data, name, seqBase);
+        Song song = importData(data, name, seqBase, mode);
         song.setSmpsMode(mode);
 
         // Load companion files from parent directory
@@ -78,7 +79,7 @@ public class SmpsImporter {
      * Auto-detects SeqBase from pointer analysis.
      */
     public Song importData(byte[] data, String name) {
-        return importData(data, name, -1);
+        return importData(data, name, -1, SmpsMode.S2);
     }
 
     /**
@@ -86,7 +87,7 @@ public class SmpsImporter {
      *
      * @param seqBase Z80 RAM base offset to subtract from pointers, or -1 to auto-detect
      */
-    Song importData(byte[] data, String name, int seqBase) {
+    Song importData(byte[] data, String name, int seqBase, SmpsMode mode) {
         if (data.length < 6) {
             throw new IllegalArgumentException("SMPS data too short: " + data.length + " bytes");
         }
@@ -160,6 +161,12 @@ public class SmpsImporter {
 
         // Create a single pattern with all track data
         Pattern pattern = new Pattern(0, 64);
+        // Parallel array: normalized data with JUMP intact for hierarchical decompilation
+        byte[][] decompileData = new byte[Pattern.CHANNEL_COUNT][];
+        // Per-channel PSG header values for hierarchical phrase initialization
+        int[] psgHeaderInstrument = new int[Pattern.CHANNEL_COUNT];
+        int[] psgHeaderKey = new int[Pattern.CHANNEL_COUNT];
+        int[] psgHeaderVol = new int[Pattern.CHANNEL_COUNT];
 
         // Extract FM track data
         for (int i = 0; i < fmCount && i < FM_CHANNEL_COUNT; i++) {
@@ -167,8 +174,9 @@ public class SmpsImporter {
             if (ptr >= 0 && ptr < data.length) {
                 byte[] trackData = extractReachableTrackData(data, ptr, seqBase);
                 if (trackData.length > 0) {
-                    trackData = stripJumpTerminator(trackData);
                     trackData = normalizeTrackPointers(trackData, ptr, seqBase);
+                    decompileData[i] = trackData;
+                    trackData = stripJumpTerminator(trackData);
                     trackData = prependFmHeaderState(trackData, fmKeys[i], fmVols[i]);
                     pattern.setTrackData(i, trackData);
                 }
@@ -181,13 +189,17 @@ public class SmpsImporter {
             if (ptr >= 0 && ptr < data.length) {
                 byte[] trackData = extractReachableTrackData(data, ptr, seqBase);
                 if (trackData.length > 0) {
-                    trackData = stripJumpTerminator(trackData);
                     trackData = normalizeTrackPointers(trackData, ptr, seqBase);
                     // Detect PSG noise mode: if track contains F3 flag, map to Noise channel (9)
                     int channelIndex = FM_CHANNEL_COUNT + i;
                     if (containsPsgNoiseFlag(trackData)) {
                         channelIndex = FM_CHANNEL_COUNT + 3; // PSG Noise = channel 9
                     }
+                    decompileData[channelIndex] = trackData;
+                    psgHeaderInstrument[channelIndex] = psgInstruments[i];
+                    psgHeaderKey[channelIndex] = psgKeys[i];
+                    psgHeaderVol[channelIndex] = psgVols[i];
+                    trackData = stripJumpTerminator(trackData);
                     trackData = prependPsgHeaderState(
                             trackData, psgKeys[i], psgVols[i], psgInstruments[i], psgMods[i]);
                     pattern.setTrackData(channelIndex, trackData);
@@ -201,6 +213,67 @@ public class SmpsImporter {
         int[] orderRow = new int[Pattern.CHANNEL_COUNT];
         song.getOrderList().add(orderRow);
         song.setLoopPoint(0);
+
+        // Populate hierarchical arrangement from extracted track data
+        int noteCompensation = switch (mode) {
+            case S1, S3K -> -1;
+            case S2 -> 0;
+        };
+        HierarchicalArrangement hier = song.getHierarchicalArrangement();
+        PhraseLibrary library = hier.getPhraseLibrary();
+
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            byte[] trackData = decompileData[ch];
+            if (trackData == null || trackData.length == 0) continue;
+
+            // Reverse note compensation for S1/S3K FM channels only (0-4).
+            // PSG (6-9) uses baseNoteOffset=0 in all modes, no compensation needed.
+            if (noteCompensation != 0 && ch < 5) { // FM channels only
+                trackData = applyNoteCompensation(trackData, noteCompensation);
+            }
+
+            ChannelType channelType = ChannelType.fromChannelIndex(ch);
+            HierarchyDecompiler.DecompileResult result =
+                    HierarchyDecompiler.decompileTrack(trackData, channelType);
+
+            // Remap phrase IDs from local decompiler library to global song library
+            Map<Integer, Integer> idMap = new HashMap<>();
+            boolean firstPhrase = true;
+            for (Phrase localPhrase : result.phrases()) {
+                Phrase newPhrase = library.createPhrase(localPhrase.getName(), localPhrase.getChannelType());
+                byte[] phraseData = localPhrase.getDataDirect();
+
+                // Prepend PSG header initialization (instrument, key offset, volume)
+                // to the first phrase so it's self-contained. The SMPS header stores
+                // these per-channel but the compiler writes zeros, so without this
+                // the PSG envelope/volume would be wrong after the round-trip.
+                if (firstPhrase && ch >= FM_CHANNEL_COUNT) {
+                    phraseData = prependPsgInitToPhrase(phraseData,
+                        psgHeaderKey[ch], psgHeaderVol[ch], psgHeaderInstrument[ch]);
+                    firstPhrase = false;
+                }
+
+                newPhrase.setData(phraseData);
+                idMap.put(localPhrase.getId(), newPhrase.getId());
+            }
+
+            // Add remapped chain entries
+            Chain chain = hier.getChain(ch);
+            for (ChainEntry localEntry : result.chainEntries()) {
+                Integer newId = idMap.get(localEntry.getPhraseId());
+                if (newId == null) continue;
+                ChainEntry newEntry = new ChainEntry(newId);
+                newEntry.setTransposeSemitones(localEntry.getTransposeSemitones());
+                newEntry.setRepeatCount(localEntry.getRepeatCount());
+                chain.getEntries().add(newEntry);
+            }
+
+            // Set loop point
+            if (result.hasLoopPoint() && result.loopEntryIndex() >= 0) {
+                chain.setLoopEntryIndex(result.loopEntryIndex());
+            }
+        }
+        song.setArrangementMode(ArrangementMode.HIERARCHICAL);
 
         return song;
     }
@@ -508,6 +581,28 @@ public class SmpsImporter {
     }
 
     /**
+     * Shift note bytes (0x81-0xDF) by a signed compensation value.
+     * Properly skips coordination flag parameters to avoid modifying non-note bytes.
+     */
+    private byte[] applyNoteCompensation(byte[] data, int compensation) {
+        byte[] result = data.clone();
+        int pos = 0;
+        while (pos < result.length) {
+            int b = result[pos] & 0xFF;
+            if (b >= 0xE0) {
+                pos += 1 + SmpsCoordFlags.getParamCount(b);
+            } else if (b >= 0x81 && b <= 0xDF) {
+                int adjusted = Math.max(0x81, Math.min(0xDF, b + compensation));
+                result[pos] = (byte) adjusted;
+                pos++;
+            } else {
+                pos++;
+            }
+        }
+        return result;
+    }
+
+    /**
      * Decompress DPCM-encoded DAC sample data.
      * Each input byte produces two output samples via high/low nibble delta accumulation.
      */
@@ -778,6 +873,50 @@ public class SmpsImporter {
             out[pos++] = (byte) volumeOffset;
         }
         System.arraycopy(trackData, 0, out, pos, trackData.length);
+        return out;
+    }
+
+    /**
+     * Prepend PSG header initialization commands (instrument, key offset, volume)
+     * to a decompiled phrase's bytecode. The SMPS header stores these per-channel
+     * but they aren't part of the track bytecode, so without this the values are
+     * lost in the decompile→recompile round-trip.
+     *
+     * <p>Like {@link #prependPsgHeaderState}, keeps any leading F3 (PSG_NOISE) first.
+     */
+    private byte[] prependPsgInitToPhrase(byte[] phraseData, int keyOffset, int volumeOffset,
+                                          int instrument) {
+        // If the phrase starts with F3 (PSG_NOISE), keep it first — setPsgVolume (EC)
+        // writes to hw ch 2 unless noise mode is already enabled.
+        boolean hoistNoise = phraseData.length >= 2
+                && (phraseData[0] & 0xFF) == SmpsCoordFlags.PSG_NOISE;
+        int noiseBytes = hoistNoise ? 2 : 0;
+
+        int prefixLen = noiseBytes;
+        if (keyOffset != 0) prefixLen += 2;
+        if (volumeOffset != 0) prefixLen += 2;
+        if (instrument != 0) prefixLen += 2;
+        if (prefixLen == 0) return phraseData;
+
+        byte[] out = new byte[prefixLen + phraseData.length - noiseBytes];
+        int pos = 0;
+        if (hoistNoise) {
+            out[pos++] = phraseData[0]; // F3
+            out[pos++] = phraseData[1]; // noise param
+        }
+        if (keyOffset != 0) {
+            out[pos++] = (byte) SmpsCoordFlags.KEY_DISP;
+            out[pos++] = (byte) keyOffset;
+        }
+        if (volumeOffset != 0) {
+            out[pos++] = (byte) SmpsCoordFlags.PSG_VOLUME;
+            out[pos++] = (byte) volumeOffset;
+        }
+        if (instrument != 0) {
+            out[pos++] = (byte) SmpsCoordFlags.PSG_INSTRUMENT;
+            out[pos++] = (byte) instrument;
+        }
+        System.arraycopy(phraseData, noiseBytes, out, pos, phraseData.length - noiseBytes);
         return out;
     }
 

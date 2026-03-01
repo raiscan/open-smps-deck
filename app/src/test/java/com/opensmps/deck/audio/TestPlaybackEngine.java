@@ -7,6 +7,31 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TestPlaybackEngine {
 
+    // ---- hierarchical-arrangement helpers ----
+
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? java.util.Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
+
+    // ---- tests ----
+
     @Test
     void testLoadAndRenderProducesAudio() {
         Song song = createTestSong();
@@ -215,8 +240,87 @@ class TestPlaybackEngine {
         song.getVoiceBank().add(new FmVoice("Sine", voiceData));
 
         // Set voice (EF), play C4, duration 48
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xEF, 0x00, (byte)0xA1, 0x30 });
+        byte[] trackData = new byte[]{ (byte)0xEF, 0x00, (byte)0xA1, 0x30 };
+        song.getPatterns().get(0).setTrackData(0, trackData);
+
+        // Hierarchical arrangement: add phrase and loop
+        addPhrase(song, 0, trackData);
+        setLoopOnActiveChains(song, 0);
+
+        return song;
+    }
+
+    private Song createTwoSustainRowSong() {
+        Song song = new Song();
+        song.setTempo(0x80);
+
+        // Same sine voice as createTestSong
+        byte[] voiceData = new byte[25];
+        voiceData[0] = 0x00;
+        voiceData[2] = 0x7F;
+        voiceData[7] = 0x7F;
+        voiceData[12] = 0x7F;
+        voiceData[16] = 0x01;
+        voiceData[17] = 0x00;
+        voiceData[18] = 0x1F;
+        voiceData[19] = 0x00;
+        voiceData[20] = 0x00;
+        voiceData[21] = 0x0F;
+        song.getVoiceBank().add(new FmVoice("Sine", voiceData));
+
+        byte[] trackData = new byte[] {
+                (byte) 0xEF, 0x00,
+                (byte) 0xA1, 0x20,
+                (byte) 0xA4, 0x20,
+                (byte) 0xF2
+        };
+
+        // Hierarchical arrangement
+        addPhrase(song, 0, trackData);
+        setLoopOnActiveChains(song, 0);
+
+        return song;
+    }
+
+    private Song createChannelLocalLoopSong() {
+        Song song = new Song();
+        song.setTempo(0x80);
+
+        // Same sine voice as createTestSong
+        byte[] voiceData = new byte[25];
+        voiceData[0] = 0x00;
+        voiceData[2] = 0x7F;
+        voiceData[7] = 0x7F;
+        voiceData[12] = 0x7F;
+        voiceData[16] = 0x01;
+        voiceData[17] = 0x00;
+        voiceData[18] = 0x1F;
+        voiceData[19] = 0x00;
+        voiceData[20] = 0x00;
+        voiceData[21] = 0x0F;
+        song.getVoiceBank().add(new FmVoice("Sine", voiceData));
+
+        byte[] ch0Data = new byte[] {
+                (byte) 0xEF, 0x00,
+                (byte) 0xA1, 0x02,
+                (byte) 0xA4, 0x02,
+                (byte) 0xF7, 0x00, 0x03, 0x02, 0x00,
+                (byte) 0xA8, 0x02,
+                (byte) 0xF2
+        };
+        byte[] ch1Data = new byte[] {
+                (byte) 0xEF, 0x00,
+                (byte) 0xB0, 0x04,
+                (byte) 0xB2, 0x04,
+                (byte) 0xB4, 0x04,
+                (byte) 0xB5, 0x04,
+                (byte) 0xF2
+        };
+
+        // Hierarchical arrangement
+        addPhrase(song, 0, ch0Data);
+        addPhrase(song, 1, ch1Data);
+        setLoopOnActiveChains(song, 0);
 
         return song;
     }
@@ -229,8 +333,14 @@ class TestPlaybackEngine {
                 new byte[]{0x00, (byte) 0xFF, 0x10, (byte) 0xF0, 0x20, (byte) 0xE0},
                 0x0C
         ));
-        song.getPatterns().get(0).setTrackData(5,
-                new byte[]{(byte) 0x81, 0x30, (byte) 0xF2});
+
+        byte[] trackData = new byte[]{(byte) 0x81, 0x30, (byte) 0xF2};
+        song.getPatterns().get(0).setTrackData(5, trackData);
+
+        // Hierarchical arrangement
+        addPhrase(song, 5, trackData);
+        setLoopOnActiveChains(song, 0);
+
         return song;
     }
 
@@ -243,6 +353,12 @@ class TestPlaybackEngine {
         row1[0] = 1;
         song.getOrderList().add(row1);
         song.setLoopPoint(1);
+
+        // Additional hierarchical phrase for the second order entry
+        addPhrase(song, 0, new byte[]{(byte) 0xBD, 0x20, (byte) 0xF2});
+        // Loop back to the second phrase (index 1)
+        song.getHierarchicalArrangement().getChain(0).setLoopEntryIndex(1);
+
         return song;
     }
 
@@ -265,6 +381,16 @@ class TestPlaybackEngine {
         row2[0] = 1;
         song.getOrderList().add(row2);
         song.setLoopPoint(2);
+
+        // Hierarchical arrangement already has the EF/A1/30 phrase from createTestSong;
+        // add additional phrases for the extra order entries.
+        addPhrase(song, 0, new byte[]{
+                (byte) 0xA1, 0x10,
+                (byte) 0xA4, 0x10,
+                (byte) 0xA8, 0x10
+        });
+        addPhrase(song, 0, new byte[]{(byte) 0xBD, 0x20});
+
         return song;
     }
 
@@ -277,6 +403,16 @@ class TestPlaybackEngine {
                 (byte) 0xA8,
                 (byte) 0xF2
         });
+
+        // Hierarchical arrangement already has the EF/A1/30 phrase from createTestSong;
+        // add phrase with the carry-context data.
+        addPhrase(song, 0, new byte[] {
+                (byte) 0xEF, 0x04,
+                (byte) 0xA1, 0x10,
+                (byte) 0xA4,
+                (byte) 0xA8
+        });
+
         return song;
     }
 
@@ -289,6 +425,16 @@ class TestPlaybackEngine {
                 (byte) 0xA4, 0x10,
                 (byte) 0xF2
         });
+
+        // Hierarchical arrangement already has the EF/A1/30 phrase from createTestSong;
+        // add phrase with the row-prefix flag data.
+        addPhrase(song, 0, new byte[] {
+                (byte) 0xA1, 0x10,
+                (byte) 0xEF, 0x07,
+                (byte) 0xE0, (byte) 0x80,
+                (byte) 0xA4, 0x10
+        });
+
         return song;
     }
 
@@ -333,10 +479,62 @@ class TestPlaybackEngine {
     }
 
     @Test
+    void getPlaybackPositionDoesNotAdvanceRowWhileDurationRemains() {
+        Song song = createTwoSustainRowSong();
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        // Prime the sequencer and advance a little. The first row should still
+        // be active because its duration has not expired yet.
+        engine.renderBuffer(new short[2048]);
+
+        PlaybackEngine.PlaybackPosition pos = engine.getPlaybackPosition();
+        assertNotNull(pos, "Should return a position after render");
+        assertEquals(0, pos.orderIndex(), "Two-row test song should stay on order row 0");
+        assertEquals(0, pos.rowIndex(),
+                "Playback cursor should remain on row 0 while row 0 duration is still active");
+    }
+
+    @Test
+    void getPlaybackPositionDoesNotRegressOnSingleChannelLoopback() {
+        Song song = createChannelLocalLoopSong();
+        PlaybackEngine engine = new PlaybackEngine();
+        engine.loadSong(song);
+
+        PlaybackEngine.PlaybackPosition previous = null;
+        boolean sawForwardMovement = false;
+        for (int i = 0; i < 16; i++) {
+            engine.renderBuffer(new short[1024]);
+            PlaybackEngine.PlaybackPosition pos = engine.getPlaybackPosition();
+            if (pos == null) continue;
+            if (previous != null) {
+                int cmp = comparePlaybackPosition(pos, previous);
+                assertTrue(cmp >= 0,
+                        "Playback cursor should not move backward when only one channel loops");
+                if (cmp > 0) {
+                    sawForwardMovement = true;
+                }
+            }
+            previous = pos;
+        }
+
+        assertNotNull(previous, "Playback cursor should resolve during loopback test");
+        assertTrue(sawForwardMovement, "Playback cursor should still move forward");
+    }
+
+    @Test
     void getPlaybackPositionReturnsNullBeforeLoad() {
         PlaybackEngine engine = new PlaybackEngine();
         assertNull(engine.getPlaybackPosition(),
                 "Should return null when no song is loaded");
+    }
+
+    private int comparePlaybackPosition(PlaybackEngine.PlaybackPosition a,
+                                        PlaybackEngine.PlaybackPosition b) {
+        if (a.orderIndex() != b.orderIndex()) {
+            return Integer.compare(a.orderIndex(), b.orderIndex());
+        }
+        return Integer.compare(a.rowIndex(), b.rowIndex());
     }
 
     private boolean renderContainsAudio(PlaybackEngine engine) {

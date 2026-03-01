@@ -6,18 +6,18 @@ import java.util.List;
 /**
  * Top-level model for an SMPS song project.
  *
- * <p>Contains the voice bank, PSG envelopes, patterns (each holding raw
- * SMPS track data per channel), and the order list that sequences patterns
- * for playback. The internal representation is SMPS-native: track data is
- * stored as raw bytecode matching the Z80 driver convention.
+ * <p>Contains the voice bank, PSG envelopes, hierarchical arrangement
+ * (chain-of-phrases per channel), and supporting data. The internal
+ * representation is SMPS-native: phrase data is raw bytecode matching
+ * the Z80 driver convention.
  *
- * <p>Default state: one empty pattern, one order row, S2 mode, tempo 0x80.
+ * <p>Default state: hierarchical arrangement mode, S2 mode, tempo 0x80.
  */
 public class Song {
 
     private String name = "Untitled";
     private SmpsMode smpsMode = SmpsMode.S2;
-    private ArrangementMode arrangementMode = ArrangementMode.LEGACY_PATTERNS;
+    private ArrangementMode arrangementMode = ArrangementMode.HIERARCHICAL;
     private int tempo = 0x80;
     private int dividingTiming = 1;
     private int loopPoint = 0;
@@ -31,6 +31,9 @@ public class Song {
     private HierarchicalArrangement hierarchicalArrangement;
 
     public Song() {
+        arrangementMode = ArrangementMode.HIERARCHICAL;
+        hierarchicalArrangement = new HierarchicalArrangement();
+        // Legacy pattern for backward compat with PatternCompiler
         patterns.add(new Pattern(0, 64));
         int[] firstOrder = new int[Pattern.CHANNEL_COUNT];
         orderList.add(firstOrder);
@@ -57,7 +60,7 @@ public class Song {
     }
 
     public void setArrangementMode(ArrangementMode arrangementMode) {
-        this.arrangementMode = arrangementMode != null ? arrangementMode : ArrangementMode.LEGACY_PATTERNS;
+        this.arrangementMode = arrangementMode != null ? arrangementMode : ArrangementMode.HIERARCHICAL;
     }
 
     public int getTempo() {

@@ -13,12 +13,19 @@ public final class HierarchyCompiler {
 
     private HierarchyCompiler() {}
 
+    /** Result of compiling a chain, with metadata for timeline construction. */
+    public record ChainCompilationResult(byte[] trackData, int[] entryOffsets, int contentEndOffset) {}
+
     /** Position in the main stream where a CALL was emitted, plus the target phrase ID. */
     private record CallPatch(int callOffset, int phraseId) {}
 
     public static byte[] compileChain(Chain chain, PhraseLibrary library) {
+        return compileChainDetailed(chain, library).trackData();
+    }
+
+    public static ChainCompilationResult compileChainDetailed(Chain chain, PhraseLibrary library) {
         if (chain.getEntries().isEmpty()) {
-            return new byte[]{(byte) SmpsCoordFlags.STOP};
+            return new ChainCompilationResult(new byte[]{(byte) SmpsCoordFlags.STOP}, new int[0], 0);
         }
 
         // Count phrase references to decide inline vs CALL
@@ -76,6 +83,8 @@ public final class HierarchyCompiler {
             }
         }
 
+        int contentEndOffset = mainStream.size();
+
         // Reset transpose if it was non-zero at end
         if (currentTranspose != 0 && !chain.hasLoop()) {
             mainStream.write((byte) SmpsCoordFlags.KEY_DISP);
@@ -108,7 +117,7 @@ public final class HierarchyCompiler {
             combined[patch.callOffset() + 2] = (byte) ((target >> 8) & 0xFF);
         }
 
-        return combined;
+        return new ChainCompilationResult(combined, entryOffsets, contentEndOffset);
     }
 
     private static void emitCall(ByteArrayOutputStream stream, int phraseId,

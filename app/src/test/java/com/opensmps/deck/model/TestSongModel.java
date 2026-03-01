@@ -12,11 +12,11 @@ class TestSongModel {
 
         assertEquals("Untitled", song.getName());
         assertEquals(SmpsMode.S2, song.getSmpsMode());
-        assertEquals(ArrangementMode.LEGACY_PATTERNS, song.getArrangementMode());
+        assertEquals(ArrangementMode.HIERARCHICAL, song.getArrangementMode());
         assertEquals(0x80, song.getTempo());
         assertEquals(1, song.getDividingTiming());
         assertEquals(0, song.getLoopPoint());
-        assertNull(song.getStructuredArrangement(), "Structured arrangement should default to null");
+        assertNotNull(song.getHierarchicalArrangement(), "Hierarchical arrangement should be created by default");
 
         assertTrue(song.getVoiceBank().isEmpty(), "Voice bank should be empty");
         assertTrue(song.getPsgEnvelopes().isEmpty(), "PSG envelopes should be empty");

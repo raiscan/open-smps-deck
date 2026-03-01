@@ -20,6 +20,27 @@ public class TestSmpsImporter {
     @TempDir
     File tempDir;
 
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? java.util.Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, com.opensmps.deck.model.ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new com.opensmps.deck.model.ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < com.opensmps.deck.model.Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
+
     @Test
     void testImportMinimalSong() {
         // Build a minimal SMPS binary:
@@ -144,33 +165,25 @@ public class TestSmpsImporter {
         Song original = new Song();
         original.setTempo(0x90);
         original.setDividingTiming(1);
-        original.getPatterns().clear();
-        original.getOrderList().clear();
 
         // Add a voice for the FM channel
         byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
         voiceData[0] = 0x32; // algo=2, fb=6
         original.getVoiceBank().add(new FmVoice("Voice 0", voiceData));
 
-        Pattern pattern = new Pattern(0, 64);
-
-        // FM channel 0: set voice, play a note, stop
-        pattern.setTrackData(0, new byte[]{
+        // FM channel 0: set voice, play a note
+        addPhrase(original, 0, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0xA1, 0x30,               // note C4, duration 0x30
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xA1, 0x30               // note C4, duration 0x30
         });
 
-        // PSG channel 0 (index 6): PSG instrument, note, stop
-        pattern.setTrackData(6, new byte[]{
+        // PSG channel 0 (index 6): PSG instrument, note
+        addPhrase(original, 6, new byte[]{
                 (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x03,
-                (byte) 0xB0, 0x18,               // note, duration
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xB0, 0x18               // note, duration
         });
 
-        original.getPatterns().add(pattern);
-        int[] orderRow = new int[Pattern.CHANNEL_COUNT];
-        original.getOrderList().add(orderRow);
+        setLoopOnActiveChains(original, 0);
 
         // Compile to SMPS binary
         byte[] smps = new PatternCompiler().compile(original);
@@ -215,39 +228,30 @@ public class TestSmpsImporter {
         Song original = new Song();
         original.setTempo(0x80);
         original.setDividingTiming(1);
-        original.getPatterns().clear();
-        original.getOrderList().clear();
 
         byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
         voiceData[0] = 0x1A; // algo=2, fb=3
         original.getVoiceBank().add(new FmVoice("Voice 0", voiceData));
 
-        Pattern pattern = new Pattern(0, 64);
-
         // Channel 0: note 0xA1 (C4)
-        pattern.setTrackData(0, new byte[]{
+        addPhrase(original, 0, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0xA1, 0x30,
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xA1, 0x30
         });
 
         // Channel 1: note 0xA5 (E4)
-        pattern.setTrackData(1, new byte[]{
+        addPhrase(original, 1, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0xA5, 0x30,
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xA5, 0x30
         });
 
         // Channel 2: note 0xA8 (G4)
-        pattern.setTrackData(2, new byte[]{
+        addPhrase(original, 2, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0xA8, 0x30,
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xA8, 0x30
         });
 
-        original.getPatterns().add(pattern);
-        int[] orderRow = new int[Pattern.CHANNEL_COUNT];
-        original.getOrderList().add(orderRow);
+        setLoopOnActiveChains(original, 0);
 
         // Compile and reimport
         byte[] smps = new PatternCompiler().compile(original);
@@ -302,31 +306,23 @@ public class TestSmpsImporter {
         Song original = new Song();
         original.setTempo(0x80);
         original.setDividingTiming(1);
-        original.getPatterns().clear();
-        original.getOrderList().clear();
 
         byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
         original.getVoiceBank().add(new FmVoice("Voice 0", voiceData));
 
-        Pattern pattern = new Pattern(0, 64);
-
         // Channel 0: normal note
-        pattern.setTrackData(0, new byte[]{
+        addPhrase(original, 0, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0xA1, 0x30,
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0xA1, 0x30
         });
 
-        // Channel 1: only a rest (0x80 = rest note) + duration + stop
-        pattern.setTrackData(1, new byte[]{
+        // Channel 1: only a rest (0x80 = rest note) + duration
+        addPhrase(original, 1, new byte[]{
                 (byte) SmpsCoordFlags.SET_VOICE, 0x00,
-                (byte) 0x80, 0x30,               // rest, duration
-                (byte) SmpsCoordFlags.STOP
+                (byte) 0x80, 0x30               // rest, duration
         });
 
-        original.getPatterns().add(pattern);
-        int[] orderRow = new int[Pattern.CHANNEL_COUNT];
-        original.getOrderList().add(orderRow);
+        setLoopOnActiveChains(original, 0);
 
         // Compile and reimport
         byte[] smps = new PatternCompiler().compile(original);
@@ -1001,6 +997,111 @@ public class TestSmpsImporter {
         }
         assertTrue(ecPos > 1, "EC (PSG_VOLUME) should appear after F3+param");
         assertTrue(f5Pos > 1, "F5 (PSG_INSTRUMENT) should appear after F3+param");
+    }
+
+    // --- Hierarchical PSG header init ---
+
+    @Test
+    void testImportPsgHeaderInitPrependedToFirstHierarchicalPhrase() {
+        // Build SMPS with 0 FM, 1 PSG channel with non-zero instrument in the header.
+        // After import, the first hierarchical phrase should start with F5 (PSG_INSTRUMENT).
+        int headerEnd = 6 + 1 * 6; // 1 PSG channel
+        int trackOffset = headerEnd;
+        int fileLen = trackOffset + 5;
+
+        byte[] smps = new byte[fileLen];
+        writeLE16(smps, 0, 0x0000); // no voice table
+        smps[2] = 0x00; // 0 FM
+        smps[3] = 0x01; // 1 PSG
+        smps[4] = 0x01;
+        smps[5] = (byte) 0x80;
+
+        // PSG entry: instrument=3, key=0, vol=0
+        writeLE16(smps, 6, trackOffset);
+        smps[8] = 0x00;  // key
+        smps[9] = 0x00;  // vol
+        smps[10] = 0x00; // mod
+        smps[11] = 0x03; // instrument
+
+        // Track data: note + dur + STOP
+        smps[trackOffset] = (byte) 0xA1;
+        smps[trackOffset + 1] = 0x30;
+        smps[trackOffset + 2] = (byte) SmpsCoordFlags.STOP;
+
+        Song song = new SmpsImporter().importData(smps, "psg-hier-init");
+
+        // Check the hierarchical arrangement for PSG channel 6
+        var hier = song.getHierarchicalArrangement();
+        assertFalse(hier.getChain(6).getEntries().isEmpty(),
+            "PSG channel 6 should have chain entries");
+        ChainEntry entry = hier.getChain(6).getEntries().get(0);
+        Phrase phrase = hier.getPhraseLibrary().getPhrase(entry.getPhraseId());
+        assertNotNull(phrase);
+
+        // The phrase data should start with F5 03 (PSG_INSTRUMENT 3)
+        byte[] data = phrase.getData();
+        assertTrue(data.length >= 4,
+            "Phrase should have F5 03 + original note data");
+        assertEquals(SmpsCoordFlags.PSG_INSTRUMENT, data[0] & 0xFF,
+            "First byte should be F5 (PSG_INSTRUMENT)");
+        assertEquals(0x03, data[1] & 0xFF,
+            "Instrument ID should be 3");
+        // Followed by original note
+        assertEquals(0xA1, data[2] & 0xFF, "Note should follow instrument command");
+    }
+
+    @Test
+    void testImportPsgNoiseHeaderInitHoistsF3First() {
+        // PSG noise track with non-zero instrument: F3 must come before F5 in phrase data
+        int headerEnd = 6 + 1 * 6;
+        int trackOffset = headerEnd;
+        int fileLen = trackOffset + 5;
+
+        byte[] smps = new byte[fileLen];
+        writeLE16(smps, 0, 0x0000);
+        smps[2] = 0x00;
+        smps[3] = 0x01;
+        smps[4] = 0x01;
+        smps[5] = (byte) 0x80;
+
+        writeLE16(smps, 6, trackOffset);
+        smps[8] = 0x00;
+        smps[9] = 0x00;
+        smps[10] = 0x00;
+        smps[11] = 0x05; // instrument=5
+
+        // Track: F3 E7 note dur STOP
+        smps[trackOffset] = (byte) SmpsCoordFlags.PSG_NOISE;
+        smps[trackOffset + 1] = (byte) 0xE7;
+        smps[trackOffset + 2] = (byte) 0xC6;
+        smps[trackOffset + 3] = 0x18;
+        smps[trackOffset + 4] = (byte) SmpsCoordFlags.STOP;
+
+        Song song = new SmpsImporter().importData(smps, "noise-hier-init");
+
+        var hier = song.getHierarchicalArrangement();
+        // Noise track maps to channel 9
+        assertFalse(hier.getChain(9).getEntries().isEmpty());
+        ChainEntry entry = hier.getChain(9).getEntries().get(0);
+        Phrase phrase = hier.getPhraseLibrary().getPhrase(entry.getPhraseId());
+        assertNotNull(phrase);
+
+        byte[] data = phrase.getData();
+        // F3 must be first, then F5 (instrument)
+        assertEquals(SmpsCoordFlags.PSG_NOISE, data[0] & 0xFF,
+            "F3 (PSG_NOISE) must be first in hierarchical phrase");
+        assertEquals(0xE7, data[1] & 0xFF);
+
+        // Find F5 — should appear after F3+param
+        boolean foundF5 = false;
+        for (int i = 2; i < data.length - 1; i++) {
+            if ((data[i] & 0xFF) == SmpsCoordFlags.PSG_INSTRUMENT) {
+                assertEquals(0x05, data[i + 1] & 0xFF, "Instrument ID should be 5");
+                foundF5 = true;
+                break;
+            }
+        }
+        assertTrue(foundF5, "F5 (PSG_INSTRUMENT) should appear in phrase data after F3");
     }
 
     // --- Helpers ---

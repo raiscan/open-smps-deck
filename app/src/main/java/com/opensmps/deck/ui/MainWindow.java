@@ -143,37 +143,27 @@ public class MainWindow {
         songTab.getTrackerGrid().setOnTogglePlayback(() -> songTabCoordinator.onTogglePlayback(songTab.getSong()));
         songTab.getTrackerGrid().setOnStopPlayback(songTabCoordinator::onStopPlayback);
         songTab.getTrackerGrid().setOnPlayFromCursor(() -> {
-            int orderIndex = songTab.getOrderListPanel().getSelectedRow();
+            int orderIndex;
+            if (songTab.isHierarchical() && songTab.getChainStrip() != null) {
+                orderIndex = Math.max(0, songTab.getChainStrip().getSelectedIndex());
+            } else {
+                orderIndex = songTab.getOrderListPanel().getSelectedRow();
+            }
             int rowIndex = songTab.getTrackerGrid().getCursorRow();
             songTabCoordinator.onPlayFromCursor(songTab.getSong(), orderIndex, rowIndex);
         });
 
         BorderPane content = new BorderPane();
 
-        if (songTab.isHierarchical()) {
-            // Hierarchical layout: SongView (left), BreadcrumbBar+ChainStrip+TrackerGrid (center)
-            VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip());
-            BorderPane centerPane = new BorderPane();
-            centerPane.setTop(centerTop);
-            centerPane.setCenter(songTab.getTrackerGrid());
+        // Hierarchical layout: SongView (left), BreadcrumbBar+ChainStrip+TrackerGrid (center)
+        VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip());
+        BorderPane centerPane = new BorderPane();
+        centerPane.setTop(centerTop);
+        centerPane.setCenter(songTab.getTrackerGrid());
 
-            content.setLeft(songTab.getSongView());
-            content.setCenter(centerPane);
-            content.setRight(songTab.getInstrumentPanel());
-        } else {
-            // Legacy layout: TrackerGrid (center), OrderList (bottom)
-            content.setCenter(songTab.getTrackerGrid());
-            content.setBottom(songTab.getOrderListPanel());
-            content.setRight(songTab.getInstrumentPanel());
-        }
-
-        songTab.getOrderListPanel().setOnOrderRowSelected(rowIndex -> {
-            Song song = songTab.getSong();
-            int patternIndex = songTabCoordinator.resolvePatternForOrderSelection(song, rowIndex);
-            if (patternIndex >= 0) {
-                songTab.getTrackerGrid().setCurrentPatternIndex(patternIndex);
-            }
-        });
+        content.setLeft(songTab.getSongView());
+        content.setCenter(centerPane);
+        content.setRight(songTab.getInstrumentPanel());
 
         Tab tab = new Tab(songTab.getTitle(), content);
         tab.setUserData(songTab);

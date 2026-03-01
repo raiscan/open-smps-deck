@@ -1,6 +1,9 @@
 package com.opensmps.deck.io;
 
+import com.opensmps.deck.model.ChainEntry;
+import com.opensmps.deck.model.ChannelType;
 import com.opensmps.deck.model.FmVoice;
+import com.opensmps.deck.model.Pattern;
 import com.opensmps.deck.model.Song;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,6 +13,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,6 +21,35 @@ class TestWavExporter {
 
     @TempDir
     File tempDir;
+
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void addPhraseRaw(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(data);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
 
     @Test
     void testExportProducesValidWavFile() throws IOException {
@@ -448,9 +481,10 @@ class TestWavExporter {
         song.getVoiceBank().add(new FmVoice("Sine", voiceData));
 
         // Set voice (EF 00), play note C4 (A1) duration 48 (30h)
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30});
 
+        setLoopOnActiveChains(song, 0);
         return song;
     }
 
@@ -510,13 +544,14 @@ class TestWavExporter {
         song.getVoiceBank().add(new FmVoice("Sine", buildAudibleVoice()));
 
         // Channel 0: rest (occupies the DAC slot in SMPS header)
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0x80, 0x30});
 
         // Channel 1: set voice 0, play note C4 (A1) for 48 ticks (maps to FM0)
-        song.getPatterns().get(0).setTrackData(1,
+        addPhrase(song, 1,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30});
 
+        setLoopOnActiveChains(song, 0);
         return song;
     }
 
@@ -541,7 +576,7 @@ class TestWavExporter {
 
         // Channel 0: rest then STOP (occupies the DAC slot in SMPS header).
         // Both channels must STOP for the sequencer to report isComplete().
-        song.getPatterns().get(0).setTrackData(0,
+        addPhraseRaw(song, 0,
                 new byte[]{
                         (byte) 0x80, 0x7F,     // rest, duration 127
                         (byte) 0x80, 0x7F,     // rest, duration 127
@@ -550,7 +585,7 @@ class TestWavExporter {
                 });
 
         // Channel 1: FM note on FM0 (set voice, play 2x 127 ticks, then STOP)
-        song.getPatterns().get(0).setTrackData(1,
+        addPhraseRaw(song, 1,
                 new byte[]{
                         (byte) 0xEF, 0x00,     // set voice 0
                         (byte) 0xA1, 0x7F,     // note C4, duration 127 ticks
@@ -559,6 +594,7 @@ class TestWavExporter {
                         (byte) 0x80            // dummy trailing byte
                 });
 
+        // No loop set -- chains end with F2 STOP so the song terminates
         return song;
     }
 }

@@ -4,14 +4,41 @@ import com.opensmps.deck.io.SmpsImporter;
 import com.opensmps.deck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
+
+import java.util.Arrays;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests that compile -> import round-trips preserve track data correctly.
  * This verifies that PatternCompiler and SmpsImporter use the same
  * coordination flag convention (via SmpsCoordFlags).
+ *
+ * <p>Uses hierarchical arrangement (chain-of-phrases) instead of legacy
+ * pattern/order data.
  */
 class TestCompileImportRoundTrip {
+
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
 
     @Test
     void compileThenImportPreservesTrackData() {
@@ -26,7 +53,8 @@ class TestCompileImportRoundTrip {
             (byte) 0xBD, 0x30,
             (byte) 0xBF, 0x20
         };
-        original.getPatterns().get(0).setTrackData(0, trackData);
+        addPhrase(original, 0, trackData);
+        setLoopOnActiveChains(original, 0);
 
         // Compile to SMPS binary
         byte[] smps = new PatternCompiler().compile(original);
@@ -34,7 +62,7 @@ class TestCompileImportRoundTrip {
         // Import back
         Song imported = new SmpsImporter().importData(smps, "roundtrip.bin");
 
-        // Track data should be preserved (minus F2 terminator, plus F6 jump appended by compiler)
+        // Track data should be preserved; the importer strips the trailing F6 jump
         byte[] importedTrack = imported.getPatterns().get(0).getTrackData(0);
         assertNotNull(importedTrack);
         assertTrue(importedTrack.length >= trackData.length,
@@ -54,8 +82,8 @@ class TestCompileImportRoundTrip {
         original.setTempo(0xA0);
         original.setDividingTiming(3);
         original.getVoiceBank().add(new FmVoice("V", new byte[25]));
-        original.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x30 });
+        addPhrase(original, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        setLoopOnActiveChains(original, 0);
 
         byte[] smps = new PatternCompiler().compile(original);
         Song imported = new SmpsImporter().importData(smps, null);
@@ -71,8 +99,8 @@ class TestCompileImportRoundTrip {
         voiceData[0] = 0x32; // algo=2, fb=6
         voiceData[1] = 0x01; // op1 mul
         original.getVoiceBank().add(new FmVoice("Lead", voiceData));
-        original.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x30 });
+        addPhrase(original, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        setLoopOnActiveChains(original, 0);
 
         byte[] smps = new PatternCompiler().compile(original);
         Song imported = new SmpsImporter().importData(smps, null);
@@ -85,8 +113,8 @@ class TestCompileImportRoundTrip {
     @Test
     void compileThenImportPreservesPsgChannel() {
         Song original = new Song();
-        original.getPatterns().get(0).setTrackData(6, // PSG channel 0
-            new byte[]{ (byte) 0xBD, 0x18 });
+        addPhrase(original, 6, new byte[]{ (byte) 0xBD, 0x18 }); // PSG channel 0
+        setLoopOnActiveChains(original, 0);
 
         byte[] smps = new PatternCompiler().compile(original);
         Song imported = new SmpsImporter().importData(smps, null);
@@ -98,12 +126,47 @@ class TestCompileImportRoundTrip {
     }
 
     @Test
+    void compileThenImportPopulatesHierarchicalArrangement() {
+        Song original = new Song();
+        original.getVoiceBank().add(new FmVoice("V", new byte[25]));
+
+        byte[] trackData = {
+            (byte) SmpsCoordFlags.SET_VOICE, 0x00,
+            (byte) 0xBD, 0x30,
+            (byte) 0xBF, 0x20
+        };
+        addPhrase(original, 0, trackData);
+        addPhrase(original, 6, new byte[]{ (byte) 0xBD, 0x18 }); // PSG
+        setLoopOnActiveChains(original, 0);
+
+        byte[] smps = new PatternCompiler().compile(original);
+        Song imported = new SmpsImporter().importData(smps, "hier-rt");
+
+        // Imported song should have hierarchical arrangement populated
+        var hier = imported.getHierarchicalArrangement();
+        assertNotNull(hier);
+        assertEquals(ArrangementMode.HIERARCHICAL, imported.getArrangementMode());
+
+        // FM channel 0 should have chain entries and phrases
+        assertFalse(hier.getChain(0).getEntries().isEmpty(),
+            "FM0 chain should have entries");
+        ChainEntry fmEntry = hier.getChain(0).getEntries().get(0);
+        Phrase fmPhrase = hier.getPhraseLibrary().getPhrase(fmEntry.getPhraseId());
+        assertNotNull(fmPhrase, "FM0 phrase should exist in library");
+        assertTrue(fmPhrase.getData().length > 0, "FM0 phrase should have data");
+
+        // PSG channel 6 should also have chain entries
+        assertFalse(hier.getChain(6).getEntries().isEmpty(),
+            "PSG0 chain should have entries");
+    }
+
+    @Test
     void jumpTerminatorIsF6() {
         // Verify PatternCompiler uses F6 (Jump) not F4 (old wrong value)
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x18 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xBD, 0x18 });
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
 

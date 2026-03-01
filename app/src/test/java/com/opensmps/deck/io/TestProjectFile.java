@@ -107,7 +107,7 @@ public class TestProjectFile {
 
         // Read the JSON, bump version to 999, write back
         String json = java.nio.file.Files.readString(file.toPath());
-        json = json.replaceFirst("\"version\": 1", "\"version\": 999");
+        json = json.replaceFirst("\"version\": 2", "\"version\": 999");
         java.nio.file.Files.writeString(file.toPath(), json);
 
         // Should throw IOException
@@ -226,5 +226,38 @@ public class TestProjectFile {
         Song loaded = ProjectFile.load(file);
         assertTrue(loaded.getDacSamples().isEmpty(),
                 "Loading an old file without dacSamples should result in empty list");
+    }
+
+    @Test
+    void testSaveLoadStructuredArrangement(@TempDir Path structuredTempDir) throws Exception {
+        Song song = new Song();
+        song.setArrangementMode(ArrangementMode.STRUCTURED_BLOCKS);
+
+        StructuredArrangement structured = new StructuredArrangement();
+        structured.setTicksPerRow(3);
+        BlockDefinition block = new BlockDefinition(10, "A", 24);
+        block.setTrackData(0, new byte[] { (byte) 0xA1, 0x18 });
+        structured.getBlocks().add(block);
+        BlockRef ref = new BlockRef(10, 12);
+        ref.setRepeatCount(2);
+        ref.setTransposeSemitones(1);
+        structured.getChannels().get(0).getBlockRefs().add(ref);
+        song.setStructuredArrangement(structured);
+
+        File file = structuredTempDir.resolve("structured.osmpsd").toFile();
+        ProjectFile.save(song, file);
+
+        Song loaded = ProjectFile.load(file);
+        assertEquals(ArrangementMode.STRUCTURED_BLOCKS, loaded.getArrangementMode());
+        assertNotNull(loaded.getStructuredArrangement());
+        assertEquals(3, loaded.getStructuredArrangement().getTicksPerRow());
+        assertEquals(1, loaded.getStructuredArrangement().getBlocks().size());
+        assertEquals(10, loaded.getStructuredArrangement().getBlocks().get(0).getId());
+        assertEquals(1, loaded.getStructuredArrangement().getChannels().get(0).getBlockRefs().size());
+        BlockRef loadedRef = loaded.getStructuredArrangement().getChannels().get(0).getBlockRefs().get(0);
+        assertEquals(10, loadedRef.getBlockId());
+        assertEquals(12, loadedRef.getStartTick());
+        assertEquals(2, loadedRef.getRepeatCount());
+        assertEquals(1, loadedRef.getTransposeSemitones());
     }
 }

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,12 +16,33 @@ public class TestSmpsExporter {
     @TempDir
     File tempDir;
 
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == 0xF2) end--;
+        byte[] phraseData = end < data.length ? Arrays.copyOf(data, end) : data;
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(phraseData);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
+
     @Test
     void testExportWritesValidFile() throws IOException {
         Song song = new Song();
         song.setTempo(0x80);
         song.getVoiceBank().add(new FmVoice("Test", new byte[25]));
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA1, 0x30, (byte) 0xF2});
 
         File file = new File(tempDir, "test.bin");
@@ -40,7 +62,7 @@ public class TestSmpsExporter {
     void testCompileMatchesExport() throws IOException {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xA1, 0x30});
 
         SmpsExporter exporter = new SmpsExporter();
@@ -63,7 +85,7 @@ public class TestSmpsExporter {
         voiceData[0] = 0x32; // algo=2, fb=6
         song.getVoiceBank().add(new FmVoice("Lead", voiceData));
         // Add some FM1 data
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0x80, 0x30});
 
         File file = new File(tempDir, "test-voice.bin");
@@ -91,11 +113,11 @@ public class TestSmpsExporter {
         song.getPsgEnvelopes().add(new PsgEnvelope("Env1", envData));
 
         // FM1 (channel 0): simple note
-        song.getPatterns().get(0).setTrackData(0,
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA0, 0x30});
 
         // PSG1 (channel 6): PSG instrument select + note
-        song.getPatterns().get(0).setTrackData(6,
+        addPhrase(song, 6,
                 new byte[]{(byte) 0xF5, 0x00, (byte) 0xA0, 0x30});
 
         File file = new File(tempDir, "test-psg.bin");
@@ -131,7 +153,7 @@ public class TestSmpsExporter {
         song.getDacSamples().add(new DacSample("Kick", sampleData, 0x0C));
 
         // DAC channel is channel 5. DAC note 0x81 = first DAC sample.
-        song.getPatterns().get(0).setTrackData(5,
+        addPhrase(song, 5,
                 new byte[]{(byte) 0x81, 0x30});
 
         File file = new File(tempDir, "test-dac.bin");
@@ -161,31 +183,23 @@ public class TestSmpsExporter {
         song.setTempo(0x80);
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        // Pattern 0 already exists from constructor; add data to FM1
-        song.getPatterns().get(0).setTrackData(0,
+        // First phrase on FM1
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA0, 0x18});
 
-        // Add pattern 1 with different FM1 data
-        Pattern pattern1 = new Pattern(1, 64);
-        pattern1.setTrackData(0,
+        // Second phrase on FM1 with different notes
+        addPhrase(song, 0,
                 new byte[]{(byte) 0xA4, 0x30, (byte) 0xA8, 0x30});
-        song.getPatterns().add(pattern1);
-
-        // Order list: row 0 -> pattern 0, row 1 -> pattern 1
-        song.getOrderList().get(0)[0] = 0;
-        int[] secondRow = new int[Pattern.CHANNEL_COUNT];
-        secondRow[0] = 1;
-        song.getOrderList().add(secondRow);
 
         File file = new File(tempDir, "test-multi.bin");
         new SmpsExporter().export(song, file);
         byte[] multiData = Files.readAllBytes(file.toPath());
 
-        // Now export a single-pattern version for size comparison
+        // Now export a single-phrase version for size comparison
         Song singleSong = new Song();
         singleSong.setTempo(0x80);
         singleSong.getVoiceBank().add(new FmVoice("V", new byte[25]));
-        singleSong.getPatterns().get(0).setTrackData(0,
+        addPhrase(singleSong, 0,
                 new byte[]{(byte) 0xEF, 0x00, (byte) 0xA0, 0x18});
 
         File singleFile = new File(tempDir, "test-single.bin");
@@ -193,10 +207,10 @@ public class TestSmpsExporter {
         byte[] singleData = Files.readAllBytes(singleFile.toPath());
 
         assertTrue(multiData.length > singleData.length,
-                "Multi-pattern export (" + multiData.length + " bytes) should be larger than " +
-                        "single-pattern export (" + singleData.length + " bytes)");
+                "Multi-phrase export (" + multiData.length + " bytes) should be larger than " +
+                        "single-phrase export (" + singleData.length + " bytes)");
 
-        // Verify both pattern note bytes appear in the multi-pattern binary
+        // Verify both phrase note bytes appear in the multi-phrase binary
         boolean foundA0 = false;
         boolean foundA4 = false;
         boolean foundA8 = false;
@@ -205,9 +219,9 @@ public class TestSmpsExporter {
             if ((b & 0xFF) == 0xA4) foundA4 = true;
             if ((b & 0xFF) == 0xA8) foundA8 = true;
         }
-        assertTrue(foundA0, "Should contain note 0xA0 from pattern 0");
-        assertTrue(foundA4, "Should contain note 0xA4 from pattern 1");
-        assertTrue(foundA8, "Should contain note 0xA8 from pattern 1");
+        assertTrue(foundA0, "Should contain note 0xA0 from phrase 1");
+        assertTrue(foundA4, "Should contain note 0xA4 from phrase 2");
+        assertTrue(foundA8, "Should contain note 0xA8 from phrase 2");
     }
 
     @Test
@@ -215,10 +229,8 @@ public class TestSmpsExporter {
         Song song = new Song();
         song.setTempo(0x60);
 
-        // Clear the default pattern's track data (already empty by default)
-        // and use an empty order list
-        song.getPatterns().clear();
-        song.getOrderList().clear();
+        // Song() creates empty chains by default in hierarchical mode,
+        // so no data means no active channels.
 
         File file = new File(tempDir, "test-empty.bin");
         // Should not throw

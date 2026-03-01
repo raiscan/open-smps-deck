@@ -1,9 +1,13 @@
 package com.opensmps.deck.audio;
 
 import com.opensmps.deck.codec.SmpsEncoder;
+import com.opensmps.deck.model.Chain;
+import com.opensmps.deck.model.ChainEntry;
 import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.FmVoice;
+import com.opensmps.deck.model.HierarchicalArrangement;
 import com.opensmps.deck.model.Pattern;
+import com.opensmps.deck.model.Phrase;
 import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
 import com.opensmps.smps.SmpsCoordFlags;
@@ -56,6 +60,22 @@ final class PlaybackSliceBuilder {
                 adjustedLoop = 0;
             }
             copy.setLoopPoint(adjustedLoop);
+
+            // Trim hierarchical chains to match sliced order
+            HierarchicalArrangement arr = copy.getHierarchicalArrangement();
+            if (arr != null) {
+                for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                    Chain chain = arr.getChain(ch);
+                    int toRemove = Math.min(orderIndex, chain.getEntries().size());
+                    for (int i = 0; i < toRemove; i++) {
+                        chain.getEntries().remove(0);
+                    }
+                    int oldLoop = chain.getLoopEntryIndex();
+                    if (oldLoop >= 0) {
+                        chain.setLoopEntryIndex(Math.max(0, oldLoop - toRemove));
+                    }
+                }
+            }
         }
         if (normalizedRow > 0 && !copy.getOrderList().isEmpty()) {
             rewriteFirstOrderRowForRowOffset(copy, normalizedRow);
@@ -258,6 +278,31 @@ final class PlaybackSliceBuilder {
         for (int[] row : source.getOrderList()) {
             copy.getOrderList().add(row.clone());
         }
+
+        // Deep copy hierarchical arrangement
+        HierarchicalArrangement sourceArr = source.getHierarchicalArrangement();
+        if (sourceArr != null) {
+            HierarchicalArrangement copyArr = copy.getHierarchicalArrangement();
+            for (Phrase phrase : sourceArr.getPhraseLibrary().getAllPhrases()) {
+                Phrase copyPhrase = copyArr.getPhraseLibrary().createPhrase(
+                        phrase.getName(), phrase.getChannelType());
+                copyPhrase.setData(phrase.getDataDirect());
+            }
+            copyArr.getPhraseLibrary().setNextId(sourceArr.getPhraseLibrary().getNextId());
+
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                Chain sourceChain = sourceArr.getChain(ch);
+                Chain copyChain = copyArr.getChain(ch);
+                for (ChainEntry entry : sourceChain.getEntries()) {
+                    ChainEntry copyEntry = new ChainEntry(entry.getPhraseId());
+                    copyEntry.setTransposeSemitones(entry.getTransposeSemitones());
+                    copyEntry.setRepeatCount(entry.getRepeatCount());
+                    copyChain.getEntries().add(copyEntry);
+                }
+                copyChain.setLoopEntryIndex(sourceChain.getLoopEntryIndex());
+            }
+        }
+
         return copy;
     }
 

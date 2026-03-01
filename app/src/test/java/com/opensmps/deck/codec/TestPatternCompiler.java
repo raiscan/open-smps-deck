@@ -7,6 +7,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TestPatternCompiler {
 
+    // ── Hierarchical arrangement helpers ──
+
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        var phrase = arr.getPhraseLibrary().createPhrase(
+            "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(stripTrailingStop(data));
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
+    }
+
+    private static byte[] stripTrailingStop(byte[] data) {
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == SmpsCoordFlags.STOP) {
+            end--;
+        }
+        return end < data.length ? java.util.Arrays.copyOf(data, end) : data;
+    }
+
+    // ── Tests ──
+
     @Test
     void testCompilesMinimalSong() {
         Song song = new Song();
@@ -17,10 +47,9 @@ class TestPatternCompiler {
         voiceData[0] = 0x00; // algo 0
         song.getVoiceBank().add(new FmVoice("Test", voiceData));
 
-        // Put note data in FM channel 0 of pattern 0
-        // EF 00 (set voice 0), A1 (note C4), 30 (duration), F2 (track end)
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
+        // EF 00 (set voice 0), A1 (note C4), 30 (duration)
+        addPhrase(song, 0, new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -47,8 +76,8 @@ class TestPatternCompiler {
         voiceData[0] = 0x32; // algo=2, fb=6
         song.getVoiceBank().add(new FmVoice("Lead", voiceData));
 
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
+        addPhrase(song, 0, new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte)0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
 
@@ -60,13 +89,9 @@ class TestPatternCompiler {
     void testLoopJumpPresent() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("Test", new byte[25]));
-        song.setLoopPoint(0);
 
-        // Two order rows both pointing to pattern 0
-        song.getOrderList().add(new int[Pattern.CHANNEL_COUNT]);
-
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xA1, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte)0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
 
@@ -90,10 +115,9 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("V1", new byte[25]));
 
         // FM channel 0 and PSG channel 0 (index 6) both have data
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
-        song.getPatterns().get(0).setTrackData(6,
-            new byte[]{ (byte)0xA1, 0x30, (byte) SmpsCoordFlags.STOP });
+        addPhrase(song, 0, new byte[]{ (byte)0xA1, 0x30 });
+        addPhrase(song, 6, new byte[]{ (byte)0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
 
@@ -106,19 +130,11 @@ class TestPatternCompiler {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        // Pattern 0: intro notes
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xA1, 0x18, (byte) 0xA3, 0x18 });
-
-        // Pattern 1: loop body
-        Pattern loopPattern = new Pattern(1, 64);
-        loopPattern.setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x30 });
-        song.getPatterns().add(loopPattern);
-
-        // Order: pattern 0 -> pattern 1, loop back to row 1 (pattern 1)
-        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
-        song.setLoopPoint(1); // loop to second order row
+        // Phrase 0: intro notes, Phrase 1: loop body
+        addPhrase(song, 0, new byte[]{ (byte) 0xA1, 0x18, (byte) 0xA3, 0x18 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        // Loop back to phrase 1 (entry index 1)
+        song.getHierarchicalArrangement().getChain(0).setLoopEntryIndex(1);
 
         byte[] smps = new PatternCompiler().compile(song);
 
@@ -147,20 +163,53 @@ class TestPatternCompiler {
     }
 
     @Test
+    void testStructuredArrangementCompilesWithoutLegacyPatternData() {
+        Song song = new Song();
+        song.setArrangementMode(ArrangementMode.STRUCTURED_BLOCKS);
+
+        StructuredArrangement structured = new StructuredArrangement();
+        BlockDefinition block = new BlockDefinition(1, "Lead", 24);
+        block.setTrackData(0, new byte[] { (byte) 0xA1, 0x18 });
+        structured.getBlocks().add(block);
+        structured.getChannels().get(0).getBlockRefs().add(new BlockRef(1, 0));
+        song.setStructuredArrangement(structured);
+
+        byte[] smps = new PatternCompiler().compile(song);
+        assertEquals(1, smps[2] & 0xFF, "Structured mode should compile active FM channel");
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        assertEquals(0xA1, smps[trackStart] & 0xFF);
+        assertEquals(0x18, smps[trackStart + 1] & 0xFF);
+    }
+
+    @Test
+    void testStructuredArrangementRespectsStartTickGaps() {
+        Song song = new Song();
+        song.setArrangementMode(ArrangementMode.STRUCTURED_BLOCKS);
+
+        StructuredArrangement structured = new StructuredArrangement();
+        BlockDefinition block = new BlockDefinition(2, "Hit", 12);
+        block.setTrackData(0, new byte[] { (byte) 0xA4, 0x0C });
+        structured.getBlocks().add(block);
+        structured.getChannels().get(0).getBlockRefs().add(new BlockRef(2, 10));
+        song.setStructuredArrangement(structured);
+
+        byte[] smps = new PatternCompiler().compile(song);
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        assertEquals(0x80, smps[trackStart] & 0xFF, "Gap should compile as rest");
+        assertEquals(10, smps[trackStart + 1] & 0xFF, "Rest duration should match start tick gap");
+        assertEquals(0xA4, smps[trackStart + 2] & 0xFF);
+    }
+
+    @Test
     void testLoopPointBeyondOrderListDefaultsToZero() {
         Song song = new Song();
         song.setTempo(120);
         song.setDividingTiming(1);
-        // Add some data to FM1 (channel 0)
-        Pattern p = song.getPatterns().get(0);
-        p.setTrackData(0, new byte[]{(byte) 0x80, 0x30}); // C4 with duration 0x30
-        // Set loop point beyond the single order row
-        song.setLoopPoint(99);
+        // Add some data to FM1 (channel 0) with no loop (chain terminates with STOP)
+        addPhrase(song, 0, new byte[]{(byte) 0x80, 0x30});
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
-        // Should not throw, and the JUMP target should point to offset 0 of the track data
-        // (the header size bytes offset)
         assertNotNull(smps);
         assertTrue(smps.length > 0);
     }
@@ -172,8 +221,8 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
         // Put a known note 0xA1 (C-2 in S2 numbering) in FM channel 0
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -201,9 +250,8 @@ class TestPatternCompiler {
         song.setSmpsMode(SmpsMode.S2);
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        // Same note data as above
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -220,8 +268,8 @@ class TestPatternCompiler {
         song.setSmpsMode(SmpsMode.S3K);
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -237,8 +285,8 @@ class TestPatternCompiler {
         Song song = new Song();
         song.setSmpsMode(SmpsMode.S1);
         // Channel 5 is DAC: 0x81 means DAC sample index 0 and must remain unchanged.
-        song.getPatterns().get(0).setTrackData(5,
-                new byte[]{(byte) 0x81, 0x20, (byte) SmpsCoordFlags.STOP});
+        addPhrase(song, 5, new byte[]{(byte) 0x81, 0x20});
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
@@ -254,8 +302,8 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
         // 0x80 is a rest -- should NOT be shifted
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0x80, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte) 0x80, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -273,8 +321,8 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
         // 0xDF is the maximum note value -- shifting +1 would exceed range
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xDF, 0x30 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xDF, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
@@ -286,46 +334,55 @@ class TestPatternCompiler {
     }
 
     @Test
-    void testCompileMultiPatternSongHasCorrectOrderJumps() {
+    void testPsgChannelNoteIsNotShiftedByModeCompensation() {
+        Song song = new Song();
+        song.setSmpsMode(SmpsMode.S1);
+        // PSG channel 6 (PSG Tone 1): note 0xBD should NOT be shifted because
+        // PSG always uses baseNoteOffset=0 regardless of SMPS mode.
+        addPhrase(song, 6, new byte[]{(byte) 0xBD, 0x18});
+        setLoopOnActiveChains(song, 0);
+
+        byte[] smps = new PatternCompiler().compile(song);
+        // PSG is the only active channel: 0 FM channels, 1 PSG channel
+        // Header: 6 bytes base + 0 FM headers + 1 PSG header (6 bytes) = 12
+        int psgTrackPtr = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int compiledNote = smps[psgTrackPtr] & 0xFF;
+        assertEquals(0xBD, compiledNote,
+            "PSG note bytes must not be shifted by S1/S3K note compensation");
+    }
+
+    @Test
+    void testCompileMultiPhraseSongHasCorrectData() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        // Pattern 0: note A
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xA1, 0x18 }); // C-2 dur=0x18
-
-        // Pattern 1: note B
-        Pattern p1 = new Pattern(1, 64);
-        p1.setTrackData(0,
-            new byte[]{ (byte) 0xBD, 0x30 }); // C-5 dur=0x30
-        song.getPatterns().add(p1);
-
-        // Order: pattern 0, then pattern 1
-        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
-        song.setLoopPoint(0);
+        // Phrase 0: note A, Phrase 1: note B
+        addPhrase(song, 0, new byte[]{ (byte) 0xA1, 0x18 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
         assertNotNull(smps);
         assertTrue(smps.length > 0);
 
-        // Re-import and verify both patterns' data are present
+        // Re-import and verify both phrases' data are present
         com.opensmps.deck.io.SmpsImporter importer = new com.opensmps.deck.io.SmpsImporter();
-        Song imported = importer.importData(smps, "multi-pattern");
+        Song imported = importer.importData(smps, "multi-phrase");
 
         byte[] importedTrack = imported.getPatterns().get(0).getTrackData(0);
         assertNotNull(importedTrack);
-        // Track should contain data from both patterns concatenated:
-        // Pattern 0 data (A1 18) + Pattern 1 data (BD 30) + F6 jump
+        // Track should contain data from both phrases concatenated:
+        // Phrase 0 data (A1 18) + Phrase 1 data (BD 30) + F6 jump
         assertTrue(importedTrack.length >= 4,
-            "Imported track should contain data from both patterns");
+            "Imported track should contain data from both phrases");
 
-        // Verify first pattern's note (C-2 = 0xA1)
-        assertEquals((byte) 0xA1, importedTrack[0], "First note should be from pattern 0");
+        // Verify first phrase's note (C-2 = 0xA1)
+        assertEquals((byte) 0xA1, importedTrack[0], "First note should be from phrase 0");
 
-        // Verify second pattern's note is present after pattern 0's data
-        // Pattern 0: A1 18 (2 bytes), pattern 1 starts at offset 2: BD 30
-        assertEquals((byte) 0xBD, importedTrack[2], "Second note should be from pattern 1");
+        // Verify second phrase's note is present after phrase 0's data
+        // Phrase 0: A1 18 (2 bytes), phrase 1 starts at offset 2: BD 30
+        assertEquals((byte) 0xBD, importedTrack[2], "Second note should be from phrase 1");
     }
 
     @Test
@@ -334,8 +391,9 @@ class TestPatternCompiler {
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
         // FM channel 0: set voice 0, note C4 dur 0x30, note E4 dur 0x20
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30, (byte) 0xA4, 0x20 });
+        addPhrase(song, 0, new byte[]{
+            (byte) SmpsCoordFlags.SET_VOICE, 0x00, (byte) 0xA1, 0x30, (byte) 0xA4, 0x20 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         PatternCompiler.CompilationResult result = compiler.compileDetailed(song);
@@ -345,40 +403,30 @@ class TestPatternCompiler {
         assertNotNull(timeline, "Should have a timeline for FM channel 0");
         assertTrue(timeline.getRowCount() > 0, "Timeline should have decoded rows");
 
-        // The track starts at some offset in the compiled binary (past header).
-        // resolvePosition with the track's own offset should resolve to order 0, row 0.
+        // resolvePosition with the track's own offset should resolve to row 0
         int trackOffset = timeline.getTrackOffset();
 
         PatternCompiler.CursorPosition pos0 = timeline.resolvePosition(trackOffset);
         assertNotNull(pos0);
-        assertEquals(0, pos0.orderIndex(), "First byte should resolve to order 0");
+        assertEquals(0, pos0.orderIndex(), "First byte should resolve to entry 0");
         assertEquals(0, pos0.rowIndex(), "First byte should resolve to row 0");
 
         // A position past the first row's bytes should resolve to a later row
         PatternCompiler.CursorPosition posLater = timeline.resolvePosition(trackOffset + 4);
         assertNotNull(posLater);
-        assertEquals(0, posLater.orderIndex(), "Single pattern song should be order 0");
         assertTrue(posLater.rowIndex() >= 1,
             "Position past first note should resolve to row 1 or later");
     }
 
     @Test
-    void testChannelTimelineResolvesMultiPatternPositions() {
+    void testChannelTimelineResolvesMultiPhrasePositions() {
         Song song = new Song();
         song.getVoiceBank().add(new FmVoice("V", new byte[25]));
 
-        // Pattern 0: one note
-        song.getPatterns().get(0).setTrackData(0,
-            new byte[]{ (byte) 0xA1, 0x18 });
-
-        // Pattern 1: another note
-        Pattern p1 = new Pattern(1, 64);
-        p1.setTrackData(0, new byte[]{ (byte) 0xBD, 0x30 });
-        song.getPatterns().add(p1);
-
-        // Order: pattern 0 -> pattern 1
-        song.getOrderList().add(new int[]{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
-        song.setLoopPoint(0);
+        // Phrase 0: one note, Phrase 1: another note
+        addPhrase(song, 0, new byte[]{ (byte) 0xA1, 0x18 });
+        addPhrase(song, 0, new byte[]{ (byte) 0xBD, 0x30 });
+        setLoopOnActiveChains(song, 0);
 
         PatternCompiler compiler = new PatternCompiler();
         PatternCompiler.CompilationResult result = compiler.compileDetailed(song);
@@ -388,48 +436,39 @@ class TestPatternCompiler {
 
         int trackOffset = timeline.getTrackOffset();
 
-        // First order row's data starts at trackOffset
+        // First entry's data starts at trackOffset
         PatternCompiler.CursorPosition firstRow = timeline.resolvePosition(trackOffset);
         assertNotNull(firstRow);
-        assertEquals(0, firstRow.orderIndex(), "First note should be in order row 0");
+        assertEquals(0, firstRow.orderIndex(), "First note should be in entry 0");
 
-        // After pattern 0's 2 bytes (A1 18), pattern 1's data begins
-        PatternCompiler.CursorPosition secondOrder = timeline.resolvePosition(trackOffset + 2);
-        assertNotNull(secondOrder);
-        assertEquals(1, secondOrder.orderIndex(), "Second pattern should resolve to order row 1");
+        // After phrase 0's 2 bytes (A1 18), phrase 1's data begins
+        PatternCompiler.CursorPosition secondEntry = timeline.resolvePosition(trackOffset + 2);
+        assertNotNull(secondEntry);
+        assertEquals(1, secondEntry.orderIndex(), "Second phrase should resolve to entry 1");
     }
 
     @Test
-    void testCompileRelocatesSegmentLocalLoopPointerPerChannel() {
+    void testCompileRelocatesInternalLoopPointer() {
         Song song = new Song();
 
-        // Pattern 0 contributes 2 bytes.
-        song.getPatterns().get(0).setTrackData(0, new byte[]{
-                (byte) 0xA1, 0x18
-        });
-
-        // Pattern 1 starts with F7 loop pointing to local offset 0x0000
-        // (start of pattern 1 segment).
-        Pattern p1 = new Pattern(1, 64);
-        p1.setTrackData(0, new byte[]{
+        // Single phrase with an internal LOOP pointing to its own start (offset 0)
+        addPhrase(song, 0, new byte[]{
+                (byte) 0xA1, 0x18,
                 (byte) SmpsCoordFlags.LOOP, 0x00, 0x02, 0x00, 0x00,
                 (byte) 0xA4, 0x18
         });
-        song.getPatterns().add(p1);
-
-        int[] orderRow1 = new int[Pattern.CHANNEL_COUNT];
-        orderRow1[0] = 1;
-        song.getOrderList().add(orderRow1);
-        song.setLoopPoint(0);
+        setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
         int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
 
+        // LOOP command at trackStart+2 (after A1 18)
         assertEquals(SmpsCoordFlags.LOOP, smps[trackStart + 2] & 0xFF);
 
+        // LOOP pointer (bytes at trackStart+5 and trackStart+6)
         int relocatedLoopTarget = (smps[trackStart + 5] & 0xFF)
                 | ((smps[trackStart + 6] & 0xFF) << 8);
-        assertEquals(trackStart + 2, relocatedLoopTarget,
-                "Loop pointer should target the start of pattern 1 segment in this channel track");
+        assertEquals(trackStart, relocatedLoopTarget,
+                "LOOP pointer should target the start of the track after relocation");
     }
 }

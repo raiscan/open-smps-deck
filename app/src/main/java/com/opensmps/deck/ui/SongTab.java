@@ -25,7 +25,7 @@ public class SongTab {
     private OrderListPanel orderListPanel;
     private InstrumentPanel instrumentPanel;
 
-    // Hierarchical mode components (null when in LEGACY_PATTERNS mode)
+    // Hierarchical mode components
     private SongView songView;
     private ChainStrip chainStrip;
     private BreadcrumbBar breadcrumbBar;
@@ -107,16 +107,15 @@ public class SongTab {
         Runnable dirtyAndEdited = () -> {
             setDirty(true);
             if (onEdited != null) onEdited.run();
-            // Refresh SongView on every edit so phrase blocks update
+            // Refresh SongView and ChainStrip on every edit so phrase blocks update
             if (songView != null) songView.refreshDisplay();
+            if (chainStrip != null) chainStrip.rebuild();
         };
         trackerGrid.setOnDirty(dirtyAndEdited);
         instrumentPanel.setOnDirty(dirtyAndEdited);
         orderListPanel.setOnDirty(dirtyAndEdited);
 
-        if (isHierarchical()) {
-            buildHierarchicalComponents();
-        }
+        buildHierarchicalComponents();
     }
 
     private void buildHierarchicalComponents() {
@@ -157,6 +156,21 @@ public class SongTab {
                     trackerGrid.setPhrase(phrase, ch);
                     breadcrumbBar.push(phrase.getName(), 1);
                 }
+            });
+
+            // ChainStrip right-click → open ChainEditor
+            chainStrip.setOnContextMenuRequested(event -> {
+                int ch = songView.getSelectedChannel();
+                String chName = channelDisplayName(ch);
+                ChainEditor editor = new ChainEditor(arr.getChain(ch), arr.getPhraseLibrary(), chName);
+                editor.showAndWait().ifPresent(result -> {
+                    if (result == javafx.scene.control.ButtonType.OK) {
+                        chainStrip.setChain(arr.getChain(ch), arr.getPhraseLibrary());
+                        songView.refreshDisplay();
+                        setDirty(true);
+                        if (onEdited != null) onEdited.run();
+                    }
+                });
             });
 
             // BreadcrumbBar navigation

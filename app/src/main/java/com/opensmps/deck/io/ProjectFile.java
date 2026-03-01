@@ -229,7 +229,12 @@ public class ProjectFile {
 
         song.setName(root.get("name").getAsString());
         song.setSmpsMode(SmpsMode.valueOf(root.get("smpsMode").getAsString()));
-        song.setArrangementMode(ArrangementMode.valueOf(root.get("arrangementMode").getAsString()));
+        try {
+            song.setArrangementMode(ArrangementMode.valueOf(root.get("arrangementMode").getAsString()));
+        } catch (IllegalArgumentException e) {
+            // Unrecognized mode (e.g. removed LEGACY_PATTERNS) defaults to HIERARCHICAL
+            song.setArrangementMode(ArrangementMode.HIERARCHICAL);
+        }
         song.setTempo(root.get("tempo").getAsInt());
         song.setDividingTiming(root.get("dividingTiming").getAsInt());
         song.setLoopPoint(root.get("loopPoint").getAsInt());

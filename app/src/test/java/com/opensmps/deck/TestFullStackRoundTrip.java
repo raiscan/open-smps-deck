@@ -169,27 +169,39 @@ class TestFullStackRoundTrip {
         }
         song.getDacSamples().add(new DacSample("SineKick", sineWave, 0x0C));
 
-        // --- Pattern 0: FM1 on channel 0, DAC on channel 5, PSG1 on channel 6 ---
-        Pattern pattern = song.getPatterns().get(0);
-
-        // FM1: set voice 0 (EF 00), play C4 (A1), duration 48 (30h)
-        pattern.setTrackData(0, new byte[]{
+        // --- Hierarchical arrangement: FM1 on channel 0, DAC on channel 5, PSG1 on channel 6 ---
+        addPhrase(song, 0, new byte[]{
                 (byte) 0xEF, 0x00,       // Set voice 0
                 (byte) 0xA1, 0x30        // Note C4, duration 0x30
         });
-
-        // DAC: play sample index 0x81 (first DAC sample), duration 0x30
-        pattern.setTrackData(5, new byte[]{
+        addPhrase(song, 5, new byte[]{
                 (byte) 0x81, 0x30        // DAC sample 0, duration 0x30
         });
-
-        // PSG1: set PSG envelope 0 (F5 00), play C4 (A1), duration 0x30
-        pattern.setTrackData(6, new byte[]{
+        addPhrase(song, 6, new byte[]{
                 (byte) 0xF5, 0x00,       // Set PSG envelope 0
                 (byte) 0xA1, 0x30        // Note C4, duration 0x30
         });
+        setLoopOnActiveChains(song, 0);
 
         return song;
+    }
+
+    private static void addPhrase(Song song, int channel, byte[] data) {
+        var arr = song.getHierarchicalArrangement();
+        var phrase = arr.getPhraseLibrary().createPhrase(
+                "Ch" + channel, ChannelType.fromChannelIndex(channel));
+        phrase.setData(data);
+        arr.getChain(channel).getEntries().add(new ChainEntry(phrase.getId()));
+    }
+
+    private static void setLoopOnActiveChains(Song song, int entryIndex) {
+        var arr = song.getHierarchicalArrangement();
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var chain = arr.getChain(ch);
+            if (!chain.getEntries().isEmpty() && entryIndex < chain.getEntries().size()) {
+                chain.setLoopEntryIndex(entryIndex);
+            }
+        }
     }
 
     /**

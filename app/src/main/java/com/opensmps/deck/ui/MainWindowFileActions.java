@@ -255,10 +255,9 @@ final class MainWindowFileActions {
                 Optional<ButtonType> result = preview.showAndWait();
 
                 if (result.isPresent() && result.get() == ButtonType.OK) {
-                    if (preview.isImportAsHierarchical()) {
-                        song.setArrangementMode(ArrangementMode.HIERARCHICAL);
-                        song.setHierarchicalArrangement(preview.buildHierarchicalArrangement());
-                    }
+                    // Always import as hierarchical arrangement
+                    song.setArrangementMode(ArrangementMode.HIERARCHICAL);
+                    song.setHierarchicalArrangement(preview.buildHierarchicalArrangement());
                     SongTab songTab = new SongTab(song);
                     addTabConsumer.accept(songTab);
                 }

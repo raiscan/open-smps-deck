@@ -612,8 +612,7 @@ public class TrackerGrid extends ScrollPane {
 
     private int clickedColumn(double x, int channel) {
         double xInChannel = (x - ROW_NUM_WIDTH) - channel * CHANNEL_WIDTH;
-        if (xInChannel < 38) return COL_NOTE;
-        if (xInChannel < 55) return COL_DURATION;
+        if (xInChannel < 55) return COL_NOTE; // Covers note + duration area (duration is display-only)
         if (xInChannel < 75) return COL_INSTRUMENT;
         return COL_EFFECT;
     }
@@ -826,6 +825,8 @@ public class TrackerGrid extends ScrollPane {
     private void moveCursorColumn(int delta) {
         int maxChannel = getVisibleChannelCount() - 1;
         int newCol = cursorColumn + delta;
+        // Skip COL_DURATION (display-only, not editable)
+        if (newCol == COL_DURATION) newCol += delta;
         if (newCol < 0) {
             // Wrap to previous channel's last column
             if (cursorChannel > 0) {

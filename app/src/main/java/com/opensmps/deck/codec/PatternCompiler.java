@@ -200,128 +200,16 @@ public class PatternCompiler {
      * Compile song bytes and expose per-channel row timelines for a target mode.
      */
     public CompilationResult compileDetailed(Song song, SmpsMode mode) {
-        if (song.getArrangementMode() == ArrangementMode.HIERARCHICAL
-                && song.getHierarchicalArrangement() != null) {
-            return compileHierarchicalDetailed(song, mode, song.getHierarchicalArrangement());
-        }
         if (song.getArrangementMode() == ArrangementMode.STRUCTURED_BLOCKS
                 && song.getStructuredArrangement() != null) {
             return compileStructuredDetailed(song, mode, song.getStructuredArrangement());
         }
-        // Transitional bridge: songs still edited in pattern/order mode compile
-        // through the legacy path when no structured arrangement is present.
-        return compileLegacyDetailed(song, mode);
-    }
-
-    private CompilationResult compileLegacyDetailed(Song song, SmpsMode mode) {
-        int noteCompensation = switch (mode) {
-            case S1, S3K -> 1;
-            case S2 -> 0;
-        };
-
-        SongSnapshot snapshot = snapshotSong(song);
-
-        List<Integer> activeFmChannels = new ArrayList<>();
-        List<Integer> activePsgChannels = new ArrayList<>();
-        List<Integer> activeChannels = new ArrayList<>();
-        List<byte[]> compiledTracks = new ArrayList<>();
-        List<ChannelTimelineBuilder> timelineBuilders = new ArrayList<>();
-
-        for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
-            if (!isChannelActive(snapshot.orderList, snapshot.patterns, ch)) {
-                continue;
-            }
-            if (ch < FM_CHANNEL_COUNT) {
-                activeFmChannels.add(ch);
-            } else {
-                activePsgChannels.add(ch);
-            }
-
-            int compensationForChannel = (ch == DAC_CHANNEL) ? 0 : noteCompensation;
-            byte[] trackData = buildTrackData(snapshot.orderList, snapshot.patterns, ch, compensationForChannel);
-            int loopTarget = calculateLoopTarget(snapshot.loopPoint, snapshot.orderList, snapshot.patterns, ch);
-
-            byte[] withJump = new byte[trackData.length + 3];
-            System.arraycopy(trackData, 0, withJump, 0, trackData.length);
-            withJump[trackData.length] = (byte) CMD_JUMP;
-            withJump[trackData.length + 1] = (byte) (loopTarget & 0xFF);
-            withJump[trackData.length + 2] = (byte) ((loopTarget >> 8) & 0xFF);
-
-            compiledTracks.add(withJump);
-            activeChannels.add(ch);
-            timelineBuilders.add(buildChannelTimeline(snapshot.orderList, snapshot.patterns, ch));
+        // Default: hierarchical arrangement
+        HierarchicalArrangement arr = song.getHierarchicalArrangement();
+        if (arr == null) {
+            arr = new HierarchicalArrangement();
         }
-
-        int fmCount = activeFmChannels.size();
-        int psgCount = activePsgChannels.size();
-
-        int headerSize = HEADER_BASE_SIZE
-                + (fmCount * FM_TRACK_HEADER_SIZE)
-                + (psgCount * PSG_TRACK_HEADER_SIZE);
-
-        int[] trackOffsets = new int[compiledTracks.size()];
-        int cursor = headerSize;
-        for (int i = 0; i < compiledTracks.size(); i++) {
-            trackOffsets[i] = cursor;
-            cursor += compiledTracks.get(i).length;
-        }
-
-        int voiceTableOffset = cursor;
-        int voiceDataLength = snapshot.voiceData.size() * FmVoice.VOICE_SIZE;
-
-        for (int i = 0; i < compiledTracks.size(); i++) {
-            relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
-        }
-
-        byte[] compiledBytes;
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream(
-                    headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
-
-            int voicePtr = snapshot.voiceData.isEmpty() ? 0 : voiceTableOffset;
-            writeLE16(out, voicePtr);
-            out.write(fmCount);
-            out.write(psgCount);
-            out.write(snapshot.dividingTiming & 0xFF);
-            out.write(snapshot.tempo & 0xFF);
-
-            int trackIndex = 0;
-            for (int i = 0; i < fmCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
-                out.write(0);
-                out.write(0);
-                trackIndex++;
-            }
-
-            for (int i = 0; i < psgCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
-                out.write(0);
-                out.write(0);
-                out.write(0);
-                out.write(0);
-                trackIndex++;
-            }
-
-            for (byte[] track : compiledTracks) {
-                out.write(track);
-            }
-
-            for (byte[] voice : snapshot.voiceData) {
-                out.write(voice);
-            }
-
-            compiledBytes = out.toByteArray();
-        } catch (IOException e) {
-            throw new RuntimeException("Unexpected I/O error during compilation", e);
-        }
-
-        ChannelTimeline[] timelinesByChannel = new ChannelTimeline[TOTAL_CHANNELS];
-        for (int i = 0; i < activeChannels.size(); i++) {
-            int channel = activeChannels.get(i);
-            timelinesByChannel[channel] = timelineBuilders.get(i).build(channel, trackOffsets[i]);
-        }
-
-        return new CompilationResult(compiledBytes, timelinesByChannel);
+        return compileHierarchicalDetailed(song, mode, arr);
     }
 
     private CompilationResult compileHierarchicalDetailed(Song song, SmpsMode mode, HierarchicalArrangement arrangement) {
@@ -341,6 +229,7 @@ public class PatternCompiler {
         List<Integer> activePsgChannels = new ArrayList<>();
         List<Integer> activeChannels = new ArrayList<>();
         List<byte[]> compiledTracks = new ArrayList<>();
+        List<HierarchyCompiler.ChainCompilationResult> chainResults = new ArrayList<>();
 
         for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
             Chain chain = arrangement.getChain(ch);
@@ -348,13 +237,16 @@ public class PatternCompiler {
                 continue;
             }
 
-            byte[] trackData = HierarchyCompiler.compileChain(chain, library);
+            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library);
+            byte[] trackData = chainResult.trackData();
             if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
                 continue;
             }
 
-            // Apply note compensation if needed
-            if (noteCompensation != 0 && ch != DAC_CHANNEL) {
+            // Apply note compensation to FM channels only (0-4).
+            // DAC (5) and PSG (6-9) don't need compensation: PSG uses
+            // baseNoteOffset=0 in all modes, DAC uses sample IDs not notes.
+            if (noteCompensation != 0 && ch < DAC_CHANNEL) {
                 trackData = applyNoteCompensation(trackData, noteCompensation);
             }
 
@@ -366,6 +258,7 @@ public class PatternCompiler {
 
             compiledTracks.add(trackData);
             activeChannels.add(ch);
+            chainResults.add(chainResult);
         }
 
         int fmCount = activeFmChannels.size();
@@ -425,6 +318,13 @@ public class PatternCompiler {
         }
 
         ChannelTimeline[] timelinesByChannel = new ChannelTimeline[TOTAL_CHANNELS];
+        for (int i = 0; i < activeChannels.size(); i++) {
+            int channel = activeChannels.get(i);
+            var chainResult = chainResults.get(i);
+            ChannelTimelineBuilder builder = buildHierarchicalTimeline(
+                    chainResult.trackData(), chainResult.entryOffsets(), chainResult.contentEndOffset());
+            timelinesByChannel[channel] = builder.build(channel, trackOffsets[i]);
+        }
         return new CompilationResult(compiledBytes, timelinesByChannel);
     }
 
@@ -444,6 +344,34 @@ public class PatternCompiler {
             }
         }
         return result;
+    }
+
+    private ChannelTimelineBuilder buildHierarchicalTimeline(byte[] trackData,
+                                                               int[] entryOffsets,
+                                                               int contentEndOffset) {
+        ChannelTimelineBuilder builder = new ChannelTimelineBuilder();
+        if (entryOffsets.length == 0 || contentEndOffset <= 0) {
+            return builder;
+        }
+
+        byte[] content = Arrays.copyOf(trackData, contentEndOffset);
+        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(content);
+
+        int currentEntry = 0;
+        int rowInEntry = 0;
+
+        for (SmpsDecoder.DecodedRow row : decodedRows) {
+            while (currentEntry + 1 < entryOffsets.length
+                    && row.byteOffset() >= entryOffsets[currentEntry + 1]) {
+                currentEntry++;
+                rowInEntry = 0;
+            }
+
+            builder.add(row.byteOffset(), currentEntry, rowInEntry);
+            rowInEntry++;
+        }
+
+        return builder;
     }
 
     private CompilationResult compileStructuredDetailed(Song song, SmpsMode mode, StructuredArrangement arrangement) {
@@ -470,7 +398,9 @@ public class PatternCompiler {
 
         int ticksPerRow = Math.max(1, arrangement.getTicksPerRow());
         for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
-            StructuredTrack track = buildStructuredTrackData(arrangement, blocksById, ch, noteCompensation);
+            // Only FM channels (0-4) need note compensation; PSG uses offset 0 in all modes
+            int chNoteComp = (ch < DAC_CHANNEL) ? noteCompensation : 0;
+            StructuredTrack track = buildStructuredTrackData(arrangement, blocksById, ch, chNoteComp);
             if (track.trackData.length == 0) {
                 continue;
             }
@@ -639,56 +569,6 @@ public class PatternCompiler {
     }
 
     /**
-     * Checks whether a channel has any non-empty track data across all
-     * patterns referenced by the order list.
-     */
-    private boolean isChannelActive(List<int[]> orderList, List<Pattern> patterns, int channel) {
-        for (int[] orderRow : orderList) {
-            int patternIndex = orderRow[channel];
-            if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                byte[] data = patterns.get(patternIndex).getTrackDataDirect(channel);
-                if (data != null && data.length > 0) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Builds concatenated track data for a channel across all order rows,
-     * stripping trailing F2 (track end) bytes between patterns and applying
-     * note compensation for the target SMPS mode.
-     */
-    private byte[] buildTrackData(List<int[]> orderList,
-                                  List<Pattern> patterns,
-                                  int channel,
-                                  int noteCompensation) {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        int cumulativeOffset = 0;
-
-        for (int[] orderRow : orderList) {
-            int patternIndex = orderRow[channel];
-            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
-                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
-                    : new byte[0];
-            if (data == null || data.length == 0) {
-                continue;
-            }
-
-            int end = stripTrailingStop(data);
-            if (end <= 0) {
-                continue;
-            }
-
-            appendTrackSegment(buf, data, end, noteCompensation, cumulativeOffset, 0, channel);
-            cumulativeOffset += end;
-        }
-
-        return buf.toByteArray();
-    }
-
-    /**
      * Walks SMPS bytecode, applies note compensation to note bytes (0x81-0xDF),
      * and writes the result to the output buffer.
      */
@@ -780,30 +660,6 @@ public class PatternCompiler {
         }
     }
 
-    /**
-     * Calculates the track-relative byte offset of the loop point for a channel.
-     */
-    private int calculateLoopTarget(int loopRow,
-                                    List<int[]> orderList,
-                                    List<Pattern> patterns,
-                                    int channel) {
-        int offset = 0;
-        for (int row = 0; row < orderList.size(); row++) {
-            if (row == loopRow) {
-                return offset;
-            }
-            int patternIndex = orderList.get(row)[channel];
-            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
-                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
-                    : new byte[0];
-            if (data != null && data.length > 0) {
-                offset += stripTrailingStop(data);
-            }
-        }
-
-        return 0;
-    }
-
     private int stripTrailingStop(byte[] data) {
         int end = data.length;
         while (end > 0 && (data[end - 1] & 0xFF) == CMD_TRACK_END) {
@@ -812,92 +668,9 @@ public class PatternCompiler {
         return end;
     }
 
-    private ChannelTimelineBuilder buildChannelTimeline(List<int[]> orderList,
-                                                        List<Pattern> patterns,
-                                                        int channel) {
-        ChannelTimelineBuilder builder = new ChannelTimelineBuilder();
-        int cumulativeOffset = 0;
-
-        for (int orderIndex = 0; orderIndex < orderList.size(); orderIndex++) {
-            int patternIndex = orderList.get(orderIndex)[channel];
-            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
-                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
-                    : new byte[0];
-            if (data == null || data.length == 0) {
-                continue;
-            }
-
-            int end = stripTrailingStop(data);
-            if (end <= 0) {
-                continue;
-            }
-
-            byte[] trimmed = Arrays.copyOf(data, end);
-            List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(trimmed);
-            for (int rowIndex = 0; rowIndex < decodedRows.size(); rowIndex++) {
-                SmpsDecoder.DecodedRow row = decodedRows.get(rowIndex);
-                builder.add(cumulativeOffset + row.byteOffset(), orderIndex, rowIndex);
-            }
-
-            cumulativeOffset += end;
-        }
-
-        return builder;
-    }
-
-    private SongSnapshot snapshotSong(Song song) {
-        List<int[]> orderList = new ArrayList<>();
-        for (int[] row : song.getOrderList()) {
-            orderList.add(row.clone());
-        }
-
-        List<Pattern> patterns = new ArrayList<>();
-        for (Pattern source : song.getPatterns()) {
-            Pattern copy = new Pattern(source.getId(), source.getRows());
-            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-                byte[] track = source.getTrackDataDirect(ch);
-                if (track != null && track.length > 0) {
-                    copy.setTrackData(ch, track.clone());
-                }
-            }
-            patterns.add(copy);
-        }
-
-        List<byte[]> voiceData = new ArrayList<>();
-        for (FmVoice voice : song.getVoiceBank()) {
-            voiceData.add(voice.getDataUnsafe().clone());
-        }
-
-        return new SongSnapshot(orderList, patterns, voiceData,
-                song.getDividingTiming(), song.getTempo(), song.getLoopPoint());
-    }
-
     private static void writeLE16(ByteArrayOutputStream out, int value) {
         out.write(value & 0xFF);
         out.write((value >> 8) & 0xFF);
-    }
-
-    private static final class SongSnapshot {
-        private final List<int[]> orderList;
-        private final List<Pattern> patterns;
-        private final List<byte[]> voiceData;
-        private final int dividingTiming;
-        private final int tempo;
-        private final int loopPoint;
-
-        private SongSnapshot(List<int[]> orderList,
-                             List<Pattern> patterns,
-                             List<byte[]> voiceData,
-                             int dividingTiming,
-                             int tempo,
-                             int loopPoint) {
-            this.orderList = orderList;
-            this.patterns = patterns;
-            this.voiceData = voiceData;
-            this.dividingTiming = dividingTiming;
-            this.tempo = tempo;
-            this.loopPoint = loopPoint;
-        }
     }
 
     private static final class ChannelTimelineBuilder {
