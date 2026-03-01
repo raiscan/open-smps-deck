@@ -1,6 +1,7 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.audio.PlaybackEngine;
+import com.opensmps.deck.codec.EffectMnemonics;
 import com.opensmps.deck.codec.PasteResolver;
 import com.opensmps.deck.codec.SmpsDecoder;
 import com.opensmps.deck.codec.SmpsEncoder;
@@ -34,7 +35,7 @@ public class TrackerGrid extends ScrollPane {
 
     private static final int ROW_HEIGHT = 20;
     private static final int ROW_NUM_WIDTH = 40;
-    private static final int CHANNEL_WIDTH = 140;
+    private static final int CHANNEL_WIDTH = 170;
     private static final int HEADER_HEIGHT = 24;
 
     private static final String[] CHANNEL_NAMES = {
@@ -47,9 +48,10 @@ public class TrackerGrid extends ScrollPane {
 
     /** Sub-column positions within a channel cell. */
     static final int COL_NOTE = 0;
-    static final int COL_INSTRUMENT = 1;
-    static final int COL_EFFECT = 2;
-    private static final int COL_COUNT = 3;
+    static final int COL_DURATION = 1;
+    static final int COL_INSTRUMENT = 2;
+    static final int COL_EFFECT = 3;
+    private static final int COL_COUNT = 4;
 
     /** Channel index for the DAC channel (FM6 used as DAC on Mega Drive). */
     private static final int DAC_CHANNEL = 5;
@@ -92,6 +94,7 @@ public class TrackerGrid extends ScrollPane {
     private int cursorColumn = COL_NOTE;
     private int playbackRow = -1;
     private int playbackOrderRow = -1;
+    private final int[] playbackRowsByChannel = new int[Pattern.CHANNEL_COUNT];
     private boolean autoScrollActive = true;
     private int currentOctave = 4;
     private int currentDuration = SmpsEncoder.DEFAULT_DURATION;
@@ -128,6 +131,7 @@ public class TrackerGrid extends ScrollPane {
         setFitToWidth(true);
         setPannable(false);
         setStyle("-fx-background: #1a1a2e;");
+        Arrays.fill(playbackRowsByChannel, -1);
         setupKeyboardHandling();
     }
 
@@ -307,7 +311,13 @@ public class TrackerGrid extends ScrollPane {
                 } else {
                     // Empty cell
                     gc.setFill(Color.web("#333333"));
-                    gc.fillText("... .. ....", x, y + ROW_HEIGHT - 5);
+                    gc.fillText("... .. .. ....", x, y + ROW_HEIGHT - 5);
+                }
+
+                if (row == playbackRowsByChannel[ch] && playbackRowsByChannel[ch] >= 0) {
+                    gc.setStroke(Color.rgb(0, 220, 220, 0.85));
+                    gc.setLineWidth(1.5);
+                    gc.strokeRect(ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 1, y + 1, CHANNEL_WIDTH - 2, ROW_HEIGHT - 2);
                 }
             }
 
@@ -331,13 +341,14 @@ public class TrackerGrid extends ScrollPane {
             double underlineY = y + ROW_HEIGHT - 1;
             switch (cursorColumn) {
                 case COL_NOTE -> gc.strokeLine(x, underlineY, x + 36, underlineY);
-                case COL_INSTRUMENT -> gc.strokeLine(x + 40, underlineY, x + 62, underlineY);
-                case COL_EFFECT -> gc.strokeLine(x + 65, underlineY, x + CHANNEL_WIDTH - 8, underlineY);
+                case COL_DURATION -> gc.strokeLine(x + 38, underlineY, x + 52, underlineY);
+                case COL_INSTRUMENT -> gc.strokeLine(x + 55, underlineY, x + 72, underlineY);
+                case COL_EFFECT -> gc.strokeLine(x + 75, underlineY, x + CHANNEL_WIDTH - 8, underlineY);
             }
             // Show pending hex digit indicator
             if (pendingHexDigit >= 0 && cursorColumn == COL_INSTRUMENT) {
                 gc.setFill(Color.web("#ffcc44"));
-                gc.fillText(String.format("%X_", pendingHexDigit), x + 40, textY);
+                gc.fillText(String.format("%X_", pendingHexDigit), x + 55, textY);
             }
         }
 
@@ -371,19 +382,25 @@ public class TrackerGrid extends ScrollPane {
             gc.fillText(displayNote, x, textY);
         }
 
+        // Duration
+        if (row.duration() > 0) {
+            gc.setFill(Color.web("#8899bb"));
+            gc.fillText(String.format("%02X", row.duration()), x + 38, textY);
+        }
+
         // Instrument (skip if pending hex digit is being shown at this cursor position)
         if (!(isCursor && pendingHexDigit >= 0 && cursorColumn == COL_INSTRUMENT)) {
             if (row.instrument() != null && !row.instrument().isEmpty()) {
                 gc.setFill(Color.web("#aacc88"));
-                gc.fillText(row.instrument(), x + 40, textY);
+                gc.fillText(row.instrument(), x + 55, textY);
             }
         }
 
         // Effect
         if (row.effect() != null && !row.effect().isEmpty()) {
             gc.setFill(Color.web("#cc8866"));
-            double effectX = x + 65;
-            double effectWidth = CHANNEL_WIDTH - 73; // 65px offset + 8px right margin
+            double effectX = x + 75;
+            double effectWidth = CHANNEL_WIDTH - 83; // 75px offset + 8px right margin
             String summary = summarizeEffectText(row.effect());
             gc.save();
             gc.beginPath();
@@ -419,6 +436,23 @@ public class TrackerGrid extends ScrollPane {
         this.playbackRow = row;
         if (autoScrollActive && row >= 0) {
             scrollToRow(row);
+        }
+        refreshDisplay();
+    }
+
+    /** Set per-channel playback row markers (length 10, -1 for inactive channels). */
+    public void setPlaybackRowsByChannel(int[] rows) {
+        if (rows == null) {
+            Arrays.fill(playbackRowsByChannel, -1);
+            refreshDisplay();
+            return;
+        }
+        int len = Math.min(playbackRowsByChannel.length, rows.length);
+        for (int i = 0; i < len; i++) {
+            playbackRowsByChannel[i] = rows[i];
+        }
+        for (int i = len; i < playbackRowsByChannel.length; i++) {
+            playbackRowsByChannel[i] = -1;
         }
         refreshDisplay();
     }
@@ -462,9 +496,17 @@ public class TrackerGrid extends ScrollPane {
 
     /** Clear the playback cursor (called on stop). */
     public void clearPlaybackCursor() {
-        if (playbackRow < 0 && playbackOrderRow < 0) return;
+        boolean anyChannelMarker = false;
+        for (int value : playbackRowsByChannel) {
+            if (value >= 0) {
+                anyChannelMarker = true;
+                break;
+            }
+        }
+        if (playbackRow < 0 && playbackOrderRow < 0 && !anyChannelMarker) return;
         this.playbackRow = -1;
         this.playbackOrderRow = -1;
+        Arrays.fill(playbackRowsByChannel, -1);
         this.autoScrollActive = true;
         refreshDisplay();
     }
@@ -504,8 +546,9 @@ public class TrackerGrid extends ScrollPane {
 
     private int clickedColumn(double x, int channel) {
         double xInChannel = (x - ROW_NUM_WIDTH) - channel * CHANNEL_WIDTH;
-        if (xInChannel < 40) return COL_NOTE;
-        if (xInChannel < 65) return COL_INSTRUMENT;
+        if (xInChannel < 38) return COL_NOTE;
+        if (xInChannel < 55) return COL_DURATION;
+        if (xInChannel < 75) return COL_INSTRUMENT;
         return COL_EFFECT;
     }
 
@@ -708,7 +751,7 @@ public class TrackerGrid extends ScrollPane {
     }
 
     /**
-     * Move the cursor left/right through sub-columns (Note -> Instrument -> Effect),
+     * Move the cursor left/right through sub-columns (Note -> Duration -> Instrument -> Effect),
      * wrapping to the previous/next channel at the boundaries.
      */
     private void moveCursorColumn(int delta) {
@@ -942,11 +985,12 @@ public class TrackerGrid extends ScrollPane {
             String[] tokens = trimmed.split("\\s+");
             int flag = parseHexByteToken(tokens[0]);
             if (flag >= 0) {
-                String label = SmpsCoordFlags.getLabel(flag);
-                if (SmpsCoordFlags.getParamCount(flag) == 1 && tokens.length >= 2) {
-                    label = label + "=" + tokens[1];
+                int paramCount = SmpsCoordFlags.getParamCount(flag);
+                int[] params = new int[Math.min(paramCount, tokens.length - 1)];
+                for (int i = 0; i < params.length; i++) {
+                    params[i] = parseHexByteToken(tokens[i + 1]);
                 }
-                labels.add(label);
+                labels.add(EffectMnemonics.format(flag, params));
             } else {
                 labels.add(tokens[0]);
             }

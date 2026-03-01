@@ -19,6 +19,14 @@ public class SmpsDecoder {
     /** A decoded tracker row plus its starting byte offset in the source track. */
     public record DecodedRow(int byteOffset, TrackerRow row) {}
 
+    /**
+     * Format a coordination flag and its parameters as a human-readable mnemonic.
+     * Delegates to {@link EffectMnemonics#format(int, int[])}.
+     */
+    public static String formatEffectMnemonic(int flag, int[] params) {
+        return EffectMnemonics.format(flag, params);
+    }
+
     /** Note names for display (C, C#, D, D#, E, F, F#, G, G#, A, A#, B). */
     private static final String[] NOTE_NAMES = {
         "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
