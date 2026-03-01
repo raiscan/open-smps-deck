@@ -9,6 +9,7 @@ import com.opensmps.deck.model.ClipboardData;
 import com.opensmps.deck.model.DacSample;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Pattern;
+import com.opensmps.deck.model.Phrase;
 import com.opensmps.deck.model.PsgEnvelope;
 import com.opensmps.deck.model.Song;
 import com.opensmps.deck.model.UndoManager;
@@ -118,6 +119,10 @@ public class TrackerGrid extends ScrollPane {
     private int soloChannel = -1;
     private PlaybackEngine playbackEngine;
 
+    // Phrase editing mode (hierarchical arrangement)
+    private Phrase activePhrase;
+    private int phraseChannelIndex = -1;
+
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
     private boolean decodedCacheDirty = true;
@@ -156,6 +161,33 @@ public class TrackerGrid extends ScrollPane {
         refreshDisplay();
     }
 
+    /**
+     * Switch to phrase editing mode: display a single phrase's data.
+     * In this mode, the grid shows one channel and edits write to the phrase.
+     */
+    public void setPhrase(Phrase phrase, int channelIndex) {
+        this.activePhrase = phrase;
+        this.phraseChannelIndex = channelIndex;
+        this.cursorRow = 0;
+        this.cursorChannel = 0;
+        this.cursorColumn = COL_NOTE;
+        clearSelection();
+        invalidateDecodedCache();
+        refreshDisplay();
+    }
+
+    /** Return to normal multi-channel pattern mode. */
+    public void clearPhrase() {
+        this.activePhrase = null;
+        this.phraseChannelIndex = -1;
+        invalidateDecodedCache();
+        refreshDisplay();
+    }
+
+    public boolean isInPhraseMode() {
+        return activePhrase != null;
+    }
+
     public void setCurrentPatternIndex(int index) {
         this.currentPatternIndex = index;
         invalidateDecodedCache();
@@ -167,6 +199,16 @@ public class TrackerGrid extends ScrollPane {
     }
 
     public void refreshDisplay() {
+        if (activePhrase != null) {
+            int maxRows = Math.max(1, ensureDecodedCache());
+            double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH;
+            double totalHeight = HEADER_HEIGHT + ROW_HEIGHT * maxRows;
+            canvas.setWidth(totalWidth);
+            canvas.setHeight(totalHeight);
+            render(maxRows);
+            return;
+        }
+
         if (song == null || song.getPatterns().isEmpty()) return;
         if (currentPatternIndex < 0 || currentPatternIndex >= song.getPatterns().size()) return;
 
@@ -187,6 +229,19 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private int ensureDecodedCache() {
+        // Phrase mode: decode single channel from phrase data
+        if (activePhrase != null) {
+            if (!decodedCacheDirty && decodedChannels.size() == 1) {
+                return decodedCacheRowCount;
+            }
+            decodedChannels.clear();
+            List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(activePhrase.getDataDirect());
+            decodedChannels.add(rows);
+            decodedCacheRowCount = Math.max(rows.size(), 1);
+            decodedCacheDirty = false;
+            return decodedCacheRowCount;
+        }
+
         if (song == null || song.getPatterns().isEmpty()) {
             decodedChannels.clear();
             decodedCacheRowCount = 1;
@@ -235,11 +290,18 @@ public class TrackerGrid extends ScrollPane {
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
         // Draw header
+        int channelCount = getVisibleChannelCount();
         gc.setFill(Color.web("#2a2a2a"));
         gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
         gc.setFont(HEADER_FONT);
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+        for (int ch = 0; ch < channelCount; ch++) {
             double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+            String headerName;
+            if (activePhrase != null) {
+                headerName = activePhrase.getName();
+            } else {
+                headerName = CHANNEL_NAMES[ch];
+            }
             boolean effectivelyMuted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
             if (soloChannel == ch) {
                 gc.setFill(Color.web("#ffcc00")); // gold for solo
@@ -248,7 +310,7 @@ public class TrackerGrid extends ScrollPane {
             } else {
                 gc.setFill(Color.web("#88aacc")); // normal
             }
-            gc.fillText(CHANNEL_NAMES[ch], x, HEADER_HEIGHT - 6);
+            gc.fillText(headerName, x, HEADER_HEIGHT - 6);
             if (effectivelyMuted) {
                 gc.setStroke(Color.web("#555555"));
                 gc.setLineWidth(1);
@@ -301,20 +363,23 @@ public class TrackerGrid extends ScrollPane {
             gc.fillText(String.format("%02X", row), 4, y + ROW_HEIGHT - 5);
 
             // Channel data
-            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            for (int ch = 0; ch < channelCount; ch++) {
                 List<SmpsDecoder.TrackerRow> channelRows = decodedChannels.get(ch);
                 double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
 
+                // In phrase mode, use the phrase's channel index for rendering context
+                int renderCh = activePhrase != null ? phraseChannelIndex : ch;
+
                 if (row < channelRows.size()) {
                     SmpsDecoder.TrackerRow tr = channelRows.get(row);
-                    renderCell(gc, tr, x, y, ch, ch == cursorChannel && row == cursorRow);
+                    renderCell(gc, tr, x, y, renderCh, ch == cursorChannel && row == cursorRow);
                 } else {
                     // Empty cell
                     gc.setFill(Color.web("#333333"));
                     gc.fillText("... .. .. ....", x, y + ROW_HEIGHT - 5);
                 }
 
-                if (row == playbackRowsByChannel[ch] && playbackRowsByChannel[ch] >= 0) {
+                if (!isInPhraseMode() && row == playbackRowsByChannel[ch] && playbackRowsByChannel[ch] >= 0) {
                     gc.setStroke(Color.rgb(0, 220, 220, 0.85));
                     gc.setLineWidth(1.5);
                     gc.strokeRect(ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 1, y + 1, CHANNEL_WIDTH - 2, ROW_HEIGHT - 2);
@@ -324,7 +389,7 @@ public class TrackerGrid extends ScrollPane {
             // Draw channel separator lines
             gc.setStroke(Color.web("#333344"));
             gc.setLineWidth(1);
-            for (int ch = 0; ch <= Pattern.CHANNEL_COUNT; ch++) {
+            for (int ch = 0; ch <= channelCount; ch++) {
                 double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
                 gc.strokeLine(x, HEADER_HEIGHT, x, HEADER_HEIGHT + rowCount * ROW_HEIGHT);
             }
@@ -537,11 +602,12 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private int clampChannel(double x, int fallbackChannel) {
+        int maxCh = getVisibleChannelCount() - 1;
         if (x < ROW_NUM_WIDTH) {
-            return Math.max(0, Math.min(fallbackChannel, Pattern.CHANNEL_COUNT - 1));
+            return Math.max(0, Math.min(fallbackChannel, maxCh));
         }
         int ch = (int) ((x - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
-        return Math.max(0, Math.min(ch, Pattern.CHANNEL_COUNT - 1));
+        return Math.max(0, Math.min(ch, maxCh));
     }
 
     private int clickedColumn(double x, int channel) {
@@ -591,7 +657,7 @@ public class TrackerGrid extends ScrollPane {
     private void handleMouseClicked(MouseEvent e) {
         if (e.getY() < HEADER_HEIGHT) {
             int ch = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
-            if (ch >= 0 && ch < Pattern.CHANNEL_COUNT) {
+            if (ch >= 0 && ch < getVisibleChannelCount()) {
                 if (e.isControlDown()) {
                     toggleSolo(ch);
                 } else {
@@ -632,8 +698,9 @@ public class TrackerGrid extends ScrollPane {
                 case MINUS, SUBTRACT -> transposeSelection(-12); // Shift+- = octave down
                 case TAB -> {
                     cancelPendingHex();
+                    int chCount = getVisibleChannelCount();
                     cursorColumn = COL_NOTE;
-                    cursorChannel = (cursorChannel - 1 + Pattern.CHANNEL_COUNT) % Pattern.CHANNEL_COUNT;
+                    cursorChannel = (cursorChannel - 1 + chCount) % chCount;
                     refreshDisplay();
                 }
                 default -> {}
@@ -689,8 +756,9 @@ public class TrackerGrid extends ScrollPane {
             case MINUS, SUBTRACT -> { cancelPendingHex(); transposeSelection(-1); }
             case TAB -> {
                 cancelPendingHex();
+                int chCount = getVisibleChannelCount();
                 cursorColumn = COL_NOTE;
-                cursorChannel = (cursorChannel + 1) % Pattern.CHANNEL_COUNT;
+                cursorChannel = (cursorChannel + 1) % chCount;
                 refreshDisplay();
             }
             case F1 -> currentOctave = 1;
@@ -744,8 +812,9 @@ public class TrackerGrid extends ScrollPane {
 
     private void moveCursor(int rowDelta, int channelDelta) {
         int maxRow = getMaxRowCount() - 1;
+        int maxChannel = getVisibleChannelCount() - 1;
         cursorRow = Math.max(0, Math.min(cursorRow + rowDelta, maxRow));
-        cursorChannel = Math.max(0, Math.min(cursorChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
+        cursorChannel = Math.max(0, Math.min(cursorChannel + channelDelta, maxChannel));
         autoScrollActive = false;
         refreshDisplay();
     }
@@ -755,6 +824,7 @@ public class TrackerGrid extends ScrollPane {
      * wrapping to the previous/next channel at the boundaries.
      */
     private void moveCursorColumn(int delta) {
+        int maxChannel = getVisibleChannelCount() - 1;
         int newCol = cursorColumn + delta;
         if (newCol < 0) {
             // Wrap to previous channel's last column
@@ -765,7 +835,7 @@ public class TrackerGrid extends ScrollPane {
             // else stay at first column of first channel
         } else if (newCol >= COL_COUNT) {
             // Wrap to next channel's first column
-            if (cursorChannel < Pattern.CHANNEL_COUNT - 1) {
+            if (cursorChannel < maxChannel) {
                 cursorChannel++;
                 cursorColumn = COL_NOTE;
             }
@@ -831,35 +901,71 @@ public class TrackerGrid extends ScrollPane {
      * to the row at the cursor position.
      */
     private void applyInstrumentValue(int value) {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return;
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
-        byte[] trackData = ensureTrackHasRow(pattern.getTrackDataDirect(cursorChannel), targetRow);
+        byte[] trackData = ensureTrackHasRow(getActiveTrackData(), targetRow);
 
-        int instrFlag = (cursorChannel <= 5)
+        int effectiveChannel = activePhrase != null ? phraseChannelIndex : cursorChannel;
+        int instrFlag = (effectiveChannel <= 5)
                 ? SmpsCoordFlags.SET_VOICE
                 : SmpsCoordFlags.PSG_INSTRUMENT;
 
-        undoManager.recordEdit(pattern, cursorChannel);
+        recordUndoIfPattern();
         byte[] newData = SmpsEncoder.setRowInstrument(trackData, targetRow, instrFlag, value);
-        pattern.setTrackData(cursorChannel, newData);
+        setActiveTrackData(newData);
         invalidateDecodedCache();
         refreshDisplay();
         markDirty();
     }
 
     private int getMaxRowCount() {
+        if (activePhrase != null) return Math.max(ensureDecodedCache(), 1);
         if (song == null || song.getPatterns().isEmpty()) return 1;
         if (currentPatternIndex < 0 || currentPatternIndex >= song.getPatterns().size()) return 1;
         return Math.max(ensureDecodedCache(), 1);
+    }
+
+    /** Returns true if an edit target is available (phrase or pattern). */
+    private boolean canEdit() {
+        if (activePhrase != null) return true;
+        return song != null && currentPatternIndex < song.getPatterns().size();
+    }
+
+    /** Get the track data for the current cursor channel (phrase or pattern). */
+    private byte[] getActiveTrackData() {
+        if (activePhrase != null) return activePhrase.getDataDirect();
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        return pattern.getTrackDataDirect(cursorChannel);
+    }
+
+    /** Set the track data for the current cursor channel (phrase or pattern). */
+    private void setActiveTrackData(byte[] data) {
+        if (activePhrase != null) {
+            activePhrase.setData(data);
+        } else {
+            Pattern pattern = song.getPatterns().get(currentPatternIndex);
+            pattern.setTrackData(cursorChannel, data);
+        }
+    }
+
+    /** Record undo snapshot before an edit. No-op in phrase mode. */
+    private void recordUndoIfPattern() {
+        if (activePhrase != null) return;
+        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        undoManager.recordEdit(pattern, cursorChannel);
+    }
+
+    /** The number of channels visible in the grid. */
+    private int getVisibleChannelCount() {
+        return activePhrase != null ? 1 : Pattern.CHANNEL_COUNT;
     }
 
     private byte[] prependInstrumentIfSelected(byte[] noteBytes) {
         if (instrumentPanel == null) return noteBytes;
 
         byte[] instrBytes = null;
-        if (cursorChannel <= 5) {
+        int effectiveChannel = activePhrase != null ? phraseChannelIndex : cursorChannel;
+        if (effectiveChannel <= 5) {
             // FM channel: use voice index
             int voiceIdx = instrumentPanel.getCurrentVoiceIndex();
             if (voiceIdx >= 0) {
@@ -882,16 +988,14 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void insertNote(int noteValue) {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return;
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
-        byte[] trackData = ensureTrackHasRow(pattern.getTrackDataDirect(cursorChannel), targetRow);
+        byte[] trackData = ensureTrackHasRow(getActiveTrackData(), targetRow);
         byte[] noteBytes = SmpsEncoder.encodeNote(noteValue, currentDuration);
         byte[] insertBytes = prependInstrumentIfSelected(noteBytes);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, targetRow, insertBytes);
-        undoManager.recordEdit(pattern, cursorChannel);
-        pattern.setTrackData(cursorChannel, newData);
+        recordUndoIfPattern();
+        setActiveTrackData(newData);
         cursorRow++;
         invalidateDecodedCache();
         refreshDisplay();
@@ -899,15 +1003,13 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void insertRest() {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return;
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
-        byte[] trackData = ensureTrackHasRow(pattern.getTrackDataDirect(cursorChannel), targetRow);
+        byte[] trackData = ensureTrackHasRow(getActiveTrackData(), targetRow);
         byte[] restBytes = SmpsEncoder.encodeRest(currentDuration);
         byte[] newData = SmpsEncoder.insertAtRow(trackData, targetRow, restBytes);
-        undoManager.recordEdit(pattern, cursorChannel);
-        pattern.setTrackData(cursorChannel, newData);
+        recordUndoIfPattern();
+        setActiveTrackData(newData);
         cursorRow++;
         invalidateDecodedCache();
         refreshDisplay();
@@ -915,22 +1017,19 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void deleteAtCursor() {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
-        byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
+        if (!canEdit()) return;
+        byte[] trackData = getActiveTrackData();
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
         byte[] newData = SmpsEncoder.deleteRow(trackData, targetRow);
-        undoManager.recordEdit(pattern, cursorChannel);
-        pattern.setTrackData(cursorChannel, newData);
+        recordUndoIfPattern();
+        setActiveTrackData(newData);
         invalidateDecodedCache();
         refreshDisplay();
         markDirty();
     }
 
     private void openEffectStackEditor() {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
+        if (!canEdit()) return;
 
         String context = String.format("%s row %02X", CHANNEL_NAMES[cursorChannel], cursorRow);
         Optional<List<SmpsEncoder.EffectCommand>> updated = EffectStackEditor.show(getEffectsAtCursor(), context);
@@ -939,23 +1038,19 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private List<SmpsEncoder.EffectCommand> getEffectsAtCursor() {
-        if (song == null || currentPatternIndex >= song.getPatterns().size()) return List.of();
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return List.of();
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
-        byte[] trackData = ensureTrackHasRow(pattern.getTrackDataDirect(cursorChannel), targetRow);
+        byte[] trackData = ensureTrackHasRow(getActiveTrackData(), targetRow);
         return SmpsEncoder.getRowEffects(trackData, targetRow);
     }
 
     private void setEffectsAtCursor(List<SmpsEncoder.EffectCommand> effects) {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return;
         int targetRow = mapVisualRowToTrackRowIndex(cursorChannel, cursorRow);
-        byte[] trackData = ensureTrackHasRow(pattern.getTrackDataDirect(cursorChannel), targetRow);
+        byte[] trackData = ensureTrackHasRow(getActiveTrackData(), targetRow);
         byte[] newData = SmpsEncoder.setRowEffects(trackData, targetRow, effects);
-        undoManager.recordEdit(pattern, cursorChannel);
-        pattern.setTrackData(cursorChannel, newData);
+        recordUndoIfPattern();
+        setActiveTrackData(newData);
         invalidateDecodedCache();
         refreshDisplay();
         markDirty();
@@ -1074,7 +1169,7 @@ public class TrackerGrid extends ScrollPane {
         }
 
         selEndRow = Math.max(0, Math.min(selEndRow + rowDelta, getMaxRowCount() - 1));
-        selEndChannel = Math.max(0, Math.min(selEndChannel + channelDelta, Pattern.CHANNEL_COUNT - 1));
+        selEndChannel = Math.max(0, Math.min(selEndChannel + channelDelta, getVisibleChannelCount() - 1));
         cursorRow = selEndRow;
         cursorChannel = selEndChannel;
         refreshDisplay();
@@ -1100,14 +1195,12 @@ public class TrackerGrid extends ScrollPane {
         selStartRow = 0;
         selStartChannel = 0;
         selEndRow = getMaxRowCount() - 1;
-        selEndChannel = Pattern.CHANNEL_COUNT - 1;
+        selEndChannel = getVisibleChannelCount() - 1;
         refreshDisplay();
     }
 
     private void copySelection() {
-        if (!hasSelection() || song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!hasSelection() || !canEdit()) return;
 
         int minCh = getSelMinChannel();
         int maxCh = getSelMaxChannel();
@@ -1117,39 +1210,49 @@ public class TrackerGrid extends ScrollPane {
         int chCount = maxCh - minCh + 1;
 
         byte[][] channelData = new byte[chCount][];
-        for (int ch = 0; ch < chCount; ch++) {
-            byte[] trackData = pattern.getTrackDataDirect(minCh + ch);
-            channelData[ch] = SmpsEncoder.extractRowRange(trackData, minRow, rowCount);
+        if (activePhrase != null) {
+            channelData[0] = SmpsEncoder.extractRowRange(activePhrase.getDataDirect(), minRow, rowCount);
+        } else {
+            Pattern pattern = song.getPatterns().get(currentPatternIndex);
+            for (int ch = 0; ch < chCount; ch++) {
+                byte[] trackData = pattern.getTrackDataDirect(minCh + ch);
+                channelData[ch] = SmpsEncoder.extractRowRange(trackData, minRow, rowCount);
+            }
         }
 
         clipboard = new ClipboardData(channelData, rowCount, song);
     }
 
     private void deleteSelection() {
-        if (!hasSelection() || song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!hasSelection() || !canEdit()) return;
 
         int minCh = getSelMinChannel();
         int maxCh = getSelMaxChannel();
         int minRow = getSelMinRow();
         int maxRow = getSelMaxRow();
 
-        // Record undo for all affected channels
-        int chCount = maxCh - minCh + 1;
-        int[] channels = new int[chCount];
-        for (int i = 0; i < chCount; i++) {
-            channels[i] = minCh + i;
-        }
-        undoManager.recordMultiEdit(pattern, channels);
-
-        // Delete rows from bottom to top (since rows shift after each delete)
-        for (int ch = minCh; ch <= maxCh; ch++) {
-            byte[] trackData = pattern.getTrackDataDirect(ch);
+        if (activePhrase != null) {
+            byte[] trackData = activePhrase.getDataDirect();
             for (int row = maxRow; row >= minRow; row--) {
                 trackData = SmpsEncoder.deleteRow(trackData, row);
             }
-            pattern.setTrackData(ch, trackData);
+            activePhrase.setData(trackData);
+        } else {
+            Pattern pattern = song.getPatterns().get(currentPatternIndex);
+            int chCount = maxCh - minCh + 1;
+            int[] channels = new int[chCount];
+            for (int i = 0; i < chCount; i++) {
+                channels[i] = minCh + i;
+            }
+            undoManager.recordMultiEdit(pattern, channels);
+
+            for (int ch = minCh; ch <= maxCh; ch++) {
+                byte[] trackData = pattern.getTrackDataDirect(ch);
+                for (int row = maxRow; row >= minRow; row--) {
+                    trackData = SmpsEncoder.deleteRow(trackData, row);
+                }
+                pattern.setTrackData(ch, trackData);
+            }
         }
 
         clearSelection();
@@ -1159,9 +1262,7 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void pasteAtCursor() {
-        if (clipboard == null || song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (clipboard == null || !canEdit()) return;
 
         // Build paste data from clipboard
         int chCount = clipboard.getChannelCount();
@@ -1171,35 +1272,38 @@ public class TrackerGrid extends ScrollPane {
         }
 
         // Cross-song paste: resolve instrument references
-        if (clipboard.isCrossSong()) {
+        if (song != null && clipboard.isCrossSong()) {
             pasteChannelData = resolveCrossPaste(pasteChannelData,
                     clipboard.getSourceVoices(), clipboard.getSourcePsgEnvelopes(), song);
             if (pasteChannelData == null) return; // user cancelled
         }
 
-        // Collect affected channel indices for atomic undo
-        int count = 0;
-        for (int ch = 0; ch < chCount; ch++) {
-            if (cursorChannel + ch < Pattern.CHANNEL_COUNT) count++;
-        }
-        int[] affectedChannels = new int[count];
-        for (int i = 0; i < count; i++) {
-            affectedChannels[i] = cursorChannel + i;
-        }
+        if (activePhrase != null) {
+            // In phrase mode, paste only the first channel
+            byte[] trackData = activePhrase.getDataDirect();
+            byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteChannelData[0]);
+            activePhrase.setData(newData);
+        } else {
+            Pattern pattern = song.getPatterns().get(currentPatternIndex);
+            int count = 0;
+            for (int ch = 0; ch < chCount; ch++) {
+                if (cursorChannel + ch < Pattern.CHANNEL_COUNT) count++;
+            }
+            int[] affectedChannels = new int[count];
+            for (int i = 0; i < count; i++) {
+                affectedChannels[i] = cursorChannel + i;
+            }
+            undoManager.recordMultiEdit(pattern, affectedChannels);
 
-        // Record undo atomically for all affected channels BEFORE any mutations
-        undoManager.recordMultiEdit(pattern, affectedChannels);
+            for (int ch = 0; ch < chCount; ch++) {
+                int targetChannel = cursorChannel + ch;
+                if (targetChannel >= Pattern.CHANNEL_COUNT) break;
 
-        for (int ch = 0; ch < chCount; ch++) {
-            int targetChannel = cursorChannel + ch;
-            if (targetChannel >= Pattern.CHANNEL_COUNT) break;
-
-            byte[] trackData = pattern.getTrackDataDirect(targetChannel);
-            byte[] pasteData = pasteChannelData[ch];
-
-            // Insert pasted bytes at cursor row
-            byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteData);
-            pattern.setTrackData(targetChannel, newData);
+                byte[] trackData = pattern.getTrackDataDirect(targetChannel);
+                byte[] pasteData = pasteChannelData[ch];
+                byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteData);
+                pattern.setTrackData(targetChannel, newData);
+            }
         }
         invalidateDecodedCache();
         refreshDisplay();
@@ -1240,33 +1344,40 @@ public class TrackerGrid extends ScrollPane {
     }
 
     private void transposeSelection(int semitones) {
-        if (song == null) return;
-        if (currentPatternIndex >= song.getPatterns().size()) return;
-        Pattern pattern = song.getPatterns().get(currentPatternIndex);
+        if (!canEdit()) return;
 
-        if (hasSelection()) {
-            int minCh = getSelMinChannel();
-            int maxCh = getSelMaxChannel();
-            int minRow = getSelMinRow();
-            int rowCount = getSelMaxRow() - minRow + 1;
-
-            int chCount = maxCh - minCh + 1;
-            int[] channels = new int[chCount];
-            for (int i = 0; i < chCount; i++) {
-                channels[i] = minCh + i;
-            }
-            undoManager.recordMultiEdit(pattern, channels);
-            for (int ch = minCh; ch <= maxCh; ch++) {
-                byte[] trackData = pattern.getTrackDataDirect(ch);
-                byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
-                pattern.setTrackData(ch, transposed);
-            }
+        if (activePhrase != null) {
+            // Phrase mode: transpose active phrase data
+            byte[] trackData = activePhrase.getDataDirect();
+            int minRow = hasSelection() ? getSelMinRow() : cursorRow;
+            int rowCount = hasSelection() ? getSelMaxRow() - minRow + 1 : 1;
+            byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
+            activePhrase.setData(transposed);
         } else {
-            // Transpose single cell at cursor
-            undoManager.recordEdit(pattern, cursorChannel);
-            byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
-            byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, cursorRow, 1, semitones);
-            pattern.setTrackData(cursorChannel, transposed);
+            Pattern pattern = song.getPatterns().get(currentPatternIndex);
+            if (hasSelection()) {
+                int minCh = getSelMinChannel();
+                int maxCh = getSelMaxChannel();
+                int minRow = getSelMinRow();
+                int rowCount = getSelMaxRow() - minRow + 1;
+
+                int chCount = maxCh - minCh + 1;
+                int[] channels = new int[chCount];
+                for (int i = 0; i < chCount; i++) {
+                    channels[i] = minCh + i;
+                }
+                undoManager.recordMultiEdit(pattern, channels);
+                for (int ch = minCh; ch <= maxCh; ch++) {
+                    byte[] trackData = pattern.getTrackDataDirect(ch);
+                    byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, minRow, rowCount, semitones);
+                    pattern.setTrackData(ch, transposed);
+                }
+            } else {
+                undoManager.recordEdit(pattern, cursorChannel);
+                byte[] trackData = pattern.getTrackDataDirect(cursorChannel);
+                byte[] transposed = SmpsEncoder.transposeTrackRange(trackData, cursorRow, 1, semitones);
+                pattern.setTrackData(cursorChannel, transposed);
+            }
         }
         invalidateDecodedCache();
         refreshDisplay();
@@ -1280,7 +1391,8 @@ public class TrackerGrid extends ScrollPane {
      * has at least one DAC sample defined, enabling DAC-specific behavior.
      */
     private boolean isDacChannelActive() {
-        return cursorChannel == DAC_CHANNEL
+        int effectiveChannel = activePhrase != null ? phraseChannelIndex : cursorChannel;
+        return effectiveChannel == DAC_CHANNEL
                 && song != null
                 && !song.getDacSamples().isEmpty();
     }

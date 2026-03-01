@@ -1,6 +1,8 @@
 package com.opensmps.deck.ui;
 
 import com.opensmps.deck.model.ArrangementMode;
+import com.opensmps.deck.model.ChannelType;
+import com.opensmps.deck.model.Phrase;
 import com.opensmps.deck.model.Song;
 import java.io.File;
 
@@ -105,6 +107,8 @@ public class SongTab {
         Runnable dirtyAndEdited = () -> {
             setDirty(true);
             if (onEdited != null) onEdited.run();
+            // Refresh SongView on every edit so phrase blocks update
+            if (songView != null) songView.refreshDisplay();
         };
         trackerGrid.setOnDirty(dirtyAndEdited);
         instrumentPanel.setOnDirty(dirtyAndEdited);
@@ -121,47 +125,70 @@ public class SongTab {
         breadcrumbBar = new BreadcrumbBar();
 
         if (song.getHierarchicalArrangement() != null) {
-            songView.setArrangement(song.getHierarchicalArrangement());
+            var arr = song.getHierarchicalArrangement();
+            songView.setArrangement(arr);
 
             // Default: show first channel's chain
-            var arr = song.getHierarchicalArrangement();
-            var chain = arr.getChain(0);
-            chainStrip.setChain(chain, arr.getPhraseLibrary());
+            chainStrip.setChain(arr.getChain(0), arr.getPhraseLibrary());
             breadcrumbBar.push("FM1 Chain", 0);
 
-            // SongView phrase selection → update ChainStrip
+            // SongView phrase selection → update ChainStrip and return to chain view
             songView.setOnPhraseSelected(phraseId -> {
                 int ch = songView.getSelectedChannel();
                 chainStrip.setChain(arr.getChain(ch), arr.getPhraseLibrary());
-                String chName = ch < 6 ? "FM" + (ch + 1) : ch < 9 ? "PSG" + (ch - 5) : "Noise";
-                if (ch == 5) chName = "DAC";
+                String chName = channelDisplayName(ch);
                 breadcrumbBar.setCrumbs(java.util.List.of(
                     new BreadcrumbBar.Crumb(chName + " Chain", 0)
                 ));
+                // Return to pattern view when switching channels
+                trackerGrid.clearPhrase();
             });
 
-            // SongView double-click → navigate to phrase
+            // SongView double-click → navigate into phrase
             songView.setOnPhraseDoubleClicked((ch, entryIndex) -> {
-                var entry = arr.getChain(ch).getEntries().get(entryIndex);
-                var phrase = arr.getPhraseLibrary().getPhrase(entry.getPhraseId());
-                if (phrase != null) {
-                    breadcrumbBar.push(phrase.getName(), 1);
-                }
+                navigateToPhrase(arr, ch, entryIndex);
             });
 
-            // ChainStrip entry selection
+            // ChainStrip entry selection → navigate into phrase
             chainStrip.setOnEntrySelected(phraseId -> {
-                var phrase = arr.getPhraseLibrary().getPhrase(phraseId);
+                int ch = songView.getSelectedChannel();
+                Phrase phrase = arr.getPhraseLibrary().getPhrase(phraseId);
                 if (phrase != null) {
+                    trackerGrid.setPhrase(phrase, ch);
                     breadcrumbBar.push(phrase.getName(), 1);
                 }
             });
 
             // BreadcrumbBar navigation
             breadcrumbBar.setOnNavigate(depth -> {
-                // depth 0 = chain level, depth 1 = phrase level
+                if (depth == 0) {
+                    // Back to chain level: clear phrase from grid
+                    trackerGrid.clearPhrase();
+                }
             });
         }
+    }
+
+    private void navigateToPhrase(com.opensmps.deck.model.HierarchicalArrangement arr, int ch, int entryIndex) {
+        var chain = arr.getChain(ch);
+        if (entryIndex < 0 || entryIndex >= chain.getEntries().size()) return;
+        var entry = chain.getEntries().get(entryIndex);
+        Phrase phrase = arr.getPhraseLibrary().getPhrase(entry.getPhraseId());
+        if (phrase != null) {
+            trackerGrid.setPhrase(phrase, ch);
+            String chName = channelDisplayName(ch);
+            breadcrumbBar.setCrumbs(java.util.List.of(
+                new BreadcrumbBar.Crumb(chName + " Chain", 0),
+                new BreadcrumbBar.Crumb(phrase.getName(), 1)
+            ));
+        }
+    }
+
+    private static String channelDisplayName(int ch) {
+        if (ch == 5) return "DAC";
+        if (ch < 5) return "FM" + (ch + 1);
+        if (ch < 9) return "PSG" + (ch - 5);
+        return "Noise";
     }
 
     /**

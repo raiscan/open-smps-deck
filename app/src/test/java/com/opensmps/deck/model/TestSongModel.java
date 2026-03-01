@@ -12,7 +12,7 @@ class TestSongModel {
 
         assertEquals("Untitled", song.getName());
         assertEquals(SmpsMode.S2, song.getSmpsMode());
-        assertEquals(ArrangementMode.STRUCTURED_BLOCKS, song.getArrangementMode());
+        assertEquals(ArrangementMode.LEGACY_PATTERNS, song.getArrangementMode());
         assertEquals(0x80, song.getTempo());
         assertEquals(1, song.getDividingTiming());
         assertEquals(0, song.getLoopPoint());

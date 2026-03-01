@@ -7,6 +7,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.paint.Color;
@@ -255,7 +256,20 @@ public class SongView extends ScrollPane {
 
         MenuItem renameItem = new MenuItem("Rename");
         renameItem.setOnAction(ev -> {
-            // Placeholder — will be wired in MainWindow integration
+            Chain chain = arrangement.getChain(channel);
+            if (entryIndex >= chain.getEntries().size()) return;
+            ChainEntry entry = chain.getEntries().get(entryIndex);
+            Phrase phrase = arrangement.getPhraseLibrary().getPhrase(entry.getPhraseId());
+            if (phrase == null) return;
+            TextInputDialog dialog = new TextInputDialog(phrase.getName());
+            dialog.setTitle("Rename Phrase");
+            dialog.setHeaderText("Enter new name for phrase:");
+            dialog.showAndWait().ifPresent(newName -> {
+                if (!newName.isBlank()) {
+                    phrase.setName(newName.trim());
+                    refreshDisplay();
+                }
+            });
         });
 
         MenuItem deleteItem = new MenuItem("Delete");
