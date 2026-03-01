@@ -12,9 +12,11 @@ class TestSongModel {
 
         assertEquals("Untitled", song.getName());
         assertEquals(SmpsMode.S2, song.getSmpsMode());
+        assertEquals(ArrangementMode.STRUCTURED_BLOCKS, song.getArrangementMode());
         assertEquals(0x80, song.getTempo());
         assertEquals(1, song.getDividingTiming());
         assertEquals(0, song.getLoopPoint());
+        assertNull(song.getStructuredArrangement(), "Structured arrangement should default to null");
 
         assertTrue(song.getVoiceBank().isEmpty(), "Voice bank should be empty");
         assertTrue(song.getPsgEnvelopes().isEmpty(), "PSG envelopes should be empty");
@@ -429,5 +431,22 @@ class TestSongModel {
         PsgEnvelope env = new PsgEnvelope("Empty", new byte[]{(byte) 0x80});
         assertEquals(0, env.getStepCount());
         assertArrayEquals(new byte[]{(byte) 0x80}, env.getData());
+    }
+
+    @Test
+    void songSupportsHierarchicalArrangementMode() {
+        var song = new Song();
+        song.setArrangementMode(ArrangementMode.HIERARCHICAL);
+        assertEquals(ArrangementMode.HIERARCHICAL, song.getArrangementMode());
+    }
+
+    @Test
+    void songStoresHierarchicalArrangement() {
+        var song = new Song();
+        var arr = new HierarchicalArrangement();
+        arr.getPhraseLibrary().createPhrase("Test", ChannelType.FM);
+        song.setHierarchicalArrangement(arr);
+        assertNotNull(song.getHierarchicalArrangement());
+        assertEquals(1, song.getHierarchicalArrangement().getPhraseLibrary().getAllPhrases().size());
     }
 }

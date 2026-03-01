@@ -17,6 +17,7 @@ public class Song {
 
     private String name = "Untitled";
     private SmpsMode smpsMode = SmpsMode.S2;
+    private ArrangementMode arrangementMode = ArrangementMode.STRUCTURED_BLOCKS;
     private int tempo = 0x80;
     private int dividingTiming = 1;
     private int loopPoint = 0;
@@ -26,6 +27,8 @@ public class Song {
     private final List<DacSample> dacSamples = new ArrayList<>();
     private final List<Pattern> patterns = new ArrayList<>();
     private final List<int[]> orderList = new ArrayList<>(); // int[10] per row
+    private StructuredArrangement structuredArrangement;
+    private HierarchicalArrangement hierarchicalArrangement;
 
     public Song() {
         patterns.add(new Pattern(0, 64));
@@ -47,6 +50,14 @@ public class Song {
 
     public void setSmpsMode(SmpsMode smpsMode) {
         this.smpsMode = smpsMode;
+    }
+
+    public ArrangementMode getArrangementMode() {
+        return arrangementMode;
+    }
+
+    public void setArrangementMode(ArrangementMode arrangementMode) {
+        this.arrangementMode = arrangementMode != null ? arrangementMode : ArrangementMode.LEGACY_PATTERNS;
     }
 
     public int getTempo() {
@@ -91,5 +102,27 @@ public class Song {
 
     public List<int[]> getOrderList() {
         return orderList;
+    }
+
+    /**
+     * Structured block-reference arrangement (optional, phase-1 scaffold).
+     *
+     * <p>When {@link #getArrangementMode()} is {@link ArrangementMode#STRUCTURED_BLOCKS},
+     * editors should prefer this model over legacy pattern/order data.
+     */
+    public StructuredArrangement getStructuredArrangement() {
+        return structuredArrangement;
+    }
+
+    public void setStructuredArrangement(StructuredArrangement structuredArrangement) {
+        this.structuredArrangement = structuredArrangement;
+    }
+
+    public HierarchicalArrangement getHierarchicalArrangement() {
+        return hierarchicalArrangement;
+    }
+
+    public void setHierarchicalArrangement(HierarchicalArrangement arr) {
+        this.hierarchicalArrangement = arr;
     }
 }
