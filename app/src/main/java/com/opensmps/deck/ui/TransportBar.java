@@ -25,6 +25,8 @@ public class TransportBar extends HBox {
     private final Spinner<Integer> dtSpinner;
     private final ComboBox<SmpsMode> modeSelector;
     private boolean paused = false;
+    private boolean suppressSongUpdate = false;
+    private Runnable onSongChanged;
 
     public TransportBar(PlaybackEngine playbackEngine, Song song) {
         this.playbackEngine = playbackEngine;
@@ -58,7 +60,9 @@ public class TransportBar extends HBox {
         tempoSpinner.setPrefWidth(80);
         tempoSpinner.setEditable(true);
         tempoSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (suppressSongUpdate) return;
             song.setTempo(newVal);
+            notifySongChanged();
         });
 
         // Dividing timing
@@ -67,7 +71,9 @@ public class TransportBar extends HBox {
         dtSpinner = new Spinner<>(1, 8, song.getDividingTiming());
         dtSpinner.setPrefWidth(60);
         dtSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (suppressSongUpdate) return;
             song.setDividingTiming(newVal);
+            notifySongChanged();
         });
 
         // Spacer
@@ -81,7 +87,9 @@ public class TransportBar extends HBox {
         modeSelector.getItems().addAll(SmpsMode.values());
         modeSelector.setValue(song.getSmpsMode());
         modeSelector.setOnAction(e -> {
+            if (suppressSongUpdate) return;
             song.setSmpsMode(modeSelector.getValue());
+            notifySongChanged();
         });
 
         getChildren().addAll(
@@ -96,9 +104,26 @@ public class TransportBar extends HBox {
 
     public void setSong(Song song) {
         this.song = song;
+        suppressSongUpdate = true;
         tempoSpinner.getValueFactory().setValue(song.getTempo());
         dtSpinner.getValueFactory().setValue(song.getDividingTiming());
         modeSelector.setValue(song.getSmpsMode());
+        suppressSongUpdate = false;
+    }
+
+    /**
+     * Sets a callback fired when tempo/dividing timing/mode changes are committed.
+     *
+     * @param callback callback to invoke on song-level transport edits
+     */
+    public void setOnSongChanged(Runnable callback) {
+        this.onSongChanged = callback;
+    }
+
+    private void notifySongChanged() {
+        if (onSongChanged != null) {
+            onSongChanged.run();
+        }
     }
 
     private void onPlay() {

@@ -9,6 +9,7 @@ import com.opensmps.smps.SmpsCoordFlags;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -26,8 +27,8 @@ import java.util.List;
 public class PatternCompiler {
 
     private static final int FM_CHANNEL_COUNT = 6;
-    private static final int PSG_CHANNEL_COUNT = 4;
     private static final int TOTAL_CHANNELS = Pattern.CHANNEL_COUNT; // 10
+    private static final int DAC_CHANNEL = 5;
 
     private static final int HEADER_BASE_SIZE = 6;
     private static final int FM_TRACK_HEADER_SIZE = 4;
@@ -37,6 +38,119 @@ public class PatternCompiler {
     private static final int CMD_JUMP = SmpsCoordFlags.JUMP;
 
     /**
+     * Row position resolved from a compiled channel timeline.
+     */
+    public record CursorPosition(int orderIndex, int rowIndex) {}
+
+    /**
+     * Row timeline for a compiled channel track.
+     */
+    public static final class ChannelTimeline {
+        private final int channel;
+        private final int trackOffset;
+        private final int[] rowOffsets;
+        private final int[] orderIndices;
+        private final int[] rowIndices;
+
+        ChannelTimeline(int channel,
+                        int trackOffset,
+                        int[] rowOffsets,
+                        int[] orderIndices,
+                        int[] rowIndices) {
+            this.channel = channel;
+            this.trackOffset = trackOffset;
+            this.rowOffsets = rowOffsets;
+            this.orderIndices = orderIndices;
+            this.rowIndices = rowIndices;
+        }
+
+        /** UI channel index this timeline represents (0-9). */
+        public int getChannel() {
+            return channel;
+        }
+
+        /** Absolute byte offset where this track starts in the compiled file. */
+        public int getTrackOffset() {
+            return trackOffset;
+        }
+
+        /** Number of decoded rows represented in this timeline. */
+        public int getRowCount() {
+            return rowOffsets.length;
+        }
+
+        /**
+         * Resolve a sequencer absolute byte position to an order/pattern row.
+         *
+         * @param absolutePosition absolute position from sequencer debug state
+         * @return resolved cursor position, or {@code null} when no rows exist
+         */
+        public CursorPosition resolvePosition(int absolutePosition) {
+            if (rowOffsets.length == 0) {
+                return null;
+            }
+            int relative = absolutePosition - trackOffset;
+            int idx = Arrays.binarySearch(rowOffsets, relative);
+            if (idx < 0) {
+                idx = -idx - 2;
+            }
+            if (idx < 0) {
+                idx = 0;
+            } else if (idx >= rowOffsets.length) {
+                idx = rowOffsets.length - 1;
+            }
+            return new CursorPosition(orderIndices[idx], rowIndices[idx]);
+        }
+    }
+
+    /**
+     * Full compile output: bytes plus row timelines per channel.
+     */
+    public static final class CompilationResult {
+        private final byte[] smpsData;
+        private final ChannelTimeline[] timelinesByChannel;
+
+        CompilationResult(byte[] smpsData, ChannelTimeline[] timelinesByChannel) {
+            this.smpsData = smpsData;
+            this.timelinesByChannel = timelinesByChannel;
+        }
+
+        /**
+         * Returns compiled SMPS bytes.
+         */
+        public byte[] getSmpsData() {
+            return smpsData.clone();
+        }
+
+        /**
+         * Returns compiled SMPS bytes without cloning.
+         *
+         * <p>Callers must treat the array as immutable.
+         */
+        public byte[] getSmpsDataUnsafe() {
+            return smpsData;
+        }
+
+        /**
+         * Returns timeline metadata for the given UI channel, or null if inactive.
+         */
+        public ChannelTimeline getChannelTimeline(int channel) {
+            if (channel < 0 || channel >= timelinesByChannel.length) {
+                return null;
+            }
+            return timelinesByChannel[channel];
+        }
+
+        /**
+         * Resolve a channel position to an order/row cursor location.
+         */
+        public CursorPosition resolveChannelPosition(int channel, int absolutePosition) {
+            ChannelTimeline timeline = getChannelTimeline(channel);
+            return timeline != null ? timeline.resolvePosition(absolutePosition) : null;
+        }
+    }
+
+    /**
      * Compiles the given song into an SMPS binary byte array using
      * the song's own {@link SmpsMode}.
      *
@@ -44,7 +158,7 @@ public class PatternCompiler {
      * @return the compiled SMPS binary data
      */
     public byte[] compile(Song song) {
-        return compile(song, song.getSmpsMode());
+        return compileDetailed(song).getSmpsDataUnsafe();
     }
 
     /**
@@ -61,26 +175,35 @@ public class PatternCompiler {
      * @return the compiled SMPS binary data
      */
     public byte[] compile(Song song, SmpsMode mode) {
+        return compileDetailed(song, mode).getSmpsDataUnsafe();
+    }
+
+    /**
+     * Compile song bytes and expose per-channel row timelines.
+     */
+    public CompilationResult compileDetailed(Song song) {
+        return compileDetailed(song, song.getSmpsMode());
+    }
+
+    /**
+     * Compile song bytes and expose per-channel row timelines for a target mode.
+     */
+    public CompilationResult compileDetailed(Song song, SmpsMode mode) {
         int noteCompensation = switch (mode) {
-            case S1, S3K -> 1;  // shift notes up by 1 to compensate for lower base
-            case S2 -> 0;       // S2 is the native format
+            case S1, S3K -> 1;
+            case S2 -> 0;
         };
 
-        // Defensive snapshot — compile reads orderList and patterns which the UI thread may modify
-        List<int[]> orderList = new ArrayList<>();
-        for (int[] row : song.getOrderList()) {
-            orderList.add(row.clone());
-        }
-        List<Pattern> patterns = new ArrayList<>(song.getPatterns());
+        SongSnapshot snapshot = snapshotSong(song);
 
-        // 1. Determine active channels and build compiled track data for each
         List<Integer> activeFmChannels = new ArrayList<>();
         List<Integer> activePsgChannels = new ArrayList<>();
-        List<byte[]> compiledTracks = new ArrayList<>(); // parallel to active channels
-        List<Integer> loopOffsets = new ArrayList<>();    // track-relative loop target for each
+        List<Integer> activeChannels = new ArrayList<>();
+        List<byte[]> compiledTracks = new ArrayList<>();
+        List<ChannelTimelineBuilder> timelineBuilders = new ArrayList<>();
 
         for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
-            if (!isChannelActive(orderList, patterns, ch)) {
+            if (!isChannelActive(snapshot.orderList, snapshot.patterns, ch)) {
                 continue;
             }
             if (ch < FM_CHANNEL_COUNT) {
@@ -89,9 +212,10 @@ public class PatternCompiler {
                 activePsgChannels.add(ch);
             }
 
-            byte[] trackData = buildTrackData(orderList, patterns, ch, noteCompensation);
-            int loopTarget = calculateLoopTarget(song.getLoopPoint(), orderList, patterns, ch);
-            // Append F6 (JUMP) + 2-byte LE placeholder (track-relative offset, patched later)
+            int compensationForChannel = (ch == DAC_CHANNEL) ? 0 : noteCompensation;
+            byte[] trackData = buildTrackData(snapshot.orderList, snapshot.patterns, ch, compensationForChannel);
+            int loopTarget = calculateLoopTarget(snapshot.loopPoint, snapshot.orderList, snapshot.patterns, ch);
+
             byte[] withJump = new byte[trackData.length + 3];
             System.arraycopy(trackData, 0, withJump, 0, trackData.length);
             withJump[trackData.length] = (byte) CMD_JUMP;
@@ -99,18 +223,17 @@ public class PatternCompiler {
             withJump[trackData.length + 2] = (byte) ((loopTarget >> 8) & 0xFF);
 
             compiledTracks.add(withJump);
-            loopOffsets.add(loopTarget);
+            activeChannels.add(ch);
+            timelineBuilders.add(buildChannelTimeline(snapshot.orderList, snapshot.patterns, ch));
         }
 
         int fmCount = activeFmChannels.size();
         int psgCount = activePsgChannels.size();
 
-        // 2. Calculate header size
         int headerSize = HEADER_BASE_SIZE
                 + (fmCount * FM_TRACK_HEADER_SIZE)
                 + (psgCount * PSG_TRACK_HEADER_SIZE);
 
-        // 3. Calculate file-relative offsets for each track
         int[] trackOffsets = new int[compiledTracks.size()];
         int cursor = headerSize;
         for (int i = 0; i < compiledTracks.size(); i++) {
@@ -118,72 +241,62 @@ public class PatternCompiler {
             cursor += compiledTracks.get(i).length;
         }
 
-        // 4. Voice table offset
         int voiceTableOffset = cursor;
-        int voiceDataLength = song.getVoiceBank().size() * FmVoice.VOICE_SIZE;
+        int voiceDataLength = snapshot.voiceData.size() * FmVoice.VOICE_SIZE;
 
-        // 5. Patch F6 (JUMP) loop targets: convert from track-relative to file-relative
         for (int i = 0; i < compiledTracks.size(); i++) {
-            byte[] track = compiledTracks.get(i);
-            // The last 3 bytes are F6 (JUMP) + 2-byte LE pointer
-            int jumpPos = track.length - 3;
-            int trackRelTarget = (track[jumpPos + 1] & 0xFF)
-                    | ((track[jumpPos + 2] & 0xFF) << 8);
-            int fileRelTarget = trackRelTarget + trackOffsets[i];
-            track[jumpPos + 1] = (byte) (fileRelTarget & 0xFF);
-            track[jumpPos + 2] = (byte) ((fileRelTarget >> 8) & 0xFF);
+            relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
         }
 
-        // 6. Assemble the final output
+        byte[] compiledBytes;
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream(
                     headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
 
-            // -- Header --
-            // Voice table pointer (LE)
-            int voicePtr = song.getVoiceBank().isEmpty() ? 0 : voiceTableOffset;
+            int voicePtr = snapshot.voiceData.isEmpty() ? 0 : voiceTableOffset;
             writeLE16(out, voicePtr);
-            // FM channel count, PSG channel count
             out.write(fmCount);
             out.write(psgCount);
-            // Dividing timing, Tempo
-            out.write(song.getDividingTiming() & 0xFF);
-            out.write(song.getTempo() & 0xFF);
+            out.write(snapshot.dividingTiming & 0xFF);
+            out.write(snapshot.tempo & 0xFF);
 
-            // FM channel headers
             int trackIndex = 0;
             for (int i = 0; i < fmCount; i++) {
                 writeLE16(out, trackOffsets[trackIndex]);
-                out.write(0); // key offset
-                out.write(0); // volume offset
+                out.write(0);
+                out.write(0);
                 trackIndex++;
             }
 
-            // PSG channel headers
             for (int i = 0; i < psgCount; i++) {
                 writeLE16(out, trackOffsets[trackIndex]);
-                out.write(0); // key offset
-                out.write(0); // volume offset
-                out.write(0); // modulation envelope ID
-                out.write(0); // PSG instrument/envelope ID
+                out.write(0);
+                out.write(0);
+                out.write(0);
+                out.write(0);
                 trackIndex++;
             }
 
-            // -- Track data --
             for (byte[] track : compiledTracks) {
                 out.write(track);
             }
 
-            // -- Voice table --
-            for (FmVoice voice : song.getVoiceBank()) {
-                out.write(voice.getDataUnsafe());
+            for (byte[] voice : snapshot.voiceData) {
+                out.write(voice);
             }
 
-            return out.toByteArray();
+            compiledBytes = out.toByteArray();
         } catch (IOException e) {
-            // ByteArrayOutputStream never throws IOException in practice
             throw new RuntimeException("Unexpected I/O error during compilation", e);
         }
+
+        ChannelTimeline[] timelinesByChannel = new ChannelTimeline[TOTAL_CHANNELS];
+        for (int i = 0; i < activeChannels.size(); i++) {
+            int channel = activeChannels.get(i);
+            timelinesByChannel[channel] = timelineBuilders.get(i).build(channel, trackOffsets[i]);
+        }
+
+        return new CompilationResult(compiledBytes, timelinesByChannel);
     }
 
     /**
@@ -207,40 +320,30 @@ public class PatternCompiler {
      * Builds concatenated track data for a channel across all order rows,
      * stripping trailing F2 (track end) bytes between patterns and applying
      * note compensation for the target SMPS mode.
-     *
-     * @param noteCompensation offset to add to note bytes (0x81-0xDF); 0 for S2, +1 for S1/S3K
      */
-    private byte[] buildTrackData(List<int[]> orderList, List<Pattern> patterns, int channel,
+    private byte[] buildTrackData(List<int[]> orderList,
+                                  List<Pattern> patterns,
+                                  int channel,
                                   int noteCompensation) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        int cumulativeOffset = 0;
 
         for (int[] orderRow : orderList) {
             int patternIndex = orderRow[channel];
-            byte[] data;
-            if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                data = patterns.get(patternIndex).getTrackDataDirect(channel);
-            } else {
-                data = new byte[0];
-            }
+            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
+                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
+                    : new byte[0];
             if (data == null || data.length == 0) {
                 continue;
             }
 
-            // Strip trailing F2 bytes
-            int end = data.length;
-            while (end > 0 && (data[end - 1] & 0xFF) == CMD_TRACK_END) {
-                end--;
+            int end = stripTrailingStop(data);
+            if (end <= 0) {
+                continue;
             }
 
-            if (end > 0) {
-                if (noteCompensation == 0) {
-                    // No compensation needed — copy directly
-                    buf.write(data, 0, end);
-                } else {
-                    // Walk the bytecode to find and adjust note bytes
-                    applyNoteCompensation(buf, data, end, noteCompensation);
-                }
-            }
+            appendTrackSegment(buf, data, end, noteCompensation, cumulativeOffset);
+            cumulativeOffset += end;
         }
 
         return buf.toByteArray();
@@ -248,33 +351,44 @@ public class PatternCompiler {
 
     /**
      * Walks SMPS bytecode, applies note compensation to note bytes (0x81-0xDF),
-     * and writes the result to the output buffer. Coordination flag bytes
-     * (0xE0-0xFF) and their parameters, duration bytes (0x01-0x7F), and rest
-     * bytes (0x80) are written unchanged.
+     * and writes the result to the output buffer.
      */
-    private void applyNoteCompensation(ByteArrayOutputStream buf, byte[] data, int end,
-                                       int noteCompensation) {
+    private void appendTrackSegment(ByteArrayOutputStream buf,
+                                    byte[] data,
+                                    int end,
+                                    int noteCompensation,
+                                    int segmentStartOffset) {
         int pos = 0;
         while (pos < end) {
             int b = data[pos] & 0xFF;
 
             if (b >= 0xE0) {
-                // Coordination flag — write flag byte + all parameter bytes unchanged
                 buf.write(b);
-                pos++;
                 int paramCount = SmpsCoordFlags.getParamCount(b);
-                for (int p = 0; p < paramCount && pos < end; p++) {
-                    buf.write(data[pos] & 0xFF);
-                    pos++;
+                if ((b == SmpsCoordFlags.JUMP || b == SmpsCoordFlags.CALL) && pos + 2 < end) {
+                    int rawTarget = (data[pos + 1] & 0xFF) | ((data[pos + 2] & 0xFF) << 8);
+                    int adjusted = adjustTrackPointer(rawTarget, end, segmentStartOffset);
+                    buf.write(adjusted & 0xFF);
+                    buf.write((adjusted >> 8) & 0xFF);
+                } else if (b == SmpsCoordFlags.LOOP && pos + 4 < end) {
+                    buf.write(data[pos + 1] & 0xFF); // loop index
+                    buf.write(data[pos + 2] & 0xFF); // loop count
+                    int rawTarget = (data[pos + 3] & 0xFF) | ((data[pos + 4] & 0xFF) << 8);
+                    int adjusted = adjustTrackPointer(rawTarget, end, segmentStartOffset);
+                    buf.write(adjusted & 0xFF);
+                    buf.write((adjusted >> 8) & 0xFF);
+                } else {
+                    for (int p = 0; p < paramCount && (pos + 1 + p) < end; p++) {
+                        buf.write(data[pos + 1 + p] & 0xFF);
+                    }
                 }
+                pos += 1 + paramCount;
             } else if (b >= 0x81 && b <= 0xDF) {
-                // Note byte — apply compensation and clamp
                 int adjusted = b + noteCompensation;
                 adjusted = Math.max(0x81, Math.min(0xDF, adjusted));
                 buf.write(adjusted);
                 pos++;
             } else {
-                // Rest (0x80) or duration (0x01-0x7F) or zero — write unchanged
                 buf.write(b);
                 pos++;
             }
@@ -282,39 +396,187 @@ public class PatternCompiler {
     }
 
     /**
-     * Calculates the track-relative byte offset of the loop point for a channel.
-     * The loop point is the cumulative byte position at which the loop-point
-     * order row's data begins within the concatenated track.
+     * Treat in-pattern pointers as local offsets and lift them into the
+     * concatenated per-channel track space.
      */
-    private int calculateLoopTarget(int loopRow, List<int[]> orderList, List<Pattern> patterns, int channel) {
+    private int adjustTrackPointer(int rawTarget, int segmentLength, int segmentStartOffset) {
+        if (rawTarget >= 0 && rawTarget < segmentLength) {
+            return rawTarget + segmentStartOffset;
+        }
+        // Already global/absolute in track space (or invalid): preserve.
+        return rawTarget;
+    }
+
+    /**
+     * Patch all in-track pointer commands (F6/F7/F8) from track-relative
+     * offsets to file-relative offsets by adding the track start.
+     */
+    private void relocateTrackPointersToFileOffsets(byte[] track, int trackOffset) {
+        int pos = 0;
+        while (pos < track.length) {
+            int cmd = track[pos] & 0xFF;
+            if (cmd >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < track.length) {
+                    int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                    int relocated = target + trackOffset;
+                    track[pos + 1] = (byte) (relocated & 0xFF);
+                    track[pos + 2] = (byte) ((relocated >> 8) & 0xFF);
+                } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < track.length) {
+                    int target = (track[pos + 3] & 0xFF) | ((track[pos + 4] & 0xFF) << 8);
+                    int relocated = target + trackOffset;
+                    track[pos + 3] = (byte) (relocated & 0xFF);
+                    track[pos + 4] = (byte) ((relocated >> 8) & 0xFF);
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+    }
+
+    /**
+     * Calculates the track-relative byte offset of the loop point for a channel.
+     */
+    private int calculateLoopTarget(int loopRow,
+                                    List<int[]> orderList,
+                                    List<Pattern> patterns,
+                                    int channel) {
         int offset = 0;
         for (int row = 0; row < orderList.size(); row++) {
             if (row == loopRow) {
                 return offset;
             }
             int patternIndex = orderList.get(row)[channel];
-            byte[] data;
-            if (patternIndex >= 0 && patternIndex < patterns.size()) {
-                data = patterns.get(patternIndex).getTrackDataDirect(channel);
-            } else {
-                data = new byte[0];
-            }
+            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
+                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
+                    : new byte[0];
             if (data != null && data.length > 0) {
-                // Same stripping logic as buildTrackData
-                int end = data.length;
-                while (end > 0 && (data[end - 1] & 0xFF) == CMD_TRACK_END) {
-                    end--;
-                }
-                offset += end;
+                offset += stripTrailingStop(data);
             }
         }
 
-        // If loop point is beyond order list, loop to start
         return 0;
+    }
+
+    private int stripTrailingStop(byte[] data) {
+        int end = data.length;
+        while (end > 0 && (data[end - 1] & 0xFF) == CMD_TRACK_END) {
+            end--;
+        }
+        return end;
+    }
+
+    private ChannelTimelineBuilder buildChannelTimeline(List<int[]> orderList,
+                                                        List<Pattern> patterns,
+                                                        int channel) {
+        ChannelTimelineBuilder builder = new ChannelTimelineBuilder();
+        int cumulativeOffset = 0;
+
+        for (int orderIndex = 0; orderIndex < orderList.size(); orderIndex++) {
+            int patternIndex = orderList.get(orderIndex)[channel];
+            byte[] data = (patternIndex >= 0 && patternIndex < patterns.size())
+                    ? patterns.get(patternIndex).getTrackDataDirect(channel)
+                    : new byte[0];
+            if (data == null || data.length == 0) {
+                continue;
+            }
+
+            int end = stripTrailingStop(data);
+            if (end <= 0) {
+                continue;
+            }
+
+            byte[] trimmed = Arrays.copyOf(data, end);
+            List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(trimmed);
+            for (int rowIndex = 0; rowIndex < decodedRows.size(); rowIndex++) {
+                SmpsDecoder.DecodedRow row = decodedRows.get(rowIndex);
+                builder.add(cumulativeOffset + row.byteOffset(), orderIndex, rowIndex);
+            }
+
+            cumulativeOffset += end;
+        }
+
+        return builder;
+    }
+
+    private SongSnapshot snapshotSong(Song song) {
+        List<int[]> orderList = new ArrayList<>();
+        for (int[] row : song.getOrderList()) {
+            orderList.add(row.clone());
+        }
+
+        List<Pattern> patterns = new ArrayList<>();
+        for (Pattern source : song.getPatterns()) {
+            Pattern copy = new Pattern(source.getId(), source.getRows());
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                byte[] track = source.getTrackDataDirect(ch);
+                if (track != null && track.length > 0) {
+                    copy.setTrackData(ch, track.clone());
+                }
+            }
+            patterns.add(copy);
+        }
+
+        List<byte[]> voiceData = new ArrayList<>();
+        for (FmVoice voice : song.getVoiceBank()) {
+            voiceData.add(voice.getDataUnsafe().clone());
+        }
+
+        return new SongSnapshot(orderList, patterns, voiceData,
+                song.getDividingTiming(), song.getTempo(), song.getLoopPoint());
     }
 
     private static void writeLE16(ByteArrayOutputStream out, int value) {
         out.write(value & 0xFF);
         out.write((value >> 8) & 0xFF);
+    }
+
+    private static final class SongSnapshot {
+        private final List<int[]> orderList;
+        private final List<Pattern> patterns;
+        private final List<byte[]> voiceData;
+        private final int dividingTiming;
+        private final int tempo;
+        private final int loopPoint;
+
+        private SongSnapshot(List<int[]> orderList,
+                             List<Pattern> patterns,
+                             List<byte[]> voiceData,
+                             int dividingTiming,
+                             int tempo,
+                             int loopPoint) {
+            this.orderList = orderList;
+            this.patterns = patterns;
+            this.voiceData = voiceData;
+            this.dividingTiming = dividingTiming;
+            this.tempo = tempo;
+            this.loopPoint = loopPoint;
+        }
+    }
+
+    private static final class ChannelTimelineBuilder {
+        private final List<Integer> rowOffsets = new ArrayList<>();
+        private final List<Integer> orderIndices = new ArrayList<>();
+        private final List<Integer> rowIndices = new ArrayList<>();
+
+        void add(int rowOffset, int orderIndex, int rowIndex) {
+            rowOffsets.add(rowOffset);
+            orderIndices.add(orderIndex);
+            rowIndices.add(rowIndex);
+        }
+
+        ChannelTimeline build(int channel, int trackOffset) {
+            int count = rowOffsets.size();
+            int[] rowOffsetArray = new int[count];
+            int[] orderArray = new int[count];
+            int[] rowArray = new int[count];
+            for (int i = 0; i < count; i++) {
+                rowOffsetArray[i] = rowOffsets.get(i);
+                orderArray[i] = orderIndices.get(i);
+                rowArray[i] = rowIndices.get(i);
+            }
+            return new ChannelTimeline(channel, trackOffset, rowOffsetArray, orderArray, rowArray);
+        }
     }
 }

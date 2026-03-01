@@ -15,6 +15,14 @@ import java.util.List;
  */
 public class SmpsEncoder {
 
+    /** One non-instrument coordination flag attached to a row. */
+    public record EffectCommand(int flag, int[] params) {
+        public EffectCommand {
+            flag &= 0xFF;
+            params = params != null ? Arrays.copyOf(params, params.length) : new int[0];
+        }
+    }
+
     /** Default duration for new notes (in frames). */
     public static final int DEFAULT_DURATION = 0x18;
 
@@ -267,25 +275,9 @@ public class SmpsEncoder {
         if (rowIndex >= rowOffsets.length) return trackData;
 
         int rowStart = rowOffsets[rowIndex];
+        int scanStart = getRowPreludeStart(trackData, rowOffsets, rowIndex);
 
-        // Determine the region before this row that could contain coordination flags.
-        // Flags for this row sit between the previous row's end and this row's note byte.
-        int scanStart;
-        if (rowIndex > 0) {
-            // End of previous row: its note byte + optional duration
-            int prevNotePos = rowOffsets[rowIndex - 1];
-            scanStart = prevNotePos + 1;
-            if (scanStart < trackData.length) {
-                int next = trackData[scanStart] & 0xFF;
-                if (next >= 0x01 && next <= 0x7F) {
-                    scanStart++; // skip duration byte
-                }
-            }
-        } else {
-            scanStart = 0;
-        }
-
-        // Scan for an existing matching instrument flag in [scanStart, rowStart)
+        // Scan for an existing matching instrument flag in [scanStart, rowStart).
         int pos = scanStart;
         while (pos < rowStart) {
             int b = trackData[pos] & 0xFF;
@@ -312,6 +304,119 @@ public class SmpsEncoder {
             out.write(trackData, rowStart, trackData.length - rowStart);
         }
         return out.toByteArray();
+    }
+
+    /**
+     * Read non-instrument effect commands attached to the given row.
+     *
+     * <p>This scans coordination flags in the row prelude (between previous row end
+     * and this row's note/tie byte), excluding instrument commands (EF/F5).
+     */
+    public static List<EffectCommand> getRowEffects(byte[] trackData, int rowIndex) {
+        if (trackData == null || trackData.length == 0) return List.of();
+
+        int[] rowOffsets = findRowByteOffsets(trackData);
+        if (rowIndex < 0 || rowIndex >= rowOffsets.length) return List.of();
+
+        int rowStart = rowOffsets[rowIndex];
+        int scanStart = getRowPreludeStart(trackData, rowOffsets, rowIndex);
+        List<EffectCommand> effects = new ArrayList<>();
+
+        int pos = scanStart;
+        while (pos < rowStart) {
+            int b = trackData[pos] & 0xFF;
+            if (b >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(b);
+                if (!SmpsCoordFlags.isSetVoice(b) && !SmpsCoordFlags.isPsgInstrument(b) && b != SmpsCoordFlags.TIE) {
+                    int[] params = new int[paramCount];
+                    for (int i = 0; i < paramCount; i++) {
+                        int paramPos = pos + 1 + i;
+                        params[i] = paramPos < trackData.length ? (trackData[paramPos] & 0xFF) : 0;
+                    }
+                    effects.add(new EffectCommand(b, params));
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+        return effects;
+    }
+
+    /**
+     * Replace non-instrument effect commands attached to the given row.
+     *
+     * <p>Instrument flags (EF/F5) in the row prelude are preserved exactly.
+     */
+    public static byte[] setRowEffects(byte[] trackData, int rowIndex, List<EffectCommand> effects) {
+        if (trackData == null || trackData.length == 0) return trackData;
+
+        int[] rowOffsets = findRowByteOffsets(trackData);
+        if (rowIndex < 0 || rowIndex >= rowOffsets.length) return trackData;
+
+        int rowStart = rowOffsets[rowIndex];
+        int scanStart = getRowPreludeStart(trackData, rowOffsets, rowIndex);
+
+        // Preserve existing instrument flags exactly as-is.
+        ByteArrayOutputStream keptInstrumentBytes = new ByteArrayOutputStream();
+        int pos = scanStart;
+        while (pos < rowStart) {
+            int b = trackData[pos] & 0xFF;
+            if (b >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int spanEnd = Math.min(trackData.length, pos + 1 + paramCount);
+                if (SmpsCoordFlags.isSetVoice(b) || SmpsCoordFlags.isPsgInstrument(b)) {
+                    keptInstrumentBytes.write(trackData, pos, Math.max(0, spanEnd - pos));
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+
+        ByteArrayOutputStream newPrelude = new ByteArrayOutputStream();
+        byte[] instrumentPrefix = keptInstrumentBytes.toByteArray();
+        newPrelude.write(instrumentPrefix, 0, instrumentPrefix.length);
+        if (effects != null) {
+            for (EffectCommand cmd : effects) {
+                if (cmd == null) continue;
+                int flag = cmd.flag() & 0xFF;
+                if (flag < 0xE0) continue;
+                if (SmpsCoordFlags.isSetVoice(flag) || SmpsCoordFlags.isPsgInstrument(flag) || flag == SmpsCoordFlags.TIE) {
+                    continue;
+                }
+                int expected = SmpsCoordFlags.getParamCount(flag);
+                int[] params = cmd.params() != null ? cmd.params() : new int[0];
+                if (params.length != expected) continue;
+
+                newPrelude.write(flag);
+                for (int p : params) {
+                    newPrelude.write(p & 0xFF);
+                }
+            }
+        }
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream(trackData.length + 32);
+        out.write(trackData, 0, scanStart);
+        byte[] preludeBytes = newPrelude.toByteArray();
+        out.write(preludeBytes, 0, preludeBytes.length);
+        out.write(trackData, rowStart, trackData.length - rowStart);
+        return out.toByteArray();
+    }
+
+    private static int getRowPreludeStart(byte[] trackData, int[] rowOffsets, int rowIndex) {
+        if (rowIndex <= 0) return 0;
+
+        // End of previous row: note/tie byte + optional duration byte.
+        int prevRowPos = rowOffsets[rowIndex - 1];
+        int scanStart = prevRowPos + 1;
+        if (scanStart < trackData.length) {
+            int next = trackData[scanStart] & 0xFF;
+            if (next >= 0x01 && next <= 0x7F) {
+                scanStart++;
+            }
+        }
+        return scanStart;
     }
 
     /**

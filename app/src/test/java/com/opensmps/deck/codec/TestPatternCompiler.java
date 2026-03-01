@@ -398,4 +398,38 @@ class TestPatternCompiler {
         assertNotNull(secondOrder);
         assertEquals(1, secondOrder.orderIndex(), "Second pattern should resolve to order row 1");
     }
+
+    @Test
+    void testCompileRelocatesSegmentLocalLoopPointerPerChannel() {
+        Song song = new Song();
+
+        // Pattern 0 contributes 2 bytes.
+        song.getPatterns().get(0).setTrackData(0, new byte[]{
+                (byte) 0xA1, 0x18
+        });
+
+        // Pattern 1 starts with F7 loop pointing to local offset 0x0000
+        // (start of pattern 1 segment).
+        Pattern p1 = new Pattern(1, 64);
+        p1.setTrackData(0, new byte[]{
+                (byte) SmpsCoordFlags.LOOP, 0x00, 0x02, 0x00, 0x00,
+                (byte) 0xA4, 0x18
+        });
+        song.getPatterns().add(p1);
+
+        int[] orderRow1 = new int[Pattern.CHANNEL_COUNT];
+        orderRow1[0] = 1;
+        song.getOrderList().add(orderRow1);
+        song.setLoopPoint(0);
+
+        byte[] smps = new PatternCompiler().compile(song);
+        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+
+        assertEquals(SmpsCoordFlags.LOOP, smps[trackStart + 2] & 0xFF);
+
+        int relocatedLoopTarget = (smps[trackStart + 5] & 0xFF)
+                | ((smps[trackStart + 6] & 0xFF) << 8);
+        assertEquals(trackStart + 2, relocatedLoopTarget,
+                "Loop pointer should target the start of pattern 1 segment in this channel track");
+    }
 }

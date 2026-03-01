@@ -12,6 +12,7 @@ import java.util.Map;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import org.xml.sax.helpers.DefaultHandler;
 
 /**
  * Imports FM voice data from RYM2612 (.rym2612) XML patch files.
@@ -46,7 +47,9 @@ public final class Rym2612Importer {
             factory.setXIncludeAware(false);
             factory.setExpandEntityReferences(false);
 
-            Document doc = factory.newDocumentBuilder().parse(file);
+            var builder = factory.newDocumentBuilder();
+            builder.setErrorHandler(new DefaultHandler());
+            Document doc = builder.parse(file);
             doc.getDocumentElement().normalize();
 
             Element root = doc.getDocumentElement();

@@ -66,23 +66,22 @@ class TestDacSampleImporter {
     }
 
     @Test
-    void testImportStereoWavTakesFirstChannel() throws IOException {
-        // Stereo 16-bit WAV: 3 frames, 2 channels each
-        // L and R are identical so the average equals the first channel's value
-        // Frame 0: L=0,     R=0     -> avg=0     -> (0>>8)+128 = 128
-        // Frame 1: L=16384, R=16384 -> avg=16384 -> (64)+128   = 192
-        // Frame 2: L=-8192, R=-8192 -> avg=-8192 -> (-32)+128  = 96
-        short[] interleaved = {0, 0, 16384, 16384, -8192, -8192};
+    void testImportStereoWavAveragesChannelsNotFirstChannelOnly() throws IOException {
+        // Stereo 16-bit WAV: 2 frames, 2 channels each
+        // Frame 0: L=32767 (127), R=0 (0) -> avg=63 -> +128 = 191
+        // Frame 1: L=-32768 (-128), R=0 (0) -> avg=-64 -> +128 = 64
+        // A first-channel-only implementation would produce 255 and 0, so this
+        // specifically guards the channel-averaging behavior.
+        short[] interleaved = {(short) 32767, 0, (short) -32768, 0};
 
         File wavFile = new File(tempDir, "stereo3.wav");
         writeMinimalWav(wavFile, interleaved, 2, 22050, 16);
 
         DacSample sample = DacSampleImporter.importFile(wavFile, 0x0C);
 
-        // 6 interleaved samples -> 3 frames (mono output)
-        assertEquals(3, sample.getData().length,
-                "Stereo WAV with 3 frames should produce 3 mono samples");
-        byte[] expected = {(byte) 128, (byte) 192, (byte) 96};
+        assertEquals(2, sample.getData().length,
+                "Stereo WAV with 2 frames should produce 2 mono samples");
+        byte[] expected = {(byte) 191, (byte) 64};
         assertArrayEquals(expected, sample.getData());
     }
 

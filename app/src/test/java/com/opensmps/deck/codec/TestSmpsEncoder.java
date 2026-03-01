@@ -1,6 +1,7 @@
 package com.opensmps.deck.codec;
 
 import org.junit.jupiter.api.Test;
+import com.opensmps.smps.SmpsCoordFlags;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -157,5 +158,57 @@ class TestSmpsEncoder {
         // Decode should produce rows
         List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
         assertFalse(rows.isEmpty());
+    }
+
+    @Test
+    void getRowEffectsExcludesInstrumentFlags() {
+        // EF 03 E0 40 F0 01 02 03 04  BD 18
+        byte[] track = {
+                (byte) SmpsCoordFlags.SET_VOICE, 0x03,
+                (byte) SmpsCoordFlags.PAN, 0x40,
+                (byte) SmpsCoordFlags.MODULATION, 0x01, 0x02, 0x03, 0x04,
+                (byte) 0xBD, 0x18
+        };
+
+        List<SmpsEncoder.EffectCommand> effects = SmpsEncoder.getRowEffects(track, 0);
+        assertEquals(2, effects.size());
+        assertEquals(SmpsCoordFlags.PAN, effects.get(0).flag());
+        assertArrayEquals(new int[]{0x40}, effects.get(0).params());
+        assertEquals(SmpsCoordFlags.MODULATION, effects.get(1).flag());
+        assertArrayEquals(new int[]{0x01, 0x02, 0x03, 0x04}, effects.get(1).params());
+    }
+
+    @Test
+    void setRowEffectsPreservesInstrumentPrefix() {
+        // EF 03 E0 40 BD 18
+        byte[] track = {
+                (byte) SmpsCoordFlags.SET_VOICE, 0x03,
+                (byte) SmpsCoordFlags.PAN, 0x40,
+                (byte) 0xBD, 0x18
+        };
+
+        List<SmpsEncoder.EffectCommand> replacement = List.of(
+                new SmpsEncoder.EffectCommand(SmpsCoordFlags.DETUNE, new int[]{0x7F})
+        );
+        byte[] out = SmpsEncoder.setRowEffects(track, 0, replacement);
+
+        assertArrayEquals(new byte[]{
+                (byte) SmpsCoordFlags.SET_VOICE, 0x03,
+                (byte) SmpsCoordFlags.DETUNE, 0x7F,
+                (byte) 0xBD, 0x18
+        }, out);
+    }
+
+    @Test
+    void setRowEffectsClearsEffectsWhenEmptyList() {
+        // E0 40 F0 01 02 03 04 BD 18
+        byte[] track = {
+                (byte) SmpsCoordFlags.PAN, 0x40,
+                (byte) SmpsCoordFlags.MODULATION, 0x01, 0x02, 0x03, 0x04,
+                (byte) 0xBD, 0x18
+        };
+
+        byte[] out = SmpsEncoder.setRowEffects(track, 0, List.of());
+        assertArrayEquals(new byte[]{(byte) 0xBD, 0x18}, out);
     }
 }

@@ -54,8 +54,8 @@ public final class DacSampleImporter {
     /**
      * Parse a WAV file and convert to unsigned 8-bit mono PCM.
      *
-     * <p>Handles stereo to mono conversion (first channel only),
-     * 16-bit signed to 8-bit unsigned conversion, and both
+     * <p>Handles stereo to mono conversion (channel average),
+     * 8/16-bit signed or unsigned PCM conversion, and both
      * big-endian and little-endian formats.
      */
     private static byte[] convertWavToUnsigned8Bit(File file) throws IOException {
@@ -63,23 +63,38 @@ public final class DacSampleImporter {
             AudioFormat fmt = ais.getFormat();
             int channels = fmt.getChannels();
             int sampleSizeInBits = fmt.getSampleSizeInBits();
+            AudioFormat.Encoding encoding = fmt.getEncoding();
             boolean bigEndian = fmt.isBigEndian();
             int bytesPerSample = sampleSizeInBits / 8;
             int frameSize = channels * bytesPerSample;
 
+            if (channels <= 0) {
+                throw new IOException("Invalid WAV channel count: " + channels);
+            }
+            if (sampleSizeInBits != 8 && sampleSizeInBits != 16) {
+                throw new IOException("Unsupported WAV bit depth: " + sampleSizeInBits);
+            }
+            if (!(AudioFormat.Encoding.PCM_SIGNED.equals(encoding)
+                    || AudioFormat.Encoding.PCM_UNSIGNED.equals(encoding))) {
+                throw new IOException("Unsupported WAV encoding: " + encoding);
+            }
+
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] frame = new byte[frameSize];
 
-            while (ais.read(frame) == frameSize) {
-                // Take only the first channel (bytes 0..bytesPerSample-1)
-                int unsigned8;
-                if (sampleSizeInBits == 16) {
-                    int signed16 = read16BitSample(frame, 0, bigEndian);
-                    unsigned8 = (signed16 >> 8) + 128;
-                } else {
-                    // 8-bit: pass through as-is
-                    unsigned8 = frame[0] & 0xFF;
+            while (readWholeFrame(ais, frame, frameSize)) {
+                int mixedSigned = 0;
+                for (int ch = 0; ch < channels; ch++) {
+                    int sampleOffset = ch * bytesPerSample;
+                    mixedSigned += readSignedSample(
+                            frame,
+                            sampleOffset,
+                            sampleSizeInBits,
+                            bigEndian,
+                            AudioFormat.Encoding.PCM_UNSIGNED.equals(encoding));
                 }
+                mixedSigned /= channels;
+                int unsigned8 = Math.max(0, Math.min(255, mixedSigned + 128));
                 out.write(unsigned8);
             }
 
@@ -90,13 +105,36 @@ public final class DacSampleImporter {
     }
 
     /**
-     * Read a 16-bit signed sample from a byte array at the given offset.
+     * Reads a whole frame. Returns false on EOF/short trailing frame.
      */
-    private static int read16BitSample(byte[] data, int offset, boolean bigEndian) {
-        if (bigEndian) {
-            return (short) ((data[offset] << 8) | (data[offset + 1] & 0xFF));
-        } else {
-            return (short) ((data[offset + 1] << 8) | (data[offset] & 0xFF));
+    private static boolean readWholeFrame(AudioInputStream ais, byte[] frame, int frameSize) throws IOException {
+        int read = ais.readNBytes(frame, 0, frameSize);
+        return read == frameSize;
+    }
+
+    /**
+     * Reads one sample and normalizes it to signed 8-bit centered range.
+     */
+    private static int readSignedSample(byte[] data, int offset, int bits, boolean bigEndian, boolean unsigned) {
+        if (bits == 8) {
+            int v = data[offset] & 0xFF;
+            return unsigned ? (v - 128) : (byte) v;
         }
+
+        int signed16 = read16BitSample(data, offset, bigEndian, unsigned);
+        return signed16 >> 8;
+    }
+
+    /**
+     * Reads a 16-bit sample from a byte array at the given offset.
+     */
+    private static int read16BitSample(byte[] data, int offset, boolean bigEndian, boolean unsigned) {
+        int raw;
+        if (bigEndian) {
+            raw = ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
+        } else {
+            raw = ((data[offset + 1] & 0xFF) << 8) | (data[offset] & 0xFF);
+        }
+        return unsigned ? (raw - 32768) : (short) raw;
     }
 }
