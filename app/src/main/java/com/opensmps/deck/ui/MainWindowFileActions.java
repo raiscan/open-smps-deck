@@ -8,6 +8,7 @@ import com.opensmps.deck.io.SmpsExporter;
 import com.opensmps.deck.io.SmpsImporter;
 import com.opensmps.deck.io.VoiceBankFile;
 import com.opensmps.deck.io.WavExporter;
+import com.opensmps.deck.model.ArrangementMode;
 import com.opensmps.deck.model.FmVoice;
 import com.opensmps.deck.model.Song;
 import javafx.application.Platform;
@@ -248,8 +249,19 @@ final class MainWindowFileActions {
             try {
                 SmpsImporter smpsImporter = new SmpsImporter();
                 Song song = smpsImporter.importFile(file);
-                SongTab songTab = new SongTab(song);
-                addTabConsumer.accept(songTab);
+
+                // Show decompilation preview dialog
+                ImportPreviewDialog preview = new ImportPreviewDialog(song);
+                Optional<ButtonType> result = preview.showAndWait();
+
+                if (result.isPresent() && result.get() == ButtonType.OK) {
+                    if (preview.isImportAsHierarchical()) {
+                        song.setArrangementMode(ArrangementMode.HIERARCHICAL);
+                        song.setHierarchicalArrangement(preview.buildHierarchicalArrangement());
+                    }
+                    SongTab songTab = new SongTab(song);
+                    addTabConsumer.accept(songTab);
+                }
             } catch (Exception ex) {
                 showError("Failed to import SMPS", ex.getMessage());
             }
