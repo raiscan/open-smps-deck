@@ -1,16 +1,27 @@
 package com.opensmps.deck.codec;
 
 import com.opensmps.deck.model.FmVoice;
+import com.opensmps.deck.model.ArrangementMode;
+import com.opensmps.deck.model.BlockDefinition;
+import com.opensmps.deck.model.BlockRef;
+import com.opensmps.deck.model.Chain;
+import com.opensmps.deck.model.ChannelArrangement;
+import com.opensmps.deck.model.HierarchicalArrangement;
 import com.opensmps.deck.model.Pattern;
+import com.opensmps.deck.model.PhraseLibrary;
 import com.opensmps.deck.model.SmpsMode;
 import com.opensmps.deck.model.Song;
+import com.opensmps.deck.model.StructuredArrangement;
 import com.opensmps.smps.SmpsCoordFlags;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Compiles a {@link Song} model into a raw SMPS binary blob that can be
@@ -189,6 +200,20 @@ public class PatternCompiler {
      * Compile song bytes and expose per-channel row timelines for a target mode.
      */
     public CompilationResult compileDetailed(Song song, SmpsMode mode) {
+        if (song.getArrangementMode() == ArrangementMode.HIERARCHICAL
+                && song.getHierarchicalArrangement() != null) {
+            return compileHierarchicalDetailed(song, mode, song.getHierarchicalArrangement());
+        }
+        if (song.getArrangementMode() == ArrangementMode.STRUCTURED_BLOCKS
+                && song.getStructuredArrangement() != null) {
+            return compileStructuredDetailed(song, mode, song.getStructuredArrangement());
+        }
+        // Transitional bridge: songs still edited in pattern/order mode compile
+        // through the legacy path when no structured arrangement is present.
+        return compileLegacyDetailed(song, mode);
+    }
+
+    private CompilationResult compileLegacyDetailed(Song song, SmpsMode mode) {
         int noteCompensation = switch (mode) {
             case S1, S3K -> 1;
             case S2 -> 0;
@@ -299,6 +324,320 @@ public class PatternCompiler {
         return new CompilationResult(compiledBytes, timelinesByChannel);
     }
 
+    private CompilationResult compileHierarchicalDetailed(Song song, SmpsMode mode, HierarchicalArrangement arrangement) {
+        int noteCompensation = switch (mode) {
+            case S1, S3K -> 1;
+            case S2 -> 0;
+        };
+
+        List<byte[]> voiceData = new ArrayList<>();
+        for (FmVoice voice : song.getVoiceBank()) {
+            voiceData.add(voice.getDataUnsafe().clone());
+        }
+
+        PhraseLibrary library = arrangement.getPhraseLibrary();
+
+        List<Integer> activeFmChannels = new ArrayList<>();
+        List<Integer> activePsgChannels = new ArrayList<>();
+        List<Integer> activeChannels = new ArrayList<>();
+        List<byte[]> compiledTracks = new ArrayList<>();
+
+        for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
+            Chain chain = arrangement.getChain(ch);
+            if (chain.getEntries().isEmpty()) {
+                continue;
+            }
+
+            byte[] trackData = HierarchyCompiler.compileChain(chain, library);
+            if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
+                continue;
+            }
+
+            // Apply note compensation if needed
+            if (noteCompensation != 0 && ch != DAC_CHANNEL) {
+                trackData = applyNoteCompensation(trackData, noteCompensation);
+            }
+
+            if (ch < FM_CHANNEL_COUNT) {
+                activeFmChannels.add(ch);
+            } else {
+                activePsgChannels.add(ch);
+            }
+
+            compiledTracks.add(trackData);
+            activeChannels.add(ch);
+        }
+
+        int fmCount = activeFmChannels.size();
+        int psgCount = activePsgChannels.size();
+        int headerSize = HEADER_BASE_SIZE + (fmCount * FM_TRACK_HEADER_SIZE) + (psgCount * PSG_TRACK_HEADER_SIZE);
+
+        int[] trackOffsets = new int[compiledTracks.size()];
+        int cursor = headerSize;
+        for (int i = 0; i < compiledTracks.size(); i++) {
+            trackOffsets[i] = cursor;
+            cursor += compiledTracks.get(i).length;
+        }
+
+        int voiceTableOffset = cursor;
+        int voiceDataLength = voiceData.size() * FmVoice.VOICE_SIZE;
+
+        for (int i = 0; i < compiledTracks.size(); i++) {
+            relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
+        }
+
+        byte[] compiledBytes;
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream(
+                    headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
+
+            int voicePtr = voiceData.isEmpty() ? 0 : voiceTableOffset;
+            writeLE16(out, voicePtr);
+            out.write(fmCount);
+            out.write(psgCount);
+            out.write(song.getDividingTiming() & 0xFF);
+            out.write(song.getTempo() & 0xFF);
+
+            int trackIndex = 0;
+            for (int i = 0; i < fmCount; i++) {
+                writeLE16(out, trackOffsets[trackIndex]);
+                out.write(0);
+                out.write(0);
+                trackIndex++;
+            }
+            for (int i = 0; i < psgCount; i++) {
+                writeLE16(out, trackOffsets[trackIndex]);
+                out.write(0);
+                out.write(0);
+                out.write(0);
+                out.write(0);
+                trackIndex++;
+            }
+            for (byte[] track : compiledTracks) {
+                out.write(track);
+            }
+            for (byte[] voice : voiceData) {
+                out.write(voice);
+            }
+            compiledBytes = out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Unexpected I/O error during hierarchical compilation", e);
+        }
+
+        ChannelTimeline[] timelinesByChannel = new ChannelTimeline[TOTAL_CHANNELS];
+        return new CompilationResult(compiledBytes, timelinesByChannel);
+    }
+
+    private byte[] applyNoteCompensation(byte[] data, int compensation) {
+        byte[] result = data.clone();
+        int pos = 0;
+        while (pos < result.length) {
+            int b = result[pos] & 0xFF;
+            if (b >= 0xE0) {
+                pos += 1 + SmpsCoordFlags.getParamCount(b);
+            } else if (b >= 0x81 && b <= 0xDF) {
+                int adjusted = Math.max(0x81, Math.min(0xDF, b + compensation));
+                result[pos] = (byte) adjusted;
+                pos++;
+            } else {
+                pos++;
+            }
+        }
+        return result;
+    }
+
+    private CompilationResult compileStructuredDetailed(Song song, SmpsMode mode, StructuredArrangement arrangement) {
+        int noteCompensation = switch (mode) {
+            case S1, S3K -> 1;
+            case S2 -> 0;
+        };
+
+        List<byte[]> voiceData = new ArrayList<>();
+        for (FmVoice voice : song.getVoiceBank()) {
+            voiceData.add(voice.getDataUnsafe().clone());
+        }
+
+        Map<Integer, BlockDefinition> blocksById = new HashMap<>();
+        for (BlockDefinition block : arrangement.getBlocks()) {
+            blocksById.put(block.getId(), block);
+        }
+
+        List<Integer> activeFmChannels = new ArrayList<>();
+        List<Integer> activePsgChannels = new ArrayList<>();
+        List<Integer> activeChannels = new ArrayList<>();
+        List<byte[]> compiledTracks = new ArrayList<>();
+        List<ChannelTimelineBuilder> timelineBuilders = new ArrayList<>();
+
+        int ticksPerRow = Math.max(1, arrangement.getTicksPerRow());
+        for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
+            StructuredTrack track = buildStructuredTrackData(arrangement, blocksById, ch, noteCompensation);
+            if (track.trackData.length == 0) {
+                continue;
+            }
+
+            if (ch < FM_CHANNEL_COUNT) {
+                activeFmChannels.add(ch);
+            } else {
+                activePsgChannels.add(ch);
+            }
+
+            byte[] withJump = new byte[track.trackData.length + 3];
+            System.arraycopy(track.trackData, 0, withJump, 0, track.trackData.length);
+            withJump[track.trackData.length] = (byte) CMD_JUMP;
+            withJump[track.trackData.length + 1] = 0;
+            withJump[track.trackData.length + 2] = 0;
+
+            compiledTracks.add(withJump);
+            activeChannels.add(ch);
+            timelineBuilders.add(buildStructuredTimeline(track.trackData, ticksPerRow));
+        }
+
+        int fmCount = activeFmChannels.size();
+        int psgCount = activePsgChannels.size();
+        int headerSize = HEADER_BASE_SIZE + (fmCount * FM_TRACK_HEADER_SIZE) + (psgCount * PSG_TRACK_HEADER_SIZE);
+
+        int[] trackOffsets = new int[compiledTracks.size()];
+        int cursor = headerSize;
+        for (int i = 0; i < compiledTracks.size(); i++) {
+            trackOffsets[i] = cursor;
+            cursor += compiledTracks.get(i).length;
+        }
+
+        int voiceTableOffset = cursor;
+        int voiceDataLength = voiceData.size() * FmVoice.VOICE_SIZE;
+
+        for (int i = 0; i < compiledTracks.size(); i++) {
+            relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
+        }
+
+        byte[] compiledBytes;
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream(
+                    headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
+
+            int voicePtr = voiceData.isEmpty() ? 0 : voiceTableOffset;
+            writeLE16(out, voicePtr);
+            out.write(fmCount);
+            out.write(psgCount);
+            out.write(song.getDividingTiming() & 0xFF);
+            out.write(song.getTempo() & 0xFF);
+
+            int trackIndex = 0;
+            for (int i = 0; i < fmCount; i++) {
+                writeLE16(out, trackOffsets[trackIndex]);
+                out.write(0);
+                out.write(0);
+                trackIndex++;
+            }
+            for (int i = 0; i < psgCount; i++) {
+                writeLE16(out, trackOffsets[trackIndex]);
+                out.write(0);
+                out.write(0);
+                out.write(0);
+                out.write(0);
+                trackIndex++;
+            }
+            for (byte[] track : compiledTracks) {
+                out.write(track);
+            }
+            for (byte[] voice : voiceData) {
+                out.write(voice);
+            }
+            compiledBytes = out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Unexpected I/O error during structured compilation", e);
+        }
+
+        ChannelTimeline[] timelinesByChannel = new ChannelTimeline[TOTAL_CHANNELS];
+        for (int i = 0; i < activeChannels.size(); i++) {
+            int channel = activeChannels.get(i);
+            timelinesByChannel[channel] = timelineBuilders.get(i).build(channel, trackOffsets[i]);
+        }
+
+        return new CompilationResult(compiledBytes, timelinesByChannel);
+    }
+
+    private StructuredTrack buildStructuredTrackData(StructuredArrangement arrangement,
+                                                     Map<Integer, BlockDefinition> blocksById,
+                                                     int channel,
+                                                     int noteCompensation) {
+        if (channel < 0 || channel >= arrangement.getChannels().size()) {
+            return StructuredTrack.EMPTY;
+        }
+        ChannelArrangement lane = arrangement.getChannels().get(channel);
+        if (lane == null || lane.getBlockRefs().isEmpty()) {
+            return StructuredTrack.EMPTY;
+        }
+
+        List<BlockRef> refs = new ArrayList<>(lane.getBlockRefs());
+        refs.sort(Comparator.comparingInt(BlockRef::getStartTick));
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int cursorTick = 0;
+        for (BlockRef ref : refs) {
+            BlockDefinition block = blocksById.get(ref.getBlockId());
+            if (block == null) {
+                continue;
+            }
+            int startTick = Math.max(0, ref.getStartTick());
+            if (startTick > cursorTick) {
+                appendRestGap(out, startTick - cursorTick);
+                cursorTick = startTick;
+            }
+
+            int repeat = Math.max(1, ref.getRepeatCount());
+            int blockTicks = Math.max(0, block.getLengthTicks());
+            byte[] segment = block.getTrackDataDirect(channel);
+            int end = (segment != null) ? stripTrailingStop(segment) : 0;
+            for (int r = 0; r < repeat; r++) {
+                if (end > 0) {
+                    int segmentStartOffset = out.size();
+                    appendTrackSegment(out, segment, end, noteCompensation, segmentStartOffset,
+                            ref.getTransposeSemitones(), channel);
+                }
+                cursorTick += blockTicks;
+            }
+        }
+
+        return out.size() > 0 ? new StructuredTrack(out.toByteArray()) : StructuredTrack.EMPTY;
+    }
+
+    private void appendRestGap(ByteArrayOutputStream out, int ticks) {
+        int remaining = Math.max(0, ticks);
+        while (remaining > 0) {
+            int chunk = Math.min(0x7F, remaining);
+            out.write(0x80);
+            out.write(chunk);
+            remaining -= chunk;
+        }
+    }
+
+    private ChannelTimelineBuilder buildStructuredTimeline(byte[] trackData, int ticksPerRow) {
+        ChannelTimelineBuilder builder = new ChannelTimelineBuilder();
+        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(trackData);
+        int tick = 0;
+        for (SmpsDecoder.DecodedRow decodedRow : decodedRows) {
+            int row = tick / ticksPerRow;
+            builder.add(decodedRow.byteOffset(), 0, row);
+
+            SmpsDecoder.TrackerRow tr = decodedRow.row();
+            if (tr.note() != null && !tr.note().isEmpty()) {
+                int dur = tr.duration();
+                tick += Math.max(1, dur);
+            }
+        }
+        return builder;
+    }
+
+    private static final class StructuredTrack {
+        private static final StructuredTrack EMPTY = new StructuredTrack(new byte[0]);
+        private final byte[] trackData;
+
+        private StructuredTrack(byte[] trackData) {
+            this.trackData = trackData;
+        }
+    }
+
     /**
      * Checks whether a channel has any non-empty track data across all
      * patterns referenced by the order list.
@@ -342,7 +681,7 @@ public class PatternCompiler {
                 continue;
             }
 
-            appendTrackSegment(buf, data, end, noteCompensation, cumulativeOffset);
+            appendTrackSegment(buf, data, end, noteCompensation, cumulativeOffset, 0, channel);
             cumulativeOffset += end;
         }
 
@@ -357,7 +696,9 @@ public class PatternCompiler {
                                     byte[] data,
                                     int end,
                                     int noteCompensation,
-                                    int segmentStartOffset) {
+                                    int segmentStartOffset,
+                                    int transposeSemitones,
+                                    int channel) {
         int pos = 0;
         while (pos < end) {
             int b = data[pos] & 0xFF;
@@ -384,7 +725,11 @@ public class PatternCompiler {
                 }
                 pos += 1 + paramCount;
             } else if (b >= 0x81 && b <= 0xDF) {
-                int adjusted = b + noteCompensation;
+                int adjusted = b;
+                if (transposeSemitones != 0 && channel != DAC_CHANNEL && channel != 9) {
+                    adjusted += transposeSemitones;
+                }
+                adjusted += noteCompensation;
                 adjusted = Math.max(0x81, Math.min(0xDF, adjusted));
                 buf.write(adjusted);
                 pos++;
