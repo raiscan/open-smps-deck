@@ -129,8 +129,8 @@ public final class HierarchyCompiler {
 
     private static void emitLoop(ByteArrayOutputStream stream, int count, int loopStart) {
         stream.write((byte) SmpsCoordFlags.LOOP);
-        stream.write(count & 0xFF);
-        stream.write(0); // padding
+        stream.write(0);              // loop counter index (0 for first nested loop level)
+        stream.write(count & 0xFF);   // repeat count
         stream.write(loopStart & 0xFF);
         stream.write((loopStart >> 8) & 0xFF);
     }

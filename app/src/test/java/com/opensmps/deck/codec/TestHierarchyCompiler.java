@@ -40,7 +40,7 @@ class TestHierarchyCompiler {
     }
 
     @Test
-    void repeatCountEmitsLoop() {
+    void repeatCountEmitsLoopWithCorrectParameterOrder() {
         var arr = new HierarchicalArrangement();
         var phrase = arr.getPhraseLibrary().createPhrase("Drum", ChannelType.FM);
         phrase.setData(new byte[]{(byte) 0xA1, 0x18});
@@ -51,12 +51,14 @@ class TestHierarchyCompiler {
         chain.getEntries().add(entry);
 
         byte[] track = HierarchyCompiler.compileChain(chain, arr.getPhraseLibrary());
-        // Should contain LOOP (F7) bytes
-        boolean hasLoop = false;
+        // Find LOOP command and verify parameter order: F7 <index> <count> <ptr_lo> <ptr_hi>
+        int loopPos = -1;
         for (int i = 0; i < track.length; i++) {
-            if ((track[i] & 0xFF) == SmpsCoordFlags.LOOP) { hasLoop = true; break; }
+            if ((track[i] & 0xFF) == SmpsCoordFlags.LOOP) { loopPos = i; break; }
         }
-        assertTrue(hasLoop, "Expected LOOP command in compiled track");
+        assertTrue(loopPos >= 0, "Expected LOOP command in compiled track");
+        assertEquals(0, track[loopPos + 1] & 0xFF, "LOOP index should be 0");
+        assertEquals(4, track[loopPos + 2] & 0xFF, "LOOP count should be 4");
     }
 
     @Test

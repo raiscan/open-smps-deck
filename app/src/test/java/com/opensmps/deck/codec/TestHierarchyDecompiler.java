@@ -51,17 +51,18 @@ class TestHierarchyDecompiler {
 
     @Test
     void detectsLoopWithCounter() {
-        // Track: note + LOOP(2x back to start) + STOP
+        // Track: note + LOOP(3x back to start) + STOP
+        // LOOP format: F7 <index> <count> <ptr_lo> <ptr_hi>
         byte[] track = {
             (byte) 0xA1, 0x18,
-            (byte) SmpsCoordFlags.LOOP, 0x02, 0x00, 0x00, 0x00, // loop 2x to offset 0
+            (byte) SmpsCoordFlags.LOOP, 0x00, 0x03, 0x00, 0x00, // index=0, count=3, target=0
             (byte) SmpsCoordFlags.STOP
         };
         var result = HierarchyDecompiler.decompileTrack(track, ChannelType.FM);
 
-        // Should detect the repeat count
+        // Should detect the repeat count of 3
         boolean hasRepeat = result.chainEntries().stream()
-            .anyMatch(e -> e.getRepeatCount() > 1);
-        assertTrue(hasRepeat, "Expected chain entry with repeat count > 1");
+            .anyMatch(e -> e.getRepeatCount() == 3);
+        assertTrue(hasRepeat, "Expected chain entry with repeat count == 3");
     }
 }

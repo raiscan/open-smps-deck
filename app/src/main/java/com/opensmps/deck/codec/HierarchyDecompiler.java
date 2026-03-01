@@ -37,6 +37,7 @@ public final class HierarchyDecompiler {
 
         // Collect segments between structural commands
         List<int[]> segments = new ArrayList<>(); // [start, end] pairs
+        List<Integer> entryStartOffsets = new ArrayList<>(); // byte offset per chain entry
         int segStart = 0;
 
         while (pos < track.length && !done) {
@@ -51,14 +52,16 @@ public final class HierarchyDecompiler {
                 Phrase subPhrase = subroutines.get(target);
                 if (subPhrase != null) {
                     // Flush preceding segments as a phrase
-                    flushSegments(segments, track, type, library, chainEntries);
+                    flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                     segments.clear();
+                    entryStartOffsets.add(pos);
                     chainEntries.add(new ChainEntry(subPhrase.getId()));
                 }
                 pos += 3;
                 segStart = pos;
             } else if (b == SmpsCoordFlags.LOOP && pos + 4 < track.length) {
-                int count = track[pos + 1] & 0xFF;
+                // LOOP format: F7 <index> <count> <ptr_lo> <ptr_hi>
+                int count = track[pos + 2] & 0xFF; // repeat count (pos+1 is loop counter index)
                 int loopTarget = (track[pos + 3] & 0xFF) | ((track[pos + 4] & 0xFF) << 8);
 
                 // The loop wraps the data from loopTarget to pos
@@ -66,7 +69,7 @@ public final class HierarchyDecompiler {
                 if (loopTarget >= segStart && loopTarget <= pos) {
                     if (loopTarget > segStart) {
                         segments.add(new int[]{segStart, loopTarget});
-                        flushSegments(segments, track, type, library, chainEntries);
+                        flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                         segments.clear();
                     }
                     // The looped body
@@ -74,6 +77,7 @@ public final class HierarchyDecompiler {
                     if (body.length > 0) {
                         Phrase loopPhrase = library.createPhrase("Loop", type);
                         loopPhrase.setData(body);
+                        entryStartOffsets.add(loopTarget);
                         ChainEntry entry = new ChainEntry(loopPhrase.getId());
                         entry.setRepeatCount(Math.max(2, count));
                         chainEntries.add(entry);
@@ -86,7 +90,7 @@ public final class HierarchyDecompiler {
                 if (pos > segStart) {
                     segments.add(new int[]{segStart, pos});
                 }
-                flushSegments(segments, track, type, library, chainEntries);
+                flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                 segments.clear();
 
                 jumpTarget = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
@@ -98,7 +102,7 @@ public final class HierarchyDecompiler {
                 if (pos > segStart) {
                     segments.add(new int[]{segStart, pos});
                 }
-                flushSegments(segments, track, type, library, chainEntries);
+                flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                 segments.clear();
                 done = true;
                 pos++;
@@ -108,7 +112,7 @@ public final class HierarchyDecompiler {
                 if (pos > segStart) {
                     segments.add(new int[]{segStart, pos});
                 }
-                flushSegments(segments, track, type, library, chainEntries);
+                flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                 segments.clear();
                 done = true;
                 pos++;
@@ -122,12 +126,12 @@ public final class HierarchyDecompiler {
 
         // Flush any remaining data if we ran off the end without hitting STOP/JUMP
         if (!done && !segments.isEmpty()) {
-            flushSegments(segments, track, type, library, chainEntries);
+            flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
         }
 
         // Resolve loop target to chain entry index
         if (hasLoopPoint && jumpTarget >= 0) {
-            loopEntryIndex = resolveLoopEntryIndex(jumpTarget, chainEntries, library);
+            loopEntryIndex = resolveLoopEntryIndex(jumpTarget, entryStartOffsets);
         }
 
         // If no chain entries were created, create one from the whole track
@@ -209,8 +213,9 @@ public final class HierarchyDecompiler {
         return track.length;
     }
 
-    private static void flushSegments(List<int[]> segments, byte[] track,
-            ChannelType type, PhraseLibrary library, List<ChainEntry> chainEntries) {
+    private static void flushSegmentsWithOffsets(List<int[]> segments, byte[] track,
+            ChannelType type, PhraseLibrary library, List<ChainEntry> chainEntries,
+            List<Integer> entryStartOffsets) {
         if (segments.isEmpty()) return;
 
         // Combine all segments into a single phrase
@@ -228,18 +233,35 @@ public final class HierarchyDecompiler {
             offset += len;
         }
 
+        entryStartOffsets.add(segments.getFirst()[0]);
         Phrase phrase = library.createPhrase("Phrase", type);
         phrase.setData(combined);
         chainEntries.add(new ChainEntry(phrase.getId()));
     }
 
-    private static int resolveLoopEntryIndex(int jumpTarget,
-            List<ChainEntry> entries, PhraseLibrary library) {
-        // For simple cases, the jump target is offset 0 → entry 0
-        if (jumpTarget == 0 && !entries.isEmpty()) {
-            return 0;
+    /**
+     * Find the chain entry index whose source byte offset best matches the JUMP target.
+     */
+    private static int resolveLoopEntryIndex(int jumpTarget, List<Integer> entryStartOffsets) {
+        if (entryStartOffsets.isEmpty()) return 0;
+
+        // Exact match
+        for (int i = 0; i < entryStartOffsets.size(); i++) {
+            if (entryStartOffsets.get(i) == jumpTarget) {
+                return i;
+            }
         }
-        // Default: loop to first entry
-        return 0;
+
+        // Closest match (JUMP target may point slightly before or into an entry)
+        int bestIndex = 0;
+        int bestDist = Integer.MAX_VALUE;
+        for (int i = 0; i < entryStartOffsets.size(); i++) {
+            int dist = Math.abs(entryStartOffsets.get(i) - jumpTarget);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 }
