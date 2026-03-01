@@ -38,18 +38,21 @@ If duration byte is omitted (next byte >= 0x80), reuse previous duration.
 ### Coordination Flags (0xE0-0xFF)
 ```
 E0 pp        Pan (C0=both, 80=left, 40=right)
-E1 ii        Set FM voice
-E4 ii        Set PSG envelope
+E1 dd        Detune
+E3           Return from subroutine
+E6 vv        Volume
 E7           Tie (sustain without key-off/key-on)
-E9 kk        Key offset (transpose)
-EA dd        Detune
+E9 kk        Key displacement (transpose)
+EF ii        Set FM voice
 F0 dd rr dd ss  Enable modulation (delay, rate, delta, steps)
-F1           Disable modulation
-F2           Track end
-F3 cc aa aa  Loop start (counter, jump target LE)
-F4 aa aa     Jump (absolute pointer LE)
-F5 aa aa     Call subroutine
-F6           Return from subroutine
+F1           Enable modulation (alt)
+F2           Track end / stop
+F3 nn        PSG noise mode
+F4           Modulation off
+F5 ii        Set PSG envelope/instrument
+F6 aa aa     Jump (absolute pointer LE)
+F7 ii cc aa aa  Loop (index, count, jump target LE)
+F8 aa aa     Call subroutine
 ```
 
 ### FM Voice Format (25 bytes, SMPS slot order)

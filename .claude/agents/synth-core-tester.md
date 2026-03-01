@@ -16,7 +16,7 @@ You verify that the synth-core module builds and all tests pass after changes.
 
 Run: `mvn test -pl synth-core`
 
-### Expected Tests
+### Expected Tests (46 total)
 
 **TestYm2612Chip** (4 tests):
 - `chipInitializesAndProducesSilence` — No signal variation without key-on
@@ -31,9 +31,35 @@ Run: `mvn test -pl synth-core`
 - `resetReturnsToCalmState` — Reset returns to silence
 - `muteChannelSilencesIt` — Per-channel mute works
 
-**TestSmpsSequencer** (2 tests):
-- `testSequencerPlaysSimpleSong` — SmpsDriver produces non-zero FM output
-- Standalone SmpsSequencer.read() works
+**TestVirtualSynthesizer** (6 tests):
+- Mixer initialization, FM/PSG mixing, reset behavior
+
+**TestBlipDeltaBuffer** (9 tests):
+- Delta buffer accumulation, clear, read-back behavior
+
+**TestBlipResampler** (9 tests):
+- Resampling ratio, output quality, edge cases
+
+**TestSmpsSequencer** (6 tests):
+- `driverProducesNonZeroOutput` — SmpsDriver produces non-zero FM output
+- `sequencerStandaloneRead` — Standalone SmpsSequencer.read() works
+- `getTrackPositionReturnsByteOffset` — Track position reporting
+- `getTrackPositionReturnsNegativeForMissingChannel` — Missing channel returns -1
+- `readDoesNotHangOnSelfJumpTrack` — Safety limit prevents infinite loop on self-JUMP
+- `readDoesNotHangOnSelfLoopingPsgEnvelope` — Safety limit prevents infinite PSG envelope loop
+
+**TestSmpsSequencerConfig** (4 tests):
+- `testBuilderDefaults` — Default config values are correct
+- `testBuilderOverrides` — Builder overrides apply correctly
+- `testFmChannelOrderDefensiveCopy` — FM channel order array is defensively copied
+- `testSpeedUpTemposImmutable` — Speed-up tempos list is immutable
+
+**TestSmpsDriver** (2 tests):
+- `getTrackPositionDelegatesToMusicSequencer` — Delegates position query to active sequencer
+- `getTrackPositionReturnsNegativeWhenNoSequencer` — Returns -1 when no sequencer loaded
+
+**TestAudioOutput** (1 test):
+- `testConstructionDoesNotThrow` — AudioOutput construction succeeds without error
 
 ## Your Job
 

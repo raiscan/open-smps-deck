@@ -17,7 +17,7 @@ OpenSMPSDeck is a standalone SMPS-native music tracker for composing YM2612 FM a
 5. [PSG Envelopes](05-psg-envelopes.md) -- Shaping PSG channel volume curves
 6. [DAC Samples](06-dac-samples.md) -- Importing and using audio samples
 7. [Tracker Grid](07-tracker-grid.md) -- Note entry, editing, and navigation
-8. [Patterns and Orders](08-patterns-and-orders.md) -- Song structure and arrangement
+8. [Chains and Phrases](08-chains-and-phrases.md) -- Song structure and arrangement
 9. [Playback and Export](09-playback-and-export.md) -- Playing, rendering, and exporting
 10. [Importing](10-importing.md) -- Bringing in existing music and voices
 11. [Keyboard Reference](11-keyboard-reference.md) -- Complete shortcut cheat sheet

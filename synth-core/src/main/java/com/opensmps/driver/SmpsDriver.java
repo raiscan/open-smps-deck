@@ -213,6 +213,21 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
         }
     }
 
+    /**
+     * Returns runtime state for a channel in the first active music sequencer,
+     * or {@code null} if unavailable.
+     */
+    public SmpsSequencer.TrackRuntimeState getTrackRuntimeState(SmpsSequencer.TrackType type, int channelId) {
+        synchronized (sequencersLock) {
+            for (SmpsSequencer seq : sequencers) {
+                if (!isSfx(seq)) {
+                    return seq.getTrackRuntimeState(type, channelId);
+                }
+            }
+            return null;
+        }
+    }
+
     @Override
     public int read(short[] buffer) {
         int frames = buffer.length / 2;

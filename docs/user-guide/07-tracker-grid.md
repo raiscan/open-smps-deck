@@ -1,10 +1,10 @@
 # Tracker Grid
 
-The tracker grid is where you compose music -- entering notes, setting instruments, and editing patterns across all 10 channels.
+The tracker grid is where you compose music -- entering notes, setting instruments, and editing phrases across all 10 channels.
 
 ## Overview
 
-The tracker grid is a decoded view over raw SMPS bytecode. Ten channels are displayed side by side as vertical columns, with rows scrolling downward. Each row represents one event in the pattern -- a note, rest, tie, or coordination flag. What you see in the grid is exactly what the SMPS sequencer will play back and what gets written to the exported binary.
+The tracker grid is a decoded view over raw SMPS bytecode. Ten channels are displayed side by side as vertical columns, with rows scrolling downward. Each row represents one event in the current phrase -- a note, rest, tie, or coordination flag. What you see in the grid is exactly what the SMPS sequencer will play back and what gets written to the exported binary.
 
 The grid occupies the central area of the application window. Row numbers are displayed in hex along the left edge. Every fourth row has a slightly lighter background to help you keep your place. The cursor row is highlighted with a distinct background color, and a thin underline marks which sub-column (Note, Instrument, or Effect) is active.
 
@@ -162,7 +162,7 @@ The selection begins from the cursor position when you first press `Shift` with 
 
 Press any arrow key without `Shift` to clear the selection and return to single-cell cursor mode.
 
-`Ctrl+A` selects every row in every channel of the current pattern. This is useful for whole-pattern operations like transposing an entire pattern or copying a full pattern to paste elsewhere.
+`Ctrl+A` selects every row in every channel of the current phrase. This is useful for whole-phrase operations like transposing an entire phrase or copying a full phrase to paste elsewhere.
 
 ## Copy, Cut, Paste
 
@@ -176,7 +176,7 @@ Press any arrow key without `Shift` to clear the selection and return to single-
 
 `Ctrl+C` copies the selected rows and channels to an internal clipboard. The clipboard stores the raw track data for each selected channel along with a reference to the source song (used for cross-song paste detection).
 
-`Ctrl+X` performs a copy followed by a delete of the selected region. The deleted rows are removed from the pattern data and the remaining rows shift up to fill the gap.
+`Ctrl+X` performs a copy followed by a delete of the selected region. The deleted rows are removed from the phrase data and the remaining rows shift up to fill the gap.
 
 ### Paste
 
@@ -252,7 +252,7 @@ Mute and solo state is respected during both real-time playback and WAV export. 
 | `Ctrl+Z`  | Undo the last edit     |
 | `Ctrl+Y`  | Redo the last undone edit |
 
-Every edit to pattern data is recorded in the undo history. This includes note entry, rest insertion, row deletion, instrument changes, transposition, paste operations, and cut operations.
+Every edit to phrase data is recorded in the undo history. This includes note entry, rest insertion, row deletion, instrument changes, transposition, paste operations, and cut operations.
 
 Multi-channel operations are grouped into a single undo step. For example:
 

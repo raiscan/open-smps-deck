@@ -17,11 +17,11 @@ Choose **File > Import SMPS** to open a raw SMPS binary as a new song. The file 
 
 The importer reads the six-byte SMPS header to extract the voice table pointer, FM and PSG channel counts, dividing timing, and tempo. It then parses each FM channel entry (four bytes: data pointer, key offset, volume offset) and each PSG channel entry (six bytes: data pointer, key offset, volume offset, modulation envelope, instrument index).
 
-For each channel, the importer follows the data pointer and scans forward through the bytecode until it hits an `F2` (track end) or `F6` (jump) command. The extracted track data is stored in a single pattern. Header state such as key displacement and volume offsets are prepended as coordination flag commands so the imported tracks play back correctly.
+For each channel, the importer follows the data pointer and scans forward through the bytecode, then passes the track data through the `HierarchyDecompiler`. The decompiler runs a three-pass analysis: first it identifies subroutine boundaries (CALL targets through RETURN), then it performs a linear scan of the main stream to split data into phrases at structural boundaries (subroutine calls, loops, key displacement changes), and finally it resolves any JUMP target to a chain entry index for the loop point. Header state such as key displacement and volume offsets are prepended as coordination flag commands so the imported tracks play back correctly.
 
 The voice table region is located using the header pointer and bounded by the nearest track data pointer. Each 25-byte block in that region is extracted as an FM voice and added to the song's voice bank. Voice count is capped at 64.
 
-The result is a new Song with one pattern, one order row, and all voices and track data reconstructed from the binary. This is useful for studying how existing Sonic music is structured, analyzing voice patches, or remixing classic tracks.
+The result is a new Song with a full hierarchical arrangement -- each channel gets a chain of phrase references decompiled from the original SMPS track structure, and all shared subroutines become shared phrases in the Phrase Library. Voices and track data are reconstructed from the binary. This is useful for studying how existing Sonic music is structured, analyzing voice patches, or remixing classic tracks.
 
 ## Importing Voice Banks
 

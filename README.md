@@ -13,7 +13,7 @@ OpenSMPS Deck produces SMPS-compatible output that can be:
 
 ### Core Tracker
 - 10-channel tracker grid (FM1-5, DAC, PSG1-3, Noise) with keyboard-driven note entry
-- Pattern-based composition with order list arrangement
+- Hierarchical Chain/Phrase composition (LSDJ-style Song -> Chain -> Phrase)
 - Real-time playback with play/stop/pause controls
 - Per-channel solo/mute toggles
 - Undo/redo with atomic multi-channel edits
@@ -96,11 +96,11 @@ Song model, codec, I/O, and JavaFX UI.
 
 | Package | Purpose |
 |---------|---------|
-| `com.opensmps.deck.model` | Song, Pattern, FmVoice, PsgEnvelope, DacSample, SmpsMode |
-| `com.opensmps.deck.codec` | PatternCompiler, SmpsEncoder/Decoder, InstrumentRemapper, PasteResolver |
-| `com.opensmps.deck.audio` | PlaybackEngine, SimpleSmpsData |
+| `com.opensmps.deck.model` | Song, Pattern, FmVoice, PsgEnvelope, DacSample, SmpsMode, Chain, ChainEntry, Phrase, PhraseLibrary, HierarchicalArrangement, ChannelType, ArrangementMode |
+| `com.opensmps.deck.codec` | PatternCompiler, SmpsEncoder/Decoder, InstrumentRemapper, PasteResolver, HierarchyCompiler, HierarchyDecompiler, EffectMnemonics |
+| `com.opensmps.deck.audio` | PlaybackEngine, SimpleSmpsData, PlaybackSliceBuilder, AdsrEnvelopeCalculator |
 | `com.opensmps.deck.io` | ProjectFile, SmpsExporter/Importer, WavExporter, VoiceBankFile, Rym2612Importer |
-| `com.opensmps.deck.ui` | TrackerGrid, FmVoiceEditor, PsgEnvelopeEditor, MainWindow, TransportBar |
+| `com.opensmps.deck.ui` | TrackerGrid, FmVoiceEditor, PsgEnvelopeEditor, MainWindow, TransportBar, SongView, ChainStrip, ChainEditor, BreadcrumbBar, PhraseEditor, ImportPreviewDialog |
 
 ### Channel Mapping
 
@@ -168,11 +168,14 @@ The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999
 
 ## Testing
 
-253 tests across 33 test files covering:
+414 tests across 51 test files covering:
 
 - **Codec layer** — Encode/decode round-trips, pattern compilation, transpose, coordination flag parity
+- **Hierarchical codec** — HierarchyCompiler/Decompiler round-trips, effect mnemonics
 - **Model layer** — Song, FmVoice, PsgEnvelope, DacSample, UndoManager, ClipboardData
+- **Hierarchical model** — Chain, Phrase, PhraseLibrary, HierarchicalArrangement, ChannelType
 - **I/O layer** — ProjectFile, SmpsImporter/Exporter, WavExporter, VoiceBankFile, Rym2612Importer, DacSampleImporter
+- **Import round-trip** — Import/export fidelity with note compensation verification
 - **Audio layer** — PlaybackEngine integration, SimpleSmpsData parsing
 - **Synth core** — YM2612, PSG, VirtualSynthesizer, BlipDeltaBuffer, BlipResampler, SMPS sequencer
 - **Full-stack** — Create/compile/play/export pipeline, S1 vs S2 mode differentiation

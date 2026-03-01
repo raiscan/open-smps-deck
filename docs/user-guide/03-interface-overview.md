@@ -4,7 +4,7 @@ The main window organizes your workspace into a menu bar, transport controls, an
 
 ## Overview
 
-Every element of the interface maps directly to a part of the SMPS data model. The **Transport Bar** controls song-level settings (tempo, timing, driver mode), the **Tracker Grid** gives you a decoded view over raw SMPS bytecode, and the **Instrument Panel** manages FM voices and PSG envelopes. The **Order List Panel** at the bottom arranges patterns into a complete song. You can open multiple songs at once -- each lives in its own tab.
+Every element of the interface maps directly to a part of the SMPS data model. The **Transport Bar** controls song-level settings (tempo, timing, driver mode), the **Tracker Grid** gives you a decoded view over raw SMPS bytecode, and the **Instrument Panel** manages FM voices and PSG envelopes. The **Song View**, **Chain Strip**, and **Breadcrumb Bar** provide hierarchical navigation through the song structure (Song -> Chain -> Phrase). You can open multiple songs at once -- each lives in its own tab.
 
 ## Main Window Layout
 
@@ -14,15 +14,17 @@ The window is organized top-to-bottom in three regions:
 2. **Transport Bar** -- playback controls plus tempo, timing, and SMPS mode settings.
 3. **Tab Pane** -- one tab per open song, plus a **[+]** tab to create new songs.
 
-Each song tab contains three panels arranged inside a border layout:
+Each song tab contains panels arranged inside a border layout:
 
 | Position | Panel | Purpose |
 |----------|-------|---------|
-| Center | [Tracker Grid](07-tracker-grid.md) | Note entry and pattern editing across all 10 channels |
+| Left | [Song View](08-chains-and-phrases.md) | Per-channel chain overview showing the song structure |
+| Center (top) | [Breadcrumb Bar](08-chains-and-phrases.md) | Navigation path (Song -> Chain -> Phrase) with click-to-navigate |
+| Center (upper) | [Chain Strip](08-chains-and-phrases.md) | Horizontal strip of clickable phrase cells for the active channel |
+| Center (main) | [Tracker Grid](07-tracker-grid.md) | Note entry and phrase editing across all 10 channels |
 | Right | [Instrument Panel](04-fm-voice-editor.md) | FM voice bank and PSG envelope management |
-| Bottom | [Order List Panel](08-patterns-and-orders.md) | Pattern arrangement and song structure |
 
-Selecting a row in the **Order List Panel** loads the corresponding pattern into the **Tracker Grid**. Edits in any panel mark the tab as dirty, indicated by an asterisk in the tab title.
+The **Song View** on the left shows all 10 channels and their chains at a glance. Clicking a channel in the **Song View** updates the **Chain Strip** to show that channel's phrase entries. Clicking a phrase cell in the **Chain Strip** loads the corresponding phrase into the **Tracker Grid**. The **Breadcrumb Bar** shows your current position in the hierarchy and lets you click to navigate back up. Edits in any panel mark the tab as dirty, indicated by an asterisk in the tab title.
 
 ## Menu Bar
 

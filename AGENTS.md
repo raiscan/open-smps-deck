@@ -8,7 +8,7 @@ Custom agents for OpenSMPS Deck development. These are available via Claude Code
 
 **Location:** `.claude/agents/smps-bytecode-helper.md`
 
-Use when working with SMPS bytecode encoding/decoding — building test SMPS binaries, debugging track data, verifying coordination flag sequences. Knows the full SMPS command set, note encoding (0x81-0xDF), duration bytes, and all coordination flags defined in `SmpsCoordFlags`.
+Use when working with SMPS bytecode encoding/decoding — building test SMPS binaries, debugging track data, verifying coordination flag sequences. Knows the full SMPS command set, note encoding (0x81-0xDF), duration bytes, and all coordination flags. Uses `SmpsCoordFlags.java` as the authoritative reference for flag byte values.
 
 **When to use:**
 - Constructing SMPS binary data for tests
@@ -20,7 +20,7 @@ Use when working with SMPS bytecode encoding/decoding — building test SMPS bin
 
 **Location:** `.claude/agents/synth-core-tester.md`
 
-Use when making changes to the synth-core module. Runs the full test suite and verifies chip emulator behavior hasn't regressed. Covers YM2612, PSG, VirtualSynthesizer, BlipDeltaBuffer, BlipResampler, and SMPS sequencer tests.
+Use when making changes to the synth-core module. Runs the full test suite (46 tests) and verifies chip emulator behavior hasn't regressed. Covers YM2612, PSG, VirtualSynthesizer, BlipDeltaBuffer, BlipResampler, SmpsSequencer, SmpsSequencerConfig, SmpsDriver, and AudioOutput tests.
 
 **When to use:**
 - After modifying any file in `synth-core/src/main/`

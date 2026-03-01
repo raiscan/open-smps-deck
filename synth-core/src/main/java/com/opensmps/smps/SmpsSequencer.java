@@ -17,6 +17,8 @@ import java.util.logging.Logger;
  */
 public class SmpsSequencer implements AudioStream, CoordFlagContext {
     private static final Logger LOGGER = Logger.getLogger(SmpsSequencer.class.getName());
+    private static final int TRACK_PARSE_SAFETY_LIMIT = 4096;
+    private static final int ENVELOPE_SAFETY_LIMIT = 512;
     private final AbstractSmpsData smpsData;
     private AbstractSmpsData fallbackVoiceData;
     private final byte[] data;
@@ -627,6 +629,25 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
         return -1;
     }
 
+    /**
+     * Runtime state for an active track: current byte position and remaining
+     * duration ticks for the currently playing row.
+     */
+    public record TrackRuntimeState(int position, int remainingDuration) {}
+
+    /**
+     * Returns runtime state for the track matching the given type/channel, or
+     * {@code null} when no matching active track exists.
+     */
+    public TrackRuntimeState getTrackRuntimeState(TrackType type, int channelId) {
+        for (Track t : tracks) {
+            if (t.type == type && t.channelId == channelId && t.active) {
+                return new TrackRuntimeState(t.pos, t.duration);
+            }
+        }
+        return null;
+    }
+
     private void calculateTempo() {
         if (sfxMode) {
             this.tempoWeight = config.getTempoModBase(); // 0x100: Tick every frame
@@ -849,7 +870,15 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
                 }
             }
 
+            int parseSafety = 0;
             while (t.duration == 0 && t.active) {
+                if (++parseSafety > TRACK_PARSE_SAFETY_LIMIT) {
+                    LOGGER.warning(() -> String.format(
+                            "Track parse safety limit exceeded (song=%d type=%s ch=%d pos=%d); deactivating track",
+                            smpsData.getId(), t.type, t.channelId, t.pos));
+                    t.active = false;
+                    break;
+                }
                 if (t.pos >= data.length) {
                     t.active = false;
                     break;
@@ -1948,7 +1977,8 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
             return;
 
         // Loop to handle envelope commands that may require immediate progression
-        while (true) {
+        int safety = 0;
+        while (safety++ < ENVELOPE_SAFETY_LIMIT) {
             if (t.envPos >= t.envData.length) {
                 t.envHold = true;
                 t.envAtRest = true;
@@ -2013,6 +2043,12 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
                 }
             }
         }
+
+        LOGGER.warning(() -> String.format(
+                "PSG envelope safety limit exceeded (song=%d ch=%d envPos=%d); forcing envelope hold",
+                smpsData.getId(), t.channelId, t.envPos));
+        t.envHold = true;
+        t.envAtRest = true;
     }
 
     private void processFmVolEnvelope(Track t) {
@@ -2020,7 +2056,8 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
             return;
         }
 
-        while (true) {
+        int safety = 0;
+        while (safety++ < ENVELOPE_SAFETY_LIMIT) {
             if (t.fmVolEnvPos >= t.fmVolEnvData.length) {
                 t.fmVolEnvHold = true;
                 return;
@@ -2065,6 +2102,11 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
             refreshVolume(t);
             return;
         }
+
+        LOGGER.warning(() -> String.format(
+                "FM volume envelope safety limit exceeded (song=%d ch=%d envPos=%d); forcing envelope hold",
+                smpsData.getId(), t.channelId, t.fmVolEnvPos));
+        t.fmVolEnvHold = true;
     }
 
     @Override

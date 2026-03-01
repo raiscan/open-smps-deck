@@ -3,6 +3,7 @@ package com.opensmps.smps;
 import com.opensmps.driver.SmpsDriver;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -239,5 +240,80 @@ class TestSmpsSequencer {
         // Query PSG channel 0 which also doesn't exist
         assertEquals(-1, seq.getTrackPosition(SmpsSequencer.TrackType.PSG, 0),
                 "Should return -1 for a PSG channel not present in the song");
+    }
+
+    @Test
+    void readDoesNotHangOnSelfJumpTrack() {
+        byte[] smps = new byte[0x26];
+
+        smps[0] = 0x0A; smps[1] = 0x00; // voice ptr
+        smps[2] = 1; smps[3] = 0;        // 1 FM, 0 PSG
+        smps[4] = 1; smps[5] = (byte) 0xFF; // timing, tempo
+
+        smps[6] = 0x23; smps[7] = 0x00;  // track ptr
+        smps[8] = 0x00; smps[9] = 0x00;  // transpose, volume
+
+        // Minimal voice payload.
+        smps[0x0A] = 0x00;
+        for (int i = 0x0B; i <= 0x0E; i++) smps[i] = 0x01;
+        for (int i = 0x0F; i <= 0x12; i++) smps[i] = 0x1F;
+        for (int i = 0x13; i <= 0x1E; i++) smps[i] = 0x00;
+        smps[0x1F] = 0x00; smps[0x20] = 0x00; smps[0x21] = 0x00; smps[0x22] = 0x00;
+
+        // F6 23 00: jump to itself forever.
+        smps[0x23] = (byte) 0xF6;
+        smps[0x24] = 0x23;
+        smps[0x25] = 0x00;
+
+        StubSmpsData data = new StubSmpsData(smps, 0);
+        DacData dacData = new DacData(Collections.emptyMap(), Collections.emptyMap());
+        SmpsSequencer seq = new SmpsSequencer(data, dacData, createS2Config());
+
+        assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+            short[] buf = new short[4096];
+            seq.read(buf);
+        });
+        assertTrue(seq.isComplete(), "Sequencer should deactivate runaway track instead of hanging");
+    }
+
+    @Test
+    void readDoesNotHangOnSelfLoopingPsgEnvelope() {
+        byte[] smps = new byte[0x0F];
+        smps[0] = 0x00; smps[1] = 0x00; // no voice table
+        smps[2] = 0; smps[3] = 1;       // 0 FM, 1 PSG
+        smps[4] = 1; smps[5] = (byte) 0xFF; // timing, tempo
+
+        // PSG track entry
+        smps[6] = 0x0C; smps[7] = 0x00; // pointer to track data
+        smps[8] = 0x00; // transpose
+        smps[9] = 0x00; // volume
+        smps[10] = 0x00; // modulation env
+        smps[11] = 0x01; // envelope instrument id
+
+        // Note + duration + stop.
+        smps[0x0C] = (byte) 0x90;
+        smps[0x0D] = 0x20;
+        smps[0x0E] = (byte) 0xF2;
+
+        StubSmpsData data = new StubSmpsData(smps, 0);
+        data.setPsgEnvelopes(new byte[][] {
+                null,
+                new byte[] { (byte) 0x82, 0x00 } // LOOP 0: command-only self-loop
+        });
+        DacData dacData = new DacData(Collections.emptyMap(), Collections.emptyMap());
+        SmpsSequencer seq = new SmpsSequencer(data, dacData, createS2Config());
+
+        assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+            short[] buf = new short[44100];
+            seq.read(buf);
+        });
+    }
+
+    private SmpsSequencerConfig createS2Config() {
+        return new SmpsSequencerConfig(
+                Collections.emptyMap(), 0x100,
+                new int[]{ 0x16, 0, 1, 2, 4, 5, 6 },
+                new int[]{ 0x80, 0xA0, 0xC0 }
+        );
     }
 }

@@ -15,7 +15,7 @@ Start, stop, and pause playback with keyboard shortcuts or the **Transport Bar**
 | Key | Action |
 |-----|--------|
 | `Space` | Toggle play / stop. If the song is stopped, compile and start playback from the beginning. If it is playing, stop. |
-| `Enter` | Play from the current cursor position. Playback starts at the selected order row and pattern row. |
+| `Enter` | Play from the current cursor position. Playback starts at the selected phrase and row. |
 | `Escape` | Stop playback. If the tracker is in edit mode, `Escape` exits edit mode first; press it again to stop. |
 
 ### Transport Bar Buttons
@@ -43,7 +43,7 @@ When a solo is active, every channel except the soloed one is treated as muted. 
 
 ## Live Reload on Edit
 
-When playback is active and you edit the song (change notes, instruments, order list, or voices), the engine automatically recompiles the song and resumes playback from the approximate current position. You do not need to stop and restart playback to hear your changes.
+When playback is active and you edit the song (change notes, instruments, chains, phrases, or voices), the engine automatically recompiles the song and resumes playback from the approximate current position. You do not need to stop and restart playback to hear your changes.
 
 Mute and solo state is preserved across live reloads. The playback cursor continues tracking the current position.
 
@@ -99,7 +99,7 @@ The WAV exporter respects the current mute and solo state in the **Tracker Grid*
 
 Select **File > Export SMPS...** to compile the song and write a raw SMPS binary (`.bin`) file.
 
-The exporter runs the same `PatternCompiler` that the playback engine uses. It compiles the full song -- header, track pointers, voice table, and all pattern bytecode -- into a single binary blob and writes it to disk. The resulting `.bin` file is ready for ROM injection or playback by an external SMPS driver such as SMPSPlay or the OpenGGF sonic-engine.
+The exporter runs the same `PatternCompiler` that the playback engine uses. It compiles the full song -- header, track pointers, voice table, and all channel track data (compiled from the chain/phrase hierarchy by the `HierarchyCompiler`) -- into a single binary blob and writes it to disk. The resulting `.bin` file is ready for ROM injection or playback by an external SMPS driver such as SMPSPlay or the OpenGGF sonic-engine.
 
 No additional dialog or settings are required. Choose a destination file and the export completes immediately.
 

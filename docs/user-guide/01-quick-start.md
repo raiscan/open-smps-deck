@@ -24,9 +24,10 @@ mvn exec:java -pl app -Dexec.mainClass=com.opensmps.deck.Launcher
 The window opens with an empty song. From top to bottom:
 
 - **Menu bar** and **Transport bar** -- play/stop controls, tempo, SMPS mode selector.
+- **Song view** (left side) -- per-channel chain overview showing the song structure.
+- **Breadcrumb bar** and **Chain strip** -- navigation path and clickable phrase cells for the active channel.
 - **Tracker grid** -- 10 columns, one per channel: FM1 through FM5, DAC, PSG1 through PSG3, and Noise. Each column shows note, instrument, and effect sub-columns.
 - **Instrument panel** (right side) -- voice bank for FM voices and PSG envelope list.
-- **Order list** (bottom) -- pattern arrangement for the full song.
 
 The cursor starts on row 0 of the **FM1** channel. The default octave is 4.
 

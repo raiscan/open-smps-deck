@@ -1,6 +1,6 @@
 # Tutorial: Your First Song
 
-This tutorial walks you through creating a complete song from scratch -- building instruments, writing patterns, arranging them, and exporting the result. By the end you will have a short loop with FM bass, FM lead, and PSG rhythm.
+This tutorial walks you through creating a complete song from scratch -- building instruments, writing phrases, arranging them into chains, and exporting the result. By the end you will have a short loop with FM bass, FM lead, and PSG rhythm.
 
 The tutorial assumes you have completed the [Quick Start](01-quick-start.md) and have the application open with an empty song. If you need to create a fresh song at any point, use **File > New** (`Ctrl+N`).
 
@@ -128,7 +128,7 @@ The SN76489 PSG chip produces simple square-wave tones. Unlike FM voices with co
 
 ## 4. Enter Bass Notes on FM1
 
-*Goal: write an eight-row bass pattern on the first FM channel.*
+*Goal: write an eight-row bass phrase on the first FM channel.*
 
 Now that you have instruments, it is time to write music. The tracker grid uses a piano-style keyboard layout: the lower row of letter keys (`Z` through `M`) maps to notes C through B in the current octave.
 
@@ -284,25 +284,25 @@ The PSG channels produce square-wave tones. Combined with a short decay envelope
 
 ---
 
-## 8. Create a Second Pattern
+## 8. Create a Second Phrase
 
-*Goal: add a second pattern with variation to make the song more interesting.*
+*Goal: add a second phrase with variation to make the song more interesting.*
 
-A song that plays the same pattern forever is monotonous. You will create a second pattern by copying the first and modifying the melody to add variety.
+A song that plays the same phrase forever is monotonous. You will create a second phrase by copying the first and modifying the melody to add variety. In the hierarchical model, each channel has a **chain** -- an ordered list of phrase references. You have been editing the first phrase in each chain. Now you will add a second phrase to the FM2 chain.
 
-1. Look at the **Order List Panel** at the bottom of the window. It currently shows one row (row `00`) referencing pattern `00` across all 10 channels.
+1. Look at the **Chain Strip** above the **Tracker Grid**. It shows the chain for the currently focused channel. You should see one phrase cell representing the phrase you have been editing.
 
-2. Click the **+** button in the order list toolbar to add a new row. Row `01` appears, initially referencing pattern `00` on all channels. Clicking **+** also creates a new empty pattern for the new row.
+2. Click the **+** button at the end of the **Chain Strip** to add a new phrase entry to the active channel's chain. A new phrase cell appears, and the **Tracker Grid** switches to show the new, empty phrase.
 
-3. Click row `00` in the order list to select it and load the original pattern into the tracker grid.
+3. Click the first phrase cell in the **Chain Strip** to go back to the original phrase. The **Tracker Grid** loads the original data.
 
-4. Press `Ctrl+A` to select all rows across all channels. The entire pattern highlights with a semi-transparent blue overlay.
+4. Press `Ctrl+A` to select all rows across all channels. The entire phrase highlights with a semi-transparent blue overlay.
 
 5. Press `Ctrl+C` to copy the selection to the clipboard.
 
-6. Click row `01` in the order list. The tracker grid switches to show the new, empty pattern.
+6. Click the second phrase cell in the **Chain Strip**. The **Tracker Grid** switches to show the new, empty phrase.
 
-7. Press `Ctrl+V` to paste. All your note data, instrument assignments, and rests from pattern `00` are now duplicated into the second pattern. The grid should look identical to the original.
+7. Press `Ctrl+V` to paste. All your note data, instrument assignments, and rests from the first phrase are now duplicated into the second phrase. The grid should look identical to the original.
 
 8. Now create a variation on the melody. Click on the FM2 channel header or navigate to FM2 row `00`.
 
@@ -310,41 +310,41 @@ A song that plays the same pattern forever is monotonous. You will create a seco
 
 10. Press `Shift+=` to transpose the selection up by one octave (12 semitones). The notes jump from octave 5 to octave 6 -- the melody is now higher and brighter.
 
-11. Optionally, change a few individual notes to make the second pattern feel even more different. Navigate to any note on FM2 and press a different key to replace it. For example, change the `D-6` on row `01` to an `E-6` by pressing `C` (the E key in octave 6).
+11. Optionally, change a few individual notes to make the second phrase feel even more different. Navigate to any note on FM2 and press a different key to replace it. For example, change the `D-6` on row `01` to an `E-6` by pressing `C` (the E key in octave 6).
 
-12. Click row `01` in the order list if it is not already selected. Press `Space` to hear the second pattern in isolation. It should sound like a recognizable variation of the first -- same bass and rhythm, but with the melody pitched higher. Press `Escape` to stop.
+12. Click the second phrase cell in the **Chain Strip** if it is not already selected. Press `Space` to hear the second phrase in isolation. It should sound like a recognizable variation of the first -- same bass and rhythm, but with the melody pitched higher. Press `Escape` to stop.
 
-**What you should see:** The order list has two rows. Clicking each row loads the corresponding pattern into the tracker grid. The second pattern has the same bass and PSG rhythm as the first, but the FM2 melody is transposed up.
+**What you should see:** The **Chain Strip** has two phrase cells. Clicking each cell loads the corresponding phrase into the **Tracker Grid**. The second phrase has the same bass and PSG rhythm as the first, but the FM2 melody is transposed up.
 
-> **Reference:** [Patterns and Orders](08-patterns-and-orders.md) covers the order list, the **Dup** button for duplicating rows, and per-channel pattern assignment.
+> **Reference:** [Chains and Phrases](08-chains-and-phrases.md) covers chain editing, phrase management, and the hierarchical song structure.
 
 ---
 
 ## 9. Arrange and Loop
 
-*Goal: arrange the two patterns into a looping song structure.*
+*Goal: arrange the two phrases into a looping song structure using the chain loop point.*
 
-The order list controls the playback sequence. Each row plays in order from top to bottom. When the last row finishes, the song jumps back to the loop point.
+Each channel's chain controls the playback sequence. Phrases play in order from the first entry to the last. When the last phrase finishes, the chain jumps back to the loop point.
 
-1. The **Order List Panel** now has two rows:
-   - Row `00` -- your original pattern (bass, melody at octave 5, and tick).
-   - Row `01` -- the variation (melody transposed to octave 6).
+1. The **Chain Strip** now has two phrase cells:
+   - The first cell -- your original phrase (bass, melody at octave 5, and tick).
+   - The second cell -- the variation (melody transposed to octave 6).
 
-2. Playback proceeds top to bottom: row `00` plays first, then row `01`, then the song loops back.
+2. Playback proceeds left to right: the first phrase plays first, then the second, then the chain loops back.
 
-3. Click row `00` in the order list to select it, then click the **Loop** button in the toolbar. A loop arrow indicator appears next to row `00`. This tells the SMPS sequencer that after row `01` finishes, playback jumps back to row `00`. Both patterns repeat indefinitely: `00` -> `01` -> `00` -> `01` -> ...
+3. Right-click the first phrase cell in the **Chain Strip** and select **Set Loop Point**. A loop arrow indicator appears on the first cell. This tells the SMPS sequencer that after the second phrase finishes, playback jumps back to the first phrase. Both phrases repeat indefinitely: first -> second -> first -> second -> ...
 
-4. Try a different arrangement: click row `01`, then click **Loop**. Now row `00` acts as a one-time intro. It plays once on the first pass, then the song loops at row `01` and only the variation repeats. This is a common technique for creating songs with intros.
+4. Try a different arrangement: right-click the second phrase cell and select **Set Loop Point**. Now the first phrase acts as a one-time intro. It plays once on the first pass, then the chain loops at the second phrase and only the variation repeats. This is a common technique for creating songs with intros.
 
-5. For this tutorial, set the loop point back to row `00` so both patterns repeat.
+5. For this tutorial, set the loop point back to the first phrase cell so both phrases repeat.
 
-6. Press `Space` to hear the full arrangement from the beginning. You should hear your original pattern followed by the variation, then the song loops back and both patterns play again. Press `Escape` to stop.
+6. Press `Space` to hear the full arrangement from the beginning. You should hear your original phrase followed by the variation, then the chain loops back and both phrases play again. Press `Escape` to stop.
 
 **What you should hear:** A two-section song that loops. The first section establishes the theme; the second section varies it by moving the melody higher. The loop is seamless -- after the second section, the original returns without any gap.
 
 Every SMPS song must loop -- there is no "play once and stop" option in the Mega Drive sound driver.
 
-> **Reference:** [Patterns and Orders](08-patterns-and-orders.md) explains loop points, row management, and how per-channel pattern indices enable flexible arrangements.
+> **Reference:** [Chains and Phrases](08-chains-and-phrases.md) explains chain loop points, phrase management, and how chains compile to SMPS bytecode.
 
 ---
 
@@ -352,7 +352,7 @@ Every SMPS song must loop -- there is no "play once and stop" option in the Mega
 
 *Goal: adjust the speed and feel of the song.*
 
-The tempo controls how fast the sequencer advances through the pattern data. Finding the right speed makes the difference between a song that feels energetic and one that drags.
+The tempo controls how fast the sequencer advances through the phrase data. Finding the right speed makes the difference between a song that feels energetic and one that drags.
 
 1. Look at the **Transport Bar** at the top of the window, directly below the menu bar.
 
@@ -384,14 +384,14 @@ You have built a complete song: two FM voices, a PSG envelope, two patterns, an 
 
 ### Review
 
-1. Click row `00` in the order list to start from the beginning.
+1. Click the first phrase cell in the **Chain Strip** to start from the beginning.
 
 2. Press `Space` to play the full song. Listen through at least one complete loop and verify:
    - The bass on FM1 provides a steady harmonic foundation (C-F-G movement).
    - The lead on FM2 sits above the bass with a distinct, brighter timbre.
    - The PSG tick on PSG1 adds a regular rhythmic pulse.
-   - The second pattern sounds like a clear variation of the first, with the melody pitched higher.
-   - The loop transition is smooth -- no awkward silence or glitch between the end of row `01` and the restart at row `00`.
+   - The second phrase sounds like a clear variation of the first, with the melody pitched higher.
+   - The loop transition is smooth -- no awkward silence or glitch between the end of the second phrase and the restart at the first.
 
 3. If anything sounds wrong, press `Escape` to stop. Navigate to the problem and fix it. Use `Ctrl+Z` to undo any mistakes. Then play again to verify.
 
@@ -399,7 +399,7 @@ You have built a complete song: two FM voices, a PSG envelope, two patterns, an 
 
 4. Save the project with **File > Save** (`Ctrl+S`). If this is a new, unsaved song, a file dialog prompts you for a location and filename. Choose a location and save it as an `.osmpsd` file.
 
-5. The `.osmpsd` format is the project file -- it is a JSON document that preserves everything: song name, SMPS mode, tempo, dividing timing, all FM voices, all PSG envelopes, all patterns, and the full order list with loop point. You can close the application and reopen the project later to continue editing.
+5. The `.osmpsd` format is the project file -- it is a JSON document that preserves everything: song name, SMPS mode, tempo, dividing timing, all FM voices, all PSG envelopes, all phrases, and the full chain arrangement with loop points. You can close the application and reopen the project later to continue editing.
 
 ### Export WAV
 
@@ -413,13 +413,13 @@ You have built a complete song: two FM voices, a PSG envelope, two patterns, an 
 
 9. Select **File > Export SMPS...** from the menu bar. Choose a destination filename.
 
-10. This produces a raw `.bin` file containing the compiled SMPS bytecode -- the header, track pointers, voice table, and all pattern data packed into a single binary blob. This is the same data that the playback engine feeds to the sequencer during real-time playback.
+10. This produces a raw `.bin` file containing the compiled SMPS bytecode -- the header, track pointers, voice table, and all channel track data compiled from the chain/phrase hierarchy into a single binary blob. This is the same data that the playback engine feeds to the sequencer during real-time playback.
 
 11. The `.bin` file is ready for injection into a Sonic ROM using a hex editor or ROM hacking tool, or for playback by an external SMPS driver such as SMPSPlay or the OpenGGF sonic-engine.
 
 ### Done
 
-Congratulations -- you have composed a complete Mega Drive song from scratch. You built two FM voices with different algorithms and timbres, designed a PSG percussion envelope, wrote patterns with bass, melody, and rhythm, arranged them into a looping structure, and exported the result in three formats: project file, audio, and SMPS binary.
+Congratulations -- you have composed a complete Mega Drive song from scratch. You built two FM voices with different algorithms and timbres, designed a PSG percussion envelope, wrote phrases with bass, melody, and rhythm, arranged them into looping chains, and exported the result in three formats: project file, audio, and SMPS binary.
 
 > **Reference:** [Playback and Export](09-playback-and-export.md) covers WAV render settings, mute/solo behavior during export, voice bank export, and binary format details.
 
@@ -433,6 +433,6 @@ Now that you have completed the tutorial, explore these topics to deepen your sk
 - **Design more PSG envelopes.** The [PSG Envelopes](05-psg-envelopes.md) chapter explains longer sustained envelopes, hi-hat imitations, and volume curve techniques.
 - **Use DAC samples.** The [DAC Samples](06-dac-samples.md) chapter shows how to import drum samples from WAV files and trigger them from the DAC channel for real sampled percussion.
 - **Master the tracker grid.** The [Tracker Grid](07-tracker-grid.md) chapter details selection, transposition, copy/paste across songs, undo/redo, and channel mute/solo.
-- **Build complex arrangements.** The [Patterns and Orders](08-patterns-and-orders.md) chapter covers per-channel pattern assignment, the **Dup** button, and strategies for efficient song structure.
+- **Build complex arrangements.** The [Chains and Phrases](08-chains-and-phrases.md) chapter covers the hierarchical song structure, chain editing, phrase management, and strategies for efficient arrangement.
 - **Import existing music.** The [Importing](10-importing.md) chapter explains how to bring in SMPS binaries from Sonic ROMs, import individual FM voices, and load voice bank files.
 - **Learn every shortcut.** The [Keyboard Reference](11-keyboard-reference.md) is a complete cheat sheet of every key binding in the application.
