@@ -26,6 +26,14 @@ public final class EffectMnemonics {
             case SmpsCoordFlags.PSG_NOISE -> String.format("NOI %02X", params[0]);
             case SmpsCoordFlags.MOD_OFF -> "MOFF";
             case SmpsCoordFlags.SND_OFF -> "SOF";
+            case SmpsCoordFlags.SET_VOICE -> String.format("VOI %02X", params[0]);
+            case SmpsCoordFlags.PSG_INSTRUMENT -> String.format("PSI %02X", params[0]);
+            case SmpsCoordFlags.FADE_IN -> "FIN";
+            case SmpsCoordFlags.FADE_OUT -> "FOT";
+            case SmpsCoordFlags.JUMP -> "JMP";
+            case SmpsCoordFlags.LOOP -> "LOP";
+            case SmpsCoordFlags.CALL -> "CAL";
+            case SmpsCoordFlags.RETURN -> "RET";
             default -> String.format("%02X", flag);
         };
     }
@@ -54,18 +62,29 @@ public final class EffectMnemonics {
             case "NOI" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.PSG_NOISE, new int[]{parseHex(arg)});
             case "MOFF" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.MOD_OFF, new int[0]);
             case "SOF" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.SND_OFF, new int[0]);
+            case "VOI" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.SET_VOICE, new int[]{parseHex(arg)});
+            case "PSI" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.PSG_INSTRUMENT, new int[]{parseHex(arg)});
+            case "FIN" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.FADE_IN, new int[0]);
+            case "FOT" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.FADE_OUT, new int[0]);
             default -> null;
         };
     }
 
     private static String formatPan(int[] params) {
-        int pan = params[0] & 0xC0;
-        return switch (pan) {
-            case 0xC0 -> "PAN LR";
-            case 0x80 -> "PAN L";
-            case 0x40 -> "PAN R";
-            default -> "PAN --";
+        int raw = params[0] & 0xFF;
+        int pan = raw & 0xC0;
+        int amsFms = raw & 0x3F;
+        String panStr = switch (pan) {
+            case 0xC0 -> "LR";
+            case 0x80 -> "L";
+            case 0x40 -> "R";
+            default -> "--";
         };
+        // Preserve AMS/FMS bits if non-zero
+        if (amsFms != 0) {
+            return String.format("PAN %s %02X", panStr, amsFms);
+        }
+        return "PAN " + panStr;
     }
 
     private static String formatSigned(int value) {
@@ -74,12 +93,20 @@ public final class EffectMnemonics {
     }
 
     private static int parsePan(String arg) {
-        return switch (arg.toUpperCase()) {
+        String[] panParts = arg.split("\\s+", 2);
+        int panBits = switch (panParts[0].toUpperCase()) {
             case "LR", "L+R" -> 0xC0;
             case "L" -> 0x80;
             case "R" -> 0x40;
             default -> 0x00;
         };
+        // Parse optional AMS/FMS suffix
+        if (panParts.length > 1 && !panParts[1].isEmpty()) {
+            try {
+                panBits |= Integer.parseInt(panParts[1], 16) & 0x3F;
+            } catch (NumberFormatException ignored) {}
+        }
+        return panBits;
     }
 
     private static int parseSigned(String arg) {

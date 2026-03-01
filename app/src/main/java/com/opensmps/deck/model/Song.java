@@ -17,7 +17,7 @@ public class Song {
 
     private String name = "Untitled";
     private SmpsMode smpsMode = SmpsMode.S2;
-    private ArrangementMode arrangementMode = ArrangementMode.STRUCTURED_BLOCKS;
+    private ArrangementMode arrangementMode = ArrangementMode.LEGACY_PATTERNS;
     private int tempo = 0x80;
     private int dividingTiming = 1;
     private int loopPoint = 0;
