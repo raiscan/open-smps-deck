@@ -6,12 +6,12 @@
 
     <parent>
         <groupId>com.opensmps</groupId>
-        <artifactId>opensmps-deck-parent</artifactId>
+        <artifactId>opensmpsdeck-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>opensmps-deck-app</artifactId>
-    <name>OpenSMPS Deck - App</name>
+    <artifactId>opensmpsdeck-app</artifactId>
+    <name>OpenSMPSDeck - App</name>
     <description>JavaFX application for SMPS music editing and playback</description>
 
     <dependencies>

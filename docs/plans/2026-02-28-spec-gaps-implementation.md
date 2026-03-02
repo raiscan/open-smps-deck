@@ -176,8 +176,8 @@ git commit -m "feat: route getTrackPosition() through SmpsDriver to music sequen
 ### Task 3: Store CompilationResult in PlaybackEngine + getPlaybackPosition()
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
-- Modify: `app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java`
 
 **Context:** `PlaybackEngine.loadSong()` currently calls `compiler.compile(song)` which internally calls `compileDetailed().getSmpsDataUnsafe()`, discarding the `CompilationResult` with its `ChannelTimeline` metadata. We need to store the result and expose a position query.
 
@@ -402,7 +402,7 @@ Expected: All PASS (existing + new tests)
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java
+git add app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java
 git commit -m "feat: store CompilationResult and expose getPlaybackPosition() in PlaybackEngine"
 ```
 
@@ -411,8 +411,8 @@ git commit -m "feat: store CompilationResult and expose getPlaybackPosition() in
 ### Task 4: Position-preserving reload()
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
-- Modify: `app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java`
 
 **Context:** `reload()` currently calls `loadSong()` which stops everything and restarts from order 0. The spec says reload should resume from the approximate playback position.
 
@@ -481,7 +481,7 @@ Expected: All PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java
+git add app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java
 git commit -m "feat: reload() preserves approximate playback position"
 ```
 
@@ -490,8 +490,8 @@ git commit -m "feat: reload() preserves approximate playback position"
 ### Task 5: SongTabCoordinator.onSongEdited() with reload and mute snapshot
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/SongTabCoordinator.java`
-- Modify: `app/src/test/java/com/opensmps/deck/ui/TestSongTabCoordinator.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/SongTabCoordinator.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/ui/TestSongTabCoordinator.java`
 
 **Context:** `SongTabCoordinator` uses a `PlaybackGateway` interface for unit-testable coordination. We need to add `reload()` to the gateway and implement `onSongEdited()` that conditionally reloads when playing, with mute state snapshot/restore.
 
@@ -583,7 +583,7 @@ Expected: All PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/SongTabCoordinator.java app/src/test/java/com/opensmps/deck/ui/TestSongTabCoordinator.java
+git add app/src/main/java/com/opensmpsdeck/ui/SongTabCoordinator.java app/src/test/java/com/opensmpsdeck/ui/TestSongTabCoordinator.java
 git commit -m "feat: add onSongEdited() to SongTabCoordinator for live reload on edit"
 ```
 
@@ -592,7 +592,7 @@ git commit -m "feat: add onSongEdited() to SongTabCoordinator for live reload on
 ### Task 6: Mute/solo reset on TrackerGrid.setSong()
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java:136-140`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java:136-140`
 
 **Context:** `TrackerGrid.setSong()` currently preserves stale mute state (`channelMuted[]` and `soloChannel`). The spec says mute state should reset on song load (but NOT on live reload — that's handled by the coordinator's snapshot/restore in a future task).
 
@@ -621,7 +621,7 @@ Expected: All PASS
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "fix: reset mute/solo state on TrackerGrid.setSong()"
 ```
 
@@ -630,8 +630,8 @@ git commit -m "fix: reset mute/solo state on TrackerGrid.setSong()"
 ### Task 7: WavExporter configurable extend/inset fade model
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/io/WavExporter.java`
-- Modify: `app/src/test/java/com/opensmps/deck/io/TestWavExporter.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/io/WavExporter.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/io/TestWavExporter.java`
 
 **Context:** Current WavExporter applies a linear fade over the entire final loop (hardcoded). The design replaces this with three controls: `fadeEnabled` (boolean), `fadeDurationSeconds` (double), and `fadeExtend` (boolean for extend vs. inset mode).
 
@@ -893,7 +893,7 @@ Expected: All PASS (existing tests + new tests)
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/WavExporter.java app/src/test/java/com/opensmps/deck/io/TestWavExporter.java
+git add app/src/main/java/com/opensmpsdeck/io/WavExporter.java app/src/test/java/com/opensmpsdeck/io/TestWavExporter.java
 git commit -m "feat: configurable extend/inset fade model for WavExporter"
 ```
 
@@ -902,7 +902,7 @@ git commit -m "feat: configurable extend/inset fade model for WavExporter"
 ### Task 8: WAV Export Dialog
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindowFileActions.java:118-157`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindowFileActions.java:118-157`
 
 **Context:** The current `onExportWav()` exports directly without any dialog for loop count or fade settings. Replace with a dialog containing the controls from the design spec.
 
@@ -1016,7 +1016,7 @@ Expected: All PASS
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindowFileActions.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindowFileActions.java
 git commit -m "feat: WAV export dialog with loop count, fade toggle, duration, and mode"
 ```
 
@@ -1025,7 +1025,7 @@ git commit -m "feat: WAV export dialog with loop count, fade toggle, duration, a
 ### Task 9: TrackerGrid playback cursor
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Context:** TrackerGrid currently has only an edit cursor (`cursorRow`, `cursorChannel`). Add a separate playback cursor that renders as a distinct highlight.
 
@@ -1087,7 +1087,7 @@ Expected: All PASS
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "feat: add playback cursor highlight to TrackerGrid"
 ```
 
@@ -1096,8 +1096,8 @@ git commit -m "feat: add playback cursor highlight to TrackerGrid"
 ### Task 10: Playback cursor sync polling
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/SongTabCoordinator.java`
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java` (if needed for interface)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/SongTabCoordinator.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java` (if needed for interface)
 
 **Context:** The coordinator needs a polling mechanism (~15 Hz) that queries the playback position and updates TrackerGrid's playback cursor and OrderListPanel's selection. The design calls for a JavaFX `AnimationTimer` or `Timeline`.
 
@@ -1188,7 +1188,7 @@ Expected: All PASS
 **Step 7: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/SongTabCoordinator.java app/src/test/java/com/opensmps/deck/ui/TestSongTabCoordinator.java
+git add app/src/main/java/com/opensmpsdeck/ui/SongTabCoordinator.java app/src/test/java/com/opensmpsdeck/ui/TestSongTabCoordinator.java
 git commit -m "feat: playback cursor sync with polling update in SongTabCoordinator"
 ```
 
@@ -1197,8 +1197,8 @@ git commit -m "feat: playback cursor sync with polling update in SongTabCoordina
 ### Task 11: Wire live reload through SongTab dirty callback
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/SongTab.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java` (or wherever SongTabCoordinator is wired)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/SongTab.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java` (or wherever SongTabCoordinator is wired)
 
 **Context:** `SongTab.setDirty(true)` is called when TrackerGrid, InstrumentPanel, or OrderListPanel fires `onDirty`. We need to additionally call `coordinator.onSongEdited(song)` when dirty is set.
 
@@ -1240,7 +1240,7 @@ Expected: All PASS
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/SongTab.java app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/SongTab.java app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: wire song dirty callback to coordinator for live reload on edit"
 ```
 

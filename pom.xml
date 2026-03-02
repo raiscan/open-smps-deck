@@ -5,11 +5,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.opensmps</groupId>
-    <artifactId>opensmps-deck-parent</artifactId>
+    <artifactId>opensmpsdeck-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>OpenSMPS Deck</name>
+    <name>OpenSMPSDeck</name>
     <description>A standalone SMPS music workstation for Mega Drive / Genesis sound</description>
 
     <properties>

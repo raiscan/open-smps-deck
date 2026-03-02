@@ -1,4 +1,4 @@
-module com.opensmps.deck {
+module com.opensmpsdeck {
     requires com.opensmps.synthcore;
     requires javafx.controls;
     requires javafx.graphics;
@@ -7,7 +7,7 @@ module com.opensmps.deck {
     requires java.xml;
     requires java.desktop;
 
-    opens com.opensmps.deck to javafx.graphics;
+    opens com.opensmpsdeck to javafx.graphics;
 
-    exports com.opensmps.deck;
+    exports com.opensmpsdeck;
 }

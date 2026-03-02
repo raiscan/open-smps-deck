@@ -4,7 +4,7 @@ Import existing SMPS music, voice banks, and audio samples from files or ROM rip
 
 ## Overview
 
-OpenSMPS Deck provides several import paths for bringing external data into your project. You can import complete SMPS binary files as new songs, load FM voice banks and individual patches from `.ovm` and `.rym2612` files, scan directories of SMPS files to cherry-pick specific voices, and add DAC samples from WAV or raw PCM files. These tools make it straightforward to study existing Sonic music, remix classic tracks, and build a personal voice library from ROM rips.
+OpenSMPSDeck provides several import paths for bringing external data into your project. You can import complete SMPS binary files as new songs, load FM voice banks and individual patches from `.ovm` and `.rym2612` files, scan directories of SMPS files to cherry-pick specific voices, and add DAC samples from WAV or raw PCM files. These tools make it straightforward to study existing Sonic music, remix classic tracks, and build a personal voice library from ROM rips.
 
 ## Importing SMPS Binary Files
 

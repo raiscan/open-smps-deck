@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-OpenSMPS Deck is a standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG music. It targets the Sega Mega Drive / Genesis sound hardware and produces SMPS-compatible output that can be injected into Sonic ROMs or played by the OpenGGF sonic-engine.
+OpenSMPSDeck is a standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG music. It targets the Sega Mega Drive / Genesis sound hardware and produces SMPS-compatible output that can be injected into Sonic ROMs or played by the OpenGGF sonic-engine.
 
 **Key principle:** The internal model IS SMPS bytecode. The tracker grid is a decoded view over raw SMPS data. What you hear is exactly what exports.
 
@@ -232,7 +232,7 @@ The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999
 
 | Extension | Format | Description |
 |-----------|--------|-------------|
-| `.osmpsd` | JSON | OpenSMPS Deck project file |
+| `.osmpsd` | JSON | OpenSMPSDeck project file |
 | `.bin` | Binary | Raw SMPS binary export |
 | `.wav` | RIFF/WAV | 44.1kHz 16-bit stereo PCM audio |
 | `.ovm` | JSON | Voice bank (FM voices + PSG envelopes) |

@@ -6,7 +6,7 @@
 
 **Architecture:** New model classes (Phrase, ChainEntry, Chain, PhraseLibrary) sit alongside existing Pattern/OrderList. A HierarchyCompiler compiles chains+phrases to SMPS track streams. An effect mnemonic codec translates between raw hex bytes and human-readable mnemonics. The existing PatternCompiler routes to the hierarchy compiler when arrangementMode is HIERARCHICAL.
 
-**Tech Stack:** Java 21, JavaFX, Maven. Tests use JUnit 5. Codec layer in `app/src/main/java/com/opensmps/deck/codec/`. Model in `app/src/main/java/com/opensmps/deck/model/`. UI in `app/src/main/java/com/opensmps/deck/ui/`.
+**Tech Stack:** Java 21, JavaFX, Maven. Tests use JUnit 5. Codec layer in `app/src/main/java/com/opensmpsdeck/codec/`. Model in `app/src/main/java/com/opensmpsdeck/model/`. UI in `app/src/main/java/com/opensmpsdeck/ui/`.
 
 **Reference:** Design doc at `docs/plans/2026-03-01-hierarchical-tracker-design.md`
 
@@ -15,13 +15,13 @@
 ## Task 1: ChannelType Enum
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/ChannelType.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestChannelType.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/ChannelType.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestChannelType.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -68,7 +68,7 @@ Expected: FAIL — class not found
 **Step 3: Write minimal implementation**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 public enum ChannelType {
     FM, DAC, PSG_TONE, PSG_NOISE;
@@ -93,7 +93,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/ChannelType.java app/src/test/java/com/opensmps/deck/model/TestChannelType.java
+git add app/src/main/java/com/opensmpsdeck/model/ChannelType.java app/src/test/java/com/opensmpsdeck/model/TestChannelType.java
 git commit -m "feat: add ChannelType enum with channel index mapping"
 ```
 
@@ -104,13 +104,13 @@ git commit -m "feat: add ChannelType enum with channel index mapping"
 A Phrase is a variable-length sequence of SMPS bytecode for a single channel. It is the atomic unit of composition — the equivalent of a reusable musical block.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/Phrase.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestPhraseModel.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/Phrase.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestPhraseModel.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -178,7 +178,7 @@ Expected: FAIL — class not found
 **Step 3: Write minimal implementation**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -227,7 +227,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/Phrase.java app/src/test/java/com/opensmps/deck/model/TestPhraseModel.java
+git add app/src/main/java/com/opensmpsdeck/model/Phrase.java app/src/test/java/com/opensmpsdeck/model/TestPhraseModel.java
 git commit -m "feat: add Phrase model class with sub-phrase references"
 ```
 
@@ -238,14 +238,14 @@ git commit -m "feat: add Phrase model class with sub-phrase references"
 A ChainEntry references a phrase with optional transpose and repeat. A Chain is a per-channel ordered list of ChainEntries with an optional loop point.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/ChainEntry.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/Chain.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestChainModel.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/ChainEntry.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/Chain.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestChainModel.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -315,7 +315,7 @@ Expected: FAIL — classes not found
 **Step 3: Write ChainEntry**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 public class ChainEntry {
 
@@ -341,7 +341,7 @@ public class ChainEntry {
 **Step 4: Write Chain**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -374,7 +374,7 @@ Expected: PASS
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/ChainEntry.java app/src/main/java/com/opensmps/deck/model/Chain.java app/src/test/java/com/opensmps/deck/model/TestChainModel.java
+git add app/src/main/java/com/opensmpsdeck/model/ChainEntry.java app/src/main/java/com/opensmpsdeck/model/Chain.java app/src/test/java/com/opensmpsdeck/model/TestChainModel.java
 git commit -m "feat: add ChainEntry and Chain model classes"
 ```
 
@@ -385,14 +385,14 @@ git commit -m "feat: add ChainEntry and Chain model classes"
 PhraseLibrary manages a collection of phrases with ID allocation. HierarchicalArrangement holds the phrase library + 10 chains + cycle detection.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/PhraseLibrary.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/HierarchicalArrangement.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestHierarchicalArrangement.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/PhraseLibrary.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/HierarchicalArrangement.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestHierarchicalArrangement.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -495,7 +495,7 @@ Expected: FAIL — classes not found
 **Step 3: Write PhraseLibrary**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -535,7 +535,7 @@ public class PhraseLibrary {
 **Step 4: Write HierarchicalArrangement**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -602,7 +602,7 @@ Expected: PASS
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/PhraseLibrary.java app/src/main/java/com/opensmps/deck/model/HierarchicalArrangement.java app/src/test/java/com/opensmps/deck/model/TestHierarchicalArrangement.java
+git add app/src/main/java/com/opensmpsdeck/model/PhraseLibrary.java app/src/main/java/com/opensmpsdeck/model/HierarchicalArrangement.java app/src/test/java/com/opensmpsdeck/model/TestHierarchicalArrangement.java
 git commit -m "feat: add PhraseLibrary and HierarchicalArrangement with cycle detection"
 ```
 
@@ -613,9 +613,9 @@ git commit -m "feat: add PhraseLibrary and HierarchicalArrangement with cycle de
 Wire HierarchicalArrangement into Song with a new ArrangementMode value.
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/model/ArrangementMode.java`
-- Modify: `app/src/main/java/com/opensmps/deck/model/Song.java`
-- Modify: `app/src/test/java/com/opensmps/deck/model/TestSongModel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/ArrangementMode.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/Song.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/model/TestSongModel.java`
 
 **Step 1: Write the failing test**
 
@@ -672,7 +672,7 @@ Expected: All 253+ tests PASS
 **Step 7: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/ArrangementMode.java app/src/main/java/com/opensmps/deck/model/Song.java app/src/test/java/com/opensmps/deck/model/TestSongModel.java
+git add app/src/main/java/com/opensmpsdeck/model/ArrangementMode.java app/src/main/java/com/opensmpsdeck/model/Song.java app/src/test/java/com/opensmpsdeck/model/TestSongModel.java
 git commit -m "feat: add HIERARCHICAL arrangement mode and Song.hierarchicalArrangement field"
 ```
 
@@ -683,13 +683,13 @@ git commit -m "feat: add HIERARCHICAL arrangement mode and Song.hierarchicalArra
 Bidirectional translation between SMPS coordination flag bytes and human-readable mnemonics. This is a pure codec with no UI dependency.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/codec/EffectMnemonics.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestEffectMnemonics.java`
+- Create: `app/src/main/java/com/opensmpsdeck/codec/EffectMnemonics.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestEffectMnemonics.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
@@ -877,7 +877,7 @@ Expected: FAIL — class not found
 **Step 3: Write EffectMnemonics implementation**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
 import com.opensmps.smps.SmpsCoordFlags;
 
@@ -990,7 +990,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/EffectMnemonics.java app/src/test/java/com/opensmps/deck/codec/TestEffectMnemonics.java
+git add app/src/main/java/com/opensmpsdeck/codec/EffectMnemonics.java app/src/test/java/com/opensmpsdeck/codec/TestEffectMnemonics.java
 git commit -m "feat: add EffectMnemonics codec for bidirectional mnemonic translation"
 ```
 
@@ -1001,15 +1001,15 @@ git commit -m "feat: add EffectMnemonics codec for bidirectional mnemonic transl
 Compiles a single chain's phrase references into a contiguous SMPS track stream. This is the core compilation path: phrases are inlined or emitted as CALL targets, repeats become LOOPs, transpose becomes KEY_DISP, and the chain loop point becomes a JUMP.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/codec/HierarchyCompiler.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestHierarchyCompiler.java`
+- Create: `app/src/main/java/com/opensmpsdeck/codec/HierarchyCompiler.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestHierarchyCompiler.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1150,9 +1150,9 @@ Expected: FAIL — class not found
 **Step 3: Write HierarchyCompiler**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 
 import java.io.ByteArrayOutputStream;
@@ -1308,7 +1308,7 @@ Expected: PASS (core structure tests pass; pointer patching tested in integratio
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/HierarchyCompiler.java app/src/test/java/com/opensmps/deck/codec/TestHierarchyCompiler.java
+git add app/src/main/java/com/opensmpsdeck/codec/HierarchyCompiler.java app/src/test/java/com/opensmpsdeck/codec/TestHierarchyCompiler.java
 git commit -m "feat: add HierarchyCompiler for chain+phrase to SMPS track compilation"
 ```
 
@@ -1319,15 +1319,15 @@ git commit -m "feat: add HierarchyCompiler for chain+phrase to SMPS track compil
 Wire HierarchyCompiler into PatternCompiler so that HIERARCHICAL mode compiles all 10 chains into a complete SMPS binary. This bridges the hierarchy model to the existing playback pipeline.
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/codec/PatternCompiler.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestHierarchyCompilerIntegration.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/codec/PatternCompiler.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestHierarchyCompilerIntegration.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1417,7 +1417,7 @@ Expected: All existing tests still PASS
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/PatternCompiler.java app/src/test/java/com/opensmps/deck/codec/TestHierarchyCompilerIntegration.java
+git add app/src/main/java/com/opensmpsdeck/codec/PatternCompiler.java app/src/test/java/com/opensmpsdeck/codec/TestHierarchyCompilerIntegration.java
 git commit -m "feat: wire HierarchyCompiler into PatternCompiler for HIERARCHICAL mode"
 ```
 
@@ -1428,15 +1428,15 @@ git commit -m "feat: wire HierarchyCompiler into PatternCompiler for HIERARCHICA
 Save and load HierarchicalArrangement (phrases, chains, sub-phrase refs) in the `.osmpsd` JSON project format.
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/io/ProjectFile.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestProjectFileHierarchy.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/io/ProjectFile.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestProjectFileHierarchy.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -1550,7 +1550,7 @@ Expected: All tests PASS (existing ProjectFile tests unchanged)
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/ProjectFile.java app/src/test/java/com/opensmps/deck/io/TestProjectFileHierarchy.java
+git add app/src/main/java/com/opensmpsdeck/io/ProjectFile.java app/src/test/java/com/opensmpsdeck/io/TestProjectFileHierarchy.java
 git commit -m "feat: add ProjectFile save/load for hierarchical arrangement"
 ```
 
@@ -1561,15 +1561,15 @@ git commit -m "feat: add ProjectFile save/load for hierarchical arrangement"
 Convert existing Pattern/OrderList songs to the hierarchical model. Each pattern's per-channel track data becomes a phrase; order list rows become chain entries.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/codec/LegacyMigrator.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestLegacyMigrator.java`
+- Create: `app/src/main/java/com/opensmpsdeck/codec/LegacyMigrator.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestLegacyMigrator.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -1659,9 +1659,9 @@ Expected: FAIL — class not found
 **Step 3: Write LegacyMigrator**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -1734,7 +1734,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/LegacyMigrator.java app/src/test/java/com/opensmps/deck/codec/TestLegacyMigrator.java
+git add app/src/main/java/com/opensmpsdeck/codec/LegacyMigrator.java app/src/test/java/com/opensmpsdeck/codec/TestLegacyMigrator.java
 git commit -m "feat: add LegacyMigrator to convert Pattern+OrderList to hierarchy"
 ```
 
@@ -1745,15 +1745,15 @@ git commit -m "feat: add LegacyMigrator to convert Pattern+OrderList to hierarch
 Decompile raw SMPS track bytecode into the hierarchy model. Pass 1 identifies CALL/RETURN/LOOP/JUMP structural boundaries. This is used during SMPS binary import.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/codec/HierarchyDecompiler.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestHierarchyDecompiler.java`
+- Create: `app/src/main/java/com/opensmpsdeck/codec/HierarchyDecompiler.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestHierarchyDecompiler.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import com.opensmps.smps.SmpsCoordFlags;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1844,7 +1844,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/HierarchyDecompiler.java app/src/test/java/com/opensmps/deck/codec/TestHierarchyDecompiler.java
+git add app/src/main/java/com/opensmpsdeck/codec/HierarchyDecompiler.java app/src/test/java/com/opensmpsdeck/codec/TestHierarchyDecompiler.java
 git commit -m "feat: add HierarchyDecompiler for SMPS track to phrase+chain decompilation"
 ```
 
@@ -1855,8 +1855,8 @@ git commit -m "feat: add HierarchyDecompiler for SMPS track to phrase+chain deco
 Evolve TrackerGrid to render and accept effect mnemonics instead of raw hex. Add a Duration column. This is a non-breaking change — the grid still operates on raw SMPS bytecode via SmpsDecoder/SmpsEncoder but displays mnemonics.
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Modify: `app/src/main/java/com/opensmps/deck/codec/SmpsDecoder.java` (add mnemonic-aware decoding)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/codec/SmpsDecoder.java` (add mnemonic-aware decoding)
 
 **Step 1: Add mnemonic formatting to SmpsDecoder**
 
@@ -1886,7 +1886,7 @@ Expected: All tests PASS (mnemonic formatting is display-only; existing codec te
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java app/src/main/java/com/opensmps/deck/codec/SmpsDecoder.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java app/src/main/java/com/opensmpsdeck/codec/SmpsDecoder.java
 git commit -m "feat: add effect mnemonic display and entry in TrackerGrid"
 ```
 
@@ -1897,7 +1897,7 @@ git commit -m "feat: add effect mnemonic display and entry in TrackerGrid"
 The always-visible left panel showing all 10 channels' phrase blocks proportionally. This is a new JavaFX component.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/SongView.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SongView.java`
 
 **Step 1: Create SongView as a Canvas-based component**
 
@@ -1929,7 +1929,7 @@ public class SongView extends ScrollPane {
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/SongView.java
+git add app/src/main/java/com/opensmpsdeck/ui/SongView.java
 git commit -m "feat: add SongView panel for hierarchical channel overview"
 ```
 
@@ -1940,8 +1940,8 @@ git commit -m "feat: add SongView panel for hierarchical channel overview"
 The chain strip sits above the phrase editor showing the active channel's chain. The chain editor is a full table dialog for detailed editing.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/ChainStrip.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/ChainEditor.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/ChainStrip.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/ChainEditor.java`
 
 **Step 1: Create ChainStrip**
 
@@ -1954,7 +1954,7 @@ TableView-based dialog with columns: #, Phrase (ComboBox), Transpose (Spinner), 
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/ChainStrip.java app/src/main/java/com/opensmps/deck/ui/ChainEditor.java
+git add app/src/main/java/com/opensmpsdeck/ui/ChainStrip.java app/src/main/java/com/opensmpsdeck/ui/ChainEditor.java
 git commit -m "feat: add ChainStrip and ChainEditor UI components"
 ```
 
@@ -1965,9 +1965,9 @@ git commit -m "feat: add ChainStrip and ChainEditor UI components"
 Wire SongView, ChainStrip, PhraseEditor (TrackerGrid), and Breadcrumb into the MainWindow layout. Replace OrderListPanel with SongView when in HIERARCHICAL mode.
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/SongTab.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/BreadcrumbBar.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/SongTab.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/BreadcrumbBar.java`
 
 **Step 1: Create BreadcrumbBar**
 
@@ -1999,7 +1999,7 @@ When LEGACY_PATTERNS: keep existing layout.
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java app/src/main/java/com/opensmps/deck/ui/SongTab.java app/src/main/java/com/opensmps/deck/ui/BreadcrumbBar.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java app/src/main/java/com/opensmpsdeck/ui/SongTab.java app/src/main/java/com/opensmpsdeck/ui/BreadcrumbBar.java
 git commit -m "feat: wire hierarchical UI layout with SongView, ChainStrip, and BreadcrumbBar"
 ```
 
@@ -2010,8 +2010,8 @@ git commit -m "feat: wire hierarchical UI layout with SongView, ChainStrip, and 
 When importing SMPS binary files, show a preview dialog that uses HierarchyDecompiler to analyze structure and lets the user confirm/adjust phrase boundaries.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/ImportPreviewDialog.java`
-- Modify: `app/src/main/java/com/opensmps/deck/io/SmpsImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/ImportPreviewDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java`
 
 **Step 1: Create ImportPreviewDialog**
 
@@ -2028,7 +2028,7 @@ After `SmpsImporter.importFile()` extracts tracks, optionally call `HierarchyDec
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/ImportPreviewDialog.java app/src/main/java/com/opensmps/deck/io/SmpsImporter.java
+git add app/src/main/java/com/opensmpsdeck/ui/ImportPreviewDialog.java app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java
 git commit -m "feat: add import decompilation preview dialog"
 ```
 

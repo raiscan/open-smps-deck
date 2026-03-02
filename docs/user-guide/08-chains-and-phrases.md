@@ -4,7 +4,7 @@ Phrases hold blocks of channel data; chains arrange them into a complete song us
 
 ## Overview
 
-Composition in OpenSMPS Deck follows a three-level hierarchy: **Song -> Chain -> Phrase**. Each channel has its own chain -- an ordered list of phrase references. Phrases are the building blocks that contain actual SMPS track data (notes, durations, coordination flags). Chains define the sequence and can transpose phrases, repeat them, and set loop points. This hierarchical model maps directly to SMPS bytecode features: subroutine calls, loops, key displacement, and jump commands.
+Composition in OpenSMPSDeck follows a three-level hierarchy: **Song -> Chain -> Phrase**. Each channel has its own chain -- an ordered list of phrase references. Phrases are the building blocks that contain actual SMPS track data (notes, durations, coordination flags). Chains define the sequence and can transpose phrases, repeat them, and set loop points. This hierarchical model maps directly to SMPS bytecode features: subroutine calls, loops, key displacement, and jump commands.
 
 ```
 Song

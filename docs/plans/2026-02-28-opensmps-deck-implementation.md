@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 21, JavaFX, Maven multi-module, javax.sound.sampled for audio output. Synth core copied from sonic-engine's `com.openggf.audio` package.
 
-**Source reference:** Synth core lives in `C:\Users\farre\IdeaProjects\sonic-engine\src\main\java\com\openggf\audio\`. Design doc at `docs/plans/2026-02-28-opensmps-deck-design.md`.
+**Source reference:** Synth core lives in `C:\Users\farre\IdeaProjects\sonic-engine\src\main\java\com\openggf\audio\`. Design doc at `docs/plans/2026-02-28-opensmpsdeck-design.md`.
 
 ---
 
@@ -24,8 +24,8 @@
 **Step 1: Create project root directory**
 
 ```bash
-mkdir -p ~/IdeaProjects/opensmps-deck
-cd ~/IdeaProjects/opensmps-deck
+mkdir -p ~/IdeaProjects/opensmpsdeck
+cd ~/IdeaProjects/opensmpsdeck
 git init
 ```
 
@@ -40,7 +40,7 @@ Create `pom.xml`:
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.opensmps</groupId>
-    <artifactId>opensmps-deck-parent</artifactId>
+    <artifactId>opensmpsdeck-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>OpenSMPSDeck</name>
@@ -83,7 +83,7 @@ Create `synth-core/pom.xml`:
 
     <parent>
         <groupId>com.opensmps</groupId>
-        <artifactId>opensmps-deck-parent</artifactId>
+        <artifactId>opensmpsdeck-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
@@ -112,11 +112,11 @@ Create `app/pom.xml`:
 
     <parent>
         <groupId>com.opensmps</groupId>
-        <artifactId>opensmps-deck-parent</artifactId>
+        <artifactId>opensmpsdeck-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>opensmps-deck-app</artifactId>
+    <artifactId>opensmpsdeck-app</artifactId>
     <name>OpenSMPSDeck Application</name>
 
     <dependencies>
@@ -157,12 +157,12 @@ mkdir -p synth-core/src/main/java/com/opensmps/smps
 mkdir -p synth-core/src/main/java/com/opensmps/driver
 mkdir -p synth-core/src/test/java/com/opensmps/synth
 mkdir -p synth-core/src/test/java/com/opensmps/smps
-mkdir -p app/src/main/java/com/opensmps/deck
-mkdir -p app/src/main/java/com/opensmps/deck/model
-mkdir -p app/src/main/java/com/opensmps/deck/ui
-mkdir -p app/src/main/java/com/opensmps/deck/audio
-mkdir -p app/src/main/java/com/opensmps/deck/io
-mkdir -p app/src/test/java/com/opensmps/deck
+mkdir -p app/src/main/java/com/opensmpsdeck
+mkdir -p app/src/main/java/com/opensmpsdeck/model
+mkdir -p app/src/main/java/com/opensmpsdeck/ui
+mkdir -p app/src/main/java/com/opensmpsdeck/audio
+mkdir -p app/src/main/java/com/opensmpsdeck/io
+mkdir -p app/src/test/java/com/opensmpsdeck
 ```
 
 **Step 6: Verify build**
@@ -732,17 +732,17 @@ git commit -m "feat: add javax.sound audio output backend"
 Core data model: Song, Pattern, FmVoice, PsgEnvelope.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/Song.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/Pattern.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/FmVoice.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/PsgEnvelope.java`
-- Create: `app/src/main/java/com/opensmps/deck/model/SmpsMode.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestSongModel.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/Song.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/Pattern.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/FmVoice.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/PsgEnvelope.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/SmpsMode.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestSongModel.java`
 
 **Step 1: Write test first**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -799,7 +799,7 @@ public class TestSongModel {
 
 `SmpsMode.java`:
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 public enum SmpsMode {
     S1, S2, S3K
@@ -808,7 +808,7 @@ public enum SmpsMode {
 
 `FmVoice.java`:
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 public class FmVoice {
     private String name;
@@ -847,7 +847,7 @@ public class FmVoice {
 
 `PsgEnvelope.java`:
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 public class PsgEnvelope {
     private String name;
@@ -879,7 +879,7 @@ public class PsgEnvelope {
 
 `Pattern.java`:
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -911,7 +911,7 @@ public class Pattern {
 
 `Song.java`:
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -973,15 +973,15 @@ git commit -m "feat: add SMPS-native song model (Song, Pattern, FmVoice, PsgEnve
 Compiles a Song model into a raw SMPS binary blob that SmpsDriver can play.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/audio/PatternCompiler.java`
-- Test: `app/src/test/java/com/opensmps/deck/audio/TestPatternCompiler.java`
+- Create: `app/src/main/java/com/opensmpsdeck/audio/PatternCompiler.java`
+- Test: `app/src/test/java/com/opensmpsdeck/audio/TestPatternCompiler.java`
 
 **Step 1: Write test**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -1068,9 +1068,9 @@ public class TestPatternCompiler {
 **Step 2: Implement PatternCompiler**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
@@ -1268,15 +1268,15 @@ git commit -m "feat: add PatternCompiler (Song model -> SMPS binary)"
 Wire PatternCompiler → SmpsDriver → AudioOutput for real-time playback.
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
-- Test: `app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java`
+- Create: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
+- Test: `app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java`
 
 **Step 1: Write test**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -1310,10 +1310,10 @@ public class TestPlaybackEngine {
 **Step 2: Implement PlaybackEngine**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
-import com.opensmps.deck.model.Song;
-import com.opensmps.deck.model.SmpsMode;
+import com.opensmpsdeck.model.Song;
+import com.opensmpsdeck.model.SmpsMode;
 import com.opensmps.driver.AudioOutput;
 import com.opensmps.driver.SmpsDriver;
 import com.opensmps.smps.*;
@@ -1398,7 +1398,7 @@ public class PlaybackEngine {
 }
 ```
 
-Note: `TestSmpsData` is from the test package in synth-core. For the app module to use it in production, either move it to `synth-core/src/main` or create an equivalent `SimpleSmpsData` class in the app module. The implementation should create a proper `SimpleSmpsData` in `com.opensmps.deck.audio`.
+Note: `TestSmpsData` is from the test package in synth-core. For the app module to use it in production, either move it to `synth-core/src/main` or create an equivalent `SimpleSmpsData` class in the app module. The implementation should create a proper `SimpleSmpsData` in `com.opensmpsdeck.audio`.
 
 **Step 3: Run tests**
 
@@ -1419,15 +1419,15 @@ git commit -m "feat: add PlaybackEngine (compile + play songs in real time)"
 ### Task 8: Project Save/Load (.osmpsd JSON)
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/ProjectFile.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestProjectFile.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/ProjectFile.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestProjectFile.java`
 
 **Step 1: Write test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.*;
+import com.opensmpsdeck.model.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
@@ -1496,8 +1496,8 @@ git add -A && git commit -m "feat: add .osmpsd project file save/load (JSON)"
 ### Task 9: SMPS Binary Export
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/SmpsExporter.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestSmpsExporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/SmpsExporter.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestSmpsExporter.java`
 
 **Step 1: Write test**
 
@@ -1519,8 +1519,8 @@ git add -A && git commit -m "feat: add SMPS binary export"
 ### Task 10: SMPS File Import (SMPSPlay .bin files)
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/SmpsImporter.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestSmpsImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestSmpsImporter.java`
 
 **Step 1: Write test**
 
@@ -1548,8 +1548,8 @@ git add -A && git commit -m "feat: add SMPS binary file import"
 ### Task 11: JavaFX Application Skeleton
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/OpenSmpsDeck.java` (Application main)
-- Create: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/OpenSmpsDeck.java` (Application main)
+- Create: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Create main application class**
 
@@ -1579,8 +1579,8 @@ git add -A && git commit -m "feat: add JavaFX application shell with placeholder
 ### Task 12: Transport Controls
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/TransportBar.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/TransportBar.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Create TransportBar**
 
@@ -1605,8 +1605,8 @@ git add -A && git commit -m "feat: add transport controls (play/stop/pause, temp
 ### Task 13: Tracker Grid (Display)
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/SmpsDecoder.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SmpsDecoder.java`
 
 **Step 1: Create SmpsDecoder**
 
@@ -1650,7 +1650,7 @@ git add -A && git commit -m "feat: add tracker grid display with SMPS bytecode d
 ### Task 14: Order List Panel
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/OrderListPanel.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/OrderListPanel.java`
 
 **Step 1: Create OrderListPanel**
 
@@ -1675,8 +1675,8 @@ git add -A && git commit -m "feat: add order list panel with pattern selection"
 ### Task 15: Tracker Grid Note Entry
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/SmpsEncoder.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SmpsEncoder.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Create SmpsEncoder**
 
@@ -1711,8 +1711,8 @@ git add -A && git commit -m "feat: add keyboard-driven note entry in tracker gri
 ### Task 16: Selection, Copy/Paste, Transpose
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/ClipboardData.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/ClipboardData.java`
 
 **Step 1: Implement selection**
 
@@ -1741,8 +1741,8 @@ git add -A && git commit -m "feat: add selection, copy/paste, transpose (+/- and
 ### Task 17: Undo/Redo
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/UndoManager.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/UndoManager.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Implement UndoManager**
 
@@ -1773,7 +1773,7 @@ git add -A && git commit -m "feat: add undo/redo for tracker grid edits"
 ### Task 18: FM Voice Editor Dialog
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java`
 
 **Step 1: Create dialog layout**
 
@@ -1808,7 +1808,7 @@ git add -A && git commit -m "feat: add FM voice editor with algorithm diagram an
 ### Task 19: PSG Envelope Editor Dialog
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/PsgEnvelopeEditor.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/PsgEnvelopeEditor.java`
 
 **Step 1: Create dialog layout**
 
@@ -1833,8 +1833,8 @@ git add -A && git commit -m "feat: add PSG envelope editor with bar graph"
 ### Task 20: Instrument Panel
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Create InstrumentPanel**
 
@@ -1861,8 +1861,8 @@ git add -A && git commit -m "feat: add instrument panel with voice bank and enve
 ### Task 21: Tab-Based Multi-Document
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/SongTab.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SongTab.java`
 
 **Step 1: Convert to TabPane**
 
@@ -1883,8 +1883,8 @@ git add -A && git commit -m "feat: add multi-document tabs with detachable windo
 ### Task 22: Cross-Song Copy-Paste with Instrument Resolution
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/InstrumentResolveDialog.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/InstrumentResolveDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Detect cross-song paste**
 
@@ -1909,8 +1909,8 @@ git add -A && git commit -m "feat: add cross-song copy-paste with instrument res
 ### Task 23: ROM Voice Import Browser
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/RomVoiceImporter.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/RomImportDialog.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/RomVoiceImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/RomImportDialog.java`
 
 **Step 1: Implement RomVoiceImporter**
 
@@ -1933,8 +1933,8 @@ git add -A && git commit -m "feat: add ROM/SMPSPlay voice import browser"
 ### Task 24: Song Import from ROM/SMPSPlay
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/io/SmpsImporter.java`
-- Create: `app/src/main/java/com/opensmps/deck/ui/SongImportDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SongImportDialog.java`
 
 **Step 1: Extend SmpsImporter**
 
@@ -1957,8 +1957,8 @@ git add -A && git commit -m "feat: add full song import from SMPSPlay .bin files
 ### Task 25: Per-Channel Solo/Mute
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
 
 **Step 1: Add mute/solo toggle to channel headers**
 
@@ -1979,8 +1979,8 @@ git add -A && git commit -m "feat: add per-channel solo/mute toggles"
 ### Task 26: WAV Export
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/WavExporter.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestWavExporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/WavExporter.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestWavExporter.java`
 
 **Step 1: Write test**
 

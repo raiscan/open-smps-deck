@@ -4,7 +4,7 @@ Play your song in real time, export it as audio, or compile it to SMPS binary fo
 
 ## Overview
 
-The internal model of every song in OpenSMPS Deck is SMPS bytecode. The tracker grid is a decoded view over that raw data, so what you hear during playback is exactly what gets written when you export. There is no separate render pass or lossy conversion step -- the playback engine and the binary exporter both feed from the same compiled output.
+The internal model of every song in OpenSMPSDeck is SMPS bytecode. The tracker grid is a decoded view over that raw data, so what you hear during playback is exactly what gets written when you export. There is no separate render pass or lossy conversion step -- the playback engine and the binary exporter both feed from the same compiled output.
 
 ## Playback Controls
 
@@ -115,7 +115,7 @@ The `.ovm` format is a JSON file containing:
 | `voices` | Array of FM voices, each with a name and hex-encoded 25-byte SMPS voice data |
 | `psgEnvelopes` | Array of PSG envelopes, each with a name and hex-encoded step data |
 
-Use voice bank files to share instrument patches between projects or with other OpenSMPS Deck users. Import them back with **File > Import Voice Bank...**.
+Use voice bank files to share instrument patches between projects or with other OpenSMPSDeck users. Import them back with **File > Import Voice Bank...**.
 
 ## Tips
 

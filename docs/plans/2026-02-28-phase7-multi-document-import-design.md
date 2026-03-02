@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add tab-based multi-document editing, cross-song copy-paste with instrument resolution, ROM/SMPSPlay voice import browser, and SMPS binary song import to OpenSMPS Deck.
+Add tab-based multi-document editing, cross-song copy-paste with instrument resolution, ROM/SMPSPlay voice import browser, and SMPS binary song import to OpenSMPSDeck.
 
 ## Components
 

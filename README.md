@@ -65,7 +65,7 @@ mvn test
 mvn package
 
 # Run the application
-mvn exec:java -pl app -Dexec.mainClass=com.opensmps.deck.Launcher
+mvn exec:java -pl app -Dexec.mainClass=com.opensmpsdeck.Launcher
 ```
 
 ## Architecture
@@ -96,11 +96,11 @@ Song model, codec, I/O, and JavaFX UI.
 
 | Package | Purpose |
 |---------|---------|
-| `com.opensmps.deck.model` | Song, Pattern, FmVoice, PsgEnvelope, DacSample, SmpsMode, Chain, ChainEntry, Phrase, PhraseLibrary, HierarchicalArrangement, ChannelType, ArrangementMode |
-| `com.opensmps.deck.codec` | PatternCompiler, SmpsEncoder/Decoder, InstrumentRemapper, PasteResolver, HierarchyCompiler, HierarchyDecompiler, EffectMnemonics |
-| `com.opensmps.deck.audio` | PlaybackEngine, SimpleSmpsData, PlaybackSliceBuilder, AdsrEnvelopeCalculator |
-| `com.opensmps.deck.io` | ProjectFile, SmpsExporter/Importer, WavExporter, VoiceBankFile, Rym2612Importer |
-| `com.opensmps.deck.ui` | TrackerGrid, FmVoiceEditor, PsgEnvelopeEditor, MainWindow, TransportBar, SongView, ChainStrip, ChainEditor, BreadcrumbBar, PhraseEditor, ImportPreviewDialog |
+| `com.opensmpsdeck.model` | Song, Pattern, FmVoice, PsgEnvelope, DacSample, SmpsMode, Chain, ChainEntry, Phrase, PhraseLibrary, HierarchicalArrangement, ChannelType, ArrangementMode |
+| `com.opensmpsdeck.codec` | PatternCompiler, SmpsEncoder/Decoder, InstrumentRemapper, PasteResolver, HierarchyCompiler, HierarchyDecompiler, EffectMnemonics |
+| `com.opensmpsdeck.audio` | PlaybackEngine, SimpleSmpsData, PlaybackSliceBuilder, AdsrEnvelopeCalculator |
+| `com.opensmpsdeck.io` | ProjectFile, SmpsExporter/Importer, WavExporter, VoiceBankFile, Rym2612Importer |
+| `com.opensmpsdeck.ui` | TrackerGrid, FmVoiceEditor, PsgEnvelopeEditor, MainWindow, TransportBar, SongView, ChainStrip, ChainEditor, BreadcrumbBar, PhraseEditor, ImportPreviewDialog |
 
 ### Channel Mapping
 

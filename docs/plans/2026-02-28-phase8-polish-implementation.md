@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add per-channel solo/mute toggles and WAV export to OpenSMPS Deck.
+**Goal:** Add per-channel solo/mute toggles and WAV export to OpenSMPSDeck.
 
 **Architecture:** Solo/Mute wires TrackerGrid header clicks to existing chip mute APIs. WAV Export renders offline via SmpsDriver.read() loop and writes RIFF/WAV.
 
@@ -13,7 +13,7 @@
 ### Task 1: Per-Channel Solo/Mute State and Click Handling
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Add mute/solo state fields**
 
@@ -84,7 +84,7 @@ Draw strikethrough line for muted channels.
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "feat: add per-channel solo/mute toggles to TrackerGrid"
 ```
 
@@ -93,7 +93,7 @@ git commit -m "feat: add per-channel solo/mute toggles to TrackerGrid"
 ### Task 2: Wire PlaybackEngine to TrackerGrid from MainWindow
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Pass PlaybackEngine to TrackerGrid in createSongTabUI()**
 
@@ -106,7 +106,7 @@ songTab.getTrackerGrid().setPlaybackEngine(playbackEngine);
 **Step 2: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: wire PlaybackEngine to TrackerGrid for mute control"
 ```
 
@@ -115,15 +115,15 @@ git commit -m "feat: wire PlaybackEngine to TrackerGrid for mute control"
 ### Task 3: WavExporter Implementation
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/WavExporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/WavExporter.java`
 
 **Step 1: Write WavExporter class**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.audio.PlaybackEngine;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.audio.PlaybackEngine;
+import com.opensmpsdeck.model.Song;
 
 import java.io.*;
 
@@ -244,7 +244,7 @@ public class WavExporter {
 **Step 2: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/WavExporter.java
+git add app/src/main/java/com/opensmpsdeck/io/WavExporter.java
 git commit -m "feat: add WavExporter for offline PCM rendering to WAV"
 ```
 
@@ -253,7 +253,7 @@ git commit -m "feat: add WavExporter for offline PCM rendering to WAV"
 ### Task 4: WavExporter Test
 
 **Files:**
-- Create: `app/src/test/java/com/opensmps/deck/io/TestWavExporter.java`
+- Create: `app/src/test/java/com/opensmpsdeck/io/TestWavExporter.java`
 
 **Step 1: Write test**
 
@@ -262,7 +262,7 @@ Test that exporting a minimal song produces a valid WAV file with correct header
 **Step 2: Commit**
 
 ```bash
-git add app/src/test/java/com/opensmps/deck/io/TestWavExporter.java
+git add app/src/test/java/com/opensmpsdeck/io/TestWavExporter.java
 git commit -m "test: add WavExporter tests for header and audio output"
 ```
 
@@ -271,7 +271,7 @@ git commit -m "test: add WavExporter tests for header and audio output"
 ### Task 5: WAV Export Menu Item in MainWindow
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Add "Export WAV..." menu item after "Export SMPS..."**
 
@@ -307,7 +307,7 @@ private void onExportWav() {
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: add Export WAV menu item to MainWindow"
 ```
 

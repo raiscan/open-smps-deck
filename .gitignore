@@ -33,6 +33,10 @@ Thumbs.db
 *.gen
 docs/SMPS-rips/
 
+# Local reference material (not committed)
+docs/xm4smps-4.1/
+docs/Xm4smps-4.1.src.tar.gz
+
 # Temporary files
 *.tmp
 *.swp

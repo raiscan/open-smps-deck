@@ -13,8 +13,8 @@
 ## Task 18: FmVoice Bit-Field Accessors
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/model/FmVoice.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestSongModel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/FmVoice.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestSongModel.java`
 
 ### Context
 
@@ -343,8 +343,8 @@ Expected: ALL PASS (existing tests updated for new offsets, new bit-field tests 
 ### Step 6: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/FmVoice.java \
-       app/src/test/java/com/opensmps/deck/model/TestSongModel.java
+git add app/src/main/java/com/opensmpsdeck/model/FmVoice.java \
+       app/src/test/java/com/opensmpsdeck/model/TestSongModel.java
 git commit -m "feat: add FmVoice bit-field accessors and fix PARAMS_PER_OPERATOR"
 ```
 
@@ -353,8 +353,8 @@ git commit -m "feat: add FmVoice bit-field accessors and fix PARAMS_PER_OPERATOR
 ## Task 19: PsgEnvelope Add/Remove Steps
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/model/PsgEnvelope.java`
-- Test: `app/src/test/java/com/opensmps/deck/model/TestSongModel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/PsgEnvelope.java`
+- Test: `app/src/test/java/com/opensmpsdeck/model/TestSongModel.java`
 
 ### Context
 
@@ -470,8 +470,8 @@ Expected: ALL PASS
 ### Step 5: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/PsgEnvelope.java \
-       app/src/test/java/com/opensmps/deck/model/TestSongModel.java
+git add app/src/main/java/com/opensmpsdeck/model/PsgEnvelope.java \
+       app/src/test/java/com/opensmpsdeck/model/TestSongModel.java
 git commit -m "feat: add PsgEnvelope addStep/removeStep/setData methods"
 ```
 
@@ -480,7 +480,7 @@ git commit -m "feat: add PsgEnvelope addStep/removeStep/setData methods"
 ## Task 20: FM Voice Editor Dialog
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java`
 
 ### Context
 
@@ -511,9 +511,9 @@ Algo 7: [1]→OUT [2]→OUT [3]→OUT [4]→OUT
 ### Step 1: Create FmVoiceEditor.java
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.FmVoice;
+import com.opensmpsdeck.model.FmVoice;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
@@ -809,7 +809,7 @@ Expected: BUILD SUCCESS
 ### Step 3: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java
+git add app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java
 git commit -m "feat: add FM voice editor dialog with algorithm diagram and operator sliders"
 ```
 
@@ -818,7 +818,7 @@ git commit -m "feat: add FM voice editor dialog with algorithm diagram and opera
 ## Task 21: PSG Envelope Editor Dialog
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/PsgEnvelopeEditor.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/PsgEnvelopeEditor.java`
 
 ### Context
 
@@ -827,9 +827,9 @@ JavaFX `Dialog<PsgEnvelope>` with a clickable bar graph canvas. Each bar represe
 ### Step 1: Create PsgEnvelopeEditor.java
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.PsgEnvelope;
+import com.opensmpsdeck.model.PsgEnvelope;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
@@ -1003,7 +1003,7 @@ Expected: BUILD SUCCESS
 ### Step 3: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/PsgEnvelopeEditor.java
+git add app/src/main/java/com/opensmpsdeck/ui/PsgEnvelopeEditor.java
 git commit -m "feat: add PSG envelope editor dialog with bar graph canvas"
 ```
 
@@ -1012,8 +1012,8 @@ git commit -m "feat: add PSG envelope editor dialog with bar graph canvas"
 ## Task 22: Instrument Panel
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 ### Context
 
@@ -1022,11 +1022,11 @@ Right-side panel with two `ListView` sections for FM voices and PSG envelopes. D
 ### Step 1: Create InstrumentPanel.java
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.PsgEnvelope;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.PsgEnvelope;
+import com.opensmpsdeck.model.Song;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -1257,8 +1257,8 @@ Expected: BUILD SUCCESS
 ### Step 4: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java \
-       app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java \
+       app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: add instrument panel with voice bank and envelope list management"
 ```
 
@@ -1267,8 +1267,8 @@ git commit -m "feat: add instrument panel with voice bank and envelope list mana
 ## Task 23: Wire Instrument Selection to TrackerGrid
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 ### Context
 
@@ -1375,8 +1375,8 @@ Expected: ALL PASS (no test changes needed — instrument wiring is UI-only)
 ### Step 6: Commit
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java \
-       app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java \
+       app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: wire instrument selection to tracker grid note entry"
 ```
 

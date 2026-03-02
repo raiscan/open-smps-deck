@@ -63,8 +63,8 @@ Write this early — other chapters will reference it, and it's a factual list t
 - Create: `docs/user-guide/11-keyboard-reference.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java` — all key handlers
-- `app/src/main/java/com/opensmps/deck/ui/MainWindow.java` — menu accelerators
+- `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java` — all key handlers
+- `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java` — menu accelerators
 
 **Step 1: Read source files for exact keybindings**
 
@@ -109,9 +109,9 @@ git commit -m "docs: add keyboard reference chapter"
 - Create: `docs/user-guide/03-interface-overview.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/MainWindow.java` — layout structure, menus, tabs
-- `app/src/main/java/com/opensmps/deck/ui/SongTab.java` — per-tab layout
-- `app/src/main/java/com/opensmps/deck/ui/TransportBar.java` — transport controls
+- `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java` — layout structure, menus, tabs
+- `app/src/main/java/com/opensmpsdeck/ui/SongTab.java` — per-tab layout
+- `app/src/main/java/com/opensmpsdeck/ui/TransportBar.java` — transport controls
 
 **Step 1: Read source files**
 
@@ -147,8 +147,8 @@ git commit -m "docs: add interface overview chapter"
 - Create: `docs/user-guide/04-fm-voice-editor.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java` — editor UI, algorithm diagram, all sliders
-- `app/src/main/java/com/opensmps/deck/model/FmVoice.java` — parameter ranges, carrier table, data layout
+- `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java` — editor UI, algorithm diagram, all sliders
+- `app/src/main/java/com/opensmpsdeck/model/FmVoice.java` — parameter ranges, carrier table, data layout
 
 **Step 1: Read source files**
 
@@ -206,8 +206,8 @@ git commit -m "docs: add FM voice editor chapter"
 - Create: `docs/user-guide/05-psg-envelopes.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/PsgEnvelopeEditor.java` — editor UI
-- `app/src/main/java/com/opensmps/deck/model/PsgEnvelope.java` — data model
+- `app/src/main/java/com/opensmpsdeck/ui/PsgEnvelopeEditor.java` — editor UI
+- `app/src/main/java/com/opensmpsdeck/model/PsgEnvelope.java` — data model
 
 **Step 1: Read source files**
 
@@ -245,10 +245,10 @@ git commit -m "docs: add PSG envelopes chapter"
 - Create: `docs/user-guide/06-dac-samples.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/DacSampleEditor.java` — editor UI
-- `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java` — DAC section (+ / Dup / Edit / Del buttons)
-- `app/src/main/java/com/opensmps/deck/io/DacSampleImporter.java` — supported formats, conversion logic
-- `app/src/main/java/com/opensmps/deck/model/DacSample.java` — data model
+- `app/src/main/java/com/opensmpsdeck/ui/DacSampleEditor.java` — editor UI
+- `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java` — DAC section (+ / Dup / Edit / Del buttons)
+- `app/src/main/java/com/opensmpsdeck/io/DacSampleImporter.java` — supported formats, conversion logic
+- `app/src/main/java/com/opensmpsdeck/model/DacSample.java` — data model
 
 **Step 1: Read source files**
 
@@ -292,9 +292,9 @@ git commit -m "docs: add DAC samples chapter"
 - Create: `docs/user-guide/07-tracker-grid.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java` — full file (all key handlers, rendering, selection, paste, transpose, mute/solo)
-- `app/src/main/java/com/opensmps/deck/ui/InstrumentResolveDialog.java` — cross-song paste resolution
-- `app/src/main/java/com/opensmps/deck/model/UndoManager.java` — undo/redo behavior
+- `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java` — full file (all key handlers, rendering, selection, paste, transpose, mute/solo)
+- `app/src/main/java/com/opensmpsdeck/ui/InstrumentResolveDialog.java` — cross-song paste resolution
+- `app/src/main/java/com/opensmpsdeck/model/UndoManager.java` — undo/redo behavior
 
 **Step 1: Read source files**
 
@@ -347,9 +347,9 @@ git commit -m "docs: add tracker grid chapter"
 - Create: `docs/user-guide/08-patterns-and-orders.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/ui/OrderListPanel.java` — order list UI, buttons, loop marker
-- `app/src/main/java/com/opensmps/deck/model/Pattern.java` — pattern data structure
-- `app/src/main/java/com/opensmps/deck/model/Song.java` — orderList, patterns, loopPoint
+- `app/src/main/java/com/opensmpsdeck/ui/OrderListPanel.java` — order list UI, buttons, loop marker
+- `app/src/main/java/com/opensmpsdeck/model/Pattern.java` — pattern data structure
+- `app/src/main/java/com/opensmpsdeck/model/Song.java` — orderList, patterns, loopPoint
 
 **Step 1: Read source files**
 
@@ -388,11 +388,11 @@ git commit -m "docs: add patterns and orders chapter"
 - Create: `docs/user-guide/09-playback-and-export.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java` — play, stop, pause, preview
-- `app/src/main/java/com/opensmps/deck/io/WavExporter.java` — WAV export (sample rate, loop count, fade-out)
-- `app/src/main/java/com/opensmps/deck/io/SmpsExporter.java` — SMPS binary export
-- `app/src/main/java/com/opensmps/deck/io/VoiceBankFile.java` — .ovm export
-- `app/src/main/java/com/opensmps/deck/ui/MainWindow.java` — export menu items
+- `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java` — play, stop, pause, preview
+- `app/src/main/java/com/opensmpsdeck/io/WavExporter.java` — WAV export (sample rate, loop count, fade-out)
+- `app/src/main/java/com/opensmpsdeck/io/SmpsExporter.java` — SMPS binary export
+- `app/src/main/java/com/opensmpsdeck/io/VoiceBankFile.java` — .ovm export
+- `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java` — export menu items
 
 **Step 1: Read source files**
 
@@ -429,13 +429,13 @@ git commit -m "docs: add playback and export chapter"
 - Create: `docs/user-guide/10-importing.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/io/SmpsImporter.java` — SMPS binary import
-- `app/src/main/java/com/opensmps/deck/io/RomVoiceImporter.java` — directory scan voice import
-- `app/src/main/java/com/opensmps/deck/io/VoiceBankFile.java` — .ovm import
-- `app/src/main/java/com/opensmps/deck/io/Rym2612Importer.java` — .rym2612 import
-- `app/src/main/java/com/opensmps/deck/io/DacSampleImporter.java` — sample import
-- `app/src/main/java/com/opensmps/deck/ui/VoiceImportDialog.java` — voice selection table
-- `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java` — Import Bank button
+- `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java` — SMPS binary import
+- `app/src/main/java/com/opensmpsdeck/io/RomVoiceImporter.java` — directory scan voice import
+- `app/src/main/java/com/opensmpsdeck/io/VoiceBankFile.java` — .ovm import
+- `app/src/main/java/com/opensmpsdeck/io/Rym2612Importer.java` — .rym2612 import
+- `app/src/main/java/com/opensmpsdeck/io/DacSampleImporter.java` — sample import
+- `app/src/main/java/com/opensmpsdeck/ui/VoiceImportDialog.java` — voice selection table
+- `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java` — Import Bank button
 
 **Step 1: Read source files**
 
@@ -475,7 +475,7 @@ git commit -m "docs: add importing chapter"
 - Create: `docs/user-guide/12-smps-modes.md`
 
 **Reference source files:**
-- `app/src/main/java/com/opensmps/deck/model/SmpsMode.java` — enum values and docs
+- `app/src/main/java/com/opensmpsdeck/model/SmpsMode.java` — enum values and docs
 - `synth-core/src/main/java/com/opensmps/smps/SmpsSequencerConfig.java` — per-mode config differences (tempo mode, pointer mode)
 
 **Step 1: Read source files**
@@ -519,7 +519,7 @@ git commit -m "docs: add SMPS modes chapter"
 
 **Reference source files:**
 - `pom.xml` — Java version, build command
-- `app/src/main/java/com/opensmps/deck/ui/MainWindow.java` — what appears on launch
+- `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java` — what appears on launch
 
 **Step 1: Read pom.xml for build prerequisites**
 

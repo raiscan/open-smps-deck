@@ -51,11 +51,11 @@ Three entry points:
 
 | Action | File |
 |--------|------|
-| Create | `app/src/main/java/com/opensmps/deck/io/OsmpsVoiceFile.java` |
-| Create | `app/src/test/java/com/opensmps/deck/io/TestOsmpsVoiceFile.java` |
-| Modify | `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java` — add Save/Load Preset buttons |
-| Modify | `app/src/main/java/com/opensmps/deck/ui/MainWindowFileActions.java` — add `.osmpsvoice` to import filter |
-| Modify | `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java` — add Export Preset action |
+| Create | `app/src/main/java/com/opensmpsdeck/io/OsmpsVoiceFile.java` |
+| Create | `app/src/test/java/com/opensmpsdeck/io/TestOsmpsVoiceFile.java` |
+| Modify | `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java` — add Save/Load Preset buttons |
+| Modify | `app/src/main/java/com/opensmpsdeck/ui/MainWindowFileActions.java` — add `.osmpsvoice` to import filter |
+| Modify | `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java` — add Export Preset action |
 
 ---
 
@@ -92,7 +92,7 @@ Everything left of the key-off marker shows Attack → Decay 1 → Decay 2. Ever
 
 ### Architecture
 
-**Pure model class:** `AdsrEnvelopeCalculator` (in `com.opensmps.deck.model` or `com.opensmps.deck.audio`) — no JavaFX dependency. Takes AR, D1R, D2R, D1L, RR and produces a list of `(normalizedTime, normalizedLevel)` points suitable for plotting. This class is fully unit-testable.
+**Pure model class:** `AdsrEnvelopeCalculator` (in `com.opensmpsdeck.model` or `com.opensmpsdeck.audio`) — no JavaFX dependency. Takes AR, D1R, D2R, D1L, RR and produces a list of `(normalizedTime, normalizedLevel)` points suitable for plotting. This class is fully unit-testable.
 
 **Rendering:** `FmVoiceEditor` calls `AdsrEnvelopeCalculator` for each of the 4 operators and draws the resulting polylines on the envelope canvas using `GraphicsContext`.
 
@@ -104,9 +104,9 @@ Every slider change in `buildSliderRow` triggers `redrawEnvelopePreview()`, whic
 
 | Action | File |
 |--------|------|
-| Create | `app/src/main/java/com/opensmps/deck/audio/AdsrEnvelopeCalculator.java` |
-| Create | `app/src/test/java/com/opensmps/deck/audio/TestAdsrEnvelopeCalculator.java` |
-| Modify | `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java` — add envelope canvas + redraw logic |
+| Create | `app/src/main/java/com/opensmpsdeck/audio/AdsrEnvelopeCalculator.java` |
+| Create | `app/src/test/java/com/opensmpsdeck/audio/TestAdsrEnvelopeCalculator.java` |
+| Modify | `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java` — add envelope canvas + redraw logic |
 
 ---
 

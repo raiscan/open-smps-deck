@@ -15,16 +15,16 @@
 ### Task 1: VoiceBankFile — .ovm Read/Write
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/VoiceBankFile.java`
-- Create: `app/src/test/java/com/opensmps/deck/io/TestVoiceBankFile.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/VoiceBankFile.java`
+- Create: `app/src/test/java/com/opensmpsdeck/io/TestVoiceBankFile.java`
 
 **Step 1: Write failing test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.PsgEnvelope;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.PsgEnvelope;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -79,17 +79,17 @@ class TestVoiceBankFile {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestVoiceBankFile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestVoiceBankFile -q`
 Expected: FAIL (class not found)
 
 **Step 3: Implement VoiceBankFile**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
 import com.google.gson.*;
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.PsgEnvelope;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.PsgEnvelope;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -187,14 +187,14 @@ public final class VoiceBankFile {
 
 **Step 4: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestVoiceBankFile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestVoiceBankFile -q`
 Expected: PASS (3 tests)
 
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/VoiceBankFile.java \
-       app/src/test/java/com/opensmps/deck/io/TestVoiceBankFile.java
+git add app/src/main/java/com/opensmpsdeck/io/VoiceBankFile.java \
+       app/src/test/java/com/opensmpsdeck/io/TestVoiceBankFile.java
 git commit -m "feat: add VoiceBankFile (.ovm) read/write with tests"
 ```
 
@@ -203,15 +203,15 @@ git commit -m "feat: add VoiceBankFile (.ovm) read/write with tests"
 ### Task 2: Rym2612Importer — .rym2612 XML Parser
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/Rym2612Importer.java`
-- Create: `app/src/test/java/com/opensmps/deck/io/TestRym2612Importer.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/Rym2612Importer.java`
+- Create: `app/src/test/java/com/opensmpsdeck/io/TestRym2612Importer.java`
 
 **Step 1: Write failing test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
+import com.opensmpsdeck.model.FmVoice;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -324,15 +324,15 @@ class TestRym2612Importer {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestRym2612Importer -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestRym2612Importer -q`
 Expected: FAIL
 
 **Step 3: Implement Rym2612Importer**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
+import com.opensmpsdeck.model.FmVoice;
 import org.w3c.dom.*;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
@@ -430,14 +430,14 @@ public final class Rym2612Importer {
 
 **Step 4: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestRym2612Importer -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestRym2612Importer -q`
 Expected: PASS (4 tests)
 
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/Rym2612Importer.java \
-       app/src/test/java/com/opensmps/deck/io/TestRym2612Importer.java
+git add app/src/main/java/com/opensmpsdeck/io/Rym2612Importer.java \
+       app/src/test/java/com/opensmpsdeck/io/TestRym2612Importer.java
 git commit -m "feat: add RYM2612 voice import (.rym2612 XML parser)"
 ```
 
@@ -446,9 +446,9 @@ git commit -m "feat: add RYM2612 voice import (.rym2612 XML parser)"
 ### Task 3: Voice Bank UI — Menu Items and InstrumentPanel Button
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/VoiceImportDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/VoiceImportDialog.java`
 
 **Step 1: Add import/export voice bank menu items to MainWindow**
 
@@ -481,11 +481,11 @@ In the voice bank button bar, add a button that opens the same import flow.
 
 **Step 3: Test manually, then commit**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn compile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn compile -q`
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java \
-       app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java \
+       app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java
 git commit -m "feat: add voice bank import/export menu items and panel button"
 ```
 
@@ -496,9 +496,9 @@ git commit -m "feat: add voice bank import/export menu items and panel button"
 ### Task 4: Parameterize SimpleSmpsData baseNoteOffset
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/audio/SimpleSmpsData.java`
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
-- Modify: `app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/SimpleSmpsData.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java`
 
 **Step 1: Write failing test**
 
@@ -569,15 +569,15 @@ SimpleSmpsData data = new SimpleSmpsData(smps, baseNoteOffset);
 
 **Step 4: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestPlaybackEngine -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestPlaybackEngine -q`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/audio/SimpleSmpsData.java \
-       app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java \
-       app/src/test/java/com/opensmps/deck/audio/TestPlaybackEngine.java
+git add app/src/main/java/com/opensmpsdeck/audio/SimpleSmpsData.java \
+       app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java \
+       app/src/test/java/com/opensmpsdeck/audio/TestPlaybackEngine.java
 git commit -m "feat: parameterize SimpleSmpsData baseNoteOffset for S1/S3K mode"
 ```
 
@@ -586,8 +586,8 @@ git commit -m "feat: parameterize SimpleSmpsData baseNoteOffset for S1/S3K mode"
 ### Task 5: Mode-Aware PatternCompiler Note Compensation
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/codec/PatternCompiler.java`
-- Modify: `app/src/test/java/com/opensmps/deck/codec/TestPatternCompiler.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/codec/PatternCompiler.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/codec/TestPatternCompiler.java`
 
 **Step 1: Write failing test**
 
@@ -650,14 +650,14 @@ byte[] smps = compiler.compile(song);  // already uses song.getSmpsMode()
 
 **Step 4: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -q`
 Expected: ALL PASS
 
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/codec/PatternCompiler.java \
-       app/src/test/java/com/opensmps/deck/codec/TestPatternCompiler.java
+git add app/src/main/java/com/opensmpsdeck/codec/PatternCompiler.java \
+       app/src/test/java/com/opensmpsdeck/codec/TestPatternCompiler.java
 git commit -m "feat: mode-aware note compensation in PatternCompiler for S1/S3K"
 ```
 
@@ -668,14 +668,14 @@ git commit -m "feat: mode-aware note compensation in PatternCompiler for S1/S3K"
 ### Task 6: DacSample Model
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/model/DacSample.java`
-- Create: `app/src/test/java/com/opensmps/deck/model/TestDacSample.java`
-- Modify: `app/src/main/java/com/opensmps/deck/model/Song.java`
+- Create: `app/src/main/java/com/opensmpsdeck/model/DacSample.java`
+- Create: `app/src/test/java/com/opensmpsdeck/model/TestDacSample.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/Song.java`
 
 **Step 1: Write failing test**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -719,7 +719,7 @@ class TestDacSample {
 **Step 2: Implement DacSample**
 
 ```java
-package com.opensmps.deck.model;
+package com.opensmpsdeck.model;
 
 /**
  * A DAC (Digital-to-Analog Converter) PCM sample for the Mega Drive DAC channel.
@@ -763,15 +763,15 @@ public List<DacSample> getDacSamples() { return dacSamples; }
 
 **Step 4: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestDacSample -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestDacSample -q`
 Expected: PASS (4 tests)
 
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/DacSample.java \
-       app/src/test/java/com/opensmps/deck/model/TestDacSample.java \
-       app/src/main/java/com/opensmps/deck/model/Song.java
+git add app/src/main/java/com/opensmpsdeck/model/DacSample.java \
+       app/src/test/java/com/opensmpsdeck/model/TestDacSample.java \
+       app/src/main/java/com/opensmpsdeck/model/Song.java
 git commit -m "feat: add DacSample model and Song.dacSamples list"
 ```
 
@@ -780,15 +780,15 @@ git commit -m "feat: add DacSample model and Song.dacSamples list"
 ### Task 7: DacSampleImporter — WAV/PCM Import
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/DacSampleImporter.java`
-- Create: `app/src/test/java/com/opensmps/deck/io/TestDacSampleImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/DacSampleImporter.java`
+- Create: `app/src/test/java/com/opensmpsdeck/io/TestDacSampleImporter.java`
 
 **Step 1: Write failing test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.DacSample;
+import com.opensmpsdeck.model.DacSample;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -862,9 +862,9 @@ class TestDacSampleImporter {
 **Step 2: Implement DacSampleImporter**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.DacSample;
+import com.opensmpsdeck.model.DacSample;
 
 import javax.sound.sampled.*;
 import java.io.*;
@@ -934,14 +934,14 @@ public final class DacSampleImporter {
 
 **Step 3: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestDacSampleImporter -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestDacSampleImporter -q`
 Expected: PASS
 
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/DacSampleImporter.java \
-       app/src/test/java/com/opensmps/deck/io/TestDacSampleImporter.java
+git add app/src/main/java/com/opensmpsdeck/io/DacSampleImporter.java \
+       app/src/test/java/com/opensmpsdeck/io/TestDacSampleImporter.java
 git commit -m "feat: add DacSampleImporter for WAV and raw PCM import"
 ```
 
@@ -950,7 +950,7 @@ git commit -m "feat: add DacSampleImporter for WAV and raw PCM import"
 ### Task 8: PlaybackEngine DAC Wiring
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java`
 
 **Step 1: Build DacData from Song's dacSamples in loadSong()**
 
@@ -980,13 +980,13 @@ Add required imports: `DacData`, `DacSample`, `HashMap`, `Map`.
 
 **Step 2: Run existing tests to verify no regression**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -q`
 Expected: ALL PASS
 
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/audio/PlaybackEngine.java
+git add app/src/main/java/com/opensmpsdeck/audio/PlaybackEngine.java
 git commit -m "feat: wire Song DAC samples to SmpsDriver DacData for playback"
 ```
 
@@ -995,8 +995,8 @@ git commit -m "feat: wire Song DAC samples to SmpsDriver DacData for playback"
 ### Task 9: ProjectFile — Save/Load DAC Samples
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/io/ProjectFile.java`
-- Modify: `app/src/test/java/com/opensmps/deck/io/TestProjectFile.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/io/ProjectFile.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/io/TestProjectFile.java`
 
 **Step 1: Write failing test**
 
@@ -1052,14 +1052,14 @@ if (root.has("dacSamples")) {
 
 **Step 3: Run tests**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestProjectFile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestProjectFile -q`
 Expected: PASS
 
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/ProjectFile.java \
-       app/src/test/java/com/opensmps/deck/io/TestProjectFile.java
+git add app/src/main/java/com/opensmpsdeck/io/ProjectFile.java \
+       app/src/test/java/com/opensmpsdeck/io/TestProjectFile.java
 git commit -m "feat: save/load DAC samples in project files"
 ```
 
@@ -1068,16 +1068,16 @@ git commit -m "feat: save/load DAC samples in project files"
 ### Task 10: DAC Samples UI — InstrumentPanel + DacSampleEditor
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/DacSampleEditor.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/DacSampleEditor.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Create DacSampleEditor dialog**
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.DacSample;
+import com.opensmpsdeck.model.DacSample;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
@@ -1142,13 +1142,13 @@ Below the PSG Envelopes section, add:
 
 **Step 3: Compile and verify**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn compile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn compile -q`
 
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/DacSampleEditor.java \
-       app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java
+git add app/src/main/java/com/opensmpsdeck/ui/DacSampleEditor.java \
+       app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java
 git commit -m "feat: add DAC Samples section to InstrumentPanel with editor dialog"
 ```
 
@@ -1157,7 +1157,7 @@ git commit -m "feat: add DAC Samples section to InstrumentPanel with editor dial
 ### Task 11: TrackerGrid DAC Channel Note Entry
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Modify note entry for DAC channel (index 5)**
 
@@ -1193,12 +1193,12 @@ if (channel == 5 && song != null) {
 
 **Step 3: Compile and test**
 
-Run: `cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn compile -q`
+Run: `cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn compile -q`
 
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "feat: DAC channel note entry with sample name display"
 ```
 
@@ -1209,7 +1209,7 @@ git commit -m "feat: DAC channel note entry with sample name display"
 **Step 1: Run full test suite**
 
 ```bash
-cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test
+cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test
 ```
 
 Expected: ALL PASS (166+ existing + new tests)
@@ -1217,7 +1217,7 @@ Expected: ALL PASS (166+ existing + new tests)
 **Step 2: Verify the bundled .rym2612 file imports correctly**
 
 ```bash
-cd /c/Users/farre/IdeaProjects/opensmps-deck && mvn test -pl app -Dtest=TestRym2612Importer -q
+cd /c/Users/farre/IdeaProjects/opensmpsdeck && mvn test -pl app -Dtest=TestRym2612Importer -q
 ```
 
 **Step 3: Final commit if any fixups needed**

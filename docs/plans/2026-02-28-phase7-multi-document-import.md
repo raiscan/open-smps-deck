@@ -13,15 +13,15 @@
 ### Task 24: SongTab Class
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/SongTab.java`
-- Test: `app/src/test/java/com/opensmps/deck/ui/TestSongTab.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/SongTab.java`
+- Test: `app/src/test/java/com/opensmpsdeck/ui/TestSongTab.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.Song;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -71,9 +71,9 @@ Expected: FAIL — class SongTab does not exist
 **Step 3: Write minimal implementation**
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.Song;
 
 import java.io.File;
 
@@ -163,7 +163,7 @@ Expected: PASS (4 tests)
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/SongTab.java app/src/test/java/com/opensmps/deck/ui/TestSongTab.java
+git add app/src/main/java/com/opensmpsdeck/ui/SongTab.java app/src/test/java/com/opensmpsdeck/ui/TestSongTab.java
 git commit -m "feat: add SongTab model for multi-document support"
 ```
 
@@ -172,8 +172,8 @@ git commit -m "feat: add SongTab model for multi-document support"
 ### Task 25: MainWindow TabPane Conversion
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TransportBar.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TransportBar.java`
 
 **Step 1: Modify TransportBar to support song switching**
 
@@ -309,7 +309,7 @@ Expected: All tests pass (existing tests don't depend on MainWindow internals)
 **Step 6: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java app/src/main/java/com/opensmps/deck/ui/TransportBar.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java app/src/main/java/com/opensmpsdeck/ui/TransportBar.java
 git commit -m "feat: convert MainWindow to tab-based multi-document editor"
 ```
 
@@ -318,10 +318,10 @@ git commit -m "feat: convert MainWindow to tab-based multi-document editor"
 ### Task 26: ClipboardData Source Song + Cross-Paste Byte Scanner
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/model/ClipboardData.java`
-- Create: `app/src/main/java/com/opensmps/deck/codec/InstrumentRemapper.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
-- Test: `app/src/test/java/com/opensmps/deck/codec/TestInstrumentRemapper.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/model/ClipboardData.java`
+- Create: `app/src/main/java/com/opensmpsdeck/codec/InstrumentRemapper.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
+- Test: `app/src/test/java/com/opensmpsdeck/codec/TestInstrumentRemapper.java`
 
 **Step 1: Add sourceSong to ClipboardData**
 
@@ -345,10 +345,10 @@ clipboard = new ClipboardData(channelData, rowCount, song);
 **Step 2: Write the InstrumentRemapper failing tests**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.Song;
 import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -433,10 +433,10 @@ Expected: FAIL — class InstrumentRemapper does not exist
 **Step 4: Implement InstrumentRemapper**
 
 ```java
-package com.opensmps.deck.codec;
+package com.opensmpsdeck.codec;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.PsgEnvelope;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.PsgEnvelope;
 import com.opensmps.smps.SmpsCoordFlags;
 
 import java.util.*;
@@ -574,10 +574,10 @@ Expected: All tests pass
 **Step 8: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/model/ClipboardData.java \
-       app/src/main/java/com/opensmps/deck/codec/InstrumentRemapper.java \
-       app/src/test/java/com/opensmps/deck/codec/TestInstrumentRemapper.java \
-       app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/model/ClipboardData.java \
+       app/src/main/java/com/opensmpsdeck/codec/InstrumentRemapper.java \
+       app/src/test/java/com/opensmpsdeck/codec/TestInstrumentRemapper.java \
+       app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "feat: add instrument remapper for cross-song paste operations"
 ```
 
@@ -586,18 +586,18 @@ git commit -m "feat: add instrument remapper for cross-song paste operations"
 ### Task 27: InstrumentResolveDialog + TrackerGrid Wiring
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/InstrumentResolveDialog.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/InstrumentResolveDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java`
 
 **Step 1: Create InstrumentResolveDialog**
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.codec.InstrumentRemapper;
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.PsgEnvelope;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.codec.InstrumentRemapper;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.PsgEnvelope;
+import com.opensmpsdeck.model.Song;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
@@ -813,8 +813,8 @@ Expected: All tests pass
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/InstrumentResolveDialog.java \
-       app/src/main/java/com/opensmps/deck/ui/TrackerGrid.java
+git add app/src/main/java/com/opensmpsdeck/ui/InstrumentResolveDialog.java \
+       app/src/main/java/com/opensmpsdeck/ui/TrackerGrid.java
 git commit -m "feat: add cross-song paste with instrument resolution dialog"
 ```
 
@@ -823,17 +823,17 @@ git commit -m "feat: add cross-song paste with instrument resolution dialog"
 ### Task 28: ImportableVoice + RomVoiceImporter
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/io/ImportableVoice.java`
-- Create: `app/src/main/java/com/opensmps/deck/io/RomVoiceImporter.java`
-- Test: `app/src/test/java/com/opensmps/deck/io/TestRomVoiceImporter.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/ImportableVoice.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/RomVoiceImporter.java`
+- Test: `app/src/test/java/com/opensmpsdeck/io/TestRomVoiceImporter.java`
 
 **Step 1: Write the failing tests**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.Song;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -917,7 +917,7 @@ Expected: FAIL — classes do not exist
 **Step 3: Create ImportableVoice record**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
 /**
  * A voice discovered during ROM/SMPS file scanning, with provenance metadata.
@@ -943,10 +943,10 @@ public record ImportableVoice(String sourceSong, int originalIndex, byte[] voice
 **Step 4: Create RomVoiceImporter**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
-import com.opensmps.deck.model.Song;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.Song;
 
 import java.io.File;
 import java.util.*;
@@ -1023,9 +1023,9 @@ Expected: All tests pass
 **Step 7: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/ImportableVoice.java \
-       app/src/main/java/com/opensmps/deck/io/RomVoiceImporter.java \
-       app/src/test/java/com/opensmps/deck/io/TestRomVoiceImporter.java
+git add app/src/main/java/com/opensmpsdeck/io/ImportableVoice.java \
+       app/src/main/java/com/opensmpsdeck/io/RomVoiceImporter.java \
+       app/src/test/java/com/opensmpsdeck/io/TestRomVoiceImporter.java
 git commit -m "feat: add RomVoiceImporter for SMPS voice bank scanning"
 ```
 
@@ -1034,16 +1034,16 @@ git commit -m "feat: add RomVoiceImporter for SMPS voice bank scanning"
 ### Task 29: VoiceImportDialog + Menu Wiring
 
 **Files:**
-- Create: `app/src/main/java/com/opensmps/deck/ui/VoiceImportDialog.java`
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Create: `app/src/main/java/com/opensmpsdeck/ui/VoiceImportDialog.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Create VoiceImportDialog**
 
 ```java
-package com.opensmps.deck.ui;
+package com.opensmpsdeck.ui;
 
-import com.opensmps.deck.io.ImportableVoice;
-import com.opensmps.deck.io.RomVoiceImporter;
+import com.opensmpsdeck.io.ImportableVoice;
+import com.opensmpsdeck.io.RomVoiceImporter;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
@@ -1191,8 +1191,8 @@ Expected: All tests pass
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/VoiceImportDialog.java \
-       app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/VoiceImportDialog.java \
+       app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: add voice import dialog with directory scanning and filtering"
 ```
 
@@ -1201,7 +1201,7 @@ git commit -m "feat: add voice import dialog with directory scanning and filteri
 ### Task 30: Import SMPS Song Menu Item
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindow.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`
 
 **Step 1: Add "Import SMPS..." menu item**
 
@@ -1233,7 +1233,7 @@ private void onImportSmps() {
 }
 ```
 
-Add import statement: `import com.opensmps.deck.io.SmpsImporter;`
+Add import statement: `import com.opensmpsdeck.io.SmpsImporter;`
 
 **Step 2: Run all tests**
 
@@ -1243,6 +1243,6 @@ Expected: All tests pass
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindow.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindow.java
 git commit -m "feat: add Import SMPS menu item for full song import into new tab"
 ```

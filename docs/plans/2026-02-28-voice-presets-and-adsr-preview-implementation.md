@@ -15,15 +15,15 @@
 ### Task 1: OsmpsVoiceFile — save/load round-trip test
 
 **Files:**
-- Create: `app/src/test/java/com/opensmps/deck/io/TestOsmpsVoiceFile.java`
-- Create: `app/src/main/java/com/opensmps/deck/io/OsmpsVoiceFile.java`
+- Create: `app/src/test/java/com/opensmpsdeck/io/TestOsmpsVoiceFile.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/OsmpsVoiceFile.java`
 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
-import com.opensmps.deck.model.FmVoice;
+import com.opensmpsdeck.model.FmVoice;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -67,13 +67,13 @@ Expected: FAIL — `OsmpsVoiceFile` class does not exist.
 **Step 3: Write minimal implementation**
 
 ```java
-package com.opensmps.deck.io;
+package com.opensmpsdeck.io;
 
 import com.google.gson.*;
-import com.opensmps.deck.model.FmVoice;
+import com.opensmpsdeck.model.FmVoice;
 
-import static com.opensmps.deck.io.HexUtil.bytesToHex;
-import static com.opensmps.deck.io.HexUtil.hexToBytes;
+import static com.opensmpsdeck.io.HexUtil.bytesToHex;
+import static com.opensmpsdeck.io.HexUtil.hexToBytes;
 
 import java.io.File;
 import java.io.IOException;
@@ -125,7 +125,7 @@ public final class OsmpsVoiceFile {
         if (fileVersion > VERSION) {
             throw new IOException(
                     "Voice preset version " + fileVersion + " is newer than supported version "
-                    + VERSION + ". Please update OpenSMPS Deck.");
+                    + VERSION + ". Please update OpenSMPSDeck.");
         }
 
         JsonElement nameElem = root.get("name");
@@ -157,8 +157,8 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/io/OsmpsVoiceFile.java \
-       app/src/test/java/com/opensmps/deck/io/TestOsmpsVoiceFile.java
+git add app/src/main/java/com/opensmpsdeck/io/OsmpsVoiceFile.java \
+       app/src/test/java/com/opensmpsdeck/io/TestOsmpsVoiceFile.java
 git commit -m "feat: add OsmpsVoiceFile for single FM voice preset I/O"
 ```
 
@@ -167,7 +167,7 @@ git commit -m "feat: add OsmpsVoiceFile for single FM voice preset I/O"
 ### Task 2: OsmpsVoiceFile — error handling tests
 
 **Files:**
-- Modify: `app/src/test/java/com/opensmps/deck/io/TestOsmpsVoiceFile.java`
+- Modify: `app/src/test/java/com/opensmpsdeck/io/TestOsmpsVoiceFile.java`
 
 **Step 1: Add failing tests for error cases**
 
@@ -239,7 +239,7 @@ Expected: PASS (all 6 tests)
 **Step 3: Commit**
 
 ```bash
-git add app/src/test/java/com/opensmps/deck/io/TestOsmpsVoiceFile.java
+git add app/src/test/java/com/opensmpsdeck/io/TestOsmpsVoiceFile.java
 git commit -m "test: add OsmpsVoiceFile error handling and edge case tests"
 ```
 
@@ -248,7 +248,7 @@ git commit -m "test: add OsmpsVoiceFile error handling and edge case tests"
 ### Task 3: FmVoiceEditor — Save/Load Preset buttons
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java:156-219` (buildButtonBar method)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java:156-219` (buildButtonBar method)
 
 **Step 1: Add Save Preset and Load Preset buttons to the button bar**
 
@@ -268,7 +268,7 @@ The "Load Preset" button:
 
 Add this import at the top of `FmVoiceEditor.java`:
 ```java
-import com.opensmps.deck.io.OsmpsVoiceFile;
+import com.opensmpsdeck.io.OsmpsVoiceFile;
 import javafx.stage.FileChooser;
 ```
 
@@ -358,7 +358,7 @@ Expected: PASS (all existing tests + new OsmpsVoiceFile tests)
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java
+git add app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java
 git commit -m "feat: add Save/Load Preset buttons to FmVoiceEditor"
 ```
 
@@ -367,7 +367,7 @@ git commit -m "feat: add Save/Load Preset buttons to FmVoiceEditor"
 ### Task 4: Import voice bank — add `.osmpsvoice` filter
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/MainWindowFileActions.java:259-315` (onImportVoiceBank method)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/MainWindowFileActions.java:259-315` (onImportVoiceBank method)
 
 **Step 1: Add `.osmpsvoice` to the file chooser filter and handle it**
 
@@ -395,7 +395,7 @@ if (file.getName().toLowerCase().endsWith(".osmpsvoice")) {
 
 Add import at the top:
 ```java
-import com.opensmps.deck.io.OsmpsVoiceFile;
+import com.opensmpsdeck.io.OsmpsVoiceFile;
 ```
 
 **Step 2: Run tests to verify nothing broke**
@@ -406,7 +406,7 @@ Expected: PASS
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/MainWindowFileActions.java
+git add app/src/main/java/com/opensmpsdeck/ui/MainWindowFileActions.java
 git commit -m "feat: add .osmpsvoice to voice bank import file filter"
 ```
 
@@ -415,7 +415,7 @@ git commit -m "feat: add .osmpsvoice to voice bank import file filter"
 ### Task 5: InstrumentPanel — Export Preset button
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java:93-100` (voice button bar)
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java:93-100` (voice button bar)
 
 **Step 1: Add an "Export" button to the voice bank button bar**
 
@@ -455,7 +455,7 @@ private void exportSelectedVoiceAsPreset() {
 
 Add import:
 ```java
-import com.opensmps.deck.io.OsmpsVoiceFile;
+import com.opensmpsdeck.io.OsmpsVoiceFile;
 ```
 
 **Step 2: Run tests to verify nothing broke**
@@ -466,7 +466,7 @@ Expected: PASS
 **Step 3: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/InstrumentPanel.java
+git add app/src/main/java/com/opensmpsdeck/ui/InstrumentPanel.java
 git commit -m "feat: add Export Preset button to InstrumentPanel voice bank"
 ```
 
@@ -477,8 +477,8 @@ git commit -m "feat: add Export Preset button to InstrumentPanel voice bank"
 ### Task 6: AdsrEnvelopeCalculator — core envelope math test
 
 **Files:**
-- Create: `app/src/test/java/com/opensmps/deck/audio/TestAdsrEnvelopeCalculator.java`
-- Create: `app/src/main/java/com/opensmps/deck/audio/AdsrEnvelopeCalculator.java`
+- Create: `app/src/test/java/com/opensmpsdeck/audio/TestAdsrEnvelopeCalculator.java`
+- Create: `app/src/main/java/com/opensmpsdeck/audio/AdsrEnvelopeCalculator.java`
 
 **Context:** The YM2612 ADSR envelope has 4 phases. We compute a normalized curve as `List<double[]>` where each element is `{normalizedTime, normalizedLevel}`. Time runs 0.0 to 1.0, level runs 0.0 (silence / -96 dB) to 1.0 (full volume / 0 dB). A key-off fraction (0.0-1.0) determines where the release phase begins on the time axis.
 
@@ -487,7 +487,7 @@ Rate parameters (AR, D1R, D2R, RR) control speed: 0 = stopped, higher = faster. 
 **Step 1: Write the failing test**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
 import org.junit.jupiter.api.Test;
 
@@ -598,7 +598,7 @@ Expected: FAIL — `AdsrEnvelopeCalculator` does not exist.
 **Step 3: Write the implementation**
 
 ```java
-package com.opensmps.deck.audio;
+package com.opensmpsdeck.audio;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -749,8 +749,8 @@ Expected: PASS (all 5 tests)
 **Step 5: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/audio/AdsrEnvelopeCalculator.java \
-       app/src/test/java/com/opensmps/deck/audio/TestAdsrEnvelopeCalculator.java
+git add app/src/main/java/com/opensmpsdeck/audio/AdsrEnvelopeCalculator.java \
+       app/src/test/java/com/opensmpsdeck/audio/TestAdsrEnvelopeCalculator.java
 git commit -m "feat: add AdsrEnvelopeCalculator for FM operator envelope curves"
 ```
 
@@ -759,7 +759,7 @@ git commit -m "feat: add AdsrEnvelopeCalculator for FM operator envelope curves"
 ### Task 7: FmVoiceEditor — envelope preview Canvas
 
 **Files:**
-- Modify: `app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java`
+- Modify: `app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java`
 
 **Step 1: Add the envelope Canvas to the layout**
 
@@ -767,7 +767,7 @@ In `FmVoiceEditor`, add a new Canvas between the button bar and the operator scr
 
 Add import:
 ```java
-import com.opensmps.deck.audio.AdsrEnvelopeCalculator;
+import com.opensmpsdeck.audio.AdsrEnvelopeCalculator;
 ```
 
 Add field:
@@ -897,7 +897,7 @@ Expected: PASS
 **Step 4: Commit**
 
 ```bash
-git add app/src/main/java/com/opensmps/deck/ui/FmVoiceEditor.java
+git add app/src/main/java/com/opensmpsdeck/ui/FmVoiceEditor.java
 git commit -m "feat: add ADSR envelope preview Canvas to FmVoiceEditor"
 ```
 

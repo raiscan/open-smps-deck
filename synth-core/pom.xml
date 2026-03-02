@@ -6,12 +6,12 @@
 
     <parent>
         <groupId>com.opensmps</groupId>
-        <artifactId>opensmps-deck-parent</artifactId>
+        <artifactId>opensmpsdeck-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>synth-core</artifactId>
-    <name>OpenSMPS Deck - Synth Core</name>
+    <name>OpenSMPSDeck - Synth Core</name>
     <description>YM2612 and PSG synthesis engine, SMPS parser and driver</description>
 
     <dependencies>

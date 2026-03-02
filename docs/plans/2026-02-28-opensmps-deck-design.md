@@ -412,7 +412,7 @@ Offline render of playback engine to `.wav`. Configurable loop count with fade-o
 ## Repository Structure
 
 ```
-opensmps-deck/
+opensmpsdeck/
   synth-core/                    # Extracted chip emulators
     src/main/java/
       com/opensmps/synth/        # Ym2612Chip, PsgChipGPGX, VirtualSynthesizer
@@ -420,7 +420,7 @@ opensmps-deck/
       com/opensmps/resampler/    # BlipDeltaBuffer, BlipResampler
   app/
     src/main/java/
-      com/opensmps/deck/
+      com/opensmpsdeck/
         model/                   # Song, Pattern, FmVoice, PsgEnvelope
         ui/                      # JavaFX: TrackerGrid, OrderList, VoiceEditor, etc.
         audio/                   # javax.sound playback, PatternCompiler

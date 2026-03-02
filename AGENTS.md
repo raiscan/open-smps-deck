@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Custom agents for OpenSMPS Deck development. These are available via Claude Code's Agent tool.
+Custom agents for OpenSMPSDeck development. These are available via Claude Code's Agent tool.
 
 ## Available Custom Agents
 

@@ -1,6 +1,6 @@
 # Quick Start
 
-Get OpenSMPS Deck running and make your first sound in under two minutes.
+Get OpenSMPSDeck running and make your first sound in under two minutes.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ mvn compile
 Launch the application:
 
 ```bash
-mvn exec:java -pl app -Dexec.mainClass=com.opensmps.deck.Launcher
+mvn exec:java -pl app -Dexec.mainClass=com.opensmpsdeck.Launcher
 ```
 
 ## What You See

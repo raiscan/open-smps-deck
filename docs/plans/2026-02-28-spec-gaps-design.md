@@ -13,9 +13,9 @@ Four spec gaps identified by comparing the original design documents against the
 
 ### Spec References
 
-- `2026-02-28-opensmps-deck-design.md:282-284` — auto-reload on edit
-- `2026-02-28-opensmps-deck-design.md:300-302` — playback position feedback
-- `2026-02-28-opensmps-deck-design.md:409` — scrolling cursor highlight
+- `2026-02-28-opensmpsdeck-design.md:282-284` — auto-reload on edit
+- `2026-02-28-opensmpsdeck-design.md:300-302` — playback position feedback
+- `2026-02-28-opensmpsdeck-design.md:409` — scrolling cursor highlight
 - `2026-02-28-phase8-polish-design.md:41` — mute reset on song reload
 - `2026-02-28-phase8-polish-design.md:80` — configurable WAV loop count
 
