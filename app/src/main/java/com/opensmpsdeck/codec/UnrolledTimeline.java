@@ -29,10 +29,13 @@ public final class UnrolledTimeline {
             SourceRef source,
             boolean isFromLoop) {}
 
-    /** Row range occupied by a phrase, for background tinting. */
+    /** Row range [startRow..endRow] (both inclusive) occupied by a phrase, for background tinting. */
     public record PhraseSpan(int startRow, int endRow, int phraseId) {}
 
-    /** Mutable list of events and phrase spans for a single channel. */
+    /**
+     * Mutable accumulator of events and phrase spans for one channel.
+     * Populated by {@link TimelineBuilder}; consumers should treat contents as read-only.
+     */
     public static final class TimelineChannel {
         private final List<TimelineEvent> events = new ArrayList<>();
         private final List<PhraseSpan> phraseSpans = new ArrayList<>();
@@ -59,6 +62,12 @@ public final class UnrolledTimeline {
 
     public int gridResolution() { return gridResolution; }
     public int totalGridRows() { return totalGridRows; }
+    /** Returns the channel at the given index (0-9). */
+    public TimelineChannel channel(int channelIndex) { return channels[channelIndex]; }
+
+    /** Returns the internal channel array. For builder use only; do not replace elements. */
     public TimelineChannel[] channels() { return channels; }
+
+    /** Returns the internal loop-back row array. For builder use only. */
     public int[] channelLoopBackRow() { return channelLoopBackRow; }
 }
