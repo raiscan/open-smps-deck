@@ -1,6 +1,8 @@
 package com.opensmpsdeck.ui;
 
 import com.opensmpsdeck.audio.PlaybackEngine;
+import com.opensmpsdeck.codec.TimelineBuilder;
+import com.opensmpsdeck.codec.UnrolledTimeline;
 import com.opensmpsdeck.model.Song;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -153,10 +155,17 @@ public class MainWindow {
             songTabCoordinator.onPlayFromCursor(songTab.getSong(), orderIndex, rowIndex);
         });
 
+        // Wire unroll toggle callback
+        songTab.getTrackerGrid().setOnRequestUnroll(() -> {
+            UnrolledTimeline timeline = TimelineBuilder.build(songTab.getSong());
+            songTab.getTrackerGrid().setUnrolledTimeline(timeline);
+        });
+
         BorderPane content = new BorderPane();
 
         // Hierarchical layout: SongView (left), BreadcrumbBar+ChainStrip+TrackerGrid (center)
-        VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip());
+        javafx.scene.layout.HBox unrollToolbar = songTab.getTrackerGrid().createUnrollToolbar();
+        VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip(), unrollToolbar);
         BorderPane centerPane = new BorderPane();
         centerPane.setTop(centerTop);
         centerPane.setCenter(songTab.getTrackerGrid());

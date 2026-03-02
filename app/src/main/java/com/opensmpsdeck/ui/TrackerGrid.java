@@ -5,6 +5,7 @@ import com.opensmpsdeck.codec.EffectMnemonics;
 import com.opensmpsdeck.codec.PasteResolver;
 import com.opensmpsdeck.codec.SmpsDecoder;
 import com.opensmpsdeck.codec.SmpsEncoder;
+import com.opensmpsdeck.codec.GridResolutionCalculator;
 import com.opensmpsdeck.codec.UnrolledTimeline;
 import com.opensmpsdeck.model.ClipboardData;
 import com.opensmpsdeck.model.DacSample;
@@ -15,11 +16,17 @@ import com.opensmpsdeck.model.PsgEnvelope;
 import com.opensmpsdeck.model.Song;
 import com.opensmpsdeck.model.UndoManager;
 import com.opensmps.smps.SmpsCoordFlags;
+import javafx.collections.FXCollections;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.HBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -117,6 +124,8 @@ public class TrackerGrid extends ScrollPane {
     private Runnable onStopPlayback;
     private Runnable onPlayFromCursor;
     private Runnable onDirty;
+    private Runnable onRequestUnroll;
+    private Runnable viewModeChangeListener;
 
     // Mute/solo state
     private final boolean[] channelMuted = new boolean[Pattern.CHANNEL_COUNT];
@@ -157,8 +166,60 @@ public class TrackerGrid extends ScrollPane {
     public void setOnStopPlayback(Runnable callback) { this.onStopPlayback = callback; }
     public void setOnPlayFromCursor(Runnable callback) { this.onPlayFromCursor = callback; }
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
+    public void setOnRequestUnroll(Runnable callback) { this.onRequestUnroll = callback; }
     public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
+
+    /**
+     * Creates a toolbar HBox with the unroll toggle button and zoom dropdown.
+     * The caller is responsible for placing this in the layout.
+     */
+    public HBox createUnrollToolbar() {
+        ToggleButton unrollToggle = new ToggleButton("Unroll");
+        unrollToggle.setStyle("-fx-font-size: 11;");
+        unrollToggle.setOnAction(e -> {
+            if (unrollToggle.isSelected()) {
+                if (onRequestUnroll != null) {
+                    onRequestUnroll.run();
+                }
+                unrollToggle.setText("Phrase");
+            } else {
+                exitUnrolledMode();
+                unrollToggle.setText("Unroll");
+            }
+        });
+
+        ComboBox<Integer> zoomCombo = new ComboBox<>();
+        zoomCombo.setItems(FXCollections.observableArrayList(1));
+        zoomCombo.setValue(1);
+        zoomCombo.setStyle("-fx-font-size: 11;");
+        zoomCombo.setPrefWidth(70);
+        zoomCombo.setVisible(false);
+        zoomCombo.setOnAction(e -> {
+            Integer selected = zoomCombo.getValue();
+            if (selected != null && selected > 0) {
+                setZoomLevel(selected);
+            }
+        });
+
+        // Update zoom combo when entering/exiting unrolled mode
+        this.viewModeChangeListener = () -> {
+            boolean unrolled = isUnrolledMode();
+            zoomCombo.setVisible(unrolled);
+            if (unrolled && unrolledTimeline != null) {
+                var levels = GridResolutionCalculator.zoomLevels(unrolledTimeline.gridResolution());
+                zoomCombo.setItems(FXCollections.observableArrayList(levels));
+                zoomCombo.setValue(zoomLevel);
+            }
+            unrollToggle.setSelected(unrolled);
+            unrollToggle.setText(unrolled ? "Phrase" : "Unroll");
+        };
+
+        HBox toolbar = new HBox(6, unrollToggle, zoomCombo);
+        toolbar.setAlignment(Pos.CENTER_LEFT);
+        toolbar.setPadding(new Insets(2, 4, 2, 4));
+        return toolbar;
+    }
 
     public void setSong(Song song) {
         this.song = song;
@@ -204,12 +265,14 @@ public class TrackerGrid extends ScrollPane {
         this.unrolledTimeline = timeline;
         this.viewMode = ViewMode.UNROLLED;
         this.zoomLevel = 1;
+        if (viewModeChangeListener != null) viewModeChangeListener.run();
         refreshDisplay();
     }
 
     public void exitUnrolledMode() {
         this.viewMode = ViewMode.PHRASE;
         this.unrolledTimeline = null;
+        if (viewModeChangeListener != null) viewModeChangeListener.run();
         refreshDisplay();
     }
 
