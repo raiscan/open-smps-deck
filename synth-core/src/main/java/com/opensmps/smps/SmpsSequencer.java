@@ -50,6 +50,7 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
     private boolean specialSfx = false; // Driver-specific "special SFX" class (e.g. S1 0xD0+)
     private boolean isSfx = false; // Cached SFX status for performance (set by SmpsDriver.addSequencer)
     private int psgLatchChannel = -1; // Cached PSG latch channel for performance (set by SmpsDriver.writePsg)
+    private long totalTicksElapsed;
     private int speedMultiplier = 1; // S3K: extra tick calls per tempo frame for speed shoes
 
     public void setPitch(float pitch) {
@@ -324,6 +325,7 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
             dividingTiming = 1;
         }
         normalTempo = smpsData.getTempo();
+        totalTicksElapsed = 0;
 
         // Initialize Region and Tempo
         setRegion(Region.NTSC);
@@ -839,6 +841,7 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
     }
 
     private void tick() {
+        totalTicksElapsed++;
         for (Track t : tracks) {
             if (!t.active)
                 continue;
@@ -2524,6 +2527,15 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
     @Override
     public int getNormalTempo() {
         return normalTempo;
+    }
+
+    /**
+     * Returns the total number of musical ticks elapsed since this sequencer was loaded.
+     * Each call to the internal {@code tick()} method increments this counter by one.
+     * Used for playback position tracking (e.g. mapping sequencer time to grid rows).
+     */
+    public long getTotalTicksElapsed() {
+        return totalTicksElapsed;
     }
 
     @Override

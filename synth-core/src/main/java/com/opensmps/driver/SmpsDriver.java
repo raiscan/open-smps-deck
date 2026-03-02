@@ -214,6 +214,21 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
     }
 
     /**
+     * Returns the total tick count from the first active music (non-SFX) sequencer,
+     * or {@code 0} if no music sequencer is loaded.
+     */
+    public long getTickCount() {
+        synchronized (sequencersLock) {
+            for (SmpsSequencer seq : sequencers) {
+                if (!isSfx(seq)) {
+                    return seq.getTotalTicksElapsed();
+                }
+            }
+            return 0;
+        }
+    }
+
+    /**
      * Returns runtime state for a channel in the first active music sequencer,
      * or {@code null} if unavailable.
      */

@@ -204,6 +204,16 @@ public class PlaybackEngine {
     }
 
     /**
+     * Returns the total tick count from the active music sequencer.
+     * Used for playback position tracking (e.g. mapping sequencer time to grid rows).
+     *
+     * @return the tick count, or 0 if no sequencer is loaded
+     */
+    public long getPlaybackTickCount() {
+        return driver.getTickCount();
+    }
+
+    /**
      * Returns the underlying synth driver.
      */
     public SmpsDriver getDriver() { return driver; }
