@@ -5,6 +5,7 @@ import com.opensmpsdeck.codec.EffectMnemonics;
 import com.opensmpsdeck.codec.PasteResolver;
 import com.opensmpsdeck.codec.SmpsDecoder;
 import com.opensmpsdeck.codec.SmpsEncoder;
+import com.opensmpsdeck.codec.UnrolledTimeline;
 import com.opensmpsdeck.model.ClipboardData;
 import com.opensmpsdeck.model.DacSample;
 import com.opensmpsdeck.model.FmVoice;
@@ -33,6 +34,9 @@ import java.util.*;
  * note entry, navigation, selection, copy/paste, transpose, and undo.
  */
 public class TrackerGrid extends ScrollPane {
+
+    /** Whether the grid shows a single phrase or the full unrolled timeline. */
+    public enum ViewMode { PHRASE, UNROLLED }
 
     private static final int ROW_HEIGHT = 20;
     private static final int ROW_NUM_WIDTH = 40;
@@ -123,6 +127,11 @@ public class TrackerGrid extends ScrollPane {
     private Phrase activePhrase;
     private int phraseChannelIndex = -1;
 
+    // Unrolled timeline mode
+    private ViewMode viewMode = ViewMode.PHRASE;
+    private UnrolledTimeline unrolledTimeline;
+    private int zoomLevel = 1;
+
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
     private boolean decodedCacheDirty = true;
@@ -186,6 +195,29 @@ public class TrackerGrid extends ScrollPane {
 
     public boolean isInPhraseMode() {
         return activePhrase != null;
+    }
+
+    public ViewMode getViewMode() { return viewMode; }
+    public boolean isUnrolledMode() { return viewMode == ViewMode.UNROLLED; }
+
+    public void setUnrolledTimeline(UnrolledTimeline timeline) {
+        this.unrolledTimeline = timeline;
+        this.viewMode = ViewMode.UNROLLED;
+        this.zoomLevel = 1;
+        refreshDisplay();
+    }
+
+    public void exitUnrolledMode() {
+        this.viewMode = ViewMode.PHRASE;
+        this.unrolledTimeline = null;
+        refreshDisplay();
+    }
+
+    public int getZoomLevel() { return zoomLevel; }
+
+    public void setZoomLevel(int zoom) {
+        this.zoomLevel = zoom;
+        refreshDisplay();
     }
 
     public void setCurrentPatternIndex(int index) {
