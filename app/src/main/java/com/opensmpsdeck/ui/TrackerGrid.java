@@ -192,16 +192,20 @@ public class TrackerGrid extends ScrollPane {
             }
         });
 
-        ComboBox<Integer> zoomCombo = new ComboBox<>();
-        zoomCombo.setItems(FXCollections.observableArrayList(1));
-        zoomCombo.setValue(1);
+        ComboBox<String> zoomCombo = new ComboBox<>();
+        zoomCombo.setItems(FXCollections.observableArrayList("1x"));
+        zoomCombo.setValue("1x");
         zoomCombo.setStyle("-fx-font-size: 11;");
-        zoomCombo.setPrefWidth(70);
+        zoomCombo.setPrefWidth(100);
         zoomCombo.setVisible(false);
         zoomCombo.setOnAction(e -> {
-            Integer selected = zoomCombo.getValue();
-            if (selected != null && selected > 0) {
-                setZoomLevel(selected);
+            String selected = zoomCombo.getValue();
+            if (selected != null && unrolledTimeline != null) {
+                var levels = GridResolutionCalculator.zoomLevels(unrolledTimeline.gridResolution());
+                int idx = zoomCombo.getSelectionModel().getSelectedIndex();
+                if (idx >= 0 && idx < levels.size()) {
+                    setZoomLevel(levels.get(idx));
+                }
             }
         });
 
@@ -210,9 +214,25 @@ public class TrackerGrid extends ScrollPane {
             boolean unrolled = isUnrolledMode();
             zoomCombo.setVisible(unrolled);
             if (unrolled && unrolledTimeline != null) {
-                var levels = GridResolutionCalculator.zoomLevels(unrolledTimeline.gridResolution());
-                zoomCombo.setItems(FXCollections.observableArrayList(levels));
-                zoomCombo.setValue(zoomLevel);
+                int baseRes = unrolledTimeline.gridResolution();
+                var levels = GridResolutionCalculator.zoomLevels(baseRes);
+                List<String> labels = new ArrayList<>();
+                for (int level : levels) {
+                    int ticksPerRow = baseRes / level;
+                    if (ticksPerRow == 1) {
+                        labels.add("Full (" + level + "x)");
+                    } else {
+                        labels.add(level + "x (" + ticksPerRow + "t)");
+                    }
+                }
+                zoomCombo.setItems(FXCollections.observableArrayList(labels));
+                // Select the label corresponding to current zoomLevel
+                int idx = levels.indexOf(zoomLevel);
+                if (idx >= 0) {
+                    zoomCombo.getSelectionModel().select(idx);
+                } else {
+                    zoomCombo.getSelectionModel().select(0);
+                }
             }
             unrollToggle.setSelected(unrolled);
             unrollToggle.setText(unrolled ? "Phrase" : "Unroll");
@@ -644,9 +664,12 @@ public class TrackerGrid extends ScrollPane {
 
                 UnrolledTimeline.TimelineChannel channel = unrolledTimeline.channel(ch);
 
-                // Phrase background tinting
+                // Phrase background tinting (recompute span rows from base resolution for zoom)
+                int baseRes = unrolledTimeline.gridResolution();
                 for (UnrolledTimeline.PhraseSpan span : channel.phraseSpans()) {
-                    if (gridRow >= span.startRow() && gridRow <= span.endRow()) {
+                    int spanStart = span.startRow() * baseRes / effectiveResolution;
+                    int spanEnd = span.endRow() * baseRes / effectiveResolution;
+                    if (gridRow >= spanStart && gridRow <= spanEnd) {
                         Color phraseColor = PhraseColors.forPhraseId(span.phraseId());
                         gc.setFill(Color.color(
                                 phraseColor.getRed(), phraseColor.getGreen(),
@@ -662,7 +685,7 @@ public class TrackerGrid extends ScrollPane {
                 if (event != null) {
                     double opacity = event.isFromLoop() ? 0.5 : 1.0;
 
-                    if (event.startGridRow() == gridRow) {
+                    if (event.startTick() / effectiveResolution == gridRow) {
                         // Event starts at this row: render note/duration/instrument
                         String formatted = formatUnrolledEventRow(event);
                         gc.setFill(Color.color(0.8, 0.85, 0.9, opacity));
@@ -674,11 +697,12 @@ public class TrackerGrid extends ScrollPane {
                     }
                 }
 
-                // Loop-back marker
-                int loopRow = unrolledTimeline.channelLoopBackRow()[ch];
-                if (loopRow >= 0 && gridRow == totalRows - 1) {
+                // Loop-back marker (convert base-resolution loop row to tick for display)
+                int baseLoopRow = unrolledTimeline.channelLoopBackRow()[ch];
+                if (baseLoopRow >= 0 && gridRow == totalRows - 1) {
+                    int loopTick = baseLoopRow * unrolledTimeline.gridResolution();
                     gc.setFill(Color.web("#66aacc"));
-                    gc.fillText("\u21ba LOOP @" + String.format("%03X", loopRow * effectiveResolution), textX, textY);
+                    gc.fillText("\u21ba LOOP @" + String.format("%03X", loopTick), textX, textY);
                 }
             }
         }
@@ -694,17 +718,20 @@ public class TrackerGrid extends ScrollPane {
 
     /**
      * Find the timeline event spanning the given grid row on a channel.
+     * Recomputes grid positions from tick values so zoom levels work correctly.
      * Returns null if no event covers this row.
      */
     private UnrolledTimeline.TimelineEvent findEventAtRow(int channel, int gridRow, int effectiveResolution) {
         if (unrolledTimeline == null) return null;
         UnrolledTimeline.TimelineChannel ch = unrolledTimeline.channel(channel);
         for (UnrolledTimeline.TimelineEvent event : ch.events()) {
-            if (gridRow >= event.startGridRow() && gridRow < event.startGridRow() + event.spanRows()) {
+            int eventStartRow = event.startTick() / effectiveResolution;
+            int eventSpanRows = Math.max(1, event.durationTicks() / effectiveResolution);
+            if (gridRow >= eventStartRow && gridRow < eventStartRow + eventSpanRows) {
                 return event;
             }
             // Events are in tick order; if we've passed the target row, stop early
-            if (event.startGridRow() > gridRow) break;
+            if (eventStartRow > gridRow) break;
         }
         return null;
     }
@@ -900,6 +927,9 @@ public class TrackerGrid extends ScrollPane {
             dragAnchorChannel = -1;
             return;
         }
+
+        // In unrolled mode, skip phrase-mode cursor/selection updates
+        if (viewMode == ViewMode.UNROLLED) return;
 
         cancelPendingHex();
         clearSelection();

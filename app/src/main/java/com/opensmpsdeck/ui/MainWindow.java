@@ -184,6 +184,7 @@ public class MainWindow {
                         && entries.get(sourceRef.chainEntryIndex()).getPhraseId() == sourceRef.phraseId()) {
                     grid.exitUnrolledMode();
                     grid.setPhrase(phrase, ch);
+                    grid.setCursorRow(sourceRef.rowInPhrase());
                     break;
                 }
             }
