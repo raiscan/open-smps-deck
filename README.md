@@ -1,8 +1,8 @@
-# OpenSMPS Deck
+# OpenSMPSDeck
 
 A standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG music targeting the Sega Mega Drive / Genesis sound hardware.
 
-OpenSMPS Deck produces SMPS-compatible output that can be:
+OpenSMPSDeck produces SMPS-compatible output that can be:
 - Injected directly into Sonic 1, 2, or 3&K ROMs
 - Played by [OpenGGF](https://github.com/jamesj999/OpenGGF)
 - Used with SMPSPlay and other community tools
@@ -70,7 +70,7 @@ mvn exec:java -pl app -Dexec.mainClass=com.opensmps.deck.Launcher
 
 ## Architecture
 
-OpenSMPS Deck is a Maven multi-module project with a clean three-layer design:
+OpenSMPSDeck is a Maven multi-module project with a clean three-layer design:
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -156,7 +156,7 @@ Song model, codec, I/O, and JavaFX UI.
 
 | Extension | Format | Description |
 |-----------|--------|-------------|
-| `.osmpsd` | JSON | OpenSMPS Deck project file |
+| `.osmpsd` | JSON | OpenSMPSDeck project file |
 | `.bin` | Binary | Raw SMPS binary (compatible with SMPSPlay) |
 | `.wav` | RIFF/WAV | 44.1kHz 16-bit stereo PCM audio export |
 | `.ovm` | JSON | Voice bank (FM voices + PSG envelopes) |
