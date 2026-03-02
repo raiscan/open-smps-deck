@@ -22,3 +22,4 @@ OpenSMPSDeck is a standalone SMPS-native music tracker for composing YM2612 FM a
 10. [Importing](10-importing.md) -- Bringing in existing music and voices
 11. [Keyboard Reference](11-keyboard-reference.md) -- Complete shortcut cheat sheet
 12. [SMPS Modes](12-smps-modes.md) -- S1, S2, and S3K driver differences
+13. [Glossary](13-glossary.md) -- Definitions of key terms
