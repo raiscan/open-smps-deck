@@ -21,12 +21,14 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.beans.value.ChangeListener;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.control.ToggleButton;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -143,6 +145,10 @@ public class TrackerGrid extends ScrollPane {
     private UnrolledTimeline unrolledTimeline;
     private int zoomLevel = 1;
 
+    // Virtual scroll state for unrolled mode (canvas stays viewport-sized)
+    private Pane unrolledScrollSpacer;
+    private ChangeListener<Number> unrolledScrollListener;
+
     // Cached decoded rows per channel
     private final List<List<SmpsDecoder.TrackerRow>> decodedChannels = new ArrayList<>();
     private boolean decodedCacheDirty = true;
@@ -178,17 +184,15 @@ public class TrackerGrid extends ScrollPane {
      * The caller is responsible for placing this in the layout.
      */
     public HBox createUnrollToolbar() {
-        ToggleButton unrollToggle = new ToggleButton("Unroll");
-        unrollToggle.setStyle("-fx-font-size: 11;");
-        unrollToggle.setOnAction(e -> {
-            if (unrollToggle.isSelected()) {
+        CheckBox unrollCheck = new CheckBox("Unroll");
+        unrollCheck.setStyle("-fx-font-size: 11; -fx-text-fill: #cccccc;");
+        unrollCheck.setOnAction(e -> {
+            if (unrollCheck.isSelected()) {
                 if (onRequestUnroll != null) {
                     onRequestUnroll.run();
                 }
-                unrollToggle.setText("Phrase");
             } else {
                 exitUnrolledMode();
-                unrollToggle.setText("Unroll");
             }
         });
 
@@ -226,7 +230,6 @@ public class TrackerGrid extends ScrollPane {
                     }
                 }
                 zoomCombo.setItems(FXCollections.observableArrayList(labels));
-                // Select the label corresponding to current zoomLevel
                 int idx = levels.indexOf(zoomLevel);
                 if (idx >= 0) {
                     zoomCombo.getSelectionModel().select(idx);
@@ -234,11 +237,10 @@ public class TrackerGrid extends ScrollPane {
                     zoomCombo.getSelectionModel().select(0);
                 }
             }
-            unrollToggle.setSelected(unrolled);
-            unrollToggle.setText(unrolled ? "Phrase" : "Unroll");
+            unrollCheck.setSelected(unrolled);
         };
 
-        HBox toolbar = new HBox(6, unrollToggle, zoomCombo);
+        HBox toolbar = new HBox(6, unrollCheck, zoomCombo);
         toolbar.setAlignment(Pos.CENTER_LEFT);
         toolbar.setPadding(new Insets(2, 4, 2, 4));
         return toolbar;
@@ -288,6 +290,7 @@ public class TrackerGrid extends ScrollPane {
         this.unrolledTimeline = timeline;
         this.viewMode = ViewMode.UNROLLED;
         this.zoomLevel = 1;
+        setupUnrolledVirtualScroll();
         if (viewModeChangeListener != null) viewModeChangeListener.run();
         refreshDisplay();
     }
@@ -295,8 +298,31 @@ public class TrackerGrid extends ScrollPane {
     public void exitUnrolledMode() {
         this.viewMode = ViewMode.PHRASE;
         this.unrolledTimeline = null;
+        teardownUnrolledVirtualScroll();
         if (viewModeChangeListener != null) viewModeChangeListener.run();
         refreshDisplay();
+    }
+
+    private void setupUnrolledVirtualScroll() {
+        unrolledScrollSpacer = new Pane();
+        unrolledScrollSpacer.getChildren().add(canvas);
+        setContent(unrolledScrollSpacer);
+        unrolledScrollListener = (obs, oldVal, newVal) -> {
+            if (viewMode == ViewMode.UNROLLED) renderUnrolledVisible();
+        };
+        vvalueProperty().addListener(unrolledScrollListener);
+    }
+
+    private void teardownUnrolledVirtualScroll() {
+        if (unrolledScrollListener != null) {
+            vvalueProperty().removeListener(unrolledScrollListener);
+            unrolledScrollListener = null;
+        }
+        if (unrolledScrollSpacer != null) {
+            unrolledScrollSpacer.getChildren().remove(canvas);
+            unrolledScrollSpacer = null;
+        }
+        setContent(canvas);
     }
 
     public int getZoomLevel() { return zoomLevel; }
@@ -322,9 +348,19 @@ public class TrackerGrid extends ScrollPane {
             int totalRows = maxTickAcrossChannels() / effectiveResolution;
             double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH * Pattern.CHANNEL_COUNT;
             double totalHeight = HEADER_HEIGHT + ROW_HEIGHT * Math.max(1, totalRows);
+
+            // Spacer gets full logical height for correct scrollbar proportions
+            if (unrolledScrollSpacer != null) {
+                unrolledScrollSpacer.setMinSize(totalWidth, totalHeight);
+                unrolledScrollSpacer.setPrefSize(totalWidth, totalHeight);
+            }
+
+            // Canvas stays viewport-sized to avoid GPU texture limits
+            double viewportHeight = getViewportBounds() != null ? getViewportBounds().getHeight() : 600;
+            if (viewportHeight <= 0) viewportHeight = 600;
             canvas.setWidth(totalWidth);
-            canvas.setHeight(totalHeight);
-            renderUnrolled();
+            canvas.setHeight(viewportHeight);
+            renderUnrolledVisible();
             return;
         }
 
@@ -606,31 +642,65 @@ public class TrackerGrid extends ScrollPane {
         }
     }
 
-    // --- Unrolled timeline rendering ---
+    // --- Unrolled timeline rendering (virtualized) ---
 
-    private void renderUnrolled() {
-        GraphicsContext gc = canvas.getGraphicsContext2D();
+    /**
+     * Compute the scroll Y offset from the ScrollPane's vvalue.
+     * Returns the pixel offset of the viewport top within the full logical content.
+     */
+    private double getUnrolledScrollY() {
+        if (unrolledScrollSpacer == null) return 0;
+        double totalHeight = unrolledScrollSpacer.getMinHeight();
+        double viewportHeight = canvas.getHeight();
+        double scrollableHeight = totalHeight - viewportHeight;
+        if (scrollableHeight <= 0) return 0;
+        return getVvalue() * scrollableHeight;
+    }
+
+    /**
+     * Render only the visible portion of the unrolled timeline.
+     * The canvas is viewport-sized and positioned at the scroll offset
+     * inside the spacer pane.
+     */
+    private void renderUnrolledVisible() {
+        if (unrolledTimeline == null || unrolledScrollSpacer == null) return;
+
         int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
         int totalRows = maxTickAcrossChannels() / effectiveResolution;
+        double scrollY = getUnrolledScrollY();
+        double viewportHeight = canvas.getHeight();
+
+        // Position canvas at scroll offset inside the spacer
+        canvas.setLayoutY(scrollY);
+
+        GraphicsContext gc = canvas.getGraphicsContext2D();
 
         // Clear
         gc.setFill(Color.web("#1a1a2e"));
-        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        gc.fillRect(0, 0, canvas.getWidth(), viewportHeight);
 
-        // Draw header
-        gc.setFill(Color.web("#2a2a2a"));
-        gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
-        gc.setFont(HEADER_FONT);
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
-            gc.setFill(Color.web("#88aacc"));
-            gc.fillText(CHANNEL_NAMES[ch], x, HEADER_HEIGHT - 6);
+        // Draw header (visible when scrolled near top)
+        double headerBottomOnCanvas = HEADER_HEIGHT - scrollY;
+        if (headerBottomOnCanvas > 0) {
+            gc.setFill(Color.web("#2a2a2a"));
+            gc.fillRect(0, 0, canvas.getWidth(), headerBottomOnCanvas);
+            gc.setFont(HEADER_FONT);
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+                gc.setFill(Color.web("#88aacc"));
+                gc.fillText(CHANNEL_NAMES[ch], x, headerBottomOnCanvas - 6);
+            }
         }
 
-        // Draw rows
+        // Determine visible row range
+        int firstVisibleRow = Math.max(0, (int) ((scrollY - HEADER_HEIGHT) / ROW_HEIGHT));
+        int lastVisibleRow = Math.min(totalRows - 1,
+                (int) ((scrollY + viewportHeight - HEADER_HEIGHT) / ROW_HEIGHT) + 1);
+
+        // Draw visible rows
         gc.setFont(MONO_FONT);
-        for (int gridRow = 0; gridRow < totalRows; gridRow++) {
-            double y = HEADER_HEIGHT + gridRow * ROW_HEIGHT;
+        for (int gridRow = firstVisibleRow; gridRow <= lastVisibleRow; gridRow++) {
+            double y = HEADER_HEIGHT + gridRow * ROW_HEIGHT - scrollY;
 
             // Playback cursor highlight (teal bar, semi-transparent)
             if (gridRow == playbackRow && playbackRow >= 0) {
@@ -707,12 +777,15 @@ public class TrackerGrid extends ScrollPane {
             }
         }
 
-        // Draw channel separator lines
+        // Draw channel separator lines (only for visible portion)
+        double contentStartY = Math.max(0, HEADER_HEIGHT - scrollY);
+        double contentEndY = Math.min(viewportHeight,
+                HEADER_HEIGHT + totalRows * ROW_HEIGHT - scrollY);
         gc.setStroke(Color.web("#333344"));
         gc.setLineWidth(1);
         for (int ch = 0; ch <= Pattern.CHANNEL_COUNT; ch++) {
             double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
-            gc.strokeLine(x, HEADER_HEIGHT, x, HEADER_HEIGHT + totalRows * ROW_HEIGHT);
+            gc.strokeLine(x, contentStartY, x, contentEndY);
         }
     }
 
@@ -831,7 +904,13 @@ public class TrackerGrid extends ScrollPane {
      * if it has moved outside the visible area.
      */
     private void scrollToRow(int row) {
-        double totalHeight = canvas.getHeight();
+        // In unrolled mode, totalHeight comes from the spacer, not the canvas
+        double totalHeight;
+        if (viewMode == ViewMode.UNROLLED && unrolledScrollSpacer != null) {
+            totalHeight = unrolledScrollSpacer.getMinHeight();
+        } else {
+            totalHeight = canvas.getHeight();
+        }
         double viewportHeight = getViewportBounds().getHeight();
         if (totalHeight <= viewportHeight || viewportHeight <= 0) return;
 
@@ -976,7 +1055,8 @@ public class TrackerGrid extends ScrollPane {
         // Unrolled mode: double-click navigates to source phrase
         if (viewMode == ViewMode.UNROLLED && unrolledTimeline != null) {
             if (e.getClickCount() >= 2) {
-                int gridRow = (int) ((e.getY() - HEADER_HEIGHT) / ROW_HEIGHT);
+                double scrollY = getUnrolledScrollY();
+                int gridRow = (int) ((e.getY() + scrollY - HEADER_HEIGHT) / ROW_HEIGHT);
                 int channel = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
                 if (channel >= 0 && channel < Pattern.CHANNEL_COUNT && gridRow >= 0) {
                     int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
