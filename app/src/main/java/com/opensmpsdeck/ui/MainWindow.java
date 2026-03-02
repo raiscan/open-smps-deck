@@ -3,6 +3,8 @@ package com.opensmpsdeck.ui;
 import com.opensmpsdeck.audio.PlaybackEngine;
 import com.opensmpsdeck.codec.TimelineBuilder;
 import com.opensmpsdeck.codec.UnrolledTimeline;
+import com.opensmpsdeck.model.Pattern;
+import com.opensmpsdeck.model.Phrase;
 import com.opensmpsdeck.model.Song;
 import javafx.application.Platform;
 import javafx.scene.Scene;
@@ -165,6 +167,26 @@ public class MainWindow {
         songTab.getTrackerGrid().setOnRequestUnroll(() -> {
             UnrolledTimeline timeline = TimelineBuilder.build(songTab.getSong());
             songTab.getTrackerGrid().setUnrolledTimeline(timeline);
+        });
+
+        // Wire phrase navigation from unrolled mode double-click
+        TrackerGrid grid = songTab.getTrackerGrid();
+        grid.setOnNavigateToPhrase(sourceRef -> {
+            var hier = songTab.getSong().getHierarchicalArrangement();
+            if (hier == null) return;
+            Phrase phrase = hier.getPhraseLibrary().getPhrase(sourceRef.phraseId());
+            if (phrase == null) return;
+            // Find channel containing this phrase via chain entry index
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                var chain = hier.getChain(ch);
+                var entries = chain.getEntries();
+                if (sourceRef.chainEntryIndex() < entries.size()
+                        && entries.get(sourceRef.chainEntryIndex()).getPhraseId() == sourceRef.phraseId()) {
+                    grid.exitUnrolledMode();
+                    grid.setPhrase(phrase, ch);
+                    break;
+                }
+            }
         });
 
         BorderPane content = new BorderPane();

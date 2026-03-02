@@ -32,6 +32,7 @@ import javafx.scene.text.Font;
 
 import java.io.ByteArrayOutputStream;
 import java.util.*;
+import java.util.function.Consumer;
 
 /**
  * Canvas-based tracker grid displaying decoded SMPS track data.
@@ -126,6 +127,7 @@ public class TrackerGrid extends ScrollPane {
     private Runnable onDirty;
     private Runnable onRequestUnroll;
     private Runnable viewModeChangeListener;
+    private Consumer<UnrolledTimeline.SourceRef> onNavigateToPhrase;
 
     // Mute/solo state
     private final boolean[] channelMuted = new boolean[Pattern.CHANNEL_COUNT];
@@ -167,6 +169,7 @@ public class TrackerGrid extends ScrollPane {
     public void setOnPlayFromCursor(Runnable callback) { this.onPlayFromCursor = callback; }
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
     public void setOnRequestUnroll(Runnable callback) { this.onRequestUnroll = callback; }
+    public void setOnNavigateToPhrase(Consumer<UnrolledTimeline.SourceRef> callback) { this.onNavigateToPhrase = callback; }
     public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
 
@@ -935,6 +938,22 @@ public class TrackerGrid extends ScrollPane {
                     toggleSolo(ch);
                 } else {
                     toggleMute(ch);
+                }
+            }
+            return;
+        }
+
+        // Unrolled mode: double-click navigates to source phrase
+        if (viewMode == ViewMode.UNROLLED && unrolledTimeline != null) {
+            if (e.getClickCount() >= 2) {
+                int gridRow = (int) ((e.getY() - HEADER_HEIGHT) / ROW_HEIGHT);
+                int channel = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
+                if (channel >= 0 && channel < Pattern.CHANNEL_COUNT && gridRow >= 0) {
+                    int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
+                    UnrolledTimeline.TimelineEvent event = findEventAtRow(channel, gridRow, effectiveResolution);
+                    if (event != null && onNavigateToPhrase != null) {
+                        onNavigateToPhrase.accept(event.source());
+                    }
                 }
             }
             return;
