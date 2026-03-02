@@ -111,10 +111,16 @@ public class MainWindow {
             new javafx.animation.KeyFrame(
                 javafx.util.Duration.millis(67), // ~15 Hz
                 e -> {
-                    songTabCoordinator.updatePlaybackCursor();
                     SongTab tab = getActiveSongTab();
                     if (tab != null) {
-                        tab.getTrackerGrid().setPlaybackRowsByChannel(playbackEngine.getChannelPlaybackRows());
+                        TrackerGrid grid = tab.getTrackerGrid();
+                        if (grid.isUnrolledMode()) {
+                            long tick = playbackEngine.getPlaybackTickCount();
+                            grid.setPlaybackTick(tick);
+                        } else {
+                            songTabCoordinator.updatePlaybackCursor();
+                            grid.setPlaybackRowsByChannel(playbackEngine.getChannelPlaybackRows());
+                        }
                     }
                 }
             )

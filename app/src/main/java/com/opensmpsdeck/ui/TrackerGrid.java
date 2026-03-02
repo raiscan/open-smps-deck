@@ -768,6 +768,17 @@ public class TrackerGrid extends ScrollPane {
         refreshDisplay();
     }
 
+    /**
+     * Set the playback cursor position from a raw sequencer tick count.
+     * Only effective in unrolled mode; maps the tick to a grid row.
+     */
+    public void setPlaybackTick(long tick) {
+        if (viewMode != ViewMode.UNROLLED || unrolledTimeline == null) return;
+        int effectiveResolution = unrolledTimeline.gridResolution() / zoomLevel;
+        int row = effectiveResolution > 0 ? (int) (tick / effectiveResolution) : 0;
+        setPlaybackRow(row);
+    }
+
     /** Set per-channel playback row markers (length 10, -1 for inactive channels). */
     public void setPlaybackRowsByChannel(int[] rows) {
         if (rows == null) {
