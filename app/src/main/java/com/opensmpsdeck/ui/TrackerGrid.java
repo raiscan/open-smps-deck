@@ -231,6 +231,17 @@ public class TrackerGrid extends ScrollPane {
     }
 
     public void refreshDisplay() {
+        if (viewMode == ViewMode.UNROLLED && unrolledTimeline != null) {
+            int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
+            int totalRows = maxTickAcrossChannels() / effectiveResolution;
+            double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH * Pattern.CHANNEL_COUNT;
+            double totalHeight = HEADER_HEIGHT + ROW_HEIGHT * Math.max(1, totalRows);
+            canvas.setWidth(totalWidth);
+            canvas.setHeight(totalHeight);
+            renderUnrolled();
+            return;
+        }
+
         if (activePhrase != null) {
             int maxRows = Math.max(1, ensureDecodedCache());
             double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH;
@@ -507,6 +518,163 @@ public class TrackerGrid extends ScrollPane {
             gc.fillText(summary, effectX, textY);
             gc.restore();
         }
+    }
+
+    // --- Unrolled timeline rendering ---
+
+    private void renderUnrolled() {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
+        int totalRows = maxTickAcrossChannels() / effectiveResolution;
+
+        // Clear
+        gc.setFill(Color.web("#1a1a2e"));
+        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        // Draw header
+        gc.setFill(Color.web("#2a2a2a"));
+        gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
+        gc.setFont(HEADER_FONT);
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+            gc.setFill(Color.web("#88aacc"));
+            gc.fillText(CHANNEL_NAMES[ch], x, HEADER_HEIGHT - 6);
+        }
+
+        // Draw rows
+        gc.setFont(MONO_FONT);
+        for (int gridRow = 0; gridRow < totalRows; gridRow++) {
+            double y = HEADER_HEIGHT + gridRow * ROW_HEIGHT;
+
+            // Playback cursor highlight (teal bar, semi-transparent)
+            if (gridRow == playbackRow && playbackRow >= 0) {
+                gc.setFill(Color.rgb(0, 180, 180, 0.25));
+                gc.fillRect(0, y, canvas.getWidth(), ROW_HEIGHT);
+            }
+
+            // Beat grid lines every 4 rows
+            if (gridRow % 4 == 0 && gridRow > 0) {
+                gc.setStroke(Color.web("#2a2a44"));
+                gc.setLineWidth(1);
+                gc.strokeLine(0, y, canvas.getWidth(), y);
+            }
+
+            // Alternating row background for readability
+            if (gridRow != playbackRow && gridRow % 4 == 0) {
+                gc.setFill(Color.web("#1e1e34"));
+                gc.fillRect(0, y, canvas.getWidth(), ROW_HEIGHT);
+            }
+
+            // Row number: show tick value
+            gc.setFill(Color.web("#666666"));
+            int tickValue = gridRow * effectiveResolution;
+            gc.fillText(String.format("%03X", tickValue), 2, y + ROW_HEIGHT - 5);
+
+            // Per-channel cells
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
+                double textX = x + 4;
+                double textY = y + ROW_HEIGHT - 5;
+
+                UnrolledTimeline.TimelineChannel channel = unrolledTimeline.channel(ch);
+
+                // Phrase background tinting
+                for (UnrolledTimeline.PhraseSpan span : channel.phraseSpans()) {
+                    if (gridRow >= span.startRow() && gridRow <= span.endRow()) {
+                        Color phraseColor = PhraseColors.forPhraseId(span.phraseId());
+                        gc.setFill(Color.color(
+                                phraseColor.getRed(), phraseColor.getGreen(),
+                                phraseColor.getBlue(), 0.15));
+                        gc.fillRect(x, y, CHANNEL_WIDTH, ROW_HEIGHT);
+                        break;
+                    }
+                }
+
+                // Find event at this row
+                UnrolledTimeline.TimelineEvent event = findEventAtRow(ch, gridRow, effectiveResolution);
+
+                if (event != null) {
+                    double opacity = event.isFromLoop() ? 0.5 : 1.0;
+
+                    if (event.startGridRow() == gridRow) {
+                        // Event starts at this row: render note/duration/instrument
+                        String formatted = formatUnrolledEventRow(event);
+                        gc.setFill(Color.color(0.8, 0.85, 0.9, opacity));
+                        gc.fillText(formatted, textX, textY);
+                    } else {
+                        // Event spans this row (sustain)
+                        gc.setFill(Color.color(0.4, 0.4, 0.5, opacity));
+                        gc.fillText("\u00b7\u00b7\u00b7", textX, textY);
+                    }
+                }
+
+                // Loop-back marker
+                int loopRow = unrolledTimeline.channelLoopBackRow()[ch];
+                if (loopRow >= 0 && gridRow == totalRows - 1) {
+                    gc.setFill(Color.web("#66aacc"));
+                    gc.fillText("\u21ba LOOP @" + String.format("%03X", loopRow * effectiveResolution), textX, textY);
+                }
+            }
+        }
+
+        // Draw channel separator lines
+        gc.setStroke(Color.web("#333344"));
+        gc.setLineWidth(1);
+        for (int ch = 0; ch <= Pattern.CHANNEL_COUNT; ch++) {
+            double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
+            gc.strokeLine(x, HEADER_HEIGHT, x, HEADER_HEIGHT + totalRows * ROW_HEIGHT);
+        }
+    }
+
+    /**
+     * Find the timeline event spanning the given grid row on a channel.
+     * Returns null if no event covers this row.
+     */
+    private UnrolledTimeline.TimelineEvent findEventAtRow(int channel, int gridRow, int effectiveResolution) {
+        if (unrolledTimeline == null) return null;
+        UnrolledTimeline.TimelineChannel ch = unrolledTimeline.channel(channel);
+        for (UnrolledTimeline.TimelineEvent event : ch.events()) {
+            if (gridRow >= event.startGridRow() && gridRow < event.startGridRow() + event.spanRows()) {
+                return event;
+            }
+            // Events are in tick order; if we've passed the target row, stop early
+            if (event.startGridRow() > gridRow) break;
+        }
+        return null;
+    }
+
+    /** Format an unrolled timeline event as "NOTE DUR INST" text. */
+    private String formatUnrolledEventRow(UnrolledTimeline.TimelineEvent event) {
+        SmpsDecoder.TrackerRow decoded = event.decoded();
+        StringBuilder sb = new StringBuilder();
+        String note = decoded.note();
+        sb.append(note != null && !note.isEmpty() ? note : "...");
+        sb.append(' ');
+        if (decoded.duration() > 0) {
+            sb.append(String.format("%02X", decoded.duration()));
+        } else {
+            sb.append("..");
+        }
+        sb.append(' ');
+        String instr = decoded.instrument();
+        sb.append(instr != null && !instr.isEmpty() ? instr : "..");
+        return sb.toString();
+    }
+
+    /** Find the maximum tick across all channels for sizing. */
+    private int maxTickAcrossChannels() {
+        if (unrolledTimeline == null) return 0;
+        int maxTick = 0;
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            UnrolledTimeline.TimelineChannel channel = unrolledTimeline.channel(ch);
+            List<UnrolledTimeline.TimelineEvent> events = channel.events();
+            if (!events.isEmpty()) {
+                UnrolledTimeline.TimelineEvent last = events.get(events.size() - 1);
+                int endTick = last.startTick() + last.durationTicks();
+                if (endTick > maxTick) maxTick = endTick;
+            }
+        }
+        return maxTick;
     }
 
     public int getCursorRow() { return cursorRow; }
