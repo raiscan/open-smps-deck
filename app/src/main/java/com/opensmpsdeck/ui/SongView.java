@@ -35,14 +35,6 @@ public class SongView extends ScrollPane {
         "PSG1", "PSG2", "PSG3", "Nse"
     };
 
-    /** Color palette for phrase blocks. Shared phrases get consistent colors. */
-    private static final Color[] PHRASE_COLORS = {
-        Color.web("#3a6b8a"), Color.web("#6b3a8a"), Color.web("#3a8a6b"),
-        Color.web("#8a6b3a"), Color.web("#8a3a5a"), Color.web("#5a8a3a"),
-        Color.web("#3a5a8a"), Color.web("#8a5a3a"), Color.web("#5a3a8a"),
-        Color.web("#3a8a5a"), Color.web("#8a3a3a"), Color.web("#3a8a8a")
-    };
-
     private final Canvas canvas;
     private HierarchicalArrangement arrangement;
     private IntConsumer onPhraseSelected;
@@ -200,7 +192,7 @@ public class SongView extends ScrollPane {
     }
 
     private static Color phraseColor(int phraseId) {
-        return PHRASE_COLORS[Math.abs(phraseId) % PHRASE_COLORS.length];
+        return PhraseColors.forPhraseId(phraseId);
     }
 
     private void handleMousePressed(MouseEvent e) {
