@@ -53,7 +53,8 @@ public class TestSmpsExporter {
         assertTrue(data.length > 0);
 
         // Verify it starts with a valid SMPS header
-        assertEquals(1, data[2] & 0xFF, "1 FM channel");
+        // fmCount=2 because dummy DAC entry is inserted when FM channels are active
+        assertEquals(2, data[2] & 0xFF, "2 FM channels (dummy DAC + FM1)");
         assertEquals(0, data[3] & 0xFF, "0 PSG channels");
         assertEquals(0x80, data[5] & 0xFF, "Tempo");
     }
@@ -127,11 +128,9 @@ public class TestSmpsExporter {
         assertTrue(data.length > 0, "Exported file should be non-empty");
 
         // Header: byte[2]=FM count, byte[3]=PSG count
-        assertEquals(1, data[2] & 0xFF, "1 FM channel");
+        // fmCount=2 because dummy DAC entry is inserted when FM channels are active
+        assertEquals(2, data[2] & 0xFF, "2 FM channels (dummy DAC + FM1)");
         assertEquals(1, data[3] & 0xFF, "1 PSG channel");
-
-        // PSG channel header is 6 bytes (vs 4 for FM), so total header =
-        // 6 (base) + 4 (1 FM) + 6 (1 PSG) = 16
         // Verify the PSG instrument command (F5 00) appears in the track data
         boolean foundPsgInstrument = false;
         for (int i = 0; i < data.length - 1; i++) {

@@ -16,7 +16,7 @@ class TestHierarchyCompilerIntegration {
         // Verify SMPS header
         assertNotNull(smps);
         assertTrue(smps.length > 6);
-        assertEquals(1, smps[2]); // 1 FM channel active
+        assertEquals(2, smps[2]); // 2 FM channels (dummy DAC + FM1)
         assertEquals(0, smps[3]); // 0 PSG channels
     }
 

@@ -27,6 +27,7 @@ public class SmpsImporter {
 
     private static final int FM_CHANNEL_COUNT = 6;
     private static final int PSG_CHANNEL_COUNT = 4;
+    private static final int DAC_MODEL_CHANNEL = 5;
 
     /** DPCM delta table used by the Z80 DAC driver for sample decompression. */
     static final int[] DPCM_DELTA_TABLE = {
@@ -168,17 +169,20 @@ public class SmpsImporter {
         int[] psgHeaderKey = new int[Pattern.CHANNEL_COUNT];
         int[] psgHeaderVol = new int[Pattern.CHANNEL_COUNT];
 
-        // Extract FM track data
+        // Extract FM track data.
+        // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
+        // Map to model channels: entry 0 → model ch 5 (DAC), entries 1+ → model ch i-1 (FM1-FM5).
         for (int i = 0; i < fmCount && i < FM_CHANNEL_COUNT; i++) {
+            int modelCh = (i == 0) ? DAC_MODEL_CHANNEL : i - 1;
             int ptr = fmPointers[i];
             if (ptr >= 0 && ptr < data.length) {
                 byte[] trackData = extractReachableTrackData(data, ptr, seqBase);
                 if (trackData.length > 0) {
                     trackData = normalizeTrackPointers(trackData, ptr, seqBase);
-                    decompileData[i] = trackData;
+                    decompileData[modelCh] = trackData;
                     trackData = stripJumpTerminator(trackData);
                     trackData = prependFmHeaderState(trackData, fmKeys[i], fmVols[i]);
-                    pattern.setTrackData(i, trackData);
+                    pattern.setTrackData(modelCh, trackData);
                 }
             }
         }

@@ -48,6 +48,10 @@ public class PatternCompiler {
     private static final int CMD_TRACK_END = SmpsCoordFlags.STOP;
     private static final int CMD_JUMP = SmpsCoordFlags.JUMP;
 
+    /** FM model channel order matching the sequencer's fmChannelOrder:
+     *  entry 0 = DAC (model ch 5), then FM1-FM5 (model ch 0-4). */
+    private static final int[] FM_COMPILE_ORDER = {DAC_CHANNEL, 0, 1, 2, 3, 4};
+
     /**
      * Row position resolved from a compiled channel timeline.
      */
@@ -231,7 +235,12 @@ public class PatternCompiler {
         List<byte[]> compiledTracks = new ArrayList<>();
         List<HierarchyCompiler.ChainCompilationResult> chainResults = new ArrayList<>();
 
-        for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
+        // Process FM channels in sequencer-expected order: DAC first, then FM1-FM5.
+        // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
+        boolean anyNonDacFm = false;
+        boolean hasDacTrack = false;
+
+        for (int ch : FM_COMPILE_ORDER) {
             Chain chain = arrangement.getChain(ch);
             if (chain.getEntries().isEmpty()) {
                 continue;
@@ -250,12 +259,39 @@ public class PatternCompiler {
                 trackData = applyNoteCompensation(trackData, noteCompensation);
             }
 
-            if (ch < FM_CHANNEL_COUNT) {
-                activeFmChannels.add(ch);
-            } else {
-                activePsgChannels.add(ch);
+            activeFmChannels.add(ch);
+            compiledTracks.add(trackData);
+            activeChannels.add(ch);
+            chainResults.add(chainResult);
+
+            if (ch == DAC_CHANNEL) hasDacTrack = true;
+            else anyNonDacFm = true;
+        }
+
+        // Insert dummy DAC entry if FM tracks exist without DAC, so the
+        // sequencer's positional fmChannelOrder mapping stays correct.
+        if (anyNonDacFm && !hasDacTrack) {
+            byte[] dummyDac = new byte[]{(byte) CMD_TRACK_END};
+            compiledTracks.add(0, dummyDac);
+            activeFmChannels.add(0, DAC_CHANNEL);
+            activeChannels.add(0, DAC_CHANNEL);
+            chainResults.add(0, new HierarchyCompiler.ChainCompilationResult(dummyDac, new int[0], 0));
+        }
+
+        // Process PSG channels (6-9)
+        for (int ch = FM_CHANNEL_COUNT; ch < TOTAL_CHANNELS; ch++) {
+            Chain chain = arrangement.getChain(ch);
+            if (chain.getEntries().isEmpty()) {
+                continue;
             }
 
+            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library);
+            byte[] trackData = chainResult.trackData();
+            if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
+                continue;
+            }
+
+            activePsgChannels.add(ch);
             compiledTracks.add(trackData);
             activeChannels.add(ch);
             chainResults.add(chainResult);
@@ -397,19 +433,52 @@ public class PatternCompiler {
         List<ChannelTimelineBuilder> timelineBuilders = new ArrayList<>();
 
         int ticksPerRow = Math.max(1, arrangement.getTicksPerRow());
-        for (int ch = 0; ch < TOTAL_CHANNELS; ch++) {
-            // Only FM channels (0-4) need note compensation; PSG uses offset 0 in all modes
+
+        // Process FM channels in sequencer-expected order: DAC first, then FM1-FM5.
+        boolean anyNonDacFm = false;
+        boolean hasDacTrack = false;
+
+        for (int ch : FM_COMPILE_ORDER) {
             int chNoteComp = (ch < DAC_CHANNEL) ? noteCompensation : 0;
             StructuredTrack track = buildStructuredTrackData(arrangement, blocksById, ch, chNoteComp);
             if (track.trackData.length == 0) {
                 continue;
             }
 
-            if (ch < FM_CHANNEL_COUNT) {
-                activeFmChannels.add(ch);
-            } else {
-                activePsgChannels.add(ch);
+            activeFmChannels.add(ch);
+
+            byte[] withJump = new byte[track.trackData.length + 3];
+            System.arraycopy(track.trackData, 0, withJump, 0, track.trackData.length);
+            withJump[track.trackData.length] = (byte) CMD_JUMP;
+            withJump[track.trackData.length + 1] = 0;
+            withJump[track.trackData.length + 2] = 0;
+
+            compiledTracks.add(withJump);
+            activeChannels.add(ch);
+            timelineBuilders.add(buildStructuredTimeline(track.trackData, ticksPerRow));
+
+            if (ch == DAC_CHANNEL) hasDacTrack = true;
+            else anyNonDacFm = true;
+        }
+
+        // Insert dummy DAC entry if FM tracks exist without DAC
+        if (anyNonDacFm && !hasDacTrack) {
+            byte[] dummyDac = new byte[]{(byte) CMD_TRACK_END};
+            compiledTracks.add(0, dummyDac);
+            activeFmChannels.add(0, DAC_CHANNEL);
+            activeChannels.add(0, DAC_CHANNEL);
+            timelineBuilders.add(0, new ChannelTimelineBuilder());
+        }
+
+        // Process PSG channels (6-9)
+        for (int ch = FM_CHANNEL_COUNT; ch < TOTAL_CHANNELS; ch++) {
+            int chNoteComp = 0; // PSG uses offset 0 in all modes
+            StructuredTrack track = buildStructuredTrackData(arrangement, blocksById, ch, chNoteComp);
+            if (track.trackData.length == 0) {
+                continue;
             }
+
+            activePsgChannels.add(ch);
 
             byte[] withJump = new byte[track.trackData.length + 3];
             System.arraycopy(track.trackData, 0, withJump, 0, track.trackData.length);

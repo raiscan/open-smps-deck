@@ -184,7 +184,7 @@ Three-pass reverse of compilation:
 - `F7 ii cc` — Loop (index, count)
 - `F8 aa aa` — Call subroutine
 - `E3` — Return from subroutine
-- `FF 00 tt` — Set tempo
+- `EA tt` — Set tempo
 
 ## Mode-Aware Behavior
 

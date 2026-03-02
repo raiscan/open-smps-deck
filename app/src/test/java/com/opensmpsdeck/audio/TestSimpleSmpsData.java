@@ -176,7 +176,8 @@ class TestSimpleSmpsData {
         // Verify header fields
         assertEquals(0xC0, data.getTempo(), "Tempo should match compiled value");
         assertEquals(3, data.getDividingTiming(), "Dividing timing should match compiled value");
-        assertEquals(1, data.getChannels(), "Should have 1 FM channel");
+        // fmCount=2 because dummy DAC entry is inserted when FM channels are active
+        assertEquals(2, data.getChannels(), "Should have 2 FM channels (dummy DAC + FM1)");
         assertEquals(1, data.getPsgChannels(), "Should have 1 PSG channel");
 
         // getData() should return the full compiled blob
@@ -189,11 +190,12 @@ class TestSimpleSmpsData {
         assertTrue(voicePtr + FmVoice.VOICE_SIZE <= smps.length,
                 "Voice pointer should allow at least one voice to fit");
 
-        // FM pointers should be populated
+        // FM pointers should be populated (2: dummy DAC + FM1)
         int[] fmPointers = data.getFmPointers();
         assertNotNull(fmPointers, "FM pointers array should not be null");
-        assertEquals(1, fmPointers.length, "Should have 1 FM pointer");
-        assertTrue(fmPointers[0] > 0, "FM channel 0 pointer should be > 0");
+        assertEquals(2, fmPointers.length, "Should have 2 FM pointers (dummy DAC + FM1)");
+        assertTrue(fmPointers[0] > 0, "FM channel 0 (DAC) pointer should be > 0");
+        assertTrue(fmPointers[1] > 0, "FM channel 1 (FM1) pointer should be > 0");
 
         // PSG pointers should be populated
         int[] psgPointers = data.getPsgPointers();
@@ -288,14 +290,16 @@ class TestSimpleSmpsData {
         byte[] smps = new PatternCompiler().compile(song);
         SimpleSmpsData data = new SimpleSmpsData(smps, 1);
 
-        // PatternCompiler writes 0 for key/volume offsets
+        // PatternCompiler writes 0 for key/volume offsets (2 entries: dummy DAC + FM1)
         int[] keyOffsets = data.getFmKeyOffsets();
         int[] volOffsets = data.getFmVolumeOffsets();
         assertNotNull(keyOffsets);
         assertNotNull(volOffsets);
-        assertEquals(1, keyOffsets.length, "Should have 1 FM key offset");
-        assertEquals(1, volOffsets.length, "Should have 1 FM volume offset");
-        assertEquals(0, keyOffsets[0], "FM key offset should be 0 as compiled");
-        assertEquals(0, volOffsets[0], "FM volume offset should be 0 as compiled");
+        assertEquals(2, keyOffsets.length, "Should have 2 FM key offsets (dummy DAC + FM1)");
+        assertEquals(2, volOffsets.length, "Should have 2 FM volume offsets (dummy DAC + FM1)");
+        assertEquals(0, keyOffsets[0], "DAC key offset should be 0 as compiled");
+        assertEquals(0, volOffsets[0], "DAC volume offset should be 0 as compiled");
+        assertEquals(0, keyOffsets[1], "FM1 key offset should be 0 as compiled");
+        assertEquals(0, volOffsets[1], "FM1 volume offset should be 0 as compiled");
     }
 }

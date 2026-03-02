@@ -78,8 +78,8 @@ public class TestSmpsImporter {
         assertEquals(6, song.getVoiceBank().get(0).getFeedback());
         assertEquals(1, song.getPatterns().size());
 
-        // Track data should be extracted
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Track data should be extracted (entry 0 maps to DAC = model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertNotNull(track);
         assertTrue(track.length > 0);
         assertEquals((byte) SmpsCoordFlags.SET_VOICE, track[0]); // first byte is set voice (EF)
@@ -124,7 +124,8 @@ public class TestSmpsImporter {
         smps[0x0C] = (byte) SmpsCoordFlags.STOP;
 
         Song song = new SmpsImporter().importData(smps, "fm-offsets");
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Entry 0 maps to DAC (model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertArrayEquals(new byte[]{
                 (byte) SmpsCoordFlags.KEY_DISP, 0x02,
                 (byte) SmpsCoordFlags.VOLUME, (byte) 0xFF,
@@ -388,7 +389,8 @@ public class TestSmpsImporter {
 
         assertEquals(1, song.getVoiceBank().size());
         assertEquals(2, song.getVoiceBank().get(0).getAlgorithm());
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Entry 0 maps to DAC (model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertNotNull(track);
         assertTrue(containsByte(track, (byte) 0xA1), "Track should contain note 0xA1");
     }
@@ -480,7 +482,8 @@ public class TestSmpsImporter {
 
         Song song = new SmpsImporter().importData(smps, "jump-test");
 
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Entry 0 maps to DAC (model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertNotNull(track);
         // Should end with F2 (STOP), not F6
         assertEquals((byte) SmpsCoordFlags.STOP, track[track.length - 1],
@@ -515,7 +518,8 @@ public class TestSmpsImporter {
         smps[0x11] = (byte) SmpsCoordFlags.STOP;
 
         Song song = new SmpsImporter().importData(smps, "loop-normalize");
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Entry 0 maps to DAC (model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertNotNull(track);
         assertTrue(track.length >= 5);
         assertEquals(SmpsCoordFlags.LOOP, track[0] & 0xFF);
@@ -553,7 +557,8 @@ public class TestSmpsImporter {
         smps[0x14] = (byte) SmpsCoordFlags.RETURN;
 
         Song song = new SmpsImporter().importData(smps, "call-sub");
-        byte[] track = song.getPatterns().get(0).getTrackData(0);
+        // Entry 0 maps to DAC (model ch 5)
+        byte[] track = song.getPatterns().get(0).getTrackData(5);
         assertNotNull(track);
         assertTrue(track.length >= 0x0B, "Imported track should include called subroutine bytes");
         assertEquals(SmpsCoordFlags.CALL, track[0] & 0xFF);

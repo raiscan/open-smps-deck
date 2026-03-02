@@ -316,4 +316,65 @@ class TestSmpsSequencer {
                 new int[]{ 0x80, 0xA0, 0xC0 }
         );
     }
+
+    @Test
+    void tempoChangeUpdatesNormalTempo() {
+        // Build a minimal SMPS binary with 1 FM channel and an EA (SET_TEMPO) command.
+        // Layout:
+        //   [0x00] Header (6 bytes): voicePtr(LE16), fmChannels, psgChannels, dividingTiming, tempo
+        //   [0x06] FM track 0 entry (4 bytes): pointer(LE16), transpose, volume
+        //   [0x0A] Voice 0 data (25 bytes)
+        //   [0x23] Track data (5 bytes): EA 60 90 30 F2
+        //
+        // Total size = 0x28 (40 bytes)
+
+        byte[] smps = new byte[0x28];
+
+        // Header
+        smps[0] = 0x0A; smps[1] = 0x00; // voice ptr at offset 0x0A
+        smps[2] = 1; smps[3] = 0;        // 1 FM, 0 PSG
+        smps[4] = 1; smps[5] = (byte) 0xC0; // dividingTiming=1, tempo=0xC0
+
+        // FM track 0 entry: pointer = 0x23 (track data start), transpose = 0, volume = 0
+        smps[6] = 0x23; smps[7] = 0x00;
+        smps[8] = 0x00; smps[9] = 0x00;
+
+        // Voice 0 at offset 0x0A (25 bytes) — minimal voice
+        smps[0x0A] = 0x00; // algo/fb
+        for (int i = 0x0B; i <= 0x0E; i++) smps[i] = 0x01; // DT/MUL
+        for (int i = 0x0F; i <= 0x12; i++) smps[i] = 0x1F; // RS/AR
+        for (int i = 0x13; i <= 0x1E; i++) smps[i] = 0x00; // D1R, D2R, SL/RR
+        smps[0x1F] = 0x00; smps[0x20] = 0x00; smps[0x21] = 0x00; smps[0x22] = 0x00; // TL
+
+        // Track data at offset 0x23:
+        //   EA 60  — SET_TEMPO: change tempo from 0xC0 to 0x60
+        //   90 30  — Note 0x90, duration 0x30
+        //   F2     — Stop
+        smps[0x23] = (byte) 0xEA;
+        smps[0x24] = 0x60;
+        smps[0x25] = (byte) 0x90;
+        smps[0x26] = 0x30;
+        smps[0x27] = (byte) 0xF2;
+
+        StubSmpsData data = new StubSmpsData(smps, 0);
+        SmpsSequencerConfig config = createS2Config();
+        DacData dacData = new DacData(Collections.emptyMap(), Collections.emptyMap());
+        SmpsSequencer seq = new SmpsSequencer(data, dacData, config);
+
+        // Before reading, verify the initial tempo is 0xC0
+        assertEquals(0xC0, seq.getNormalTempo(),
+                "Initial normalTempo should be 0xC0 as set in the header");
+        assertEquals(0xC0, seq.debugState().tempoWeight,
+                "Initial tempoWeight should be 0xC0");
+
+        // Read audio to trigger the sequencer to process the track data (including EA 60)
+        short[] buf = new short[44100]; // ~500ms mono — plenty to process the EA command
+        seq.read(buf);
+
+        // After reading, the EA 60 command should have updated the tempo
+        assertEquals(0x60, seq.getNormalTempo(),
+                "normalTempo should be 0x60 after EA 60 command");
+        assertEquals(0x60, seq.debugState().tempoWeight,
+                "tempoWeight should be 0x60 after EA 60 command");
+    }
 }

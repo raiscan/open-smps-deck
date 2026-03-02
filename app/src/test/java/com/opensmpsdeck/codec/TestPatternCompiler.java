@@ -57,8 +57,9 @@ class TestPatternCompiler {
         assertNotNull(smps);
         assertTrue(smps.length > 0);
 
-        // Verify header basics
-        assertEquals(1, smps[2] & 0xFF, "Should have 1 FM channel");
+        // Verify header basics — fmCount=2 because a dummy DAC entry is inserted
+        // when non-DAC FM channels are active (sequencer expects DAC as entry 0)
+        assertEquals(2, smps[2] & 0xFF, "Should have 2 FM channels (dummy DAC + FM1)");
         assertEquals(0, smps[3] & 0xFF, "Should have 0 PSG channels");
         assertEquals(1, smps[4] & 0xFF, "Dividing timing");
         assertEquals(0x80, smps[5] & 0xFF, "Tempo");
@@ -121,7 +122,7 @@ class TestPatternCompiler {
 
         byte[] smps = new PatternCompiler().compile(song);
 
-        assertEquals(1, smps[2] & 0xFF, "1 FM channel");
+        assertEquals(2, smps[2] & 0xFF, "2 FM channels (dummy DAC + FM1)");
         assertEquals(1, smps[3] & 0xFF, "1 PSG channel");
     }
 
@@ -143,8 +144,8 @@ class TestPatternCompiler {
             if ((smps[i] & 0xFF) == SmpsCoordFlags.JUMP) {
                 int target = (smps[i + 1] & 0xFF) | ((smps[i + 2] & 0xFF) << 8);
                 // Target should point past the intro data (A1 18 A3 18 = 4 bytes)
-                // and into the loop body area
-                int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+                // and into the loop body area. FM1 is entry 1 (entry 0 is dummy DAC).
+                int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
                 assertTrue(target > trackStart,
                     "Loop target should point past intro into loop body");
                 return;
@@ -175,8 +176,9 @@ class TestPatternCompiler {
         song.setStructuredArrangement(structured);
 
         byte[] smps = new PatternCompiler().compile(song);
-        assertEquals(1, smps[2] & 0xFF, "Structured mode should compile active FM channel");
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // fmCount=2 (dummy DAC + FM1), FM1 is entry 1 at offset 10
+        assertEquals(2, smps[2] & 0xFF, "Structured mode should compile dummy DAC + active FM channel");
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         assertEquals(0xA1, smps[trackStart] & 0xFF);
         assertEquals(0x18, smps[trackStart + 1] & 0xFF);
     }
@@ -194,7 +196,8 @@ class TestPatternCompiler {
         song.setStructuredArrangement(structured);
 
         byte[] smps = new PatternCompiler().compile(song);
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         assertEquals(0x80, smps[trackStart] & 0xFF, "Gap should compile as rest");
         assertEquals(10, smps[trackStart + 1] & 0xFF, "Rest duration should match start tick gap");
         assertEquals(0xA4, smps[trackStart + 2] & 0xFF);
@@ -227,8 +230,9 @@ class TestPatternCompiler {
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
 
-        // Track data starts after header: 6 (base) + 4 (1 FM track header) = offset 10
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC). Header: 6 base + 2*4 FM entries = 14.
+        // Entry 1 pointer is at offset 10.
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         // Track data: EF 00 <note> 30 F6 xx xx
         // The note is at trackStart + 2 (after EF 00)
         int compiledNote = smps[trackStart + 2] & 0xFF;
@@ -256,7 +260,8 @@ class TestPatternCompiler {
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
 
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         int compiledNote = smps[trackStart + 2] & 0xFF;
         assertEquals(0xA1, compiledNote,
             "S2 mode should leave note 0xA1 unchanged (no compensation)");
@@ -274,7 +279,8 @@ class TestPatternCompiler {
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
 
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         int compiledNote = smps[trackStart] & 0xFF;
         assertEquals(0xBE, compiledNote,
             "S3K mode should shift note 0xBD -> 0xBE (+1 compensation)");
@@ -308,7 +314,8 @@ class TestPatternCompiler {
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
 
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         int compiledByte = smps[trackStart] & 0xFF;
         assertEquals(0x80, compiledByte,
             "Rest byte 0x80 should NOT be shifted by note compensation");
@@ -327,7 +334,8 @@ class TestPatternCompiler {
         PatternCompiler compiler = new PatternCompiler();
         byte[] smps = compiler.compile(song);
 
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
         int compiledNote = smps[trackStart] & 0xFF;
         assertEquals(0xDF, compiledNote,
             "Note at max 0xDF should be clamped to 0xDF, not overflow into coord flag range");
@@ -460,7 +468,8 @@ class TestPatternCompiler {
         setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        // FM1 is entry 1 (entry 0 is dummy DAC)
+        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
 
         // LOOP command at trackStart+2 (after A1 18)
         assertEquals(SmpsCoordFlags.LOOP, smps[trackStart + 2] & 0xFF);
