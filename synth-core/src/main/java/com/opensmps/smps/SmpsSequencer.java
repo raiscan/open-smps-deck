@@ -635,16 +635,23 @@ public class SmpsSequencer implements AudioStream, CoordFlagContext {
      * Runtime state for an active track: current byte position and remaining
      * duration ticks for the currently playing row.
      */
-    public record TrackRuntimeState(int position, int remainingDuration) {}
+    public record TrackRuntimeState(int position, int remainingDuration, int outerCallSite) {
+        public TrackRuntimeState(int position, int remainingDuration) {
+            this(position, remainingDuration, -1);
+        }
+    }
 
     /**
      * Returns runtime state for the track matching the given type/channel, or
-     * {@code null} when no matching active track exists.
+     * {@code null} when no matching active track exists. When the track is
+     * inside an F8 subroutine, {@code outerCallSite} is the byte position of
+     * the outermost CALL flag in the main stream (-1 otherwise).
      */
     public TrackRuntimeState getTrackRuntimeState(TrackType type, int channelId) {
         for (Track t : tracks) {
             if (t.type == type && t.channelId == channelId && t.active) {
-                return new TrackRuntimeState(t.pos, t.duration);
+                int callSite = t.returnSp > 0 ? Math.max(0, t.returnStack[0] - 3) : -1;
+                return new TrackRuntimeState(t.pos, t.duration, callSite);
             }
         }
         return null;

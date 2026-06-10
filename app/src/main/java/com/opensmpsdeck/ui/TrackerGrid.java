@@ -500,41 +500,7 @@ public class TrackerGrid extends ScrollPane {
             gc.fillRect(0, 0, canvas.getWidth(), viewportHeight);
         }
 
-        // Draw header (visible when scrolled near top)
         int channelCount = getVisibleChannelCount();
-        double headerBottomOnCanvas = HEADER_HEIGHT - scrollY;
-        if (headerBottomOnCanvas > 0) {
-            gc.setFill(Color.web("#2a2a2a"));
-            gc.fillRect(0, 0, canvas.getWidth(), headerBottomOnCanvas);
-            gc.setFont(HEADER_FONT);
-            for (int ch = 0; ch < channelCount; ch++) {
-                double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
-                String headerName;
-                if (activePhrase != null) {
-                    headerName = activePhrase.getName();
-                } else {
-                    headerName = CHANNEL_NAMES[ch];
-                }
-                boolean effectivelyMuted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
-                if (activePhrase != null) {
-                    // Header text in the phrase's colour
-                    gc.setFill(PhraseColors.forPhraseId(activePhrase.getId()).brighter());
-                } else if (soloChannel == ch) {
-                    gc.setFill(Color.web("#ffcc00")); // gold for solo
-                } else if (effectivelyMuted) {
-                    gc.setFill(Color.web("#555555")); // grey for muted
-                } else {
-                    gc.setFill(Color.web("#88aacc")); // normal
-                }
-                gc.fillText(headerName, x, headerBottomOnCanvas - 6);
-                if (effectivelyMuted) {
-                    gc.setStroke(Color.web("#555555"));
-                    gc.setLineWidth(1);
-                    double textY = headerBottomOnCanvas - 6;
-                    gc.strokeLine(x, textY - 4, x + CHANNEL_WIDTH - 8, textY - 4);
-                }
-            }
-        }
 
         // Determine visible row range
         int firstVisibleRow = Math.max(0, (int) ((scrollY - HEADER_HEIGHT) / ROW_HEIGHT));
@@ -619,6 +585,33 @@ public class TrackerGrid extends ScrollPane {
         for (int ch = 0; ch <= channelCount; ch++) {
             double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
             gc.strokeLine(x, sepStartY, x, sepEndY);
+        }
+
+        // Sticky header: always pinned to the top of the viewport, drawn
+        // last so scrolled rows slide underneath it
+        gc.setFill(Color.web("#2a2a2a"));
+        gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
+        gc.setFont(HEADER_FONT);
+        for (int ch = 0; ch < channelCount; ch++) {
+            double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+            String headerName = activePhrase != null ? activePhrase.getName() : CHANNEL_NAMES[ch];
+            int modelCh = activePhrase != null ? phraseChannelIndex : ch;
+            boolean effectivelyMuted = soloChannel >= 0 ? (modelCh != soloChannel) : channelMuted[modelCh];
+            if (activePhrase != null) {
+                gc.setFill(PhraseColors.forPhraseId(activePhrase.getId()).brighter());
+            } else if (soloChannel == ch) {
+                gc.setFill(Color.web("#ffcc00")); // gold for solo
+            } else if (effectivelyMuted) {
+                gc.setFill(Color.web("#555555")); // grey for muted
+            } else {
+                gc.setFill(Color.web("#88aacc")); // normal
+            }
+            gc.fillText(headerName, x, HEADER_HEIGHT - 6);
+            if (effectivelyMuted) {
+                gc.setStroke(Color.web("#555555"));
+                gc.setLineWidth(1);
+                gc.strokeLine(x, HEADER_HEIGHT - 10, x + CHANNEL_WIDTH - 8, HEADER_HEIGHT - 10);
+            }
         }
     }
 
@@ -740,18 +733,6 @@ public class TrackerGrid extends ScrollPane {
         gc.setFill(Color.web("#1a1a2e"));
         gc.fillRect(0, 0, canvas.getWidth(), viewportHeight);
 
-        // Draw header (visible when scrolled near top)
-        double headerBottomOnCanvas = HEADER_HEIGHT - scrollY;
-        if (headerBottomOnCanvas > 0) {
-            gc.setFill(Color.web("#2a2a2a"));
-            gc.fillRect(0, 0, canvas.getWidth(), headerBottomOnCanvas);
-            gc.setFont(HEADER_FONT);
-            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-                double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
-                gc.setFill(Color.web("#88aacc"));
-                gc.fillText(CHANNEL_NAMES[ch], x, headerBottomOnCanvas - 6);
-            }
-        }
 
         // Determine visible row range
         int firstVisibleRow = Math.max(0, (int) ((scrollY - HEADER_HEIGHT) / ROW_HEIGHT));
@@ -847,6 +828,18 @@ public class TrackerGrid extends ScrollPane {
         for (int ch = 0; ch <= Pattern.CHANNEL_COUNT; ch++) {
             double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH;
             gc.strokeLine(x, contentStartY, x, contentEndY);
+        }
+
+        // Sticky header pinned to the viewport top
+        gc.setFill(Color.web("#2a2a2a"));
+        gc.fillRect(0, 0, canvas.getWidth(), HEADER_HEIGHT);
+        gc.setFont(HEADER_FONT);
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            double x = ROW_NUM_WIDTH + ch * CHANNEL_WIDTH + 4;
+            boolean effectivelyMuted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
+            gc.setFill(soloChannel == ch ? Color.web("#ffcc00")
+                    : effectivelyMuted ? Color.web("#555555") : Color.web("#88aacc"));
+            gc.fillText(CHANNEL_NAMES[ch], x, HEADER_HEIGHT - 6);
         }
     }
 
@@ -1094,12 +1087,13 @@ public class TrackerGrid extends ScrollPane {
     private void handleMousePressed(MouseEvent e) {
         // The canvas sits at the scroll offset inside the spacer, so canvas-local
         // coordinates map to content coordinates by adding the scroll offset.
-        double contentY = e.getY() + getScrollY();
-        if (contentY < HEADER_HEIGHT) {
+        // The header is pinned to the viewport top
+        if (e.getY() < HEADER_HEIGHT) {
             dragAnchorRow = -1;
             dragAnchorChannel = -1;
             return;
         }
+        double contentY = e.getY() + getScrollY();
 
         // In unrolled mode, skip phrase-mode cursor/selection updates
         if (viewMode == ViewMode.UNROLLED) return;
@@ -1119,8 +1113,8 @@ public class TrackerGrid extends ScrollPane {
 
     private void handleMouseDragged(MouseEvent e) {
         if (!e.isPrimaryButtonDown()) return;
+        if (e.getY() < HEADER_HEIGHT) return; // pinned header
         double contentY = e.getY() + getScrollY();
-        if (contentY < HEADER_HEIGHT) return;
         if (dragAnchorRow < 0 || dragAnchorChannel < 0) return;
 
         cancelPendingHex();
@@ -1136,7 +1130,8 @@ public class TrackerGrid extends ScrollPane {
 
     private void handleMouseClicked(MouseEvent e) {
         double scrollY = getScrollY();
-        if (e.getY() + scrollY < HEADER_HEIGHT) {
+        // The header is pinned to the viewport top
+        if (e.getY() < HEADER_HEIGHT) {
             int ch = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
             if (ch >= 0 && ch < getVisibleChannelCount()) {
                 // Phrase mode shows a single column for the phrase's channel

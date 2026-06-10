@@ -332,25 +332,27 @@ public class PlaybackEngine {
     private List<ResolvedTrackCursor> collectResolvedTrackCursors() {
         List<ResolvedTrackCursor> out = new ArrayList<>(10);
 
-        addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.DAC, 5));
+        addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.DAC, 5), 5);
         for (int fm = 0; fm < 6; fm++) {
-            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.FM, fm));
+            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.FM, fm), fm);
         }
         for (int psg = 0; psg < 4; psg++) {
-            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.PSG, psg));
+            addResolvedCursor(out, driver.getTrackRuntimeState(SmpsSequencer.TrackType.PSG, psg),
+                    psg == 3 ? 9 : 6 + psg);
         }
         return out;
     }
 
     private void addResolvedCursor(List<ResolvedTrackCursor> out,
-                                   SmpsSequencer.TrackRuntimeState state) {
-        ResolvedTrackCursor resolved = resolveFromMatchingTimeline(state);
+                                   SmpsSequencer.TrackRuntimeState state, int modelChannel) {
+        ResolvedTrackCursor resolved = resolveFromMatchingTimeline(state, modelChannel);
         if (resolved != null) {
             out.add(resolved);
         }
     }
 
-    private ResolvedTrackCursor resolveFromMatchingTimeline(SmpsSequencer.TrackRuntimeState state) {
+    private ResolvedTrackCursor resolveFromMatchingTimeline(SmpsSequencer.TrackRuntimeState state,
+                                                            int modelChannel) {
         if (state == null) return null;
 
         // While a row is still counting down, the sequencer position points at the
@@ -360,20 +362,23 @@ public class PlaybackEngine {
                 ? Math.max(0, state.position() - 1)
                 : state.position();
 
-        PatternCompiler.ChannelTimeline best = null;
-        for (int ch = 0; ch < 10; ch++) {
-            PatternCompiler.ChannelTimeline timeline = compilationResult.getChannelTimeline(ch);
-            if (timeline == null || timeline.getRowCount() == 0) continue;
-            if (effectivePos >= timeline.getTrackOffset()) {
-                if (best == null || timeline.getTrackOffset() > best.getTrackOffset()) {
-                    best = timeline;
-                }
-            }
+        // The track identity tells us the channel directly; matching by raw
+        // byte offset picked the wrong timeline for restructured streams
+        PatternCompiler.ChannelTimeline timeline = compilationResult.getChannelTimeline(modelChannel);
+        if (timeline == null || timeline.getRowCount() == 0) {
+            // Compiled noise tracks sit in the tone3 slot and vice versa
+            int alt = modelChannel == 9 ? 8 : modelChannel == 8 ? 9 : -1;
+            timeline = alt >= 0 ? compilationResult.getChannelTimeline(alt) : null;
+            if (timeline == null || timeline.getRowCount() == 0) return null;
         }
-        if (best == null) return null;
-        PatternCompiler.CursorPosition cursor = best.resolvePosition(effectivePos);
+
+        // Inside an F8 subroutine the position points at sub-region bytes that
+        // have no row mapping (resolvePosition would clamp to the last row).
+        // The main-stream row that is "playing" is the CALL site itself.
+        int resolveAt = state.outerCallSite() >= 0 ? state.outerCallSite() : effectivePos;
+        PatternCompiler.CursorPosition cursor = timeline.resolvePosition(resolveAt);
         if (cursor == null) return null;
-        return new ResolvedTrackCursor(best.getChannel(), cursor);
+        return new ResolvedTrackCursor(timeline.getChannel(), cursor);
     }
 
     private PatternCompiler.CursorPosition chooseGlobalCursor(List<ResolvedTrackCursor> candidates) {
