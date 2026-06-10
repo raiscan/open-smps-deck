@@ -236,12 +236,16 @@ public class PatternCompiler {
         List<byte[]> compiledTracks = new ArrayList<>();
         List<HierarchyCompiler.ChainCompilationResult> chainResults = new ArrayList<>();
 
-        // Process FM channels in sequencer-expected order: DAC first, then FM1-FM5.
-        // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
+        // Process FM channels in sequencer-expected order: DAC first, then
+        // FM1-FM5 (and FM6 last when channel 5 carries FM6 instead of DAC).
+        boolean fm6Mode = song.isDacChannelFm6();
+        int[] fmCompileOrder = fm6Mode
+                ? new int[]{0, 1, 2, 3, 4, DAC_CHANNEL}
+                : FM_COMPILE_ORDER;
         boolean anyNonDacFm = false;
         boolean hasDacTrack = false;
 
-        for (int ch : FM_COMPILE_ORDER) {
+        for (int ch : fmCompileOrder) {
             Chain chain = arrangement.getChain(ch);
             if (chain.getEntries().isEmpty()) {
                 continue;
@@ -253,10 +257,11 @@ public class PatternCompiler {
                 continue;
             }
 
-            // Apply note compensation to FM channels only (0-4).
-            // DAC (5) and PSG (6-9) don't need compensation: PSG uses
+            // Apply note compensation to FM channels only (0-4, plus 5 in FM6
+            // mode). DAC and PSG don't need compensation: PSG uses
             // baseNoteOffset=0 in all modes, DAC uses sample IDs not notes.
-            if (noteCompensation != 0 && ch < DAC_CHANNEL) {
+            boolean fmChannel = ch < DAC_CHANNEL || fm6Mode;
+            if (noteCompensation != 0 && fmChannel) {
                 trackData = applyNoteCompensation(trackData, noteCompensation);
             }
 
@@ -265,7 +270,7 @@ public class PatternCompiler {
             activeChannels.add(ch);
             chainResults.add(chainResult);
 
-            if (ch == DAC_CHANNEL) hasDacTrack = true;
+            if (ch == DAC_CHANNEL && !fm6Mode) hasDacTrack = true;
             else anyNonDacFm = true;
         }
 

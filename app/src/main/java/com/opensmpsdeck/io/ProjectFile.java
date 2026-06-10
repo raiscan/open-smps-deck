@@ -39,6 +39,7 @@ public class ProjectFile {
         root.addProperty("tempo", song.getTempo());
         root.addProperty("dividingTiming", song.getDividingTiming());
         root.addProperty("loopPoint", song.getLoopPoint());
+        root.addProperty("dacChannelIsFm6", song.isDacChannelFm6());
 
         // Voice bank
         JsonArray voices = new JsonArray();
@@ -277,6 +278,10 @@ public class ProjectFile {
                     e.get("name").getAsString(),
                     hexToBytes(e.get("data").getAsString())
             ));
+        }
+
+        if (root.has("dacChannelIsFm6")) {
+            song.setDacChannelFm6(root.get("dacChannelIsFm6").getAsBoolean());
         }
 
         // Modulation envelopes (optional for backward compatibility)

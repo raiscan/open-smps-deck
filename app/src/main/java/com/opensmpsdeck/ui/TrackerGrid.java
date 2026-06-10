@@ -641,7 +641,8 @@ public class TrackerGrid extends ScrollPane {
             String displayNote = row.note();
             boolean isDacNote = false;
 
-            if (channel == DAC_CHANNEL && song != null && !song.getDacSamples().isEmpty()) {
+            if (channel == DAC_CHANNEL && song != null && !song.getDacSamples().isEmpty()
+                    && !song.isDacChannelFm6()) {
                 // Try to format as DAC sample name
                 if (!displayNote.equals("---") && !displayNote.equals("===") && !displayNote.equals("???")) {
                     // Reverse-lookup: the decoded note string came from a 0x81+ byte.

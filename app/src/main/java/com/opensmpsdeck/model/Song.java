@@ -19,6 +19,7 @@ public class Song {
     private SmpsMode smpsMode = SmpsMode.S2;
     private ArrangementMode arrangementMode = ArrangementMode.HIERARCHICAL;
     private int tempo = 0x80;
+    private boolean dacChannelIsFm6;
     private int dividingTiming = 1;
     private int loopPoint = 0;
 
@@ -98,6 +99,19 @@ public class Song {
      */
     public List<PsgEnvelope> getModEnvelopes() {
         return modEnvelopes;
+    }
+
+    /**
+     * Whether model channel 5 carries a sixth FM track instead of DAC.
+     * Used by 7-FM-entry songs (e.g. S1 Special Stage, Chaos Emerald jingles)
+     * where FM6 takes the hardware channel DAC would otherwise use.
+     */
+    public boolean isDacChannelFm6() {
+        return dacChannelIsFm6;
+    }
+
+    public void setDacChannelFm6(boolean fm6) {
+        this.dacChannelIsFm6 = fm6;
     }
 
     public List<PsgEnvelope> getPsgEnvelopes() {

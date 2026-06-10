@@ -221,10 +221,15 @@ public class SmpsImporter {
         int[] psgHeaderMod = new int[Pattern.CHANNEL_COUNT];
 
         // Extract FM track data.
-        // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
-        // Map to model channels: entry 0 → model ch 5 (DAC), entries 1+ → model ch i-1 (FM1-FM5).
-        for (int i = 0; i < fmCount && i < FM_CHANNEL_COUNT; i++) {
-            int modelCh = (i == 0) ? DAC_MODEL_CHANNEL : i - 1;
+        // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, ... 6→FM6.
+        // Map to model channels: entry 0 → model ch 5 (DAC), entries 1-5 →
+        // model ch i-1 (FM1-FM5). A 7th entry is FM6 taking the hardware
+        // channel DAC would use; it replaces the (stub) DAC on model ch 5.
+        for (int i = 0; i < fmCount && i <= FM_CHANNEL_COUNT; i++) {
+            int modelCh = (i == 0 || i == FM_CHANNEL_COUNT) ? DAC_MODEL_CHANNEL : i - 1;
+            if (i == FM_CHANNEL_COUNT) {
+                song.setDacChannelFm6(true);
+            }
             int ptr = fmPointers[i];
             if (ptr >= 0 && ptr < data.length) {
                 TrackExtract extract = extractTrack(data, ptr, seqBase);
@@ -282,13 +287,17 @@ public class SmpsImporter {
             byte[] trackData = decompileData[ch];
             if (trackData == null || trackData.length == 0) continue;
 
-            // Reverse note compensation for S1/S3K FM channels only (0-4).
+            // Reverse note compensation for S1/S3K FM channels only (0-4,
+            // plus channel 5 when it carries FM6 instead of DAC).
             // PSG (6-9) uses baseNoteOffset=0 in all modes, no compensation needed.
-            if (noteCompensation != 0 && ch < 5) { // FM channels only
+            boolean fmChannel = ch < 5 || (ch == DAC_MODEL_CHANNEL && song.isDacChannelFm6());
+            if (noteCompensation != 0 && fmChannel) {
                 trackData = applyNoteCompensation(trackData, noteCompensation);
             }
 
-            ChannelType channelType = ChannelType.fromChannelIndex(ch);
+            ChannelType channelType = (ch == DAC_MODEL_CHANNEL && song.isDacChannelFm6())
+                    ? ChannelType.FM
+                    : ChannelType.fromChannelIndex(ch);
             HierarchyDecompiler.DecompileResult result =
                     HierarchyDecompiler.decompileTrack(trackData, channelType, dialect);
 
