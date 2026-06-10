@@ -152,6 +152,140 @@ public final class SmpsCoordFlags {
         return PARAM_COUNTS[index];
     }
 
+    // --- Per-driver dialect tables ---
+
+    /**
+     * SMPS driver dialect. The default tables above describe S2; S1 and S3K
+     * assign different sizes and meanings to several flags (per the SMPSPlay
+     * DefCFlag definitions for each game).
+     */
+    public enum Dialect { S1, S2, S3K }
+
+    /** S1 deviations from S2: ED is ClearPush with no parameter. */
+    private static final int[] S1_PARAM_COUNTS = PARAM_COUNTS.clone();
+    static {
+        S1_PARAM_COUNTS[UNUSED_ED - 0xE0] = 0;
+    }
+
+    /**
+     * S3K flag sizes (S3K DefCFlag.txt). Notable size changes vs S2:
+     * E4 VOL_ABS(1), E5 VOL_CC_FMP2(2), E9 SPINDASH_REV(0), EB LOOP_EXIT(3),
+     * EE FM_COMMAND(2), F1 MOD_ENV(2), F4 MOD_ENV_GEN(1), FB TRANSPOSE_ADD(1),
+     * FC CONT_SFX(2), FD RAW_FREQ(1), FE SPC_FM3(4), FF META prefix(1 + meta).
+     */
+    private static final int[] S3K_PARAM_COUNTS = new int[32];
+    static {
+        S3K_PARAM_COUNTS[0xE0 - 0xE0] = 1; // PANAFMS
+        S3K_PARAM_COUNTS[0xE1 - 0xE0] = 1; // DETUNE
+        S3K_PARAM_COUNTS[0xE2 - 0xE0] = 1; // FADE_IN_SONG
+        S3K_PARAM_COUNTS[0xE3 - 0xE0] = 0; // TRK_END (mute)
+        S3K_PARAM_COUNTS[0xE4 - 0xE0] = 1; // VOL_ABS
+        S3K_PARAM_COUNTS[0xE5 - 0xE0] = 2; // VOL_CC_FMP2
+        S3K_PARAM_COUNTS[0xE6 - 0xE0] = 1; // VOL_CC_FM
+        S3K_PARAM_COUNTS[0xE7 - 0xE0] = 0; // HOLD
+        S3K_PARAM_COUNTS[0xE8 - 0xE0] = 1; // NOTE_STOP
+        S3K_PARAM_COUNTS[0xE9 - 0xE0] = 0; // SPINDASH_REV
+        S3K_PARAM_COUNTS[0xEA - 0xE0] = 1; // PLAY_DAC
+        S3K_PARAM_COUNTS[0xEB - 0xE0] = 3; // LOOP_EXIT
+        S3K_PARAM_COUNTS[0xEC - 0xE0] = 1; // PSG_VOL
+        S3K_PARAM_COUNTS[0xED - 0xE0] = 1; // TRANSPOSE_SET
+        S3K_PARAM_COUNTS[0xEE - 0xE0] = 2; // FM_COMMAND
+        S3K_PARAM_COUNTS[0xEF - 0xE0] = 1; // INSTRUMENT
+        S3K_PARAM_COUNTS[0xF0 - 0xE0] = 4; // MOD_SETUP
+        S3K_PARAM_COUNTS[0xF1 - 0xE0] = 2; // MOD_ENV (FMP)
+        S3K_PARAM_COUNTS[0xF2 - 0xE0] = 0; // TRK_END
+        S3K_PARAM_COUNTS[0xF3 - 0xE0] = 1; // PSG_NOISE
+        S3K_PARAM_COUNTS[0xF4 - 0xE0] = 1; // MOD_ENV (generic)
+        S3K_PARAM_COUNTS[0xF5 - 0xE0] = 1; // PSG_INSTRUMENT
+        S3K_PARAM_COUNTS[0xF6 - 0xE0] = 2; // GOTO
+        S3K_PARAM_COUNTS[0xF7 - 0xE0] = 4; // LOOP
+        S3K_PARAM_COUNTS[0xF8 - 0xE0] = 2; // GOSUB
+        S3K_PARAM_COUNTS[0xF9 - 0xE0] = 0; // RETURN
+        S3K_PARAM_COUNTS[0xFA - 0xE0] = 0; // MODS_OFF
+        S3K_PARAM_COUNTS[0xFB - 0xE0] = 1; // TRANSPOSE_ADD
+        S3K_PARAM_COUNTS[0xFC - 0xE0] = 2; // CONT_SFX
+        S3K_PARAM_COUNTS[0xFD - 0xE0] = 1; // RAW_FREQ
+        S3K_PARAM_COUNTS[0xFE - 0xE0] = 4; // SPC_FM3
+        S3K_PARAM_COUNTS[0xFF - 0xE0] = 1; // META prefix (sub-command byte; see getMetaParamCount)
+    }
+
+    /** Parameter bytes following each S3K FF meta sub-command (after the sub byte). */
+    private static final int[] S3K_META_PARAM_COUNTS = {
+        1, // 00 TEMPO_SET
+        1, // 01 SND_CMD
+        1, // 02 MUS_PAUSE
+        3, // 03 COPY_MEM
+        1, // 04 TICK_MULT
+        4, // 05 SSG_EG
+        2, // 06 FM_VOLENV
+        0, // 07 SPINDASH_REV_RESET
+    };
+
+    /** S3K meta-command prefix (FF). */
+    public static final int S3K_META = 0xFF;
+
+    /** S3K return-from-subroutine flag (F9). */
+    public static final int S3K_RETURN = 0xF9;
+
+    /** S3K transpose-add flag (FB), the equivalent of S2's E9 KEY_DISP. */
+    public static final int S3K_TRANSPOSE_ADD = 0xFB;
+
+    /**
+     * Get the number of parameter bytes for a flag in the given dialect.
+     * For the S3K FF meta prefix this returns 1 (the sub-command byte);
+     * callers must add {@link #getMetaParamCount(int)} for the sub-command.
+     */
+    public static int getParamCount(int flagByte, Dialect dialect) {
+        int index = (flagByte & 0xFF) - 0xE0;
+        if (index < 0 || index >= PARAM_COUNTS.length) return 0;
+        return switch (dialect) {
+            case S1 -> S1_PARAM_COUNTS[index];
+            case S2 -> PARAM_COUNTS[index];
+            case S3K -> S3K_PARAM_COUNTS[index];
+        };
+    }
+
+    /**
+     * Parameter bytes following an S3K FF meta sub-command byte.
+     *
+     * @param subCommand the byte after FF
+     * @return parameter byte count (0 for unknown sub-commands)
+     */
+    public static int getMetaParamCount(int subCommand) {
+        int sub = subCommand & 0xFF;
+        return (sub < S3K_META_PARAM_COUNTS.length) ? S3K_META_PARAM_COUNTS[sub] : 0;
+    }
+
+    /** Whether the flag returns from an F8 subroutine call in the dialect. */
+    public static boolean isReturn(int flagByte, Dialect dialect) {
+        int b = flagByte & 0xFF;
+        return dialect == Dialect.S3K ? b == S3K_RETURN : b == RETURN;
+    }
+
+    /**
+     * Whether the flag ends the track in the dialect
+     * (F2 everywhere; S1 also EE; S3K also E3 = TEND_MUTE).
+     */
+    public static boolean isTrackEnd(int flagByte, Dialect dialect) {
+        int b = flagByte & 0xFF;
+        if (b == STOP) return true;
+        return switch (dialect) {
+            case S1 -> b == NOOP_EE;
+            case S2 -> false;
+            case S3K -> b == RETURN; // 0xE3 = TRK_END (mute) in S3K
+        };
+    }
+
+    /** The additive transpose flag for the dialect (E9 in S1/S2, FB in S3K). */
+    public static int transposeAddFlag(Dialect dialect) {
+        return dialect == Dialect.S3K ? S3K_TRANSPOSE_ADD : KEY_DISP;
+    }
+
+    /** The return-from-subroutine flag for the dialect (E3 in S1/S2, F9 in S3K). */
+    public static int returnFlag(Dialect dialect) {
+        return dialect == Dialect.S3K ? S3K_RETURN : RETURN;
+    }
+
     // --- Human-readable labels ---
 
     /** Labels for display in tracker effect columns. */

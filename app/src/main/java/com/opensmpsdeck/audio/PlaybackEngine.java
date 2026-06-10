@@ -7,12 +7,14 @@ import com.opensmpsdeck.model.SmpsMode;
 import com.opensmps.driver.AudioOutput;
 import com.opensmps.driver.SmpsDriver;
 import com.opensmps.smps.DacData;
+import com.opensmps.smps.S3kCoordFlagHandler;
 import com.opensmps.smps.SmpsSequencer;
 import com.opensmps.smps.SmpsSequencerConfig;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.ArrayList;
 
@@ -379,7 +381,13 @@ public class PlaybackEngine {
         return playbackSliceBuilder.createPlaybackSlice(song, orderIndex, rowIndex);
     }
 
-    private SmpsSequencerConfig buildConfig(SmpsMode mode) {
+    /**
+     * Build the per-game sequencer profile. Mirrors the sonic-engine (OpenGGF)
+     * Sonic1/Sonic2/Sonic3k SmpsSequencerConfig classes, which are validated
+     * against real game playback. Game speed-up tempo tables are omitted —
+     * the tracker has no speed shoes.
+     */
+    public static SmpsSequencerConfig buildConfig(SmpsMode mode) {
         return switch (mode) {
             case S2 -> new SmpsSequencerConfig.Builder()
                 .tempoModBase(0x100)
@@ -392,15 +400,34 @@ public class PlaybackEngine {
                 .fmChannelOrder(new int[]{ 0x16, 0, 1, 2, 4, 5, 6 })
                 .psgChannelOrder(new int[]{ 0x80, 0xA0, 0xC0 })
                 .tempoMode(SmpsSequencerConfig.TempoMode.TIMEOUT)
-                .relativePointers(true)
-                .tempoOnFirstTick(true)
+                // S1: ED is ClearPush with no param (S2: IGNORE with 1 param)
+                .coordFlagParamOverrides(Map.of(0xED, 0))
+                // S1: EE is a track-end flag
+                .extraTrkEndFlags(Set.of(0xEE))
+                .applyModOnNote(false)   // ModAlgo = 68k
+                .halveModSteps(false)    // 68k driver has no srl a
+                .relativePointers(true)  // PC-relative pointers for F6/F7/F8
+                .tempoOnFirstTick(true)  // DOTEMPO
                 .build();
             case S3K -> new SmpsSequencerConfig.Builder()
                 .tempoModBase(0x100)
                 .fmChannelOrder(new int[]{ 0x16, 0, 1, 2, 4, 5, 6 })
                 .psgChannelOrder(new int[]{ 0x80, 0xA0, 0xC0 })
                 .tempoMode(SmpsSequencerConfig.TempoMode.OVERFLOW)
-                .tempoOnFirstTick(true)
+                .applyModOnNote(true)       // ModAlgo = Z80
+                .halveModSteps(true)        // Z80 driver halves mod steps (srl a)
+                .relativePointers(false)    // PtrFmt = Z80 (absolute addresses)
+                .tempoOnFirstTick(true)     // Tempo1Tick = DOTEMPO
+                .volMode(SmpsSequencerConfig.VolMode.BIT7)
+                .psgEnvCmd80(SmpsSequencerConfig.PsgEnvCmd80.RESET)
+                .noteOnPrevent(SmpsSequencerConfig.NoteOnPrevent.HOLD)
+                .delayFreq(SmpsSequencerConfig.DelayFreq.KEEP)
+                .coordFlagHandler(new S3kCoordFlagHandler())
+                .modAlgo(SmpsSequencerConfig.ModAlgo.MOD_Z80)
+                .fadeOutDelay(6)
+                .fadeOutSteps(0x28)
+                .fadeInSteps(0x40)
+                .fadeInDelay(2)
                 .build();
         };
     }

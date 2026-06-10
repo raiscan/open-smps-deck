@@ -931,21 +931,21 @@ public class TestSmpsImporter {
     void testContainsPsgNoiseFlag() {
         // Direct test of the scanner
         // Track with F3 at the start
-        assertTrue(SmpsImporter.containsPsgNoiseFlag(new byte[]{
+        assertTrue(new SmpsImporter().containsPsgNoiseFlag(new byte[]{
                 (byte) SmpsCoordFlags.PSG_NOISE, (byte) 0xE7,
                 (byte) 0xA1, 0x30,
                 (byte) SmpsCoordFlags.STOP
         }));
 
         // Track without F3
-        assertFalse(SmpsImporter.containsPsgNoiseFlag(new byte[]{
+        assertFalse(new SmpsImporter().containsPsgNoiseFlag(new byte[]{
                 (byte) 0xA1, 0x30,
                 (byte) SmpsCoordFlags.STOP
         }));
 
         // F3 appearing as a parameter to another flag should NOT trigger
         // E0 takes 1 param — if param happens to be 0xF3, it's not a flag
-        assertFalse(SmpsImporter.containsPsgNoiseFlag(new byte[]{
+        assertFalse(new SmpsImporter().containsPsgNoiseFlag(new byte[]{
                 (byte) SmpsCoordFlags.PAN, (byte) 0xF3,
                 (byte) 0xA1, 0x30,
                 (byte) SmpsCoordFlags.STOP

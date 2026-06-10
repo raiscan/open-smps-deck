@@ -21,12 +21,27 @@ public final class HierarchyDecompiler {
             int sharedPhraseCount) {}
 
     public static DecompileResult decompileTrack(byte[] track, ChannelType type) {
+        return decompileTrack(track, type, SmpsCoordFlags.Dialect.S2);
+    }
+
+    /**
+     * Decompile a track using the coordination flag dialect of the song's
+     * driver. Flag sizes, the return flag (E3 vs S3K's F9), and track-end
+     * flags differ per dialect.
+     */
+    public static DecompileResult decompileTrack(byte[] track, ChannelType type,
+            SmpsCoordFlags.Dialect dialect) {
         PhraseLibrary library = new PhraseLibrary();
         List<ChainEntry> chainEntries = new ArrayList<>();
 
         // Pass 1: Find subroutines (CALL targets → RETURN)
         Map<Integer, Phrase> subroutines = new LinkedHashMap<>();
-        findSubroutines(track, type, library, subroutines);
+        findSubroutines(track, type, library, subroutines, dialect);
+
+        // Pre-pass: the channel loop's JUMP target must become a chain entry
+        // boundary, otherwise the loop snaps to the nearest phrase start and
+        // playback drifts after the first loop iteration.
+        int loopBoundary = findChannelLoopTarget(track, dialect);
 
         // Pass 2: Linear scan of main stream, splitting at structural boundaries
         int pos = 0;
@@ -35,13 +50,25 @@ public final class HierarchyDecompiler {
         int jumpTarget = -1;
         boolean done = false;
 
+        int gotoGuard = 0;
+        boolean[] visitedScan = new boolean[track.length];
+
         // Collect segments between structural commands
         List<int[]> segments = new ArrayList<>(); // [start, end] pairs
         List<Integer> entryStartOffsets = new ArrayList<>(); // byte offset per chain entry
         int segStart = 0;
 
         while (pos < track.length && !done) {
+            visitedScan[pos] = true;
             int b = track[pos] & 0xFF;
+
+            // Force a phrase boundary exactly at the channel loop target
+            if (pos == loopBoundary && pos > segStart) {
+                segments.add(new int[]{segStart, pos});
+                flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
+                segments.clear();
+                segStart = pos;
+            }
 
             if (b == SmpsCoordFlags.CALL && pos + 2 < track.length) {
                 // Save any preceding data as a segment
@@ -74,7 +101,7 @@ public final class HierarchyDecompiler {
                         segments.clear();
                     }
                     // The looped body
-                    byte[] body = Arrays.copyOfRange(track, loopTarget, pos);
+                    byte[] body = copyRegionFlattened(track, loopTarget, pos, dialect, 0);
                     if (body.length > 0) {
                         Phrase loopPhrase = library.createPhrase("Loop", type);
                         loopPhrase.setData(body);
@@ -120,12 +147,24 @@ public final class HierarchyDecompiler {
                 flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                 segments.clear();
 
-                jumpTarget = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
-                hasLoopPoint = true;
-                done = true;
-                pos += 3;
-                segStart = pos;
-            } else if (b == SmpsCoordFlags.STOP) {
+                int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (target >= 0 && target < track.length && !visitedScan[target]
+                        && gotoGuard < MAX_GOTOS) {
+                    // Mid-stream goto to an unvisited position (e.g. a channel
+                    // jumping into another channel's shared stream): continue
+                    // scanning at the target
+                    gotoGuard++;
+                    pos = target;
+                    segStart = pos;
+                } else {
+                    // Back-edge to already-scanned bytes: the channel loop
+                    jumpTarget = target;
+                    hasLoopPoint = true;
+                    done = true;
+                    pos += 3;
+                    segStart = pos;
+                }
+            } else if (SmpsCoordFlags.isTrackEnd(b, dialect)) {
                 if (pos > segStart) {
                     segments.add(new int[]{segStart, pos});
                 }
@@ -134,7 +173,7 @@ public final class HierarchyDecompiler {
                 done = true;
                 pos++;
                 segStart = pos;
-            } else if (b == SmpsCoordFlags.RETURN) {
+            } else if (SmpsCoordFlags.isReturn(b, dialect)) {
                 // Entered subroutine area, stop main scan
                 if (pos > segStart) {
                     segments.add(new int[]{segStart, pos});
@@ -145,7 +184,7 @@ public final class HierarchyDecompiler {
                 pos++;
                 segStart = pos;
             } else if (b >= 0xE0) {
-                pos += 1 + SmpsCoordFlags.getParamCount(b);
+                pos += 1 + flagBytes(track, pos, b, dialect);
             } else {
                 pos++;
             }
@@ -162,7 +201,7 @@ public final class HierarchyDecompiler {
         }
 
         // If no chain entries were created, create one from the whole track
-        int mainEnd = findMainEnd(track);
+        int mainEnd = findMainEnd(track, dialect);
         if (chainEntries.isEmpty() && mainEnd > 0) {
             byte[] data = Arrays.copyOf(track, mainEnd);
             Phrase phrase = library.createPhrase("Track", type);
@@ -180,7 +219,8 @@ public final class HierarchyDecompiler {
     }
 
     private static void findSubroutines(byte[] track, ChannelType type,
-            PhraseLibrary library, Map<Integer, Phrase> subroutines) {
+            PhraseLibrary library, Map<Integer, Phrase> subroutines,
+            SmpsCoordFlags.Dialect dialect) {
         // Scan for CALL targets and extract subroutine bodies
         List<Integer> callTargets = new ArrayList<>();
         int pos = 0;
@@ -193,7 +233,7 @@ public final class HierarchyDecompiler {
                 }
                 pos += 3;
             } else if (b >= 0xE0) {
-                pos += 1 + SmpsCoordFlags.getParamCount(b);
+                pos += 1 + flagBytes(track, pos, b, dialect);
             } else {
                 pos++;
             }
@@ -202,19 +242,8 @@ public final class HierarchyDecompiler {
         // For each call target, extract bytes until RETURN
         for (int target : callTargets) {
             if (target < 0 || target >= track.length) continue;
-            int subEnd = target;
-            while (subEnd < track.length) {
-                int b = track[subEnd] & 0xFF;
-                if (b == SmpsCoordFlags.RETURN) {
-                    break;
-                } else if (b >= 0xE0) {
-                    subEnd += 1 + SmpsCoordFlags.getParamCount(b);
-                } else {
-                    subEnd++;
-                }
-            }
-            if (subEnd > target) {
-                byte[] body = Arrays.copyOfRange(track, target, subEnd);
+            byte[] body = extractSubBody(track, target, dialect, 0);
+            if (body.length > 0) {
                 Phrase phrase = library.createPhrase("Sub", type);
                 phrase.setData(body);
                 subroutines.put(target, phrase);
@@ -222,22 +251,149 @@ public final class HierarchyDecompiler {
         }
     }
 
-    private static int findMainEnd(byte[] track) {
+    /**
+     * Extract a subroutine body up to its RETURN flag. The body is copied
+     * through {@link #copyRegionFlattened}, which inlines nested F8 CALLs and
+     * unrolls embedded backward F7 loops — both carry track-local pointers
+     * that would go stale once the phrase is recompiled at a new position.
+     */
+    private static byte[] extractSubBody(byte[] track, int target,
+            SmpsCoordFlags.Dialect dialect, int depth) {
+        int subEnd = target;
+        while (subEnd < track.length) {
+            int b = track[subEnd] & 0xFF;
+            if (SmpsCoordFlags.isReturn(b, dialect)) {
+                break;
+            }
+            int len = (b >= 0xE0) ? 1 + flagBytes(track, subEnd, b, dialect) : 1;
+            subEnd += Math.max(1, Math.min(len, track.length - subEnd));
+        }
+        return copyRegionFlattened(track, target, subEnd, dialect, depth);
+    }
+
+    /** Largest F7 repeat count that gets unrolled when found inside a phrase body. */
+    private static final int MAX_UNROLL_COUNT = 0x20;
+
+    /** Safety bound on mid-stream F6 gotos followed during the main scan. */
+    private static final int MAX_GOTOS = 64;
+
+    /**
+     * Copy a track region into self-contained phrase bytes: nested F8 CALLs
+     * are inlined and backward F7 loops whose target lies within the region
+     * are unrolled (which also reproduces per-iteration effects such as an
+     * additive transpose inside the loop body). Pointers that cannot be made
+     * self-contained are copied as-is.
+     */
+    private static byte[] copyRegionFlattened(byte[] track, int from, int to,
+            SmpsCoordFlags.Dialect dialect, int depth) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        int pos = from;
+        while (pos < to && pos < track.length) {
+            int b = track[pos] & 0xFF;
+            if (b == SmpsCoordFlags.CALL && pos + 2 < track.length && depth < 4) {
+                int nested = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (nested >= 0 && nested < track.length) {
+                    byte[] inner = extractSubBody(track, nested, dialect, depth + 1);
+                    out.write(inner, 0, inner.length);
+                    pos += 3;
+                    continue;
+                }
+            }
+            if (b == SmpsCoordFlags.LOOP && pos + 4 < track.length && depth < 4) {
+                int count = track[pos + 2] & 0xFF;
+                int target = (track[pos + 3] & 0xFF) | ((track[pos + 4] & 0xFF) << 8);
+                if (target >= from && target < pos && count >= 1 && count <= MAX_UNROLL_COUNT) {
+                    // The first pass over [target..pos) is already in the output;
+                    // emit the remaining (count - 1) iterations.
+                    for (int rep = 1; rep < count; rep++) {
+                        byte[] again = copyRegionFlattened(track, target, pos, dialect, depth + 1);
+                        out.write(again, 0, again.length);
+                    }
+                    pos += 5;
+                    continue;
+                }
+            }
+            int len = (b >= 0xE0) ? 1 + flagBytes(track, pos, b, dialect) : 1;
+            len = Math.max(1, Math.min(len, track.length - pos));
+            out.write(track, pos, len);
+            pos += len;
+        }
+        return out.toByteArray();
+    }
+
+    private static int findMainEnd(byte[] track, SmpsCoordFlags.Dialect dialect) {
         int pos = 0;
         while (pos < track.length) {
             int b = track[pos] & 0xFF;
-            if (b == SmpsCoordFlags.STOP || b == SmpsCoordFlags.JUMP) {
+            if (SmpsCoordFlags.isTrackEnd(b, dialect) || b == SmpsCoordFlags.JUMP) {
                 return pos;
-            } else if (b == SmpsCoordFlags.RETURN) {
+            } else if (SmpsCoordFlags.isReturn(b, dialect)) {
                 // Entered subroutine area
                 return pos;
             } else if (b >= 0xE0) {
-                pos += 1 + SmpsCoordFlags.getParamCount(b);
+                pos += 1 + flagBytes(track, pos, b, dialect);
             } else {
                 pos++;
             }
         }
         return track.length;
+    }
+
+    /**
+     * Walk the main stream and return the channel loop's JUMP target
+     * (track-local offset), or -1 when the track does not loop.
+     *
+     * <p>Mid-stream F6 jumps to unvisited positions are followed as gotos
+     * (channels can share another channel's stream); the channel loop is the
+     * first back-edge — a jump to an already-visited position.
+     */
+    private static int findChannelLoopTarget(byte[] track, SmpsCoordFlags.Dialect dialect) {
+        boolean[] visited = new boolean[track.length];
+        int gotos = 0;
+        int pos = 0;
+        while (pos >= 0 && pos < track.length) {
+            if (visited[pos]) {
+                return pos; // ran back into visited bytes without a jump
+            }
+            visited[pos] = true;
+            int b = track[pos] & 0xFF;
+            if (b == SmpsCoordFlags.JUMP && pos + 2 < track.length) {
+                int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (target < 0 || target >= track.length) return -1;
+                if (visited[target] || gotos >= MAX_GOTOS) {
+                    return target; // back-edge: the channel loop
+                }
+                gotos++;
+                pos = target;
+                continue;
+            }
+            if (SmpsCoordFlags.isTrackEnd(b, dialect) || SmpsCoordFlags.isReturn(b, dialect)) {
+                return -1;
+            }
+            if (b >= 0xE0) {
+                int len = 1 + flagBytes(track, pos, b, dialect);
+                for (int i = 1; i < len && pos + i < track.length; i++) {
+                    visited[pos + i] = true;
+                }
+                pos += len;
+            } else {
+                pos++;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Total parameter bytes for the flag at {@code pos} in the dialect
+     * (the S3K FF meta prefix includes its sub-command's parameters).
+     */
+    private static int flagBytes(byte[] track, int pos, int cmd, SmpsCoordFlags.Dialect dialect) {
+        int params = SmpsCoordFlags.getParamCount(cmd, dialect);
+        if (dialect == SmpsCoordFlags.Dialect.S3K
+                && cmd == SmpsCoordFlags.S3K_META && pos + 1 < track.length) {
+            params += SmpsCoordFlags.getMetaParamCount(track[pos + 1] & 0xFF);
+        }
+        return params;
     }
 
     private static void flushSegmentsWithOffsets(List<int[]> segments, byte[] track,

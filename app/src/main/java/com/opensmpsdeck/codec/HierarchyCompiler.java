@@ -24,6 +24,15 @@ public final class HierarchyCompiler {
     }
 
     public static ChainCompilationResult compileChainDetailed(Chain chain, PhraseLibrary library) {
+        return compileChainDetailed(chain, library, SmpsCoordFlags.Dialect.S2);
+    }
+
+    /**
+     * Compile a chain emitting the coordination flags of the given dialect
+     * (S3K returns from subroutines with F9 and transposes with FB).
+     */
+    public static ChainCompilationResult compileChainDetailed(Chain chain, PhraseLibrary library,
+            SmpsCoordFlags.Dialect dialect) {
         if (chain.getEntries().isEmpty()) {
             return new ChainCompilationResult(new byte[]{(byte) SmpsCoordFlags.STOP}, new int[0], 0);
         }
@@ -53,11 +62,12 @@ public final class HierarchyCompiler {
             byte[] phraseData = phrase.getDataDirect();
             if (phraseData.length == 0) continue;
 
-            // Emit transpose if needed
+            // Emit transpose if needed. The transpose flag ADDS to the track's
+            // key displacement, so emit the delta from the current value.
             int targetTranspose = entry.getTransposeSemitones();
             if (targetTranspose != currentTranspose) {
-                mainStream.write((byte) SmpsCoordFlags.KEY_DISP);
-                mainStream.write((byte) (targetTranspose & 0xFF));
+                mainStream.write((byte) SmpsCoordFlags.transposeAddFlag(dialect));
+                mainStream.write((byte) ((targetTranspose - currentTranspose) & 0xFF));
                 currentTranspose = targetTranspose;
             }
 
@@ -69,14 +79,14 @@ public final class HierarchyCompiler {
                 int loopStart = mainStream.size();
                 if (isShared) {
                     emitCall(mainStream, entry.getPhraseId(), subroutinePool,
-                        subroutineOffsets, phraseData, callPatches);
+                        subroutineOffsets, phraseData, callPatches, dialect);
                 } else {
                     mainStream.write(phraseData, 0, phraseData.length);
                 }
                 emitLoop(mainStream, repeatCount, loopStart);
             } else if (isShared) {
                 emitCall(mainStream, entry.getPhraseId(), subroutinePool,
-                    subroutineOffsets, phraseData, callPatches);
+                    subroutineOffsets, phraseData, callPatches, dialect);
             } else {
                 // Inline directly
                 mainStream.write(phraseData, 0, phraseData.length);
@@ -85,10 +95,10 @@ public final class HierarchyCompiler {
 
         int contentEndOffset = mainStream.size();
 
-        // Reset transpose if it was non-zero at end
+        // Reset transpose if it was non-zero at end (additive flag: emit the inverse)
         if (currentTranspose != 0 && !chain.hasLoop()) {
-            mainStream.write((byte) SmpsCoordFlags.KEY_DISP);
-            mainStream.write(0);
+            mainStream.write((byte) SmpsCoordFlags.transposeAddFlag(dialect));
+            mainStream.write((byte) ((-currentTranspose) & 0xFF));
         }
 
         // Emit loop or stop
@@ -122,11 +132,11 @@ public final class HierarchyCompiler {
 
     private static void emitCall(ByteArrayOutputStream stream, int phraseId,
             ByteArrayOutputStream subPool, Map<Integer, Integer> subOffsets,
-            byte[] data, List<CallPatch> patches) {
+            byte[] data, List<CallPatch> patches, SmpsCoordFlags.Dialect dialect) {
         if (!subOffsets.containsKey(phraseId)) {
             subOffsets.put(phraseId, subPool.size());
             subPool.write(data, 0, data.length);
-            subPool.write((byte) SmpsCoordFlags.RETURN);
+            subPool.write((byte) SmpsCoordFlags.returnFlag(dialect));
         }
         // Record position for patching
         patches.add(new CallPatch(stream.size(), phraseId));

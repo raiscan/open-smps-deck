@@ -93,15 +93,16 @@ class TestHierarchyCompiler {
         chain.getEntries().add(new ChainEntry(p2.getId()));
 
         byte[] track = HierarchyCompiler.compileChain(chain, arr.getPhraseLibrary());
-        // Should contain KEY_DISP +5 before p1, KEY_DISP 0 before p2
+        // KEY_DISP is ADDITIVE in the sequencer, so the compiler emits deltas:
+        // +5 before p1, then -5 (0xFB) before p2 to return to no transposition
         boolean foundReset = false;
         for (int i = 2; i < track.length - 1; i++) {
-            if ((track[i] & 0xFF) == SmpsCoordFlags.KEY_DISP && track[i + 1] == 0) {
+            if ((track[i] & 0xFF) == SmpsCoordFlags.KEY_DISP && (track[i + 1] & 0xFF) == 0xFB) {
                 foundReset = true;
                 break;
             }
         }
-        assertTrue(foundReset, "Expected KEY_DISP reset to 0 between transposed and normal phrase");
+        assertTrue(foundReset, "Expected KEY_DISP -5 delta between transposed and normal phrase");
     }
 
     @Test

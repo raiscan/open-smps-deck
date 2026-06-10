@@ -217,6 +217,7 @@ public class PatternCompiler {
     }
 
     private CompilationResult compileHierarchicalDetailed(Song song, SmpsMode mode, HierarchicalArrangement arrangement) {
+        this.dialect = mode.dialect();
         int noteCompensation = switch (mode) {
             case S1, S3K -> 1;
             case S2 -> 0;
@@ -246,7 +247,7 @@ public class PatternCompiler {
                 continue;
             }
 
-            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library);
+            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library, dialect);
             byte[] trackData = chainResult.trackData();
             if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
                 continue;
@@ -285,7 +286,7 @@ public class PatternCompiler {
                 continue;
             }
 
-            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library);
+            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library, dialect);
             byte[] trackData = chainResult.trackData();
             if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
                 continue;
@@ -414,6 +415,7 @@ public class PatternCompiler {
     }
 
     private CompilationResult compileStructuredDetailed(Song song, SmpsMode mode, StructuredArrangement arrangement) {
+        this.dialect = mode.dialect();
         int noteCompensation = switch (mode) {
             case S1, S3K -> 1;
             case S2 -> 0;
@@ -660,7 +662,7 @@ public class PatternCompiler {
 
             if (b >= 0xE0) {
                 buf.write(b);
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = flagParamBytes(data, pos, b);
                 if ((b == SmpsCoordFlags.JUMP || b == SmpsCoordFlags.CALL) && pos + 2 < end) {
                     int rawTarget = (data[pos + 1] & 0xFF) | ((data[pos + 2] & 0xFF) << 8);
                     int adjusted = adjustTrackPointer(rawTarget, end, segmentStartOffset);
@@ -716,7 +718,7 @@ public class PatternCompiler {
         while (pos < track.length) {
             int cmd = track[pos] & 0xFF;
             if (cmd >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                int paramCount = flagParamBytes(track, pos, cmd);
                 if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < track.length) {
                     int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
                     int relocated = target + trackOffset;
@@ -741,6 +743,22 @@ public class PatternCompiler {
             end--;
         }
         return end;
+    }
+
+    /** Coordination flag dialect of the current compile (set per compile call). */
+    private SmpsCoordFlags.Dialect dialect = SmpsCoordFlags.Dialect.S2;
+
+    /**
+     * Total parameter bytes for the flag at {@code pos} in the current dialect
+     * (the S3K FF meta prefix includes its sub-command's parameters).
+     */
+    private int flagParamBytes(byte[] data, int pos, int cmd) {
+        int params = SmpsCoordFlags.getParamCount(cmd, dialect);
+        if (dialect == SmpsCoordFlags.Dialect.S3K
+                && cmd == SmpsCoordFlags.S3K_META && pos + 1 < data.length) {
+            params += SmpsCoordFlags.getMetaParamCount(data[pos + 1] & 0xFF);
+        }
+        return params;
     }
 
     private static void writeLE16(ByteArrayOutputStream out, int value) {
@@ -772,7 +790,7 @@ public class PatternCompiler {
         while (pos < track.length) {
             int cmd = track[pos] & 0xFF;
             if (cmd >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                int paramCount = flagParamBytes(track, pos, cmd);
                 if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < track.length) {
                     rewritePointerAs68k(track, pos + 1, trackOffset);
                 } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < track.length) {

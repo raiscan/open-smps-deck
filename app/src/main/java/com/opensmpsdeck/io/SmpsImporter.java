@@ -44,6 +44,9 @@ public class SmpsImporter {
      */
     private boolean use68kPointers;
 
+    /** Coordination flag dialect of the current import (sizes/meanings per driver). */
+    private SmpsCoordFlags.Dialect dialect = SmpsCoordFlags.Dialect.S2;
+
     /** DPCM delta table used by the Z80 DAC driver for sample decompression. */
     static final int[] DPCM_DELTA_TABLE = {
         0, 1, 2, 4, 8, 16, 32, 64,
@@ -117,6 +120,7 @@ public class SmpsImporter {
             throw new IllegalArgumentException("SMPS data too short: " + data.length + " bytes");
         }
         use68kPointers = (mode == SmpsMode.S1);
+        dialect = mode.dialect();
 
         Song song = new Song();
         song.getPatterns().clear();
@@ -283,7 +287,7 @@ public class SmpsImporter {
 
             ChannelType channelType = ChannelType.fromChannelIndex(ch);
             HierarchyDecompiler.DecompileResult result =
-                    HierarchyDecompiler.decompileTrack(trackData, channelType);
+                    HierarchyDecompiler.decompileTrack(trackData, channelType, dialect);
 
             // Remap phrase IDs from local decompiler library to global song library
             Map<Integer, Integer> idMap = new HashMap<>();
@@ -361,17 +365,18 @@ public class SmpsImporter {
         while (pos < data.length) {
             int cmd = data[pos] & 0xFF;
 
-            if (cmd == SmpsCoordFlags.STOP) {
-                return pos + 1; // F2 = track end, include it
+            if (SmpsCoordFlags.isTrackEnd(cmd, dialect)) {
+                return pos + 1; // track end, include it
             }
             if (cmd == SmpsCoordFlags.JUMP) {
-                return pos + 1 + SmpsCoordFlags.getParamCount(cmd); // F6 + 2-byte pointer
+                return pos + 1 + SmpsCoordFlags.getParamCount(cmd, dialect); // F6 + 2-byte pointer
             }
 
             // Skip coordination flags with parameters
             if (cmd >= 0xE0 && cmd <= 0xFF) {
+                int params = flagParamBytes(data, pos, cmd);
                 pos++; // skip the flag byte
-                pos += SmpsCoordFlags.getParamCount(cmd);
+                pos += params;
                 continue;
             }
 
@@ -512,7 +517,7 @@ public class SmpsImporter {
                 maxReach = Math.max(maxReach, Math.min(data.length - 1, pos + span - 1));
                 minReach = Math.min(minReach, pos);
 
-                if (cmd == SmpsCoordFlags.STOP || cmd == 0x00) {
+                if (SmpsCoordFlags.isTrackEnd(cmd, dialect) || cmd == 0x00) {
                     break;
                 }
 
@@ -543,7 +548,7 @@ public class SmpsImporter {
                         pos += span; // continue at caller fallthrough
                         continue;
                     }
-                    if (cmd == SmpsCoordFlags.RETURN) {
+                    if (SmpsCoordFlags.isReturn(cmd, dialect)) {
                         break;
                     }
                     pos += span;
@@ -556,40 +561,51 @@ public class SmpsImporter {
 
         if (maxReach < start) return new TrackExtract(new byte[0], 0);
 
-        // Main stream first; any reachable pre-start region (shared subroutines)
-        // is relocated after it so the track still begins at byte 0.
-        int mainLen = maxReach + 1 - start;
         byte[] out;
+        int regionBase;  // file offset corresponding to local offset `prelude`
+        int prelude;     // bytes before the contiguous region copy
         if (minReach < start) {
-            int preLen = start - minReach;
-            out = new byte[mainLen + preLen];
-            System.arraycopy(data, start, out, 0, mainLen);
-            System.arraycopy(data, minReach, out, mainLen, preLen);
+            // Reachable code precedes the entry point (shared streams or
+            // subroutines). Keep the whole region contiguous — borrowed
+            // streams may flow across the entry point — and enter through a
+            // 3-byte JUMP prelude to the real start.
+            int regionLen = maxReach + 1 - minReach;
+            prelude = 3;
+            regionBase = minReach;
+            out = new byte[prelude + regionLen];
+            int entry = prelude + (start - minReach);
+            out[0] = (byte) SmpsCoordFlags.JUMP;
+            out[1] = (byte) (entry & 0xFF);
+            out[2] = (byte) ((entry >> 8) & 0xFF);
+            System.arraycopy(data, minReach, out, prelude, regionLen);
         } else {
+            prelude = 0;
+            regionBase = start;
             out = Arrays.copyOfRange(data, start, maxReach + 1);
         }
 
-        remapTrackPointers(out, start, minReach, mainLen, seqBase);
-        return new TrackExtract(out, mainLen);
+        remapTrackPointers(out, regionBase, prelude, seqBase);
+        return new TrackExtract(out, out.length);
     }
 
     /**
      * Normalize every in-track pointer (F6/F7/F8) in the extracted buffer to a
-     * track-local little-endian offset, accounting for the relocated pre-start
-     * region. Pointers that resolve outside the extracted regions keep their
-     * raw bytes.
+     * track-local little-endian offset. Pointers that resolve outside the
+     * extracted region keep their raw bytes.
+     *
+     * @param regionBase file offset of the byte at local offset {@code prelude}
+     * @param prelude    number of synthetic bytes before the copied region
      */
-    private void remapTrackPointers(byte[] out, int trackStart, int minReach, int mainLen,
-                                    int seqBase) {
-        int pos = 0;
+    private void remapTrackPointers(byte[] out, int regionBase, int prelude, int seqBase) {
+        int pos = prelude; // synthetic prelude pointer is already local
         while (pos < out.length) {
             int cmd = out[pos] & 0xFF;
             if (cmd >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                int paramCount = flagParamBytes(out, pos, cmd);
                 if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < out.length) {
-                    remapPointerWord(out, pos + 1, trackStart, minReach, mainLen, seqBase);
+                    remapPointerWord(out, pos + 1, regionBase, prelude, seqBase);
                 } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < out.length) {
-                    remapPointerWord(out, pos + 3, trackStart, minReach, mainLen, seqBase);
+                    remapPointerWord(out, pos + 3, regionBase, prelude, seqBase);
                 }
                 pos += 1 + paramCount;
             } else {
@@ -598,22 +614,20 @@ public class SmpsImporter {
         }
     }
 
-    private void remapPointerWord(byte[] out, int ptrPos, int trackStart, int minReach,
-                                  int mainLen, int seqBase) {
+    private void remapPointerWord(byte[] out, int ptrPos, int regionBase, int prelude,
+                                  int seqBase) {
         int raw = readPtr16(out, ptrPos);
         int local;
         if (use68kPointers) {
             // PC-relative from the pointer word's ORIGINAL file offset + 1
-            int filePtrPos = ptrPos < mainLen
-                    ? trackStart + ptrPos
-                    : minReach + (ptrPos - mainLen);
+            int filePtrPos = regionBase + (ptrPos - prelude);
             int targetFile = filePtrPos + 1 + (short) raw;
-            local = mapFileOffsetToLocal(targetFile, trackStart, minReach, mainLen);
+            local = mapFileOffsetToLocal(targetFile, regionBase, prelude, out.length);
         } else {
             // Try file-relative first, then Z80-absolute (matches resolveInlinePointer)
-            local = mapFileOffsetToLocal(raw, trackStart, minReach, mainLen);
+            local = mapFileOffsetToLocal(raw, regionBase, prelude, out.length);
             if (local < 0) {
-                local = mapFileOffsetToLocal(raw - seqBase, trackStart, minReach, mainLen);
+                local = mapFileOffsetToLocal(raw - seqBase, regionBase, prelude, out.length);
             }
         }
         if (local >= 0) {
@@ -623,15 +637,10 @@ public class SmpsImporter {
     }
 
     /** Map a file offset into the extracted track's local space, or -1 if outside. */
-    private static int mapFileOffsetToLocal(int fileOffset, int trackStart, int minReach,
-                                            int mainLen) {
-        if (fileOffset >= trackStart && fileOffset < trackStart + mainLen) {
-            return fileOffset - trackStart;
-        }
-        if (fileOffset >= minReach && fileOffset < trackStart) {
-            return mainLen + (fileOffset - minReach);
-        }
-        return -1;
+    private static int mapFileOffsetToLocal(int fileOffset, int regionBase, int prelude,
+                                            int outLength) {
+        int local = prelude + (fileOffset - regionBase);
+        return (local >= prelude && local < outLength) ? local : -1;
     }
 
     private int commandSpan(byte[] data, int pos, int cmd) {
@@ -644,11 +653,23 @@ public class SmpsImporter {
             return span;
         }
         if (cmd >= 0xE0) {
-            int paramCount = SmpsCoordFlags.getParamCount(cmd);
-            int span = 1 + paramCount;
+            int span = 1 + flagParamBytes(data, pos, cmd);
             return Math.max(1, Math.min(span, data.length - pos));
         }
         return 1;
+    }
+
+    /**
+     * Total parameter bytes for the flag at {@code pos} in the current dialect.
+     * For the S3K FF meta prefix this includes the sub-command's own parameters.
+     */
+    private int flagParamBytes(byte[] data, int pos, int cmd) {
+        int params = SmpsCoordFlags.getParamCount(cmd, dialect);
+        if (dialect == SmpsCoordFlags.Dialect.S3K
+                && cmd == SmpsCoordFlags.S3K_META && pos + 1 < data.length) {
+            params += SmpsCoordFlags.getMetaParamCount(data[pos + 1] & 0xFF);
+        }
+        return params;
     }
 
     private int resolveInlinePointer(byte[] data, int ptrOffset, int seqBase) {
@@ -672,7 +693,7 @@ public class SmpsImporter {
      * Scan track bytecode for the F3 (PSG_NOISE) coordination flag.
      * Walks the bytecode properly to avoid matching parameter bytes.
      */
-    static boolean containsPsgNoiseFlag(byte[] trackData) {
+    boolean containsPsgNoiseFlag(byte[] trackData) {
         int pos = 0;
         while (pos < trackData.length) {
             int cmd = trackData[pos] & 0xFF;
@@ -680,8 +701,9 @@ public class SmpsImporter {
                 return true;
             }
             if (cmd >= 0xE0 && cmd <= 0xFF) {
+                int params = flagParamBytes(trackData, pos, cmd);
                 pos++; // skip flag byte
-                pos += SmpsCoordFlags.getParamCount(cmd);
+                pos += params;
                 continue;
             }
             pos++;
@@ -699,7 +721,7 @@ public class SmpsImporter {
         while (pos < result.length) {
             int b = result[pos] & 0xFF;
             if (b >= 0xE0) {
-                pos += 1 + SmpsCoordFlags.getParamCount(b);
+                pos += 1 + flagParamBytes(result, pos, b);
             } else if (b >= 0x81 && b <= 0xDF) {
                 int adjusted = Math.max(0x81, Math.min(0xDF, b + compensation));
                 result[pos] = (byte) adjusted;
@@ -1030,7 +1052,7 @@ public class SmpsImporter {
         byte[] out = new byte[prefixLen + trackData.length];
         int pos = 0;
         if (keyOffset != 0) {
-            out[pos++] = (byte) SmpsCoordFlags.KEY_DISP;
+            out[pos++] = (byte) SmpsCoordFlags.transposeAddFlag(dialect);
             out[pos++] = (byte) keyOffset;
         }
         if (volumeOffset != 0) {
@@ -1121,7 +1143,7 @@ public class SmpsImporter {
             out[pos++] = phraseData[1]; // noise param
         }
         if (keyOffset != 0) {
-            out[pos++] = (byte) SmpsCoordFlags.KEY_DISP;
+            out[pos++] = (byte) SmpsCoordFlags.transposeAddFlag(dialect);
             out[pos++] = (byte) keyOffset;
         }
         if (volumeOffset != 0) {
@@ -1162,7 +1184,7 @@ public class SmpsImporter {
             out[pos++] = trackData[1]; // noise param
         }
         if (keyOffset != 0) {
-            out[pos++] = (byte) SmpsCoordFlags.KEY_DISP;
+            out[pos++] = (byte) SmpsCoordFlags.transposeAddFlag(dialect);
             out[pos++] = (byte) keyOffset;
         }
         if (volumeOffset != 0) {
