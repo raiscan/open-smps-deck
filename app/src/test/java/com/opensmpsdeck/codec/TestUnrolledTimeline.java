@@ -9,7 +9,8 @@ class TestUnrolledTimeline {
 
     @Test
     void timelineEventHoldsSourceRef() {
-        var source = new UnrolledTimeline.SourceRef(5, 2, 3);
+        var source = new UnrolledTimeline.SourceRef(0, 5, 2, 3);
+        assertEquals(0, source.channel());
         assertEquals(5, source.phraseId());
         assertEquals(2, source.chainEntryIndex());
         assertEquals(3, source.rowInPhrase());
@@ -41,7 +42,7 @@ class TestUnrolledTimeline {
         assertTrue(channel.events().isEmpty());
         assertTrue(channel.phraseSpans().isEmpty());
 
-        var source = new UnrolledTimeline.SourceRef(1, 0, 0);
+        var source = new UnrolledTimeline.SourceRef(0, 1, 0, 0);
         var row = new SmpsDecoder.TrackerRow("D-4", 12, "", "");
         var event = new UnrolledTimeline.TimelineEvent(
                 0, 12, 0, 1, row, source, false);

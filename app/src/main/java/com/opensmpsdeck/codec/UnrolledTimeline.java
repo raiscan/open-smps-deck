@@ -16,8 +16,8 @@ import java.util.List;
  */
 public final class UnrolledTimeline {
 
-    /** Reference back to the source phrase and position for navigation. */
-    public record SourceRef(int phraseId, int chainEntryIndex, int rowInPhrase) {}
+    /** Reference back to the source channel/phrase/position for navigation. */
+    public record SourceRef(int channel, int phraseId, int chainEntryIndex, int rowInPhrase) {}
 
     /** A single note/rest/tie event placed on the unrolled grid. */
     public record TimelineEvent(

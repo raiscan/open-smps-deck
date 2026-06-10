@@ -183,18 +183,11 @@ public class MainWindow {
             if (hier == null) return;
             Phrase phrase = hier.getPhraseLibrary().getPhrase(sourceRef.phraseId());
             if (phrase == null) return;
-            // Find channel containing this phrase via chain entry index
-            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-                var chain = hier.getChain(ch);
-                var entries = chain.getEntries();
-                if (sourceRef.chainEntryIndex() < entries.size()
-                        && entries.get(sourceRef.chainEntryIndex()).getPhraseId() == sourceRef.phraseId()) {
-                    grid.exitUnrolledMode();
-                    grid.setPhrase(phrase, ch);
-                    grid.setCursorRow(sourceRef.rowInPhrase());
-                    break;
-                }
-            }
+            // The ref carries the channel: a shared phrase at the same entry
+            // index on two channels must open under the clicked channel
+            grid.exitUnrolledMode();
+            grid.setPhrase(phrase, sourceRef.channel());
+            grid.setCursorRow(sourceRef.rowInPhrase());
         });
 
         BorderPane content = new BorderPane();

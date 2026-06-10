@@ -22,6 +22,9 @@ import java.util.List;
  */
 public class ChainEditor extends Dialog<ButtonType> {
 
+    /** Live chain in the song model; only written on OK. */
+    private final Chain liveChain;
+    /** Working copy all edits operate on, discarded on Cancel. */
     private final Chain chain;
     private final PhraseLibrary phraseLibrary;
     private final com.opensmps.smps.SmpsCoordFlags.Dialect dialect;
@@ -51,7 +54,8 @@ public class ChainEditor extends Dialog<ButtonType> {
 
     public ChainEditor(Chain chain, PhraseLibrary phraseLibrary, String channelName,
             com.opensmps.smps.SmpsCoordFlags.Dialect dialect) {
-        this.chain = chain;
+        this.liveChain = chain;
+        this.chain = copyChain(chain);
         this.phraseLibrary = phraseLibrary;
         this.dialect = dialect;
 
@@ -75,6 +79,35 @@ public class ChainEditor extends Dialog<ButtonType> {
 
         getDialogPane().setContent(content);
         getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        // Cancel must actually cancel: edits live in the working copy and are
+        // only written back to the song model when OK is pressed. (Phrases
+        // created by Add but cancelled remain unreferenced in the library,
+        // which is harmless.)
+        setResultConverter(button -> {
+            if (button == ButtonType.OK) {
+                applyToLiveChain();
+            }
+            return button;
+        });
+    }
+
+    private static Chain copyChain(Chain source) {
+        Chain copy = new Chain(source.getChannelIndex());
+        for (ChainEntry entry : source.getEntries()) {
+            ChainEntry e = new ChainEntry(entry.getPhraseId());
+            e.setTransposeSemitones(entry.getTransposeSemitones());
+            e.setRepeatCount(entry.getRepeatCount());
+            copy.getEntries().add(e);
+        }
+        copy.setLoopEntryIndex(source.getLoopEntryIndex());
+        return copy;
+    }
+
+    private void applyToLiveChain() {
+        liveChain.getEntries().clear();
+        liveChain.getEntries().addAll(chain.getEntries());
+        liveChain.setLoopEntryIndex(chain.getLoopEntryIndex());
     }
 
     @SuppressWarnings("unchecked")

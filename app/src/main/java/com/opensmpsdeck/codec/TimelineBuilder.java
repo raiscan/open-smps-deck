@@ -79,7 +79,7 @@ public final class TimelineBuilder {
                         allDurations.add(scaledDuration);
 
                         var source = new UnrolledTimeline.SourceRef(
-                                entry.getPhraseId(), entryIdx, rowIdx);
+                                ch, entry.getPhraseId(), entryIdx, rowIdx);
                         channelEvents[ch].add(new RawEvent(
                                 ch, currentTick, scaledDuration, row, source, isFromLoop));
 

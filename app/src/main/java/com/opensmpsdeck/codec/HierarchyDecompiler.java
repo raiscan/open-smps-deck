@@ -92,9 +92,27 @@ public final class HierarchyDecompiler {
                     segments.clear();
                     entryStartOffsets.add(pos);
                     chainEntries.add(new ChainEntry(subPhrase.getId()));
+                    pos += 3;
+                    segStart = pos;
+                } else if (target == pos + 3 || target < 0 || target >= track.length) {
+                    // Push-and-fall-through call (no RETURN exists): drop the
+                    // F8 bytes and keep scanning — the pushed return address
+                    // is never popped, so this is semantically a no-op
+                    pos += 3;
+                    segStart = pos;
+                } else if (!visitedScan[target] && gotoGuard < MAX_GOTOS) {
+                    // Call-as-jump (no RETURN exists): follow it like a goto
+                    gotoGuard++;
+                    flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
+                    segments.clear();
+                    pos = target;
+                    segStart = pos;
+                } else {
+                    // Jump into already-scanned bytes with no return: stop
+                    flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
+                    segments.clear();
+                    break;
                 }
-                pos += 3;
-                segStart = pos;
             } else if (b == SmpsCoordFlags.LOOP && pos + 4 < track.length) {
                 // LOOP format: F7 <index> <count> <ptr_lo> <ptr_hi>
                 int count = track[pos + 2] & 0xFF; // repeat count (pos+1 is loop counter index)
@@ -252,7 +270,7 @@ public final class HierarchyDecompiler {
         for (int target : callTargets) {
             if (target < 0 || target >= track.length) continue;
             byte[] body = extractSubBody(track, target, dialect, 0);
-            if (body.length > 0) {
+            if (body != null && body.length > 0) {
                 Phrase phrase = library.createPhrase("Sub", type);
                 phrase.setData(body);
                 subroutines.put(target, phrase);
@@ -269,13 +287,24 @@ public final class HierarchyDecompiler {
     private static byte[] extractSubBody(byte[] track, int target,
             SmpsCoordFlags.Dialect dialect, int depth) {
         int subEnd = target;
+        boolean returns = false;
         while (subEnd < track.length) {
             int b = track[subEnd] & 0xFF;
             if (SmpsCoordFlags.isReturn(b, dialect)) {
+                returns = true;
                 break;
+            }
+            if (SmpsCoordFlags.isTrackEnd(b, dialect) || b == SmpsCoordFlags.JUMP) {
+                break; // control never comes back: not a real subroutine
             }
             int len = (b >= 0xE0) ? 1 + flagBytes(track, subEnd, b, dialect) : 1;
             subEnd += Math.max(1, Math.min(len, track.length - subEnd));
+        }
+        if (!returns) {
+            // Call-without-return (rips use F8 as a push-and-fall-through or
+            // as a jump): the body must NOT become a subroutine phrase, or
+            // the linear scan duplicates the same bytes.
+            return null;
         }
         return copyRegionFlattened(track, target, subEnd, dialect, depth);
     }
@@ -358,6 +387,7 @@ public final class HierarchyDecompiler {
      */
     private static int findChannelLoopTarget(byte[] track, SmpsCoordFlags.Dialect dialect) {
         boolean[] visited = new boolean[track.length];
+        java.util.Deque<Integer> callStack = new java.util.ArrayDeque<>();
         int gotos = 0;
         int pos = 0;
         while (pos >= 0 && pos < track.length) {
@@ -376,7 +406,24 @@ public final class HierarchyDecompiler {
                 pos = target;
                 continue;
             }
-            if (SmpsCoordFlags.isTrackEnd(b, dialect) || SmpsCoordFlags.isReturn(b, dialect)) {
+            if (b == SmpsCoordFlags.CALL && pos + 2 < track.length && callStack.size() < 8) {
+                // Follow calls like the driver: returnless calls (used as
+                // jumps or push-and-fall-through) can hide the channel loop
+                int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (target >= 0 && target < track.length && !visited[target]) {
+                    callStack.push(pos + 3);
+                    pos = target;
+                    continue;
+                }
+                pos += 3;
+                continue;
+            }
+            if (SmpsCoordFlags.isReturn(b, dialect)) {
+                if (callStack.isEmpty()) return -1;
+                pos = callStack.pop();
+                continue;
+            }
+            if (SmpsCoordFlags.isTrackEnd(b, dialect)) {
                 return -1;
             }
             if (b >= 0xE0) {
@@ -401,6 +448,7 @@ public final class HierarchyDecompiler {
             SmpsCoordFlags.Dialect dialect) {
         java.util.TreeSet<Integer> targets = new java.util.TreeSet<>();
         boolean[] visited = new boolean[track.length];
+        java.util.Deque<Integer> callStack = new java.util.ArrayDeque<>();
         int gotos = 0;
         int pos = 0;
         while (pos >= 0 && pos < track.length && !visited[pos]) {
@@ -424,7 +472,22 @@ public final class HierarchyDecompiler {
                 pos = target;
                 continue;
             }
-            if (SmpsCoordFlags.isTrackEnd(b, dialect) || SmpsCoordFlags.isReturn(b, dialect)) {
+            if (b == SmpsCoordFlags.CALL && pos + 2 < track.length && callStack.size() < 8) {
+                int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (target >= 0 && target < track.length && !visited[target]) {
+                    callStack.push(pos + 3);
+                    pos = target;
+                    continue;
+                }
+                pos += 3;
+                continue;
+            }
+            if (SmpsCoordFlags.isReturn(b, dialect)) {
+                if (callStack.isEmpty()) break;
+                pos = callStack.pop();
+                continue;
+            }
+            if (SmpsCoordFlags.isTrackEnd(b, dialect)) {
                 break;
             }
             pos += (b >= 0xE0) ? 1 + flagBytes(track, pos, b, dialect) : 1;
