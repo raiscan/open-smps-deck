@@ -31,6 +31,25 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
     // Scratch buffer for read() to avoid per-frame allocations
     private final short[] scratchFrameBuf = new short[2];
 
+    /** Rendering strategy for {@link #read(short[])}. */
+    public enum ReadMode {
+        /** Advance sequencers and render one frame at a time. */
+        SAMPLE_ACCURATE,
+        /**
+         * Batch-render chunks between tempo frame boundaries, falling back
+         * to sample-accurate at boundaries and during fades. Identical
+         * output, far less per-sample overhead.
+         */
+        HYBRID
+    }
+
+    private static final int MIN_BATCH_SAMPLES = 32;
+    private ReadMode readMode = ReadMode.HYBRID;
+
+    public void setReadMode(ReadMode mode) {
+        this.readMode = mode;
+    }
+
     public SmpsDriver() {
         super();
     }
@@ -278,38 +297,110 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
 
     @Override
     public int read(short[] buffer) {
+        if (readMode == ReadMode.HYBRID) {
+            return readHybrid(buffer);
+        }
+        return readSampleAccurate(buffer);
+    }
+
+    private int readSampleAccurate(short[] buffer) {
         int frames = buffer.length / 2;
 
-        // Per-sample processing is required because sequencer state changes (note events,
-        // instrument changes, etc.) must happen in lockstep with rendering. Batching
-        // breaks audio fidelity because synth state changes mid-batch would be lost.
         synchronized (sequencersLock) {
             for (int i = 0; i < frames; i++) {
-                int size = sequencers.size();
-                for (int j = 0; j < size; j++) {
-                    SmpsSequencer seq = sequencers.get(j);
-                    seq.advance(1.0);
-                    if (seq.isComplete()) {
-                        pendingRemovals.add(seq);
-                    }
-                }
-
-                if (!pendingRemovals.isEmpty()) {
-                    for (int j = 0; j < pendingRemovals.size(); j++) {
-                        SmpsSequencer seq = pendingRemovals.get(j);
-                        sequencers.remove(seq);
-                        releaseLocks(seq);
-                        sfxSequencers.remove(seq);
-                    }
-                    pendingRemovals.clear();
-                }
-
-                super.render(scratchFrameBuf);
-                buffer[i * 2] = scratchFrameBuf[0];
-                buffer[i * 2 + 1] = scratchFrameBuf[1];
+                renderSingleSample(buffer, i);
             }
         }
         return buffer.length;
+    }
+
+    private int readHybrid(short[] buffer) {
+        int frames = buffer.length / 2;
+
+        synchronized (sequencersLock) {
+            int frameIndex = 0;
+            while (frameIndex < frames) {
+                if (requiresSampleAccurateFallback()) {
+                    renderSingleSample(buffer, frameIndex++);
+                    continue;
+                }
+
+                int safeChunk = computeSafeChunkSamples(frames - frameIndex);
+                if (safeChunk < MIN_BATCH_SAMPLES) {
+                    renderSingleSample(buffer, frameIndex++);
+                    continue;
+                }
+
+                advanceSequencersBatch(safeChunk);
+                removeCompletedSequencers();
+                super.renderFrames(buffer, frameIndex, safeChunk);
+                frameIndex += safeChunk;
+            }
+        }
+        return buffer.length;
+    }
+
+    private boolean requiresSampleAccurateFallback() {
+        for (int i = 0; i < sequencers.size(); i++) {
+            if (sequencers.get(i).requiresSampleAccurateFallback()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The tempo cap is nextTempoFrame - 1 because sample-accurate mode advances
+    // one sample before rendering it; the boundary sample must stay on that
+    // path so the pre-boundary samples do not render with post-tick state.
+    private int computeSafeChunkSamples(int maxFrames) {
+        int safe = maxFrames;
+        for (int i = 0; i < sequencers.size(); i++) {
+            SmpsSequencer seq = sequencers.get(i);
+            int preTempoSafe = Math.max(0, seq.getSamplesUntilNextTempoFrame() - 1);
+            safe = Math.min(safe, preTempoSafe);
+            int preEventSafe = Math.max(0, seq.getSamplesUntilNextObservableEvent() - 1);
+            safe = Math.min(safe, preEventSafe);
+        }
+        return safe;
+    }
+
+    private void advanceSequencersBatch(int frames) {
+        int size = sequencers.size();
+        for (int i = 0; i < size; i++) {
+            SmpsSequencer seq = sequencers.get(i);
+            seq.advanceBatch(frames);
+            if (seq.isComplete()) {
+                pendingRemovals.add(seq);
+            }
+        }
+    }
+
+    private void renderSingleSample(short[] buffer, int frameIndex) {
+        int size = sequencers.size();
+        for (int j = 0; j < size; j++) {
+            SmpsSequencer seq = sequencers.get(j);
+            seq.advance(1.0);
+            if (seq.isComplete()) {
+                pendingRemovals.add(seq);
+            }
+        }
+        removeCompletedSequencers();
+
+        super.render(scratchFrameBuf);
+        buffer[frameIndex * 2] = scratchFrameBuf[0];
+        buffer[frameIndex * 2 + 1] = scratchFrameBuf[1];
+    }
+
+    private void removeCompletedSequencers() {
+        if (!pendingRemovals.isEmpty()) {
+            for (int j = 0; j < pendingRemovals.size(); j++) {
+                SmpsSequencer seq = pendingRemovals.get(j);
+                sequencers.remove(seq);
+                releaseLocks(seq);
+                sfxSequencers.remove(seq);
+            }
+            pendingRemovals.clear();
+        }
     }
 
     @Override

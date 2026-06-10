@@ -68,7 +68,18 @@ public class VirtualSynthesizer implements Synthesizer {
 
     public void render(short[] buffer) {
         // Assume buffer is Stereo Interleaved (L, R, L, R...)
-        int frames = buffer.length / 2;
+        renderFrames(buffer, 0, buffer.length / 2);
+    }
+
+    /**
+     * Render a chunk of stereo frames into {@code buffer} starting at
+     * {@code frameOffset} (interleaved L,R). Ported from sonic-engine to
+     * support batched driver rendering between sequencer tick boundaries.
+     */
+    public void renderFrames(short[] buffer, int frameOffset, int frames) {
+        if (buffer == null || frames <= 0) {
+            return;
+        }
 
         // Reuse scratch buffers, resize only when needed
         if (scratchLeft.length < frames) {
@@ -84,12 +95,12 @@ public class VirtualSynthesizer implements Synthesizer {
         Arrays.fill(scratchLeftPsg, 0, frames, 0);
         Arrays.fill(scratchRightPsg, 0, frames, 0);
 
-        ym.renderStereo(scratchLeft, scratchRight);
+        ym.renderStereo(scratchLeft, scratchRight, frames);
 
         // GPGX-style: FM output is clipped to +/-8191 internally.
         // No output gain applied here - volume issues are in the EG/feedback implementation.
 
-        psg.renderStereo(scratchLeftPsg, scratchRightPsg);
+        psg.renderStereo(scratchLeftPsg, scratchRightPsg, frames);
 
         // Mix PSG into FM output. GPGX PSG produces unipolar 0..4200 that the
         // BlipDeltaBuffer DC-blocks to +/-2100 -- close to PsgChip's +/-4096 >> 1.
@@ -111,8 +122,9 @@ public class VirtualSynthesizer implements Synthesizer {
             if (l > 32767) l = 32767; else if (l < -32768) l = -32768;
             if (r > 32767) r = 32767; else if (r < -32768) r = -32768;
 
-            buffer[i * 2] = (short) l;
-            buffer[i * 2 + 1] = (short) r;
+            int sampleIndex = (frameOffset + i) * 2;
+            buffer[sampleIndex] = (short) l;
+            buffer[sampleIndex + 1] = (short) r;
         }
     }
 
