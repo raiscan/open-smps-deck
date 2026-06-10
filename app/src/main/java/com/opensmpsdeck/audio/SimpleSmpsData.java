@@ -12,6 +12,7 @@ public class SimpleSmpsData extends AbstractSmpsData {
 
     private byte[][] psgEnvelopes;
     private byte[][] modEnvelopes;
+    private boolean voiceOperatorSwap;
     private final int baseNoteOffset;
     private final int psgBaseNoteOffset;
     private final boolean bigEndianPointers;
@@ -98,6 +99,11 @@ public class SimpleSmpsData extends AbstractSmpsData {
         }
     }
 
+    /** Voices stored in native S1/S3K group order need the chip-order swap. */
+    public void setVoiceOperatorSwap(boolean swap) {
+        this.voiceOperatorSwap = swap;
+    }
+
     @Override
     public byte[] getVoice(int voiceId) {
         if (voicePtr == 0 || voicePtr >= data.length) return null;
@@ -105,6 +111,9 @@ public class SimpleSmpsData extends AbstractSmpsData {
         if (offset + FmVoice.VOICE_SIZE > data.length) return null;
         byte[] voice = new byte[FmVoice.VOICE_SIZE];
         System.arraycopy(data, offset, voice, 0, FmVoice.VOICE_SIZE);
+        if (voiceOperatorSwap) {
+            voice = FmVoice.swapMiddleOperators(voice);
+        }
         return voice;
     }
 

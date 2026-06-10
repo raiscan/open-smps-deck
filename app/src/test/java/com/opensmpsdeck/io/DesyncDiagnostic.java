@@ -91,7 +91,12 @@ public class DesyncDiagnostic {
             int base = voicePtr - z80StartAddress;
             int offset = base + voiceId * 25;
             if (offset < 0 || offset + 25 > data.length) return null;
-            return Arrays.copyOfRange(data, offset, offset + 25);
+            byte[] voice = Arrays.copyOfRange(data, offset, offset + 25);
+            if (fmBaseNoteOffset == 0) {
+                // S1/S3K rips store voices in native group order
+                voice = com.opensmpsdeck.model.FmVoice.swapMiddleOperators(voice);
+            }
+            return voice;
         }
 
         @Override
@@ -178,6 +183,7 @@ public class DesyncDiagnostic {
         Song song = new SmpsImporter().importFile(f);
         byte[] compiled = new PatternCompiler().compile(song);
         SimpleSmpsData compiledData = new SimpleSmpsData(compiled, fmBase, 0, bigEndian);
+        compiledData.setVoiceOperatorSwap(mode != SmpsMode.S2);
         if (envs != null) compiledData.setPsgEnvelopes(envs);
         if (modEnvs != null) compiledData.setModEnvelopes(modEnvs);
         Map<String, List<NoteEvent>> eventsB = capture(compiledData, mode, 60);

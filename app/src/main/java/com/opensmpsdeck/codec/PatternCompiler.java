@@ -225,7 +225,12 @@ public class PatternCompiler {
 
         List<byte[]> voiceData = new ArrayList<>();
         for (FmVoice voice : song.getVoiceBank()) {
-            voiceData.add(voice.getDataUnsafe().clone());
+            byte[] v = voice.getDataUnsafe().clone();
+            if (dialect != SmpsCoordFlags.Dialect.S2) {
+                // Write S1/S3K voices back in their native group order
+                v = FmVoice.swapMiddleOperators(v);
+            }
+            voiceData.add(v);
         }
 
         PhraseLibrary library = arrangement.getPhraseLibrary();
@@ -448,7 +453,12 @@ public class PatternCompiler {
 
         List<byte[]> voiceData = new ArrayList<>();
         for (FmVoice voice : song.getVoiceBank()) {
-            voiceData.add(voice.getDataUnsafe().clone());
+            byte[] v = voice.getDataUnsafe().clone();
+            if (dialect != SmpsCoordFlags.Dialect.S2) {
+                // Write S1/S3K voices back in their native group order
+                v = FmVoice.swapMiddleOperators(v);
+            }
+            voiceData.add(v);
         }
 
         Map<Integer, BlockDefinition> blocksById = new HashMap<>();

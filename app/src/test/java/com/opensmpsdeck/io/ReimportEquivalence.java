@@ -86,6 +86,7 @@ public class ReimportEquivalence {
         boolean be = song.getSmpsMode() == SmpsMode.S1;
         int fmBase = song.getSmpsMode() == SmpsMode.S2 ? 1 : 0;
         SimpleSmpsData data = new SimpleSmpsData(compiled, fmBase, 0, be);
+        data.setVoiceOperatorSwap(song.getSmpsMode() != SmpsMode.S2);
         if (!song.getPsgEnvelopes().isEmpty()) {
             byte[][] envs = new byte[song.getPsgEnvelopes().size()][];
             for (int i = 0; i < envs.length; i++) envs[i] = song.getPsgEnvelopes().get(i).getData();

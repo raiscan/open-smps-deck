@@ -188,6 +188,10 @@ public class SmpsImporter {
                 if (vOffset + FmVoice.VOICE_SIZE > data.length) break;
                 byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
                 System.arraycopy(data, vOffset, voiceData, 0, FmVoice.VOICE_SIZE);
+                if (dialect != SmpsCoordFlags.Dialect.S2) {
+                    // S1/S3K voices use native Op4,Op3,Op2,Op1 group order
+                    voiceData = FmVoice.swapMiddleOperators(voiceData);
+                }
                 song.getVoiceBank().add(new FmVoice("Voice " + i, voiceData));
             }
         } else if (insLib != null && insLib.data().length >= FmVoice.VOICE_SIZE) {
@@ -204,6 +208,9 @@ public class SmpsImporter {
                 byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
                 System.arraycopy(insLib.data(), start + i * FmVoice.VOICE_SIZE,
                         voiceData, 0, FmVoice.VOICE_SIZE);
+                if (dialect != SmpsCoordFlags.Dialect.S2) {
+                    voiceData = FmVoice.swapMiddleOperators(voiceData);
+                }
                 song.getVoiceBank().add(new FmVoice("GblIns " + i, voiceData));
             }
         }

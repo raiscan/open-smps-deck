@@ -185,4 +185,21 @@ public class FmVoice {
      * Converts a display-order operator index (0-3 for OP1-OP4) to the file's operator index (identity: the file is in musical order).
      */
     public static int displayToSmps(int displayIndex) { return DISPLAY_TO_SMPS[displayIndex]; }
+
+    /**
+     * Convert between the native S1/S3K voice byte order and the engine's
+     * S2 order. S1/S3K drivers (SMPSPlay InsMode=DEFAULT) store each 4-byte
+     * operator parameter group as Op4,Op3,Op2,Op1, while the chip layer and
+     * this model use the S2 order Op4,Op2,Op3,Op1. The transform swaps the
+     * middle two bytes of each group and is its own inverse.
+     */
+    public static byte[] swapMiddleOperators(byte[] voice) {
+        byte[] out = voice.clone();
+        for (int g = 1; g + 2 < VOICE_SIZE; g += 4) {
+            byte tmp = out[g + 1];
+            out[g + 1] = out[g + 2];
+            out[g + 2] = tmp;
+        }
+        return out;
+    }
 }
