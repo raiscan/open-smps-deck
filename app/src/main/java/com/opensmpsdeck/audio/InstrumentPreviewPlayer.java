@@ -42,7 +42,7 @@ public final class InstrumentPreviewPlayer {
     public static void previewFmVoice(PlaybackEngine engine, FmVoice voice, int noteByte) {
         if (engine == null) return;
         engine.stop();
-        engine.loadSong(buildFmPreviewSong(voice, noteByte, DEFAULT_DURATION));
+        engine.loadPreview(buildFmPreviewSong(voice, noteByte, DEFAULT_DURATION));
         engine.play();
     }
 
@@ -50,7 +50,7 @@ public final class InstrumentPreviewPlayer {
     public static void previewPsgEnvelope(PlaybackEngine engine, PsgEnvelope envelope, int noteByte) {
         if (engine == null) return;
         engine.stop();
-        engine.loadSong(buildPsgPreviewSong(envelope, noteByte, DEFAULT_DURATION));
+        engine.loadPreview(buildPsgPreviewSong(envelope, noteByte, DEFAULT_DURATION));
         engine.play();
     }
 
@@ -58,7 +58,7 @@ public final class InstrumentPreviewPlayer {
     public static void previewDacSample(PlaybackEngine engine, DacSample sample) {
         if (engine == null) return;
         engine.stop();
-        engine.loadSong(buildDacPreviewSong(sample));
+        engine.loadPreview(buildDacPreviewSong(sample));
         engine.play();
     }
 

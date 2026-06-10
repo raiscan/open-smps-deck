@@ -24,6 +24,7 @@ public class Song {
 
     private final List<FmVoice> voiceBank = new ArrayList<>();
     private final List<PsgEnvelope> psgEnvelopes = new ArrayList<>();
+    private final List<PsgEnvelope> modEnvelopes = new ArrayList<>();
     private final List<DacSample> dacSamples = new ArrayList<>();
     private final List<Pattern> patterns = new ArrayList<>();
     private final List<int[]> orderList = new ArrayList<>(); // int[10] per row
@@ -89,6 +90,14 @@ public class Song {
 
     public List<FmVoice> getVoiceBank() {
         return voiceBank;
+    }
+
+    /**
+     * Modulation envelopes (vibrato/pitch sweeps), shared LST format with PSG
+     * volume envelopes. IDs in bytecode are 1-based: id n = entry n-1.
+     */
+    public List<PsgEnvelope> getModEnvelopes() {
+        return modEnvelopes;
     }
 
     public List<PsgEnvelope> getPsgEnvelopes() {

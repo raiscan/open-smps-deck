@@ -89,6 +89,7 @@ public class SmpsImporter {
         if (parentDir != null) {
             loadDacSamples(parentDir, song);
             loadPsgEnvelopes(parentDir, song);
+            loadModEnvelopes(parentDir, song);
         }
 
         return song;
@@ -217,6 +218,7 @@ public class SmpsImporter {
         int[] psgHeaderVol = new int[Pattern.CHANNEL_COUNT];
         int[] fmHeaderKey = new int[Pattern.CHANNEL_COUNT];
         int[] fmHeaderVol = new int[Pattern.CHANNEL_COUNT];
+        int[] psgHeaderMod = new int[Pattern.CHANNEL_COUNT];
 
         // Extract FM track data.
         // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
@@ -252,6 +254,7 @@ public class SmpsImporter {
                     psgHeaderInstrument[channelIndex] = psgInstruments[i];
                     psgHeaderKey[channelIndex] = psgKeys[i];
                     psgHeaderVol[channelIndex] = psgVols[i];
+                    psgHeaderMod[channelIndex] = psgMods[i];
                     byte[] trackData = stripJumpTerminator(extract);
                     trackData = prependPsgHeaderState(
                             trackData, psgKeys[i], psgVols[i], psgInstruments[i], psgMods[i]);
@@ -318,10 +321,11 @@ public class SmpsImporter {
             // the compiler writes zeros, so they must live in the chain itself.
             if (ch >= FM_CHANNEL_COUNT) {
                 applyHeaderInit(chain, library, channelType, true,
-                        psgHeaderKey[ch], psgHeaderVol[ch], psgHeaderInstrument[ch]);
+                        psgHeaderKey[ch], psgHeaderVol[ch], psgHeaderInstrument[ch],
+                        psgHeaderMod[ch]);
             } else {
                 applyHeaderInit(chain, library, channelType, false,
-                        fmHeaderKey[ch], fmHeaderVol[ch], 0);
+                        fmHeaderKey[ch], fmHeaderVol[ch], 0, 0);
             }
         }
         song.setArrangementMode(ArrangementMode.HIERARCHICAL);
@@ -974,6 +978,30 @@ public class SmpsImporter {
         }
     }
 
+    /**
+     * Load companion modulation envelopes from Modulat.lst (same LST format as
+     * PSG.lst). Bytecode mod envelope IDs are 1-based into this list.
+     */
+    private void loadModEnvelopes(File parentDir, Song song) {
+        File modLst = new File(parentDir, "Modulat.lst");
+        if (!modLst.exists()) return;
+        try {
+            byte[] data = Files.readAllBytes(modLst.toPath());
+            song.getModEnvelopes().addAll(parsePsgLst(data));
+        } catch (IOException e) {
+            // Companion modulation file is optional
+        }
+    }
+
+    /** Prefix a phrase with an S3K F4 (set modulation envelope) command. */
+    private static byte[] prependModEnv(byte[] phraseData, int modEnv) {
+        byte[] out = new byte[2 + phraseData.length];
+        out[0] = (byte) 0xF4;
+        out[1] = (byte) modEnv;
+        System.arraycopy(phraseData, 0, out, 2, phraseData.length);
+        return out;
+    }
+
     private static int parseHexOrDec(String value) {
         value = value.trim();
         if (value.startsWith("0x") || value.startsWith("0X")) {
@@ -1075,8 +1103,11 @@ public class SmpsImporter {
      * the loop index shifted past it.
      */
     private void applyHeaderInit(Chain chain, PhraseLibrary library, ChannelType type,
-                                 boolean psg, int keyOffset, int volumeOffset, int instrument) {
-        if (keyOffset == 0 && volumeOffset == 0 && (!psg || instrument == 0)) return;
+                                 boolean psg, int keyOffset, int volumeOffset, int instrument,
+                                 int modEnv) {
+        // Header modulation envelopes are only expressible in S3K bytecode (F4)
+        boolean emitModEnv = psg && modEnv != 0 && dialect == SmpsCoordFlags.Dialect.S3K;
+        if (keyOffset == 0 && volumeOffset == 0 && (!psg || instrument == 0) && !emitModEnv) return;
         if (chain.getEntries().isEmpty()) return;
 
         ChainEntry firstEntry = chain.getEntries().get(0);
@@ -1089,9 +1120,13 @@ public class SmpsImporter {
 
         if (refs == 1 && firstEntry.getRepeatCount() <= 1 && !loopHitsFirst) {
             byte[] d = firstPhrase.getDataDirect();
-            firstPhrase.setData(psg
+            d = psg
                     ? prependPsgInitToPhrase(d, keyOffset, volumeOffset, instrument)
-                    : prependFmHeaderState(d, keyOffset, volumeOffset));
+                    : prependFmHeaderState(d, keyOffset, volumeOffset);
+            if (emitModEnv) {
+                d = prependModEnv(d, modEnv);
+            }
+            firstPhrase.setData(d);
             return;
         }
 
@@ -1105,9 +1140,13 @@ public class SmpsImporter {
             seed = new byte[]{firstData[0], firstData[1]};
         }
         Phrase initPhrase = library.createPhrase("Init", type);
-        initPhrase.setData(psg
+        byte[] initData = psg
                 ? prependPsgInitToPhrase(seed, keyOffset, volumeOffset, instrument)
-                : prependFmHeaderState(new byte[0], keyOffset, volumeOffset));
+                : prependFmHeaderState(new byte[0], keyOffset, volumeOffset);
+        if (emitModEnv) {
+            initData = prependModEnv(initData, modEnv);
+        }
+        initPhrase.setData(initData);
         chain.getEntries().add(0, new ChainEntry(initPhrase.getId()));
         if (chain.getLoopEntryIndex() >= 0) {
             chain.setLoopEntryIndex(chain.getLoopEntryIndex() + 1);

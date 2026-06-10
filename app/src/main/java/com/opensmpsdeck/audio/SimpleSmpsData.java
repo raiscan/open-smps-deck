@@ -11,6 +11,7 @@ import com.opensmps.smps.AbstractSmpsData;
 public class SimpleSmpsData extends AbstractSmpsData {
 
     private byte[][] psgEnvelopes;
+    private byte[][] modEnvelopes;
     private final int baseNoteOffset;
     private final int psgBaseNoteOffset;
     private final boolean bigEndianPointers;
@@ -46,6 +47,17 @@ public class SimpleSmpsData extends AbstractSmpsData {
 
     public void setPsgEnvelopes(byte[][] envelopes) {
         this.psgEnvelopes = envelopes;
+    }
+
+    /** Modulation envelopes; bytecode IDs are 1-based (id n = entry n-1). */
+    public void setModEnvelopes(byte[][] envelopes) {
+        this.modEnvelopes = envelopes;
+    }
+
+    @Override
+    public byte[] getModEnvelope(int id) {
+        if (modEnvelopes == null || id < 1 || id > modEnvelopes.length) return null;
+        return modEnvelopes[id - 1];
     }
 
     @Override

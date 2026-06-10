@@ -34,6 +34,7 @@ public class DesyncDiagnostic {
         private final boolean bigEndian;
         private final int fmBaseNoteOffset;
         private byte[][] envelopes;
+        private byte[][] modEnvelopes;
 
         RawRipData(byte[] data, int seqBase, boolean bigEndian, int fmBaseNoteOffset) {
             super(data, seqBase);
@@ -43,6 +44,14 @@ public class DesyncDiagnostic {
         }
 
         void setEnvelopes(byte[][] envelopes) { this.envelopes = envelopes; }
+
+        void setModEnvelopes(byte[][] envelopes) { this.modEnvelopes = envelopes; }
+
+        @Override
+        public byte[] getModEnvelope(int id) {
+            if (modEnvelopes == null || id < 1 || id > modEnvelopes.length) return null;
+            return modEnvelopes[id - 1];
+        }
 
         @Override
         protected void parseHeader() {
@@ -147,9 +156,22 @@ public class DesyncDiagnostic {
             for (int i = 0; i < envs.length; i++) envs[i] = envelopes.get(i).getData();
         }
 
+        // Modulation envelopes shared by both sides
+        byte[][] modEnvs = null;
+        File modLst = new File(f.getParentFile(), "Modulat.lst");
+        if (!modLst.exists() && f.getParentFile() != null) {
+            modLst = new File(f.getParentFile().getParentFile(), "Modulat.lst");
+        }
+        if (modLst.exists()) {
+            List<PsgEnvelope> envelopes = SmpsImporter.parsePsgLst(Files.readAllBytes(modLst.toPath()));
+            modEnvs = new byte[envelopes.size()][];
+            for (int i = 0; i < modEnvs.length; i++) modEnvs[i] = envelopes.get(i).getData();
+        }
+
         // Side A: original raw rip
         RawRipData rawData = new RawRipData(raw, seqBase, bigEndian, fmBase);
         rawData.setEnvelopes(envs);
+        rawData.setModEnvelopes(modEnvs);
         Map<String, List<NoteEvent>> eventsA = capture(rawData, mode, 60);
 
         // Side B: imported + recompiled (same as the app's playback path)
@@ -157,6 +179,7 @@ public class DesyncDiagnostic {
         byte[] compiled = new PatternCompiler().compile(song);
         SimpleSmpsData compiledData = new SimpleSmpsData(compiled, fmBase, 0, bigEndian);
         if (envs != null) compiledData.setPsgEnvelopes(envs);
+        if (modEnvs != null) compiledData.setModEnvelopes(modEnvs);
         Map<String, List<NoteEvent>> eventsB = capture(compiledData, mode, 60);
 
         // Compare per channel

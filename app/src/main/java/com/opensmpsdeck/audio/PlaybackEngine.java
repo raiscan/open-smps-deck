@@ -35,6 +35,7 @@ public class PlaybackEngine {
     private SmpsSequencer currentSequencer;
     private volatile PatternCompiler.CompilationResult compilationResult;
     private int baseOrderIndex; // only accessed from UI thread
+    private volatile boolean previewPlayback;
     private PatternCompiler.CursorPosition lastResolvedCursor;
 
     /**
@@ -49,7 +50,23 @@ public class PlaybackEngine {
     /** Compile song and load into sequencer. Does NOT start playback. */
     public void loadSong(Song song) {
         baseOrderIndex = 0;
+        previewPlayback = false;
         loadSongImpl(song);
+    }
+
+    /**
+     * Load a one-shot instrument preview song. Marks the engine as previewing
+     * so UI position tracking (grid playback cursor) ignores this playback.
+     */
+    public void loadPreview(Song song) {
+        baseOrderIndex = 0;
+        previewPlayback = true;
+        loadSongImpl(song);
+    }
+
+    /** True while the loaded song is an instrument preview, not user content. */
+    public boolean isPreviewPlayback() {
+        return previewPlayback;
     }
 
     /**
@@ -80,6 +97,13 @@ public class PlaybackEngine {
                 envs[i] = song.getPsgEnvelopes().get(i).getData();
             }
             data.setPsgEnvelopes(envs);
+        }
+        if (!song.getModEnvelopes().isEmpty()) {
+            byte[][] modEnvs = new byte[song.getModEnvelopes().size()][];
+            for (int i = 0; i < modEnvs.length; i++) {
+                modEnvs[i] = song.getModEnvelopes().get(i).getData();
+            }
+            data.setModEnvelopes(modEnvs);
         }
 
         DacData dacData = null;

@@ -930,9 +930,44 @@ public class TrackerGrid extends ScrollPane {
      */
     public void setPlaybackTick(long tick) {
         if (viewMode != ViewMode.UNROLLED || unrolledTimeline == null) return;
-        int effectiveResolution = unrolledTimeline.gridResolution() / zoomLevel;
-        int row = effectiveResolution > 0 ? (int) (tick / effectiveResolution) : 0;
+        int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
+        int row = (int) (tick / effectiveResolution);
+
+        // When the song loops, wrap the cursor back into the loop region
+        // instead of running off the end of the grid
+        int totalRows = maxTickAcrossChannels() / effectiveResolution;
+        if (totalRows > 0 && row >= totalRows) {
+            int loopRow = unrolledLoopRow(effectiveResolution);
+            if (loopRow >= 0 && loopRow < totalRows) {
+                row = loopRow + (int) ((row - (long) loopRow) % (totalRows - loopRow));
+            } else {
+                row = totalRows - 1; // non-looping song: pin at the last row
+            }
+        }
         setPlaybackRow(row);
+    }
+
+    /**
+     * Grid row the song loops back to, derived from the loop point of the
+     * longest channel (the one that defines the timeline length), or -1.
+     */
+    private int unrolledLoopRow(int effectiveResolution) {
+        if (unrolledTimeline == null) return -1;
+        int baseRes = unrolledTimeline.gridResolution();
+        int bestEndTick = -1;
+        int bestLoopRow = -1;
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            var events = unrolledTimeline.channel(ch).events();
+            if (events.isEmpty()) continue;
+            var last = events.get(events.size() - 1);
+            int endTick = last.startTick() + last.durationTicks();
+            int loopBackRow = unrolledTimeline.channelLoopBackRow()[ch];
+            if (endTick > bestEndTick && loopBackRow >= 0) {
+                bestEndTick = endTick;
+                bestLoopRow = loopBackRow * baseRes / effectiveResolution;
+            }
+        }
+        return bestLoopRow;
     }
 
     /** Set per-channel playback row markers (length 10, -1 for inactive channels). */

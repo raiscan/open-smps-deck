@@ -60,6 +60,16 @@ public class ProjectFile {
         }
         root.add("psgEnvelopes", envelopes);
 
+        // Modulation envelopes (optional, added later; same shape as psgEnvelopes)
+        JsonArray modEnvelopes = new JsonArray();
+        for (PsgEnvelope env : song.getModEnvelopes()) {
+            JsonObject e = new JsonObject();
+            e.addProperty("name", env.getName());
+            e.addProperty("data", bytesToHex(env.getData()));
+            modEnvelopes.add(e);
+        }
+        root.add("modEnvelopes", modEnvelopes);
+
         // Order list
         JsonArray orders = new JsonArray();
         for (int[] row : song.getOrderList()) {
@@ -267,6 +277,20 @@ public class ProjectFile {
                     e.get("name").getAsString(),
                     hexToBytes(e.get("data").getAsString())
             ));
+        }
+
+        // Modulation envelopes (optional for backward compatibility)
+        JsonArray modEnvelopesArray = root.getAsJsonArray("modEnvelopes");
+        if (modEnvelopesArray != null) {
+            for (JsonElement elem : modEnvelopesArray) {
+                JsonObject e = elem.getAsJsonObject();
+                requireField(e, "name", "modEnvelopes entry", file);
+                requireField(e, "data", "modEnvelopes entry", file);
+                song.getModEnvelopes().add(new PsgEnvelope(
+                        e.get("name").getAsString(),
+                        hexToBytes(e.get("data").getAsString())
+                ));
+            }
         }
 
         // Order list
