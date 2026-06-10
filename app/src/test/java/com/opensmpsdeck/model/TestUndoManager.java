@@ -178,4 +178,43 @@ class TestUndoManager {
         assertArrayEquals(ch0New, pattern.getTrackData(0), "Channel 0 should be re-applied");
         assertArrayEquals(ch1New, pattern.getTrackData(1), "Channel 1 should be re-applied");
     }
+
+    @Test
+    void phraseEditsAreUndoable() {
+        PhraseLibrary lib = new PhraseLibrary();
+        Phrase phrase = lib.createPhrase("P", ChannelType.FM);
+        phrase.setData(new byte[]{(byte) 0xA5, 0x10});
+
+        UndoManager mgr = new UndoManager();
+        mgr.recordPhraseEdit(phrase);
+        phrase.setData(new byte[]{(byte) 0xA7, 0x20});
+
+        assertTrue(mgr.undo());
+        assertArrayEquals(new byte[]{(byte) 0xA5, 0x10}, phrase.getDataDirect());
+
+        assertTrue(mgr.redo());
+        assertArrayEquals(new byte[]{(byte) 0xA7, 0x20}, phrase.getDataDirect());
+    }
+
+    @Test
+    void phraseAndPatternEditsShareOneHistory() {
+        PhraseLibrary lib = new PhraseLibrary();
+        Phrase phrase = lib.createPhrase("P", ChannelType.FM);
+        phrase.setData(new byte[]{0x01});
+        Pattern pattern = new Pattern(0, 64);
+        pattern.setTrackData(0, new byte[]{0x02});
+
+        UndoManager mgr = new UndoManager();
+        mgr.recordPhraseEdit(phrase);
+        phrase.setData(new byte[]{0x11});
+        mgr.recordEdit(pattern, 0);
+        pattern.setTrackData(0, new byte[]{0x12});
+
+        assertTrue(mgr.undo()); // pattern edit first (LIFO)
+        assertArrayEquals(new byte[]{0x02}, pattern.getTrackDataDirect(0));
+        assertArrayEquals(new byte[]{0x11}, phrase.getDataDirect());
+
+        assertTrue(mgr.undo());
+        assertArrayEquals(new byte[]{0x01}, phrase.getDataDirect());
+    }
 }

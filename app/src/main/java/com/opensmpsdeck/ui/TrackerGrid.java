@@ -1224,12 +1224,14 @@ public class TrackerGrid extends ScrollPane {
                     if (undoManager.undo()) {
                         invalidateDecodedCache();
                         refreshDisplay();
+                        markDirty();
                     }
                 }
                 case Y -> {
                     if (undoManager.redo()) {
                         invalidateDecodedCache();
                         refreshDisplay();
+                        markDirty();
                     }
                 }
                 case UP -> { currentOctave = Math.min(currentOctave + 1, 8); }
@@ -1449,9 +1451,12 @@ public class TrackerGrid extends ScrollPane {
         }
     }
 
-    /** Record undo snapshot before an edit. No-op in phrase mode. */
+    /** Record an undo snapshot before an edit (phrase or pattern mode). */
     private void recordUndoIfPattern() {
-        if (activePhrase != null) return;
+        if (activePhrase != null) {
+            undoManager.recordPhraseEdit(activePhrase);
+            return;
+        }
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         undoManager.recordEdit(pattern, cursorChannel);
     }
@@ -1733,6 +1738,7 @@ public class TrackerGrid extends ScrollPane {
         int maxRow = getSelMaxRow();
 
         if (activePhrase != null) {
+            undoManager.recordPhraseEdit(activePhrase);
             byte[] trackData = activePhrase.getDataDirect();
             for (int row = maxRow; row >= minRow; row--) {
                 trackData = SmpsEncoder.deleteRow(trackData, row, dialect());
@@ -1782,6 +1788,7 @@ public class TrackerGrid extends ScrollPane {
 
         if (activePhrase != null) {
             // In phrase mode, paste only the first channel
+            undoManager.recordPhraseEdit(activePhrase);
             byte[] trackData = activePhrase.getDataDirect();
             byte[] newData = SmpsEncoder.insertAtRow(trackData, cursorRow, pasteChannelData[0], dialect());
             activePhrase.setData(newData);
@@ -1850,6 +1857,7 @@ public class TrackerGrid extends ScrollPane {
 
         if (activePhrase != null) {
             // Phrase mode: transpose active phrase data
+            undoManager.recordPhraseEdit(activePhrase);
             byte[] trackData = activePhrase.getDataDirect();
             int minRow = hasSelection() ? getSelMinRow() : cursorRow;
             int rowCount = hasSelection() ? getSelMaxRow() - minRow + 1 : 1;
