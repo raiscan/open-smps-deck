@@ -80,8 +80,8 @@ class TestInstrumentRemapper {
         byte[] dstData = {0x03, 0x04, (byte) 0x80};
         List<PsgEnvelope> src = List.of(new PsgEnvelope("Env1", srcData));
         List<PsgEnvelope> dst = List.of(new PsgEnvelope("Env2", dstData));
-        Map<Integer, Integer> map = InstrumentRemapper.autoRemapPsg(src, dst, Set.of(0));
-        assertFalse(map.containsKey(0));
+        Map<Integer, Integer> map = InstrumentRemapper.autoRemapPsg(src, dst, Set.of(1));
+        assertFalse(map.containsKey(1));
     }
 
     @Test

@@ -181,9 +181,9 @@ class TestPasteResolver {
 
         // Channel data with PSG instrument references
         byte[] ch = {
-                (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x00,  // PSG envelope 0
+                (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x01,  // first envelope (ids are 1-based)
                 (byte) 0x80, 0x18,
-                (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x01,  // PSG envelope 1
+                (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x02,  // second envelope
                 (byte) 0x82, 0x0C
         };
 
@@ -200,12 +200,12 @@ class TestPasteResolver {
 
         // Verify PSG mapping: src 0 -> dst 1, src 1 -> dst 0
         assertEquals(2, result.psgMap().size());
-        assertEquals(1, result.psgMap().get(0), "src PSG 0 should map to dst PSG 1");
-        assertEquals(0, result.psgMap().get(1), "src PSG 1 should map to dst PSG 0");
+        assertEquals(2, result.psgMap().get(1), "src env id 1 should map to dst env id 2");
+        assertEquals(1, result.psgMap().get(2), "src env id 2 should map to dst env id 1");
 
-        // allPsg should contain both indices
-        assertTrue(result.allPsg().contains(0));
+        // allPsg should contain both ids
         assertTrue(result.allPsg().contains(1));
+        assertTrue(result.allPsg().contains(2));
         assertTrue(result.allVoices().isEmpty(), "No FM voice references expected");
     }
 

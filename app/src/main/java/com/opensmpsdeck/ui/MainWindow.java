@@ -118,7 +118,13 @@ public class MainWindow {
                         // Previews borrow the engine: clear rather than freeze
                         // the song's playback cursor
                         tab.getTrackerGrid().clearPlaybackCursor();
+                        wasPreviewing = true;
                         return;
+                    }
+                    if (tab != null && wasPreviewing) {
+                        // Previews unmute all channels; restore the grid's state
+                        wasPreviewing = false;
+                        tab.getTrackerGrid().applyMuteState();
                     }
                     if (tab != null) {
                         TrackerGrid grid = tab.getTrackerGrid();
@@ -139,6 +145,9 @@ public class MainWindow {
         setupLayout();
         setupStage();
     }
+
+    /** Set while instrument previews borrow the engine (see cursor poll). */
+    private boolean wasPreviewing;
 
     private SongTab getActiveSongTab() {
         Tab selected = tabPane.getSelectionModel().getSelectedItem();
@@ -252,6 +261,11 @@ public class MainWindow {
         // Tab selection listener: update transport and title
         tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
             SongTab activeTab = getActiveSongTab();
+            // Mute/solo state is per tab; the chip mutes are global. Apply the
+            // newly active tab's state so another tab's mutes don't leak in.
+            if (activeTab != null && activeTab.getTrackerGrid() != null) {
+                activeTab.getTrackerGrid().applyMuteState();
+            }
             String selectedText = newTab != null ? newTab.getText() : null;
             Object selectedUserData = newTab != null ? newTab.getUserData() : null;
             tabLifecycleCoordinator.onTabSelectionChanged(

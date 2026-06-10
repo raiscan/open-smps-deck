@@ -259,21 +259,22 @@ class TestSimpleSmpsData {
         SimpleSmpsData data = new SimpleSmpsData(minimalData, 1);
 
         // Default: no envelopes set
-        assertNull(data.getPsgEnvelope(0), "PSG envelope should be null when not set");
+        assertNull(data.getPsgEnvelope(1), "PSG envelope should be null when not set");
         assertNull(data.getPsgEnvelope(-1), "Negative index should return null");
 
-        // Set envelopes and verify retrieval
+        // Set envelopes and verify retrieval (F5 ids are 1-based; 0 = none)
         byte[][] envelopes = {
                 {0x00, 0x01, 0x02, (byte) 0x80},
                 {0x10, 0x20, (byte) 0x80}
         };
         data.setPsgEnvelopes(envelopes);
 
-        assertNotNull(data.getPsgEnvelope(0), "PSG envelope 0 should be retrievable after set");
-        assertArrayEquals(envelopes[0], data.getPsgEnvelope(0), "PSG envelope 0 data should match");
-        assertNotNull(data.getPsgEnvelope(1), "PSG envelope 1 should be retrievable after set");
-        assertArrayEquals(envelopes[1], data.getPsgEnvelope(1), "PSG envelope 1 data should match");
-        assertNull(data.getPsgEnvelope(2), "Out-of-range PSG envelope should return null");
+        assertNull(data.getPsgEnvelope(0), "Id 0 means no envelope");
+        assertNotNull(data.getPsgEnvelope(1), "PSG envelope id 1 should be retrievable after set");
+        assertArrayEquals(envelopes[0], data.getPsgEnvelope(1), "PSG envelope id 1 = first entry");
+        assertNotNull(data.getPsgEnvelope(2), "PSG envelope id 2 should be retrievable after set");
+        assertArrayEquals(envelopes[1], data.getPsgEnvelope(2), "PSG envelope id 2 = second entry");
+        assertNull(data.getPsgEnvelope(3), "Out-of-range PSG envelope should return null");
     }
 
     /**

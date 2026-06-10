@@ -1481,7 +1481,8 @@ public class TrackerGrid extends ScrollPane {
             // PSG channel: use envelope index
             int envIdx = instrumentPanel.getCurrentEnvelopeIndex();
             if (envIdx >= 0) {
-                instrBytes = SmpsEncoder.encodePsgEnvelope(envIdx);
+                // F5 ids are 1-based: list index n = envelope id n+1
+                instrBytes = SmpsEncoder.encodePsgEnvelope(envIdx + 1);
             }
         }
 
@@ -1973,7 +1974,12 @@ public class TrackerGrid extends ScrollPane {
 
     // --- Mute / Solo ---
 
-    private void applyMuteState() {
+    /**
+     * Push this grid's full mute/solo state to the playback engine.
+     * Called internally on toggles, and externally when this grid's tab
+     * becomes active or when a preview (which unmutes everything) ends.
+     */
+    public void applyMuteState() {
         if (playbackEngine == null) return;
         for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
             boolean muted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];

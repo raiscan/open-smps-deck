@@ -117,10 +117,11 @@ public class SimpleSmpsData extends AbstractSmpsData {
         return voice;
     }
 
+    /** PSG envelope ids are 1-based in SMPS bytecode; id 0 = no envelope. */
     @Override
     public byte[] getPsgEnvelope(int id) {
-        if (psgEnvelopes == null || id < 0 || id >= psgEnvelopes.length) return null;
-        return psgEnvelopes[id];
+        if (psgEnvelopes == null || id < 1 || id > psgEnvelopes.length) return null;
+        return psgEnvelopes[id - 1];
     }
 
     @Override

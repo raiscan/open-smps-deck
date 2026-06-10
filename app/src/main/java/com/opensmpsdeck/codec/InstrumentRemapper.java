@@ -178,15 +178,20 @@ public final class InstrumentRemapper {
     public static Map<Integer, Integer> autoRemapPsg(List<PsgEnvelope> src, List<PsgEnvelope> dst, Set<Integer> needed) {
         Map<Integer, Integer> map = new HashMap<>();
 
-        for (int srcIdx : needed) {
-            if (srcIdx < 0 || srcIdx >= src.size()) continue;
+        for (int srcId : needed) {
+            // F5 ids are 1-based into the envelope list; id 0 = no envelope
+            if (srcId == 0) {
+                map.put(0, 0);
+                continue;
+            }
+            if (srcId < 1 || srcId > src.size()) continue;
 
-            byte[] srcData = src.get(srcIdx).getData();
+            byte[] srcData = src.get(srcId - 1).getData();
 
             for (int dstIdx = 0; dstIdx < dst.size(); dstIdx++) {
                 byte[] dstData = dst.get(dstIdx).getData();
                 if (Arrays.equals(srcData, dstData)) {
-                    map.put(srcIdx, dstIdx);
+                    map.put(srcId, dstIdx + 1);
                     break;
                 }
             }

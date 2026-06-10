@@ -61,7 +61,21 @@ public class PlaybackEngine {
     public void loadPreview(Song song) {
         baseOrderIndex = 0;
         previewPlayback = true;
+        // A preview must be audible regardless of the song grid's mute/solo
+        // state (previews play on FM1/PSG1/DAC). The UI reapplies the grid's
+        // mutes when the preview ends.
+        clearAllMutes();
         loadSongImpl(song);
+    }
+
+    /** Unmute every chip channel. */
+    public void clearAllMutes() {
+        for (int ch = 0; ch < 6; ch++) {
+            driver.setFmMute(ch, false);
+        }
+        for (int ch = 0; ch < 4; ch++) {
+            driver.setPsgMute(ch, false);
+        }
     }
 
     /** True while the loaded song is an instrument preview, not user content. */

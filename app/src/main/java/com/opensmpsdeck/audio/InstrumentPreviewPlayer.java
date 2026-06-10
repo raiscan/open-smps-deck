@@ -78,7 +78,8 @@ public final class InstrumentPreviewPlayer {
         Song song = newPreviewSong();
         song.getPsgEnvelopes().add(envelope);
         byte[] data = {
-            (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x00,
+            // PSG envelope ids are 1-based (0 = envelope off)
+            (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x01,
             (byte) clampNote(noteByte), (byte) clampDuration(durationFrames),
             (byte) SmpsCoordFlags.STOP
         };

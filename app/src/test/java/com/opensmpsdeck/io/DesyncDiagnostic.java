@@ -101,8 +101,8 @@ public class DesyncDiagnostic {
 
         @Override
         public byte[] getPsgEnvelope(int id) {
-            if (envelopes == null || id < 0 || id >= envelopes.length) return null;
-            return envelopes[id];
+            if (envelopes == null || id < 1 || id > envelopes.length) return null;
+            return envelopes[id - 1];
         }
 
         @Override

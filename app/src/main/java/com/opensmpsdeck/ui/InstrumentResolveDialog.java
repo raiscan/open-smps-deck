@@ -178,14 +178,15 @@ public class InstrumentResolveDialog extends Dialog<InstrumentResolveDialog.Reso
             }
         }
 
-        int nextPsgIdx = dstSong.getPsgEnvelopes().size();
+        // F5 envelope ids are 1-based into the song's envelope list
+        int nextPsgId = dstSong.getPsgEnvelopes().size() + 1;
         for (ResolveEntry entry : psgEntries) {
             switch (entry.action) {
                 case "Copy" -> {
-                    if (entry.sourceIndex >= 0 && entry.sourceIndex < srcSong.getPsgEnvelopes().size()) {
-                        PsgEnvelope env = srcSong.getPsgEnvelopes().get(entry.sourceIndex);
+                    if (entry.sourceIndex >= 1 && entry.sourceIndex <= srcSong.getPsgEnvelopes().size()) {
+                        PsgEnvelope env = srcSong.getPsgEnvelopes().get(entry.sourceIndex - 1);
                         envelopesToCopy.add(new PsgEnvelope(env.getName(), env.getData()));
-                        psgMap.put(entry.sourceIndex, nextPsgIdx++);
+                        psgMap.put(entry.sourceIndex, nextPsgId++);
                     }
                 }
                 case "Remap" -> psgMap.put(entry.sourceIndex, entry.remapTarget);
