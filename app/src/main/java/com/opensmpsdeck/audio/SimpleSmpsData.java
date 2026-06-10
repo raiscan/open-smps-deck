@@ -13,6 +13,7 @@ public class SimpleSmpsData extends AbstractSmpsData {
     private byte[][] psgEnvelopes;
     private final int baseNoteOffset;
     private final int psgBaseNoteOffset;
+    private final boolean bigEndianPointers;
 
     public SimpleSmpsData(byte[] data) {
         this(data, 1, 0); // S2 default: FM offset=1, PSG offset=0
@@ -23,9 +24,24 @@ public class SimpleSmpsData extends AbstractSmpsData {
     }
 
     public SimpleSmpsData(byte[] data, int baseNoteOffset, int psgBaseNoteOffset) {
+        this(data, baseNoteOffset, psgBaseNoteOffset, false);
+    }
+
+    /**
+     * @param bigEndianPointers true for SMPS 68k binaries (S1), whose header and
+     *                          in-stream pointers are big-endian
+     */
+    public SimpleSmpsData(byte[] data, int baseNoteOffset, int psgBaseNoteOffset,
+                          boolean bigEndianPointers) {
         super(data, 0); // file-relative pointers (z80StartAddress=0)
         this.baseNoteOffset = baseNoteOffset;
         this.psgBaseNoteOffset = psgBaseNoteOffset;
+        this.bigEndianPointers = bigEndianPointers;
+        if (bigEndianPointers) {
+            // The superclass constructor parses the header before this flag is
+            // assigned (reading little-endian); re-parse with the correct order.
+            parseHeader();
+        }
     }
 
     public void setPsgEnvelopes(byte[][] envelopes) {
@@ -89,6 +105,9 @@ public class SimpleSmpsData extends AbstractSmpsData {
     @Override
     public int read16(int offset) {
         if (offset + 2 > data.length) return 0;
+        if (bigEndianPointers) {
+            return ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
+        }
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 

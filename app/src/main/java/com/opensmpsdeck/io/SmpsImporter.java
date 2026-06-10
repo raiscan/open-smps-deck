@@ -29,6 +29,21 @@ public class SmpsImporter {
     private static final int PSG_CHANNEL_COUNT = 4;
     private static final int DAC_MODEL_CHANNEL = 5;
 
+    /**
+     * Shared FM instrument library (SMPSPlay's GlobalInsLib, e.g. InsSet.17D8.bin).
+     * Used when a song's voice pointer resolves outside the song file.
+     *
+     * @param data raw library bytes (consecutive 25-byte voices)
+     * @param baseAddress Z80 address of the library start (encoded in the filename)
+     */
+    record GlobalInsLib(byte[] data, int baseAddress) {}
+
+    /**
+     * Whether the current import uses SMPS 68k pointer conventions (Sonic 1):
+     * big-endian header pointers and PC-relative in-stream jump pointers.
+     */
+    private boolean use68kPointers;
+
     /** DPCM delta table used by the Z80 DAC driver for sample decompression. */
     static final int[] DPCM_DELTA_TABLE = {
         0, 1, 2, 4, 8, 16, 32, 64,
@@ -62,7 +77,8 @@ public class SmpsImporter {
         // Try filename-encoded SeqBase (e.g., "song.1380.sm2")
         int seqBase = parseFilenameOffset(filename);
 
-        Song song = importData(data, name, seqBase, mode);
+        GlobalInsLib insLib = findGlobalInsLib(file.getParentFile());
+        Song song = importData(data, name, seqBase, mode, insLib);
         song.setSmpsMode(mode);
 
         // Load companion files from parent directory
@@ -89,9 +105,18 @@ public class SmpsImporter {
      * @param seqBase Z80 RAM base offset to subtract from pointers, or -1 to auto-detect
      */
     Song importData(byte[] data, String name, int seqBase, SmpsMode mode) {
+        return importData(data, name, seqBase, mode, null);
+    }
+
+    /**
+     * Import raw SMPS binary data with an explicit SeqBase and optional shared
+     * instrument library for songs whose voice table lives outside the file.
+     */
+    Song importData(byte[] data, String name, int seqBase, SmpsMode mode, GlobalInsLib insLib) {
         if (data.length < 6) {
             throw new IllegalArgumentException("SMPS data too short: " + data.length + " bytes");
         }
+        use68kPointers = (mode == SmpsMode.S1);
 
         Song song = new Song();
         song.getPatterns().clear();
@@ -99,7 +124,7 @@ public class SmpsImporter {
         song.setName(name != null ? name.replaceAll("\\.[^.]+$", "") : "Imported");
 
         // Parse header (raw pointers before SeqBase adjustment)
-        int voicePtr = readLE16(data, 0);
+        int voicePtr = readPtr16(data, 0);
         int fmCount = data[2] & 0xFF;
         int psgCount = data[3] & 0xFF;
         song.setDividingTiming(data[4] & 0xFF);
@@ -112,7 +137,7 @@ public class SmpsImporter {
         int[] fmVols = new int[fmCount];
         for (int i = 0; i < fmCount; i++) {
             if (offset + 3 >= data.length) break;
-            fmPointers[i] = readLE16(data, offset);
+            fmPointers[i] = readPtr16(data, offset);
             fmKeys[i] = (byte) data[offset + 2];
             fmVols[i] = (byte) data[offset + 3];
             offset += 4;
@@ -126,7 +151,7 @@ public class SmpsImporter {
         int[] psgInstruments = new int[psgCount];
         for (int i = 0; i < psgCount; i++) {
             if (offset + 5 >= data.length) break;
-            psgPointers[i] = readLE16(data, offset);
+            psgPointers[i] = readPtr16(data, offset);
             psgKeys[i] = (byte) data[offset + 2];
             psgVols[i] = (byte) data[offset + 3];
             psgMods[i] = data[offset + 4] & 0xFF;
@@ -148,8 +173,10 @@ public class SmpsImporter {
             psgPointers[i] -= seqBase;
         }
 
-        // Extract voices from voice table
-        if (voicePtr > 0 && voicePtr < data.length) {
+        // Extract voices from the in-file voice table, or fall back to the shared
+        // instrument library when the pointer resolves outside the file
+        // (mirrors SMPSPlay loader_smps.c instrument table resolution).
+        if (voicePtr > 0 && voicePtr + FmVoice.VOICE_SIZE <= data.length) {
             int voiceCount = estimateVoiceCount(data, voicePtr, fmPointers, psgPointers);
             for (int i = 0; i < voiceCount; i++) {
                 int vOffset = voicePtr + i * FmVoice.VOICE_SIZE;
@@ -157,6 +184,22 @@ public class SmpsImporter {
                 byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
                 System.arraycopy(data, vOffset, voiceData, 0, FmVoice.VOICE_SIZE);
                 song.getVoiceBank().add(new FmVoice("Voice " + i, voiceData));
+            }
+        } else if (insLib != null && insLib.data().length >= FmVoice.VOICE_SIZE) {
+            // Raw (pre-SeqBase) pointer mid-library starts the table there;
+            // anything else (at the base, or out of range) uses the full library
+            int rawVoicePtr = voicePtr + Math.max(0, seqBase);
+            int start = 0;
+            if (rawVoicePtr > insLib.baseAddress()
+                    && rawVoicePtr < insLib.baseAddress() + insLib.data().length) {
+                start = rawVoicePtr - insLib.baseAddress();
+            }
+            int voiceCount = Math.min((insLib.data().length - start) / FmVoice.VOICE_SIZE, 64);
+            for (int i = 0; i < voiceCount; i++) {
+                byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
+                System.arraycopy(insLib.data(), start + i * FmVoice.VOICE_SIZE,
+                        voiceData, 0, FmVoice.VOICE_SIZE);
+                song.getVoiceBank().add(new FmVoice("GblIns " + i, voiceData));
             }
         }
 
@@ -176,11 +219,10 @@ public class SmpsImporter {
             int modelCh = (i == 0) ? DAC_MODEL_CHANNEL : i - 1;
             int ptr = fmPointers[i];
             if (ptr >= 0 && ptr < data.length) {
-                byte[] trackData = extractReachableTrackData(data, ptr, seqBase);
-                if (trackData.length > 0) {
-                    trackData = normalizeTrackPointers(trackData, ptr, seqBase);
-                    decompileData[modelCh] = trackData;
-                    trackData = stripJumpTerminator(trackData);
+                TrackExtract extract = extractTrack(data, ptr, seqBase);
+                if (extract.data().length > 0) {
+                    decompileData[modelCh] = extract.data();
+                    byte[] trackData = stripJumpTerminator(extract);
                     trackData = prependFmHeaderState(trackData, fmKeys[i], fmVols[i]);
                     pattern.setTrackData(modelCh, trackData);
                 }
@@ -191,19 +233,18 @@ public class SmpsImporter {
         for (int i = 0; i < psgCount && i < PSG_CHANNEL_COUNT; i++) {
             int ptr = psgPointers[i];
             if (ptr >= 0 && ptr < data.length) {
-                byte[] trackData = extractReachableTrackData(data, ptr, seqBase);
-                if (trackData.length > 0) {
-                    trackData = normalizeTrackPointers(trackData, ptr, seqBase);
+                TrackExtract extract = extractTrack(data, ptr, seqBase);
+                if (extract.data().length > 0) {
                     // Detect PSG noise mode: if track contains F3 flag, map to Noise channel (9)
                     int channelIndex = FM_CHANNEL_COUNT + i;
-                    if (containsPsgNoiseFlag(trackData)) {
+                    if (containsPsgNoiseFlag(extract.data())) {
                         channelIndex = FM_CHANNEL_COUNT + 3; // PSG Noise = channel 9
                     }
-                    decompileData[channelIndex] = trackData;
+                    decompileData[channelIndex] = extract.data();
                     psgHeaderInstrument[channelIndex] = psgInstruments[i];
                     psgHeaderKey[channelIndex] = psgKeys[i];
                     psgHeaderVol[channelIndex] = psgVols[i];
-                    trackData = stripJumpTerminator(trackData);
+                    byte[] trackData = stripJumpTerminator(extract);
                     trackData = prependPsgHeaderState(
                             trackData, psgKeys[i], psgVols[i], psgInstruments[i], psgMods[i]);
                     pattern.setTrackData(channelIndex, trackData);
@@ -394,28 +435,53 @@ public class SmpsImporter {
     }
 
     /**
-     * Strip a trailing F6 (JUMP) terminator from track data, replacing with F2 (STOP).
-     * PatternCompiler adds its own F6/F2 terminators, so stale jump pointers must be removed.
+     * Result of reachability-based track extraction.
+     *
+     * @param data track bytes: the main stream (starting at the track's entry
+     *             point) followed by any reachable bytes that preceded the entry
+     *             point in the file (relocated subroutines)
+     * @param mainLength length of the main stream within {@code data}
      */
-    private byte[] stripJumpTerminator(byte[] trackData) {
-        if (trackData.length >= 3
-                && (trackData[trackData.length - 3] & 0xFF) == SmpsCoordFlags.JUMP) {
-            byte[] result = new byte[trackData.length - 2];
-            System.arraycopy(trackData, 0, result, 0, trackData.length - 3);
-            result[result.length - 1] = (byte) SmpsCoordFlags.STOP;
+    record TrackExtract(byte[] data, int mainLength) {}
+
+    /**
+     * Strip the main stream's trailing F6 (JUMP) terminator, replacing it with
+     * F2 (STOP). PatternCompiler adds its own terminators, so stale jump
+     * pointers must be removed. When relocated subroutines follow the main
+     * stream, the JUMP is overwritten in place (padded with STOP bytes) so
+     * pointers into the subroutine block stay valid.
+     */
+    private byte[] stripJumpTerminator(TrackExtract extract) {
+        byte[] trackData = extract.data();
+        int mainLen = extract.mainLength();
+        if (mainLen >= 3 && mainLen <= trackData.length
+                && (trackData[mainLen - 3] & 0xFF) == SmpsCoordFlags.JUMP) {
+            if (mainLen == trackData.length) {
+                byte[] result = new byte[trackData.length - 2];
+                System.arraycopy(trackData, 0, result, 0, trackData.length - 3);
+                result[result.length - 1] = (byte) SmpsCoordFlags.STOP;
+                return result;
+            }
+            byte[] result = trackData.clone();
+            result[mainLen - 3] = (byte) SmpsCoordFlags.STOP;
+            result[mainLen - 2] = (byte) SmpsCoordFlags.STOP;
+            result[mainLen - 1] = (byte) SmpsCoordFlags.STOP;
             return result;
         }
         return trackData;
     }
 
     /**
-     * Extracts a track by following reachable control flow from its start pointer.
+     * Extracts a track by following reachable control flow from its start pointer
+     * and normalizes in-track pointers to track-local little-endian offsets.
      *
-     * <p>This keeps call/jump/loop targets that may live after the first linear
-     * terminator, which is common in SMPS track layouts.
+     * <p>Keeps call/jump/loop targets that live after the first linear terminator
+     * AND targets that precede the track's entry point (rips commonly share
+     * subroutines placed before the track start — e.g. Sonic 2's Super Sonic
+     * theme). Pre-start regions are relocated after the main stream.
      */
-    private byte[] extractReachableTrackData(byte[] data, int start, int seqBase) {
-        if (start < 0 || start >= data.length) return new byte[0];
+    private TrackExtract extractTrack(byte[] data, int start, int seqBase) {
+        if (start < 0 || start >= data.length) return new TrackExtract(new byte[0], 0);
 
         boolean[] reachable = new boolean[data.length];
         boolean[] queued = new boolean[data.length];
@@ -425,6 +491,7 @@ public class SmpsImporter {
         queued[start] = true;
 
         int maxReach = start;
+        int minReach = start;
         while (!work.isEmpty()) {
             int pos = work.removeFirst();
             if (pos < 0 || pos >= data.length) continue;
@@ -441,6 +508,7 @@ public class SmpsImporter {
                     reachable[pos + i] = true;
                 }
                 maxReach = Math.max(maxReach, Math.min(data.length - 1, pos + span - 1));
+                minReach = Math.min(minReach, pos);
 
                 if (cmd == SmpsCoordFlags.STOP || cmd == 0x00) {
                     break;
@@ -484,8 +552,84 @@ public class SmpsImporter {
             }
         }
 
-        if (maxReach < start) return new byte[0];
-        return Arrays.copyOfRange(data, start, maxReach + 1);
+        if (maxReach < start) return new TrackExtract(new byte[0], 0);
+
+        // Main stream first; any reachable pre-start region (shared subroutines)
+        // is relocated after it so the track still begins at byte 0.
+        int mainLen = maxReach + 1 - start;
+        byte[] out;
+        if (minReach < start) {
+            int preLen = start - minReach;
+            out = new byte[mainLen + preLen];
+            System.arraycopy(data, start, out, 0, mainLen);
+            System.arraycopy(data, minReach, out, mainLen, preLen);
+        } else {
+            out = Arrays.copyOfRange(data, start, maxReach + 1);
+        }
+
+        remapTrackPointers(out, start, minReach, mainLen, seqBase);
+        return new TrackExtract(out, mainLen);
+    }
+
+    /**
+     * Normalize every in-track pointer (F6/F7/F8) in the extracted buffer to a
+     * track-local little-endian offset, accounting for the relocated pre-start
+     * region. Pointers that resolve outside the extracted regions keep their
+     * raw bytes.
+     */
+    private void remapTrackPointers(byte[] out, int trackStart, int minReach, int mainLen,
+                                    int seqBase) {
+        int pos = 0;
+        while (pos < out.length) {
+            int cmd = out[pos] & 0xFF;
+            if (cmd >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < out.length) {
+                    remapPointerWord(out, pos + 1, trackStart, minReach, mainLen, seqBase);
+                } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < out.length) {
+                    remapPointerWord(out, pos + 3, trackStart, minReach, mainLen, seqBase);
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+    }
+
+    private void remapPointerWord(byte[] out, int ptrPos, int trackStart, int minReach,
+                                  int mainLen, int seqBase) {
+        int raw = readPtr16(out, ptrPos);
+        int local;
+        if (use68kPointers) {
+            // PC-relative from the pointer word's ORIGINAL file offset + 1
+            int filePtrPos = ptrPos < mainLen
+                    ? trackStart + ptrPos
+                    : minReach + (ptrPos - mainLen);
+            int targetFile = filePtrPos + 1 + (short) raw;
+            local = mapFileOffsetToLocal(targetFile, trackStart, minReach, mainLen);
+        } else {
+            // Try file-relative first, then Z80-absolute (matches resolveInlinePointer)
+            local = mapFileOffsetToLocal(raw, trackStart, minReach, mainLen);
+            if (local < 0) {
+                local = mapFileOffsetToLocal(raw - seqBase, trackStart, minReach, mainLen);
+            }
+        }
+        if (local >= 0) {
+            out[ptrPos] = (byte) (local & 0xFF);
+            out[ptrPos + 1] = (byte) ((local >> 8) & 0xFF);
+        }
+    }
+
+    /** Map a file offset into the extracted track's local space, or -1 if outside. */
+    private static int mapFileOffsetToLocal(int fileOffset, int trackStart, int minReach,
+                                            int mainLen) {
+        if (fileOffset >= trackStart && fileOffset < trackStart + mainLen) {
+            return fileOffset - trackStart;
+        }
+        if (fileOffset >= minReach && fileOffset < trackStart) {
+            return mainLen + (fileOffset - minReach);
+        }
+        return -1;
     }
 
     private int commandSpan(byte[] data, int pos, int cmd) {
@@ -507,7 +651,13 @@ public class SmpsImporter {
 
     private int resolveInlinePointer(byte[] data, int ptrOffset, int seqBase) {
         if (ptrOffset < 0 || ptrOffset + 1 >= data.length) return -1;
-        int raw = readLE16(data, ptrOffset);
+        int raw = readPtr16(data, ptrOffset);
+
+        if (use68kPointers) {
+            // SMPS 68k: dc.w loc-*-1 — signed offset from (pointer offset + 1)
+            int target = ptrOffset + 1 + (short) raw;
+            return (target >= 0 && target < data.length) ? target : -1;
+        }
 
         if (raw >= 0 && raw < data.length) return raw; // file-relative pointer
         int adjusted = raw - seqBase; // Z80-absolute pointer
@@ -515,53 +665,6 @@ public class SmpsImporter {
         return -1;
     }
 
-    /**
-     * Convert absolute in-track pointers (F6/F7/F8) to offsets relative to the
-     * start of this extracted track, preserving pointers that clearly target
-     * outside the extracted byte range.
-     */
-    private byte[] normalizeTrackPointers(byte[] trackData, int trackStartOffset, int seqBase) {
-        if (trackData == null || trackData.length == 0) {
-            return trackData;
-        }
-
-        byte[] out = trackData.clone();
-        int pos = 0;
-        while (pos < out.length) {
-            int cmd = out[pos] & 0xFF;
-            if (cmd >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(cmd);
-                if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < out.length) {
-                    int raw = (out[pos + 1] & 0xFF) | ((out[pos + 2] & 0xFF) << 8);
-                    int normalized = normalizePointer(raw, trackStartOffset, out.length, seqBase);
-                    out[pos + 1] = (byte) (normalized & 0xFF);
-                    out[pos + 2] = (byte) ((normalized >> 8) & 0xFF);
-                } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < out.length) {
-                    int raw = (out[pos + 3] & 0xFF) | ((out[pos + 4] & 0xFF) << 8);
-                    int normalized = normalizePointer(raw, trackStartOffset, out.length, seqBase);
-                    out[pos + 3] = (byte) (normalized & 0xFF);
-                    out[pos + 4] = (byte) ((normalized >> 8) & 0xFF);
-                }
-                pos += 1 + paramCount;
-            } else {
-                pos++;
-            }
-        }
-        return out;
-    }
-
-    private int normalizePointer(int rawPointer, int trackStartOffset, int trackLength, int seqBase) {
-        int local = rawPointer - trackStartOffset;
-        if (local >= 0 && local < trackLength) {
-            return local;
-        }
-        int adjusted = rawPointer - seqBase;
-        local = adjusted - trackStartOffset;
-        if (local >= 0 && local < trackLength) {
-            return local;
-        }
-        return rawPointer;
-    }
 
     /**
      * Scan track bytecode for the F3 (PSG_NOISE) coordination flag.
@@ -858,6 +961,62 @@ public class SmpsImporter {
     private int readLE16(byte[] data, int offset) {
         if (offset + 2 > data.length) return 0;
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
+    }
+
+    /** Read a 16-bit pointer honoring the current import's pointer format. */
+    private int readPtr16(byte[] data, int offset) {
+        if (offset + 2 > data.length) return 0;
+        if (use68kPointers) {
+            return ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
+        }
+        return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
+    }
+
+    /**
+     * Locate the shared FM instrument library (SMPSPlay GlobalInsLib) for songs
+     * whose voice pointer targets it. Checks the song's directory then its parent
+     * (proto rip sets share the parent's library). The library's Z80 base address
+     * is encoded in its filename (e.g. InsSet.17D8.bin).
+     */
+    static GlobalInsLib findGlobalInsLib(File dir) {
+        for (int depth = 0; dir != null && depth < 2; dir = dir.getParentFile(), depth++) {
+            File libFile = null;
+
+            // Prefer the config.ini GlobalInsLib entry when present
+            File configIni = new File(dir, "config.ini");
+            if (configIni.exists()) {
+                try {
+                    for (String line : Files.readAllLines(configIni.toPath(), StandardCharsets.UTF_8)) {
+                        int eq = line.indexOf('=');
+                        if (eq < 0) continue;
+                        if (line.substring(0, eq).trim().equalsIgnoreCase("GlobalInsLib")) {
+                            File candidate = new File(dir, line.substring(eq + 1).trim());
+                            if (candidate.exists()) libFile = candidate;
+                            break;
+                        }
+                    }
+                } catch (IOException e) {
+                    // fall through to filename scan
+                }
+            }
+
+            if (libFile == null) {
+                File[] matches = dir.listFiles((d, name) ->
+                        name.toLowerCase().matches("insset\\.[0-9a-f]{4}\\.bin"));
+                if (matches != null && matches.length > 0) libFile = matches[0];
+            }
+
+            if (libFile != null) {
+                int base = parseFilenameOffset(libFile.getName());
+                if (base < 0) base = 0;
+                try {
+                    return new GlobalInsLib(Files.readAllBytes(libFile.toPath()), base);
+                } catch (IOException e) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private byte[] prependFmHeaderState(byte[] trackData, int keyOffset, int volumeOffset) {

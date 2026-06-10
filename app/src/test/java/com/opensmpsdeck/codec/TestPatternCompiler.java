@@ -232,7 +232,7 @@ class TestPatternCompiler {
 
         // FM1 is entry 1 (entry 0 is dummy DAC). Header: 6 base + 2*4 FM entries = 14.
         // Entry 1 pointer is at offset 10.
-        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
+        int trackStart = ((smps[10] & 0xFF) << 8) | (smps[11] & 0xFF); // S1: big-endian header pointers
         // Track data: EF 00 <note> 30 F6 xx xx
         // The note is at trackStart + 2 (after EF 00)
         int compiledNote = smps[trackStart + 2] & 0xFF;
@@ -295,7 +295,7 @@ class TestPatternCompiler {
         setLoopOnActiveChains(song, 0);
 
         byte[] smps = new PatternCompiler().compile(song);
-        int trackStart = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int trackStart = ((smps[6] & 0xFF) << 8) | (smps[7] & 0xFF); // S1: big-endian header pointers
         int compiledFirstByte = smps[trackStart] & 0xFF;
         assertEquals(0x81, compiledFirstByte,
                 "DAC note bytes must not be shifted by S1/S3K note compensation");
@@ -315,7 +315,7 @@ class TestPatternCompiler {
         byte[] smps = compiler.compile(song);
 
         // FM1 is entry 1 (entry 0 is dummy DAC)
-        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
+        int trackStart = ((smps[10] & 0xFF) << 8) | (smps[11] & 0xFF); // S1: big-endian header pointers
         int compiledByte = smps[trackStart] & 0xFF;
         assertEquals(0x80, compiledByte,
             "Rest byte 0x80 should NOT be shifted by note compensation");
@@ -335,7 +335,7 @@ class TestPatternCompiler {
         byte[] smps = compiler.compile(song);
 
         // FM1 is entry 1 (entry 0 is dummy DAC)
-        int trackStart = (smps[10] & 0xFF) | ((smps[11] & 0xFF) << 8);
+        int trackStart = ((smps[10] & 0xFF) << 8) | (smps[11] & 0xFF); // S1: big-endian header pointers
         int compiledNote = smps[trackStart] & 0xFF;
         assertEquals(0xDF, compiledNote,
             "Note at max 0xDF should be clamped to 0xDF, not overflow into coord flag range");
@@ -353,7 +353,7 @@ class TestPatternCompiler {
         byte[] smps = new PatternCompiler().compile(song);
         // PSG is the only active channel: 0 FM channels, 1 PSG channel
         // Header: 6 bytes base + 0 FM headers + 1 PSG header (6 bytes) = 12
-        int psgTrackPtr = (smps[6] & 0xFF) | ((smps[7] & 0xFF) << 8);
+        int psgTrackPtr = ((smps[6] & 0xFF) << 8) | (smps[7] & 0xFF); // S1: big-endian header pointers
         int compiledNote = smps[psgTrackPtr] & 0xFF;
         assertEquals(0xBD, compiledNote,
             "PSG note bytes must not be shifted by S1/S3K note compensation");

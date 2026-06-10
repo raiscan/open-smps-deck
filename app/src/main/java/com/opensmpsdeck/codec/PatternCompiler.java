@@ -313,6 +313,9 @@ public class PatternCompiler {
 
         for (int i = 0; i < compiledTracks.size(); i++) {
             relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
+            if (mode == SmpsMode.S1) {
+                convertTrackPointersTo68k(compiledTracks.get(i), trackOffsets[i]);
+            }
         }
 
         byte[] compiledBytes;
@@ -321,7 +324,7 @@ public class PatternCompiler {
                     headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
 
             int voicePtr = voiceData.isEmpty() ? 0 : voiceTableOffset;
-            writeLE16(out, voicePtr);
+            writePtr16(out, voicePtr, mode);
             out.write(fmCount);
             out.write(psgCount);
             out.write(song.getDividingTiming() & 0xFF);
@@ -329,13 +332,13 @@ public class PatternCompiler {
 
             int trackIndex = 0;
             for (int i = 0; i < fmCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
+                writePtr16(out, trackOffsets[trackIndex], mode);
                 out.write(0);
                 out.write(0);
                 trackIndex++;
             }
             for (int i = 0; i < psgCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
+                writePtr16(out, trackOffsets[trackIndex], mode);
                 out.write(0);
                 out.write(0);
                 out.write(0);
@@ -507,6 +510,9 @@ public class PatternCompiler {
 
         for (int i = 0; i < compiledTracks.size(); i++) {
             relocateTrackPointersToFileOffsets(compiledTracks.get(i), trackOffsets[i]);
+            if (mode == SmpsMode.S1) {
+                convertTrackPointersTo68k(compiledTracks.get(i), trackOffsets[i]);
+            }
         }
 
         byte[] compiledBytes;
@@ -515,7 +521,7 @@ public class PatternCompiler {
                     headerSize + (voiceTableOffset - headerSize) + voiceDataLength);
 
             int voicePtr = voiceData.isEmpty() ? 0 : voiceTableOffset;
-            writeLE16(out, voicePtr);
+            writePtr16(out, voicePtr, mode);
             out.write(fmCount);
             out.write(psgCount);
             out.write(song.getDividingTiming() & 0xFF);
@@ -523,13 +529,13 @@ public class PatternCompiler {
 
             int trackIndex = 0;
             for (int i = 0; i < fmCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
+                writePtr16(out, trackOffsets[trackIndex], mode);
                 out.write(0);
                 out.write(0);
                 trackIndex++;
             }
             for (int i = 0; i < psgCount; i++) {
-                writeLE16(out, trackOffsets[trackIndex]);
+                writePtr16(out, trackOffsets[trackIndex], mode);
                 out.write(0);
                 out.write(0);
                 out.write(0);
@@ -740,6 +746,51 @@ public class PatternCompiler {
     private static void writeLE16(ByteArrayOutputStream out, int value) {
         out.write(value & 0xFF);
         out.write((value >> 8) & 0xFF);
+    }
+
+    /**
+     * Write a header pointer in the target mode's byte order.
+     * S1 (SMPS 68k) headers use big-endian pointers; S2/S3K use little-endian.
+     */
+    private static void writePtr16(ByteArrayOutputStream out, int value, SmpsMode mode) {
+        if (mode == SmpsMode.S1) {
+            out.write((value >> 8) & 0xFF);
+            out.write(value & 0xFF);
+        } else {
+            writeLE16(out, value);
+        }
+    }
+
+    /**
+     * Convert in-track pointer words (F6/F7/F8) from little-endian file-absolute
+     * offsets to the SMPS 68k convention: big-endian, PC-relative encoded as
+     * {@code dc.w loc-*-1} (signed offset from the pointer word's offset + 1).
+     * Must run after {@link #relocateTrackPointersToFileOffsets}.
+     */
+    private void convertTrackPointersTo68k(byte[] track, int trackOffset) {
+        int pos = 0;
+        while (pos < track.length) {
+            int cmd = track[pos] & 0xFF;
+            if (cmd >= 0xE0) {
+                int paramCount = SmpsCoordFlags.getParamCount(cmd);
+                if ((cmd == SmpsCoordFlags.JUMP || cmd == SmpsCoordFlags.CALL) && pos + 2 < track.length) {
+                    rewritePointerAs68k(track, pos + 1, trackOffset);
+                } else if (cmd == SmpsCoordFlags.LOOP && pos + 4 < track.length) {
+                    rewritePointerAs68k(track, pos + 3, trackOffset);
+                }
+                pos += 1 + paramCount;
+            } else {
+                pos++;
+            }
+        }
+    }
+
+    private void rewritePointerAs68k(byte[] track, int ptrPos, int trackOffset) {
+        int target = (track[ptrPos] & 0xFF) | ((track[ptrPos + 1] & 0xFF) << 8);
+        int filePtrPos = trackOffset + ptrPos;
+        int relative = target - filePtrPos - 1;
+        track[ptrPos] = (byte) ((relative >> 8) & 0xFF);
+        track[ptrPos + 1] = (byte) (relative & 0xFF);
     }
 
     private static final class ChannelTimelineBuilder {

@@ -67,7 +67,9 @@ public class PlaybackEngine {
             case S2 -> 1;
             case S3K -> 0;
         };
-        SimpleSmpsData data = new SimpleSmpsData(smps, baseNoteOffset);
+        // S1 binaries use SMPS 68k big-endian pointers
+        boolean bigEndianPointers = song.getSmpsMode() == SmpsMode.S1;
+        SimpleSmpsData data = new SimpleSmpsData(smps, baseNoteOffset, 0, bigEndianPointers);
 
         // Convert PSG envelopes from Song model to byte[][] for SmpsData
         if (!song.getPsgEnvelopes().isEmpty()) {
