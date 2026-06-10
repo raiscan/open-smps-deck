@@ -223,7 +223,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             chooser.setTitle("Save Voice Preset");
             chooser.getExtensionFilters().add(
                     new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
+            DialogPaths.applyTo(chooser, "voicePreset");
             File file = chooser.showSaveDialog(getOwner());
+            DialogPaths.remember("voicePreset", file);
             if (file != null) {
                 try {
                     OsmpsVoiceFile.save(voice, file);
@@ -241,7 +243,9 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             chooser.setTitle("Load Voice Preset");
             chooser.getExtensionFilters().add(
                     new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
+            DialogPaths.applyTo(chooser, "voicePreset");
             File file = chooser.showOpenDialog(getOwner());
+            DialogPaths.remember("voicePreset", file);
             if (file != null) {
                 try {
                     FmVoice loaded = OsmpsVoiceFile.load(file);

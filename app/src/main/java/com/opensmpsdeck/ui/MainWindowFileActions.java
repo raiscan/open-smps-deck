@@ -5,6 +5,7 @@ import com.opensmpsdeck.io.OsmpsVoiceFile;
 import com.opensmpsdeck.io.ProjectFile;
 import com.opensmpsdeck.io.Rym2612Importer;
 import com.opensmpsdeck.io.SmpsExporter;
+import com.opensmpsdeck.io.DacSampleExporter;
 import com.opensmpsdeck.io.SmpsImporter;
 import com.opensmpsdeck.io.VoiceBankFile;
 import com.opensmpsdeck.io.WavExporter;
@@ -62,7 +63,9 @@ final class MainWindowFileActions {
         fileChooser.setTitle("Open Project");
         fileChooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("OpenSMPSDeck Project", "*.osmpsd"));
+        DialogPaths.applyTo(fileChooser, "project");
         File file = fileChooser.showOpenDialog(stage);
+        DialogPaths.remember("project", file);
         if (file != null) {
             try {
                 Song song = ProjectFile.load(file);
@@ -97,8 +100,11 @@ final class MainWindowFileActions {
         if (tab.getFile() != null) {
             fileChooser.setInitialDirectory(tab.getFile().getParentFile());
             fileChooser.setInitialFileName(tab.getFile().getName());
+        } else {
+            DialogPaths.applyTo(fileChooser, "project");
         }
         File file = fileChooser.showSaveDialog(stage);
+        DialogPaths.remember("project", file);
         if (file != null) {
             saveToFile(tab, file);
         }
@@ -244,7 +250,9 @@ final class MainWindowFileActions {
                 new FileChooser.ExtensionFilter("SMPSPlay S2", "*.sm2"),
                 new FileChooser.ExtensionFilter("SMPSPlay S1", "*.smp")
         );
+        DialogPaths.applyTo(fileChooser, "smpsImport");
         File file = fileChooser.showOpenDialog(stage);
+        DialogPaths.remember("smpsImport", file);
         if (file != null) {
             try {
                 SmpsImporter smpsImporter = new SmpsImporter();
@@ -280,7 +288,9 @@ final class MainWindowFileActions {
                 new FileChooser.ExtensionFilter("RYM2612 Patch", "*.rym2612"),
                 new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice")
         );
+        DialogPaths.applyTo(fileChooser, "voiceBank");
         File file = fileChooser.showOpenDialog(stage);
+        DialogPaths.remember("voiceBank", file);
         if (file == null) return;
 
         try {
@@ -339,9 +349,11 @@ final class MainWindowFileActions {
         Song song = songTab.getSong();
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Export Voice Bank");
+        DialogPaths.applyTo(fileChooser, "voiceBank");
         fileChooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("OpenSMPS Voice Bank", "*.ovm"));
         File file = fileChooser.showSaveDialog(stage);
+        DialogPaths.remember("voiceBank", file);
         if (file != null) {
             try {
                 VoiceBankFile.save(song.getName(), song.getVoiceBank(),
@@ -367,12 +379,38 @@ final class MainWindowFileActions {
         }
     }
 
+    /** Exports the active song's DAC samples (DAC.ini + DefDrum.txt + raw PCM). */
+    void onExportDacSamples() {
+        SongTab tab = getActiveSongTab();
+        if (tab == null) return;
+        if (tab.getSong().getDacSamples().isEmpty()) {
+            showError("No DAC samples", "This song has no DAC samples to export.");
+            return;
+        }
+        javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+        chooser.setTitle("Export DAC Samples To...");
+        DialogPaths.applyTo(chooser, "dacExport");
+        File dir = chooser.showDialog(stage);
+        DialogPaths.remember("dacExport", dir);
+        if (dir != null) {
+            try {
+                DacSampleExporter.export(tab.getSong(), dir);
+            } catch (IOException ex) {
+                showError("Failed to export DAC samples", ex.getMessage());
+            }
+        }
+    }
+
     private File showFileDialog(String title, String desc, String ext, boolean save) {
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle(title);
         fileChooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter(desc, ext));
-        return save ? fileChooser.showSaveDialog(stage) : fileChooser.showOpenDialog(stage);
+        String pathKey = title.replaceAll("\s+", "");
+        DialogPaths.applyTo(fileChooser, pathKey);
+        File file = save ? fileChooser.showSaveDialog(stage) : fileChooser.showOpenDialog(stage);
+        DialogPaths.remember(pathKey, file);
+        return file;
     }
 
     private void showError(String header, String content) {

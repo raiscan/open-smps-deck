@@ -245,7 +245,9 @@ public class InstrumentPanel extends VBox {
         chooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("OpenSMPS Voice Preset", "*.osmpsvoice"));
         chooser.setInitialFileName(voice.getName() + ".osmpsvoice");
+        DialogPaths.applyTo(chooser, "voicePreset");
         File file = chooser.showSaveDialog(getScene().getWindow());
+        DialogPaths.remember("voicePreset", file);
         if (file != null) {
             try {
                 OsmpsVoiceFile.save(voice, file);
@@ -314,7 +316,9 @@ public class InstrumentPanel extends VBox {
                 new FileChooser.ExtensionFilter("Audio Files", "*.wav", "*.pcm", "*.bin"),
                 new FileChooser.ExtensionFilter("All Files", "*.*")
         );
+        DialogPaths.applyTo(chooser, "dacImport");
         File file = chooser.showOpenDialog(getScene().getWindow());
+        DialogPaths.remember("dacImport", file);
         if (file == null) {
             return;
         }
@@ -413,7 +417,8 @@ public class InstrumentPanel extends VBox {
 
     private ListView<String> createListView(ObservableList<String> items) {
         ListView<String> listView = new ListView<>(items);
-        listView.setPrefHeight(180);
+        listView.setPrefHeight(150);
+        listView.setMinHeight(80);
         listView.setStyle("-fx-background-color: " + LIST_BG_COLOR + "; "
                 + "-fx-control-inner-background: " + LIST_BG_COLOR + "; "
                 + "-fx-text-fill: " + TEXT_COLOR + ";");

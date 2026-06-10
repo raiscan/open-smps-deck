@@ -210,7 +210,14 @@ public class MainWindow {
 
         content.setLeft(songTab.getSongView());
         content.setCenter(centerPane);
-        content.setRight(songTab.getInstrumentPanel());
+
+        // Instrument panel scrolls on small screens instead of forcing a tall window
+        javafx.scene.control.ScrollPane instrumentScroll =
+                new javafx.scene.control.ScrollPane(songTab.getInstrumentPanel());
+        instrumentScroll.setFitToWidth(true);
+        instrumentScroll.setHbarPolicy(javafx.scene.control.ScrollPane.ScrollBarPolicy.NEVER);
+        instrumentScroll.setStyle("-fx-background-color: transparent;");
+        content.setRight(instrumentScroll);
 
         Tab tab = new Tab(songTab.getTitle(), content);
         tab.setUserData(songTab);
@@ -329,10 +336,14 @@ public class MainWindow {
         MenuItem exportVoiceBankItem = new MenuItem("Export Voice Bank...");
         exportVoiceBankItem.setOnAction(e -> fileActions.onExportVoiceBank());
 
+        MenuItem exportDacItem = new MenuItem("Export DAC Samples...");
+        exportDacItem.setOnAction(e -> fileActions.onExportDacSamples());
+
         fileMenu.getItems().addAll(newItem, openItem, new SeparatorMenuItem(),
                 saveItem, saveAsItem, separator, exportItem, exportWavItem,
                 new SeparatorMenuItem(), importVoicesItem, importSmpsItem,
-                new SeparatorMenuItem(), importVoiceBankItem, exportVoiceBankItem);
+                new SeparatorMenuItem(), importVoiceBankItem, exportVoiceBankItem,
+                exportDacItem);
 
         menuBar.getMenus().add(fileMenu);
         return menuBar;
@@ -381,8 +392,10 @@ public class MainWindow {
                 : "");
         stage.setScene(scene);
         updateTitle();
-        stage.setMinWidth(800);
-        stage.setMinHeight(600);
+        // Keep the minimum small enough for compact laptop screens; panels
+        // scroll internally rather than propagating large minimum sizes.
+        stage.setMinWidth(640);
+        stage.setMinHeight(480);
     }
 
     public void show() {

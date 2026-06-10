@@ -109,7 +109,9 @@ public class VoiceImportDialog extends Dialog<List<ImportableVoice>> {
             if (lastDirectory != null && lastDirectory.isDirectory()) {
                 chooser.setInitialDirectory(lastDirectory);
             }
+            DialogPaths.applyTo(chooser, "smpsVoiceDir");
             File dir = chooser.showDialog(pane.getScene().getWindow());
+            DialogPaths.remember("smpsVoiceDir", dir);
             if (dir != null) {
                 lastDirectory = dir;
                 dirLabel.setText(dir.getAbsolutePath());
