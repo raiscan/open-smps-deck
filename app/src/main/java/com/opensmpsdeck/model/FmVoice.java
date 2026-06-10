@@ -91,27 +91,41 @@ public class FmVoice {
     }
 
     /**
+     * Byte offset of each parameter group within the SMPS voice blob.
+     * Indexed by paramOffset: 0=DT/MUL, 1=TL, 2=RS/AR, 3=AM/D1R, 4=D2R, 5=D1L/RR.
+     *
+     * <p>SMPS voices are parameter-grouped (all four operators' DT/MUL bytes,
+     * then RS/AR, etc. — TL last), matching Ym2612Chip.setInstrument's index
+     * tables. Within each group the slot order is op1, op3, op2, op4.
+     */
+    private static final int[] PARAM_GROUP_BASE = { 1, 21, 5, 9, 13, 17 };
+
+    /**
      * Reads an operator parameter.
      *
-     * @param opIndex    operator index (0-3)
-     * @param paramOffset parameter offset within the 6-byte operator block (0-5)
+     * @param opIndex    operator slot within the parameter group (0-3, in SMPS
+     *                   file order op1, op3, op2, op4 — see {@link #displayToSmps})
+     * @param paramOffset parameter selector (0=DT/MUL, 1=TL, 2=RS/AR, 3=AM/D1R,
+     *                   4=D2R, 5=D1L/RR)
      * @return unsigned parameter value
      */
     public int getOpParam(int opIndex, int paramOffset) {
         validateOpParam(opIndex, paramOffset);
-        return data[1 + opIndex * PARAMS_PER_OPERATOR + paramOffset] & 0xFF;
+        return data[PARAM_GROUP_BASE[paramOffset] + opIndex] & 0xFF;
     }
 
     /**
      * Writes an operator parameter.
      *
-     * @param opIndex    operator index (0-3)
-     * @param paramOffset parameter offset within the 6-byte operator block (0-5)
+     * @param opIndex    operator slot within the parameter group (0-3, in SMPS
+     *                   file order op1, op3, op2, op4 — see {@link #displayToSmps})
+     * @param paramOffset parameter selector (0=DT/MUL, 1=TL, 2=RS/AR, 3=AM/D1R,
+     *                   4=D2R, 5=D1L/RR)
      * @param value      parameter value (0-255)
      */
     public void setOpParam(int opIndex, int paramOffset, int value) {
         validateOpParam(opIndex, paramOffset);
-        data[1 + opIndex * PARAMS_PER_OPERATOR + paramOffset] = (byte) (value & 0xFF);
+        data[PARAM_GROUP_BASE[paramOffset] + opIndex] = (byte) (value & 0xFF);
     }
 
     private void validateOpParam(int opIndex, int paramOffset) {

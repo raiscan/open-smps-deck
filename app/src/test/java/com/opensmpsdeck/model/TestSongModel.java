@@ -64,23 +64,26 @@ class TestSongModel {
         byte[] voiceData = new byte[25];
         FmVoice voice = new FmVoice("OpTest", voiceData);
 
-        // Set operator 0, param 0 (DT_MUL at byte[1])
+        // SMPS voices are parameter-grouped: DT/MUL 1-4, RS/AR 5-8, AM/D1R 9-12,
+        // D2R 13-16, D1L/RR 17-20, TL 21-24 (matching Ym2612Chip.setInstrument).
+
+        // Set operator slot 0, param 0 (DT_MUL group base 1 → byte[1])
         voice.setOpParam(0, 0, 0x71);
         assertEquals(0x71, voice.getOpParam(0, 0));
 
-        // Set operator 2, param 3 (AM_D1R at byte[1 + 2*6 + 3] = byte[16])
+        // Set operator slot 2, param 3 (AM_D1R group base 9 → byte[11])
         voice.setOpParam(2, 3, 0xAB);
         assertEquals(0xAB, voice.getOpParam(2, 3));
 
-        // Set operator 3, param 4 (D2R at byte[1 + 3*6 + 4] = byte[23])
+        // Set operator slot 3, param 4 (D2R group base 13 → byte[16])
         voice.setOpParam(3, 4, 0xFF);
         assertEquals(0xFF, voice.getOpParam(3, 4));
 
         // Verify the raw data reflects the writes
         byte[] raw = voice.getDataUnsafe();
         assertEquals((byte) 0x71, raw[1]);
-        assertEquals((byte) 0xAB, raw[16]);
-        assertEquals((byte) 0xFF, raw[23]);
+        assertEquals((byte) 0xAB, raw[11]);
+        assertEquals((byte) 0xFF, raw[16]);
 
         // Boundary checks
         assertThrows(IndexOutOfBoundsException.class, () -> voice.getOpParam(-1, 0));

@@ -75,8 +75,9 @@ public final class Rym2612Importer {
             int algorithm = clamp(round(params.getOrDefault("Algorithm", 0.0)), 0, 7);
             int feedback = clamp(round(params.getOrDefault("Feedback", 0.0)), 0, 7);
 
-            byte[] data = new byte[FmVoice.VOICE_SIZE];
-            data[0] = (byte) ((feedback << 3) | (algorithm & 0x07));
+            FmVoice voice = new FmVoice(patchName, new byte[FmVoice.VOICE_SIZE]);
+            voice.setAlgorithm(algorithm);
+            voice.setFeedback(feedback);
 
             // Parse each display-order operator (OP1-OP4) and write to SMPS operator slot
             for (int displayOp = 0; displayOp < FmVoice.OPERATOR_COUNT; displayOp++) {
@@ -94,16 +95,15 @@ public final class Rym2612Importer {
                 int d1l = clamp(round(params.getOrDefault(prefix + "D2L", 0.0)), 0, 15); // RYM D2L = SMPS D1L
                 int rr = clamp(round(params.getOrDefault(prefix + "RR", 0.0)), 0, 15);
 
-                int base = 1 + smpsOp * FmVoice.PARAMS_PER_OPERATOR;
-                data[base]     = (byte) ((dt << 4) | (mul & 0x0F));       // DT_MUL
-                data[base + 1] = (byte) (tl & 0x7F);                      // TL
-                data[base + 2] = (byte) ((rs << 6) | (ar & 0x1F));        // RS_AR
-                data[base + 3] = (byte) ((am << 7) | (d1r & 0x1F));       // AM_D1R
-                data[base + 4] = (byte) (d2r & 0x1F);                     // D2R
-                data[base + 5] = (byte) ((d1l << 4) | (rr & 0x0F));       // D1L_RR
+                voice.setOpParam(smpsOp, 0, (dt << 4) | (mul & 0x0F));   // DT_MUL
+                voice.setOpParam(smpsOp, 1, tl & 0x7F);                  // TL
+                voice.setOpParam(smpsOp, 2, (rs << 6) | (ar & 0x1F));    // RS_AR
+                voice.setOpParam(smpsOp, 3, (am << 7) | (d1r & 0x1F));   // AM_D1R
+                voice.setOpParam(smpsOp, 4, d2r & 0x1F);                 // D2R
+                voice.setOpParam(smpsOp, 5, (d1l << 4) | (rr & 0x0F));   // D1L_RR
             }
 
-            return new FmVoice(patchName, data);
+            return voice;
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {
