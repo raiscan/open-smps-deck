@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <pre>
  * byte 0      : feedback/algorithm
- * bytes 1-4   : DT/MUL   (slot order: op1, op3, op2, op4)
+ * bytes 1-4   : DT/MUL   (operators in musical order OP1, OP2, OP3, OP4)
  * bytes 5-8   : RS/AR
  * bytes 9-12  : AM/D1R
  * bytes 13-16 : D2R
@@ -52,18 +52,53 @@ class TestFmVoiceSmpsLayout {
     }
 
     @Test
-    void perSlotValuesMapToTheRightBytes() {
+    void perOperatorValuesMapToTheRightBytes() {
+        // Within each group the file stores operators in straight musical order
+        // OP1, OP2, OP3, OP4. (SMPSPlay's INSOPS_DEFAULT maps file bytes to
+        // registers 30, 38, 34, 3C — the swap is on the register side, where
+        // +0/+8/+4/+C are OP1/OP2/OP3/OP4 musically.)
         byte[] data = new byte[FmVoice.VOICE_SIZE];
-        data[21] = 0x10; // TL slot 0
-        data[22] = 0x20; // TL slot 1
-        data[23] = 0x30; // TL slot 2
-        data[24] = 0x40; // TL slot 3
+        data[21] = 0x10; // TL OP1
+        data[22] = 0x20; // TL OP2
+        data[23] = 0x30; // TL OP3
+        data[24] = 0x40; // TL OP4
         FmVoice voice = new FmVoice("Test", data);
 
         assertEquals(0x10, voice.getTl(0));
         assertEquals(0x20, voice.getTl(1));
         assertEquals(0x30, voice.getTl(2));
         assertEquals(0x40, voice.getTl(3));
+    }
+
+    @Test
+    void displayOrderIsMusicalOrder() {
+        // The editor's OP2 column must read the file's OP2 byte: the display
+        // index passes straight through to the accessors
+        byte[] data = new byte[FmVoice.VOICE_SIZE];
+        data[22] = 0x20; // TL OP2
+        data[23] = 0x30; // TL OP3
+        FmVoice voice = new FmVoice("Test", data);
+
+        assertEquals(0x20, voice.getTl(FmVoice.displayToSmps(1)),
+                "Display OP2 must read the file's OP2 byte (22)");
+        assertEquals(0x30, voice.getTl(FmVoice.displayToSmps(2)),
+                "Display OP3 must read the file's OP3 byte (23)");
+    }
+
+    @Test
+    void carrierTableUsesMusicalOperatorOrder() {
+        FmVoice voice = new FmVoice("Test", new byte[FmVoice.VOICE_SIZE]);
+        // Algorithm 4: OP1→OP2 and OP3→OP4 pairs; carriers are OP2 and OP4
+        voice.setAlgorithm(4);
+        assertFalse(voice.isCarrier(0), "Algo 4: OP1 is a modulator");
+        assertTrue(voice.isCarrier(1), "Algo 4: OP2 is a carrier");
+        assertFalse(voice.isCarrier(2), "Algo 4: OP3 is a modulator");
+        assertTrue(voice.isCarrier(3), "Algo 4: OP4 is a carrier");
+
+        // Algorithm 0: serial chain, only OP4 carries
+        voice.setAlgorithm(0);
+        assertFalse(voice.isCarrier(0));
+        assertTrue(voice.isCarrier(3));
     }
 
     @Test

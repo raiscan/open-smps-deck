@@ -365,11 +365,12 @@ class TestSongModel {
         assertTrue(voice.isCarrier(2));
         assertTrue(voice.isCarrier(3));
 
-        // Algorithm 4: Op2 (idx 2) and Op4 (idx 3) are carriers
+        // Algorithm 4: Op2 (idx 1) and Op4 (idx 3) are carriers
+        // (operator indices are musical order: 0=Op1, 1=Op2, 2=Op3, 3=Op4)
         voice.setAlgorithm(4);
         assertFalse(voice.isCarrier(0));
-        assertFalse(voice.isCarrier(1));
-        assertTrue(voice.isCarrier(2));
+        assertTrue(voice.isCarrier(1));
+        assertFalse(voice.isCarrier(2));
         assertTrue(voice.isCarrier(3));
     }
 
@@ -420,13 +421,13 @@ class TestSongModel {
 
     @Test
     void testFmVoiceDisplayOrder() {
-        // SMPS order: Op1=0, Op3=1, Op2=2, Op4=3
-        // Display order: Op1=0, Op2=1, Op3=2, Op4=3
-        // displayToSmps: display[0]=0, display[1]=2, display[2]=1, display[3]=3
-        assertEquals(0, FmVoice.displayToSmps(0)); // Display Op1 -> SMPS 0
-        assertEquals(2, FmVoice.displayToSmps(1)); // Display Op2 -> SMPS 2
-        assertEquals(1, FmVoice.displayToSmps(2)); // Display Op3 -> SMPS 1
-        assertEquals(3, FmVoice.displayToSmps(3)); // Display Op4 -> SMPS 3
+        // SMPS voice files store operators in musical order, so the display
+        // index passes straight through (the 1,3,2,4 swap is a register-side
+        // quirk handled inside Ym2612Chip.setInstrument)
+        assertEquals(0, FmVoice.displayToSmps(0)); // Display Op1 -> file 0
+        assertEquals(1, FmVoice.displayToSmps(1)); // Display Op2 -> file 1
+        assertEquals(2, FmVoice.displayToSmps(2)); // Display Op3 -> file 2
+        assertEquals(3, FmVoice.displayToSmps(3)); // Display Op4 -> file 3
     }
 
     @Test

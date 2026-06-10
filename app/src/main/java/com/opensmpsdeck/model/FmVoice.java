@@ -12,18 +12,25 @@ public class FmVoice {
     public static final int OPERATOR_COUNT = 4;
     public static final int PARAMS_PER_OPERATOR = 6;
 
-    private static final int[] DISPLAY_TO_SMPS = {0, 2, 1, 3};
+    /**
+     * Display operator order equals the file's operator order: SMPS voices
+     * store each parameter group in straight musical order OP1, OP2, OP3, OP4.
+     * (The famous 1,3,2,4 swap happens at the YM2612 register write — registers
+     * +0/+8/+4/+C are OP1/OP2/OP3/OP4 — see Ym2612Chip's DT_IDX/TL_IDX tables
+     * and SMPSPlay's INSOPS_DEFAULT register list.)
+     */
+    private static final int[] DISPLAY_TO_SMPS = {0, 1, 2, 3};
 
-    // Carrier table: [algorithm][smpsOpIndex] = true if carrier
-    // SMPS op indices: 0=Op1, 1=Op3, 2=Op2, 3=Op4
+    // Carrier table: [algorithm][operatorIndex] = true if carrier
+    // Operator indices are musical order: 0=Op1, 1=Op2, 2=Op3, 3=Op4
     private static final boolean[][] CARRIER_TABLE = {
         {false, false, false, true},   // Algo 0: Op4
         {false, false, false, true},   // Algo 1: Op4
         {false, false, false, true},   // Algo 2: Op4
         {false, false, false, true},   // Algo 3: Op4
-        {false, false, true,  true},   // Algo 4: Op2(idx2), Op4(idx3)
-        {false, true,  true,  true},   // Algo 5: Op2(idx2), Op3(idx1), Op4(idx3)
-        {false, true,  true,  true},   // Algo 6: Op2(idx2), Op3(idx1), Op4(idx3)
+        {false, true,  false, true},   // Algo 4: Op2, Op4
+        {false, true,  true,  true},   // Algo 5: Op2, Op3, Op4
+        {false, true,  true,  true},   // Algo 6: Op2, Op3, Op4
         {true,  true,  true,  true},   // Algo 7: all
     };
 
@@ -96,15 +103,15 @@ public class FmVoice {
      *
      * <p>SMPS voices are parameter-grouped (all four operators' DT/MUL bytes,
      * then RS/AR, etc. — TL last), matching Ym2612Chip.setInstrument's index
-     * tables. Within each group the slot order is op1, op3, op2, op4.
+     * tables. Within each group the operators are in musical order Op1-Op4.
      */
     private static final int[] PARAM_GROUP_BASE = { 1, 21, 5, 9, 13, 17 };
 
     /**
      * Reads an operator parameter.
      *
-     * @param opIndex    operator slot within the parameter group (0-3, in SMPS
-     *                   file order op1, op3, op2, op4 — see {@link #displayToSmps})
+     * @param opIndex    operator index in musical order (0=Op1 .. 3=Op4; file
+     *                   groups store operators in this order)
      * @param paramOffset parameter selector (0=DT/MUL, 1=TL, 2=RS/AR, 3=AM/D1R,
      *                   4=D2R, 5=D1L/RR)
      * @return unsigned parameter value
@@ -117,8 +124,8 @@ public class FmVoice {
     /**
      * Writes an operator parameter.
      *
-     * @param opIndex    operator slot within the parameter group (0-3, in SMPS
-     *                   file order op1, op3, op2, op4 — see {@link #displayToSmps})
+     * @param opIndex    operator index in musical order (0=Op1 .. 3=Op4; file
+     *                   groups store operators in this order)
      * @param paramOffset parameter selector (0=DT/MUL, 1=TL, 2=RS/AR, 3=AM/D1R,
      *                   4=D2R, 5=D1L/RR)
      * @param value      parameter value (0-255)
@@ -175,7 +182,7 @@ public class FmVoice {
     public boolean isCarrier(int smpsOpIndex) { return CARRIER_TABLE[getAlgorithm()][smpsOpIndex]; }
 
     /**
-     * Converts a display-order operator index (1,2,3,4) to SMPS order (0=Op1, 2=Op2, 1=Op3, 3=Op4).
+     * Converts a display-order operator index (0-3 for OP1-OP4) to the file's operator index (identity: the file is in musical order).
      */
     public static int displayToSmps(int displayIndex) { return DISPLAY_TO_SMPS[displayIndex]; }
 }
