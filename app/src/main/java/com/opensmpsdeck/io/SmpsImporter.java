@@ -207,10 +207,12 @@ public class SmpsImporter {
         Pattern pattern = new Pattern(0, 64);
         // Parallel array: normalized data with JUMP intact for hierarchical decompilation
         byte[][] decompileData = new byte[Pattern.CHANNEL_COUNT][];
-        // Per-channel PSG header values for hierarchical phrase initialization
+        // Per-channel header values for hierarchical chain initialization
         int[] psgHeaderInstrument = new int[Pattern.CHANNEL_COUNT];
         int[] psgHeaderKey = new int[Pattern.CHANNEL_COUNT];
         int[] psgHeaderVol = new int[Pattern.CHANNEL_COUNT];
+        int[] fmHeaderKey = new int[Pattern.CHANNEL_COUNT];
+        int[] fmHeaderVol = new int[Pattern.CHANNEL_COUNT];
 
         // Extract FM track data.
         // The sequencer's fmChannelOrder maps entry 0→DAC, 1→FM1, 2→FM2, etc.
@@ -222,6 +224,8 @@ public class SmpsImporter {
                 TrackExtract extract = extractTrack(data, ptr, seqBase);
                 if (extract.data().length > 0) {
                     decompileData[modelCh] = extract.data();
+                    fmHeaderKey[modelCh] = fmKeys[i];
+                    fmHeaderVol[modelCh] = fmVols[i];
                     byte[] trackData = stripJumpTerminator(extract);
                     trackData = prependFmHeaderState(trackData, fmKeys[i], fmVols[i]);
                     pattern.setTrackData(modelCh, trackData);
@@ -283,22 +287,9 @@ public class SmpsImporter {
 
             // Remap phrase IDs from local decompiler library to global song library
             Map<Integer, Integer> idMap = new HashMap<>();
-            boolean firstPhrase = true;
             for (Phrase localPhrase : result.phrases()) {
                 Phrase newPhrase = library.createPhrase(localPhrase.getName(), localPhrase.getChannelType());
-                byte[] phraseData = localPhrase.getDataDirect();
-
-                // Prepend PSG header initialization (instrument, key offset, volume)
-                // to the first phrase so it's self-contained. The SMPS header stores
-                // these per-channel but the compiler writes zeros, so without this
-                // the PSG envelope/volume would be wrong after the round-trip.
-                if (firstPhrase && ch >= FM_CHANNEL_COUNT) {
-                    phraseData = prependPsgInitToPhrase(phraseData,
-                        psgHeaderKey[ch], psgHeaderVol[ch], psgHeaderInstrument[ch]);
-                    firstPhrase = false;
-                }
-
-                newPhrase.setData(phraseData);
+                newPhrase.setData(localPhrase.getDataDirect());
                 idMap.put(localPhrase.getId(), newPhrase.getId());
             }
 
@@ -316,6 +307,17 @@ public class SmpsImporter {
             // Set loop point
             if (result.hasLoopPoint() && result.loopEntryIndex() >= 0) {
                 chain.setLoopEntryIndex(result.loopEntryIndex());
+            }
+
+            // Preserve per-channel header state (key displacement, volume
+            // attenuation, PSG instrument). The SMPS header carries these but
+            // the compiler writes zeros, so they must live in the chain itself.
+            if (ch >= FM_CHANNEL_COUNT) {
+                applyHeaderInit(chain, library, channelType, true,
+                        psgHeaderKey[ch], psgHeaderVol[ch], psgHeaderInstrument[ch]);
+            } else {
+                applyHeaderInit(chain, library, channelType, false,
+                        fmHeaderKey[ch], fmHeaderVol[ch], 0);
             }
         }
         song.setArrangementMode(ArrangementMode.HIERARCHICAL);
@@ -1037,6 +1039,57 @@ public class SmpsImporter {
         }
         System.arraycopy(trackData, 0, out, pos, trackData.length);
         return out;
+    }
+
+    /**
+     * Apply the SMPS header's per-channel initialization (key displacement,
+     * volume attenuation, PSG instrument) to a decompiled chain.
+     *
+     * <p>KEY_DISP (E9), VOLUME (E6), and PSG_VOLUME (EC) are ADDITIVE in the
+     * sequencer, so the prefix must execute exactly once. When the chain's
+     * first phrase provably plays a single time it is baked in directly;
+     * otherwise (shared phrase, repeat count, or the chain loops back to entry
+     * 0) a dedicated one-shot init phrase is inserted at the chain head and
+     * the loop index shifted past it.
+     */
+    private void applyHeaderInit(Chain chain, PhraseLibrary library, ChannelType type,
+                                 boolean psg, int keyOffset, int volumeOffset, int instrument) {
+        if (keyOffset == 0 && volumeOffset == 0 && (!psg || instrument == 0)) return;
+        if (chain.getEntries().isEmpty()) return;
+
+        ChainEntry firstEntry = chain.getEntries().get(0);
+        int firstId = firstEntry.getPhraseId();
+        long refs = chain.getEntries().stream()
+                .filter(e -> e.getPhraseId() == firstId).count();
+        boolean loopHitsFirst = chain.getLoopEntryIndex() == 0;
+        Phrase firstPhrase = library.getPhrase(firstId);
+        if (firstPhrase == null) return;
+
+        if (refs == 1 && firstEntry.getRepeatCount() <= 1 && !loopHitsFirst) {
+            byte[] d = firstPhrase.getDataDirect();
+            firstPhrase.setData(psg
+                    ? prependPsgInitToPhrase(d, keyOffset, volumeOffset, instrument)
+                    : prependFmHeaderState(d, keyOffset, volumeOffset));
+            return;
+        }
+
+        // One-shot init phrase before the body. For PSG noise tracks, carry the
+        // F3 noise-mode enable into the init so EC targets the right hw channel
+        // (re-running F3 in the body is harmless — it just re-sets the mode).
+        byte[] seed = new byte[0];
+        byte[] firstData = firstPhrase.getDataDirect();
+        if (psg && firstData.length >= 2
+                && (firstData[0] & 0xFF) == SmpsCoordFlags.PSG_NOISE) {
+            seed = new byte[]{firstData[0], firstData[1]};
+        }
+        Phrase initPhrase = library.createPhrase("Init", type);
+        initPhrase.setData(psg
+                ? prependPsgInitToPhrase(seed, keyOffset, volumeOffset, instrument)
+                : prependFmHeaderState(new byte[0], keyOffset, volumeOffset));
+        chain.getEntries().add(0, new ChainEntry(initPhrase.getId()));
+        if (chain.getLoopEntryIndex() >= 0) {
+            chain.setLoopEntryIndex(chain.getLoopEntryIndex() + 1);
+        }
     }
 
     /**
