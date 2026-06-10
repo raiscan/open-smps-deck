@@ -15,6 +15,8 @@ public class ClipboardData {
     private final List<FmVoice> sourceVoices;
     private final List<PsgEnvelope> sourcePsgEnvelopes;
     private final boolean crossSong;
+    /** Identity of the song the data was copied from (weak: never blocks GC). */
+    private final java.lang.ref.WeakReference<Song> sourceSongRef;
 
     public ClipboardData(byte[][] channelData, int rowCount, Song sourceSong) {
         this.channelData = new byte[channelData.length][];
@@ -23,6 +25,7 @@ public class ClipboardData {
         }
         this.channelCount = channelData.length;
         this.rowCount = rowCount;
+        this.sourceSongRef = new java.lang.ref.WeakReference<>(sourceSong);
         if (sourceSong != null) {
             // Snapshot voice/psg data so the source Song can be GC'd
             this.sourceVoices = new ArrayList<>();
@@ -43,6 +46,14 @@ public class ClipboardData {
 
     public ClipboardData(byte[][] channelData, int rowCount) {
         this(channelData, rowCount, null);
+    }
+
+    /**
+     * Whether this clipboard content was copied from the given song.
+     * False when the source song differs or has been garbage collected.
+     */
+    public boolean isFromSong(Song song) {
+        return song != null && sourceSongRef.get() == song;
     }
 
     public byte[] getChannelData(int index) {

@@ -116,6 +116,10 @@ public class SongTab {
         orderListPanel.setOnDirty(dirtyAndEdited);
 
         buildHierarchicalComponents();
+
+        // SongView mutates the model directly (delete/rename entries)
+        // and must mark the tab dirty and trigger live recompiles too
+        songView.setOnEdited(dirtyAndEdited);
     }
 
     private void buildHierarchicalComponents() {

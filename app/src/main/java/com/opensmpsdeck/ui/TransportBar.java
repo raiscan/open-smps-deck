@@ -127,9 +127,10 @@ public class TransportBar extends HBox {
     }
 
     private void onPlay() {
-        if (paused) {
+        // Derive pause state from the engine: stop shortcuts and previews can
+        // reset playback behind this bar's back
+        if (playbackEngine.isPlaying() && playbackEngine.isPaused()) {
             playbackEngine.resume();
-            paused = false;
         } else {
             playbackEngine.loadSong(song);
             playbackEngine.play();
@@ -138,13 +139,11 @@ public class TransportBar extends HBox {
 
     private void onStop() {
         playbackEngine.stop();
-        paused = false;
     }
 
     private void onPause() {
         if (playbackEngine.isPlaying()) {
             playbackEngine.pause();
-            paused = true;
         }
     }
 }

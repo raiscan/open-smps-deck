@@ -284,17 +284,35 @@ public class PatternCompiler {
             chainResults.add(0, new HierarchyCompiler.ChainCompilationResult(dummyDac, new int[0], 0));
         }
 
-        // Process PSG channels (6-9)
-        for (int ch = FM_CHANNEL_COUNT; ch < TOTAL_CHANNELS; ch++) {
-            Chain chain = arrangement.getChain(ch);
-            if (chain.getEntries().isEmpty()) {
-                continue;
+        // Process PSG channels. PSG header entries are positional: tone1 (ch6),
+        // tone2 (ch7), and a third slot that is tone3 (ch8) OR noise (ch9) -
+        // they share the same hardware channel. Earlier positions must be
+        // present as stubs when a later position has content.
+        boolean hasTone3 = !arrangement.getChain(8).getEntries().isEmpty();
+        int[] psgPositional = {6, 7, hasTone3 ? 8 : 9};
+        int lastPsgPosition = -1;
+        for (int i = 0; i < psgPositional.length; i++) {
+            if (!arrangement.getChain(psgPositional[i]).getEntries().isEmpty()) {
+                lastPsgPosition = i;
             }
-
-            var chainResult = HierarchyCompiler.compileChainDetailed(chain, library, dialect);
-            byte[] trackData = chainResult.trackData();
-            if (trackData.length == 0 || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
-                continue;
+        }
+        for (int i = 0; i <= lastPsgPosition; i++) {
+            int ch = psgPositional[i];
+            Chain chain = arrangement.getChain(ch);
+            byte[] trackData = null;
+            HierarchyCompiler.ChainCompilationResult chainResult = null;
+            if (!chain.getEntries().isEmpty()) {
+                chainResult = HierarchyCompiler.compileChainDetailed(chain, library, dialect);
+                trackData = chainResult.trackData();
+                if (trackData.length == 0
+                        || (trackData.length == 1 && (trackData[0] & 0xFF) == CMD_TRACK_END)) {
+                    trackData = null;
+                }
+            }
+            if (trackData == null) {
+                trackData = new byte[]{(byte) CMD_TRACK_END}; // positional stub
+                chainResult = new HierarchyCompiler.ChainCompilationResult(
+                        trackData, new int[0], 0);
             }
 
             activePsgChannels.add(ch);
@@ -379,7 +397,9 @@ public class PatternCompiler {
         while (pos < result.length) {
             int b = result[pos] & 0xFF;
             if (b >= 0xE0) {
-                pos += 1 + SmpsCoordFlags.getParamCount(b);
+                // Dialect-aware sizes: an S3K flag parameter that lands in the
+                // note range must not be "compensated"
+                pos += 1 + flagParamBytes(result, pos, b);
             } else if (b >= 0x81 && b <= 0xDF) {
                 int adjusted = Math.max(0x81, Math.min(0xDF, b + compensation));
                 result[pos] = (byte) adjusted;

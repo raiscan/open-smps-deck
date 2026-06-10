@@ -176,9 +176,42 @@ public class SmpsDriver extends VirtualSynthesizer implements AudioStream {
             for (int i = 0; i < 4; i++)
                 psgLocks[i] = null;
             psgLatches.clear();
+            // Silence hardware (ROM: zFMSilenceAll + zPSGSilenceAll) under the
+            // render lock: read() renders whole buffers while holding it, and
+            // the chip register state must not be mutated mid-render.
+            silenceAll();
         }
-        // Silence hardware (ROM: zFMSilenceAll + zPSGSilenceAll)
-        silenceAll();
+    }
+
+    /**
+     * Atomically replace the current music: stop everything, silence the
+     * chips, construct the new sequencer (whose constructor writes chip
+     * registers, e.g. DAC enable), and add it — all under the render lock so
+     * the audio thread never observes torn chip state. The factory runs on
+     * the caller's thread.
+     */
+    public SmpsSequencer replaceMusic(java.util.function.Supplier<SmpsSequencer> factory) {
+        synchronized (sequencersLock) {
+            stopAll();
+            SmpsSequencer seq = factory.get();
+            addSequencer(seq, false);
+            return seq;
+        }
+    }
+
+    /** Chip mute toggles come from the UI thread; serialize with rendering. */
+    @Override
+    public void setFmMute(int channel, boolean mute) {
+        synchronized (sequencersLock) {
+            super.setFmMute(channel, mute);
+        }
+    }
+
+    @Override
+    public void setPsgMute(int channel, boolean mute) {
+        synchronized (sequencersLock) {
+            super.setPsgMute(channel, mute);
+        }
     }
 
     /**

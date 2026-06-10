@@ -126,8 +126,12 @@ public class PlaybackEngine {
         }
 
         SmpsSequencerConfig config = buildConfig(song.getSmpsMode());
-        currentSequencer = new SmpsSequencer(data, dacData, driver, config);
-        driver.addSequencer(currentSequencer, false);
+        final DacData finalDacData = dacData;
+        // Construct + register atomically under the driver's render lock: the
+        // sequencer constructor writes chip registers (DAC enable, DAC data)
+        // that must not interleave with an in-flight render.
+        currentSequencer = driver.replaceMusic(
+                () -> new SmpsSequencer(data, finalDacData, driver, config));
     }
 
     /** Render samples to buffer without audio device (headless). */
@@ -193,6 +197,7 @@ public class PlaybackEngine {
     public void reload(Song song) {
         PlaybackPosition pos = getPlaybackPosition();
         boolean wasPlaying = isPlaying();
+        boolean wasPaused = isPaused();
 
         if (wasPlaying && audioOutput != null) {
             audioOutput.stop();
@@ -207,6 +212,9 @@ public class PlaybackEngine {
 
         if (wasPlaying) {
             play();
+            if (wasPaused) {
+                pause(); // editing while paused must not audibly resume
+            }
         }
     }
 
@@ -250,6 +258,9 @@ public class PlaybackEngine {
      * Returns true when the real-time audio output thread is running.
      */
     public boolean isPlaying() { return audioOutput != null && audioOutput.isRunning(); }
+
+    /** True when the audio thread is running but paused. */
+    public boolean isPaused() { return audioOutput != null && audioOutput.isPaused(); }
 
     /**
      * Returns the current playback position in terms of the original song's

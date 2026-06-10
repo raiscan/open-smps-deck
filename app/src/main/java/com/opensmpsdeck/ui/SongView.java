@@ -42,6 +42,7 @@ public class SongView extends ScrollPane {
     private final Pane scrollSpacer = new Pane();
     private HierarchicalArrangement arrangement;
     private IntConsumer onPhraseSelected;
+    private Runnable onEdited;
     private BiConsumer<Integer, Integer> onPhraseDoubleClicked; // (channelIndex, entryIndex)
     private int selectedChannel = 0;
     private int selectedEntryIndex = -1;
@@ -66,6 +67,15 @@ public class SongView extends ScrollPane {
     public void setArrangement(HierarchicalArrangement arrangement) {
         this.arrangement = arrangement;
         refreshDisplay();
+    }
+
+    /** Called after this view mutates the song (delete/rename). */
+    public void setOnEdited(Runnable callback) {
+        this.onEdited = callback;
+    }
+
+    private void notifyEdited() {
+        if (onEdited != null) onEdited.run();
     }
 
     public void setOnPhraseSelected(IntConsumer callback) {
@@ -296,6 +306,7 @@ public class SongView extends ScrollPane {
                 if (!newName.isBlank()) {
                     phrase.setName(newName.trim());
                     refreshDisplay();
+                    notifyEdited();
                 }
             });
         });
@@ -305,8 +316,16 @@ public class SongView extends ScrollPane {
             Chain chain = arrangement.getChain(channel);
             if (entryIndex < chain.getEntries().size()) {
                 chain.getEntries().remove(entryIndex);
+                int loop = chain.getLoopEntryIndex();
+                if (loop > entryIndex) {
+                    chain.setLoopEntryIndex(loop - 1);
+                } else if (loop >= chain.getEntries().size()) {
+                    chain.setLoopEntryIndex(chain.getEntries().isEmpty() ? -1
+                            : chain.getEntries().size() - 1);
+                }
                 selectedEntryIndex = -1;
                 refreshDisplay();
+                notifyEdited();
             }
         });
 

@@ -120,7 +120,8 @@ public class TrackerGrid extends ScrollPane {
     private int selStartRow = -1, selStartChannel = -1;
     private int selEndRow = -1, selEndChannel = -1;
     private int dragAnchorRow = -1, dragAnchorChannel = -1;
-    private ClipboardData clipboard;
+    /** Shared across all grids so copy/paste works between song tabs. */
+    private static ClipboardData clipboard;
     private final UndoManager undoManager = new UndoManager();
     private Runnable onTogglePlayback;
     private Runnable onStopPlayback;
@@ -337,7 +338,7 @@ public class TrackerGrid extends ScrollPane {
     public void refreshDisplay() {
         if (viewMode == ViewMode.UNROLLED && unrolledTimeline != null) {
             int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
-            int totalRows = maxTickAcrossChannels() / effectiveResolution;
+            int totalRows = Math.ceilDiv(maxTickAcrossChannels(), effectiveResolution);
             double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH * Pattern.CHANNEL_COUNT;
             applyVirtualSize(totalWidth, HEADER_HEIGHT + ROW_HEIGHT * Math.max(1, totalRows));
             renderUnrolledVisible();
@@ -720,7 +721,7 @@ public class TrackerGrid extends ScrollPane {
         if (unrolledTimeline == null) return;
 
         int effectiveResolution = Math.max(1, unrolledTimeline.gridResolution() / zoomLevel);
-        int totalRows = maxTickAcrossChannels() / effectiveResolution;
+        int totalRows = Math.ceilDiv(maxTickAcrossChannels(), effectiveResolution);
         double scrollY = getScrollY();
         double viewportHeight = canvas.getHeight();
 
@@ -936,7 +937,7 @@ public class TrackerGrid extends ScrollPane {
 
         // When the song loops, wrap the cursor back into the loop region
         // instead of running off the end of the grid
-        int totalRows = maxTickAcrossChannels() / effectiveResolution;
+        int totalRows = Math.ceilDiv(maxTickAcrossChannels(), effectiveResolution);
         if (totalRows > 0 && row >= totalRows) {
             int loopRow = unrolledLoopRow(effectiveResolution);
             if (loopRow >= 0 && loopRow < totalRows) {
@@ -1132,10 +1133,12 @@ public class TrackerGrid extends ScrollPane {
         if (e.getY() + scrollY < HEADER_HEIGHT) {
             int ch = (int) ((e.getX() - ROW_NUM_WIDTH) / CHANNEL_WIDTH);
             if (ch >= 0 && ch < getVisibleChannelCount()) {
+                // Phrase mode shows a single column for the phrase's channel
+                int modelCh = (activePhrase != null) ? phraseChannelIndex : ch;
                 if (e.isControlDown()) {
-                    toggleSolo(ch);
+                    toggleSolo(modelCh);
                 } else {
-                    toggleMute(ch);
+                    toggleMute(modelCh);
                 }
             }
             return;
@@ -1763,8 +1766,9 @@ public class TrackerGrid extends ScrollPane {
             pasteChannelData[ch] = clipboard.getChannelData(ch);
         }
 
-        // Cross-song paste: resolve instrument references
-        if (song != null && clipboard.isCrossSong()) {
+        // Cross-song paste: resolve instrument references. Same-song pastes
+        // skip resolution — indices are already valid in their own song.
+        if (song != null && clipboard.isCrossSong() && !clipboard.isFromSong(song)) {
             pasteChannelData = resolveCrossPaste(pasteChannelData,
                     clipboard.getSourceVoices(), clipboard.getSourcePsgEnvelopes(), song);
             if (pasteChannelData == null) return; // user cancelled

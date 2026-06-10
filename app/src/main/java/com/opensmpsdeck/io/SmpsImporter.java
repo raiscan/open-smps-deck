@@ -250,9 +250,12 @@ public class SmpsImporter {
             if (ptr >= 0 && ptr < data.length) {
                 TrackExtract extract = extractTrack(data, ptr, seqBase);
                 if (extract.data().length > 0) {
-                    // Detect PSG noise mode: if track contains F3 flag, map to Noise channel (9)
+                    // Detect PSG noise mode. Only the last PSG track (the
+                    // tone3/noise hardware slot) can drive the noise
+                    // generator; F3 flags on earlier PSG tracks are
+                    // configuration writes, not channel moves.
                     int channelIndex = FM_CHANNEL_COUNT + i;
-                    if (containsPsgNoiseFlag(extract.data())) {
+                    if (i == psgCount - 1 && containsPsgNoiseFlag(extract.data())) {
                         channelIndex = FM_CHANNEL_COUNT + 3; // PSG Noise = channel 9
                     }
                     decompileData[channelIndex] = extract.data();
@@ -707,19 +710,48 @@ public class SmpsImporter {
      * Walks the bytecode properly to avoid matching parameter bytes.
      */
     boolean containsPsgNoiseFlag(byte[] trackData) {
-        int pos = 0;
-        while (pos < trackData.length) {
-            int cmd = trackData[pos] & 0xFF;
-            if (cmd == SmpsCoordFlags.PSG_NOISE) {
-                return true;
+        // Walk the PLAYBACK stream (following gotos and calls) rather than
+        // scanning the raw buffer: extracted tracks may contain other
+        // channels' bytes when streams are shared, and another channel's F3
+        // must not flip this channel into noise mode.
+        boolean[] visited = new boolean[trackData.length];
+        Deque<Integer> work = new ArrayDeque<>();
+        work.add(0);
+        int guard = 0;
+        while (!work.isEmpty() && guard++ < 4096) {
+            int pos = work.poll();
+            while (pos >= 0 && pos < trackData.length && !visited[pos]) {
+                visited[pos] = true;
+                int cmd = trackData[pos] & 0xFF;
+                if (cmd == SmpsCoordFlags.PSG_NOISE) {
+                    return true;
+                }
+                if (cmd == SmpsCoordFlags.JUMP && pos + 2 < trackData.length) {
+                    int t = (trackData[pos + 1] & 0xFF) | ((trackData[pos + 2] & 0xFF) << 8);
+                    if (t >= 0 && t < trackData.length && !visited[t]) {
+                        pos = t;
+                        continue;
+                    }
+                    break;
+                }
+                if (cmd == SmpsCoordFlags.CALL && pos + 2 < trackData.length) {
+                    int t = (trackData[pos + 1] & 0xFF) | ((trackData[pos + 2] & 0xFF) << 8);
+                    if (t >= 0 && t < trackData.length && !visited[t]) {
+                        work.add(t);
+                    }
+                    pos += 3;
+                    continue;
+                }
+                if (SmpsCoordFlags.isTrackEnd(cmd, dialect)
+                        || SmpsCoordFlags.isReturn(cmd, dialect)) {
+                    break;
+                }
+                if (cmd >= 0xE0) {
+                    pos += 1 + flagParamBytes(trackData, pos, cmd);
+                } else {
+                    pos++;
+                }
             }
-            if (cmd >= 0xE0 && cmd <= 0xFF) {
-                int params = flagParamBytes(trackData, pos, cmd);
-                pos++; // skip flag byte
-                pos += params;
-                continue;
-            }
-            pos++;
         }
         return false;
     }

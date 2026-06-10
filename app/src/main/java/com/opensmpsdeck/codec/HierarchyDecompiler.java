@@ -38,10 +38,14 @@ public final class HierarchyDecompiler {
         Map<Integer, Phrase> subroutines = new LinkedHashMap<>();
         findSubroutines(track, type, library, subroutines, dialect);
 
-        // Pre-pass: the channel loop's JUMP target must become a chain entry
-        // boundary, otherwise the loop snaps to the nearest phrase start and
-        // playback drifts after the first loop iteration.
+        // Pre-pass: the channel loop's JUMP target and every F7 loop target
+        // must become chain entry boundaries, otherwise loops snap to the
+        // nearest phrase start and playback drifts after the first iteration.
         int loopBoundary = findChannelLoopTarget(track, dialect);
+        java.util.TreeSet<Integer> splitBoundaries = collectLoopTargets(track, dialect);
+        if (loopBoundary >= 0) {
+            splitBoundaries.add(loopBoundary);
+        }
 
         // Pass 2: Linear scan of main stream, splitting at structural boundaries
         int pos = 0;
@@ -62,12 +66,17 @@ public final class HierarchyDecompiler {
             visitedScan[pos] = true;
             int b = track[pos] & 0xFF;
 
-            // Force a phrase boundary exactly at the channel loop target
-            if (pos == loopBoundary && pos > segStart) {
-                segments.add(new int[]{segStart, pos});
+            // Force phrase boundaries exactly at loop targets (channel F6 and
+            // backward F7). Rips may loop to a position the linear instruction
+            // stream never lands on (mid-instruction reparse) — split at the
+            // exact byte when the scan crosses it, byte-faithfully.
+            for (Integer b2;
+                 (b2 = splitBoundaries.higher(segStart)) != null && b2 <= pos; ) {
+                segments.add(new int[]{segStart, b2});
                 flushSegmentsWithOffsets(segments, track, type, library, chainEntries, entryStartOffsets);
                 segments.clear();
-                segStart = pos;
+                segStart = b2;
+                splitBoundaries.remove(b2);
             }
 
             if (b == SmpsCoordFlags.CALL && pos + 2 < track.length) {
@@ -381,6 +390,46 @@ public final class HierarchyDecompiler {
             }
         }
         return -1;
+    }
+
+    /**
+     * Collect every backward F7 loop target reachable in the main stream
+     * (following mid-stream F6 gotos), so each can become an exact phrase
+     * boundary before the main scan runs.
+     */
+    private static java.util.TreeSet<Integer> collectLoopTargets(byte[] track,
+            SmpsCoordFlags.Dialect dialect) {
+        java.util.TreeSet<Integer> targets = new java.util.TreeSet<>();
+        boolean[] visited = new boolean[track.length];
+        int gotos = 0;
+        int pos = 0;
+        while (pos >= 0 && pos < track.length && !visited[pos]) {
+            visited[pos] = true;
+            int b = track[pos] & 0xFF;
+            if (b == SmpsCoordFlags.LOOP && pos + 4 < track.length) {
+                int target = (track[pos + 3] & 0xFF) | ((track[pos + 4] & 0xFF) << 8);
+                if (target >= 0 && target < pos) {
+                    targets.add(target);
+                }
+                pos += 5;
+                continue;
+            }
+            if (b == SmpsCoordFlags.JUMP && pos + 2 < track.length) {
+                int target = (track[pos + 1] & 0xFF) | ((track[pos + 2] & 0xFF) << 8);
+                if (target < 0 || target >= track.length || visited[target]
+                        || gotos >= MAX_GOTOS) {
+                    break; // back-edge: channel loop, handled separately
+                }
+                gotos++;
+                pos = target;
+                continue;
+            }
+            if (SmpsCoordFlags.isTrackEnd(b, dialect) || SmpsCoordFlags.isReturn(b, dialect)) {
+                break;
+            }
+            pos += (b >= 0xE0) ? 1 + flagBytes(track, pos, b, dialect) : 1;
+        }
+        return targets;
     }
 
     /**

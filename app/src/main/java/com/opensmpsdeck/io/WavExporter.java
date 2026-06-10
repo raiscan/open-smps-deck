@@ -113,13 +113,14 @@ public class WavExporter {
 
             while (totalFrames < maxFrames) {
                 engine.renderBuffer(buffer);
-                if (engine.getDriver().isComplete()) break;
-
+                // Write the rendered chunk BEFORE checking completion — the
+                // final buffer contains the tail of the song
                 for (short sample : buffer) {
                     pcmData.write(sample & 0xFF);
                     pcmData.write((sample >> 8) & 0xFF);
                 }
                 totalFrames += BUFFER_FRAMES;
+                if (engine.getDriver().isComplete()) break;
             }
         }
 

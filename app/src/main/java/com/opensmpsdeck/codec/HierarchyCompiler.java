@@ -54,13 +54,18 @@ public final class HierarchyCompiler {
 
         for (int i = 0; i < chain.getEntries().size(); i++) {
             var entry = chain.getEntries().get(i);
-            entryOffsets[i] = mainStream.size();
 
             Phrase phrase = library.getPhrase(entry.getPhraseId());
-            if (phrase == null) continue;
+            if (phrase == null) {
+                entryOffsets[i] = mainStream.size();
+                continue;
+            }
 
             byte[] phraseData = phrase.getDataDirect();
-            if (phraseData.length == 0) continue;
+            if (phraseData.length == 0) {
+                entryOffsets[i] = mainStream.size();
+                continue;
+            }
 
             // Emit transpose if needed. The transpose flag ADDS to the track's
             // key displacement, so emit the delta from the current value.
@@ -70,6 +75,11 @@ public final class HierarchyCompiler {
                 mainStream.write((byte) ((targetTranspose - currentTranspose) & 0xFF));
                 currentTranspose = targetTranspose;
             }
+
+            // Record the entry offset AFTER the delta: the channel loop jumps
+            // here, and re-executing an additive delta would accumulate
+            // transposition on every loop pass.
+            entryOffsets[i] = mainStream.size();
 
             boolean isShared = refCounts.getOrDefault(entry.getPhraseId(), 0) > 1;
             int repeatCount = entry.getRepeatCount();
@@ -104,6 +114,15 @@ public final class HierarchyCompiler {
         // Emit loop or stop
         if (chain.hasLoop() && chain.getLoopEntryIndex() >= 0
                 && chain.getLoopEntryIndex() < entryOffsets.length) {
+            // The loop target sits after its entry's transpose delta, so the
+            // jump must first restore that entry's transpose state.
+            int loopTranspose = chain.getEntries()
+                    .get(chain.getLoopEntryIndex()).getTransposeSemitones();
+            if (currentTranspose != loopTranspose) {
+                mainStream.write((byte) SmpsCoordFlags.transposeAddFlag(dialect));
+                mainStream.write((byte) ((loopTranspose - currentTranspose) & 0xFF));
+                currentTranspose = loopTranspose;
+            }
             int loopTarget = entryOffsets[chain.getLoopEntryIndex()];
             emitJump(mainStream, loopTarget);
         } else {

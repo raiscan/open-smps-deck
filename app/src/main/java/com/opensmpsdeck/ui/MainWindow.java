@@ -114,9 +114,13 @@ public class MainWindow {
                 javafx.util.Duration.millis(67), // ~15 Hz
                 e -> {
                     SongTab tab = getActiveSongTab();
-                    // Instrument previews borrow the engine; they must not
-                    // move the song's playback cursor
-                    if (tab != null && !playbackEngine.isPreviewPlayback()) {
+                    if (tab != null && playbackEngine.isPreviewPlayback()) {
+                        // Previews borrow the engine: clear rather than freeze
+                        // the song's playback cursor
+                        tab.getTrackerGrid().clearPlaybackCursor();
+                        return;
+                    }
+                    if (tab != null) {
                         TrackerGrid grid = tab.getTrackerGrid();
                         if (grid.isUnrolledMode()) {
                             long tick = playbackEngine.getPlaybackTickCount();

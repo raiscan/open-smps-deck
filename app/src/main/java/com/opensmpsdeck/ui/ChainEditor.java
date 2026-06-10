@@ -197,7 +197,14 @@ public class ChainEditor extends Dialog<ButtonType> {
         int sel = table.getSelectionModel().getSelectedIndex();
         if (sel >= 0 && sel < chain.getEntries().size()) {
             chain.getEntries().remove(sel);
-            if (chain.getLoopEntryIndex() >= chain.getEntries().size()) {
+            int loop = chain.getLoopEntryIndex();
+            if (loop > sel) {
+                chain.setLoopEntryIndex(loop - 1); // entry before the loop removed
+            } else if (loop >= chain.getEntries().size() || loop == sel) {
+                chain.setLoopEntryIndex(chain.getEntries().isEmpty() ? -1
+                        : Math.min(loop, chain.getEntries().size() - 1));
+            }
+            if (chain.getEntries().isEmpty()) {
                 chain.setLoopEntryIndex(-1);
             }
             refreshRows();
