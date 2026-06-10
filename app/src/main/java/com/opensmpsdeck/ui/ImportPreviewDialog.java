@@ -1,20 +1,23 @@
 package com.opensmpsdeck.ui;
 
-import com.opensmpsdeck.codec.HierarchyDecompiler;
 import com.opensmpsdeck.model.*;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Dialog that previews the hierarchical decompilation of an imported SMPS song.
- * Shows per-channel structure with phrase blocks, CALL/LOOP/JUMP markers,
- * shared phrase reference counts, and provides Import/Cancel buttons.
+ * Shows the per-channel structure (chain entries, phrases, shared phrase counts,
+ * loop points) of the arrangement built by the importer, and provides
+ * Import/Cancel buttons.
+ *
+ * <p>The displayed arrangement is the one {@code SmpsImporter} attached to the
+ * song. It is shown as-is — re-decompiling here would lose loop points and
+ * mode-specific note compensation.
  */
 public class ImportPreviewDialog extends Dialog<ButtonType> {
 
@@ -24,32 +27,37 @@ public class ImportPreviewDialog extends Dialog<ButtonType> {
     };
 
     private final Song song;
-    private final List<HierarchyDecompiler.DecompileResult> channelResults = new ArrayList<>();
-    private boolean importAsHierarchical = false;
 
     public ImportPreviewDialog(Song song) {
         this.song = song;
         setTitle("Import Structure Preview");
         setHeaderText("Decompiled structure from imported SMPS data");
 
-        decompileAllChannels();
+        HierarchicalArrangement arrangement = song.getHierarchicalArrangement();
 
         VBox content = new VBox(8);
         content.setPadding(new Insets(12));
         content.setPrefWidth(550);
         content.setPrefHeight(400);
 
-        // Summary stats
-        int totalPhrases = 0;
-        int totalShared = 0;
+        // Phrase reference counts across all chains (shared = referenced 2+ times)
+        Map<Integer, Integer> refCounts = new HashMap<>();
         int totalLoops = 0;
-        for (var result : channelResults) {
-            totalPhrases += result.phrases().size();
-            totalShared += result.sharedPhraseCount();
-            if (result.hasLoopPoint()) totalLoops++;
+        if (arrangement != null) {
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                Chain chain = arrangement.getChain(ch);
+                for (ChainEntry entry : chain.getEntries()) {
+                    refCounts.merge(entry.getPhraseId(), 1, Integer::sum);
+                }
+                if (chain.hasLoop()) totalLoops++;
+            }
         }
+        int totalPhrases = arrangement != null
+                ? arrangement.getPhraseLibrary().getAllPhrases().size() : 0;
+        long totalShared = refCounts.values().stream().filter(c -> c > 1).count();
+
         Label summaryLabel = new Label(String.format(
-            "Phrases: %d  |  Shared (CALL): %d  |  Channels with loop: %d",
+            "Phrases: %d  |  Shared: %d  |  Channels with loop: %d",
             totalPhrases, totalShared, totalLoops));
         summaryLabel.setStyle("-fx-font-family: 'Monospaced'; -fx-font-size: 12;");
 
@@ -58,54 +66,56 @@ public class ImportPreviewDialog extends Dialog<ButtonType> {
         channelListView.setStyle("-fx-font-family: 'Monospaced'; -fx-font-size: 11;");
         VBox.setVgrow(channelListView, Priority.ALWAYS);
 
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            if (ch >= channelResults.size()) break;
-            var result = channelResults.get(ch);
-            if (result.phrases().isEmpty() && result.chainEntries().isEmpty()) continue;
+        if (arrangement != null) {
+            PhraseLibrary library = arrangement.getPhraseLibrary();
+            for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+                Chain chain = arrangement.getChain(ch);
+                if (chain.getEntries().isEmpty()) continue;
 
-            StringBuilder sb = new StringBuilder();
-            sb.append(CHANNEL_NAMES[ch]).append(": ");
-            sb.append(result.chainEntries().size()).append(" entries, ");
-            sb.append(result.phrases().size()).append(" phrases");
-            if (result.sharedPhraseCount() > 0) {
-                sb.append(" (").append(result.sharedPhraseCount()).append(" shared)");
-            }
-            if (result.hasLoopPoint()) {
-                sb.append(" [loop at ").append(result.loopEntryIndex()).append("]");
-            }
+                long distinctPhrases = chain.getEntries().stream()
+                        .map(ChainEntry::getPhraseId).distinct().count();
+                long sharedInChain = chain.getEntries().stream()
+                        .map(ChainEntry::getPhraseId).distinct()
+                        .filter(id -> refCounts.getOrDefault(id, 0) > 1).count();
 
-            channelListView.getItems().add(sb.toString());
-
-            // Show chain entries
-            for (int i = 0; i < result.chainEntries().size(); i++) {
-                var entry = result.chainEntries().get(i);
-                Phrase phrase = findPhrase(result.phrases(), entry.getPhraseId());
-                String phraseName = phrase != null ? phrase.getName() : "?";
-                int dataLen = phrase != null ? phrase.getDataDirect().length : 0;
-
-                StringBuilder entryStr = new StringBuilder("  ");
-                if (result.hasLoopPoint() && i == result.loopEntryIndex()) {
-                    entryStr.append("\u21BA ");
-                } else {
-                    entryStr.append("  ");
+                StringBuilder sb = new StringBuilder();
+                sb.append(CHANNEL_NAMES[ch]).append(": ");
+                sb.append(chain.getEntries().size()).append(" entries, ");
+                sb.append(distinctPhrases).append(" phrases");
+                if (sharedInChain > 0) {
+                    sb.append(" (").append(sharedInChain).append(" shared)");
                 }
-                entryStr.append(String.format("[%d] %s (%d bytes)", entry.getPhraseId(), phraseName, dataLen));
-                if (entry.getRepeatCount() > 1) {
-                    entryStr.append(" \u00D7").append(entry.getRepeatCount());
+                if (chain.hasLoop()) {
+                    sb.append(" [loop at ").append(chain.getLoopEntryIndex()).append("]");
                 }
-                channelListView.getItems().add(entryStr.toString());
+                channelListView.getItems().add(sb.toString());
+
+                for (int i = 0; i < chain.getEntries().size(); i++) {
+                    ChainEntry entry = chain.getEntries().get(i);
+                    Phrase phrase = library.getPhrase(entry.getPhraseId());
+                    String phraseName = phrase != null ? phrase.getName() : "?";
+                    int dataLen = phrase != null ? phrase.getDataDirect().length : 0;
+
+                    StringBuilder entryStr = new StringBuilder("  ");
+                    if (chain.hasLoop() && i == chain.getLoopEntryIndex()) {
+                        entryStr.append("↺ ");
+                    } else {
+                        entryStr.append("  ");
+                    }
+                    entryStr.append(String.format("[%d] %s (%d bytes)",
+                            entry.getPhraseId(), phraseName, dataLen));
+                    if (entry.getRepeatCount() > 1) {
+                        entryStr.append(" ×").append(entry.getRepeatCount());
+                    }
+                    if (entry.getTransposeSemitones() != 0) {
+                        entryStr.append(String.format(" %+d", entry.getTransposeSemitones()));
+                    }
+                    channelListView.getItems().add(entryStr.toString());
+                }
             }
         }
 
-        // Import mode selector
-        CheckBox hierarchicalCheck = new CheckBox("Import as Hierarchical arrangement");
-        hierarchicalCheck.setSelected(false);
-        hierarchicalCheck.setOnAction(e -> importAsHierarchical = hierarchicalCheck.isSelected());
-
-        HBox optionsBox = new HBox(12, hierarchicalCheck);
-        optionsBox.setPadding(new Insets(4, 0, 4, 0));
-
-        content.getChildren().addAll(summaryLabel, channelListView, optionsBox);
+        content.getChildren().addAll(summaryLabel, channelListView);
 
         getDialogPane().setContent(content);
         getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -114,71 +124,11 @@ public class ImportPreviewDialog extends Dialog<ButtonType> {
         okButton.setText("Import");
     }
 
-    private void decompileAllChannels() {
-        if (song.getPatterns().isEmpty()) return;
-        Pattern pattern = song.getPatterns().getFirst();
-
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            byte[] trackData = pattern.getTrackData(ch);
-            if (trackData == null || trackData.length == 0) {
-                channelResults.add(new HierarchyDecompiler.DecompileResult(
-                    List.of(), List.of(), false, -1, 0));
-                continue;
-            }
-            ChannelType type = ChannelType.fromChannelIndex(ch);
-            channelResults.add(HierarchyDecompiler.decompileTrack(trackData, type));
-        }
-    }
-
-    public boolean isImportAsHierarchical() {
-        return importAsHierarchical;
-    }
-
     /**
-     * Build a HierarchicalArrangement from the decompiled results.
-     * Should only be called when {@link #isImportAsHierarchical()} is true.
+     * Returns the arrangement the importer attached to the song.
+     * Kept for call-site compatibility; this dialog no longer rebuilds it.
      */
     public HierarchicalArrangement buildHierarchicalArrangement() {
-        HierarchicalArrangement arrangement = new HierarchicalArrangement();
-        PhraseLibrary library = arrangement.getPhraseLibrary();
-
-        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
-            if (ch >= channelResults.size()) break;
-            var result = channelResults.get(ch);
-            Chain chain = arrangement.getChain(ch);
-
-            // Re-create phrases in the arrangement's library
-            java.util.Map<Integer, Integer> oldToNew = new java.util.HashMap<>();
-            for (Phrase oldPhrase : result.phrases()) {
-                ChannelType type = ChannelType.fromChannelIndex(ch);
-                Phrase newPhrase = library.createPhrase(oldPhrase.getName(), type);
-                newPhrase.setData(oldPhrase.getData());
-                oldToNew.put(oldPhrase.getId(), newPhrase.getId());
-            }
-
-            // Build chain entries with remapped phrase IDs
-            for (var entry : result.chainEntries()) {
-                Integer newId = oldToNew.get(entry.getPhraseId());
-                if (newId != null) {
-                    ChainEntry newEntry = new ChainEntry(newId);
-                    newEntry.setRepeatCount(entry.getRepeatCount());
-                    newEntry.setTransposeSemitones(entry.getTransposeSemitones());
-                    chain.getEntries().add(newEntry);
-                }
-            }
-
-            if (result.hasLoopPoint()) {
-                chain.setLoopEntryIndex(result.loopEntryIndex());
-            }
-        }
-
-        return arrangement;
-    }
-
-    private static Phrase findPhrase(List<Phrase> phrases, int id) {
-        for (Phrase p : phrases) {
-            if (p.getId() == id) return p;
-        }
-        return null;
+        return song.getHierarchicalArrangement();
     }
 }
