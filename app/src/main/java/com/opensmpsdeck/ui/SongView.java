@@ -41,6 +41,7 @@ public class SongView extends ScrollPane {
     // to respect GPU texture limits (huge canvases fail to render)
     private final Pane scrollSpacer = new Pane();
     private HierarchicalArrangement arrangement;
+    private com.opensmps.smps.SmpsCoordFlags.Dialect dialect = com.opensmps.smps.SmpsCoordFlags.Dialect.S2;
     private IntConsumer onPhraseSelected;
     private Runnable onEdited;
     private BiConsumer<Integer, Integer> onPhraseDoubleClicked; // (channelIndex, entryIndex)
@@ -62,6 +63,10 @@ public class SongView extends ScrollPane {
         // Re-render the visible window whenever the viewport scrolls or resizes
         hvalueProperty().addListener((obs, oldVal, newVal) -> refreshDisplay());
         viewportBoundsProperty().addListener((obs, oldVal, newVal) -> refreshDisplay());
+    }
+
+    public void setDialect(com.opensmps.smps.SmpsCoordFlags.Dialect dialect) {
+        this.dialect = dialect;
     }
 
     public void setArrangement(HierarchicalArrangement arrangement) {
@@ -168,7 +173,7 @@ public class SongView extends ScrollPane {
             Phrase phrase = library.getPhrase(entry.getPhraseId());
             if (phrase == null) continue;
 
-            int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect()).size());
+            int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect(), dialect).size());
             int effectiveRows = rowCount * entry.getRepeatCount();
             double blockWidth = Math.max(20, effectiveRows * PIXELS_PER_ROW);
 
@@ -227,7 +232,7 @@ public class SongView extends ScrollPane {
             for (ChainEntry entry : arrangement.getChain(ch).getEntries()) {
                 Phrase phrase = library.getPhrase(entry.getPhraseId());
                 if (phrase == null) continue;
-                int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect()).size());
+                int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect(), dialect).size());
                 int effectiveRows = rowCount * entry.getRepeatCount();
                 channelWidth += Math.max(20, effectiveRows * PIXELS_PER_ROW);
             }
@@ -260,7 +265,7 @@ public class SongView extends ScrollPane {
             ChainEntry entry = chain.getEntries().get(i);
             Phrase phrase = library.getPhrase(entry.getPhraseId());
             if (phrase == null) continue;
-            int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect()).size());
+            int rowCount = Math.max(1, SmpsDecoder.decode(phrase.getDataDirect(), dialect).size());
             int effectiveRows = rowCount * entry.getRepeatCount();
             double blockWidth = Math.max(20, effectiveRows * PIXELS_PER_ROW);
 

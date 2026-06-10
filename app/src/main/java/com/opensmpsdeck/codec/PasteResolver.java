@@ -52,10 +52,17 @@ public final class PasteResolver {
      */
     public static ScanResult scanAndAutoRemap(byte[][] channelData, List<FmVoice> srcVoices,
                                                List<PsgEnvelope> srcPsgEnvelopes, Song dstSong) {
+        return scanAndAutoRemap(channelData, srcVoices, srcPsgEnvelopes, dstSong,
+                com.opensmps.smps.SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static ScanResult scanAndAutoRemap(byte[][] channelData, List<FmVoice> srcVoices,
+                                               List<PsgEnvelope> srcPsgEnvelopes, Song dstSong,
+                                               com.opensmps.smps.SmpsCoordFlags.Dialect dialect) {
         Set<Integer> allVoices = new LinkedHashSet<>();
         Set<Integer> allPsg = new LinkedHashSet<>();
         for (byte[] data : channelData) {
-            InstrumentRemapper.ScanResult scan = InstrumentRemapper.scan(data);
+            InstrumentRemapper.ScanResult scan = InstrumentRemapper.scan(data, dialect);
             allVoices.addAll(scan.voiceIndices());
             allPsg.addAll(scan.psgIndices());
         }
@@ -99,9 +106,15 @@ public final class PasteResolver {
      */
     public static byte[][] rewriteAll(byte[][] channelData, Map<Integer, Integer> voiceMap,
                                        Map<Integer, Integer> psgMap) {
+        return rewriteAll(channelData, voiceMap, psgMap, com.opensmps.smps.SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[][] rewriteAll(byte[][] channelData, Map<Integer, Integer> voiceMap,
+                                       Map<Integer, Integer> psgMap,
+                                       com.opensmps.smps.SmpsCoordFlags.Dialect dialect) {
         byte[][] result = new byte[channelData.length][];
         for (int i = 0; i < channelData.length; i++) {
-            result[i] = InstrumentRemapper.rewrite(channelData[i], voiceMap, psgMap);
+            result[i] = InstrumentRemapper.rewrite(channelData[i], voiceMap, psgMap, dialect);
         }
         return result;
     }

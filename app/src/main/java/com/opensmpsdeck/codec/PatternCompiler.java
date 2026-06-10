@@ -420,7 +420,7 @@ public class PatternCompiler {
         }
 
         byte[] content = Arrays.copyOf(trackData, contentEndOffset);
-        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(content);
+        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(content, dialect);
 
         int currentEntry = 0;
         int rowInEntry = 0;
@@ -646,7 +646,7 @@ public class PatternCompiler {
 
     private ChannelTimelineBuilder buildStructuredTimeline(byte[] trackData, int ticksPerRow) {
         ChannelTimelineBuilder builder = new ChannelTimelineBuilder();
-        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(trackData);
+        List<SmpsDecoder.DecodedRow> decodedRows = SmpsDecoder.decodeWithOffsets(trackData, dialect);
         int tick = 0;
         for (SmpsDecoder.DecodedRow decodedRow : decodedRows) {
             int row = tick / ticksPerRow;

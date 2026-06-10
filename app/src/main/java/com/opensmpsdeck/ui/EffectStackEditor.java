@@ -34,8 +34,15 @@ public class EffectStackEditor extends Dialog<List<SmpsEncoder.EffectCommand>> {
     private final TextField paramsField = new TextField();
     private final Label hintLabel = new Label();
     private final Label bytesPreview = new Label();
+    private final SmpsCoordFlags.Dialect dialect;
 
     public EffectStackEditor(List<SmpsEncoder.EffectCommand> initial, String contextLabel) {
+        this(initial, contextLabel, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public EffectStackEditor(List<SmpsEncoder.EffectCommand> initial, String contextLabel,
+            SmpsCoordFlags.Dialect dialect) {
+        this.dialect = dialect;
         setTitle("Effect Stack");
         setHeaderText(contextLabel);
 
@@ -134,10 +141,32 @@ public class EffectStackEditor extends Dialog<List<SmpsEncoder.EffectCommand>> {
     }
 
     public static Optional<List<SmpsEncoder.EffectCommand>> show(List<SmpsEncoder.EffectCommand> initial, String contextLabel) {
-        return new EffectStackEditor(initial, contextLabel).showAndWait();
+        return show(initial, contextLabel, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static Optional<List<SmpsEncoder.EffectCommand>> show(List<SmpsEncoder.EffectCommand> initial,
+            String contextLabel, SmpsCoordFlags.Dialect dialect) {
+        return new EffectStackEditor(initial, contextLabel, dialect).showAndWait();
     }
 
     private void setupFlagChoices() {
+        if (dialect == SmpsCoordFlags.Dialect.S3K) {
+            // Flags whose S3K meaning/size is known; offering S2-only flags
+            // here would write wrongly-sized commands into the phrase
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.PAN, "Pan/AMS/FMS"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.DETUNE, "Detune"));
+            flagBox.getItems().add(new FlagChoice(0xE4, "Set volume (absolute)"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.VOLUME, "Volume change"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.NOTE_FILL, "Note fill"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.SET_TEMPO, "Set tempo"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.PSG_VOLUME, "PSG volume change"));
+            flagBox.getItems().add(new FlagChoice(0xED, "Set transposition"));
+            flagBox.getItems().add(new FlagChoice(0xFB, "Add transposition"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.MODULATION, "Modulation"));
+            flagBox.getItems().add(new FlagChoice(0xF4, "Set modulation envelope"));
+            flagBox.getItems().add(new FlagChoice(SmpsCoordFlags.PSG_NOISE, "PSG noise mode"));
+            return;
+        }
         int[] supported = {
                 SmpsCoordFlags.PAN, SmpsCoordFlags.DETUNE, SmpsCoordFlags.SET_COMM,
                 SmpsCoordFlags.RETURN, SmpsCoordFlags.FADE_IN, SmpsCoordFlags.TICK_MULT,
@@ -168,7 +197,7 @@ public class EffectStackEditor extends Dialog<List<SmpsEncoder.EffectCommand>> {
             hintLabel.setText("");
             return;
         }
-        int params = SmpsCoordFlags.getParamCount(choice.flag());
+        int params = SmpsCoordFlags.getParamCount(choice.flag(), dialect);
         hintLabel.setText(params == 0
                 ? "No params expected."
                 : "Enter " + params + " hex byte(s), e.g. " + sampleParamHint(params));
@@ -225,7 +254,7 @@ public class EffectStackEditor extends Dialog<List<SmpsEncoder.EffectCommand>> {
     private SmpsEncoder.EffectCommand buildCommandFromInputs() {
         FlagChoice choice = flagBox.getValue();
         if (choice == null) return null;
-        int expected = SmpsCoordFlags.getParamCount(choice.flag());
+        int expected = SmpsCoordFlags.getParamCount(choice.flag(), dialect);
         int[] params = parseHexParams(paramsField.getText(), expected);
         if (params == null) return null;
         return new SmpsEncoder.EffectCommand(choice.flag(), params);

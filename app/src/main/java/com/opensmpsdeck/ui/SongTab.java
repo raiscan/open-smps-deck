@@ -130,6 +130,7 @@ public class SongTab {
         if (song.getHierarchicalArrangement() != null) {
             var arr = song.getHierarchicalArrangement();
             songView.setArrangement(arr);
+            songView.setDialect(song.getSmpsMode().dialect());
 
             // Default: show first channel's chain
             chainStrip.setChain(arr.getChain(0), arr.getPhraseLibrary());
@@ -167,7 +168,8 @@ public class SongTab {
             chainStrip.setOnContextMenuRequested(event -> {
                 int ch = songView.getSelectedChannel();
                 String chName = channelDisplayName(ch);
-                ChainEditor editor = new ChainEditor(arr.getChain(ch), arr.getPhraseLibrary(), chName);
+                ChainEditor editor = new ChainEditor(arr.getChain(ch), arr.getPhraseLibrary(),
+                        chName, song.getSmpsMode().dialect());
                 editor.showAndWait().ifPresent(result -> {
                     if (result == javafx.scene.control.ButtonType.OK) {
                         chainStrip.setChain(arr.getChain(ch), arr.getPhraseLibrary());

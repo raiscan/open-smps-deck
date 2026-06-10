@@ -24,6 +24,7 @@ public class ChainEditor extends Dialog<ButtonType> {
 
     private final Chain chain;
     private final PhraseLibrary phraseLibrary;
+    private final com.opensmps.smps.SmpsCoordFlags.Dialect dialect;
     private final TableView<ChainEntryRow> table;
     private final ObservableList<ChainEntryRow> rows = FXCollections.observableArrayList();
 
@@ -45,8 +46,14 @@ public class ChainEditor extends Dialog<ButtonType> {
     }
 
     public ChainEditor(Chain chain, PhraseLibrary phraseLibrary, String channelName) {
+        this(chain, phraseLibrary, channelName, com.opensmps.smps.SmpsCoordFlags.Dialect.S2);
+    }
+
+    public ChainEditor(Chain chain, PhraseLibrary phraseLibrary, String channelName,
+            com.opensmps.smps.SmpsCoordFlags.Dialect dialect) {
         this.chain = chain;
         this.phraseLibrary = phraseLibrary;
+        this.dialect = dialect;
 
         setTitle("Chain Editor - " + channelName);
         setHeaderText("Edit chain entries for " + channelName);
@@ -175,7 +182,7 @@ public class ChainEditor extends Dialog<ButtonType> {
             ChainEntry entry = entries.get(i);
             Phrase phrase = phraseLibrary.getPhrase(entry.getPhraseId());
             int rowCount = phrase != null ?
-                Math.max(1, SmpsDecoder.decode(phrase.getDataDirect()).size()) : 0;
+                Math.max(1, SmpsDecoder.decode(phrase.getDataDirect(), dialect).size()) : 0;
             boolean isLoop = chain.hasLoop() && i == chain.getLoopEntryIndex();
             rows.add(new ChainEntryRow(i, entry, phrase, rowCount, isLoop));
         }

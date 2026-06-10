@@ -150,11 +150,16 @@ public class SmpsEncoder {
      * @return the new track byte array
      */
     public static byte[] insertAtRow(byte[] trackData, int rowIndex, byte[] newBytes) {
+        return insertAtRow(trackData, rowIndex, newBytes, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] insertAtRow(byte[] trackData, int rowIndex, byte[] newBytes,
+            SmpsCoordFlags.Dialect dialect) {
         // Decode to find byte offsets
         if (trackData == null) trackData = new byte[0];
 
         // Find the byte offset of the target row
-        int[] rowOffsets = findRowByteOffsets(trackData);
+        int[] rowOffsets = findRowByteOffsets(trackData, dialect);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -187,9 +192,13 @@ public class SmpsEncoder {
      * @return the new track byte array with the row removed
      */
     public static byte[] deleteRow(byte[] trackData, int rowIndex) {
+        return deleteRow(trackData, rowIndex, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] deleteRow(byte[] trackData, int rowIndex, SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return new byte[0];
 
-        int[] rowOffsets = findRowByteOffsets(trackData);
+        int[] rowOffsets = findRowByteOffsets(trackData, dialect);
         if (rowIndex >= rowOffsets.length) return trackData;
 
         int startOffset = rowOffsets[rowIndex];
@@ -214,9 +223,14 @@ public class SmpsEncoder {
      * @return new track data with transposed notes
      */
     public static byte[] transposeTrackRange(byte[] trackData, int startRow, int rowCount, int semitones) {
+        return transposeTrackRange(trackData, startRow, rowCount, semitones, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] transposeTrackRange(byte[] trackData, int startRow, int rowCount,
+            int semitones, SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return trackData;
         byte[] result = trackData.clone();
-        int[] offsets = findRowByteOffsets(result);
+        int[] offsets = findRowByteOffsets(result, dialect);
 
         int endRow = Math.min(startRow + rowCount, offsets.length);
         for (int row = startRow; row < endRow; row++) {
@@ -238,8 +252,13 @@ public class SmpsEncoder {
      * @return byte array containing just the selected rows' bytes
      */
     public static byte[] extractRowRange(byte[] trackData, int startRow, int rowCount) {
+        return extractRowRange(trackData, startRow, rowCount, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] extractRowRange(byte[] trackData, int startRow, int rowCount,
+            SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return new byte[0];
-        int[] offsets = findRowByteOffsets(trackData);
+        int[] offsets = findRowByteOffsets(trackData, dialect);
 
         if (startRow >= offsets.length) return new byte[0];
 
@@ -269,9 +288,14 @@ public class SmpsEncoder {
      * @return the new track byte array, or the original if rowIndex is out of range
      */
     public static byte[] setRowInstrument(byte[] trackData, int rowIndex, int instrFlag, int instrValue) {
+        return setRowInstrument(trackData, rowIndex, instrFlag, instrValue, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] setRowInstrument(byte[] trackData, int rowIndex, int instrFlag,
+            int instrValue, SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return trackData;
 
-        int[] rowOffsets = findRowByteOffsets(trackData);
+        int[] rowOffsets = findRowByteOffsets(trackData, dialect);
         if (rowIndex >= rowOffsets.length) return trackData;
 
         int rowStart = rowOffsets[rowIndex];
@@ -282,7 +306,7 @@ public class SmpsEncoder {
         while (pos < rowStart) {
             int b = trackData[pos] & 0xFF;
             if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(trackData, pos, b, dialect);
                 if (b == instrFlag && paramCount >= 1 && pos + 1 < trackData.length) {
                     // Found existing instrument flag -- update its parameter in-place
                     byte[] result = trackData.clone();
@@ -313,9 +337,14 @@ public class SmpsEncoder {
      * and this row's note/tie byte), excluding instrument commands (EF/F5).
      */
     public static List<EffectCommand> getRowEffects(byte[] trackData, int rowIndex) {
+        return getRowEffects(trackData, rowIndex, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static List<EffectCommand> getRowEffects(byte[] trackData, int rowIndex,
+            SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return List.of();
 
-        int[] rowOffsets = findRowByteOffsets(trackData);
+        int[] rowOffsets = findRowByteOffsets(trackData, dialect);
         if (rowIndex < 0 || rowIndex >= rowOffsets.length) return List.of();
 
         int rowStart = rowOffsets[rowIndex];
@@ -326,7 +355,7 @@ public class SmpsEncoder {
         while (pos < rowStart) {
             int b = trackData[pos] & 0xFF;
             if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(trackData, pos, b, dialect);
                 if (!SmpsCoordFlags.isSetVoice(b) && !SmpsCoordFlags.isPsgInstrument(b) && b != SmpsCoordFlags.TIE) {
                     int[] params = new int[paramCount];
                     for (int i = 0; i < paramCount; i++) {
@@ -349,9 +378,14 @@ public class SmpsEncoder {
      * <p>Instrument flags (EF/F5) in the row prelude are preserved exactly.
      */
     public static byte[] setRowEffects(byte[] trackData, int rowIndex, List<EffectCommand> effects) {
+        return setRowEffects(trackData, rowIndex, effects, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] setRowEffects(byte[] trackData, int rowIndex, List<EffectCommand> effects,
+            SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return trackData;
 
-        int[] rowOffsets = findRowByteOffsets(trackData);
+        int[] rowOffsets = findRowByteOffsets(trackData, dialect);
         if (rowIndex < 0 || rowIndex >= rowOffsets.length) return trackData;
 
         int rowStart = rowOffsets[rowIndex];
@@ -363,7 +397,7 @@ public class SmpsEncoder {
         while (pos < rowStart) {
             int b = trackData[pos] & 0xFF;
             if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(trackData, pos, b, dialect);
                 int spanEnd = Math.min(trackData.length, pos + 1 + paramCount);
                 if (SmpsCoordFlags.isSetVoice(b) || SmpsCoordFlags.isPsgInstrument(b)) {
                     keptInstrumentBytes.write(trackData, pos, Math.max(0, spanEnd - pos));
@@ -385,7 +419,7 @@ public class SmpsEncoder {
                 if (SmpsCoordFlags.isSetVoice(flag) || SmpsCoordFlags.isPsgInstrument(flag) || flag == SmpsCoordFlags.TIE) {
                     continue;
                 }
-                int expected = SmpsCoordFlags.getParamCount(flag);
+                int expected = SmpsCoordFlags.getParamCount(flag, dialect);
                 int[] params = cmd.params() != null ? cmd.params() : new int[0];
                 if (params.length != expected) continue;
 
@@ -407,10 +441,12 @@ public class SmpsEncoder {
     private static int getRowPreludeStart(byte[] trackData, int[] rowOffsets, int rowIndex) {
         if (rowIndex <= 0) return 0;
 
-        // End of previous row: note/tie byte + optional duration byte.
+        // End of previous row: a note/rest carries an optional inline
+        // duration byte; tie and bare-duration re-trigger rows are 1 byte.
         int prevRowPos = rowOffsets[rowIndex - 1];
+        int prevByte = trackData[prevRowPos] & 0xFF;
         int scanStart = prevRowPos + 1;
-        if (scanStart < trackData.length) {
+        if (prevByte >= 0x80 && prevByte <= 0xDF && scanStart < trackData.length) {
             int next = trackData[scanStart] & 0xFF;
             if (next >= 0x01 && next <= 0x7F) {
                 scanStart++;
@@ -424,21 +460,33 @@ public class SmpsEncoder {
      * Uses {@link SmpsCoordFlags#getParamCount(int)} for consistent flag parsing.
      */
     static int[] findRowByteOffsets(byte[] trackData) {
+        return findRowByteOffsets(trackData, SmpsCoordFlags.Dialect.S2);
+    }
+
+    /**
+     * Find the byte offset for each decoded row in the track data. Row
+     * semantics MUST mirror {@link SmpsDecoder#decodeWithOffsets}: notes,
+     * rests, ties, and bare-duration re-triggers (after the first note)
+     * are rows.
+     */
+    static int[] findRowByteOffsets(byte[] trackData, SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) return new int[0];
 
         List<Integer> offsets = new ArrayList<>();
         int pos = 0;
+        boolean seenNote = false;
 
         while (pos < trackData.length) {
             int b = trackData[pos] & 0xFF;
 
-            if (b == 0x00 || b == SmpsCoordFlags.STOP) {
+            if (b == 0x00 || SmpsCoordFlags.isTrackEnd(b, dialect)) {
                 break;
             } else if (b >= 0x80 && b <= 0xDF) {
                 // Note/rest -- this is a row
                 offsets.add(pos);
+                seenNote = true;
                 pos++;
-                // Skip duration if present
+                // Skip inline duration if present
                 if (pos < trackData.length) {
                     int next = trackData[pos] & 0xFF;
                     if (next >= 0x01 && next <= 0x7F) {
@@ -446,9 +494,13 @@ public class SmpsEncoder {
                     }
                 }
             } else if (b >= 0x01 && b <= 0x7F) {
+                // Bare duration: a re-trigger row when a note precedes it
+                if (seenNote) {
+                    offsets.add(pos);
+                }
                 pos++;
             } else if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(trackData, pos, b, dialect);
 
                 if (b == SmpsCoordFlags.TIE) {
                     // Tie is also a row

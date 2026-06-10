@@ -59,7 +59,8 @@ public final class TimelineBuilder {
                 byte[] data = phrase.getDataDirect();
                 if (data == null || data.length == 0) continue;
 
-                List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data);
+                List<SmpsDecoder.TrackerRow> rows = SmpsDecoder.decode(data,
+                        song.getSmpsMode().dialect());
                 int repeatCount = Math.max(1, entry.getRepeatCount());
 
                 // Record loop-back tick at the start of the loop target entry

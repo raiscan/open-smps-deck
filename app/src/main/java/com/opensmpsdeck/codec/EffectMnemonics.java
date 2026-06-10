@@ -7,6 +7,33 @@ public final class EffectMnemonics {
     private EffectMnemonics() {}
 
     public static String format(int flag, int[] params) {
+        return format(flag, params, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static String format(int flag, int[] params, SmpsCoordFlags.Dialect dialect) {
+        if (dialect == SmpsCoordFlags.Dialect.S3K) {
+            // Flags whose meaning differs from S2 in the S3K driver
+            switch (flag) {
+                case 0xE3: return "END";
+                case 0xE4: return String.format("VLA %02X", params.length > 0 ? params[0] : 0);
+                case 0xE9: return "SDR";
+                case 0xED: return String.format("TRS %02X", params.length > 0 ? params[0] : 0);
+                case 0xEE: return String.format("FMC %02X %02X",
+                        params.length > 0 ? params[0] : 0, params.length > 1 ? params[1] : 0);
+                case 0xF1: return String.format("MNV %02X %02X",
+                        params.length > 0 ? params[0] : 0, params.length > 1 ? params[1] : 0);
+                case 0xF4: return String.format("MNV %02X", params.length > 0 ? params[0] : 0);
+                case 0xF9: return "RET";
+                case 0xFB: return "TRN " + formatSigned(params.length > 0 ? params[0] : 0);
+                case 0xE5: case 0xEB: case 0xFC: case 0xFD: case 0xFE: case 0xFF: {
+                    StringBuilder sb = new StringBuilder(String.format("%02X", flag));
+                    for (int p : params) sb.append(String.format(" %02X", p & 0xFF));
+                    return sb.toString();
+                }
+                default:
+                    break; // same semantics as S2 — fall through
+            }
+        }
         return switch (flag) {
             case SmpsCoordFlags.PAN -> formatPan(params);
             case SmpsCoordFlags.DETUNE -> "DET " + formatSigned(params[0]);
@@ -39,10 +66,25 @@ public final class EffectMnemonics {
     }
 
     public static SmpsEncoder.EffectCommand parse(String mnemonic) {
+        return parse(mnemonic, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static SmpsEncoder.EffectCommand parse(String mnemonic, SmpsCoordFlags.Dialect dialect) {
         if (mnemonic == null || mnemonic.isEmpty()) return null;
         String[] parts = mnemonic.split(" ", 2);
         String cmd = parts[0].toUpperCase();
         String arg = parts.length > 1 ? parts[1].trim() : "";
+
+        if (dialect == SmpsCoordFlags.Dialect.S3K) {
+            switch (cmd) {
+                case "TRN": return new SmpsEncoder.EffectCommand(0xFB, new int[]{parseSigned(arg)});
+                case "TRS": return new SmpsEncoder.EffectCommand(0xED, new int[]{parseHex(arg)});
+                case "VLA": return new SmpsEncoder.EffectCommand(0xE4, new int[]{parseHex(arg)});
+                case "MNV": return new SmpsEncoder.EffectCommand(0xF4, new int[]{parseHex(arg)});
+                default:
+                    break;
+            }
+        }
 
         return switch (cmd) {
             case "PAN" -> new SmpsEncoder.EffectCommand(SmpsCoordFlags.PAN, new int[]{parsePan(arg)});

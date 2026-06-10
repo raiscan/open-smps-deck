@@ -131,6 +131,7 @@ final class PlaybackSliceBuilder {
     }
 
     private void rewriteFirstOrderRowForRowOffset(Song song, int rowIndex) {
+        var dialect = song.getSmpsMode().dialect();
         int[] firstOrder = song.getOrderList().get(0);
         int entryPatternIndex = song.getPatterns().size();
 
@@ -151,7 +152,7 @@ final class PlaybackSliceBuilder {
             if (patternIndex >= 0 && patternIndex < song.getPatterns().size()) {
                 sourceTrack = song.getPatterns().get(patternIndex).getTrackData(ch);
             }
-            byte[] trimmed = extractRowRangeForPlayback(sourceTrack, rowIndex, ch);
+            byte[] trimmed = extractRowRangeForPlayback(sourceTrack, rowIndex, ch, dialect);
             entry.setTrackData(ch, trimmed);
             firstOrder[ch] = entryPatternIndex;
         }
@@ -163,19 +164,20 @@ final class PlaybackSliceBuilder {
      * Extracts decoded rows from {@code startRow} onward while preserving enough
      * context so the first extracted row plays correctly.
      */
-    private byte[] extractRowRangeForPlayback(byte[] trackData, int startRow, int channel) {
+    private byte[] extractRowRangeForPlayback(byte[] trackData, int startRow, int channel,
+            SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) {
             return new byte[0];
         }
 
-        List<RowSliceContext> rows = scanRowSliceContexts(trackData);
+        List<RowSliceContext> rows = scanRowSliceContexts(trackData, dialect);
         if (startRow < 0 || startRow >= rows.size()) {
             return new byte[0];
         }
 
         RowSliceContext start = rows.get(startRow);
         byte[] prefix = Arrays.copyOfRange(trackData, start.prefixStartOffset, start.rowStartOffset);
-        byte[] body = SmpsEncoder.extractRowRange(trackData, startRow, 1_000_000);
+        byte[] body = SmpsEncoder.extractRowRange(trackData, startRow, 1_000_000, dialect);
 
         List<byte[]> parts = new ArrayList<>(4);
         boolean fmLikeChannel = channel <= 5;
@@ -217,10 +219,6 @@ final class PlaybackSliceBuilder {
         return out;
     }
 
-    private List<RowSliceContext> scanRowSliceContexts(byte[] trackData) {
-        return scanRowSliceContexts(trackData, SmpsCoordFlags.Dialect.S2);
-    }
-
     private List<RowSliceContext> scanRowSliceContexts(byte[] trackData,
             SmpsCoordFlags.Dialect dialect) {
         List<RowSliceContext> rows = new ArrayList<>();
@@ -230,6 +228,7 @@ final class PlaybackSliceBuilder {
         int lastFmInstrument = -1;
         int lastPsgInstrument = -1;
         boolean durationSincePreviousRow = false;
+        boolean seenNote = false;
         boolean fmInstrumentSincePreviousRow = false;
         boolean psgInstrumentSincePreviousRow = false;
 
@@ -239,6 +238,9 @@ final class PlaybackSliceBuilder {
                 break;
             }
 
+            if (b >= 0x80 && b <= 0xDF) {
+                seenNote = true;
+            }
             if ((b >= 0x80 && b <= 0xDF) || b == SmpsCoordFlags.TIE) {
                 RowSliceContext row = new RowSliceContext();
                 row.prefixStartOffset = prevRowEnd;
@@ -269,6 +271,28 @@ final class PlaybackSliceBuilder {
             }
 
             if (b >= 0x01 && b <= 0x7F) {
+                // Bare duration after a note: a re-trigger row of its own
+                // (mirrors SmpsDecoder/SmpsEncoder row semantics)
+                if (seenNote) {
+                    RowSliceContext row = new RowSliceContext();
+                    row.prefixStartOffset = prevRowEnd;
+                    row.rowStartOffset = pos;
+                    row.lastDurationBeforeRow = currentDuration;
+                    row.lastFmInstrumentBeforeRow = lastFmInstrument;
+                    row.lastPsgInstrumentBeforeRow = lastPsgInstrument;
+                    row.prefixSetsDuration = durationSincePreviousRow;
+                    row.prefixSetsFmInstrument = fmInstrumentSincePreviousRow;
+                    row.prefixSetsPsgInstrument = psgInstrumentSincePreviousRow;
+                    row.rowHasInlineDuration = true; // the byte IS the duration
+                    currentDuration = b;
+                    rows.add(row);
+                    pos++;
+                    prevRowEnd = pos;
+                    durationSincePreviousRow = false;
+                    fmInstrumentSincePreviousRow = false;
+                    psgInstrumentSincePreviousRow = false;
+                    continue;
+                }
                 currentDuration = b;
                 durationSincePreviousRow = true;
                 pos++;

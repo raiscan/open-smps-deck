@@ -44,6 +44,10 @@ public final class InstrumentRemapper {
      * @return scan result containing the sets of referenced voice and PSG indices
      */
     public static ScanResult scan(byte[] data) {
+        return scan(data, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static ScanResult scan(byte[] data, SmpsCoordFlags.Dialect dialect) {
         Set<Integer> voiceIndices = new LinkedHashSet<>();
         Set<Integer> psgIndices = new LinkedHashSet<>();
 
@@ -56,7 +60,7 @@ public final class InstrumentRemapper {
             int b = data[pos] & 0xFF;
 
             if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(data, pos, b, dialect);
 
                 if (b == SmpsCoordFlags.SET_VOICE && pos + 1 < data.length) {
                     voiceIndices.add(data[pos + 1] & 0xFF);
@@ -88,6 +92,11 @@ public final class InstrumentRemapper {
      * @return new byte array with rewritten indices
      */
     public static byte[] rewrite(byte[] data, Map<Integer, Integer> voiceMap, Map<Integer, Integer> psgMap) {
+        return rewrite(data, voiceMap, psgMap, SmpsCoordFlags.Dialect.S2);
+    }
+
+    public static byte[] rewrite(byte[] data, Map<Integer, Integer> voiceMap,
+            Map<Integer, Integer> psgMap, SmpsCoordFlags.Dialect dialect) {
         if (data == null || data.length == 0) {
             return new byte[0];
         }
@@ -99,7 +108,7 @@ public final class InstrumentRemapper {
             int b = result[pos] & 0xFF;
 
             if (b >= 0xE0) {
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = SmpsDecoder.flagSpan(data, pos, b, dialect);
 
                 if (b == SmpsCoordFlags.SET_VOICE && pos + 1 < result.length) {
                     int srcIdx = result[pos + 1] & 0xFF;

@@ -10,6 +10,13 @@ import java.util.List;
  *
  * <p>Uses {@link SmpsCoordFlags} for all coordination flag parameter counts
  * and semantic identification (voice set, PSG instrument, tie, etc.).
+ * Flag sizes are dialect-dependent; the single-argument overloads assume the
+ * S2 dialect for backward compatibility.
+ *
+ * <p>A bare duration byte (0x01-0x7F) after a note RE-TRIGGERS that note in
+ * the driver, so it decodes as its own row (repeating the note display).
+ * A leading bare duration with no preceding note only sets the duration and
+ * produces no row.
  */
 public class SmpsDecoder {
 
@@ -45,13 +52,19 @@ public class SmpsDecoder {
         return NOTE_NAMES[semitone] + octave;
     }
 
+    /** Decode with the default S2 dialect. */
+    public static List<TrackerRow> decode(byte[] trackData) {
+        return decode(trackData, SmpsCoordFlags.Dialect.S2);
+    }
+
     /**
      * Decode raw SMPS track data into a list of TrackerRows.
-     * Each note/rest produces one row. Coordination flags are attached to the
-     * following note's effect column, or as standalone rows if no note follows.
+     * Each note/rest/re-trigger produces one row. Coordination flags are
+     * attached to the following note's effect column, or as standalone rows
+     * if no note follows.
      */
-    public static List<TrackerRow> decode(byte[] trackData) {
-        List<DecodedRow> decoded = decodeWithOffsets(trackData);
+    public static List<TrackerRow> decode(byte[] trackData, SmpsCoordFlags.Dialect dialect) {
+        List<DecodedRow> decoded = decodeWithOffsets(trackData, dialect);
         List<TrackerRow> rows = new ArrayList<>(decoded.size());
         for (DecodedRow row : decoded) {
             rows.add(row.row());
@@ -59,18 +72,24 @@ public class SmpsDecoder {
         return rows;
     }
 
+    /** Decode with offsets using the default S2 dialect. */
+    public static List<DecodedRow> decodeWithOffsets(byte[] trackData) {
+        return decodeWithOffsets(trackData, SmpsCoordFlags.Dialect.S2);
+    }
+
     /**
      * Decode raw SMPS track data into rows with source byte offsets.
      *
-     * <p>Row decoding semantics are identical to {@link #decode(byte[])}.
+     * <p>Row decoding semantics are identical to {@link #decode(byte[], SmpsCoordFlags.Dialect)}.
      */
-    public static List<DecodedRow> decodeWithOffsets(byte[] trackData) {
+    public static List<DecodedRow> decodeWithOffsets(byte[] trackData, SmpsCoordFlags.Dialect dialect) {
         if (trackData == null || trackData.length == 0) {
             return List.of();
         }
 
         int pos = 0;
         int currentDuration = 0;
+        int lastNoteByte = -1;
         StringBuilder pendingEffect = new StringBuilder();
         String pendingInstrument = "";
         int pendingRowOffset = -1;
@@ -79,16 +98,17 @@ public class SmpsDecoder {
         while (pos < trackData.length) {
             int b = trackData[pos] & 0xFF;
 
-            if (b == 0x00 || b == SmpsCoordFlags.STOP) {
+            if (b == 0x00 || SmpsCoordFlags.isTrackEnd(b, dialect)) {
                 // Track end - stop decoding.
                 break;
             } else if (b >= 0x80 && b <= 0xDF) {
                 // Note or rest.
                 int noteOffset = pos;
                 String note = decodeNote(b);
+                lastNoteByte = b;
                 pos++;
 
-                // Check for duration byte.
+                // Check for inline duration byte.
                 if (pos < trackData.length) {
                     int next = trackData[pos] & 0xFF;
                     if (next >= 0x01 && next <= 0x7F) {
@@ -105,13 +125,23 @@ public class SmpsDecoder {
                 pendingRowOffset = -1;
 
             } else if (b >= 0x01 && b <= 0x7F) {
-                // Bare duration (re-trigger with previous note duration).
+                // Bare duration: re-triggers the previous note in the driver,
+                // so it is a row of its own. With no preceding note it only
+                // sets the duration.
                 currentDuration = b;
+                if (lastNoteByte >= 0) {
+                    String effect = pendingEffect.length() > 0 ? pendingEffect.toString().trim() : "";
+                    rows.add(new DecodedRow(pos, new TrackerRow(
+                            decodeNote(lastNoteByte), currentDuration, pendingInstrument, effect)));
+                    pendingEffect.setLength(0);
+                    pendingInstrument = "";
+                    pendingRowOffset = -1;
+                }
                 pos++;
 
             } else if (b >= 0xE0) {
                 // Coordination flag.
-                int paramCount = SmpsCoordFlags.getParamCount(b);
+                int paramCount = flagSpan(trackData, pos, b, dialect);
                 if (pendingRowOffset < 0) {
                     pendingRowOffset = pos;
                 }
@@ -153,5 +183,18 @@ public class SmpsDecoder {
         }
 
         return rows;
+    }
+
+    /**
+     * Parameter byte count for the flag at {@code pos} in the dialect,
+     * including the S3K FF meta sub-command's parameters.
+     */
+    static int flagSpan(byte[] data, int pos, int cmd, SmpsCoordFlags.Dialect dialect) {
+        int params = SmpsCoordFlags.getParamCount(cmd, dialect);
+        if (dialect == SmpsCoordFlags.Dialect.S3K && cmd == SmpsCoordFlags.S3K_META
+                && pos + 1 < data.length) {
+            params += SmpsCoordFlags.getMetaParamCount(data[pos + 1] & 0xFF);
+        }
+        return params;
     }
 }
