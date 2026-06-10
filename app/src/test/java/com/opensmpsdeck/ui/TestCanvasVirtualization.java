@@ -75,6 +75,9 @@ class TestCanvasVirtualization {
 
     private static Song longSong(int rows) {
         Song song = new Song();
+        // Legacy pattern-view song: hierarchical mode with empty chains would
+        // show the getting-started hint instead of the pattern grid
+        song.setArrangementMode(com.opensmpsdeck.model.ArrangementMode.STRUCTURED_BLOCKS);
         song.getPatterns().clear();
         Pattern pattern = new Pattern(0, 64);
         pattern.setTrackData(0, longTrack(rows));

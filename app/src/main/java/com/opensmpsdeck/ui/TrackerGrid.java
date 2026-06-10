@@ -179,6 +179,11 @@ public class TrackerGrid extends ScrollPane {
     public void setOnPlayFromCursor(Runnable callback) { this.onPlayFromCursor = callback; }
     public void setOnDirty(Runnable callback) { this.onDirty = callback; }
     public void setOnRequestUnroll(Runnable callback) { this.onRequestUnroll = callback; }
+
+    /** Asks the owner to build an unrolled timeline and enter unrolled mode. */
+    public void requestUnroll() {
+        if (onRequestUnroll != null) onRequestUnroll.run();
+    }
     public void setOnNavigateToPhrase(Consumer<UnrolledTimeline.SourceRef> callback) { this.onNavigateToPhrase = callback; }
     public void setPlaybackEngine(PlaybackEngine engine) { this.playbackEngine = engine; }
     private void markDirty() { if (onDirty != null) onDirty.run(); }
@@ -265,6 +270,13 @@ public class TrackerGrid extends ScrollPane {
      * In this mode, the grid shows one channel and edits write to the phrase.
      */
     public void setPhrase(Phrase phrase, int channelIndex) {
+        // Editing a phrase always leaves unrolled mode; the unrolled timeline
+        // would otherwise keep rendering over the phrase grid
+        if (viewMode == ViewMode.UNROLLED) {
+            this.viewMode = ViewMode.PHRASE;
+            this.unrolledTimeline = null;
+            if (viewModeChangeListener != null) viewModeChangeListener.run();
+        }
         this.activePhrase = phrase;
         this.phraseChannelIndex = channelIndex;
         this.cursorRow = 0;
@@ -343,12 +355,49 @@ public class TrackerGrid extends ScrollPane {
         if (song == null || song.getPatterns().isEmpty()) return;
         if (currentPatternIndex < 0 || currentPatternIndex >= song.getPatterns().size()) return;
 
+        // Empty hierarchical song: show a getting-started hint instead of a bare grid
+        if (isEmptyHierarchicalSong()) {
+            double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH * Pattern.CHANNEL_COUNT;
+            applyVirtualSize(totalWidth, HEADER_HEIGHT + ROW_HEIGHT * 16);
+            renderEmptySongHint();
+            return;
+        }
+
         Pattern pattern = song.getPatterns().get(currentPatternIndex);
         int maxRows = Math.max(pattern.getRows(), ensureDecodedCache());
 
         double totalWidth = ROW_NUM_WIDTH + CHANNEL_WIDTH * Pattern.CHANNEL_COUNT;
         applyVirtualSize(totalWidth, HEADER_HEIGHT + ROW_HEIGHT * maxRows);
         render(maxRows);
+    }
+
+    /** True when the song uses the hierarchical model but has no chain content yet. */
+    private boolean isEmptyHierarchicalSong() {
+        if (song == null) return false;
+        if (song.getArrangementMode() != com.opensmpsdeck.model.ArrangementMode.HIERARCHICAL) return false;
+        var hier = song.getHierarchicalArrangement();
+        if (hier == null) return true;
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            if (!hier.getChain(ch).getEntries().isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private void renderEmptySongHint() {
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        gc.setFill(Color.web("#1a1a2e"));
+        gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+
+        gc.setFont(MONO_FONT);
+        gc.setFill(Color.web("#667799"));
+        double x = ROW_NUM_WIDTH + 12;
+        double y = HEADER_HEIGHT + 28;
+        gc.fillText("This song is empty.", x, y);
+        gc.setFill(Color.web("#556688"));
+        gc.fillText("1. Right-click the chain strip above to add a phrase to a channel", x, y + 24);
+        gc.fillText("2. Click the phrase cell to open it in this grid and enter notes", x, y + 44);
+        gc.fillText("3. Use the Song panel on the left to arrange phrases per channel", x, y + 64);
+        gc.fillText("Keys: Z-M play notes · 0-9/A-F set values · Space play/stop", x, y + 92);
     }
 
     /**
@@ -435,6 +484,15 @@ public class TrackerGrid extends ScrollPane {
         gc.setFill(Color.web("#1a1a2e"));
         gc.fillRect(0, 0, canvas.getWidth(), viewportHeight);
 
+        // Phrase mode: tint the grid with the phrase's colour so it visually
+        // matches the same phrase's blocks in SongView and ChainStrip
+        if (activePhrase != null) {
+            Color phraseColor = PhraseColors.forPhraseId(activePhrase.getId());
+            gc.setFill(Color.color(phraseColor.getRed(), phraseColor.getGreen(),
+                    phraseColor.getBlue(), 0.08));
+            gc.fillRect(0, 0, canvas.getWidth(), viewportHeight);
+        }
+
         // Draw header (visible when scrolled near top)
         int channelCount = getVisibleChannelCount();
         double headerBottomOnCanvas = HEADER_HEIGHT - scrollY;
@@ -451,7 +509,10 @@ public class TrackerGrid extends ScrollPane {
                     headerName = CHANNEL_NAMES[ch];
                 }
                 boolean effectivelyMuted = soloChannel >= 0 ? (ch != soloChannel) : channelMuted[ch];
-                if (soloChannel == ch) {
+                if (activePhrase != null) {
+                    // Header text in the phrase's colour
+                    gc.setFill(PhraseColors.forPhraseId(activePhrase.getId()).brighter());
+                } else if (soloChannel == ch) {
                     gc.setFill(Color.web("#ffcc00")); // gold for solo
                 } else if (effectivelyMuted) {
                     gc.setFill(Color.web("#555555")); // grey for muted

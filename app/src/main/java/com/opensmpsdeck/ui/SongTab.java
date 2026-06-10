@@ -139,8 +139,9 @@ public class SongTab {
                 breadcrumbBar.setCrumbs(java.util.List.of(
                     new BreadcrumbBar.Crumb(chName + " Chain", 0)
                 ));
-                // Return to pattern view when switching channels
+                // Return to the unrolled song view when switching channels
                 trackerGrid.clearPhrase();
+                trackerGrid.requestUnroll();
             });
 
             // SongView double-click → navigate into phrase
@@ -176,8 +177,9 @@ public class SongTab {
             // BreadcrumbBar navigation
             breadcrumbBar.setOnNavigate(depth -> {
                 if (depth == 0) {
-                    // Back to chain level: clear phrase from grid
+                    // Back to chain level: return to the unrolled song view
                     trackerGrid.clearPhrase();
+                    trackerGrid.requestUnroll();
                 }
             });
         }

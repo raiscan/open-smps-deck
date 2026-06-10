@@ -165,6 +165,7 @@ public class MainWindow {
 
         // Wire unroll toggle callback
         songTab.getTrackerGrid().setOnRequestUnroll(() -> {
+            if (!hasChainContent(songTab.getSong())) return;
             UnrolledTimeline timeline = TimelineBuilder.build(songTab.getSong());
             songTab.getTrackerGrid().setUnrolledTimeline(timeline);
         });
@@ -194,6 +195,14 @@ public class MainWindow {
 
         // Hierarchical layout: SongView (left), BreadcrumbBar+ChainStrip+TrackerGrid (center)
         javafx.scene.layout.HBox unrollToolbar = songTab.getTrackerGrid().createUnrollToolbar();
+
+        // Open hierarchical songs in the unrolled timeline by default: it is the
+        // view that lines up with the chain/phrase structure (phrase spans are
+        // colour-tinted), unlike the legacy flat pattern view.
+        if (songTab.isHierarchical() && hasChainContent(songTab.getSong())) {
+            grid.setUnrolledTimeline(TimelineBuilder.build(songTab.getSong()));
+        }
+
         VBox centerTop = new VBox(songTab.getBreadcrumbBar(), songTab.getChainStrip(), unrollToolbar);
         BorderPane centerPane = new BorderPane();
         centerPane.setTop(centerTop);
@@ -411,4 +420,15 @@ public class MainWindow {
         SongTab tab = getActiveSongTab();
         return tab != null ? tab.getInstrumentPanel() : null;
     }
+
+    /** True when any channel chain has at least one entry. */
+    private static boolean hasChainContent(Song song) {
+        var hier = song.getHierarchicalArrangement();
+        if (hier == null) return false;
+        for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
+            if (!hier.getChain(ch).getEntries().isEmpty()) return true;
+        }
+        return false;
+    }
+
 }
