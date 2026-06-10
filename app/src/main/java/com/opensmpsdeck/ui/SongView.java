@@ -10,6 +10,7 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -36,6 +37,9 @@ public class SongView extends ScrollPane {
     };
 
     private final Canvas canvas;
+    // Spacer carries the full logical width; the canvas stays viewport-sized
+    // to respect GPU texture limits (huge canvases fail to render)
+    private final Pane scrollSpacer = new Pane();
     private HierarchicalArrangement arrangement;
     private IntConsumer onPhraseSelected;
     private BiConsumer<Integer, Integer> onPhraseDoubleClicked; // (channelIndex, entryIndex)
@@ -45,13 +49,18 @@ public class SongView extends ScrollPane {
 
     public SongView() {
         canvas = new Canvas(600, Pattern.CHANNEL_COUNT * CHANNEL_HEIGHT);
-        setContent(canvas);
+        scrollSpacer.getChildren().add(canvas);
+        setContent(scrollSpacer);
         setFitToWidth(true);
         setPannable(false);
         setStyle("-fx-background: #1a1a2e;");
         setPrefWidth(200);
 
         canvas.setOnMousePressed(this::handleMousePressed);
+
+        // Re-render the visible window whenever the viewport scrolls or resizes
+        hvalueProperty().addListener((obs, oldVal, newVal) -> refreshDisplay());
+        viewportBoundsProperty().addListener((obs, oldVal, newVal) -> refreshDisplay());
     }
 
     public void setArrangement(HierarchicalArrangement arrangement) {
@@ -76,15 +85,29 @@ public class SongView extends ScrollPane {
     }
 
     public void refreshDisplay() {
-        double totalWidth = computeTotalWidth();
-        canvas.setWidth(Math.max(totalWidth, getWidth()));
-        canvas.setHeight(Pattern.CHANNEL_COUNT * CHANNEL_HEIGHT);
+        double totalWidth = Math.max(computeTotalWidth(), getWidth());
+        double totalHeight = Pattern.CHANNEL_COUNT * CHANNEL_HEIGHT;
+
+        scrollSpacer.setMinSize(totalWidth, totalHeight);
+        scrollSpacer.setPrefSize(totalWidth, totalHeight);
+
+        double viewportWidth = getViewportBounds() != null ? getViewportBounds().getWidth() : 600;
+        if (viewportWidth <= 0) viewportWidth = 600;
+        canvas.setWidth(Math.min(viewportWidth, totalWidth));
+        canvas.setHeight(totalHeight);
+
+        double scrollX = getScrollX();
+        canvas.setLayoutX(scrollX);
 
         GraphicsContext gc = canvas.getGraphicsContext2D();
         gc.setFill(Color.web("#1a1a2e"));
         gc.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
         if (arrangement == null) return;
+
+        // Render in content coordinates; the canvas only shows the visible window
+        gc.save();
+        gc.translate(-scrollX, 0);
 
         for (int ch = 0; ch < Pattern.CHANNEL_COUNT; ch++) {
             renderChannel(gc, ch);
@@ -97,6 +120,18 @@ public class SongView extends ScrollPane {
             gc.setLineWidth(1);
             gc.strokeLine(cursorX, 0, cursorX, canvas.getHeight());
         }
+
+        gc.restore();
+    }
+
+    /**
+     * Compute the scroll X offset from the ScrollPane's hvalue:
+     * the pixel offset of the viewport left edge within the logical content.
+     */
+    private double getScrollX() {
+        double scrollableWidth = scrollSpacer.getMinWidth() - canvas.getWidth();
+        if (scrollableWidth <= 0) return 0;
+        return getHvalue() * scrollableWidth;
     }
 
     private void renderChannel(GraphicsContext gc, int ch) {
@@ -109,10 +144,10 @@ public class SongView extends ScrollPane {
         gc.setFill(Color.web("#88aacc"));
         gc.fillText(CHANNEL_NAMES[ch], 4, y + CHANNEL_HEIGHT - 8);
 
-        // Channel separator line
+        // Channel separator line (content coordinates; clipped to the canvas)
         gc.setStroke(Color.web("#333344"));
         gc.setLineWidth(0.5);
-        gc.strokeLine(0, y + CHANNEL_HEIGHT, canvas.getWidth(), y + CHANNEL_HEIGHT);
+        gc.strokeLine(0, y + CHANNEL_HEIGHT, scrollSpacer.getMinWidth(), y + CHANNEL_HEIGHT);
 
         // Phrase blocks
         double blockX = LABEL_WIDTH;
@@ -205,8 +240,9 @@ public class SongView extends ScrollPane {
         Chain chain = arrangement.getChain(ch);
         PhraseLibrary library = arrangement.getPhraseLibrary();
 
-        // Find which entry was clicked
-        double clickX = e.getX();
+        // Find which entry was clicked (canvas sits at the scroll offset,
+        // so canvas-local x maps to content x by adding the offset)
+        double clickX = e.getX() + getScrollX();
         double blockX = LABEL_WIDTH;
         selectedEntryIndex = -1;
 
