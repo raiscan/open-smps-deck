@@ -1,6 +1,7 @@
 package com.opensmpsdeck.ui;
 
 import com.opensmpsdeck.audio.AdsrEnvelopeCalculator;
+import com.opensmpsdeck.audio.InstrumentPreviewPlayer;
 import com.opensmpsdeck.audio.PlaybackEngine;
 import com.opensmpsdeck.io.OsmpsVoiceFile;
 import com.opensmpsdeck.model.FmVoice;
@@ -52,6 +53,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
     private final HBox operatorRow;
     private ComboBox<Integer> algoCombo;
     private ComboBox<Integer> fbCombo;
+    private final NoteSelector noteSelector = new NoteSelector();
     private PlaybackEngine previewEngine;
 
     /**
@@ -134,42 +136,13 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
     }
 
     /**
-     * Plays a short test note using the current voice settings.
-     * Stops any active playback first to ensure the preview channel is available.
+     * Plays the selected note with the current voice settings, through the real
+     * SMPS pipeline so the preview matches in-song playback.
      */
     private void previewVoice() {
-        if (previewEngine == null) return;
-
-        // Stop any active playback so FM channel 0 lock is released
-        previewEngine.stop();
-
-        byte[] voiceData = voice.getData();
-        var driver = previewEngine.getDriver();
-
-        // Load the current voice onto FM channel 0
-        driver.setInstrument(this, 0, voiceData);
-
-        // Set panning to both L+R on channel 0 (reg 0xB4, port 0)
-        driver.writeFm(this, 0, 0xB4, 0xC0);
-
-        // Key on: write note frequency for middle C (octave 4, ~262Hz)
-        // YM2612 freq for C4: block=4, fnum=0x269
-        int block = 4;
-        int fnum = 0x269;
-        driver.writeFm(this, 0, 0xA4, (block << 3) | ((fnum >> 8) & 0x07)); // freq MSB
-        driver.writeFm(this, 0, 0xA0, fnum & 0xFF); // freq LSB
-        driver.writeFm(this, 0, 0x28, 0xF0); // key on all operators, channel 0
-
-        // Ensure audio output is running so the preview is audible
-        previewEngine.play();
-
-        // Schedule key off after 500ms
-        Thread keyOffThread = new Thread(() -> {
-            try { Thread.sleep(500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-            driver.writeFm(this, 0, 0x28, 0x00); // key off channel 0
-        });
-        keyOffThread.setDaemon(true);
-        keyOffThread.start();
+        InstrumentPreviewPlayer.previewFmVoice(previewEngine,
+                new FmVoice(voice.getName(), voice.getData()),
+                noteSelector.getNoteByte());
     }
 
     private void applyVoiceData(FmVoice source) {
@@ -280,7 +253,7 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             }
         });
 
-        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn, savePresetBtn, loadPresetBtn);
+        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn, noteSelector, savePresetBtn, loadPresetBtn);
         return bar;
     }
 

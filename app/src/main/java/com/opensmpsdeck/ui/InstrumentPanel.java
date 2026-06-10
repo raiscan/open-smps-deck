@@ -356,6 +356,7 @@ public class InstrumentPanel extends VBox {
         }
         DacSample existing = song.getDacSamples().get(index);
         DacSampleEditor editor = new DacSampleEditor(existing);
+        editor.setPreviewEngine(playbackEngine);
         Optional<DacSample> result = editor.showAndWait();
         if (result.isPresent()) {
             refreshDacSampleList();

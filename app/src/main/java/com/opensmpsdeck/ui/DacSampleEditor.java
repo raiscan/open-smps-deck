@@ -1,5 +1,7 @@
 package com.opensmpsdeck.ui;
 
+import com.opensmpsdeck.audio.InstrumentPreviewPlayer;
+import com.opensmpsdeck.audio.PlaybackEngine;
 import com.opensmpsdeck.model.DacSample;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -11,7 +13,8 @@ import javafx.scene.layout.VBox;
  * Dialog for editing a DAC sample's name and playback rate.
  *
  * <p>The dialog displays the sample name (editable), playback rate spinner
- * (0-255), and the sample data size as a read-only label. On OK, the sample's
+ * (0-255), the sample data size as a read-only label, and a preview button
+ * that plays the sample at the currently selected rate. On OK, the sample's
  * name and rate are updated in place and the sample is returned. On Cancel,
  * null is returned.
  */
@@ -19,6 +22,8 @@ public class DacSampleEditor extends Dialog<DacSample> {
 
     private static final String BG_COLOR = "#1e1e1e";
     private static final String TEXT_COLOR = "#cccccc";
+
+    private PlaybackEngine previewEngine;
 
     /**
      * Creates a new DAC sample editor dialog.
@@ -73,7 +78,16 @@ public class DacSampleEditor extends Dialog<DacSample> {
         sizeValue.setStyle("-fx-text-fill: " + TEXT_COLOR + ";");
         sizeRow.getChildren().addAll(sizeLabel, sizeValue);
 
-        mainLayout.getChildren().addAll(nameRow, rateRow, sizeRow);
+        // Preview row: plays the sample at the rate currently in the spinner
+        HBox previewRow = new HBox(8);
+        previewRow.setAlignment(Pos.CENTER_LEFT);
+        Button previewButton = new Button("♫ Preview");
+        previewButton.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: " + TEXT_COLOR + ";");
+        previewButton.setOnAction(e -> InstrumentPreviewPlayer.previewDacSample(previewEngine,
+                new DacSample(nameField.getText(), sample.getDataDirect(), rateSpinner.getValue())));
+        previewRow.getChildren().add(previewButton);
+
+        mainLayout.getChildren().addAll(nameRow, rateRow, sizeRow, previewRow);
         dialogPane.setContent(mainLayout);
 
         // Result converter: on OK update sample in place and return it
@@ -85,5 +99,14 @@ public class DacSampleEditor extends Dialog<DacSample> {
             }
             return null;
         });
+    }
+
+    /**
+     * Sets the playback engine used for sample preview.
+     *
+     * @param engine the playback engine (may be null to disable preview)
+     */
+    public void setPreviewEngine(PlaybackEngine engine) {
+        this.previewEngine = engine;
     }
 }
