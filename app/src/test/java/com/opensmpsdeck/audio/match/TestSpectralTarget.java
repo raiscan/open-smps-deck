@@ -49,6 +49,35 @@ class TestSpectralTarget {
     }
 
     @Test
+    void valleysExposeInterHarmonicNoise() {
+        // clean tone vs the same tone with broadband noise between harmonics:
+        // harmonic levels barely change, but valley levels must
+        float[] clean = sine(440, 1.0, 0.5);
+        float[] noisy = sine(440, 1.0, 0.5);
+        var rng = new java.util.Random(3L);
+        for (int i = 0; i < noisy.length; i++) noisy[i] += (float) ((rng.nextDouble() * 2 - 1) * 0.08);
+        SpectralTarget cleanT = SpectralTarget.extract(clean, 44100, 440);
+        SpectralTarget noisyT = SpectralTarget.extract(noisy, 44100, 440);
+        assertTrue(cleanT.valleyLevels()[2] < noisyT.valleyLevels()[2] - 10,
+                "noise must raise valley levels: clean=" + cleanT.valleyLevels()[2]
+                        + " noisy=" + noisyT.valleyLevels()[2]);
+        assertTrue(SpectralTarget.distance(cleanT, noisyT) > 0.005,
+                "distance must register the noise");
+    }
+
+    @Test
+    void lowBassHarmonicsResolvedWithLargerFft() {
+        // 43.7 Hz fundamental: 2048-bin FFT (21.5 Hz bins) cannot separate
+        // h1/h2; the adaptive 8192 window must
+        float[] sig = sine(43.7, 1.5, 0.5);
+        float[] h2 = sine(87.4, 1.5, 0.1); // -14 dB
+        for (int i = 0; i < sig.length; i++) sig[i] += h2[i];
+        SpectralTarget t = SpectralTarget.extract(sig, 44100, 43.7);
+        assertEquals(0.0, t.harmonicLevels()[0], 1.5);
+        assertEquals(-14.0, t.harmonicLevels()[1], 2.5);
+    }
+
+    @Test
     void distanceGrowsWithSpectralDifference() {
         SpectralTarget pure = SpectralTarget.extract(sine(440, 1.0, 0.5), 44100, 440);
         float[] rich = sine(440, 1.0, 0.4);

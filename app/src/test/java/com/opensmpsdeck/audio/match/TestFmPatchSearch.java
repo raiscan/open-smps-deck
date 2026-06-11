@@ -10,12 +10,35 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TestFmPatchSearch {
 
+    /** A voice that keeps ringing after key-off must score worse against a decaying target. */
+    @Test
+    void ringingAfterKeyOffIsPenalized() {
+        var renderer = new CandidateRenderer();
+        // target: a plucky bell — its envelope decays within the window
+        float[] audio = renderer.render(GmVoiceSuggestions.bell().getData(), 60, 0.5, 0.0);
+        SpectralTarget target = SpectralTarget.extract(audio, 44100, midiHz(60));
+        var targets = List.of(new FmPatchSearch.Target(target, 60, 0.5));
+
+        FmVoice releasing = GmVoiceSuggestions.pad();
+        for (int op = 0; op < 4; op++) releasing.setRr(op, 12);
+        FmVoice ringing = new FmVoice("ringer", releasing.getData());
+        for (int op = 0; op < 4; op++) {
+            ringing.setRr(op, 0);   // no release: rings forever after key-off
+            ringing.setD2r(op, 0);
+            ringing.setD1l(op, 0);
+        }
+        double scoreReleasing = FmPatchSearch.fitness(releasing, targets, renderer);
+        double scoreRinging = FmPatchSearch.fitness(ringing, targets, renderer);
+        assertTrue(scoreRinging > scoreReleasing + 0.01,
+                "ringing=" + scoreRinging + " releasing=" + scoreReleasing);
+    }
+
     /** Ground truth: render a known voice, use it as the target, search must approach it. */
     @Test
     void recoversKnownVoiceSpectrally() {
         FmVoice truth = GmVoiceSuggestions.fmBass();
         var renderer = new CandidateRenderer();
-        float[] audio = renderer.render(truth.getData(), 48, 0.5, 0.25);
+        float[] audio = renderer.render(truth.getData(), 48, 0.5, 0.0);
         SpectralTarget target = SpectralTarget.extract(audio, 44100, midiHz(48));
 
         var cfg = new FmPatchSearch.Config(16, 12, Long.MAX_VALUE, 42L, 3);
@@ -34,7 +57,7 @@ class TestFmPatchSearch {
         FmVoice truth = GmVoiceSuggestions.bell();
         var renderer = new CandidateRenderer();
         SpectralTarget target = SpectralTarget.extract(
-                renderer.render(truth.getData(), 60, 0.4, 0.2), 44100, midiHz(60));
+                renderer.render(truth.getData(), 60, 0.4, 0.0), 44100, midiHz(60));
         var cfg = new FmPatchSearch.Config(8, 4, Long.MAX_VALUE, 7L, 2);
         var targets = List.of(new FmPatchSearch.Target(target, 60, 0.4));
 
@@ -47,7 +70,7 @@ class TestFmPatchSearch {
     void budgetExpiryReturnsBestSoFar() {
         var renderer = new CandidateRenderer();
         SpectralTarget target = SpectralTarget.extract(
-                renderer.render(GmVoiceSuggestions.pad().getData(), 60, 0.4, 0.2),
+                renderer.render(GmVoiceSuggestions.pad().getData(), 60, 0.4, 0.0),
                 44100, midiHz(60));
         // elapsed supplier that is instantly over budget → only generation 0 runs
         var cfg = new FmPatchSearch.Config(8, 100, 1L, 1L, 2);

@@ -79,16 +79,56 @@ public final class FmPatchSearch {
         return out;
     }
 
-    /** Mean spectral distance across all target windows. */
+    private static final int SAMPLE_RATE = 44100;
+    /** Weight of the post-key-off ring penalty in the fitness sum. */
+    private static final double RING_WEIGHT = 0.3;
+
+    /**
+     * Mean spectral distance across all target windows, plus a ring penalty:
+     * the target window is key-held audio, so the candidate's post-key-off tail
+     * has no counterpart in the spectral comparison — without this term a voice
+     * with no release (RR=0) goes unpenalized and rings forever in playback.
+     * The candidate's tail level is allowed up to the target's own ending
+     * envelope level (sustained pads tolerate ring; plucky targets do not).
+     */
     static double fitness(FmVoice v, List<Target> targets, CandidateRenderer renderer) {
         double sum = 0;
         for (Target t : targets) {
             float[] audio = renderer.render(v.getData(), t.midiPitch(), t.keyOnSec(), 0.25);
-            SpectralTarget cand = SpectralTarget.extract(audio, 44100,
-                    440.0 * Math.pow(2, (t.midiPitch() - 69) / 12.0));
+            // fingerprint only the key-on portion: the spectral comparison must
+            // see what the target window saw (key-held audio), not the release
+            int keyOnSamples = (int) (t.keyOnSec() * SAMPLE_RATE);
+            float[] held = java.util.Arrays.copyOfRange(audio, 0, Math.min(keyOnSamples, audio.length));
+            SpectralTarget cand = SpectralTarget.extract(held, SAMPLE_RATE,
+                    t.spectral().fundamentalHz());
             sum += SpectralTarget.distance(t.spectral(), cand);
+            sum += RING_WEIGHT * ringPenalty(audio, keyOnSamples, t.spectral());
         }
         return sum / targets.size();
+    }
+
+    /** Squared excess of post-key-off tail level over the target's ending level. */
+    private static double ringPenalty(float[] audio, int keyOnSamples, SpectralTarget target) {
+        int tailFrom = Math.min(audio.length, keyOnSamples + SAMPLE_RATE / 10);  // 0.1 s after off
+        int tailTo = Math.min(audio.length, keyOnSamples + SAMPLE_RATE / 4);     // .. 0.25 s
+        int susFrom = Math.max(0, keyOnSamples - SAMPLE_RATE / 5);               // last 0.2 s held
+        double tail = rms(audio, tailFrom, tailTo);
+        double sustain = rms(audio, susFrom, keyOnSamples);
+        if (sustain < 1e-6) return 0;
+        double candTail = Math.min(1.5, tail / sustain);
+        double[] env = target.rmsEnvelope();
+        double targetEnd = 0;
+        for (int i = env.length - 8; i < env.length; i++) targetEnd += env[i];
+        targetEnd /= 8;
+        double excess = Math.max(0, candTail - targetEnd);
+        return excess * excess;
+    }
+
+    private static double rms(float[] a, int from, int to) {
+        if (to <= from) return 0;
+        double s = 0;
+        for (int i = from; i < to; i++) s += a[i] * a[i];
+        return Math.sqrt(s / (to - from));
     }
 
     private static FmVoice tournament(List<ScoredVoice> scored, Random rng) {

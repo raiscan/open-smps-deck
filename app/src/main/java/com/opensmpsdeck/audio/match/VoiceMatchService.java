@@ -13,11 +13,28 @@ import java.util.function.IntConsumer;
 /** Async facade over the matching pipeline. No JavaFX dependencies. */
 public final class VoiceMatchService {
 
+    /**
+     * @param referenceSlice the best validated window's audio (44.1 kHz mono) for
+     *                       A/B audition against candidates; null when no candidates
+     * @param referencePitch nearest MIDI pitch of the reference slice's measured
+     *                       fundamental — audition candidates at this pitch
+     */
     public record MatchResult(List<FmPatchSearch.ScoredVoice> candidates,
-                              String failureReason) {}
+                              String failureReason,
+                              float[] referenceSlice, int referencePitch) {
 
+        static MatchResult failure(String reason) {
+            return new MatchResult(List.of(), reason, null, -1);
+        }
+    }
+
+    /** MIDI-isolated windows to consider before audio validation thins them. */
+    private static final int CANDIDATE_WINDOWS = 8;
     private static final int TOP_WINDOWS = 3;
     private static final int SAMPLE_RATE = 44100;
+    /** Max leading silence to trim from a misaligned window. */
+    private static final double MAX_ONSET_TRIM_SEC = 0.15;
+    private static final double MIN_USABLE_SEC = 0.2;
 
     private final ExecutorService executor =
             Executors.newSingleThreadExecutor(r -> {
@@ -28,6 +45,10 @@ public final class VoiceMatchService {
 
     /**
      * Runs the matching pipeline asynchronously on a single-thread executor.
+     * Windows found in the MIDI are validated against the audio itself
+     * ({@link WindowValidator}): leading silence trimmed, pitch anchored to the
+     * measured fundamental (sub-octave bass layers are common), and windows
+     * whose audio is reverb mush rather than the labeled note are rejected.
      *
      * @param progress invoked on the executor thread; marshal to the UI thread yourself
      */
@@ -35,32 +56,68 @@ public final class VoiceMatchService {
                                                 TickTimeMapper map, FmPatchSearch.Config cfg,
                                                 IntConsumer progress) {
         return CompletableFuture.supplyAsync(() -> {
-            var windows = MonophonicWindowFinder.find(notes, map, TOP_WINDOWS);
+            var windows = MonophonicWindowFinder.find(notes, map, CANDIDATE_WINDOWS);
             if (windows.isEmpty()) {
-                return new MatchResult(List.of(),
+                return MatchResult.failure(
                         "No isolated note of at least 250 ms found in the MIDI — "
                         + "pick a voice from a bank instead.");
             }
-            List<FmPatchSearch.Target> targets = new ArrayList<>();
+
+            record Validated(float[] slice, double anchoredHz, double harmonicity,
+                             double lengthSec) {}
+            List<Validated> validated = new ArrayList<>();
+            List<String> reasons = new ArrayList<>();
             for (var w : windows) {
                 int start = (int) (w.startSec() * SAMPLE_RATE);
                 int len = (int) (w.lengthSec() * SAMPLE_RATE);
-                if (start + len > stemAudio.length) continue;
+                if (start < 0 || start + len > stemAudio.length) continue;
                 float[] slice = new float[len];
                 System.arraycopy(stemAudio, start, slice, 0, len);
-                double hz = 440.0 * Math.pow(2, (w.midiPitch() - 69) / 12.0);
+
+                // trim leading silence from misaligned windows
+                int onset = WindowValidator.findOnset(slice, SAMPLE_RATE);
+                if (onset > 0 && onset <= MAX_ONSET_TRIM_SEC * SAMPLE_RATE
+                        && len - onset >= MIN_USABLE_SEC * SAMPLE_RATE) {
+                    slice = java.util.Arrays.copyOfRange(slice, onset, len);
+                }
+
+                double labeledHz = 440.0 * Math.pow(2, (w.midiPitch() - 69) / 12.0);
+                var v = WindowValidator.validate(slice, SAMPLE_RATE, labeledHz);
+                if (v.usable()) {
+                    validated.add(new Validated(slice, v.anchoredHz(), v.harmonicity(),
+                            slice.length / (double) SAMPLE_RATE));
+                } else {
+                    reasons.add(String.format("@%.1fs: %s", w.startSec(), v.reason()));
+                }
+            }
+            if (validated.isEmpty()) {
+                return MatchResult.failure(
+                        "No window where the audio cleanly plays the MIDI's note — "
+                        + (reasons.isEmpty() ? "windows fall outside the WAV."
+                                             : String.join("; ", reasons)));
+            }
+
+            // keep the most harmonic windows (cleanest audio), best first — the
+            // finder's MIDI-side score ordering says nothing about audio quality
+            validated.sort((a, b) -> Double.compare(b.harmonicity(), a.harmonicity()));
+            if (validated.size() > TOP_WINDOWS) {
+                validated = validated.subList(0, TOP_WINDOWS);
+            }
+            List<FmPatchSearch.Target> targets = new ArrayList<>();
+            for (Validated v : validated) {
+                int anchoredPitch = (int) Math.round(69 + 12 * Math.log(v.anchoredHz() / 440.0)
+                        / Math.log(2));
                 targets.add(new FmPatchSearch.Target(
-                        SpectralTarget.extract(slice, SAMPLE_RATE, hz),
-                        w.midiPitch(), Math.min(w.lengthSec(), 1.0)));
+                        SpectralTarget.extract(v.slice(), SAMPLE_RATE, v.anchoredHz()),
+                        anchoredPitch, Math.min(v.lengthSec(), 1.0)));
             }
-            if (targets.isEmpty()) {
-                return new MatchResult(List.of(), "Isolated windows fall outside the WAV.");
-            }
+
             long startMs = System.currentTimeMillis();
             var candidates = FmPatchSearch.search(targets,
                     com.opensmpsdeck.io.midi.GmVoiceSuggestions.seedBank(), cfg,
                     () -> System.currentTimeMillis() - startMs, progress);
-            return new MatchResult(candidates, null);
+            return new MatchResult(candidates, null,
+                    validated.get(0).slice(), targets.get(0).midiPitch());
         }, executor);
     }
 
