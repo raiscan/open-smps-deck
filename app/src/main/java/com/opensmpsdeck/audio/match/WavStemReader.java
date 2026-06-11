@@ -38,7 +38,7 @@ public final class WavStemReader {
     }
 
     /** Linear-interpolation resampler — adequate for analysis targets. */
-    static float[] resample(float[] in, float fromRate, float toRate) {
+    public static float[] resample(float[] in, float fromRate, float toRate) {
         if (Math.abs(fromRate - toRate) < 0.5f) return in;
         int outLen = (int) ((long) in.length * toRate / fromRate);
         float[] out = new float[outLen];
