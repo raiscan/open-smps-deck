@@ -63,7 +63,8 @@ public final class FmPatchSearch {
         // hill-climb the leaders
         List<ScoredVoice> polished = new ArrayList<>();
         for (ScoredVoice sv : scored.subList(0, Math.min(cfg.topN(), scored.size()))) {
-            if (elapsedMillis.getAsLong() > cfg.budgetMillis()) { polished.add(sv); continue; }
+            if (elapsedMillis.getAsLong() > cfg.budgetMillis()
+                    || Thread.currentThread().isInterrupted()) { polished.add(sv); continue; }
             polished.add(hillClimb(sv, targets, renderer));
         }
         polished.sort(Comparator.comparingDouble(ScoredVoice::score));

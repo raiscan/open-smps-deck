@@ -97,7 +97,14 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
                                 list.getSelectionModel().selectFirst();
                                 getDialogPane().lookupButton(ButtonType.OK).setDisable(false);
                             }
-                        }));
+                        }))
+                        .exceptionally(ex -> {
+                            Platform.runLater(() -> {
+                                progress.setVisible(false);
+                                status.setText("Match failed: " + ex.getMessage());
+                            });
+                            return null;
+                        });
             } catch (Exception ex) {
                 Platform.runLater(() -> {
                     progress.setVisible(false);
