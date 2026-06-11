@@ -109,9 +109,17 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
                             if (result.candidates().isEmpty()) {
                                 status.setText(result.failureReason());
                             } else {
-                                status.setText(lowConfidence
+                                String base = lowConfidence
                                         ? "Top candidates — low confidence (no MIDI guidance):"
-                                        : "Top candidates — compare against the original and accept:");
+                                        : "Top candidates — compare against the original and accept:";
+                                var mod = result.referenceModulation();
+                                if (mod != null && mod.significant()) {
+                                    base += String.format(
+                                            "  (vibrato detected: %.0f cents @ %.1f Hz — "
+                                            + "consider SMPS modulation on this channel)",
+                                            mod.depthCents(), mod.rateHz());
+                                }
+                                status.setText(base);
                                 list.setItems(FXCollections.observableArrayList(
                                         result.candidates()));
                                 list.getSelectionModel().selectFirst();

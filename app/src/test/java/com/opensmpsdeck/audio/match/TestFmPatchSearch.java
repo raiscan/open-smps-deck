@@ -33,6 +33,29 @@ class TestFmPatchSearch {
                 "ringing=" + scoreRinging + " releasing=" + scoreReleasing);
     }
 
+    /**
+     * Symmetric vibrato: when the target audio carries vibrato and the candidate
+     * renders with the same measured wobble, the true voice must still score
+     * near zero — without symmetry the smeared harmonics/valleys would diverge.
+     */
+    @Test
+    void vibratoTargetStillRecoversTruthWhenRenderedSymmetrically() {
+        FmVoice truth = GmVoiceSuggestions.brass();
+        var renderer = new CandidateRenderer();
+        var vibrato = new ModulationDetector.Modulation(60, 5.5);
+        float[] audio = renderer.render(truth.getData(), 55, 0.8, 0.0, vibrato);
+        SpectralTarget target = SpectralTarget.extract(audio, 44100, midiHz(55));
+
+        var withSym = List.of(new FmPatchSearch.Target(target, 55, 0.8, vibrato));
+        var withoutSym = List.of(new FmPatchSearch.Target(target, 55, 0.8));
+        double symmetric = FmPatchSearch.fitness(truth, withSym, renderer);
+        double asymmetric = FmPatchSearch.fitness(truth, withoutSym, renderer);
+
+        assertTrue(symmetric < 0.005, "symmetric truth score " + symmetric);
+        assertTrue(asymmetric > symmetric * 3,
+                "vibrato must matter: sym=" + symmetric + " asym=" + asymmetric);
+    }
+
     /** Ground truth: render a known voice, use it as the target, search must approach it. */
     @Test
     void recoversKnownVoiceSpectrally() {

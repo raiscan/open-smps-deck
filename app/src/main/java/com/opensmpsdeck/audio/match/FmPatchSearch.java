@@ -18,7 +18,14 @@ public final class FmPatchSearch {
         public static Config defaults() { return new Config(32, 40, 10_000, 1234L, 5); }
     }
 
-    public record Target(SpectralTarget spectral, int midiPitch, double keyOnSec) {}
+    public record Target(SpectralTarget spectral, int midiPitch, double keyOnSec,
+                         ModulationDetector.Modulation modulation) {
+
+        /** Unmodulated target (steady tone). */
+        public Target(SpectralTarget spectral, int midiPitch, double keyOnSec) {
+            this(spectral, midiPitch, keyOnSec, ModulationDetector.Modulation.NONE);
+        }
+    }
 
     public record ScoredVoice(FmVoice voice, double score) {}
 
@@ -94,7 +101,8 @@ public final class FmPatchSearch {
     static double fitness(FmVoice v, List<Target> targets, CandidateRenderer renderer) {
         double sum = 0;
         for (Target t : targets) {
-            float[] audio = renderer.render(v.getData(), t.midiPitch(), t.keyOnSec(), 0.25);
+            float[] audio = renderer.render(v.getData(), t.midiPitch(), t.keyOnSec(), 0.25,
+                    t.modulation());
             // fingerprint only the key-on portion: the spectral comparison must
             // see what the target window saw (key-held audio), not the release
             int keyOnSamples = (int) (t.keyOnSec() * SAMPLE_RATE);

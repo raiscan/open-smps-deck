@@ -121,7 +121,20 @@ public final class WindowValidator {
                 break;
             }
         }
-        return (double) sampleRate / bestLag;
+        // parabolic interpolation around the peak for sub-sample lag precision
+        // (integer lags quantize pitch to ~6 cents at 150 Hz — too coarse for
+        // vibrato tracking)
+        double refined = bestLag;
+        if (bestLag > minLag && bestLag < maxLag
+                && corrs[bestLag - 1] > 0 && corrs[bestLag + 1] > 0) {
+            double y0 = corrs[bestLag - 1], y1 = corrs[bestLag], y2 = corrs[bestLag + 1];
+            double denom = y0 - 2 * y1 + y2;
+            if (Math.abs(denom) > 1e-12) {
+                double delta = 0.5 * (y0 - y2) / denom;
+                if (Math.abs(delta) < 1) refined = bestLag + delta;
+            }
+        }
+        return sampleRate / refined;
     }
 
     /**

@@ -44,6 +44,16 @@ public final class CandidateRenderer {
     }
 
     public float[] render(byte[] voice25, int midiPitch, double keyOnSec, double tailSec) {
+        return render(voice25, midiPitch, keyOnSec, tailSec, ModulationDetector.Modulation.NONE);
+    }
+
+    /**
+     * Renders with sinusoidal pitch modulation matching the target's measured
+     * vibrato — undetected vibrato smears the target's spectrum, so the
+     * candidate must smear identically for a fair comparison.
+     */
+    public float[] render(byte[] voice25, int midiPitch, double keyOnSec, double tailSec,
+                          ModulationDetector.Modulation modulation) {
         chip.reset();
         chip.setOutputSampleRate(SAMPLE_RATE);
         chip.setInstrument(CHANNEL, voice25);
@@ -52,25 +62,38 @@ public final class CandidateRenderer {
         int semitone = Math.floorMod(midiPitch, 12);
         int block = Math.max(0, Math.min(7, midiPitch / 12 - 1));
         int fnum = FNUM[semitone];
-        chip.write(0, 0xA4 + CHANNEL, (block << 3) | (fnum >> 8)); // high byte FIRST
-        chip.write(0, 0xA0 + CHANNEL, fnum & 0xFF);
+        writeFnum(block, fnum);
 
         int keyOnSamples = (int) (keyOnSec * SAMPLE_RATE);
         int tailSamples = (int) (tailSec * SAMPLE_RATE);
         float[] out = new float[keyOnSamples + tailSamples];
 
         chip.write(0, 0x28, 0xF0 | CHANNEL); // all four operators on
-        renderInto(out, 0, keyOnSamples);
+        renderInto(out, 0, keyOnSamples, block, fnum, modulation);
         chip.write(0, 0x28, CHANNEL);        // key off
-        renderInto(out, keyOnSamples, tailSamples);
+        renderInto(out, keyOnSamples, tailSamples, block, fnum, modulation);
         return out;
     }
 
-    private void renderInto(float[] out, int offset, int count) {
+    private void writeFnum(int block, int fnum) {
+        fnum = Math.max(0, Math.min(0x7FF, fnum));
+        chip.write(0, 0xA4 + CHANNEL, (block << 3) | (fnum >> 8)); // high byte FIRST
+        chip.write(0, 0xA0 + CHANNEL, fnum & 0xFF);
+    }
+
+    private void renderInto(float[] out, int offset, int count, int block, int baseFnum,
+                            ModulationDetector.Modulation mod) {
         int[] left = new int[CHUNK];
         int[] right = new int[CHUNK];
         int done = 0;
         while (done < count) {
+            if (mod.significant()) {
+                // update pitch once per chunk (~11.6 ms — ≥12 steps per vibrato
+                // cycle at typical 3-7 Hz rates)
+                double t = (offset + done) / (double) SAMPLE_RATE;
+                double cents = mod.depthCents() / 2 * Math.sin(2 * Math.PI * mod.rateHz() * t);
+                writeFnum(block, (int) Math.round(baseFnum * Math.pow(2, cents / 1200.0)));
+            }
             int n = Math.min(CHUNK, count - done);
             java.util.Arrays.fill(left, 0, n, 0);   // renderStereo accumulates
             java.util.Arrays.fill(right, 0, n, 0);

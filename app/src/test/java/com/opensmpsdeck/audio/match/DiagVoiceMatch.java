@@ -119,6 +119,9 @@ class DiagVoiceMatch {
                                 ? String.format("ACCEPT anchored=%.1f Hz harm=%.2f", v.anchoredHz(), v.harmonicity())
                                 : "REJECT " + v.reason());
                 if (!v.usable() || targets.size() >= 3) continue;
+                var mod = ModulationDetector.measure(slice, 44100, v.anchoredHz());
+                System.out.printf("  modulation: depth=%.0f cents rate=%.1f Hz%s%n",
+                        mod.depthCents(), mod.rateHz(), mod.significant() ? "  << SIGNIFICANT" : "");
                 SpectralTarget t = SpectralTarget.extract(slice, 44100, v.anchoredHz());
                 System.out.print("  target harmonics dB:");
                 for (double l : t.harmonicLevels()) System.out.printf(" %.0f", l);
@@ -127,7 +130,7 @@ class DiagVoiceMatch {
                 System.out.println();
                 int anchoredPitch = (int) Math.round(69 + 12 * Math.log(v.anchoredHz() / 440.0) / Math.log(2));
                 targets.add(new FmPatchSearch.Target(t, anchoredPitch,
-                        Math.min(slice.length / 44100.0, 1.0)));
+                        Math.min(slice.length / 44100.0, 1.0), mod));
             }
             if (targets.isEmpty()) { System.out.println("NO TARGETS"); continue; }
 

@@ -21,10 +21,12 @@ public final class VoiceMatchService {
      */
     public record MatchResult(List<FmPatchSearch.ScoredVoice> candidates,
                               String failureReason,
-                              float[] referenceSlice, int referencePitch) {
+                              float[] referenceSlice, int referencePitch,
+                              ModulationDetector.Modulation referenceModulation) {
 
         static MatchResult failure(String reason) {
-            return new MatchResult(List.of(), reason, null, -1);
+            return new MatchResult(List.of(), reason, null, -1,
+                    ModulationDetector.Modulation.NONE);
         }
     }
 
@@ -107,9 +109,13 @@ public final class VoiceMatchService {
             for (Validated v : validated) {
                 int anchoredPitch = (int) Math.round(69 + 12 * Math.log(v.anchoredHz() / 440.0)
                         / Math.log(2));
+                // vibrato in the stem smears the target's spectrum; carrying the
+                // measurement lets candidates render with the same wobble
+                var modulation = ModulationDetector.measure(v.slice(), SAMPLE_RATE,
+                        v.anchoredHz());
                 targets.add(new FmPatchSearch.Target(
                         SpectralTarget.extract(v.slice(), SAMPLE_RATE, v.anchoredHz()),
-                        anchoredPitch, Math.min(v.lengthSec(), 1.0)));
+                        anchoredPitch, Math.min(v.lengthSec(), 1.0), modulation));
             }
 
             long startMs = System.currentTimeMillis();
@@ -117,7 +123,8 @@ public final class VoiceMatchService {
                     com.opensmpsdeck.io.midi.GmVoiceSuggestions.seedBank(), cfg,
                     () -> System.currentTimeMillis() - startMs, progress);
             return new MatchResult(candidates, null,
-                    validated.get(0).slice(), targets.get(0).midiPitch());
+                    validated.get(0).slice(), targets.get(0).midiPitch(),
+                    targets.get(0).modulation());
         }, executor);
     }
 
