@@ -36,7 +36,7 @@ public final class MidiSongBuilder {
             var params = new MidiPhraseEncoder.EncodeParams(
                     spec.unitsPerSixteenth(), spec.stepsPerBar(), spec.barsPerPhrase(),
                     a.octaveShift());
-            var quantized = NoteQuantizer.quantize(a.line().notes(), spec.ppq());
+            var quantized = NoteQuantizer.quantize(a.line().notes(), a.ppq());
             List<ChainEntry> entries = MidiPhraseEncoder.encodeLine(quantized, type,
                     params, lib, dedup,
                     a.stemName() + "-" + a.line().rank(), warnings);

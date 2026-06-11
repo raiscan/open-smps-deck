@@ -28,8 +28,9 @@ public record MidiImportSpec(
      * @param targetChannel model channel index 0-8 (FM1-5, DAC handled separately, PSG1-3)
      * @param voice         FM voice for FM channels (null for PSG)
      * @param psgEnvelopeId 1-based envelope id for PSG channels, -1 = none
+     * @param ppq           pulses per quarter of the stem this line came from
      */
     public record LineAssignment(String stemName, VoiceSeparator.SeparatedLine line,
                                  int targetChannel, int octaveShift,
-                                 FmVoice voice, int psgEnvelopeId) {}
+                                 FmVoice voice, int psgEnvelopeId, int ppq) {}
 }

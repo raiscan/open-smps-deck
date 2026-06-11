@@ -53,8 +53,6 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
         loopSong.setSelected(true);
 
         for (var s : MappingSuggester.suggest(stems)) rows.add(new LineRow(s));
-        recomputeTempoAndDrums();
-        modeBox.valueProperty().addListener((o, a, b) -> recomputeTempoAndDrums());
 
         VBox content = new VBox(10,
                 new Label("Files: " + stems.size() + " stem(s)"),
@@ -68,6 +66,11 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
         warningsArea.setPrefRowCount(4);
         getDialogPane().setContent(content);
         getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        // Must run AFTER the button types are added so lookupButton(OK) can
+        // disable the OK button when the initial tempo fit fails.
+        recomputeTempoAndDrums();
+        modeBox.valueProperty().addListener((o, a, b) -> recomputeTempoAndDrums());
 
         setResultConverter(bt -> bt == ButtonType.OK ? buildSpec() : null);
     }
@@ -186,13 +189,18 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
     }
 
     private MidiImportSpec buildSpec() {
+        if (fit == null) return null; // no valid tempo fit: OK is disabled, but stay safe
+        MidiStem first = stems.get(0);
         List<MidiImportSpec.LineAssignment> assignments = new ArrayList<>();
         for (LineRow r : rows) {
             if (r.targetChannel < 0) continue;
+            int ppq = stems.stream()
+                    .filter(s -> s.name().equals(r.stemName))
+                    .mapToInt(MidiStem::ppq)
+                    .findFirst().orElse(first.ppq());
             assignments.add(new MidiImportSpec.LineAssignment(
-                    r.stemName, r.line, r.targetChannel, r.octaveShift, r.voice, -1));
+                    r.stemName, r.line, r.targetChannel, r.octaveShift, r.voice, -1, ppq));
         }
-        MidiStem first = stems.get(0);
         // 16 sixteenth-steps per 4/4 bar, scaled by the time signature
         int stepsPerBar = 16 * first.timeSignature().numerator()
                 / first.timeSignature().denominator();

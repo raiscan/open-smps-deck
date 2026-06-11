@@ -19,7 +19,7 @@ class TestMidiSongBuilder {
                 new NoteEvent(480, 480, 64, 100)));
         var assignment = new MidiImportSpec.LineAssignment(
                 "Synth", line, 0 /* FM1 */, 0 /* octave shift */,
-                GmVoiceSuggestions.squareLead(), -1 /* no PSG env */);
+                GmVoiceSuggestions.squareLead(), -1 /* no PSG env */, 480 /* ppq */);
         return new MidiImportSpec(
                 "Like We", SmpsMode.S2, 0xCC, 2, 4 /* unitsPerSixteenth */,
                 16 /* stepsPerBar */, 4 /* barsPerPhrase */, true /* loop */,
@@ -91,9 +91,9 @@ class TestMidiSongBuilder {
         var spec = new MidiImportSpec(
                 "Dedup", SmpsMode.S2, 0x80, 1, 4, 16, 4, false, 480,
                 List.of(new MidiImportSpec.LineAssignment(
-                                "A", lineA, 0, 0, GmVoiceSuggestions.squareLead(), -1),
+                                "A", lineA, 0, 0, GmVoiceSuggestions.squareLead(), -1, 480),
                         new MidiImportSpec.LineAssignment(
-                                "B", lineB, 1, 0, GmVoiceSuggestions.squareLead(), -1)),
+                                "B", lineB, 1, 0, GmVoiceSuggestions.squareLead(), -1, 480)),
                 List.of(), List.of(), GmDrumMapper.defaultMapping(), Map.of());
         Song song = MidiSongBuilder.build(spec);
 
@@ -106,6 +106,39 @@ class TestMidiSongBuilder {
             assertEquals((byte) SmpsCoordFlags.SET_VOICE, data[0], "channel " + ch);
             assertEquals(0, data[1], "channel " + ch + " voice index");
         }
+    }
+
+    @Test
+    void perStemPpqQuantizesEachLineCorrectly() {
+        // identical musical content at different resolutions: a quarter note on
+        // beat 2 — tick 480 len 480 at ppq 480, tick 960 len 960 at ppq 960
+        var line480 = new VoiceSeparator.SeparatedLine(0, List.of(
+                new NoteEvent(480, 480, 60, 100)));
+        var line960 = new VoiceSeparator.SeparatedLine(0, List.of(
+                new NoteEvent(960, 960, 60, 100)));
+        var spec = new MidiImportSpec(
+                "Ppq", SmpsMode.S2, 0x80, 1, 4, 16, 4, false, 480,
+                List.of(new MidiImportSpec.LineAssignment(
+                                "A", line480, 0, 0, GmVoiceSuggestions.squareLead(), -1, 480),
+                        new MidiImportSpec.LineAssignment(
+                                "B", line960, 1, 0, GmVoiceSuggestions.squareLead(), -1, 960)),
+                List.of(), List.of(), GmDrumMapper.defaultMapping(), Map.of());
+        Song song = MidiSongBuilder.build(spec);
+
+        List<String> decoded0 = decodeFirstPhrase(song, 0);
+        List<String> decoded1 = decodeFirstPhrase(song, 1);
+        assertEquals(decoded0, decoded1,
+                "same musical content at different ppq must produce identical rows");
+    }
+
+    private static List<String> decodeFirstPhrase(Song song, int channel) {
+        int firstId = song.getHierarchicalArrangement().getChain(channel)
+                .getEntries().get(0).getPhraseId();
+        byte[] data = song.getHierarchicalArrangement().getPhraseLibrary()
+                .getPhrase(firstId).getData();
+        return SmpsDecoder.decode(data).stream()
+                .map(r -> r.note() + ":" + r.duration())
+                .toList();
     }
 
     @Test
