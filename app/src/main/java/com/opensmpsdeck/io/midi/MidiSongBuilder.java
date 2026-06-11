@@ -162,8 +162,13 @@ public final class MidiSongBuilder {
         if (entries.isEmpty()) return;
 
         if (!dac) {
+            // raw full-volume white noise sounds like static — give imported hats
+            // a fast decay-to-silence envelope (the sequencer holds the final
+            // attenuation until the next hit re-attacks)
+            int envId = ensureNoiseEnvelope(song);
             prependToPhrase(lib, entries.get(0),
-                    new byte[]{(byte) SmpsCoordFlags.PSG_NOISE, (byte) NOISE_MODE_BYTE}, type,
+                    new byte[]{(byte) SmpsCoordFlags.PSG_INSTRUMENT, (byte) envId,
+                               (byte) SmpsCoordFlags.PSG_NOISE, (byte) NOISE_MODE_BYTE}, type,
                     replacedOriginals);
         } else {
             for (int slot : usedSlots) {
@@ -177,5 +182,20 @@ public final class MidiSongBuilder {
             }
         }
         arr.getChain(channel).getEntries().addAll(entries);
+    }
+
+    /** Attenuation ramp 0→15 over ~7 ticks (≈ one 16th at typical fits), 0x80-terminated. */
+    private static final byte[] NOISE_DECAY_ENVELOPE =
+            {0x00, 0x02, 0x04, 0x06, 0x09, 0x0C, 0x0F, (byte) 0x80};
+    private static final String NOISE_ENVELOPE_NAME = "Noise Hat";
+
+    /** Returns the 1-based id of the imported-hat decay envelope, creating it once. */
+    private static int ensureNoiseEnvelope(Song song) {
+        List<PsgEnvelope> envs = song.getPsgEnvelopes();
+        for (int i = 0; i < envs.size(); i++) {
+            if (NOISE_ENVELOPE_NAME.equals(envs.get(i).getName())) return i + 1;
+        }
+        envs.add(new PsgEnvelope(NOISE_ENVELOPE_NAME, NOISE_DECAY_ENVELOPE.clone()));
+        return envs.size();
     }
 }

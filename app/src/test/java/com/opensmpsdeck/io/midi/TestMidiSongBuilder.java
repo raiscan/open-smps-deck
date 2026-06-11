@@ -29,6 +29,36 @@ class TestMidiSongBuilder {
     }
 
     @Test
+    void noiseChannelGetsDecayEnvelope() {
+        var spec = basicSpec();
+        var withNoise = new MidiImportSpec(
+                spec.songName(), spec.mode(), spec.tempoByte(), spec.dividingTiming(),
+                spec.unitsPerSixteenth(), spec.stepsPerBar(), spec.barsPerPhrase(),
+                spec.loopWholeSong(), spec.ppq(), spec.lines(),
+                List.of(),
+                List.of(new GmDrumMapper.DrumHit(0, 1, GmDrumMapper.DrumTarget.NOISE_SHORT),
+                        new GmDrumMapper.DrumHit(2, 1, GmDrumMapper.DrumTarget.NOISE_LONG)),
+                spec.drumMapping(), spec.dacSampleOverrides());
+        Song song = MidiSongBuilder.build(withNoise);
+
+        // a decaying envelope is created for the imported hats...
+        assertEquals(1, song.getPsgEnvelopes().size());
+        PsgEnvelope env = song.getPsgEnvelopes().get(0);
+        int last = env.getStep(env.getStepCount() - 1);
+        assertEquals(0x0F, last, "hat envelope must decay to silence");
+        assertTrue(env.getStep(0) < env.getStep(env.getStepCount() - 1),
+                "envelope must decay (attenuation rises)");
+
+        // ...and the noise channel's first phrase selects it (1-based id) plus noise mode
+        int firstId = song.getHierarchicalArrangement().getChain(9).getEntries().get(0).getPhraseId();
+        byte[] data = song.getHierarchicalArrangement().getPhraseLibrary()
+                .getPhrase(firstId).getData();
+        assertEquals((byte) SmpsCoordFlags.PSG_INSTRUMENT, data[0]);
+        assertEquals(1, data[1]);
+        assertEquals((byte) SmpsCoordFlags.PSG_NOISE, data[2]);
+    }
+
+    @Test
     void buildsSongWithAssignedChannel() {
         Song song = MidiSongBuilder.build(basicSpec());
         assertEquals("Like We", song.getName());
