@@ -22,6 +22,61 @@ class TestMidiImportIntegration {
     @TempDir
     Path tempDir;
 
+    /**
+     * Suno exports one .mid per stem; multi-selecting them in File > Import MIDI
+     * must merge all stems into a single Song. This is the headless equivalent of
+     * onImportMidi reading several files into one MidiImportDialog.
+     */
+    @Test
+    void multipleStemFilesMergeIntoOneSong() throws Exception {
+        // stem 1: a melody (program 80, lead)
+        File melodyFile = writeSingleTrackStem("melody.mid", 80, new int[]{72, 76, 79});
+        // stem 2: a bass line (program 32 → bass-like, prefers FM)
+        File bassFile = writeSingleTrackStem("bass.mid", 32, new int[]{36, 38, 40});
+
+        List<MidiStem> stems = List.of(MidiReader.read(melodyFile), MidiReader.read(bassFile));
+        var suggestions = MappingSuggester.suggest(stems);
+        assertEquals(2, suggestions.size(), "one line per stem");
+
+        var assignments = suggestions.stream()
+                .map(s -> new MidiImportSpec.LineAssignment(s.stemName(), s.line(),
+                        s.targetChannel(), 0, GmVoiceSuggestions.forProgram(s.gmProgram()), -1,
+                        stems.stream().filter(st -> st.name().equals(s.stemName()))
+                                .mapToInt(MidiStem::ppq).findFirst().orElse(480)))
+                .toList();
+        var fit = TempoFitter.fit(stems.get(0).tempoMap(), stems.get(0).totalTicks(),
+                stems.get(0).ppq(), SmpsMode.S2);
+        Song song = MidiSongBuilder.build(new MidiImportSpec(
+                "Merged", SmpsMode.S2, fit.tempoByte(), fit.dividingTiming(),
+                fit.unitsPerSixteenth(), 16, 4, true, stems.get(0).ppq(), assignments,
+                List.of(), List.of(), GmDrumMapper.defaultMapping(), Map.of()));
+
+        // both stems land in the one song, on different channels
+        var arr = song.getHierarchicalArrangement();
+        long populated = arr.getChains().stream().filter(c -> !c.getEntries().isEmpty()).count();
+        assertEquals(2, populated, "both stems must occupy a channel in the same song");
+        // bass-like stem won an FM channel
+        var bassAssign = assignments.stream()
+                .filter(a -> a.stemName().equals("bass")).findFirst().orElseThrow();
+        assertTrue(bassAssign.targetChannel() <= 4);
+    }
+
+    private File writeSingleTrackStem(String name, int program, int[] pitches) throws Exception {
+        Sequence seq = new Sequence(Sequence.PPQ, 480);
+        Track t = seq.createTrack();
+        t.add(new MidiEvent(new MetaMessage(0x51, new byte[]{0x07, (byte) 0xA1, 0x20}, 3), 0));
+        t.add(new MidiEvent(new ShortMessage(ShortMessage.PROGRAM_CHANGE, 0, program, 0), 0));
+        for (int i = 0; i < pitches.length; i++) {
+            t.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, pitches[i], 100),
+                    i * 480L));
+            t.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, pitches[i], 0),
+                    i * 480L + 480));
+        }
+        File f = tempDir.resolve(name).toFile();
+        MidiSystem.write(seq, 1, f);
+        return f;
+    }
+
     /** Builds a tiny two-bar fixture: melody + bass + kick/hat drums at 120 BPM. */
     private File writeFixture() throws Exception {
         Sequence seq = new Sequence(Sequence.PPQ, 480);

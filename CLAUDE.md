@@ -10,7 +10,7 @@ OpenSMPSDeck is a standalone SMPS-native music tracker for composing YM2612 FM a
 
 ```bash
 mvn compile                    # Build all modules
-mvn test                       # Run all tests (647 tests)
+mvn test                       # Run all tests (660 tests)
 mvn test -pl synth-core        # Run synth-core tests only
 mvn test -pl app               # Run app tests only
 mvn test -Dtest=TestClassName  # Run a single test class
@@ -256,7 +256,7 @@ The `synth-core` module is extracted from [OpenGGF](https://github.com/jamesj999
 
 ## Testing
 
-647 tests across 105 test files (52 synth-core + 595 app):
+660 tests across 107 test files (52 synth-core + 608 app):
 
 - **Full-stack:** `TestFullStackRoundTrip` — create/compile/play/export pipeline using hierarchical arrangements, S1 vs S2 mode differentiation
 - **Codec:** HierarchyCompiler/Decompiler round-trips, encode/decode, pattern compilation, transpose, coordination flag parity, effect mnemonics, paste resolution
