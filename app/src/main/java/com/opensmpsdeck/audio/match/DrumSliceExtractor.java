@@ -18,17 +18,19 @@ public final class DrumSliceExtractor {
     private static final double Z80_CLOCK = 3_579_545.0; // Ym2612Chip.Z80_CLOCK
     private static final double DAC_LOOP_CYCLES = 26.0;   // Ym2612Chip.DAC_LOOP_CYCLES
     private static final double DAC_LOOP_SAMPLES = 2.0;   // Ym2612Chip.DAC_LOOP_SAMPLES
-    // S2 default; DacData.baseCycles is 301/288/297 for S1/S2/S3K. The slice
-    // resample rate only sets sample-count granularity, so the S2 value is fine
-    // as a fixed reference for one-shot extraction.
-    private static final double DAC_BASE_CYCLES = 288.0; // DacData S2 default
+    // Mirrors Ym2612Chip.DAC_BASE_CYCLES (line ~416: "Base overhead = 295
+    // cycles per 2 samples"), the chip's own fallback constant. Mode-aware
+    // runtime values are 301/288/297 (S1/S2/S3K) via DacData.baseCycles; the
+    // slice resample rate only sets sample-count granularity, so the chip's
+    // fixed reference is fine for one-shot extraction.
+    private static final double DAC_BASE_CYCLES = 295.0; // Ym2612Chip.DAC_BASE_CYCLES
 
     private DrumSliceExtractor() {}
 
     /**
      * Playback rate in Hz for a DAC rate byte, matching the driver math in
      * {@code Ym2612Chip.playDac} (synth-core, lines 1840-1847). For the
-     * {@code InstrumentPanel} default rate {@code 0x0C} this yields ~12.5 kHz.
+     * {@code InstrumentPanel} default rate {@code 0x0C} this yields ~12.3 kHz.
      */
     public static int dacPlaybackHz(int rateByte) {
         int effectiveRate = Math.max(1, rateByte & 0xFF);
@@ -40,6 +42,7 @@ public final class DrumSliceExtractor {
     public static DacSample extract(float[] audio, int sampleRate, double onsetSec,
                                     double maxEndSec, String name, int rateByte) {
         int start = (int) (onsetSec * sampleRate);
+        start = Math.min(start, audio.length - 1); // onset at/after buffer end
         // backtrack to nearest zero crossing (≤ 5 ms) to avoid a click
         int limit = Math.max(0, start - sampleRate / 200);
         while (start > limit && !(audio[start - 1] <= 0 && audio[start] > 0)) start--;
