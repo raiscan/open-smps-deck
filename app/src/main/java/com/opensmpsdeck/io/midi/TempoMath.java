@@ -5,61 +5,62 @@ import com.opensmpsdeck.model.SmpsMode;
 /**
  * Effective sequencer ticks per 60 Hz frame for each SMPS tempo mode,
  * computed by simulating the driver's accumulator logic.
- * Semantics mirror SmpsSequencer (synth-core) — that code is authoritative.
  *
- * <p>Verified against {@code SmpsSequencer.processTempoFrame()} (synth-core,
- * 2026-06-11):
+ * <p>Semantics verified against {@code SmpsSequencer.processTempoFrame()}
+ * (synth-core, lines ~1039-1121; {@code tempoModBase = 0x100}) — that code
+ * is authoritative:
  * <ul>
- *   <li><b>OVERFLOW2 (S2):</b> {@code tempoAccumulator += tempoWeight; if
- *       (tempoAccumulator >= tempoModBase) { tempoAccumulator -= tempoModBase; }
- *       else tick();} with {@code tempoModBase = 0x100}. An overflow frame is
- *       skipped. The simulation's {@code acc > 0xFF} is identical to
- *       {@code acc >= 0x100}, and {@code acc &= 0xFF} equals {@code acc -= 0x100}
- *       because {@code acc} never reaches 0x200. Matches.</li>
- *   <li><b>OVERFLOW (S3K):</b> ticks every non-overflow frame; the sequencer
- *       expresses this as "skip on overflow", but a 60 Hz wrapper that ticks
- *       once per frame plus one extra on overflow yields the same effective rate.
- *       Same accumulator/modBase arithmetic as above. Matches.</li>
- *   <li><b>TIMEOUT (S1):</b> the sequencer literally ticks <i>every</i> frame and,
- *       when the countdown (reloaded from the tempo byte) reaches zero, instead
- *       <i>extends</i> all active note durations by one frame. That duration
- *       stretch is musically equivalent to stalling one frame out of every
- *       {@code tempoByte}: net musical progress is {@code (tempoByte - 1)} steps
- *       per {@code tempoByte} frames. This simulation models that effective
- *       progress rate (stall-the-frame), which is what tempo fitting needs, even
- *       though the literal sequencer mechanism differs.</li>
+ *   <li><b>OVERFLOW2 (S2):</b> {@code acc += tempo}; the track ticks ONLY when
+ *       the accumulator overflows ({@code acc >= 0x100}, then
+ *       {@code acc -= 0x100}). Effective rate = tempo/256; higher tempo is
+ *       faster. A tempo byte of 0 never ticks at all.</li>
+ *   <li><b>OVERFLOW (S3K):</b> {@code acc += tempo}; an overflow frame is
+ *       SKIPPED (delay), every other frame ticks once. Effective rate =
+ *       1 - tempo/256; higher tempo is slower.</li>
+ *   <li><b>TIMEOUT (S1):</b> the sequencer ticks every frame, but a countdown
+ *       (decrement-then-check, reloaded to the tempo byte, so its period is
+ *       exactly tempo frames) extends all active note durations by 1 on
+ *       expiry. Each extension cancels that frame's duration progress, so the
+ *       long-run effective rate is (tempo - 1)/tempo (e.g. tempo 4 = 0.75),
+ *       confirmed by simulating the sequencer's exact code path over a note
+ *       stream. Note this is (t-1)/t, not t/(t+1): extensions recur every t
+ *       real frames, so a nominal duration d plays for d*t/(t-1) frames.
+ *       A tempo byte of 1 extends every frame and freezes the music
+ *       (rate 0).</li>
  * </ul>
  */
 public final class TempoMath {
 
     private static final int SIM_FRAMES = 1 << 16;
+    private static final int TEMPO_MOD_BASE = 0x100; // SmpsSequencerConfig default
 
     private TempoMath() {}
 
     public static double ticksPerFrame(SmpsMode mode, int tempoByte) {
         int ticks = 0;
         switch (mode) {
-            case S1 -> { // TIMEOUT: countdown; expiry stalls the frame
+            case S1 -> { // TIMEOUT: every frame ticks; expiry extends durations,
+                         // cancelling that frame's progress
                 int counter = tempoByte;
                 for (int f = 0; f < SIM_FRAMES; f++) {
-                    if (--counter == 0) counter = tempoByte;
+                    counter--;
+                    if (counter <= 0) counter = tempoByte; // extension frame: net 0
                     else ticks++;
                 }
             }
-            case S2 -> { // OVERFLOW2: overflow frame is skipped
+            case S2 -> { // OVERFLOW2: tick only when the accumulator overflows
                 int acc = 0;
                 for (int f = 0; f < SIM_FRAMES; f++) {
                     acc += tempoByte;
-                    if (acc > 0xFF) acc &= 0xFF;
-                    else ticks++;
+                    if (acc >= TEMPO_MOD_BASE) { acc -= TEMPO_MOD_BASE; ticks++; }
                 }
             }
-            case S3K -> { // OVERFLOW: overflow frame double-ticks
+            case S3K -> { // OVERFLOW: overflow frame is skipped, others tick
                 int acc = 0;
                 for (int f = 0; f < SIM_FRAMES; f++) {
-                    ticks++;
                     acc += tempoByte;
-                    if (acc > 0xFF) { acc &= 0xFF; ticks++; }
+                    if (acc >= TEMPO_MOD_BASE) acc -= TEMPO_MOD_BASE;
+                    else ticks++;
                 }
             }
         }

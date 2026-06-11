@@ -22,10 +22,17 @@ public final class TempoFitter {
         double bpm = weightedMedianBpm(tempoMap, totalTicks, ppq);
         double idealSixteenthSec = 15.0 / bpm;
 
+        // ticksPerFrame does not depend on div; cache it once (256 simulations
+        // instead of 256 * MAX_DIVIDING_TIMING)
+        double[] tpfCache = new double[0x100];
+        for (int tempo = 1; tempo <= 0xFF; tempo++) {
+            tpfCache[tempo] = TempoMath.ticksPerFrame(mode, tempo);
+        }
+
         TempoFit best = null;
         for (int div = 1; div <= MAX_DIVIDING_TIMING; div++) {
             for (int tempo = 1; tempo <= 0xFF; tempo++) {
-                double tpf = TempoMath.ticksPerFrame(mode, tempo);
+                double tpf = tpfCache[tempo];
                 if (tpf <= 0) continue;
                 double secondsPerUnit = div / (FRAME_RATE * tpf);
                 int units = (int) Math.round(idealSixteenthSec / secondsPerUnit);
@@ -38,6 +45,11 @@ public final class TempoFitter {
                     best = new TempoFit(bpm, tempo, div, units, errPct);
                 }
             }
+        }
+        if (best == null) {
+            throw new IllegalArgumentException(
+                    "No SMPS tempo/dividing-timing combination fits %.1f BPM in mode %s"
+                            .formatted(bpm, mode));
         }
         return best;
     }
@@ -57,6 +69,7 @@ public final class TempoFitter {
             if (end <= start) continue;
             segs.add(new Seg(60e6 / tempoMap.get(i).microsecondsPerQuarter(), end - start));
         }
+        if (segs.isEmpty()) return 120.0;
         segs.sort((a, b) -> Double.compare(a.bpm(), b.bpm()));
         long half = segs.stream().mapToLong(Seg::ticks).sum() / 2;
         long acc = 0;

@@ -53,5 +53,6 @@ class TestVoiceSeparator {
         var r = VoiceSeparator.separate(List.of(n(0, 480, 60), n(10, 470, 67)), 2, 15);
         assertEquals(67, r.lines().get(0).notes().get(0).pitch());
         assertEquals(60, r.lines().get(1).notes().get(0).pitch());
+        assertEquals(0, r.droppedNotes());
     }
 }
