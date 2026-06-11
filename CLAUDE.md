@@ -101,6 +101,27 @@ SMPS-native data structures. The primary arrangement model is **hierarchical**: 
 | `RomVoiceImporter` | Scan SMPSPlay `.bin` directories for importable voices |
 | `HexUtil` | Shared hex encoding/decoding utility |
 
+#### MIDI import pipeline (`com.opensmpsdeck.io.midi`)
+
+A pure pipeline that converts per-stem `.mid` files into a new hierarchical Song: MidiReader → VoiceSeparator → TempoFitter/NoteQuantizer → GmDrumMapper → MidiPhraseEncoder → MidiSongBuilder. Everything downstream of the produced `Song` is existing machinery.
+
+| Class | Purpose |
+|-------|---------|
+| `MidiReader` | Parses a `.mid` file into a neutral `MidiStem` (note pairing, tempo/time-sig map, drum-channel flagging) |
+| `NoteEvent` | Single MIDI note in absolute ticks (start, duration, pitch, velocity) |
+| `MidiStem` | Neutral model of one parsed `.mid`: ppq, tempo map, time signature, note tracks |
+| `TickTimeMapper` | Converts absolute MIDI ticks to seconds via the tempo map |
+| `VoiceSeparator` | Skyline voice separation: splits polyphonic tracks into ≤N monophonic lines, counts dropped notes |
+| `TempoMath` | Effective sequencer ticks/frame per SMPS tempo mode (mirrors `SmpsSequencer`) |
+| `TempoFitter` | Fits SMPS tempo byte + dividing timing to a MIDI tempo map (weighted-median BPM) |
+| `NoteQuantizer` | Snaps note on/off times to a 16th-note step grid |
+| `GmDrumMapper` | Maps GM drum pitches to DAC sample slots and PSG noise hits, with priority resolution |
+| `MidiPhraseEncoder` | Encodes a quantized line into bar-aligned, deduplicated phrases + chain entries (tie/rest chunking) |
+| `GmVoiceSuggestions` | Suggests an `FmVoice` for a GM program number |
+| `MappingSuggester` | Produces the dialog's pre-filled line → channel assignment |
+| `MidiImportSpec` | Confirmed import parameters (mode, tempo, line assignments, drum hits) produced by the dialog |
+| `MidiSongBuilder` | Assembles the final hierarchical `Song` from a confirmed `MidiImportSpec` |
+
 ### 6. app/ui (JavaFX)
 
 | Class | Purpose |
@@ -124,6 +145,7 @@ SMPS-native data structures. The primary arrangement model is **hierarchical**: 
 | `VoiceImportDialog` | Filterable voice import browser with multi-select |
 | `ImportPreviewDialog` | SMPS import preview with decompilation visualization |
 | `InstrumentResolveDialog` | Cross-song paste instrument resolution (copy/remap/skip) |
+| `MidiImportDialog` | MIDI import preview: per-line channel/voice mapping and drum routing before building the Song |
 
 ## Hierarchical Arrangement Model
 
