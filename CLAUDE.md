@@ -87,6 +87,23 @@ SMPS-native data structures. The primary arrangement model is **hierarchical**: 
 | `SimpleSmpsData` | Wraps compiled SMPS binary for the sequencer. Parameterized baseNoteOffset |
 | `AdsrEnvelopeCalculator` | FM operator envelope curve calculation for visual preview |
 
+#### WAV voice matching (`com.opensmpsdeck.audio.match`)
+
+Derives `FmVoice` candidates from stem WAVs by genetic search against the in-process `Ym2612Chip`, and slices drum one-shots from a drums WAV into `DacSample`s. MIDI-guided isolation: WavStemReader → MonophonicWindowFinder → SpectralTarget → CandidateRenderer → FmPatchSearch, behind the async `VoiceMatchService`. No new Maven dependencies (JDK `javax.sound.sampled` + synth-core chip).
+
+| Class | Purpose |
+|-------|---------|
+| `Fft` | In-place iterative radix-2 Cooley-Tukey FFT (power-of-two only) |
+| `WavStemReader` | Reads a WAV as mono float samples resampled to 44.1 kHz; `resample()` is the shared linear resampler |
+| `SpectralTarget` | Timbre fingerprint: 16 peak-normalized harmonic dB levels + RMS envelope; `distance()` weighted MSE metric |
+| `MonophonicWindowFinder` | MIDI-guided isolated-note windows (melodic) and isolated drum hits (drum mode) |
+| `CandidateRenderer` | Headless YM2612 render of an FM voice (key-on/sustain/key-off/tail); one instance per thread |
+| `FmPatchSearch` | Seeded genetic search + per-operator TL hill-climb over 4-op FM patch space; deterministic per seed, budget/interrupt cancellable |
+| `VoiceMatchService` | Async facade over the pipeline; reports isolation failures. Progress runs on the executor thread |
+| `DrumSliceExtractor` | Slices a drum one-shot into a normalized unsigned 8-bit `DacSample` at the DAC playback rate |
+
+The UI surfaces this via `VoiceMatchDialog` (run + audition + accept), a per-row "Match…" column and "Extract samples from WAV" checkbox in `MidiImportDialog`, and a "Match from WAV…" button in `FmVoiceEditor`.
+
 ### 5. app/io (file I/O)
 
 | Class | Purpose |
