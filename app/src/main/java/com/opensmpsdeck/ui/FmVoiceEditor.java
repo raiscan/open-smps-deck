@@ -3,7 +3,11 @@ package com.opensmpsdeck.ui;
 import com.opensmpsdeck.audio.AdsrEnvelopeCalculator;
 import com.opensmpsdeck.audio.InstrumentPreviewPlayer;
 import com.opensmpsdeck.audio.PlaybackEngine;
+import com.opensmpsdeck.audio.match.WavStemReader;
 import com.opensmpsdeck.io.OsmpsVoiceFile;
+import com.opensmpsdeck.io.midi.MidiStem;
+import com.opensmpsdeck.io.midi.NoteEvent;
+import com.opensmpsdeck.io.midi.TickTimeMapper;
 import com.opensmpsdeck.model.FmVoice;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -17,6 +21,7 @@ import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 
 import java.io.File;
+import java.util.List;
 
 /**
  * Dialog for editing an FM voice patch.
@@ -257,8 +262,78 @@ public class FmVoiceEditor extends Dialog<FmVoice> {
             }
         });
 
-        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn, noteSelector, savePresetBtn, loadPresetBtn);
+        Button matchBtn = new Button("Match from WAV…");
+        matchBtn.setStyle("-fx-background-color: #2a2a2a; -fx-text-fill: #cccccc;");
+        matchBtn.setOnAction(e -> matchFromWav());
+
+        bar.getChildren().addAll(copyBtn, pasteBtn, initBtn, previewBtn, noteSelector,
+                matchBtn, savePresetBtn, loadPresetBtn);
         return bar;
+    }
+
+    /**
+     * Matches an FM voice against a user-chosen WAV without MIDI guidance: uses the
+     * note selector's pitch, finds the loudest 0.5 s region by a 100 ms RMS scan, and
+     * runs the same {@link VoiceMatchDialog} (marked low confidence).
+     */
+    private void matchFromWav() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Match Voice from WAV");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("WAV Audio", "*.wav"));
+        DialogPaths.applyTo(chooser, "wavMatch");
+        File wav = chooser.showOpenDialog(getOwner());
+        DialogPaths.remember("wavMatch", wav);
+        if (wav == null) return;
+
+        float[] audio;
+        try {
+            audio = WavStemReader.readMono44k(wav);
+        } catch (Exception ex) {
+            new Alert(Alert.AlertType.ERROR, "Could not read WAV: " + ex.getMessage(),
+                    ButtonType.OK).showAndWait();
+            return;
+        }
+
+        // SMPS note byte 0x81 = C0 = MIDI pitch 12.
+        int midiPitch = (noteSelector.getNoteByte() - 0x81) + 12;
+
+        // Find the loudest 0.5 s region by a 100 ms RMS scan; synthesize one note there.
+        double startSec = loudestRegionStartSec(audio, WavStemReader.TARGET_RATE, 0.5);
+        var map = new TickTimeMapper(480, List.of(new MidiStem.TempoEvent(0, 500000)));
+        // 480 ppq at 120 BPM → 1 tick = 1/960 s. 0.5 s = 480 ticks.
+        long startTick = Math.round(startSec * 960);
+        var notes = List.of(new NoteEvent(startTick, 480, midiPitch, 110));
+
+        VoiceMatchDialog dialog = new VoiceMatchDialog(wav, notes, map, true);
+        dialog.setPreviewEngine(previewEngine);
+        dialog.initOwner(getOwner());
+        dialog.showAndWait().ifPresent(this::applyVoiceData);
+    }
+
+    /** Returns the start (seconds) of the loudest {@code windowSec} region by 100 ms RMS hops. */
+    private static double loudestRegionStartSec(float[] audio, int sampleRate, double windowSec) {
+        int hop = sampleRate / 10; // 100 ms
+        int windowHops = Math.max(1, (int) Math.round(windowSec * sampleRate / hop));
+        int hops = Math.max(1, audio.length / hop);
+        double[] rms = new double[hops];
+        for (int h = 0; h < hops; h++) {
+            double sum = 0;
+            int n = Math.min(hop, audio.length - h * hop);
+            for (int i = 0; i < n; i++) {
+                double v = audio[h * hop + i];
+                sum += v * v;
+            }
+            rms[h] = Math.sqrt(sum / Math.max(1, n));
+        }
+        double best = -1;
+        int bestHop = 0;
+        for (int h = 0; h + windowHops <= hops; h++) {
+            double sum = 0;
+            for (int w = 0; w < windowHops; w++) sum += rms[h + w];
+            if (sum > best) { best = sum; bestHop = h; }
+        }
+        return (double) bestHop * hop / sampleRate;
     }
 
     private HBox buildTopRow() {

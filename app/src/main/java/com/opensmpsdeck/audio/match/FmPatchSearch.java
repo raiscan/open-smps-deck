@@ -30,6 +30,7 @@ public final class FmPatchSearch {
     public static List<ScoredVoice> search(List<Target> targets, List<FmVoice> seeds,
                                            Config cfg, LongSupplier elapsedMillis,
                                            IntConsumer progress) {
+        if (seeds.isEmpty()) throw new IllegalArgumentException("seeds required");
         Random rng = new Random(cfg.seed());
         CandidateRenderer renderer = new CandidateRenderer();
 
@@ -44,6 +45,9 @@ public final class FmPatchSearch {
         List<ScoredVoice> scored = score(pop, targets, renderer);
         for (int gen = 0; gen < cfg.maxGenerations(); gen++) {
             if (elapsedMillis.getAsLong() > cfg.budgetMillis()) break;
+            // Allow VoiceMatchService.shutdownNow() to cancel an in-flight search
+            // promptly (e.g. when the dialog is closed).
+            if (Thread.currentThread().isInterrupted()) break;
             progress.accept(gen);
 
             List<FmVoice> next = new ArrayList<>();

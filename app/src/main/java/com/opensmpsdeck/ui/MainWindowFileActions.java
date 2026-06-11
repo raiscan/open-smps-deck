@@ -50,17 +50,20 @@ final class MainWindowFileActions {
     private final Consumer<SongTab> addTabConsumer;
     private final Runnable refreshTitles;
     private final BiConsumer<String, String> errorReporter;
+    private final Supplier<com.opensmpsdeck.audio.PlaybackEngine> previewEngineSupplier;
 
     MainWindowFileActions(Stage stage,
                           Supplier<SongTab> activeSongTabSupplier,
                           Consumer<SongTab> addTabConsumer,
                           Runnable refreshTitles,
-                          BiConsumer<String, String> errorReporter) {
+                          BiConsumer<String, String> errorReporter,
+                          Supplier<com.opensmpsdeck.audio.PlaybackEngine> previewEngineSupplier) {
         this.stage = stage;
         this.activeSongTabSupplier = activeSongTabSupplier;
         this.addTabConsumer = addTabConsumer;
         this.refreshTitles = refreshTitles;
         this.errorReporter = errorReporter;
+        this.previewEngineSupplier = previewEngineSupplier;
     }
 
     /** Opens an `.osmpsd` project and adds it as a new tab. */
@@ -293,10 +296,12 @@ final class MainWindowFileActions {
         DialogPaths.remember("midiImport", files.get(0));
 
         List<MidiStem> stems = new ArrayList<>();
+        List<File> readFiles = new ArrayList<>();
         StringBuilder errors = new StringBuilder();
         for (File f : files) {
             try {
                 stems.add(MidiReader.read(f));
+                readFiles.add(f);
             } catch (IOException e) {
                 errors.append(f.getName()).append(": ").append(e.getMessage()).append('\n');
             }
@@ -309,7 +314,8 @@ final class MainWindowFileActions {
             new Alert(Alert.AlertType.WARNING, "Some files were skipped:\n" + errors).showAndWait();
         }
 
-        MidiImportDialog dialog = new MidiImportDialog(stems);
+        MidiImportDialog dialog = new MidiImportDialog(stems, readFiles);
+        dialog.setPreviewEngine(previewEngineSupplier.get());
         Optional<MidiImportSpec> spec = dialog.showAndWait();
         if (spec.isEmpty()) return;
 

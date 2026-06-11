@@ -26,6 +26,11 @@ public final class VoiceMatchService {
                 return t;
             });
 
+    /**
+     * Runs the matching pipeline asynchronously on a single-thread executor.
+     *
+     * @param progress invoked on the executor thread; marshal to the UI thread yourself
+     */
     public CompletableFuture<MatchResult> match(float[] stemAudio, List<NoteEvent> notes,
                                                 TickTimeMapper map, FmPatchSearch.Config cfg,
                                                 IntConsumer progress) {

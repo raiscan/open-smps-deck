@@ -40,7 +40,8 @@ public class MainWindow {
                 this::getActiveSongTab,
                 this::addNewTab,
                 this::refreshActiveTabTitle,
-                this::showError
+                this::showError,
+                () -> playbackEngine
         );
         this.songTabCoordinator = new SongTabCoordinator(new SongTabCoordinator.PlaybackGateway() {
             @Override
