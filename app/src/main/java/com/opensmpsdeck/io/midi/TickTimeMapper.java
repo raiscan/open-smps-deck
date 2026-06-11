@@ -1,6 +1,7 @@
 package com.opensmpsdeck.io.midi;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /** Converts absolute MIDI ticks to seconds using a tempo map. */
@@ -16,6 +17,7 @@ public final class TickTimeMapper {
     public TickTimeMapper(int ppq, List<MidiStem.TempoEvent> tempoMap) {
         this.ppq = ppq;
         List<MidiStem.TempoEvent> map = new ArrayList<>(tempoMap);
+        map.sort(Comparator.comparingLong(MidiStem.TempoEvent::tick));
         if (map.isEmpty() || map.get(0).tick() > 0) {
             map.add(0, new MidiStem.TempoEvent(0, DEFAULT_US_PER_QUARTER));
         }

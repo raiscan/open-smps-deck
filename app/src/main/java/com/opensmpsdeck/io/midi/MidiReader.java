@@ -10,7 +10,6 @@ public final class MidiReader {
 
     private static final int META_TEMPO = 0x51;
     private static final int META_TIME_SIG = 0x58;
-    private static final int META_TRACK_NAME = 0x03;
     private static final int DRUM_CHANNEL = 9;
 
     private MidiReader() {}
@@ -80,7 +79,7 @@ public final class MidiReader {
             if (!notes.isEmpty()) {
                 notes.sort(Comparator.comparingLong(NoteEvent::startTick)
                         .thenComparing(Comparator.comparingInt(NoteEvent::pitch).reversed()));
-                noteTracks.add(new MidiStem.MidiNoteTrack(drum, programs, List.copyOf(notes)));
+                noteTracks.add(new MidiStem.MidiNoteTrack(drum, Set.copyOf(programs), List.copyOf(notes)));
             }
         }
 

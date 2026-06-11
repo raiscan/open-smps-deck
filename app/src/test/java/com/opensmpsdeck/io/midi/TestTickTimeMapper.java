@@ -30,4 +30,11 @@ class TestTickTimeMapper {
         var m = new TickTimeMapper(480, List.of());
         assertEquals(0.5, m.secondsAt(480), 1e-9);
     }
+
+    @Test
+    void tempoMapStartingAfterTickZeroDefaultsTo120BeforeFirstEvent() {
+        var m = new TickTimeMapper(480, List.of(new MidiStem.TempoEvent(480, 1000000)));
+        assertEquals(0.5, m.secondsAt(480), 1e-9);
+        assertEquals(1.5, m.secondsAt(960), 1e-9);
+    }
 }

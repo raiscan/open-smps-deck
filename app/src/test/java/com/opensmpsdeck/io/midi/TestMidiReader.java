@@ -64,7 +64,7 @@ class TestMidiReader {
         MidiStem stem = MidiReader.read(write(seq));
         NoteEvent dangling = stem.tracks().get(0).notes().stream()
                 .filter(n -> n.pitch() == 64).findFirst().orElseThrow();
-        assertTrue(dangling.durationTicks() > 0);
+        assertEquals(860, dangling.durationTicks());
     }
 
     @Test
