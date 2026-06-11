@@ -9,6 +9,10 @@ import com.opensmpsdeck.io.DacSampleExporter;
 import com.opensmpsdeck.io.SmpsImporter;
 import com.opensmpsdeck.io.VoiceBankFile;
 import com.opensmpsdeck.io.WavExporter;
+import com.opensmpsdeck.io.midi.MidiImportSpec;
+import com.opensmpsdeck.io.midi.MidiReader;
+import com.opensmpsdeck.io.midi.MidiSongBuilder;
+import com.opensmpsdeck.io.midi.MidiStem;
 import com.opensmpsdeck.model.ArrangementMode;
 import com.opensmpsdeck.model.FmVoice;
 import com.opensmpsdeck.model.Song;
@@ -26,6 +30,8 @@ import javafx.stage.Stage;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -272,6 +278,47 @@ final class MainWindowFileActions {
             } catch (Exception ex) {
                 showError("Failed to import SMPS", ex.getMessage());
             }
+        }
+    }
+
+    /** Imports one or more `.mid` stems as a new hierarchical song tab. */
+    void onImportMidi() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Import MIDI Stems");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("MIDI Files", "*.mid", "*.midi"));
+        DialogPaths.applyTo(fileChooser, "midiImport");
+        List<File> files = fileChooser.showOpenMultipleDialog(stage);
+        if (files == null || files.isEmpty()) return;
+        DialogPaths.remember("midiImport", files.get(0));
+
+        List<MidiStem> stems = new ArrayList<>();
+        StringBuilder errors = new StringBuilder();
+        for (File f : files) {
+            try {
+                stems.add(MidiReader.read(f));
+            } catch (IOException e) {
+                errors.append(f.getName()).append(": ").append(e.getMessage()).append('\n');
+            }
+        }
+        if (stems.isEmpty()) {
+            new Alert(Alert.AlertType.ERROR, "No readable MIDI files:\n" + errors).showAndWait();
+            return;
+        }
+        if (errors.length() > 0) {
+            new Alert(Alert.AlertType.WARNING, "Some files were skipped:\n" + errors).showAndWait();
+        }
+
+        MidiImportDialog dialog = new MidiImportDialog(stems);
+        Optional<MidiImportSpec> spec = dialog.showAndWait();
+        if (spec.isEmpty()) return;
+
+        try {
+            Song song = MidiSongBuilder.build(spec.get());
+            SongTab songTab = new SongTab(song);
+            addTabConsumer.accept(songTab);
+        } catch (Exception ex) {
+            showError("Failed to import MIDI", ex.getMessage());
         }
     }
 

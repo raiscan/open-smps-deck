@@ -343,6 +343,9 @@ public class MainWindow {
         MenuItem importSmpsItem = new MenuItem("Import SMPS...");
         importSmpsItem.setOnAction(e -> fileActions.onImportSmps());
 
+        MenuItem importMidiItem = new MenuItem("Import MIDI...");
+        importMidiItem.setOnAction(e -> fileActions.onImportMidi());
+
         MenuItem importVoiceBankItem = new MenuItem("Import Voice Bank...");
         importVoiceBankItem.setOnAction(e -> fileActions.onImportVoiceBank());
 
@@ -354,7 +357,7 @@ public class MainWindow {
 
         fileMenu.getItems().addAll(newItem, openItem, new SeparatorMenuItem(),
                 saveItem, saveAsItem, separator, exportItem, exportWavItem,
-                new SeparatorMenuItem(), importVoicesItem, importSmpsItem,
+                new SeparatorMenuItem(), importVoicesItem, importSmpsItem, importMidiItem,
                 new SeparatorMenuItem(), importVoiceBankItem, exportVoiceBankItem,
                 exportDacItem);
 
