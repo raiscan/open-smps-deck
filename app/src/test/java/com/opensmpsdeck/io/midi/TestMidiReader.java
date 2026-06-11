@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import javax.sound.midi.*;
 import java.io.File;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -115,5 +116,24 @@ class TestMidiReader {
         t.add(noteOff(0, 60, 480));
         MidiStem stem = MidiReader.read(write(seq));
         assertEquals(1, stem.tracks().size());
+    }
+
+    @Test
+    void format2IsRejected() throws Exception {
+        // Write a format-1 file, then patch byte 9 (MThd format field, big-endian) to 2.
+        Sequence seq = new Sequence(Sequence.PPQ, 480);
+        Track t = seq.createTrack();
+        t.add(noteOn(0, 60, 100, 0));
+        t.add(noteOff(0, 60, 480));
+        File f = write(seq);
+
+        // Patch the format field: MThd header bytes 8-9 hold the format word (big-endian).
+        // Format 1 file written above has 0x00 0x01 at offset 8-9; change to 0x00 0x02.
+        byte[] bytes = java.nio.file.Files.readAllBytes(f.toPath());
+        bytes[9] = 0x02;
+        java.nio.file.Files.write(f.toPath(), bytes);
+
+        IOException ex = assertThrows(IOException.class, () -> MidiReader.read(f));
+        assertTrue(ex.getMessage().contains("Format 2"), "message should mention Format 2: " + ex.getMessage());
     }
 }

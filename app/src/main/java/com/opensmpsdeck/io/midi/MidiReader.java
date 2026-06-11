@@ -15,6 +15,14 @@ public final class MidiReader {
     private MidiReader() {}
 
     public static MidiStem read(File file) throws IOException {
+        try {
+            MidiFileFormat fmt = MidiSystem.getMidiFileFormat(file);
+            if (fmt.getType() == 2) {
+                throw new IOException("Format 2 MIDI is not supported: " + file.getName());
+            }
+        } catch (InvalidMidiDataException e) {
+            throw new IOException("Not a valid MIDI file: " + file.getName(), e);
+        }
         Sequence seq;
         try {
             seq = MidiSystem.getSequence(file);
