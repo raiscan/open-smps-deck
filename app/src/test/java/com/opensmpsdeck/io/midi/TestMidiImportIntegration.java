@@ -2,6 +2,7 @@ package com.opensmpsdeck.io.midi;
 
 import com.opensmpsdeck.audio.PlaybackEngine;
 import com.opensmpsdeck.codec.PatternCompiler;
+import com.opensmpsdeck.codec.SmpsDecoder;
 import com.opensmpsdeck.model.Song;
 import com.opensmpsdeck.model.SmpsMode;
 import org.junit.jupiter.api.Test;
@@ -9,15 +10,17 @@ import org.junit.jupiter.api.io.TempDir;
 
 import javax.sound.midi.*;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class TestMidiImportIntegration {
 
     @TempDir
-    File tempDir;
+    Path tempDir;
 
     /** Builds a tiny two-bar fixture: melody + bass + kick/hat drums at 120 BPM. */
     private File writeFixture() throws Exception {
@@ -41,7 +44,7 @@ class TestMidiImportIntegration {
             drums.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 9, pitch, 0),
                     beat * 480L + 120));
         }
-        File f = new File(tempDir, "fixture.mid");
+        File f = tempDir.resolve("fixture.mid").toFile();
         MidiSystem.write(seq, 1, f);
         return f;
     }
@@ -76,6 +79,32 @@ class TestMidiImportIntegration {
         assertFalse(arr.getChain(5).getEntries().isEmpty(), "kicks on DAC");
         assertFalse(arr.getChain(9).getEntries().isEmpty(), "hats on noise");
         assertEquals(0, arr.getChain(0).getLoopEntryIndex());
+        assertEquals(0, arr.getChain(5).getLoopEntryIndex(), "DAC chain loops to start");
+        assertEquals(0, arr.getChain(9).getLoopEntryIndex(), "noise chain loops to start");
+    }
+
+    @Test
+    void importedMelodyDecodesToFixtureNotes() throws Exception {
+        // fixture melody MIDI 60/64/67/72 → noteByte 0x81 + pitch − 12 → 0xB1.. → C-4 E-4 G-4 C-5
+        Song song = importFixture();
+        var arr = song.getHierarchicalArrangement();
+        var lib = arr.getPhraseLibrary();
+        int firstPhraseId = arr.getChain(0).getEntries().get(0).getPhraseId();
+        byte[] data = lib.getPhrase(firstPhraseId).getData();
+
+        // keep only sounding-note rows: skip rests "---", ties "===", and
+        // flag-only rows (empty note); the EF voice prefix lands in the
+        // instrument column of the first note row, not in a row of its own
+        Set<String> nonNotes = Set.of("---", "===", "");
+        var soundingNotes = SmpsDecoder.decode(data).stream()
+                .map(SmpsDecoder.TrackerRow::note)
+                .filter(n -> !nonNotes.contains(n))
+                .toList();
+
+        assertTrue(soundingNotes.size() >= 4,
+                "expected at least 4 melody notes, got " + soundingNotes);
+        assertEquals(List.of("C-4", "E-4", "G-4", "C-5"), soundingNotes.subList(0, 4),
+                "first four melody notes must match the fixture in order");
     }
 
     @Test
