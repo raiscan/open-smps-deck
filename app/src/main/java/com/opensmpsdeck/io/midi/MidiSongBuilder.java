@@ -189,13 +189,23 @@ public final class MidiSongBuilder {
             {0x00, 0x02, 0x04, 0x06, 0x09, 0x0C, 0x0F, (byte) 0x80};
     private static final String NOISE_ENVELOPE_NAME = "Noise Hat";
 
+    /** Noise mode the importer emits (white noise, high fixed rate). */
+    public static int noiseModeByte() {
+        return NOISE_MODE_BYTE;
+    }
+
+    /** The decay envelope imported hats use — also used by the import preview. */
+    public static PsgEnvelope defaultNoiseEnvelope() {
+        return new PsgEnvelope(NOISE_ENVELOPE_NAME, NOISE_DECAY_ENVELOPE.clone());
+    }
+
     /** Returns the 1-based id of the imported-hat decay envelope, creating it once. */
     private static int ensureNoiseEnvelope(Song song) {
         List<PsgEnvelope> envs = song.getPsgEnvelopes();
         for (int i = 0; i < envs.size(); i++) {
             if (NOISE_ENVELOPE_NAME.equals(envs.get(i).getName())) return i + 1;
         }
-        envs.add(new PsgEnvelope(NOISE_ENVELOPE_NAME, NOISE_DECAY_ENVELOPE.clone()));
+        envs.add(defaultNoiseEnvelope());
         return envs.size();
     }
 }

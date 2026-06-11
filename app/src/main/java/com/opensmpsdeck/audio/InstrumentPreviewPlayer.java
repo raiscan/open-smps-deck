@@ -34,6 +34,7 @@ public final class InstrumentPreviewPlayer {
     private static final int PSG_PREVIEW_CHANNEL = 6; // PSG1
     private static final int FM_PREVIEW_CHANNEL = 0;  // FM1
     private static final int DAC_CHANNEL = 5;
+    private static final int NOISE_CHANNEL = 9;
 
     private InstrumentPreviewPlayer() {
     }
@@ -60,6 +61,31 @@ public final class InstrumentPreviewPlayer {
         engine.stop();
         engine.loadPreview(buildDacPreviewSong(sample));
         engine.play();
+    }
+
+    /**
+     * Plays one PSG noise hit exactly as the MIDI importer emits it: envelope
+     * select, white-noise mode, then a single hit on the noise channel.
+     */
+    public static void previewNoiseHit(PlaybackEngine engine, PsgEnvelope envelope,
+                                       int noiseModeByte) {
+        if (engine == null) return;
+        engine.stop();
+        engine.loadPreview(buildNoisePreviewSong(envelope, noiseModeByte));
+        engine.play();
+    }
+
+    static Song buildNoisePreviewSong(PsgEnvelope envelope, int noiseModeByte) {
+        Song song = newPreviewSong();
+        song.getPsgEnvelopes().add(envelope);
+        byte[] data = {
+            (byte) SmpsCoordFlags.PSG_INSTRUMENT, 0x01, // 1-based envelope id
+            (byte) SmpsCoordFlags.PSG_NOISE, (byte) noiseModeByte,
+            (byte) 0xB0, 0x10,
+            (byte) SmpsCoordFlags.STOP
+        };
+        addPhrase(song, NOISE_CHANNEL, data);
+        return song;
     }
 
     static Song buildFmPreviewSong(FmVoice voice, int noteByte, int durationFrames) {

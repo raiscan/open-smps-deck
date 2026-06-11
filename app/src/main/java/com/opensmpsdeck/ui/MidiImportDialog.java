@@ -1,5 +1,6 @@
 package com.opensmpsdeck.ui;
 
+import com.opensmpsdeck.audio.InstrumentPreviewPlayer;
 import com.opensmpsdeck.audio.PlaybackEngine;
 import com.opensmpsdeck.audio.match.DrumSliceExtractor;
 import com.opensmpsdeck.audio.match.MonophonicWindowFinder;
@@ -93,7 +94,8 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
                 buildMappingTable(),
                 new HBox(10, new Label("Bars per phrase:"), phraseBars,
                         new Label("Mode:"), modeBox, loopSong),
-                new HBox(10, new Label("Drums:"), extractDrumSamples),
+                new HBox(10, new Label("Drums:"), extractDrumSamples,
+                        new Label("Preview:"), buildDrumPreviewButtons()),
                 new Label("Warnings:"), warningsArea);
         content.setPadding(new Insets(10));
         warningsArea.setEditable(false);
@@ -140,6 +142,9 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
             }
         }
         drumSplit = GmDrumMapper.split(drumNotes, drumMapping);
+        if (hatPreviewButton != null) {
+            hatPreviewButton.setDisable(drumSplit.noiseHits().isEmpty());
+        }
         for (int p : drumSplit.droppedPitches()) {
             warn.append("Unmapped GM drum pitch ").append(p).append(" dropped\n");
         }
@@ -306,7 +311,7 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
 
         Map<Integer, DacSample> dacSampleOverrides = Map.of();
         if (extractDrumSamples.isSelected() && findDrumWav() != null) {
-            dacSampleOverrides = extractDrumSamples();
+            dacSampleOverrides = extractedDrums();
         }
 
         return new MidiImportSpec(
@@ -314,6 +319,51 @@ public class MidiImportDialog extends Dialog<MidiImportSpec> {
                 fit.unitsPerSixteenth(), stepsPerBar, phraseBars.getValue(),
                 loopSong.isSelected(), first.ppq(), assignments,
                 drumSplit.dacHits(), drumSplit.noiseHits(), drumMapping, dacSampleOverrides);
+    }
+
+    /**
+     * Kick/Snare/Tom buttons audition the extracted DAC one-shots through the
+     * real DAC pipeline; Hat plays one noise hit exactly as the import emits it
+     * (decay envelope + white-noise mode). DAC buttons need the drums WAV and
+     * the extraction checkbox; Hat only needs drum hits in the MIDI.
+     */
+    private HBox buildDrumPreviewButtons() {
+        HBox box = new HBox(5);
+        String[] names = {"Kick", "Snare", "Tom"};
+        boolean wavAvailable = findDrumWav() != null;
+        for (int slot = 0; slot < names.length; slot++) {
+            final int s = slot;
+            Button b = new Button(names[slot]);
+            b.setDisable(!wavAvailable);
+            b.setOnAction(e -> {
+                if (previewEngine == null || !extractDrumSamples.isSelected()) return;
+                DacSample sample = extractedDrums().get(s);
+                if (sample != null && sample.getData().length > 0) {
+                    InstrumentPreviewPlayer.previewDacSample(previewEngine, sample);
+                }
+            });
+            extractDrumSamples.selectedProperty().addListener(
+                    (o, was, is) -> b.setDisable(!is || !wavAvailable));
+            box.getChildren().add(b);
+        }
+        hatPreviewButton = new Button("Hat");
+        hatPreviewButton.setDisable(true); // enabled once recomputeTempoAndDrums finds noise hits
+        hatPreviewButton.setOnAction(e -> InstrumentPreviewPlayer.previewNoiseHit(previewEngine,
+                MidiSongBuilder.defaultNoiseEnvelope(), MidiSongBuilder.noiseModeByte()));
+        box.getChildren().add(hatPreviewButton);
+        return box;
+    }
+
+    private Button hatPreviewButton;
+
+    /** Lazily extracted drum one-shots — shared by the preview buttons and OK. */
+    private Map<Integer, DacSample> extractedDrumsCache;
+
+    private Map<Integer, DacSample> extractedDrums() {
+        if (extractedDrumsCache == null) {
+            extractedDrumsCache = extractDrumSamples();
+        }
+        return extractedDrumsCache;
     }
 
     /** The source {@code .wav} alongside the drum stem's {@code .mid}, or null. */
