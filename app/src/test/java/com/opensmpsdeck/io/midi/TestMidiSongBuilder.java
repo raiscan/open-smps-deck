@@ -82,6 +82,33 @@ class TestMidiSongBuilder {
     }
 
     @Test
+    void dataEqualVoicesShareOneBankSlot() {
+        // two channels, each carrying a FRESH (distinct instance, data-equal) voice
+        var lineA = new VoiceSeparator.SeparatedLine(0, List.of(
+                new NoteEvent(0, 480, 60, 100)));
+        var lineB = new VoiceSeparator.SeparatedLine(0, List.of(
+                new NoteEvent(0, 480, 67, 100)));
+        var spec = new MidiImportSpec(
+                "Dedup", SmpsMode.S2, 0x80, 1, 4, 16, 4, false, 480,
+                List.of(new MidiImportSpec.LineAssignment(
+                                "A", lineA, 0, 0, GmVoiceSuggestions.squareLead(), -1),
+                        new MidiImportSpec.LineAssignment(
+                                "B", lineB, 1, 0, GmVoiceSuggestions.squareLead(), -1)),
+                List.of(), List.of(), GmDrumMapper.defaultMapping(), Map.of());
+        Song song = MidiSongBuilder.build(spec);
+
+        assertEquals(1, song.getVoiceBank().size());
+        for (int ch = 0; ch <= 1; ch++) {
+            int firstId = song.getHierarchicalArrangement().getChain(ch)
+                    .getEntries().get(0).getPhraseId();
+            byte[] data = song.getHierarchicalArrangement().getPhraseLibrary()
+                    .getPhrase(firstId).getData();
+            assertEquals((byte) SmpsCoordFlags.SET_VOICE, data[0], "channel " + ch);
+            assertEquals(0, data[1], "channel " + ch + " voice index");
+        }
+    }
+
+    @Test
     void builtSongCompiles() {
         Song song = MidiSongBuilder.build(basicSpec());
         byte[] smps = new PatternCompiler().compile(song);
