@@ -146,8 +146,12 @@ public final class MidiPhraseEncoder {
                                   List<String> warnings) {
         int nb = NOTE_BASE + pitch - 12 + 12 * octaveShift;
         if (nb < NOTE_BASE || nb > NOTE_MAX) {
-            int clamped = Math.floorMod(nb - NOTE_BASE, 12) + NOTE_BASE
-                    + (nb < NOTE_BASE ? 0 : (NOTE_MAX - NOTE_BASE) / 12 * 12);
+            // Shift into range by whole octaves so the pitch class is preserved:
+            // pick the lowest (below range) or highest (above range) in-range octave
+            // that still holds this pitch class.
+            int pc = Math.floorMod(nb - NOTE_BASE, 12);
+            int clamped = NOTE_BASE + pc
+                    + (nb < NOTE_BASE ? 0 : (NOTE_MAX - NOTE_BASE - pc) / 12 * 12);
             warnings.add(String.format("%s: MIDI pitch %d out of SMPS range, clamped", type, pitch));
             nb = Math.max(NOTE_BASE, Math.min(NOTE_MAX, clamped));
         }

@@ -81,6 +81,23 @@ class TestMidiPhraseEncoder {
     }
 
     @Test
+    void clampedHighPitchPreservesPitchClass() {
+        // MIDI 107 = B7 → raw note byte 0xE0, one above NOTE_MAX (0xDF). The clamp
+        // must drop whole octaves and land on a B (0xD4 = B-6), not bleed into the
+        // adjacent pitch class via a bare min() (0xDF = A#).
+        var lib = new PhraseLibrary();
+        var notes = List.of(new NoteQuantizer.QuantizedNote(0, 1, 107, 100));
+        var warnings = new ArrayList<String>();
+        var entries = MidiPhraseEncoder.encodeLine(notes, ChannelType.FM, P, lib,
+                new java.util.HashMap<>(), "x", warnings);
+        byte[] data = lib.getPhrase(entries.get(0).getPhraseId()).getData();
+        var rows = SmpsDecoder.decode(data);
+        assertTrue(rows.get(0).note().startsWith("B-"),
+                "clamp must preserve pitch class B, got " + rows.get(0).note());
+        assertFalse(warnings.isEmpty());
+    }
+
+    @Test
     void noteSpanningBarBoundarySplitsWithTie() {
         var lib = new PhraseLibrary();
         // starts at step 14, length 4 → crosses the bar at step 16
