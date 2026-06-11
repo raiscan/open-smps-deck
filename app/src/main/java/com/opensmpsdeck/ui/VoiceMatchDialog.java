@@ -25,8 +25,14 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
     private final ProgressBar progress = new ProgressBar(ProgressBar.INDETERMINATE_PROGRESS);
     private final Label status = new Label("Analyzing…");
     private final VoiceMatchService service = new VoiceMatchService();
+    private final com.opensmpsdeck.audio.PcmClipPlayer clipPlayer =
+            new com.opensmpsdeck.audio.PcmClipPlayer();
     private final String resultBaseName;
     private PlaybackEngine previewEngine;
+    /** The original WAV slice the candidates were matched against (A/B reference). */
+    private float[] referenceSlice;
+    /** Note byte for candidate audition — the matched window's pitch, not a fixed C4. */
+    private int auditionNoteByte = InstrumentPreviewPlayer.DEFAULT_NOTE;
 
     /**
      * @param wavFile        stem WAV to analyse
@@ -47,16 +53,25 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
                         : String.format("score %.4f — %s", item.score(), item.voice().getName()));
             }
         });
-        Button audition = new Button("Audition");
+        Button audition = new Button("Audition Match");
         audition.setOnAction(e -> {
+            clipPlayer.stop();
             var sel = list.getSelectionModel().getSelectedItem();
             if (sel != null && previewEngine != null) {
                 InstrumentPreviewPlayer.previewFmVoice(previewEngine, sel.voice(),
-                        InstrumentPreviewPlayer.DEFAULT_NOTE);
+                        auditionNoteByte);
             }
         });
+        Button playOriginal = new Button("Play Original");
+        playOriginal.setDisable(true);
+        playOriginal.setOnAction(e -> {
+            if (previewEngine != null) previewEngine.stop();
+            if (referenceSlice != null) clipPlayer.play(referenceSlice, 44100);
+        });
+        this.playOriginalButton = playOriginal;
 
-        VBox box = new VBox(10, status, progress, list, new HBox(10, audition));
+        VBox box = new VBox(10, status, progress, list,
+                new HBox(10, audition, playOriginal));
         box.setPadding(new Insets(10));
         getDialogPane().setContent(box);
         getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -69,10 +84,15 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
             FmVoice accepted = new FmVoice(resultBaseName + " match", sel.voice().getData());
             return accepted;
         });
-        setOnHidden(e -> service.shutdown());
+        setOnHidden(e -> {
+            clipPlayer.stop();
+            service.shutdown();
+        });
 
         startMatch(wavFile, notes, map, lowConfidence);
     }
+
+    private final Button playOriginalButton;
 
     public void setPreviewEngine(PlaybackEngine engine) { this.previewEngine = engine; }
 
@@ -91,11 +111,18 @@ public class VoiceMatchDialog extends Dialog<FmVoice> {
                             } else {
                                 status.setText(lowConfidence
                                         ? "Top candidates — low confidence (no MIDI guidance):"
-                                        : "Top candidates — audition and accept:");
+                                        : "Top candidates — compare against the original and accept:");
                                 list.setItems(FXCollections.observableArrayList(
                                         result.candidates()));
                                 list.getSelectionModel().selectFirst();
                                 getDialogPane().lookupButton(ButtonType.OK).setDisable(false);
+                                referenceSlice = result.referenceSlice();
+                                if (result.referencePitch() >= 0) {
+                                    // audition at the matched pitch for a fair A/B
+                                    auditionNoteByte = Math.max(0x81, Math.min(0xDF,
+                                            0x81 + result.referencePitch() - 12));
+                                }
+                                playOriginalButton.setDisable(referenceSlice == null);
                             }
                         }))
                         .exceptionally(ex -> {
