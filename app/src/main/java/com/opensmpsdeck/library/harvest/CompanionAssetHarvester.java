@@ -223,9 +223,28 @@ public final class CompanionAssetHarvester {
                 value(base == null ? null : base.variantPath()),
                 firstNonBlank(base == null ? null : base.configExtension(), extension),
                 value(base == null ? null : base.sourceSongFile()),
-                companion.getFileName().toString(),
+                companionSource(scanRoot, base, companion),
                 originalIndexOrId,
                 driver == null ? value(base == null ? null : base.driverSummary()) : driver.summary());
+    }
+
+    private static String companionSource(Path scanRoot, SourceReference base, Path companion) {
+        Path root = scanRoot;
+        if (root == null && base != null && base.scanRoot() != null && !base.scanRoot().isBlank()) {
+            root = Path.of(base.scanRoot());
+        }
+        Path normalizedCompanion = companion.toAbsolutePath().normalize();
+        if (root != null) {
+            Path normalizedRoot = root.toAbsolutePath().normalize();
+            if (normalizedCompanion.startsWith(normalizedRoot)) {
+                return slashPath(normalizedRoot.relativize(normalizedCompanion));
+            }
+        }
+        return companion.getFileName().toString();
+    }
+
+    private static String slashPath(Path path) {
+        return path.toString().replace('\\', '/');
     }
 
     private static String value(String value) {

@@ -47,6 +47,9 @@ class TestInstrumentLibraryScanner {
         assertEquals(1, first.newAssetsByKind().get(InstrumentAssetKind.PSG_ENVELOPE));
         assertEquals(1, library.entries(InstrumentAssetKind.FM_VOICE).size());
         assertEquals(1, library.entries(InstrumentAssetKind.PSG_ENVELOPE).size());
+        assertEquals("Sega/Sonic2/Proto/PSG.lst",
+                library.entries(InstrumentAssetKind.PSG_ENVELOPE).getFirst()
+                        .sourceReferences().getFirst().sourceCompanionFile());
         assertTrue(first.failures().isEmpty());
 
         library.clearDirty();
@@ -55,6 +58,8 @@ class TestInstrumentLibraryScanner {
         assertEquals(1, second.configDirectoriesFound());
         assertEquals(0, second.newAssets());
         assertEquals(4, second.duplicateAssets());
+        assertEquals(2, second.duplicateAssetsByKind().get(InstrumentAssetKind.FM_VOICE));
+        assertEquals(2, second.duplicateAssetsByKind().get(InstrumentAssetKind.PSG_ENVELOPE));
         assertFalse(library.isDirty(), "Repeated scan should not add new source refs");
     }
 

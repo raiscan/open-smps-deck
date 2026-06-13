@@ -1,5 +1,6 @@
 package com.opensmpsdeck.library.scan;
 
+import com.opensmpsdeck.io.EnvelopeListParser;
 import com.opensmpsdeck.io.SmpsImporter;
 import com.opensmpsdeck.library.AddResult;
 import com.opensmpsdeck.library.InstrumentAssetKind;
@@ -7,7 +8,9 @@ import com.opensmpsdeck.library.InstrumentLibrary;
 import com.opensmpsdeck.library.InstrumentLibraryEntry;
 import com.opensmpsdeck.library.SourceReference;
 import com.opensmpsdeck.library.harvest.CompanionAssetHarvester;
+import com.opensmpsdeck.library.harvest.DacIniParser;
 import com.opensmpsdeck.library.harvest.HarvestResult;
+import com.opensmpsdeck.library.harvest.InsSetVoiceParser;
 import com.opensmpsdeck.library.rip.CoordFlagDefinition;
 import com.opensmpsdeck.library.rip.DialectCapability;
 import com.opensmpsdeck.library.rip.DialectCapabilityClassifier;
@@ -144,6 +147,7 @@ public final class InstrumentLibraryScanner {
             InstrumentLibrary library,
             Counter counter) {
         Map<InstrumentAssetKind, Integer> before = countsByKind(library);
+        Map<InstrumentAssetKind, Integer> companionCounts = companionCountsByKind(section, driver);
         HarvestResult result = CompanionAssetHarvester.harvest(library, scanRoot, section, driver, baseSource);
         Map<InstrumentAssetKind, Integer> after = countsByKind(library);
 
@@ -151,6 +155,7 @@ public final class InstrumentLibraryScanner {
         counter.newAssets += result.addedCount();
         counter.duplicateAssets += result.duplicateCount();
         addDeltas(counter.newAssetsByKind, before, after);
+        addCompanionDuplicateCounts(counter.duplicateAssetsByKind, companionCounts, before, after);
         for (String warning : result.warnings()) {
             counter.failure(configPath, warning);
         }
@@ -443,6 +448,90 @@ public final class InstrumentLibraryScanner {
                 target.merge(kind, delta, Integer::sum);
             }
         }
+    }
+
+    private static void addCompanionDuplicateCounts(
+            EnumMap<InstrumentAssetKind, Integer> target,
+            Map<InstrumentAssetKind, Integer> companionCounts,
+            Map<InstrumentAssetKind, Integer> before,
+            Map<InstrumentAssetKind, Integer> after) {
+        for (InstrumentAssetKind kind : InstrumentAssetKind.values()) {
+            int newCount = Math.max(0, after.get(kind) - before.get(kind));
+            int duplicateCount = Math.max(0, companionCounts.get(kind) - newCount);
+            if (duplicateCount > 0) {
+                target.merge(kind, duplicateCount, Integer::sum);
+            }
+        }
+    }
+
+    private static Map<InstrumentAssetKind, Integer> companionCountsByKind(
+            SmpsRipConfig.Section section,
+            SmpsDriverDefinition driver) {
+        EnumMap<InstrumentAssetKind, Integer> counts = new EnumMap<>(InstrumentAssetKind.class);
+        for (InstrumentAssetKind kind : InstrumentAssetKind.values()) {
+            counts.put(kind, 0);
+        }
+        counts.put(InstrumentAssetKind.PSG_ENVELOPE, envelopeCount(section.resolve("VolEnv")));
+        counts.put(InstrumentAssetKind.MOD_ENVELOPE, envelopeCount(section.resolve("ModEnv")));
+        counts.put(InstrumentAssetKind.DAC_SAMPLE, dacCount(section.resolve("DAC")));
+        counts.put(InstrumentAssetKind.FM_VOICE, fmVoiceCount(section.resolve("GlobalInsLib"), section.extension(), driver));
+        return counts;
+    }
+
+    private static int envelopeCount(Path companion) {
+        if (companion == null || !Files.exists(companion)) {
+            return 0;
+        }
+        try {
+            return EnvelopeListParser.parse(Files.readAllBytes(companion)).size();
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private static int fmVoiceCount(Path companion, String extension, SmpsDriverDefinition driver) {
+        if (companion == null || !Files.exists(companion)) {
+            return 0;
+        }
+        try {
+            return InsSetVoiceParser.parse(companion, extension, driver).size();
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private static int dacCount(Path companion) {
+        if (companion == null || !Files.exists(companion)) {
+            return 0;
+        }
+        try {
+            Path configDir = companion.toAbsolutePath().normalize().getParent();
+            int count = 0;
+            for (DacIniParser.Entry entry : DacIniParser.parse(companion)) {
+                if (dacSampleExists(configDir, entry)) {
+                    count++;
+                }
+            }
+            return count;
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private static boolean dacSampleExists(Path configDir, DacIniParser.Entry entry) {
+        String normalized = entry.file().replace('\\', '/');
+        String baseName = Path.of(normalized).getFileName().toString();
+        return Files.exists(configDir.resolve("DAC").resolve("uncompressed").resolve(baseName).normalize())
+                || Files.exists(resolvePossiblyAbsolute(configDir, normalized))
+                || Files.exists(configDir.resolve("DAC").resolve(baseName).normalize());
+    }
+
+    private static Path resolvePossiblyAbsolute(Path baseDir, String value) {
+        Path path = Path.of(value);
+        if (path.isAbsolute()) {
+            return path.normalize();
+        }
+        return baseDir.resolve(path).normalize();
     }
 
     private static String message(Exception e) {
