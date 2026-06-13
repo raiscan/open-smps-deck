@@ -14,6 +14,7 @@ OpenSMPSDeck already stores instruments inside each `Song`:
 - `Song.getPsgEnvelopes()` contains PSG volume envelopes.
 - `Song.getModEnvelopes()` contains modulation envelopes in the same byte-array shape as PSG envelopes.
 - `Song.getDacSamples()` contains `DacSample` entries.
+- `FmVoice.VOICE_SIZE` is the canonical FM voice payload size used by the app.
 
 Existing I/O already provides useful pieces:
 
@@ -35,9 +36,9 @@ Default storage:
 - If unset, the root defaults to a per-user OpenSMPSDeck data directory.
 - The root contains `library.json` and a `dac/` payload directory.
 
-`library.json` is versioned, pretty-printed JSON. It stores metadata and small payloads directly:
+`library.json` is read and written by a new `InstrumentLibraryFile` persistence class. It is versioned, pretty-printed JSON and stores metadata and small payloads directly:
 
-- FM voice data as hex-encoded 25-byte blobs.
+- FM voice data as hex-encoded `FmVoice.VOICE_SIZE` blobs in the app's canonical operator/register layout.
 - PSG envelope data as hex.
 - Modulation envelope data as hex.
 - DAC metadata and the relative path to a raw unsigned 8-bit PCM payload file under `dac/`.
@@ -61,7 +62,7 @@ Common asset metadata:
 
 FM voice metadata:
 
-- 25-byte voice data
+- `FmVoice.VOICE_SIZE` voice data
 - algorithm
 - feedback
 
@@ -80,7 +81,7 @@ DAC metadata:
 
 Deduplication rules:
 
-- FM voices dedupe by exact 25-byte data.
+- FM voices dedupe by exact canonical `FmVoice.VOICE_SIZE` data after any supported source-layout normalization.
 - PSG envelopes dedupe by exact bytes.
 - Modulation envelopes dedupe by exact bytes and stay separate from PSG volume envelopes.
 - DAC samples dedupe by exact sample bytes plus playback rate.
@@ -109,6 +110,21 @@ Discovery behavior:
 - Derive driver family, game name, and variant/prototype path from the folder path relative to the selected root.
 - Avoid treating arbitrary `.bin` files as song candidates in known rip trees. `.bin` files are usually driver dumps, DAC payloads, instrument sets, pan animation tables, or other data.
 
+Companion resolution is new scanner work. The current `SmpsImporter` companion loading is useful for existing full imports, but it looks for hardcoded names such as `PSG.lst`, `Modulat.lst`, `DAC.ini`, and `DefDrum.txt` in the parent directory. `SmpsRipConfigParser` must resolve the actual filenames named by `config.ini`, including alternate DAC ini names and instrument-library paths.
+
+Config file roles:
+
+| File/key | Parser responsibility |
+| --- | --- |
+| `config.ini` | Maps extension sections to companion filenames and driver-definition files. |
+| `Driver` / `DefDrv.txt` | Feeds `SmpsDriverDefinition` for pointer, tempo, instrument, channel, frequency, drum, and envelope settings. |
+| `Commands` / `DefCFlag.txt` | Feeds `CoordFlagDefinition`; command bytes should be interpreted against `SmpsCoordFlags` where existing app constants are authoritative. |
+| `Drums` / `DefDrum.txt` | Maps drum notes or ids to DAC entries when importing or harvesting DAC metadata. |
+| `VolEnv` | Feeds PSG volume-envelope harvesting. |
+| `ModEnv` | Feeds modulation-envelope harvesting. |
+| `DAC` | Feeds DAC metadata and payload harvesting. |
+| `GlobalInsLib` and `InsSet*.bin` | Feed FM voice-bank harvesting when layout normalization is supported. |
+
 Primary harvesting:
 
 - Parse configured `VolEnv` files such as `PSG.lst` using the mid2smps envelope-list format.
@@ -116,6 +132,14 @@ Primary harvesting:
 - Parse configured DAC ini files, including variants like `DAC.ini`, `DAC_Voice.ini`, `DAC_Voice1.ini`, `DAC_Voice2.ini`, `DAC_SFX.ini`, and `NECPCM.ini`.
 - Load referenced PCM/DPCM files, converting supported DPCM to unsigned 8-bit PCM using the existing DPCM delta logic.
 - Parse configured `GlobalInsLib` and `InsSet*.bin` files as FM voice banks when their instrument mode is supported.
+
+FM voice normalization is mandatory:
+
+- Every harvested FM voice must be converted to the app's canonical `FmVoice.VOICE_SIZE` layout before dedupe or storage.
+- Song-import harvesting may reuse `SmpsImporter` output because it already produces `FmVoice` model entries.
+- Direct `GlobalInsLib` and `InsSet*.bin` harvesting must derive source layout from `InsMode` and `InsRegs`.
+- If a source's operator/register layout cannot be normalized with confidence, skip direct FM voice harvesting for that config and report the reason in the scan summary. Do not store raw source-order voice bytes in the library.
+- Unsupported FM library layout does not block PSG, modulation-envelope, or DAC harvesting from the same config.
 
 Song import harvesting:
 
@@ -136,6 +160,19 @@ Scan summary:
 - total library counts by kind
 
 Rescanning the same root is idempotent. Existing assets are not duplicated; new source references are merged into existing entries.
+
+Idempotency details:
+
+- Re-encountering the same source reference is a no-op.
+- `updatedTimestamp` changes only when an asset's metadata or source-reference set actually changes.
+- `library.json` is saved only when the in-memory library changed.
+- The first version keeps a single pretty-printed JSON index. This is acceptable for expected v1 scale, but future large-library work can split the index by kind if full-archive scans make the file unwieldy.
+
+Recursive traversal guards:
+
+- Do not follow symlinks by default.
+- Track canonical visited directories to avoid loops.
+- Expose a conservative maximum recursion depth constant for tests and future preferences, while allowing normal game-root scans to complete.
 
 ## Dialect Capability Classification
 
@@ -170,12 +207,18 @@ The scanner must not decide support from extension alone. It parses `DefDrv.txt`
 
 Capability buckets:
 
-- `FULL_IMPORT`: the song format can be imported into a `Song` model with current or immediately parameterized importer behavior.
+- `FULL_IMPORT`: the song format can be imported into a `Song` model by the importer that exists in the current implementation layer.
 - `ASSET_ONLY`: the scanner can harvest companion files, but full track decompilation is not supported yet.
 - `UNSUPPORTED`: the file looks like a song, but required driver features are not implemented.
 - `IGNORED`: driver/sample/data files that are not song or library inputs.
 
-Likely `FULL_IMPORT` targets after adding parsed definitions:
+Layering rule:
+
+- Before layer 7, `FULL_IMPORT` is limited to files that map to the existing hardcoded importer modes: `SmpsMode.S1`, `SmpsMode.S2`, or `SmpsMode.S3K`.
+- Other parseable configs are `ASSET_ONLY` until the parameterized importer can consume their parsed `SmpsDriverDefinition` and `CoordFlagDefinition`.
+- The scanner must not attempt full import for a config just because its driver definition appears theoretically compatible. This prevents large-root scans from producing avoidable parse failures while companion harvesting can still succeed.
+
+Initial `FULL_IMPORT` eligibility after layer 7 adds parsed definitions:
 
 - Non-preSMPS `PtrFmt=Z80`, `68k`, or `Rst`.
 - `TempoMode=Timeout`, `Overflow`, or `Overflow2`.
@@ -271,6 +314,7 @@ Library persistence is stricter:
 - Invalid `library.json` causes a load error and does not silently discard data.
 - Saving writes to a temporary file and then replaces the index to avoid corrupting the library on partial writes.
 - DAC payload files are written before the index references them.
+- A crash between DAC payload write and index replacement can leave orphaned files in `dac/`. This is acceptable for v1 because the index remains coherent; a future reconciliation pass can delete unreferenced payloads.
 
 ## Testing Strategy
 
@@ -278,12 +322,13 @@ Unit tests:
 
 - `InstrumentLibraryFile` round-trips JSON and DAC payloads.
 - Duplicate assets merge source references instead of adding entries.
+- Re-scanning an identical source reference is a no-op and does not update timestamps.
 - Deployment appends missing assets and reuses identical existing song assets.
 - `SmpsRipConfigParser` parses config sections and companion file keys.
 - `SmpsDriverDefinition` parses key `DefDrv.txt` properties.
 - `CoordFlagDefinition` parses command lengths and jump offsets.
 - DAC ini parser handles `DAC.ini`, `DAC_Voice.ini`, DPCM, PCM, `Rate`, `Param1`, `Param2`, and missing file entries.
-- `InsSet*.bin` parser extracts 25-byte voices and honors supported operator ordering.
+- `InsSet*.bin` parser extracts `FmVoice.VOICE_SIZE` voices, normalizes supported operator ordering, and skips unsupported ordering instead of storing raw bytes.
 
 Scanner tests:
 
@@ -291,6 +336,8 @@ Scanner tests:
 - Recursive scanning from the parent root discovers nested game folders.
 - Re-running the scan is idempotent.
 - Unsupported song dialect still harvests companion assets.
+- Before parameterized importer support lands, a non-S1/S2/S3K config is classified as `ASSET_ONLY` and is not sent through `SmpsImporter.importFile()`.
+- Recursive scanning does not follow symlink loops.
 
 Integration tests:
 
