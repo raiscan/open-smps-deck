@@ -18,6 +18,7 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +61,29 @@ class TestInstrumentLibraryFile {
     }
 
     @Test
+    void missingVersionThrowsIOException() throws Exception {
+        Files.writeString(tempDir.resolve("library.json"), """
+                {
+                  "entries": []
+                }
+                """);
+
+        assertThrows(java.io.IOException.class, () -> InstrumentLibraryFile.load(tempDir));
+    }
+
+    @Test
+    void futureVersionThrowsIOException() throws Exception {
+        Files.writeString(tempDir.resolve("library.json"), """
+                {
+                  "version": 999,
+                  "entries": []
+                }
+                """);
+
+        assertThrows(java.io.IOException.class, () -> InstrumentLibraryFile.load(tempDir));
+    }
+
+    @Test
     void dacPayloadFilenameUsesPayloadSha256Only() throws Exception {
         InstrumentLibrary library = new InstrumentLibrary();
         SourceReference source = SourceReference.minimal(tempDir.toString(), "DAC.ini", "81");
@@ -88,6 +112,41 @@ class TestInstrumentLibraryFile {
         assertEquals(expectedPayload, dacEntries.get(1).getAsJsonObject().get("payload").getAsString());
         assertTrue(Files.exists(tempDir.resolve(expectedPayload)));
         assertEquals(2, InstrumentLibraryFile.load(tempDir).entries(InstrumentAssetKind.DAC_SAMPLE).size());
+    }
+
+    @Test
+    void loadRejectsDacPayloadPathOutsideDacDirectory() throws Exception {
+        InstrumentLibrary library = new InstrumentLibrary();
+        SourceReference source = SourceReference.minimal(tempDir.toString(), "DAC.ini", "81");
+        byte[] data = new byte[]{0x01, 0x02};
+        library.addOrMerge(InstrumentLibraryEntry.dacSample(
+                "DAC", data, 0x20, "PCM", null, null, null, "81", source), Instant.EPOCH);
+        InstrumentLibraryFile.save(library, tempDir);
+
+        Path outsidePayload = tempDir.resolve("outside.pcm").toAbsolutePath();
+        Files.write(outsidePayload, data);
+        JsonObject root = JsonParser.parseString(Files.readString(tempDir.resolve("library.json"))).getAsJsonObject();
+        root.getAsJsonArray("entries").get(0).getAsJsonObject().addProperty("payload", outsidePayload.toString());
+        Files.writeString(tempDir.resolve("library.json"), root.toString());
+
+        assertThrows(java.io.IOException.class, () -> InstrumentLibraryFile.load(tempDir));
+    }
+
+    @Test
+    void savedDacDedupeKeyIsCompactAndDoesNotContainRawHex() throws Exception {
+        InstrumentLibrary library = new InstrumentLibrary();
+        SourceReference source = SourceReference.minimal(tempDir.toString(), "DAC.ini", "81");
+        byte[] data = new byte[]{0x10, 0x20, 0x30, 0x40};
+        library.addOrMerge(InstrumentLibraryEntry.dacSample(
+                "DAC", data, 0x22, "PCM", null, null, null, "81", source), Instant.EPOCH);
+
+        InstrumentLibraryFile.save(library, tempDir);
+
+        JsonObject root = JsonParser.parseString(Files.readString(tempDir.resolve("library.json"))).getAsJsonObject();
+        String dedupeKey = root.getAsJsonArray("entries").get(0).getAsJsonObject().get("dedupeKey").getAsString();
+
+        assertEquals("dac:34:4:" + sha256Hex(data), dedupeKey);
+        assertFalse(dedupeKey.contains(HexUtil.bytesToHex(data)));
     }
 
     private static String sha256Hex(byte[] data) throws Exception {

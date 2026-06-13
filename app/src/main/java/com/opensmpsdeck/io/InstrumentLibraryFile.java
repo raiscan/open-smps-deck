@@ -60,6 +60,7 @@ public final class InstrumentLibraryFile {
         try {
             JsonObject json = JsonParser.parseString(Files.readString(libraryJson, StandardCharsets.UTF_8))
                     .getAsJsonObject();
+            validateVersion(json, libraryJson);
             JsonArray entries = json.getAsJsonArray("entries");
             if (entries == null) {
                 throw new IOException("Instrument library file is missing entries array: " + libraryJson);
@@ -124,7 +125,7 @@ public final class InstrumentLibraryFile {
         byte[] data;
         InstrumentLibraryEntry entry;
         if (kind == InstrumentAssetKind.DAC_SAMPLE) {
-            data = Files.readAllBytes(root.resolve(requireString(json, "payload")).normalize());
+            data = Files.readAllBytes(resolveDacPayload(root, requireString(json, "payload")));
             entry = InstrumentLibraryEntry.dacSample(
                     displayName,
                     data,
@@ -149,6 +150,42 @@ public final class InstrumentLibraryFile {
             entry = entry.withMergedSources(sources.subList(1, sources.size()), updated);
         }
         return entry.withTimestamps(created, updated);
+    }
+
+    private static void validateVersion(JsonObject json, Path libraryJson) throws IOException {
+        JsonElement element = json.get("version");
+        if (element == null || element.isJsonNull()) {
+            throw new IOException("Instrument library file is missing required version field: " + libraryJson);
+        }
+        int version = element.getAsInt();
+        if (version > VERSION) {
+            throw new IOException(
+                    "Instrument library file version " + version + " is newer than supported version " + VERSION);
+        }
+    }
+
+    private static Path resolveDacPayload(Path root, String payload) throws IOException {
+        Path payloadPath = Path.of(payload);
+        if (payloadPath.isAbsolute() || containsParentTraversal(payloadPath)) {
+            throw new IOException("DAC payload path must stay under the library dac directory: " + payload);
+        }
+
+        Path libraryRoot = root.toAbsolutePath().normalize();
+        Path dacRoot = libraryRoot.resolve("dac").normalize();
+        Path resolved = libraryRoot.resolve(payloadPath).normalize();
+        if (!resolved.startsWith(dacRoot)) {
+            throw new IOException("DAC payload path must stay under the library dac directory: " + payload);
+        }
+        return resolved;
+    }
+
+    private static boolean containsParentTraversal(Path path) {
+        for (Path part : path) {
+            if ("..".equals(part.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static JsonArray toSourcesJson(List<SourceReference> sources) {

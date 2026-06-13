@@ -3,6 +3,7 @@ package com.opensmpsdeck.library;
 import com.opensmpsdeck.model.FmVoice;
 import org.junit.jupiter.api.Test;
 
+import java.security.MessageDigest;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,5 +50,25 @@ class TestInstrumentLibrary {
                 "Kick slow", data, 0x30, "PCM", null, null, null, "81", source), Instant.EPOCH);
 
         assertEquals(2, library.entries(InstrumentAssetKind.DAC_SAMPLE).size());
+    }
+
+    @Test
+    void dacDedupeKeyUsesRateLengthAndPayloadHash() throws Exception {
+        SourceReference source = SourceReference.minimal("C:/rips", "DAC.ini", "81");
+        byte[] data = new byte[]{0x10, 0x20, 0x30, 0x40};
+
+        InstrumentLibraryEntry entry = InstrumentLibraryEntry.dacSample(
+                "Kick", data, 0x20, "PCM", null, null, null, "81", source);
+
+        assertEquals("dac:32:4:" + sha256Hex(data), entry.dedupeKey());
+    }
+
+    private static String sha256Hex(byte[] data) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
+        StringBuilder builder = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            builder.append(String.format("%02x", b & 0xFF));
+        }
+        return builder.toString();
     }
 }

@@ -2,6 +2,8 @@ package com.opensmpsdeck.library;
 
 import com.opensmpsdeck.io.HexUtil;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -191,12 +193,27 @@ public final class InstrumentLibraryEntry {
     }
 
     private static String dedupeKey(InstrumentAssetKind kind, byte[] data, int rate) {
-        String hex = HexUtil.bytesToHex(data);
         return switch (kind) {
-            case FM_VOICE -> "fm:" + hex;
-            case PSG_ENVELOPE -> "psg:" + hex;
-            case MOD_ENVELOPE -> "mod:" + hex;
-            case DAC_SAMPLE -> "dac:" + (rate & 0xFF) + ":" + hex;
+            case FM_VOICE -> "fm:" + HexUtil.bytesToHex(data);
+            case PSG_ENVELOPE -> "psg:" + HexUtil.bytesToHex(data);
+            case MOD_ENVELOPE -> "mod:" + HexUtil.bytesToHex(data);
+            case DAC_SAMPLE -> "dac:" + (rate & 0xFF) + ":" + data.length + ":" + sha256Hex(data);
         };
+    }
+
+    private static String sha256Hex(byte[] data) {
+        try {
+            return bytesToLowerHex(MessageDigest.getInstance("SHA-256").digest(data));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest is not available", e);
+        }
+    }
+
+    private static String bytesToLowerHex(byte[] data) {
+        StringBuilder builder = new StringBuilder(data.length * 2);
+        for (byte b : data) {
+            builder.append(String.format("%02x", b & 0xFF));
+        }
+        return builder.toString();
     }
 }
