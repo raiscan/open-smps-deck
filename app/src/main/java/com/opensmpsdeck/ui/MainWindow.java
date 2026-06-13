@@ -26,6 +26,7 @@ public class MainWindow {
     private final BorderPane root;
     private final PlaybackEngine playbackEngine;
     private final MainWindowFileActions fileActions;
+    private final LibraryActions libraryActions;
     private final SongTabCoordinator songTabCoordinator;
     private final MainWindowTabLifecycleCoordinator tabLifecycleCoordinator;
     private final TabPane tabPane = new TabPane();
@@ -43,6 +44,7 @@ public class MainWindow {
                 this::showError,
                 () -> playbackEngine
         );
+        this.libraryActions = new LibraryActions(stage, this::getActiveSongTab, this::refreshActiveTabTitle);
         this.songTabCoordinator = new SongTabCoordinator(new SongTabCoordinator.PlaybackGateway() {
             @Override
             public boolean isPlaying() {
@@ -362,7 +364,21 @@ public class MainWindow {
                 new SeparatorMenuItem(), importVoiceBankItem, exportVoiceBankItem,
                 exportDacItem);
 
-        menuBar.getMenus().add(fileMenu);
+        Menu libraryMenu = new Menu("Library");
+
+        MenuItem openLibraryItem = new MenuItem("Open Library...");
+        openLibraryItem.setOnAction(e -> libraryActions.onOpenLibrary());
+
+        MenuItem scanFolderItem = new MenuItem("Scan Folder...");
+        scanFolderItem.setOnAction(e -> libraryActions.onScanFolder());
+
+        MenuItem libraryLocationItem = new MenuItem("Library Location...");
+        libraryLocationItem.setOnAction(e -> libraryActions.onLibraryLocation());
+
+        libraryMenu.getItems().addAll(openLibraryItem, scanFolderItem, new SeparatorMenuItem(),
+                libraryLocationItem);
+
+        menuBar.getMenus().addAll(fileMenu, libraryMenu);
         return menuBar;
     }
 
