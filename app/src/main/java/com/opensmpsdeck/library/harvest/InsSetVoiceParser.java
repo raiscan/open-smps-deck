@@ -27,10 +27,10 @@ public final class InsSetVoiceParser {
         if (insMode.equals("custom") || insMode.equals("interleaved")) {
             return List.of();
         }
-        if (insMode.equals("hardware") && !isConfirmedHardwareMapping(definition)) {
+        if (insMode.equals("hardware")) {
             return List.of();
         }
-        if (!insMode.equals("default") && !insMode.equals("hardware")) {
+        if (!insMode.equals("default")) {
             return List.of();
         }
 
@@ -46,11 +46,6 @@ public final class InsSetVoiceParser {
             }
         }
         return List.copyOf(voices);
-    }
-
-    private static boolean isConfirmedHardwareMapping(SmpsDriverDefinition definition) {
-        String insRegs = normalize(definition == null ? "" : definition.insRegs());
-        return insRegs.equals("algo") || insRegs.equals("bit7");
     }
 
     private static String normalize(String value) {
