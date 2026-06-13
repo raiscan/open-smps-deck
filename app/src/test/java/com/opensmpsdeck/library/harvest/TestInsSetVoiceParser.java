@@ -37,6 +37,10 @@ class TestInsSetVoiceParser {
                 new SmpsDriverDefinition("Z80", "Overflow", "Hardware", "Algo", false);
         SmpsDriverDefinition hardwareBit7Definition =
                 new SmpsDriverDefinition("Z80", "Overflow", "Hardware", "Bit7", false);
+        SmpsDriverDefinition blankModeDefinition =
+                new SmpsDriverDefinition("Z80", "Overflow", "", "Bit7", false);
+        SmpsDriverDefinition nullModeDefinition =
+                new SmpsDriverDefinition("Z80", "Overflow", null, "Bit7", false);
 
         List<FmVoice> s3kVoices = InsSetVoiceParser.parse(insSet, ".s3k", defaultDefinition);
         List<FmVoice> sm2Voices = InsSetVoiceParser.parse(insSet, ".sm2", defaultDefinition);
@@ -45,6 +49,9 @@ class TestInsSetVoiceParser {
         List<FmVoice> skippedUnknownExtension = InsSetVoiceParser.parse(insSet, ".abc", defaultDefinition);
         List<FmVoice> skippedHardwareAlgo = InsSetVoiceParser.parse(insSet, ".s3k", hardwareAlgoDefinition);
         List<FmVoice> skippedHardwareBit7 = InsSetVoiceParser.parse(insSet, ".sm2", hardwareBit7Definition);
+        List<FmVoice> skippedBlankMode = InsSetVoiceParser.parse(insSet, ".sm2", blankModeDefinition);
+        List<FmVoice> skippedNullMode = InsSetVoiceParser.parse(insSet, ".sm2", nullModeDefinition);
+        List<FmVoice> skippedNullDefinition = InsSetVoiceParser.parse(insSet, ".sm2", null);
 
         assertEquals(1, s3kVoices.size());
         assertArrayEquals(FmVoice.swapMiddleOperators(nativeOrder), s3kVoices.getFirst().getData());
@@ -55,5 +62,8 @@ class TestInsSetVoiceParser {
         assertTrue(skippedUnknownExtension.isEmpty());
         assertTrue(skippedHardwareAlgo.isEmpty());
         assertTrue(skippedHardwareBit7.isEmpty());
+        assertTrue(skippedBlankMode.isEmpty());
+        assertTrue(skippedNullMode.isEmpty());
+        assertTrue(skippedNullDefinition.isEmpty());
     }
 }

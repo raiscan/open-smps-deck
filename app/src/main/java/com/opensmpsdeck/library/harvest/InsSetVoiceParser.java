@@ -20,10 +20,10 @@ public final class InsSetVoiceParser {
 
     public static List<FmVoice> parse(Path file, String extension, SmpsDriverDefinition definition)
             throws IOException {
-        String insMode = normalize(definition == null ? "" : definition.insMode());
-        if (insMode.isBlank()) {
-            insMode = "default";
+        if (definition == null) {
+            return List.of();
         }
+        String insMode = normalize(definition.insMode());
         if (insMode.equals("custom") || insMode.equals("interleaved")) {
             return List.of();
         }
