@@ -44,14 +44,34 @@ final class LibraryActions {
             return;
         }
 
-        InstrumentLibrary library;
-        try {
-            library = InstrumentLibraryFile.load(LibraryPaths.getLibraryRoot());
-        } catch (Exception ex) {
-            showError("Failed to load instrument library", message(ex));
-            return;
-        }
+        Path libraryRoot = LibraryPaths.getLibraryRoot();
+        ProgressDialog progressDialog = createProgressDialog("Opening instrument library...");
+        Task<InstrumentLibrary> loadTask = new Task<>() {
+            @Override
+            protected InstrumentLibrary call() throws Exception {
+                updateMessage("Loading " + libraryRoot + "...");
+                return InstrumentLibraryFile.load(libraryRoot);
+            }
+        };
 
+        progressDialog.statusLabel().textProperty().bind(loadTask.messageProperty());
+        loadTask.setOnSucceeded(event -> {
+            progressDialog.dialog().close();
+            openLoadedLibrary(songTab, loadTask.getValue());
+        });
+        loadTask.setOnFailed(event -> {
+            progressDialog.dialog().close();
+            Throwable ex = loadTask.getException();
+            showError("Failed to load instrument library", ex == null ? "Unknown error" : message(ex));
+        });
+
+        Thread thread = new Thread(loadTask, "Instrument-Library-Load");
+        thread.setDaemon(true);
+        progressDialog.dialog().show();
+        thread.start();
+    }
+
+    private void openLoadedLibrary(SongTab songTab, InstrumentLibrary library) {
         LibraryBrowserDialog dialog = new LibraryBrowserDialog(library);
         dialog.initOwner(stage);
         Optional<List<InstrumentLibraryEntry>> selected = dialog.showAndWait();

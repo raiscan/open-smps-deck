@@ -6,6 +6,9 @@ import com.opensmpsdeck.library.InstrumentLibraryEntry;
 import com.opensmpsdeck.library.SourceReference;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
 import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
@@ -20,6 +23,7 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
@@ -31,6 +35,7 @@ import java.util.function.Function;
 final class LibraryBrowserDialog extends Dialog<List<InstrumentLibraryEntry>> {
 
     private final List<TableView<InstrumentLibraryEntry>> tables = new ArrayList<>();
+    private final List<FilteredList<InstrumentLibraryEntry>> filteredLists = new ArrayList<>();
 
     LibraryBrowserDialog(InstrumentLibrary library) {
         setTitle("Instrument Library");
@@ -52,7 +57,11 @@ final class LibraryBrowserDialog extends Dialog<List<InstrumentLibraryEntry>> {
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
-        VBox content = new VBox(tabs);
+        TextField filterField = new TextField();
+        filterField.setPromptText("Search name, game, source, driver, type, rate, or ID");
+        filterField.textProperty().addListener((obs, oldValue, newValue) -> applyFilter(newValue));
+
+        VBox content = new VBox(8, filterField, tabs);
         content.setPadding(new Insets(10));
         pane.setContent(content);
 
@@ -77,14 +86,32 @@ final class LibraryBrowserDialog extends Dialog<List<InstrumentLibraryEntry>> {
             String title,
             List<InstrumentLibraryEntry> entries,
             java.util.function.Consumer<TableView<InstrumentLibraryEntry>> extraColumns) {
+        ObservableList<InstrumentLibraryEntry> allEntries = FXCollections.observableArrayList(entries);
+        FilteredList<InstrumentLibraryEntry> filteredEntries = new FilteredList<>(allEntries, entry -> true);
         TableView<InstrumentLibraryEntry> table = new TableView<>();
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        table.getItems().setAll(entries);
+        table.setItems(filteredEntries);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_SUBSEQUENT_COLUMNS);
         addCommonColumns(table);
         extraColumns.accept(table);
         tables.add(table);
-        return new Tab(title + " (" + entries.size() + ")", table);
+        filteredLists.add(filteredEntries);
+        Tab tab = new Tab(tabTitle(title, filteredEntries.size(), allEntries.size()), table);
+        filteredEntries.predicateProperty().addListener((obs, oldValue, newValue) ->
+                tab.setText(tabTitle(title, filteredEntries.size(), allEntries.size())));
+        return tab;
+    }
+
+    private void applyFilter(String query) {
+        for (FilteredList<InstrumentLibraryEntry> filteredList : filteredLists) {
+            filteredList.setPredicate(entry -> LibraryEntryFilter.matches(entry, query));
+        }
+    }
+
+    private static String tabTitle(String title, int filteredCount, int totalCount) {
+        return filteredCount == totalCount
+                ? title + " (" + totalCount + ")"
+                : title + " (" + filteredCount + "/" + totalCount + ")";
     }
 
     private void addCommonColumns(TableView<InstrumentLibraryEntry> table) {
