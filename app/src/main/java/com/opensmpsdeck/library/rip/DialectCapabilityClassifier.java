@@ -15,6 +15,9 @@ public final class DialectCapabilityClassifier {
         if (normalizedExtension.isEmpty()) {
             return DialectCapability.IGNORED;
         }
+        if (songCandidate && definition == null) {
+            return DialectCapability.UNSUPPORTED;
+        }
         if (songCandidate && definition != null && definition.hasPreSmpsTrackHeader()) {
             return DialectCapability.UNSUPPORTED;
         }

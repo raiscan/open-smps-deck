@@ -25,6 +25,10 @@ class TestDialectCapabilityClassifier {
         assertEquals(DialectCapability.ASSET_ONLY,
                 DialectCapabilityClassifier.classify(".sm2", current, false));
         assertEquals(DialectCapability.UNSUPPORTED,
+                DialectCapabilityClassifier.classify(".sm2", null, true));
+        assertEquals(DialectCapability.ASSET_ONLY,
+                DialectCapabilityClassifier.classify(".sm2", null, false));
+        assertEquals(DialectCapability.UNSUPPORTED,
                 DialectCapabilityClassifier.classify(".s3k", preSmps, true));
         assertEquals(DialectCapability.ASSET_ONLY,
                 DialectCapabilityClassifier.classify(".sm2", preSmps, false));
