@@ -29,8 +29,9 @@ Create these files:
 - `app/src/main/java/com/opensmpsdeck/library/rip/CoordFlagDefinition.java`: parsed `DefCFlag.txt` command lengths and jump offsets.
 - `app/src/main/java/com/opensmpsdeck/library/rip/DialectCapability.java`: enum for `FULL_IMPORT`, `ASSET_ONLY`, `UNSUPPORTED`, `IGNORED`.
 - `app/src/main/java/com/opensmpsdeck/library/rip/DialectCapabilityClassifier.java`: gates current full import to S1/S2/S3K until parameterized import exists.
-- `app/src/main/java/com/opensmpsdeck/library/harvest/DacCodec.java`: DPCM decompression shared by importer and scanner.
-- `app/src/main/java/com/opensmpsdeck/library/harvest/EnvelopeListParser.java`: shared parser for `PSG.lst` and `Modulat.lst`.
+- `app/src/main/java/com/opensmpsdeck/io/DacCodec.java`: DPCM decompression shared by importer and scanner.
+- `app/src/main/java/com/opensmpsdeck/io/EnvelopeListParser.java`: shared parser for `PSG.lst` and `Modulat.lst`.
+- `app/src/main/java/com/opensmpsdeck/io/FmVoiceLayoutNormalizer.java`: shared FM voice layout normalization used by both importer and direct InsSet harvesting.
 - `app/src/main/java/com/opensmpsdeck/library/harvest/DacIniParser.java`: parses SMPSPlay DAC ini variants.
 - `app/src/main/java/com/opensmpsdeck/library/harvest/InsSetVoiceParser.java`: extracts normalized FM voices from supported instrument layouts.
 - `app/src/main/java/com/opensmpsdeck/library/harvest/CompanionAssetHarvester.java`: harvests configured `VolEnv`, `ModEnv`, `DAC`, and `GlobalInsLib`.
@@ -45,7 +46,7 @@ Create these files:
 
 Modify these files:
 
-- `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java`: delegate DPCM decompression to `DacCodec`.
+- `app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java`: delegate DPCM decompression and FM voice layout normalization to shared `io` helpers.
 - `app/src/main/java/com/opensmpsdeck/ui/MainWindow.java`: add `Library` menu and wire `LibraryActions`.
 - `app/src/main/java/module-info.java`: export or open packages only if compilation requires it.
 
@@ -222,6 +223,12 @@ public final class InstrumentLibraryEntry {
     public InstrumentLibraryEntry withMergedSources(List<SourceReference> newSources, Instant now)
 }
 ```
+
+Byte-array ownership requirements:
+
+- All static factories must clone incoming byte arrays before storing them.
+- `data()` must return a clone.
+- Internal equality, dedupe keys, and persistence must use the stored immutable copy, not caller-owned arrays.
 
 Dedupe keys:
 
@@ -733,7 +740,7 @@ Parse both `Len=2` style cells and tabular cells containing `Len` and `JmpOfs`. 
 private static final Set<String> CURRENT_FULL_IMPORT_EXTENSIONS = Set.of(".smp", ".sm2", ".s3k", ".bin");
 ```
 
-Return `FULL_IMPORT` only when the normalized extension is in that set and the file is a song candidate from the config section. Return `ASSET_ONLY` for parseable config sections outside that set. Return `UNSUPPORTED` for preSMPS track headers or missing driver definitions only when a song file is selected for import; companion harvesting still runs.
+Return `FULL_IMPORT` only when the normalized extension is in that set and the file is a song candidate from the config section. The `.bin` entry is safe only because the scanner must also require a matching `.bin` config section before treating a `.bin` file as a song; keep that guard with the classifier call. Return `ASSET_ONLY` for parseable config sections outside that set. Return `UNSUPPORTED` for preSMPS track headers or missing driver definitions only when a song file is selected for import; companion harvesting still runs.
 
 - [ ] **Step 4: Run parser tests**
 
@@ -757,8 +764,9 @@ git commit -m "feat: parse smps rip dialect metadata"
 ### Task 4: Companion Asset Harvesting
 
 **Files:**
-- Create: `app/src/main/java/com/opensmpsdeck/library/harvest/DacCodec.java`
-- Create: `app/src/main/java/com/opensmpsdeck/library/harvest/EnvelopeListParser.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/DacCodec.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/EnvelopeListParser.java`
+- Create: `app/src/main/java/com/opensmpsdeck/io/FmVoiceLayoutNormalizer.java`
 - Create: `app/src/main/java/com/opensmpsdeck/library/harvest/DacIniParser.java`
 - Create: `app/src/main/java/com/opensmpsdeck/library/harvest/InsSetVoiceParser.java`
 - Create: `app/src/main/java/com/opensmpsdeck/library/harvest/CompanionAssetHarvester.java`
@@ -809,10 +817,15 @@ void insSetParserNormalizesDefaultOrderingAndSkipsUnsupported() throws Exception
     SmpsDriverDefinition customDefinition =
             new SmpsDriverDefinition("Z80", "Overflow", "Custom", "Bit7", false);
 
-    List<FmVoice> voices = InsSetVoiceParser.parse(tempDir.resolve("InsSet.17D8.bin"), defaultDefinition);
-    List<FmVoice> skipped = InsSetVoiceParser.parse(tempDir.resolve("InsSet.17D8.bin"), customDefinition);
+    List<FmVoice> s3kVoices = InsSetVoiceParser.parse(
+            tempDir.resolve("InsSet.17D8.bin"), ".s3k", defaultDefinition);
+    List<FmVoice> sm2Voices = InsSetVoiceParser.parse(
+            tempDir.resolve("InsSet.17D8.bin"), ".sm2", defaultDefinition);
+    List<FmVoice> skipped = InsSetVoiceParser.parse(
+            tempDir.resolve("InsSet.17D8.bin"), ".sm2", customDefinition);
 
-    assertArrayEquals(FmVoice.swapMiddleOperators(nativeOrder), voices.getFirst().getData());
+    assertArrayEquals(FmVoice.swapMiddleOperators(nativeOrder), s3kVoices.getFirst().getData());
+    assertArrayEquals(nativeOrder, sm2Voices.getFirst().getData());
     assertTrue(skipped.isEmpty());
 }
 ```
@@ -865,12 +878,12 @@ mvn -pl app -am -Dtest=TestDacIniParser,TestInsSetVoiceParser,TestCompanionAsset
 
 Expected: compilation fails because harvesting classes do not exist.
 
-- [ ] **Step 3: Implement `DacCodec` and update `SmpsImporter`**
+- [ ] **Step 3: Implement shared `io` parsers and update `SmpsImporter`**
 
-Move the DPCM delta table behavior into `DacCodec`:
+Move the DPCM delta table behavior into `DacCodec` under `com.opensmpsdeck.io`:
 
 ```java
-package com.opensmpsdeck.library.harvest;
+package com.opensmpsdeck.io;
 
 public final class DacCodec {
     private static final int[] DPCM_DELTA_TABLE = {
@@ -893,7 +906,41 @@ public final class DacCodec {
 }
 ```
 
-In `SmpsImporter`, replace calls to `decompressDpcm(raw)` with `DacCodec.decompressDpcm(raw)` and keep existing importer behavior unchanged.
+Create `app/src/main/java/com/opensmpsdeck/io/FmVoiceLayoutNormalizer.java`:
+
+```java
+package com.opensmpsdeck.io;
+
+import com.opensmps.smps.SmpsCoordFlags;
+import com.opensmpsdeck.model.FmVoice;
+import com.opensmpsdeck.model.SmpsMode;
+
+import java.util.Optional;
+
+public final class FmVoiceLayoutNormalizer {
+    private FmVoiceLayoutNormalizer() {}
+
+    public static byte[] normalizeForMode(byte[] voiceData, SmpsMode mode) {
+        byte[] copy = voiceData.clone();
+        return mode.dialect() == SmpsCoordFlags.Dialect.S2
+                ? copy
+                : FmVoice.swapMiddleOperators(copy);
+    }
+
+    public static Optional<byte[]> normalizeForExtension(byte[] voiceData, String extension) {
+        String ext = extension == null ? "" : extension.toLowerCase();
+        SmpsMode mode = switch (ext) {
+            case ".smp" -> SmpsMode.S1;
+            case ".s3k" -> SmpsMode.S3K;
+            case ".sm2", ".bin" -> SmpsMode.S2;
+            default -> null;
+        };
+        return mode == null ? Optional.empty() : Optional.of(normalizeForMode(voiceData, mode));
+    }
+}
+```
+
+In `SmpsImporter`, replace direct `FmVoice.swapMiddleOperators` calls with `FmVoiceLayoutNormalizer.normalizeForMode(voiceData, mode)`. Replace calls to `decompressDpcm(raw)` with `DacCodec.decompressDpcm(raw)`. Keep existing importer behavior unchanged for S1/S2/S3K.
 
 - [ ] **Step 4: Implement DAC and InsSet parsers**
 
@@ -917,11 +964,11 @@ public record Entry(
 
 `DacIniParser.parse(Path ini)` must support `Compr=True`, `Compr=DPCM`, `Compr=PCM`, `File`, `Rate`, `Pan`, `Param1`, and `Param2`. Parse section ids as hex.
 
-`InsSetVoiceParser.parse(Path file, SmpsDriverDefinition definition)` rules:
+`InsSetVoiceParser.parse(Path file, String extension, SmpsDriverDefinition definition)` rules:
 
 - Return empty list for `InsMode=Custom` or `InsMode=Interleaved`.
 - Read consecutive `FmVoice.VOICE_SIZE` chunks.
-- For `InsMode=Default`, normalize with `FmVoice.swapMiddleOperators`.
+- For `InsMode=Default`, normalize with `FmVoiceLayoutNormalizer.normalizeForExtension(rawVoice, extension)` so direct InsSet harvesting and full import use the same S1/S2/S3K swap criterion; skip the voice when the result is empty.
 - For `InsMode=Hardware`, keep bytes only when `InsRegs=Algo` or `InsRegs=Bit7` has a confirmed mapping in tests; otherwise return empty list.
 - Never return raw bytes for unknown layouts.
 
@@ -957,7 +1004,7 @@ public record HarvestResult(
 Create `EnvelopeListParser`:
 
 ```java
-package com.opensmpsdeck.library.harvest;
+package com.opensmpsdeck.io;
 
 import com.opensmpsdeck.model.PsgEnvelope;
 
@@ -1006,7 +1053,7 @@ DAC file resolution order:
 Run:
 
 ```powershell
-mvn -pl app -am -Dtest=TestDacIniParser,TestInsSetVoiceParser,TestCompanionAssetHarvester,TestSmpsImporter test
+mvn -pl app -am -Dtest=TestDacIniParser,TestInsSetVoiceParser,TestCompanionAssetHarvester,TestSmpsImporter,TestSmpsImporterGlobalInsLib test
 ```
 
 Expected: all selected tests pass.
@@ -1014,7 +1061,7 @@ Expected: all selected tests pass.
 - [ ] **Step 7: Commit Task 4**
 
 ```powershell
-git add app/src/main/java/com/opensmpsdeck/library/harvest app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java app/src/test/java/com/opensmpsdeck/library/harvest
+git add app/src/main/java/com/opensmpsdeck/library/harvest app/src/main/java/com/opensmpsdeck/io/DacCodec.java app/src/main/java/com/opensmpsdeck/io/EnvelopeListParser.java app/src/main/java/com/opensmpsdeck/io/FmVoiceLayoutNormalizer.java app/src/main/java/com/opensmpsdeck/io/SmpsImporter.java app/src/test/java/com/opensmpsdeck/library/harvest
 git commit -m "feat: harvest configured smps companion assets"
 ```
 
@@ -1103,6 +1150,103 @@ void nonCurrentImportDialectIsAssetOnlyBeforeLayerSeven() throws Exception {
     assertEquals(0, summary.fullSongImportsAttempted());
     assertEquals(1, summary.assetOnlyFoldersHarvested());
     assertEquals(1, library.entries(InstrumentAssetKind.PSG_ENVELOPE).size());
+}
+```
+
+```java
+@Test
+void directInsSetHarvestAndFullImportUseSameFmVoiceLayout() throws Exception {
+    Path game = tempDir.resolve("Z80").resolve("Synthetic S2");
+    Files.createDirectories(game);
+    Files.writeString(game.resolve("config.ini"), """
+            [.sm2]
+            Driver=DefDrv.txt
+            Commands=DefCFlag.txt
+            GlobalInsLib=InsSet.17D8.bin
+            """);
+    Files.writeString(game.resolve("DefDrv.txt"), """
+            PtrFmt=Z80
+            TempoMode=Timeout
+            InsMode=Default
+            InsRegs=Bit7
+            """);
+    Files.writeString(game.resolve("DefCFlag.txt"), "[Main]\nE6\tVolume\tLen=1\n");
+
+    byte[] voice = new byte[FmVoice.VOICE_SIZE];
+    for (int i = 0; i < voice.length; i++) voice[i] = (byte) i;
+    Files.write(game.resolve("InsSet.17D8.bin"), voice);
+    Files.write(game.resolve("01 Test.8000.sm2"), buildS2SongWithGlobalInsLib(0x17D8));
+
+    InstrumentLibrary library = new InstrumentLibrary();
+    ScanSummary summary = new InstrumentLibraryScanner().scan(tempDir, library);
+
+    assertEquals(1, summary.fullSongImportsAttempted());
+    assertEquals(1, summary.fullSongImportsSucceeded());
+    assertEquals(1, library.entries(InstrumentAssetKind.FM_VOICE).size(),
+            "Direct InsSet harvest and full song import must dedupe the same voice");
+    assertArrayEquals(voice, library.entries(InstrumentAssetKind.FM_VOICE).getFirst().data(),
+            ".sm2/S2 GlobalInsLib voices must not be swapped on one path but not the other");
+}
+```
+
+```java
+@Test
+void saveLoadThenRescanIdenticalRootDoesNotDirtyLibrary() throws Exception {
+    Path game = tempDir.resolve("Z80").resolve("Sonic 2");
+    Files.createDirectories(game);
+    Files.writeString(game.resolve("config.ini"), """
+            [.sm2]
+            Driver=DefDrv.txt
+            Commands=DefCFlag.txt
+            VolEnv=PSG.lst
+            """);
+    Files.writeString(game.resolve("DefDrv.txt"), """
+            PtrFmt=Z80
+            TempoMode=Timeout
+            InsMode=Default
+            InsRegs=Bit7
+            """);
+    Files.writeString(game.resolve("DefCFlag.txt"), "[Main]\nE6\tVolume\tLen=1\n");
+    writeLst(game.resolve("PSG.lst"), "Env", new byte[]{1, (byte) 0x80});
+
+    Path libraryRoot = tempDir.resolve("library-root");
+    InstrumentLibrary firstLibrary = new InstrumentLibrary();
+    new InstrumentLibraryScanner().scan(tempDir, firstLibrary);
+    InstrumentLibraryFile.save(firstLibrary, libraryRoot);
+
+    InstrumentLibrary loaded = InstrumentLibraryFile.load(libraryRoot);
+    loaded.clearDirty();
+    ScanSummary second = new InstrumentLibraryScanner().scan(tempDir, loaded);
+
+    assertEquals(0, second.newAssets());
+    assertFalse(loaded.isDirty());
+}
+```
+
+Add this helper to `TestInstrumentLibraryScanner`:
+
+```java
+private static byte[] buildS2SongWithGlobalInsLib(int rawVoicePtr) {
+    int base = 0x8000;
+    int fm1Track = 6 + 4;
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    writeLE16(out, rawVoicePtr);
+    out.write(1);
+    out.write(0);
+    out.write(0x01);
+    out.write(0x80);
+    writeLE16(out, base + fm1Track);
+    out.write(0);
+    out.write(0);
+    out.write(0x85);
+    out.write(0x08);
+    out.write(0xF2);
+    return out.toByteArray();
+}
+
+private static void writeLE16(ByteArrayOutputStream out, int value) {
+    out.write(value & 0xFF);
+    out.write((value >> 8) & 0xFF);
 }
 ```
 
