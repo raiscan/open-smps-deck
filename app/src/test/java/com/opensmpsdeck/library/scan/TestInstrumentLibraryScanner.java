@@ -167,6 +167,57 @@ class TestInstrumentLibraryScanner {
         assertTrue(library.entries().isEmpty());
     }
 
+    @Test
+    void binSectionsOnlyAttemptExplicitSongImports() throws Exception {
+        Path context = tempDir.resolve("Sega").resolve("BinGame");
+        writeRipContext(context, ".bin", "song.8000.bin", null);
+        writeLst(context.resolve("PSG.lst"), "BinEnv", new byte[]{2, (byte) 0x80});
+        byte[] voice = voice(0x71);
+        Files.write(context.resolve("InsSet.17D8.bin"), voice);
+        Files.write(context.resolve("song.8000.bin"), buildS2SongWithGlobalInsLib(LIB_BASE));
+        Files.write(context.resolve("TablePayload.bin"), new byte[]{1, 2, 3});
+
+        ScanSummary summary = new InstrumentLibraryScanner().scan(tempDir, new InstrumentLibrary());
+
+        assertEquals(1, summary.fullSongImportsAttempted());
+        assertEquals(1, summary.fullSongImportsSucceeded());
+        assertTrue(summary.failures().isEmpty());
+    }
+
+    @Test
+    void sourceMetadataUsesEffectiveSectionDirectoryWhenDirIsConfigured() throws Exception {
+        Path effectiveDirectory = tempDir.resolve("Sega").resolve("DirGame").resolve("Proto");
+        Files.createDirectories(effectiveDirectory);
+        Files.writeString(tempDir.resolve("config.ini"), """
+                [Music]
+                Ext=.sm2
+                Dir=Sega/DirGame/Proto
+                Driver=DefDrv.txt
+                VolEnv=PSG.lst
+                Song=dirsong.8000.sm2
+                """);
+        Files.writeString(effectiveDirectory.resolve("DefDrv.txt"), """
+                PtrFmt=Z80
+                TempoMode=S2
+                InsMode=Default
+                InsRegs=Bit7
+                """);
+        writeLst(effectiveDirectory.resolve("PSG.lst"), "DirEnv", new byte[]{1, (byte) 0x80});
+        Files.write(effectiveDirectory.resolve("dirsong.8000.sm2"), buildS2SongWithGlobalInsLib(LIB_BASE));
+
+        InstrumentLibrary library = new InstrumentLibrary();
+
+        ScanSummary summary = new InstrumentLibraryScanner().scan(tempDir, library);
+
+        assertEquals(1, summary.fullSongImportsAttempted());
+        assertEquals(1, library.entries(InstrumentAssetKind.PSG_ENVELOPE).size());
+        var source = library.entries(InstrumentAssetKind.PSG_ENVELOPE).getFirst().sourceReferences().getFirst();
+        assertEquals("Sega", source.driverFamily());
+        assertEquals("DirGame", source.gameName());
+        assertEquals("Proto", source.variantPath());
+        assertEquals("Sega/DirGame/Proto/PSG.lst", source.sourceCompanionFile());
+    }
+
     private static void writeRipContext(Path context, String extension, String songFile, String commandsFile)
             throws Exception {
         Files.createDirectories(context);

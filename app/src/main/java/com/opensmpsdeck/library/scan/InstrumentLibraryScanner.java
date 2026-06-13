@@ -51,7 +51,13 @@ public final class InstrumentLibraryScanner {
         Files.walkFileTree(scanRoot, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                Path realPath = dir.toRealPath();
+                Path realPath;
+                try {
+                    realPath = dir.toRealPath();
+                } catch (IOException e) {
+                    counter.failure(dir, "failed to resolve directory: " + message(e));
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
                 if (!visitedDirectories.add(realPath)) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
@@ -59,7 +65,7 @@ public final class InstrumentLibraryScanner {
                 Path config = dir.resolve(CONFIG_INI);
                 if (Files.isRegularFile(config)) {
                     counter.configDirectoriesFound++;
-                    scanConfigDirectory(scanRoot, dir.toAbsolutePath().normalize(), config, library, counter);
+                    scanConfigDirectory(scanRoot, config, library, counter);
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -71,6 +77,12 @@ public final class InstrumentLibraryScanner {
                 }
                 return FileVisitResult.CONTINUE;
             }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                counter.failure(file, "failed to visit file: " + message(exc));
+                return FileVisitResult.CONTINUE;
+            }
         });
 
         return counter.summary(library);
@@ -78,7 +90,6 @@ public final class InstrumentLibraryScanner {
 
     private void scanConfigDirectory(
             Path scanRoot,
-            Path configDirectory,
             Path configPath,
             InstrumentLibrary library,
             Counter counter) {
@@ -96,7 +107,7 @@ public final class InstrumentLibraryScanner {
                 continue;
             }
 
-            SourceReference baseSource = baseSource(scanRoot, configDirectory, section, parsed.driver());
+            SourceReference baseSource = baseSource(scanRoot, section.directory(), section, parsed.driver());
             harvestSection(scanRoot, configPath, section, parsed.driver(), baseSource, library, counter);
             scanSongs(scanRoot, configPath, section, parsed.driver(), baseSource, library, counter);
         }
@@ -233,6 +244,9 @@ public final class InstrumentLibraryScanner {
         addConfiguredSong(section, candidates, "music");
 
         String extension = normalizeExtension(section.extension());
+        if (extension.equals(".bin")) {
+            return List.copyOf(candidates);
+        }
         if (!extension.isBlank() && Files.isDirectory(section.directory())) {
             Set<Path> companionPaths = companionPaths(section);
             try (var stream = Files.list(section.directory())) {
