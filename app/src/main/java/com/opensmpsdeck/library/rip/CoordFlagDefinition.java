@@ -69,7 +69,7 @@ public final class CoordFlagDefinition {
         int jumpOffset = -1;
 
         if (columns.length >= 4 && !isInteger(columns[2]) && isInteger(columns[3]) && !columns[2].contains("=")) {
-            parameterLength = Integer.parseInt(columns[3]);
+            parameterLength = parseTabularLength(columns[3]);
             if (columns.length >= 5 && isInteger(columns[4])) {
                 jumpOffset = Integer.parseInt(columns[4]);
             }
@@ -107,6 +107,17 @@ public final class CoordFlagDefinition {
             parameterLength = 0;
         }
         return new CoordFlagCommand(byteValue, name, parameterLength, jumpOffset);
+    }
+
+    private static int parseTabularLength(String value) {
+        String normalized = value.trim();
+        int parsed;
+        if (normalized.matches("[0-9A-Fa-f]{2}")) {
+            parsed = Integer.parseInt(normalized, 16);
+        } else {
+            parsed = Integer.parseInt(normalized);
+        }
+        return parsed & 0x7F;
     }
 
     private static boolean isInteger(String value) {

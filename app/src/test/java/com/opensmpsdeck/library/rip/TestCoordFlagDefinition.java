@@ -45,6 +45,8 @@ class TestCoordFlagDefinition {
                 [Main]
                 E0\tPANAFMS\tPAFMS_PAN\t02
                 F7\tJUMP\tNONE\t02\t00
+                EF\tINSTRUMENT\tINS_C_FM\t82
+                03\tFADE_SPC\tFDSPC_FMPSG\t83
                 """);
 
         CoordFlagDefinition parsed = CoordFlagDefinition.parse(definition);
@@ -53,5 +55,9 @@ class TestCoordFlagDefinition {
                 parsed.mainCommand(0xE0));
         assertEquals(new CoordFlagDefinition.CoordFlagCommand(0xF7, "JUMP", 2, 0),
                 parsed.mainCommand(0xF7));
+        assertEquals(new CoordFlagDefinition.CoordFlagCommand(0xEF, "INSTRUMENT", 2, -1),
+                parsed.mainCommand(0xEF));
+        assertEquals(new CoordFlagDefinition.CoordFlagCommand(0x03, "FADE_SPC", 3, -1),
+                parsed.mainCommand(0x03));
     }
 }
