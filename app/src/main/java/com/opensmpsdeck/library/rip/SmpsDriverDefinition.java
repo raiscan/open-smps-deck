@@ -33,7 +33,11 @@ public record SmpsDriverDefinition(
 
     private static Map<String, String> readProperties(Path path) throws IOException {
         Map<String, String> values = new LinkedHashMap<>();
-        for (Map<String, String> section : SmpsRipConfigParser.readIniSections(path).values()) {
+        for (Map.Entry<String, Map<String, String>> sectionEntry : SmpsRipConfigParser.readIniSections(path).entrySet()) {
+            if (normalize(sectionEntry.getKey()).equals("presmpstrkhdr")) {
+                values.put("presmpstrkhdr", "section");
+            }
+            Map<String, String> section = sectionEntry.getValue();
             for (Map.Entry<String, String> entry : section.entrySet()) {
                 values.put(normalize(entry.getKey()), entry.getValue());
             }

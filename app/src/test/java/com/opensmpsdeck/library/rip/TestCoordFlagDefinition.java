@@ -37,4 +37,21 @@ class TestCoordFlagDefinition {
         assertEquals(new CoordFlagDefinition.CoordFlagCommand(0x02, "cfMetaDelay", 2, -1),
                 parsed.metaCommand(0x02));
     }
+
+    @Test
+    void coordFlagDefinitionParsesFlagTypeSubtypeLengthRows() throws Exception {
+        Path definition = tempDir.resolve("DefCFlag.txt");
+        Files.writeString(definition, """
+                [Main]
+                E0\tPANAFMS\tPAFMS_PAN\t02
+                F7\tJUMP\tNONE\t02\t00
+                """);
+
+        CoordFlagDefinition parsed = CoordFlagDefinition.parse(definition);
+
+        assertEquals(new CoordFlagDefinition.CoordFlagCommand(0xE0, "PANAFMS", 2, -1),
+                parsed.mainCommand(0xE0));
+        assertEquals(new CoordFlagDefinition.CoordFlagCommand(0xF7, "JUMP", 2, 0),
+                parsed.mainCommand(0xF7));
+    }
 }

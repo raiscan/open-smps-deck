@@ -68,6 +68,14 @@ public final class CoordFlagDefinition {
         int parameterLength = -1;
         int jumpOffset = -1;
 
+        if (columns.length >= 4 && !isInteger(columns[2]) && isInteger(columns[3]) && !columns[2].contains("=")) {
+            parameterLength = Integer.parseInt(columns[3]);
+            if (columns.length >= 5 && isInteger(columns[4])) {
+                jumpOffset = Integer.parseInt(columns[4]);
+            }
+            return new CoordFlagCommand(byteValue, name, parameterLength, jumpOffset);
+        }
+
         for (int i = 2; i < columns.length; i++) {
             String cell = columns[i].trim();
             if (cell.isEmpty()) {
@@ -99,6 +107,15 @@ public final class CoordFlagDefinition {
             parameterLength = 0;
         }
         return new CoordFlagCommand(byteValue, name, parameterLength, jumpOffset);
+    }
+
+    private static boolean isInteger(String value) {
+        try {
+            Integer.parseInt(value);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static int parseByte(String value) {

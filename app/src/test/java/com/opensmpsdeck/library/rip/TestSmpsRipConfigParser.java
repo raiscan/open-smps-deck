@@ -33,4 +33,21 @@ class TestSmpsRipConfigParser {
         assertEquals(tempDir.resolve("drivers/s2/Driver.ini").normalize(), section.resolve("DEF"));
         assertEquals(tempDir.resolve("drivers/s2/coord/DefCFlag.ini").normalize(), section.resolve("cflags"));
     }
+
+    @Test
+    void configParserUsesExtensionSectionNameWhenExtKeyMissing() throws Exception {
+        Path config = tempDir.resolve("config.ini");
+        Files.writeString(config, """
+                [.sm2]
+                Dir=drivers/s2
+                Def=DefDrv.txt
+                """);
+
+        SmpsRipConfig parsed = SmpsRipConfigParser.parse(config);
+
+        SmpsRipConfig.Section section = parsed.sections().get(".sm2");
+        assertEquals(".sm2", section.extension());
+        assertEquals(tempDir.resolve("drivers/s2").normalize(), section.directory());
+        assertEquals(tempDir.resolve("drivers/s2/DefDrv.txt").normalize(), section.resolve("def"));
+    }
 }

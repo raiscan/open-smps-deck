@@ -47,4 +47,19 @@ class TestSmpsDriverDefinition {
 
         assertTrue(parsed.hasPreSmpsTrackHeader());
     }
+
+    @Test
+    void driverDefinitionDetectsPreSmpsTrackHeaderSection() throws Exception {
+        Path definition = tempDir.resolve("DefDrv.txt");
+        Files.writeString(definition, """
+                PtrFmt=Z80
+
+                [preSMPSTrkHdr]
+                Byte0=$80
+                """);
+
+        SmpsDriverDefinition parsed = SmpsDriverDefinition.parse(definition);
+
+        assertTrue(parsed.hasPreSmpsTrackHeader());
+    }
 }

@@ -21,6 +21,9 @@ public final class SmpsRipConfigParser {
             Map<String, String> values = entry.getValue();
             SmpsRipConfig.Section preliminary = new SmpsRipConfig.Section("", baseDirectory, values);
             String extension = firstPresent(preliminary, "ext", "extension");
+            if (extension.isBlank() && entry.getKey().startsWith(".")) {
+                extension = entry.getKey();
+            }
             Path directory = resolveDirectory(baseDirectory, firstPresent(preliminary, "dir", "directory"));
             sections.put(entry.getKey(), new SmpsRipConfig.Section(extension, directory, values));
         }
