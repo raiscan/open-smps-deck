@@ -34,4 +34,17 @@ class TestSmpsDriverDefinition {
         assertTrue(parsed.hasPreSmpsTrackHeader());
         assertEquals("PtrFmt=Z80 TempoMode=S2 InsMode=Global InsRegs=25 PreSMPS=true", parsed.summary());
     }
+
+    @Test
+    void driverDefinitionDetectsPreSmpsTrackHeaderKey() throws Exception {
+        Path definition = tempDir.resolve("DefDrv.txt");
+        Files.writeString(definition, """
+                PtrFmt=Z80
+                preSMPSTrkHdr=$80
+                """);
+
+        SmpsDriverDefinition parsed = SmpsDriverDefinition.parse(definition);
+
+        assertTrue(parsed.hasPreSmpsTrackHeader());
+    }
 }

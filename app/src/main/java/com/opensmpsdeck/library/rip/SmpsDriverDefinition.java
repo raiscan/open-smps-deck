@@ -20,7 +20,7 @@ public record SmpsDriverDefinition(
                 value(values, "tempomode"),
                 value(values, "insmode"),
                 value(values, "insregs"),
-                parseBoolean(value(values, "presmps")));
+                hasPreSmpsTrackHeader(values));
     }
 
     public String summary() {
@@ -51,6 +51,14 @@ public record SmpsDriverDefinition(
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return normalized.equals("true") || normalized.equals("yes") || normalized.equals("1");
+    }
+
+    private static boolean hasPreSmpsTrackHeader(Map<String, String> values) {
+        String preSmpsTrackHeader = value(values, "presmpstrkhdr");
+        if (!preSmpsTrackHeader.isBlank()) {
+            return true;
+        }
+        return parseBoolean(value(values, "presmps"));
     }
 
     private static String normalize(String key) {
