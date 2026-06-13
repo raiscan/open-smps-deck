@@ -102,7 +102,7 @@ public final class InstrumentLibraryScanner {
 
     private ParsedSection parseSection(Path configPath, SmpsRipConfig.Section section, Counter counter) {
         SmpsDriverDefinition driver = null;
-        Path driverPath = section.resolve("def");
+        Path driverPath = firstResolved(section, "driver", "def");
         if (driverPath != null) {
             try {
                 driver = SmpsDriverDefinition.parse(driverPath);
@@ -263,7 +263,7 @@ public final class InstrumentLibraryScanner {
 
     private static Set<Path> companionPaths(SmpsRipConfig.Section section) {
         Set<Path> paths = new HashSet<>();
-        for (String key : List.of("volenv", "modenv", "dac", "globalinslib", "def", "cflags", "coordflags",
+        for (String key : List.of("volenv", "modenv", "dac", "globalinslib", "driver", "def", "cflags", "coordflags",
                 "commands", "cmds")) {
             Path path = section.resolve(key);
             if (path != null) {

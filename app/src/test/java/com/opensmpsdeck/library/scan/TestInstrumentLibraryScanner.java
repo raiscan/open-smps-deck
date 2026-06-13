@@ -65,11 +65,11 @@ class TestInstrumentLibraryScanner {
         Files.writeString(context.resolve("config.ini"), """
                 [Music]
                 Ext=.trs
-                Def=Driver.ini
+                Driver=DefDrv.txt
                 VolEnv=PSG.lst
                 Song=bonus.trs
                 """);
-        Files.writeString(context.resolve("Driver.ini"), """
+        Files.writeString(context.resolve("DefDrv.txt"), """
                 PtrFmt=Z80
                 TempoMode=S2
                 InsMode=Default
@@ -95,7 +95,7 @@ class TestInstrumentLibraryScanner {
     @Test
     void directInsSetHarvestAndFullImportUseSameFmVoiceLayout() throws Exception {
         Path context = tempDir.resolve("Sega").resolve("Sonic2");
-        writeRipContext(context, ".sm2", "music.8000.sm2", null);
+        writeRipContext(context, ".sm2", "music.8000.sm2", "Commands.txt");
         byte[] voice = voice(0x41);
         Files.write(context.resolve("InsSet.17D8.bin"), voice);
         Files.write(context.resolve("music.8000.sm2"), buildS2SongWithGlobalInsLib(LIB_BASE));
@@ -143,14 +143,14 @@ class TestInstrumentLibraryScanner {
         Files.writeString(context.resolve("config.ini"), """
                 [Music]
                 Ext=%s
-                Def=Driver.ini
+                Driver=DefDrv.txt
                 GlobalInsLib=InsSet.17D8.bin
                 VolEnv=PSG.lst
                 Song=%s
                 %s
                 """.formatted(extension, songFile,
                 commandsFile == null ? "" : "Commands=" + commandsFile));
-        Files.writeString(context.resolve("Driver.ini"), """
+        Files.writeString(context.resolve("DefDrv.txt"), """
                 PtrFmt=Z80
                 TempoMode=S2
                 InsMode=Default
