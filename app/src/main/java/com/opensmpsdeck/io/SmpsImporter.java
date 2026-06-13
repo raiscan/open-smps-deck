@@ -47,12 +47,6 @@ public class SmpsImporter {
     /** Coordination flag dialect of the current import (sizes/meanings per driver). */
     private SmpsCoordFlags.Dialect dialect = SmpsCoordFlags.Dialect.S2;
 
-    /** DPCM delta table used by the Z80 DAC driver for sample decompression. */
-    static final int[] DPCM_DELTA_TABLE = {
-        0, 1, 2, 4, 8, 16, 32, 64,
-        -128, -1, -2, -4, -8, -16, -32, -64
-    };
-
     /**
      * Import an SMPS binary file as a Song.
      * Detects SmpsMode from extension, resolves SeqBase, and loads companion files.
@@ -188,10 +182,7 @@ public class SmpsImporter {
                 if (vOffset + FmVoice.VOICE_SIZE > data.length) break;
                 byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
                 System.arraycopy(data, vOffset, voiceData, 0, FmVoice.VOICE_SIZE);
-                if (dialect != SmpsCoordFlags.Dialect.S2) {
-                    // S1/S3K voices use native Op4,Op3,Op2,Op1 group order
-                    voiceData = FmVoice.swapMiddleOperators(voiceData);
-                }
+                voiceData = FmVoiceLayoutNormalizer.normalizeForMode(voiceData, mode);
                 song.getVoiceBank().add(new FmVoice("Voice " + i, voiceData));
             }
         } else if (insLib != null && insLib.data().length >= FmVoice.VOICE_SIZE) {
@@ -208,9 +199,7 @@ public class SmpsImporter {
                 byte[] voiceData = new byte[FmVoice.VOICE_SIZE];
                 System.arraycopy(insLib.data(), start + i * FmVoice.VOICE_SIZE,
                         voiceData, 0, FmVoice.VOICE_SIZE);
-                if (dialect != SmpsCoordFlags.Dialect.S2) {
-                    voiceData = FmVoice.swapMiddleOperators(voiceData);
-                }
+                voiceData = FmVoiceLayoutNormalizer.normalizeForMode(voiceData, mode);
                 song.getVoiceBank().add(new FmVoice("GblIns " + i, voiceData));
             }
         }
@@ -790,16 +779,7 @@ public class SmpsImporter {
      * Each input byte produces two output samples via high/low nibble delta accumulation.
      */
     static byte[] decompressDpcm(byte[] compressed) {
-        byte[] output = new byte[compressed.length * 2];
-        int accumulator = 0x80;
-        for (int i = 0; i < compressed.length; i++) {
-            int b = compressed[i] & 0xFF;
-            accumulator = (accumulator + DPCM_DELTA_TABLE[(b >> 4) & 0x0F]) & 0xFF;
-            output[i * 2] = (byte) accumulator;
-            accumulator = (accumulator + DPCM_DELTA_TABLE[b & 0x0F]) & 0xFF;
-            output[i * 2 + 1] = (byte) accumulator;
-        }
-        return output;
+        return DacCodec.decompressDpcm(compressed);
     }
 
     /**
@@ -807,28 +787,7 @@ public class SmpsImporter {
      * Format: "LST_ENV" (7 bytes) + count (1 byte) + per-envelope: nameLen + name + dataLen + data.
      */
     static List<PsgEnvelope> parsePsgLst(byte[] data) {
-        List<PsgEnvelope> envelopes = new ArrayList<>();
-        if (data.length < 8) return envelopes;
-
-        String header = new String(data, 0, 7, StandardCharsets.US_ASCII);
-        if (!"LST_ENV".equals(header)) return envelopes;
-
-        int count = data[7] & 0xFF;
-        int pos = 8;
-        for (int i = 0; i < count && pos < data.length; i++) {
-            int nameLen = data[pos++] & 0xFF;
-            if (pos + nameLen > data.length) break;
-            String envName = new String(data, pos, nameLen, StandardCharsets.US_ASCII);
-            pos += nameLen;
-            if (pos >= data.length) break;
-            int dataLen = data[pos++] & 0xFF;
-            if (pos + dataLen > data.length) break;
-            byte[] envData = new byte[dataLen];
-            System.arraycopy(data, pos, envData, 0, dataLen);
-            pos += dataLen;
-            envelopes.add(new PsgEnvelope(envName, envData));
-        }
-        return envelopes;
+        return EnvelopeListParser.parse(data);
     }
 
     /**
@@ -999,14 +958,14 @@ public class SmpsImporter {
         f = new File(parentDir, filename.replace('\\', '/'));
         if (f.exists()) {
             byte[] raw = Files.readAllBytes(f.toPath());
-            return dpcm ? decompressDpcm(raw) : raw;
+            return dpcm ? DacCodec.decompressDpcm(raw) : raw;
         }
 
         // Try DAC/ subdirectory
         f = new File(new File(parentDir, "DAC"), baseName);
         if (f.exists()) {
             byte[] raw = Files.readAllBytes(f.toPath());
-            return dpcm ? decompressDpcm(raw) : raw;
+            return dpcm ? DacCodec.decompressDpcm(raw) : raw;
         }
 
         return null;
