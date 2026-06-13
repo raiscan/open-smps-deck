@@ -24,7 +24,6 @@ import com.opensmpsdeck.model.Song;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -115,22 +114,13 @@ public final class InstrumentLibraryScanner {
             }
         }
 
-        Path cflagsPath = firstResolved(section, "cflags", "coordflags");
-        if (cflagsPath != null) {
+        LinkedHashSet<Path> coordFlagPaths = new LinkedHashSet<>();
+        addResolved(coordFlagPaths, section, "commands", "cmds", "cflags", "coordflags");
+        for (Path coordFlagPath : coordFlagPaths) {
             try {
-                CoordFlagDefinition.parse(cflagsPath);
+                CoordFlagDefinition.parse(coordFlagPath);
             } catch (IOException | RuntimeException e) {
-                counter.failure(cflagsPath, "failed to parse coordination flags: " + message(e));
-                return null;
-            }
-        }
-
-        Path commandsPath = firstResolved(section, "commands", "cmds");
-        if (commandsPath != null) {
-            try {
-                validateCommands(commandsPath);
-            } catch (IOException | RuntimeException e) {
-                counter.failure(commandsPath, "failed to parse commands: " + message(e));
+                counter.failure(coordFlagPath, "failed to parse coordination flags: " + message(e));
                 return null;
             }
         }
@@ -365,6 +355,15 @@ public final class InstrumentLibraryScanner {
         return null;
     }
 
+    private static void addResolved(LinkedHashSet<Path> paths, SmpsRipConfig.Section section, String... keys) {
+        for (String key : keys) {
+            Path path = section.resolve(key);
+            if (path != null) {
+                paths.add(path);
+            }
+        }
+    }
+
     private static String fileExtension(Path path) {
         String name = path.getFileName().toString();
         int dot = name.lastIndexOf('.');
@@ -377,46 +376,6 @@ public final class InstrumentLibraryScanner {
         }
         String normalized = extension.trim().toLowerCase(Locale.ROOT);
         return normalized.startsWith(".") ? normalized : "." + normalized;
-    }
-
-    private static void validateCommands(Path path) throws IOException {
-        int lineNumber = 0;
-        for (String rawLine : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-            lineNumber++;
-            String line = stripComment(rawLine).trim();
-            if (line.isEmpty() || line.startsWith("[") && line.endsWith("]")) {
-                continue;
-            }
-            String[] columns = line.split("\\s+");
-            if (columns.length < 2) {
-                throw new IOException("invalid command line " + lineNumber);
-            }
-            parseByte(columns[0]);
-        }
-    }
-
-    private static int parseByte(String value) {
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("0x")) {
-            normalized = normalized.substring(2);
-        } else if (normalized.startsWith("$")) {
-            normalized = normalized.substring(1);
-        }
-        return Integer.parseInt(normalized, 16) & 0xFF;
-    }
-
-    private static String stripComment(String line) {
-        int semicolon = line.indexOf(';');
-        int hash = line.indexOf('#');
-        int comment = -1;
-        if (semicolon >= 0 && hash >= 0) {
-            comment = Math.min(semicolon, hash);
-        } else if (semicolon >= 0) {
-            comment = semicolon;
-        } else if (hash >= 0) {
-            comment = hash;
-        }
-        return comment >= 0 ? line.substring(0, comment) : line;
     }
 
     private static void countAdd(AddResult result, Counter counter) {

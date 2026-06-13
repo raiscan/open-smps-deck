@@ -142,6 +142,31 @@ class TestInstrumentLibraryScanner {
         assertFalse(loaded.isDirty(), "Rescanning a saved and loaded library should not dirty it");
     }
 
+    @Test
+    void malformedCommandsDefinitionRecordsFailureAndSkipsSection() throws Exception {
+        Path context = tempDir.resolve("Sega").resolve("BrokenFlags");
+        writeRipContext(context, ".sm2", "broken.8000.sm2", "DefCFlag.txt");
+        writeLst(context.resolve("PSG.lst"), "Broken", new byte[]{7, 8, (byte) 0x80});
+        Files.write(context.resolve("InsSet.17D8.bin"), voice(0x61));
+        Files.write(context.resolve("broken.8000.sm2"), buildS2SongWithGlobalInsLib(LIB_BASE));
+        Files.writeString(context.resolve("DefCFlag.txt"), """
+                [Main]
+                F8 cfJumpTo Len=bad/JmpOfs=0
+                """);
+
+        InstrumentLibrary library = new InstrumentLibrary();
+
+        ScanSummary summary = new InstrumentLibraryScanner().scan(tempDir, library);
+
+        assertEquals(1, summary.configDirectoriesFound());
+        assertEquals(1, summary.failures().size());
+        assertEquals(context.resolve("DefCFlag.txt").toAbsolutePath().normalize(),
+                summary.failures().getFirst().path());
+        assertTrue(summary.failures().getFirst().reason().contains("failed to parse coordination flags"));
+        assertEquals(0, summary.newAssets());
+        assertTrue(library.entries().isEmpty());
+    }
+
     private static void writeRipContext(Path context, String extension, String songFile, String commandsFile)
             throws Exception {
         Files.createDirectories(context);
