@@ -42,11 +42,14 @@ def main():
             env = os.environ.copy()
             for key in ("GDK_SCALE", "GDK_DPI_SCALE", "glass.gtk.uiScale"):
                 env.pop(key, None)
-            env.update(overrides)
             env["XDG_CONFIG_HOME"] = str(case)
             print(f"Checking {name}", flush=True)
             subprocess.run([
-                "xvfb-run", "-a", "-s", "-screen 0 1920x1080x24 -dpi 96", "java", *flags,
+                "xvfb-run", "-a", "-s", "-screen 0 1920x1080x24 -dpi 96",
+                # POSIX shell wrappers may discard environment names containing
+                # dots. Install explicit overrides after xvfb-run's shell, so
+                # Java actually receives glass.gtk.uiScale on every runner.
+                "env", *(f"{key}={value}" for key, value in overrides.items()), "java", *flags,
                 "-cp", classpath, "com.opensmpsdeck.studio.DpiStudioSmoke", expected,
                 str(source), str(screenshots / f"dpi-{name}.png"),
             ], env=env, check=True, timeout=25)

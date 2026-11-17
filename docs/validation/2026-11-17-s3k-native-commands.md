@@ -66,6 +66,14 @@ the first runner step using `RUNNER_TEMP`; actionlint and a local execution of
 that step pass. The [GitHub context availability table](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)
 documents this scope restriction. No application source changed for this fix.
 
+The first runnable hosted check reached the native UI tests and exposed a second
+portability issue: the explicit dotted environment-variable case saw desktop
+150% instead of requested 200%. This is consistent with shell filtering of dotted
+environment names; the local `/bin/sh` is Bash. Explicit test overrides are now
+installed with `env` after the Xvfb shell wrapper, so shell filtering of names
+such as `glass.gtk.uiScale` cannot remove the test input before Java starts.
+The six packaged cases were repeated locally after this harness correction.
+
 ## Full-suite comparison and limits
 
 `xvfb-run ... mvn -B --fail-at-end verify -Dstudio.ui.test=true
