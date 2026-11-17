@@ -23,12 +23,13 @@ public final class StudioWindow implements AutoCloseable {
     private final Label title=new Label(), fileState=new Label(), status=new Label("Ready"), detail=new Label("Choose a sequence"), linked=new Label();
     private final ListView<Sequence> browser=new ListView<>();
     private final VBox inspector=new VBox(12);
-    private final HBox noteInspector=new HBox(8);
+    private final FlowPane noteInspector=new FlowPane(8,8);
     final TimelineView timeline=new TimelineView();
     final PianoRollView piano=new PianoRollView();
     private final StudioPlayback playback=new StudioPlayback();
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
     private final Deque<StudioProject> undo=new ArrayDeque<>(), redo=new ArrayDeque<>();
+    private ResponsiveEditors editors;
     private ProjectDocument document;
     private ProjectWatcher watcher;
     private String selectedClip, selectedSequence, selectedNote;
@@ -39,13 +40,17 @@ public final class StudioWindow implements AutoCloseable {
     public StudioWindow(Stage stage,Path file) throws IOException {
         this.stage=stage;
         build();
-        Scene scene=new Scene(root,1440,900);
+        var area=Screen.getPrimary().getVisualBounds();
+        Scene scene=new Scene(root,Math.min(1440,area.getWidth()*.94),Math.min(900,area.getHeight()*.90));
         scene.getStylesheets().add(Objects.requireNonNull(getClass().getResource("studio.css")).toExternalForm());
-        stage.setScene(scene);stage.setMinWidth(1050);stage.setMinHeight(700);
+        scene.heightProperty().addListener((o,a,b)->adaptHeight(b.doubleValue()));adaptHeight(scene.getHeight());
+        stage.setScene(scene);stage.setMinWidth(Math.min(1050,area.getWidth()*.90));stage.setMinHeight(Math.min(700,area.getHeight()*.85));
         scene.addEventFilter(KeyEvent.KEY_PRESSED,this::key);
         stage.setOnCloseRequest(event->{if(!confirmLeave())event.consume();else close();});
         load(file);
     }
+    void showNotes(){editors.showNotes();}
+    private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
     ProjectDocument document(){return document;}
     Scene scene(){return stage.getScene();}
     String selectedClip(){return selectedClip;}
@@ -72,9 +77,11 @@ public final class StudioWindow implements AutoCloseable {
         browser.getSelectionModel().selectedItemProperty().addListener((o,a,b)->{
             if(!updating&&b!=null){selectedSequence=b.id();selectedClip=null;selectedNote=null;refreshView();}
         });
+        browser.setOnMouseClicked(e->{if(e.getClickCount()==2)showNotes();});
         browser.setOnDragDetected(e->{var s=browser.getSelectionModel().getSelectedItem();if(s!=null){var board=browser.startDragAndDrop(TransferMode.COPY);var content=new ClipboardContent();content.putString("smps-sequence:"+s.id());board.setContent(content);e.consume();}});
         VBox library=new VBox(12,label("SEQUENCES","section"),label("Reusable musical sources","muted"),browser,button("+ Place on timeline",this::place),button("+ New sequence",this::newSequence));
         library.getStyleClass().add("library");library.setMinWidth(170);VBox.setVgrow(browser,Priority.ALWAYS);
+        timeline.openNotes=this::showNotes;
         timeline.selection=id->{selectedClip=id;selectedNote=null;if(id!=null)selectedSequence=clip().sequenceId();refreshView();};
         timeline.edit=c->change(p->ProjectEdits.replaceClip(p,c));
         timeline.placement=c->{if(change(p->ProjectEdits.addClip(p,c))){selectedClip=c.id();selectedSequence=c.sequenceId();refreshView();}};
@@ -90,9 +97,10 @@ public final class StudioWindow implements AutoCloseable {
         HBox pianoHeader=new HBox(12,detail,spacer(),linked);pianoHeader.getStyleClass().add("panelbar");
         noteInspector.getStyleClass().add("note-inspector");
         VBox notes=new VBox(pianoHeader,piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
-        SplitPane work=new SplitPane(arrangement,notes);work.setOrientation(javafx.geometry.Orientation.VERTICAL);work.setDividerPositions(0.59);
-        inspector.getStyleClass().add("inspector");inspector.setMinWidth(220);inspector.setPrefWidth(240);
-        SplitPane layout=new SplitPane(library,work,inspector);layout.setDividerPositions(.15,.82);root.setCenter(layout);
+        editors=new ResponsiveEditors(arrangement,notes);
+        inspector.getStyleClass().add("inspector");inspector.setMinWidth(0);inspector.setPrefWidth(240);
+        ScrollPane inspectorScroll=new ScrollPane(inspector);inspectorScroll.setFitToWidth(true);inspectorScroll.setMinWidth(210);inspectorScroll.getStyleClass().add("editor-scroll");
+        SplitPane layout=new SplitPane(library,editors,inspectorScroll);layout.setDividerPositions(.15,.82);root.setCenter(layout);
         status.getStyleClass().add("status");status.setWrapText(true);
         HBox bottom=new HBox(12,status,spacer(),label("S3&K  ·  LIVE FILES  ·  NATIVE PLAYBACK","muted"));bottom.getStyleClass().add("statusbar");root.setBottom(bottom);
     }
@@ -137,7 +145,9 @@ public final class StudioWindow implements AutoCloseable {
         detail.setText(source()==null?"NOTE EDITOR":source().name().toUpperCase(Locale.ROOT));
         long uses=p.clips().stream().filter(c->c.sequenceId().equals(selectedSequence)).count();
         linked.setText(source()==null?"Double-click to add notes":"Linked source · "+uses+" instance"+(uses==1?"":"s")+" · double-click to add notes");
-        refreshInspector();refreshNoteInspector();refreshStatus();updating=false;
+        refreshInspector();
+        for(var node:inspector.getChildren()){if(node instanceof Label l){l.setWrapText(true);l.setMinWidth(0);}if(node instanceof Button b){b.setWrapText(true);b.setMinWidth(0);b.setMaxWidth(Double.MAX_VALUE);}}
+        refreshNoteInspector();refreshStatus();updating=false;
     }
     private void refreshInspector(){
         inspector.getChildren().clear();inspector.getChildren().add(label("CLIP INSPECTOR","section"));
@@ -161,7 +171,7 @@ public final class StudioWindow implements AutoCloseable {
         piano.selected=n.id();piano.draw();
         TextField tick=field(n.tick(),"note-tick"),duration=field(n.duration(),"note-duration"),pitch=field(n.pitch(),"note-pitch");
         Button apply=button("Apply note",()->{try{change(p->ProjectEdits.updateNote(p,selectedSequence,new NoteEvent(n.id(),Integer.parseInt(tick.getText()),Integer.parseInt(duration.getText()),Integer.parseInt(pitch.getText()))));}catch(IllegalArgumentException e){error(e);}});apply.setId("apply-note");
-        noteInspector.getChildren().addAll(label(PianoRollView.noteName(n.pitch()),"section"),label("Tick","muted"),tick,label("Length","muted"),duration,label("MIDI pitch","muted"),pitch,apply,button("Delete",this::deleteNote));
+        noteInspector.getChildren().addAll(label(PianoRollView.noteName(n.pitch()),"section"),new HBox(6,label("Tick","muted"),tick),new HBox(6,label("Length","muted"),duration),new HBox(6,label("MIDI pitch","muted"),pitch),apply,button("Delete",this::deleteNote));
     }
     private Clip clip(){return document==null?null:document.project().clips().stream().filter(c->c.id().equals(selectedClip)).findFirst().orElse(null);}
     private Sequence source(){return document==null?null:document.project().sequences().stream().filter(s->s.id().equals(selectedSequence)).findFirst().orElse(null);}

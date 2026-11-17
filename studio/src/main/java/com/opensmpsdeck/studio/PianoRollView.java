@@ -66,7 +66,7 @@ final class PianoRollView extends ViewportCanvas {
     @Override void draw() {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
         g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
-        g.setFont(Font.font("System",10));
+        g.setFont(Font.font("System",12));
         for(int pitch=topPitch;pitch>=bottomPitch;pitch--) {
             double y=HEADER+(topPitch-pitch)*NOTE_ROW; boolean black=switch(pitch%12){case 1,3,6,8,10->true;default->false;};
             g.setFill(Color.web(black?"#121b28":"#1a2534")); g.fillRect(0,y,w,NOTE_ROW);

@@ -5,6 +5,11 @@ old tracker, with playback through the pinned OpenGGF S3&K core. Start with the
 [original demo](../../examples/lantern-walk.smps.json); make a copy before editing
 it if you want to keep the example unchanged.
 
+Studio follows native display scaling, including Linux GTK/Xft preferences.
+Restart after changing desktop scale. On a short logical screen, use the
+**Arrangement** and **Notes** tabs to give each editor enough space. Double-click
+a clip or source to open Notes. The inspector has its own scroll area.
+
 ## Arrange clips
 
 The sequence browser on the left contains reusable musical sources. Drag one

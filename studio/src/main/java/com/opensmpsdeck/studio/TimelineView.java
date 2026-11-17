@@ -18,6 +18,7 @@ final class TimelineView extends ViewportCanvas {
     String selectedLane="FM1";
     double scale=5;
     double playhead=-1;
+    Runnable openNotes=()->{};
     Consumer<String> selection=ignored -> {};
     Consumer<Clip> edit=ignored -> {};
     Consumer<Clip> placement=ignored -> {};
@@ -47,6 +48,7 @@ final class TimelineView extends ViewportCanvas {
             if(changed!=null) edit.accept(changed);
             draw();
         });
+        canvas.setOnMouseClicked(e->{if(e.getClickCount()==2&&e.isStillSincePress()&&selected!=null)openNotes.run();});
         canvas.setOnDragOver(e -> {
             if(e.getDragboard().hasString() && e.getDragboard().getString().startsWith("smps-sequence:")) e.acceptTransferModes(TransferMode.COPY);
             e.consume();
@@ -86,7 +88,7 @@ final class TimelineView extends ViewportCanvas {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
         g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
         if(project==null) return;
-        g.setFont(Font.font("System",11));
+        g.setFont(Font.font("System",13));
         for(int row=0;row<LANES.size();row++) {
             g.setFill(Color.web(row%2==0?"#141d2a":"#111a26")); g.fillRect(0,RULER+row*ROW,w,ROW);
             g.setStroke(Color.web("#243043")); g.strokeLine(0,RULER+(row+1)*ROW,w,RULER+(row+1)*ROW);
@@ -137,7 +139,7 @@ final class TimelineView extends ViewportCanvas {
                 g.strokeLine(noteX,noteY,Math.min(x+width-3,noteX+note.duration()*scale-2),noteY);
             }
         }
-        g.setFill(Color.web("#e5f8f4")); g.setFont(Font.font("System",11)); g.fillText(source.name(),Math.max(x+8,GUTTER+8),y+15);
+        g.setFill(Color.web("#e5f8f4")); g.setFont(Font.font("System",13)); g.fillText(source.name(),Math.max(x+8,GUTTER+8),y+15);
         g.restore();
         g.setFill(Color.web("#d4f3ef",0.7)); g.fillRoundRect(x+width-6,y+12,2,16,2,2);
     }

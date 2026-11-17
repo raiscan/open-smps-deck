@@ -146,6 +146,12 @@ class StudioWindowTest {
         fx(()->{mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,TimelineView.GUTTER+20,TimelineView.RULER+20,false);assertEquals("FM2",clip("clip-a1").lane());assertEquals(144,clip("clip-a1").lengthTicks());assertFalse(window.document().dirty());assertEquals(before,window.piano.offset,1.0);return null;});
     }
 
+    @Test void shortLogicalWorkAreaUsesReachableEditorTabs() throws Exception {
+        fx(()->{stage.setHeight(610);return null;});await(()->window.scene().lookup(".tab-pane")!=null);
+        fx(()->{window.showNotes();window.scene().getRoot().applyCss();window.scene().getRoot().layout();assertTrue(window.piano.scroll.getViewportBounds().getHeight()>80,"compact notes editor needs usable height");return null;});
+        fx(()->{stage.setHeight(900);return null;});await(()->window.scene().lookup(".tab-pane")==null);
+    }
+
     @Test void snapshotRealEditor() throws Exception {
         String target=System.getProperty("studio.snapshot");Assumptions.assumeTrue(target!=null,"Optional visual QA artifact");
         fx(()->{

@@ -24,6 +24,9 @@ abstract class ViewportCanvas extends Region {
     void dimensions(double width, double height) {
         contentWidth = Math.max(400, width); contentHeight = height;
         setMinSize(contentWidth, height); setPrefSize(contentWidth, height);
+        // Publish the new content bounds before restoring a scroll anchor.
+        // Otherwise ScrollPane normalizes hvalue again on the next layout pass.
+        resize(contentWidth, height);
         updateViewport(); requestLayout();
     }
     final void updateViewport() {

@@ -56,6 +56,8 @@ jobs:
         run: |
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project examples/lantern-walk.smps.json
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project examples/lantern-walk.smps.json "$RUNNER_TEMP/project.wav" --frames 1800
+      - name: Verify native DPI and physical pointer editing
+        run: python3 tools/verify_studio_dpi.py --scratch "$RUNNER_TEMP"
       - name: Fetch only the locked upstream commit
         run: |
           revision=$(python3 -c 'import json; print(json.load(open("upstream/openggf-audio.lock.json"))["revision"])')
