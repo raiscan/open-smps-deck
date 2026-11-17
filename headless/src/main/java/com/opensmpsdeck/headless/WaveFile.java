@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.CompiledProject;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -7,14 +8,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 
 /** Fixed-length stereo PCM WAV written one presentation at a time. */
 public final class WaveFile {
     private WaveFile() {}
 
     public static void render(byte[] song, Path output, int presentations) throws IOException {
+        render(new CompiledProject(S3kBinary.validateAndCopy(song), List.of()), output, presentations);
+    }
+
+    public static void render(CompiledProject project, Path output, int presentations) throws IOException {
         S3kRenderer.validatePresentations(presentations);
-        byte[] validated = S3kBinary.validateAndCopy(song);
+        S3kBinary.validateAndCopy(project);
         // CREATE_NEW also rejects symlinks and concurrent creators; never truncate a user's file.
         OutputStream created = Files.newOutputStream(output, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         boolean complete = false;
@@ -26,7 +32,7 @@ public final class WaveFile {
             le32(out, S3kRenderer.SAMPLE_RATE); le32(out, S3kRenderer.SAMPLE_RATE * 4);
             le16(out, 4); le16(out, 16); ascii(out, "data"); le32(out, bytes);
             byte[] encoded = new byte[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 4];
-            S3kRenderer.render(validated, presentations, pcm -> {
+            S3kRenderer.render(project, presentations, pcm -> {
                 if (Thread.currentThread().isInterrupted())
                     throw new java.io.InterruptedIOException("WAV export cancelled");
                 for (int i = 0; i < pcm.length; i++) {

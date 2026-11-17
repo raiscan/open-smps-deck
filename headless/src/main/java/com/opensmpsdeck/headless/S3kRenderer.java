@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.CompiledProject;
 import com.openggf.audio.MusicRestoreSink;
 import com.openggf.audio.driver.SmpsDriver;
 import com.openggf.audio.rewind.SmpsDriverSnapshot;
@@ -14,6 +15,8 @@ import com.openggf.game.sonic3k.audio.Sonic3kSmpsSequencerConfig;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsData;
 import java.io.IOException;
 import java.util.Map;
+import java.util.List;
+import java.util.HashMap;
 import java.util.Objects;
 
 /** Bounded, no-device rendering through the pinned production session. */
@@ -44,8 +47,26 @@ public final class S3kRenderer {
         validatePresentations(presentations);
         Objects.requireNonNull(sink, "sink");
         Objects.requireNonNull(observer, "observer");
-        byte[] bytes = S3kBinary.validateAndCopy(input);
+        render(new CompiledProject(S3kBinary.validateAndCopy(input), List.of()), presentations, sink, observer);
+    }
+
+    public static void render(CompiledProject project, int presentations, PcmSink sink) throws IOException {
+        render(project, presentations, sink, ChipWriteObserver.NONE);
+    }
+
+    /** Render one immutable native bank together with its explicitly supplied dependencies. */
+    public static void render(CompiledProject project, int presentations, PcmSink sink, ChipWriteObserver observer) throws IOException {
+        validatePresentations(presentations);
+        Objects.requireNonNull(sink, "sink");
+        Objects.requireNonNull(observer, "observer");
+        Objects.requireNonNull(project, "project");
+        byte[] bytes = S3kBinary.validateAndCopy(project);
+        Map<Integer, List<Integer>> psg = project.psgEnvelopes(), mod = project.modulationEnvelopes();
         var data = new Sonic3kSmpsData(bytes, 0);
+        // The pinned setters retain their inputs. These arrays belong only to
+        // this render and are installed before any sequencer state is captured.
+        data.setPsgEnvelopes(nativeEnvelopes(psg));
+        data.setModEnvelopes(nativeEnvelopes(mod));
         var dac = new DacData(Map.of(), Map.of(), 297);
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
         var source = SmpsSourceDescriptor.from(data);
@@ -74,6 +95,16 @@ public final class S3kRenderer {
                 sink.accept(pcm);
             }
         }
+    }
+
+    private static Map<Integer, byte[]> nativeEnvelopes(Map<Integer, List<Integer>> source) {
+        Map<Integer, byte[]> owned = new HashMap<>();
+        source.forEach((index, values) -> {
+            byte[] bytes = new byte[values.size()];
+            for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) (int) values.get(i);
+            owned.put(index, bytes);
+        });
+        return Map.copyOf(owned);
     }
 
     static void validatePresentations(int presentations) {

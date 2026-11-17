@@ -54,7 +54,7 @@ public final class DpiStudioSmoke {
             check(fx(()->window.document().project().sequences().getFirst().notes().stream().anyMatch(n->n.tick()==90&&n.duration()==6)),"native scaled note resize failed");
             Button save=fx(()->(Button)window.scene().getRoot().lookupAll(".button").stream().filter(n->n instanceof Button b&&b.getText().equals("Save")).findFirst().orElseThrow());
             check(fx(()->save.getFont().getSize()>=14),"control text is undersized");click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
-            check(!fx(()->window.document().dirty()),"native Save click failed");
+            awaitSaved();
             check(ProjectFiles.load(Path.of(args[1])).project().sequences().getFirst().notes().size()==7,"saved pointer edit not in shared file");
             // Commands must remain reachable through the same scaled native UI.
             fx(()->{
@@ -78,14 +78,31 @@ public final class DpiStudioSmoke {
             }));
             check(fx(()->window.document().project().formatVersion()==2&&window.document().project().sequences().getFirst().commands().size()==1),"native scaled command Add failed");
             click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
+            awaitSaved();
             check(ProjectFiles.load(Path.of(args[1])).project().sequences().getFirst().commands().getFirst().arguments().equals(java.util.List.of(128)),"native command not saved");
+            fx(()->{window.showAssets();layout();window.voices.selectVoice("voice-lead");((TextField)window.scene().lookup("#voice-name")).setText("Scaled FM voice");return null;});
+            revealButton((ScrollPane)fx(()->window.voices.getCenter()),"apply-voice");
+            Button applyVoice=fx(()->(Button)window.scene().lookup("#apply-voice"));click(fx(()->applyVoice.localToScreen(applyVoice.getWidth()/2,applyVoice.getHeight()/2)));
+            check(fx(()->window.document().project().voices().getFirst().name().equals("Scaled FM voice")),"native scaled voice Apply failed");
+            fx(()->{window.showEnvelopes();layout();return null;});
+            revealButton((ScrollPane)fx(()->window.envelopes.getCenter()),"add-psg-envelope");
+            Button addEnvelope=fx(()->(Button)window.scene().lookup("#add-psg-envelope"));click(fx(()->addEnvelope.localToScreen(addEnvelope.getWidth()/2,addEnvelope.getHeight()/2)));
+            check(fx(()->window.document().project().formatVersion()==3&&window.document().project().envelopes().size()==1),"native scaled envelope creation failed");
+            click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
+            awaitSaved();
+            var savedAssets=ProjectFiles.load(Path.of(args[1])).project();
+            check(savedAssets.voices().getFirst().name().equals("Scaled FM voice"),"native voice edit not saved: "+savedAssets.voices().getFirst().name());
+            check(savedAssets.envelopes().size()==1,"native envelope edit not saved: "+savedAssets.envelopes().size()+" assets; dirty="+fx(()->window.document().dirty())+", "+fx(()->window.document().message()));
+            fx(()->{window.showCommands();layout();return null;});
             fx(()->{((ScrollPane)window.commands.getCenter()).setVvalue(0);layout();return null;});
             fx(()->{
                 WritableImage image=stage.getScene().snapshot(null);BufferedImage png=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);
                 for(int y=0;y<png.getHeight();y++)for(int x=0;x<png.getWidth();x++)png.setRGB(x,y,image.getPixelReader().getArgb(x,y));
                 ImageIO.write(png,"png",Path.of(args[2]).toFile());return null;
             });
-            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip drag, scrolled note entry/resize, command Add, Save and work-area bounds");
+            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip/note/command edits, voice Apply, envelope creation, Save and work-area bounds");
+        } catch(Exception|AssertionError failure){
+            fx(()->{WritableImage image=stage.getScene().snapshot(null);BufferedImage png=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);for(int y=0;y<png.getHeight();y++)for(int x=0;x<png.getWidth();x++)png.setRGB(x,y,image.getPixelReader().getArgb(x,y));ImageIO.write(png,"png",Path.of(args[2]+".failure.png").toFile());return null;});throw failure;
         } finally {fx(()->{if(window!=null)window.close();if(stage!=null)stage.close();Platform.exit();return null;});}
     }
     private static void reveal(int pitch) throws Exception {
@@ -98,8 +115,17 @@ public final class DpiStudioSmoke {
         check(viewport.localToScreen(viewport.getBoundsInLocal()).contains(point),"note handle not visible in viewport");return point;
     }
     private static void layout(){window.scene().getRoot().applyCss();window.scene().getRoot().layout();}
+    private static void revealButton(ScrollPane scroll,String id)throws Exception{
+        fx(()->{Node control=window.scene().lookup("#"+id);var bounds=scroll.getContent().sceneToLocal(control.localToScene(control.getBoundsInLocal()));scroll.setVvalue(Math.clamp((bounds.getMinY()-15)/Math.max(1,scroll.getContent().getLayoutBounds().getHeight()-scroll.getViewportBounds().getHeight()),0,1));layout();return null;});pause();
+        fx(()->{Node control=window.scene().lookup("#"+id);Node viewport=scroll.lookup(".viewport");check(viewport.localToScreen(viewport.getBoundsInLocal()).contains(control.localToScreen(control.getBoundsInLocal()))||viewport.localToScreen(viewport.getBoundsInLocal()).contains(control.localToScreen(control.getBoundsInLocal().getCenterX(),control.getBoundsInLocal().getCenterY())),id+" is outside asset viewport");return null;});
+    }
     private static void click(Point2D point) throws Exception {fx(()->{robot.mouseMove(point);robot.mousePress(MouseButton.PRIMARY);robot.mouseRelease(MouseButton.PRIMARY);return null;});pause();}
     private static void pause() throws InterruptedException {Thread.sleep(120);}
+    private static void awaitSaved()throws Exception{
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(fx(()->window.document().dirty())&&System.nanoTime()<deadline)Thread.sleep(25);
+        check(!fx(()->window.document().dirty()),"native Save did not complete: "+fx(()->window.document().message()));
+    }
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}
     private static <T>T fx(Callable<T> work) throws Exception {FutureTask<T> task=new FutureTask<>(work);Platform.runLater(task);return task.get(10,TimeUnit.SECONDS);}
 }

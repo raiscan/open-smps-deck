@@ -1,0 +1,26 @@
+package com.opensmpsdeck.project;
+
+import java.util.List;
+
+/** Bounded envelope subset whose native and pinned-driver behavior is defined. */
+public final class EnvelopeProgram {
+    private EnvelopeProgram() {}
+
+    public static void validate(String type,List<Integer> bytes) {
+        int maximum;
+        if(Envelope.PSG_VOLUME.equals(type)) maximum=0x0F;
+        else if(Envelope.MODULATION.equals(type)) maximum=0x7F;
+        else throw new IllegalArgumentException("Envelope type must be PSG_VOLUME or MODULATION");
+        if(bytes==null || bytes.isEmpty() || bytes.size()>256) throw new IllegalArgumentException("Envelope program must contain 1..256 raw bytes");
+        for(Integer value:bytes) {
+            if(value==null || value<0 || value>255) throw new IllegalArgumentException("Envelope bytes must be in 0..255");
+            if(value<=maximum || value==0x80 || value==0x81 || value==0x83) continue;
+            if(value==0x82 || value==0x84 || value>=0x85)
+                throw new IllegalArgumentException(String.format("Unsupported envelope control %02X; native/driver behavior is outside the safe profile",value));
+            throw new IllegalArgumentException("PSG volume envelope data must be in 00..0F");
+        }
+        if(bytes.getFirst()==0x80) throw new IllegalArgumentException("Envelope cannot start with reset 80: zero-time reset cycle");
+        int last=bytes.getLast();
+        if(last!=0x80 && last!=0x81 && last!=0x83) throw new IllegalArgumentException("Envelope must end with reset 80, rest 81 or hold 83");
+    }
+}

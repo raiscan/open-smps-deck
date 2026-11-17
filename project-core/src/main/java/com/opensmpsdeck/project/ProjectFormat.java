@@ -33,11 +33,15 @@ public final class ProjectFormat {
             reader.setLenient(false);
             JsonElement tree = readValue(reader, 0);
             if (reader.peek() != JsonToken.END_DOCUMENT) throw invalid("project", "unexpected content after document");
-            JsonObject o = object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips");
-            int version=integer(o,"formatVersion");
-            if(version!=1 && version!=2) throw invalid("formatVersion", "only versions 1 and 2 are supported");
+            if(!tree.isJsonObject()) throw invalid("project","must be an object");
+            if(!tree.getAsJsonObject().has("formatVersion")) throw invalid("project.formatVersion","required field is missing");
+            int version=integer(tree.getAsJsonObject(),"formatVersion");
+            if(version<1 || version>3) throw invalid("formatVersion", "only versions 1, 2 and 3 are supported");
+            JsonObject o = version==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
+                    : object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips");
             StudioProject project = new StudioProject(version,string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),integer(o,"tempo"),
-                    list(o,"voices",ProjectFormat::voice),list(o,"sequences",e->sequence(e,version)),list(o,"clips",ProjectFormat::clip));
+                    list(o,"voices",ProjectFormat::voice),list(o,"sequences",e->sequence(e,version)),list(o,"clips",ProjectFormat::clip),
+                    version==3?list(o,"envelopes",ProjectFormat::envelope):List.of());
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -59,7 +63,7 @@ public final class ProjectFormat {
             JsonArray notes = new JsonArray();
             for (NoteEvent n : s.notes()) { JsonObject y=new JsonObject(); y.addProperty("id",n.id()); y.addProperty("tick",n.tick()); y.addProperty("duration",n.duration()); y.addProperty("pitch",n.pitch()); notes.add(y); }
             x.add("notes",notes);
-            if(project.formatVersion()==2) {
+            if(project.formatVersion()>=2) {
                 JsonArray commands=new JsonArray();
                 for(CommandEvent event:s.commands()) {
                     JsonObject y=new JsonObject(); y.addProperty("id",event.id()); y.addProperty("tick",event.tick()); y.addProperty("command",event.command().name());
@@ -67,18 +71,29 @@ public final class ProjectFormat {
                 }
                 x.add("commands",commands); x.addProperty("repeatState",s.repeatState());
             }
+            if(project.formatVersion()==3) {
+                x.addProperty("psgEnvelopeId",s.psgEnvelopeId());x.addProperty("modulationEnvelopeId",s.modulationEnvelopeId());
+            }
             sequences.add(x);
         }
         o.add("sequences",sequences);
         JsonArray clips = new JsonArray();
         for (Clip c : project.clips()) { JsonObject x=new JsonObject(); x.addProperty("id",c.id()); x.addProperty("sequenceId",c.sequenceId()); x.addProperty("lane",c.lane()); x.addProperty("startTick",c.startTick()); x.addProperty("lengthTicks",c.lengthTicks()); clips.add(x); }
         o.add("clips",clips);
+        if(project.formatVersion()==3) {
+            JsonArray envelopes=new JsonArray();
+            for(Envelope envelope:project.envelopes()) {
+                JsonObject x=new JsonObject();x.addProperty("id",envelope.id());x.addProperty("name",envelope.name());x.addProperty("type",envelope.type());
+                JsonArray bytes=new JsonArray();envelope.bytes().forEach(bytes::add);x.add("bytes",bytes);envelopes.add(x);
+            }
+            o.add("envelopes",envelopes);
+        }
         return GSON.toJson(o) + "\n";
     }
 
     public static void validate(StudioProject project) {
         if (project == null) throw invalid("project", "document is required");
-        if (project.formatVersion()!=1 && project.formatVersion()!=2) throw invalid("formatVersion", "only versions 1 and 2 are supported");
+        if (project.formatVersion()<1 || project.formatVersion()>3) throw invalid("formatVersion", "only versions 1, 2 and 3 are supported");
         text(project.name(),"name");
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
@@ -89,6 +104,17 @@ public final class ProjectFormat {
             if (v.bytes().size()!=25) throw invalid("voice '"+v.id()+"'.bytes", "exactly 25 native-order bytes are required");
             for (int b : v.bytes()) range(b,0,255,"voice '"+v.id()+"'.bytes");
         }
+        if(project.formatVersion()<3 && !project.envelopes().isEmpty()) throw invalid("envelopes","envelope assets require formatVersion 3");
+        Map<String,Envelope> envelopes=unique(project.envelopes(),Envelope::id,"envelopes");
+        int psgCount=0,modulationCount=0;
+        for(Envelope envelope:project.envelopes()) {
+            String at="envelope '"+envelope.id()+"'";text(envelope.name(),at+".name");
+            try { EnvelopeProgram.validate(envelope.type(),envelope.bytes()); }
+            catch(IllegalArgumentException e) { throw invalid(at+".bytes",e.getMessage()); }
+            if(Envelope.PSG_VOLUME.equals(envelope.type())) psgCount++;else modulationCount++;
+        }
+        if(psgCount>255) throw invalid("envelopes","at most 255 PSG volume envelopes can be addressed");
+        if(modulationCount>127) throw invalid("envelopes","at most 127 modulation envelopes can be addressed; index 128 is reserved for custom modulation");
         Map<String,Sequence> sequences = unique(project.sequences(), Sequence::id, "sequences");
         for (Sequence s : project.sequences()) {
             String at="sequence '"+s.id()+"'"; text(s.name(),at+".name");
@@ -96,9 +122,15 @@ public final class ProjectFormat {
             range(s.lengthTicks(),1,Integer.MAX_VALUE,at+".lengthTicks"); range(s.volume(),0,127,at+".volume");
             if(!"RESET".equals(s.repeatState()) && !"CARRY".equals(s.repeatState())) throw invalid(at+".repeatState","use RESET or CARRY");
             if(project.formatVersion()==1 && (!s.commands().isEmpty() || !"RESET".equals(s.repeatState()))) throw invalid(at,"commands and repeat-state changes require formatVersion 2");
+            if(project.formatVersion()<3 && (s.psgEnvelopeId()!=null || s.modulationEnvelopeId()!=null)) throw invalid(at,"envelope references require formatVersion 3");
+            if(s.psgEnvelopeId()!=null) {
+                if(!s.type().equals("PSG")) throw invalid(at+".psgEnvelopeId","PSG volume envelopes require a PSG source");
+                envelopeReference(envelopes,s.psgEnvelopeId(),Envelope.PSG_VOLUME,at+".psgEnvelopeId");
+            }
+            if(s.modulationEnvelopeId()!=null) envelopeReference(envelopes,s.modulationEnvelopeId(),Envelope.MODULATION,at+".modulationEnvelopeId");
             if (s.type().equals("FM")) {
                 if (!voices.containsKey(s.voiceId())) throw invalid(at+".voiceId","undefined FM voice '"+s.voiceId()+"'");
-            } else if (s.voiceId()!=null) throw invalid(at+".voiceId","PSG must use null; external envelopes are not supported");
+            } else if (s.voiceId()!=null) throw invalid(at+".voiceId","PSG must use null; use psgEnvelopeId for a volume envelope");
             unique(s.notes(),NoteEvent::id,at+".notes");
             List<NoteEvent> sorted=s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList();
             long end=0;
@@ -147,12 +179,23 @@ public final class ProjectFormat {
         JsonObject o=object(e,"voice","id","name","bytes");
         return new Voice(string(o,"id"),string(o,"name"),list(o,"bytes",x->integer(x,"voice.bytes[]")));
     }
+    private static Envelope envelope(JsonElement e) {
+        JsonObject o=object(e,"envelope","id","name","type","bytes");
+        return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),list(o,"bytes",x->integer(x,"envelope.bytes[]")));
+    }
+    private static void envelopeReference(Map<String,Envelope> envelopes,String id,String type,String at) {
+        Envelope envelope=envelopes.get(id);
+        if(envelope==null) throw invalid(at,"undefined envelope '"+id+"'");
+        if(!type.equals(envelope.type())) throw invalid(at,"requires a "+type+" envelope");
+    }
     private static Sequence sequence(JsonElement e,int version) {
         JsonObject o=version==1 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes")
-                : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState");
+                : version==2 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState")
+                : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState","psgEnvelopeId","modulationEnvelopeId");
         String voice=o.get("voiceId").isJsonNull()?null:string(o,"voiceId");
         return new Sequence(string(o,"id"),string(o,"name"),string(o,"type"),integer(o,"lengthTicks"),voice,integer(o,"volume"),list(o,"notes",ProjectFormat::note),
-                version==1?List.of():list(o,"commands",ProjectFormat::command),version==1?"RESET":string(o,"repeatState"));
+                version==1?List.of():list(o,"commands",ProjectFormat::command),version==1?"RESET":string(o,"repeatState"),
+                version==3?nullableString(o,"psgEnvelopeId"):null,version==3?nullableString(o,"modulationEnvelopeId"):null);
     }
     private static CommandEvent command(JsonElement e) {
         JsonObject o=object(e,"command","id","tick","command","arguments");
@@ -178,6 +221,7 @@ public final class ProjectFormat {
         if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw invalid(key,"must be a string");
         return e.getAsString();
     }
+    private static String nullableString(JsonObject o,String key) { return o.get(key).isJsonNull()?null:string(o,key); }
     private static int integer(JsonObject o,String key) { return integer(o.get(key),key); }
     private static int integer(JsonElement e,String at) {
         if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber()) throw invalid(at,"must be an integer");

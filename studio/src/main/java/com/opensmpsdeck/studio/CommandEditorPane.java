@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.project.CommandEvent;
+import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectEdits;
 import com.opensmpsdeck.project.Sequence;
@@ -24,12 +25,14 @@ import java.util.function.UnaryOperator;
 
 /** Native events and source settings use the document's common edit/undo path. */
 final class CommandEditorPane extends BorderPane {
+    Consumer<String> voiceEditor=ignored->{},envelopeEditor=ignored->{};
     private final Consumer<UnaryOperator<StudioProject>> edit;
     private final Consumer<String> error;
     private final TableView<CommandEvent> table = new TableView<>();
     private final ComboBox<NativeCommand> command = new ComboBox<>();
     private final TextField tick = new TextField("0"), bytes = new TextField();
     private final ComboBox<String> voice = new ComboBox<>(), repeat = new ComboBox<>();
+    private final ComboBox<String> psgEnvelope = new ComboBox<>(), modEnvelope = new ComboBox<>();
     private final TextField volume = new TextField();
     private final Label heading = label("SOURCE COMMANDS", "section");
     private final Label linked = label("Choose a source", "muted");
@@ -108,13 +111,19 @@ final class CommandEditorPane extends BorderPane {
         voice.valueProperty().addListener((o, a, b) -> { if (!updating) updateNotices(); });
         volume.textProperty().addListener((o, a, b) -> { if (!updating) updateNotices(); });
         repeat.valueProperty().addListener((o, a, b) -> { if (!updating) updateNotices(); });
+        configureEnvelope(psgEnvelope,"source-psg-envelope");configureEnvelope(modEnvelope,"source-mod-envelope");
         volume.setOnAction(e -> applySource());
         FlowPane settings = new FlowPane(10, 8, field("Source voice", voice), field("Volume (0–127)", volume), field("Repeat state", repeat));
         FlowPane settingButtons = new FlowPane(8, 8, button("Apply source", "apply-source", this::applySource),
                 button("Reload source settings", "reload-source", () -> { if (source != null) loadSettings(source); }));
+        Button editVoice=button("Edit selected voice","edit-source-voice",()->voiceEditor.accept(voice.getValue()));editVoice.disableProperty().bind(voice.disableProperty());
+        Button editPsg=button("Edit PSG envelope","edit-source-psg-envelope",()->envelopeEditor.accept(psgEnvelope.getValue()));editPsg.disableProperty().bind(psgEnvelope.disableProperty());
+        Button editMod=button("Edit modulation envelope","edit-source-mod-envelope",()->envelopeEditor.accept(modEnvelope.getValue()));editMod.disableProperty().bind(modEnvelope.disableProperty());
+        FlowPane assetLinks=new FlowPane(8,8,editVoice,editPsg,editMod);
         Label repeatHelp = label("RESET restores supported native state on every repetition. CARRY retains it between repetitions of one clip. Each independent clip always starts reset.", "muted");
+        FlowPane envelopeSettings=new FlowPane(10,8,field("PSG volume envelope",psgEnvelope),field("Modulation envelope",modEnvelope));
         VBox contents = new VBox(10, heading, linked, table, ordering, eventFields, eventButtons, help, inputGuide,
-                draftNotice, new Separator(), label("LINKED SOURCE SETTINGS", "section"), settings, settingButtons, repeatHelp, settingsNotice);
+                draftNotice, new Separator(), label("LINKED SOURCE SETTINGS", "section"), settings, envelopeSettings, settingButtons, assetLinks, repeatHelp, settingsNotice);
         contents.setPadding(new Insets(12)); contents.setMinWidth(0);
         ScrollPane scroll = new ScrollPane(contents); scroll.setFitToWidth(true); scroll.setMinSize(0, 0);
         scroll.getStyleClass().add("editor-scroll"); setCenter(scroll);
@@ -137,6 +146,8 @@ final class CommandEditorPane extends BorderPane {
             String previousVoice = voice.getValue();
             voice.getItems().setAll(project == null ? List.of() : project.voices().stream().map(Voice::id).toList());
             voice.setValue(previousVoice); voice.setDisable(next == null || !next.type().equals("FM"));
+            updateEnvelopeChoices(psgEnvelope,"PSG_VOLUME");updateEnvelopeChoices(modEnvelope,"MODULATION");
+            psgEnvelope.setDisable(next==null||!next.type().equals("PSG"));modEnvelope.setDisable(next==null);
             heading.setText(next == null ? "SOURCE COMMANDS" : next.name().toUpperCase(Locale.ROOT) + " · COMMANDS");
             long count = next == null ? 0 : project.clips().stream().filter(c -> c.sequenceId().equals(next.id())).count();
             linked.setText(next == null ? "Choose a source in the sequence browser" : "Linked source · " + count + " clip instance" + (count == 1 ? "" : "s") + " · event, voice, volume and repeat edits affect every linked clip");
@@ -202,6 +213,7 @@ final class CommandEditorPane extends BorderPane {
             voice.setValue(latest == null ? null : latest.voiceId());
             volume.setText(latest == null ? "" : Integer.toString(latest.volume()));
             repeat.setValue(latest == null ? "RESET" : latest.repeatState());
+            psgEnvelope.setValue(latest==null?null:latest.psgEnvelopeId());modEnvelope.setValue(latest==null?null:latest.modulationEnvelopeId());
         } finally { updating = previous; }
         updateNotices();
     }
@@ -254,8 +266,9 @@ final class CommandEditorPane extends BorderPane {
             Sequence expected = settingsBaseline;
             String newVoice = source.type().equals("FM") ? voice.getValue() : null;
             String newRepeat = repeat.getValue();
-            Sequence intended = findSource(sourceSettingsFromDraft(project, expected, newVoice, newVolume, newRepeat), expected.id());
-            submit(p -> sourceSettingsFromDraft(p, expected, newVoice, newVolume, newRepeat));
+            String newPsg=source.type().equals("PSG")?psgEnvelope.getValue():null,newMod=modEnvelope.getValue();
+            Sequence intended = findSource(sourceSettingsFromDraft(project, expected, newVoice, newVolume, newRepeat,newPsg,newMod), expected.id());
+            submit(p -> sourceSettingsFromDraft(p, expected, newVoice, newVolume, newRepeat,newPsg,newMod));
             if (source != null && source.equals(intended)) loadSettings(source);
         } catch (NumberFormatException e) { report("Source volume must be a decimal integer from 0 to 127."); }
         catch (IllegalArgumentException e) { report(e.getMessage()); }
@@ -308,7 +321,9 @@ final class CommandEditorPane extends BorderPane {
     private boolean settingsDraftChanged() {
         return settingsBaseline != null && (!Objects.equals(voice.getValue(), settingsBaseline.voiceId())
                 || !volume.getText().trim().equals(Integer.toString(settingsBaseline.volume()))
-                || !Objects.equals(repeat.getValue(), settingsBaseline.repeatState()));
+                || !Objects.equals(repeat.getValue(), settingsBaseline.repeatState())
+                || !Objects.equals(psgEnvelope.getValue(),settingsBaseline.psgEnvelopeId())
+                || !Objects.equals(modEnvelope.getValue(),settingsBaseline.modulationEnvelopeId()));
     }
 
     private CommandEvent findCommand(String id) {
@@ -322,17 +337,40 @@ final class CommandEditorPane extends BorderPane {
     }
 
     static StudioProject sourceSettingsFromDraft(StudioProject project, Sequence expected, String voice, int volume, String repeat) {
+        return sourceSettingsFromDraft(project,expected,voice,volume,repeat,expected.psgEnvelopeId(),expected.modulationEnvelopeId());
+    }
+
+    static StudioProject sourceSettingsFromDraft(StudioProject project, Sequence expected, String voice, int volume, String repeat,String psg,String mod) {
         Sequence latest = findSource(project, expected.id());
         if (latest == null || !latest.type().equals(expected.type())) throw new IllegalArgumentException("Source changed; reload source settings before applying.");
         boolean voiceChanged = !Objects.equals(voice, expected.voiceId());
         boolean volumeChanged = volume != expected.volume();
         boolean repeatChanged = !Objects.equals(repeat, expected.repeatState());
+        boolean psgChanged=!Objects.equals(psg,expected.psgEnvelopeId()),modChanged=!Objects.equals(mod,expected.modulationEnvelopeId());
         if ((voiceChanged && !Objects.equals(latest.voiceId(), expected.voiceId()))
                 || (volumeChanged && latest.volume() != expected.volume())
-                || (repeatChanged && !Objects.equals(latest.repeatState(), expected.repeatState())))
+                || (repeatChanged && !Objects.equals(latest.repeatState(), expected.repeatState()))
+                || (psgChanged&&!Objects.equals(latest.psgEnvelopeId(),expected.psgEnvelopeId()))
+                || (modChanged&&!Objects.equals(latest.modulationEnvelopeId(),expected.modulationEnvelopeId())))
             throw new IllegalArgumentException("Source settings changed while you were editing. Your values are retained; reload source settings before applying.");
         StudioProject updated = ProjectEdits.setSourceSettings(project, expected.id(), voiceChanged ? voice : latest.voiceId(), volumeChanged ? volume : latest.volume());
-        return ProjectEdits.setRepeatState(updated, expected.id(), repeatChanged ? repeat : latest.repeatState());
+        updated=ProjectEdits.setRepeatState(updated, expected.id(), repeatChanged ? repeat : latest.repeatState());
+        return ProjectEdits.setSourceEnvelopes(updated,expected.id(),psgChanged?psg:latest.psgEnvelopeId(),modChanged?mod:latest.modulationEnvelopeId());
+    }
+
+    private void configureEnvelope(ComboBox<String> box,String id){
+        box.setId(id);box.setPrefWidth(240);box.setMaxWidth(Double.MAX_VALUE);box.setPromptText("None");
+        box.setConverter(new StringConverter<>(){
+            @Override public String toString(String value){return value==null?"None":project==null?value:project.envelopes().stream().filter(e->e.id().equals(value)).findFirst().map(e->e.name()+" · "+e.id()).orElse(value+" (unavailable)");}
+            @Override public String fromString(String value){return value;}
+        });
+        box.setCellFactory(ignored->new ListCell<>(){@Override protected void updateItem(String value,boolean empty){super.updateItem(value,empty);setText(empty?null:box.getConverter().toString(value));}});
+        box.valueProperty().addListener((o,a,b)->{if(!updating)updateNotices();});
+    }
+    private void updateEnvelopeChoices(ComboBox<String> box,String type){
+        String previous=box.getValue();List<String> ids=new ArrayList<>();ids.add(null);
+        if(project!=null)project.envelopes().stream().filter(e->e.type().equals(type)).map(Envelope::id).forEach(ids::add);
+        box.getItems().setAll(ids);box.setValue(previous);
     }
 
     static List<Integer> parseHexArguments(String text) {

@@ -37,8 +37,7 @@ the piano roll focused removes a selected note.
 **These are linked sources:** changing a source changes all its instances.
 Editing a clip's repeated length leaves the source unchanged. The header shows
 how many instances use that source. **New sequence** creates an empty FM or PSG
-source; a new project includes original starter FM voices. Custom voice editing
-currently uses the documented JSON file, not an instrument editor.
+source; a new project includes original starter FM voices. Use **Voices & assets** to edit instruments and envelopes.
 
 ## Edit native commands
 
@@ -70,6 +69,39 @@ A form draft survives external changes to its source. Applying an outdated event
 is refused; use **Reload event** or **New form** to continue from the current
 source. Source settings merge untouched fields and refuse conflicting edits.
 These draft fields are not saved until applied.
+
+## Voices and envelope assets
+
+Choose **Voices & assets**, or the source editor's **Assets** tab. The **FM
+voices** view lists linked local voices and their source usage. New creates a
+native starting patch; Duplicate copies the applied voice. Delete refuses any
+voice still assigned to a source. Assign voices in **Commands → Linked source
+settings**, then **Apply source**.
+
+The voice editor exposes algorithm/feedback and four native stored slots, labelled
+with their YM register offsets. Values are decimal. Total level0 is loudest and
+127 is quietest. **Apply track volume** is an independent native TL high-bit flag;
+algorithm changes retain it. **Apply parameters + name** commits those fields.
+**Apply raw bytes** separately commits exactly25 hex bytes in native order.
+The two drafts are independent; Reload replaces both with the current voice.
+
+The **Envelopes** view creates PSG volume or modulation envelopes. Give the asset
+a name and raw hex bytes, then **Apply envelope**. Assign it through the two
+envelope selectors in **Commands → Linked source settings**. None disables that
+envelope on the next source reset. Envelopes are linked: editing one changes all
+assigned sources and clips. Their steps advance with the driver, independently
+of the piano-roll tick ruler.
+
+This first profile accepts PSG00–0F attenuation, modulation00–7F frequency offsets,
+and80 reset /81 rest-or-hold /83 silence-or-hold. End in80/81/83; starting80 is
+rejected to prevent an immediate reset loop. Branches, multiplier commands and
+negative modulation offsets await driver work. Help and validation keep those
+limits explicit. Try [voices-and-envelopes.smps.json](../../examples/voices-and-envelopes.smps.json).
+
+Voice/envelope drafts survive external changes to the same asset. Applying a stale
+or deleted asset is refused; Reload adopts its current definition. A removed
+selection does not become a different asset. These forms use the shared project
+undo, Save and recovery flow; typing alone does not save a draft.
 
 ## Save, external changes and recovery
 
@@ -105,8 +137,12 @@ frame budget. No audio device? The app reports the problem; WAV export still wor
 **Export WAV** renders the complete clip arrangement plus a short tail.
 **Export SMPS** writes the baked standalone binary. Choose a new output filename;
 existing files are preserved. A stopped export cleans up its incomplete WAV.
-The binary's voices are local, so this slice requires no external assets.
+Local voices are baked into the binary. Projects declaring envelopes require
+**Assets → Export package**, which writes native track/resource bytes plus their
+manifest and source JSON into a new `.smps.zip`. This adapter package is documented
+for engine integration; OpenGGF does not yet load the ZIP directly. Bare binary
+export refuses to drop those dependencies. Preview and WAV export use them.
 
-Nested multi-channel sequences, make-unique, DAC samples, envelopes and remaining
+Nested multi-channel sequences, make-unique, DAC samples, remaining envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records the remaining authoring and driver gaps before importing.

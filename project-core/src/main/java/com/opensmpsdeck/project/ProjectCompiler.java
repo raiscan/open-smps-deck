@@ -13,16 +13,22 @@ public final class ProjectCompiler {
     private static final int REST=0x80, STOP=0xF2, HOLD=0xE7;
     private ProjectCompiler() {}
 
+    public static CompiledProject compileWithAssets(StudioProject project) {
+        return new CompiledProject(compile(project),project.envelopes());
+    }
+
     public static byte[] compile(StudioProject project) {
         ProjectFormat.validate(project);
         Map<String,Sequence> sources=new HashMap<>(); Map<String,List<NoteEvent>> notes=new HashMap<>();
         for (Sequence s : project.sequences()) { sources.put(s.id(),s); notes.put(s.id(),s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList()); }
         Map<String,Integer> voices=new HashMap<>(); for(int i=0;i<project.voices().size();i++) voices.put(project.voices().get(i).id(),i);
-        if(project.formatVersion()==2) for(Clip clip:project.clips()) {
+        if(project.formatVersion()>=2) for(Clip clip:project.clips()) {
             Sequence source=sources.get(clip.sequenceId());
             if(source.type().equals("FM") && voices.get(source.voiceId())>=128)
                 throw new IllegalArgumentException("Sequence '"+source.id()+"': banked voice references need future asset support (local voice index "+voices.get(source.voiceId())+")");
         }
+        Map<String,Integer> psgEnvelopes=envelopeIndices(project.envelopes(),Envelope.PSG_VOLUME);
+        Map<String,Integer> modulationEnvelopes=envelopeIndices(project.envelopes(),Envelope.MODULATION);
         int fm=1, psg=0;
         for(Clip c : project.clips()) {
             if(c.lane().startsWith("FM")) fm=Math.max(fm,1+Integer.parseInt(c.lane().substring(2)));
@@ -32,8 +38,8 @@ public final class ProjectCompiler {
         Bank out=new Bank(); for(int i=0;i<header;i++) out.put(0);
         out.set(2,fm); out.set(3,psg); out.set(4,1); out.set(5,project.tempo());
         out.word(6,out.size()); out.put(STOP); // DAC must always be the first positional slot.
-        for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices);
-        for(int channel=1;channel<=psg;channel++) lane(out,project,"PSG"+channel,6+4*fm+6*(channel-1),sources,notes,voices);
+        for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices,psgEnvelopes,modulationEnvelopes);
+        for(int channel=1;channel<=psg;channel++) lane(out,project,"PSG"+channel,6+4*fm+6*(channel-1),sources,notes,voices,psgEnvelopes,modulationEnvelopes);
         if(!project.voices().isEmpty()) {
             out.word(0,out.size());
             for(Voice v : project.voices()) for(int b : v.bytes()) out.put(b);
@@ -42,7 +48,8 @@ public final class ProjectCompiler {
     }
 
     private static void lane(Bank out,StudioProject project,String lane,int pointer,
-                             Map<String,Sequence> sources,Map<String,List<NoteEvent>> notes,Map<String,Integer> voices) {
+                             Map<String,Sequence> sources,Map<String,List<NoteEvent>> notes,Map<String,Integer> voices,
+                             Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes) {
         out.word(pointer,out.size());
         List<Clip> clips=project.clips().stream().filter(c->c.lane().equals(lane)).sorted(Comparator.comparingInt(Clip::startTick)).toList();
         int cursor=0;
@@ -54,7 +61,7 @@ public final class ProjectCompiler {
             List<CommandEvent> commands=source.commands().stream().sorted(Comparator.comparingInt(CommandEvent::tick)).toList();
             while(remaining>0) {
                 int length=Math.min(remaining,source.lengthTicks());
-                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) reset(out,source,voices,project.formatVersion()==2);
+                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) reset(out,source,voices,project.formatVersion(),psgEnvelopes,modulationEnvelopes);
                 if(project.formatVersion()==1) {
                     int at=0;
                     for(NoteEvent note : notes.get(source.id())) {
@@ -76,12 +83,22 @@ public final class ProjectCompiler {
         out.put(STOP);
     }
 
-    private static void reset(Bank out,Sequence source,Map<String,Integer> voices,boolean expanded) {
+    private static void reset(Bank out,Sequence source,Map<String,Integer> voices,int version,
+                              Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes) {
         if(source.type().equals("FM")) { out.put(0xEF); out.put(voices.get(source.voiceId())); }
         out.put(0xE4); out.put(source.volume());
         if(source.type().equals("FM")) { out.put(0xE0); out.put(0xC0); }
         out.put(0xED); out.put(0x40);
-        if(expanded) { out.put(0xE1); out.put(0); out.put(0xE8); out.put(0); out.put(0xFA); }
+        if(version>=2) { out.put(0xE1); out.put(0); out.put(0xE8); out.put(0); out.put(0xFA); }
+        if(version==3) {
+            if(source.type().equals("PSG")) { out.put(0xF5);out.put(source.psgEnvelopeId()==null?0:psgEnvelopes.get(source.psgEnvelopeId())); }
+            out.put(0xF4);out.put(source.modulationEnvelopeId()==null?0:modulationEnvelopes.get(source.modulationEnvelopeId()));
+        }
+    }
+    private static Map<String,Integer> envelopeIndices(List<Envelope> envelopes,String type) {
+        Map<String,Integer> indices=new HashMap<>();
+        for(Envelope envelope:envelopes) if(type.equals(envelope.type())) indices.put(envelope.id(),indices.size()+1);
+        return indices;
     }
     /** Merge only source events, streaming bounded time units straight into the bank. */
     private static void units(Bank out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length) {

@@ -63,4 +63,14 @@ class CommandEditorPaneTest {
         assertEquals(captured.commands(), result.commands());
         assertEquals(2, merged.formatVersion());
     }
+
+    @Test void sourceEnvelopeDraftMergesUntouchedReferencesAndRejectsConflictingAssignments(){
+        StudioProject original=ProjectEdits.addEnvelope(DemoProject.create(),new Envelope("env-a","A","PSG_VOLUME",List.of(0,0x83)));
+        original=ProjectEdits.addEnvelope(original,new Envelope("env-b","B","PSG_VOLUME",List.of(0,4,0x83)));
+        Sequence expected=original.sequences().getLast();
+        StudioProject external=ProjectEdits.setSourceEnvelopes(original,expected.id(),"env-a",null);
+        StudioProject merged=CommandEditorPane.sourceSettingsFromDraft(external,expected,null,42,expected.repeatState(),null,null);
+        Sequence result=merged.sequences().getLast();assertEquals("env-a",result.psgEnvelopeId());assertEquals(42,result.volume());assertEquals(2,merged.envelopes().size());assertEquals(3,merged.formatVersion());
+        assertThrows(IllegalArgumentException.class,()->CommandEditorPane.sourceSettingsFromDraft(external,expected,null,42,expected.repeatState(),"env-b",null));
+    }
 }

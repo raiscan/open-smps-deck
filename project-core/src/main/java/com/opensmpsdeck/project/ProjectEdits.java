@@ -46,10 +46,61 @@ public final class ProjectEdits {
         },true);
     }
     public static StudioProject setRepeatState(StudioProject p,String sequenceId,String state) {
-        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),state),true);
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),state,s.psgEnvelopeId(),s.modulationEnvelopeId()),true);
     }
     public static StudioProject setSourceSettings(StudioProject p,String sequenceId,String voiceId,int volume) {
-        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),voiceId,volume,s.notes(),s.commands(),s.repeatState()));
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),voiceId,volume,s.notes(),s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()));
+    }
+    public static StudioProject setSourceEnvelopes(StudioProject p,String sequenceId,String psgId,String modulationId) {
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),s.repeatState(),psgId,modulationId),3);
+    }
+
+    public static StudioProject addVoice(StudioProject p,Voice voice) {
+        ProjectFormat.validate(p);List<Voice> voices=new ArrayList<>(p.voices());voices.add(voice);
+        return withAssets(p,p.formatVersion(),voices,p.envelopes());
+    }
+    public static StudioProject updateVoice(StudioProject p,Voice voice) {
+        return changeVoice(p,voice.id(),old->voice);
+    }
+    public static StudioProject deleteVoice(StudioProject p,String voiceId) {
+        ProjectFormat.validate(p);
+        if(p.sequences().stream().anyMatch(s->voiceId.equals(s.voiceId()))) throw new IllegalArgumentException("Voice '"+voiceId+"' is referenced by a source");
+        return changeVoice(p,voiceId,old->null);
+    }
+    public static StudioProject addEnvelope(StudioProject p,Envelope envelope) {
+        ProjectFormat.validate(p);List<Envelope> envelopes=new ArrayList<>(p.envelopes());envelopes.add(envelope);
+        return withAssets(p,3,p.voices(),envelopes);
+    }
+    public static StudioProject updateEnvelope(StudioProject p,Envelope envelope) {
+        return changeEnvelope(p,envelope.id(),old->envelope);
+    }
+    public static StudioProject deleteEnvelope(StudioProject p,String envelopeId) {
+        ProjectFormat.validate(p);
+        if(p.sequences().stream().anyMatch(s->envelopeId.equals(s.psgEnvelopeId()) || envelopeId.equals(s.modulationEnvelopeId())))
+            throw new IllegalArgumentException("Envelope '"+envelopeId+"' is referenced by a source");
+        return changeEnvelope(p,envelopeId,old->null);
+    }
+
+    private static StudioProject changeVoice(StudioProject p,String id,UnaryOperator<Voice> change) {
+        ProjectFormat.validate(p);List<Voice> voices=new ArrayList<>();boolean found=false;
+        for(Voice voice:p.voices()) {
+            if(voice.id().equals(id)) { found=true;voice=change.apply(voice); }
+            if(voice!=null) voices.add(voice);
+        }
+        if(!found) throw new IllegalArgumentException("Unknown voice '"+id+"'");
+        return withAssets(p,p.formatVersion(),voices,p.envelopes());
+    }
+    private static StudioProject changeEnvelope(StudioProject p,String id,UnaryOperator<Envelope> change) {
+        ProjectFormat.validate(p);List<Envelope> envelopes=new ArrayList<>();boolean found=false;
+        for(Envelope envelope:p.envelopes()) {
+            if(envelope.id().equals(id)) { found=true;envelope=change.apply(envelope); }
+            if(envelope!=null) envelopes.add(envelope);
+        }
+        if(!found) throw new IllegalArgumentException("Unknown envelope '"+id+"'");
+        return withAssets(p,3,p.voices(),envelopes);
+    }
+    private static StudioProject withAssets(StudioProject p,int version,List<Voice> voices,List<Envelope> envelopes) {
+        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes));
     }
 
     private static StudioProject changeClip(StudioProject p,String id,UnaryOperator<Clip> change) {
@@ -73,13 +124,16 @@ public final class ProjectEdits {
         return changeSequence(p,id,change,false);
     }
     private static StudioProject changeSequence(StudioProject p,String id,UnaryOperator<Sequence> change,boolean upgrade) {
+        return changeSequence(p,id,change,upgrade?2:1);
+    }
+    private static StudioProject changeSequence(StudioProject p,String id,UnaryOperator<Sequence> change,int minimumVersion) {
         ProjectFormat.validate(p); List<Sequence> sequences=new ArrayList<>(); boolean found=false, changed=false;
         for(Sequence s : p.sequences()) { if(s.id().equals(id)) { found=true; Sequence next=change.apply(s); changed=!next.equals(s); s=next; } sequences.add(s); }
         if(!found) throw new IllegalArgumentException("Unknown sequence '"+id+"'");
-        return checked(new StudioProject(upgrade&&changed?2:p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips()));
+        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes()));
     }
-    private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState()); }
-    private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState()); }
-    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips)); }
+    private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()); }
+    private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()); }
+    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes())); }
     private static StudioProject checked(StudioProject p) { ProjectFormat.validate(p); return p; }
 }

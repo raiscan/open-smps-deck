@@ -21,10 +21,10 @@ Playback uses the unchanged OpenGGF snapshot pinned by
 | Two-operand FM volume change `E5` | Not offered in v2 | Raw binary rejected | Missing | First operand ignored, second is signed FM attenuation delta |
 | Four-byte custom modulation and modulation off | v2; setup restricted to explicit note attack ticks | `F0` and `FA` accepted with exact arities | Command help and arguments | Pending setup and native attack preparation |
 | Event ordering and repetition state | Stable authored order at equal ticks; RESET/CARRY; independent clips reset | Compiles inline; trimmed events omitted | Reorder and repeat-state controls | Native mutable track state |
-| Local FM voices | Native 25-byte entries; sequence voice selection | Terminal local table, no conversion | Source voice selector; no operator editor | Local/shared/global lookup |
+| Local FM voices | Exact 25-byte entries; source selection and pure asset CRUD | Terminal local table; package manifest indices | Native algorithm/feedback, four stored operators, independent TL high-bit flags, raw bytes | Local/shared/global lookup |
 | Arbitrary voice changes, shared/global/cross-song voices | Missing references and resolution | No dependency bundle | Missing | Basic lookup available; native high-bit `EF` is a limitation below |
 | PSG noise | Not represented in v2 | Existing raw binary `F3` remains accepted | Missing | PSG noise/reset implemented |
-| PSG and modulation envelopes | Missing typed assets and references | Header IDs must be zero; no tables injected | Missing | `setPsgEnvelopes` / `setModEnvelopes`; `F1/F4/F5` |
+| PSG and modulation envelopes | v3 typed assets and stable source references; bounded profile below | Resolved F5/F4 tables installed before sequencer creation; native resource package | Asset CRUD/raw bytes, source assignments and editor links | Setters and F1/F4/F5; remaining semantic limits below |
 | FM volume envelope and SSG-EG | Missing | `FF05/06` rejected | Missing | Handlers present; FM volume envelope uses PSG-envelope map |
 | DAC samples, mappings and rates | Missing DAC source/lane and asset package | DAC slot must stop; renderer supplies empty `DacData` | Missing | PCM bytes plus note-to-sample/rate map; base cycles 297 |
 | FM6 and DAC/FM6 ownership | Missing | At most stopped DAC + five FM slots | Missing lane | Seven-entry channel map available; DAC shares physical FM6 |
@@ -36,12 +36,14 @@ Playback uses the unchanged OpenGGF snapshot pinned by
 | Tempo changes, dividing timing, PAL and speed changes | Fixed header tempo, dividing timing 1 | `FF00/04` rejected; 60 Hz NTSC, 48 kHz | Header tempo and approximate fixed-tempo playhead only | Tempo/divider and session timing support exist |
 | Fade/restore, spindash state and continuous SFX | Missing execution context and external triggers | `E2/E9/FC/FF07` rejected; restore sink unavailable | Missing | Require session/shared runtime state |
 | Sound dispatch, music halt and memory copy | Missing | `FF01/02/03` rejected | Missing | Syntax consumed only; semantic support absent |
-| Dependency-complete native package | Missing | Bare `.bin` or rendered WAV only | Existing exports | Data setters are building blocks, not a package format |
+| Dependency-complete package for supported assets | v3 compiler returns native bank plus all declared envelopes | Deterministic ZIP, source, manifest, hashes and raw resources; bare export refuses dropping assets | Export package; resource-aware preview/WAV | Adapter maps install through existing setters; no in-engine ZIP loader yet |
 
 Version 1 remains readable/writable with its original field set and compilation.
-Version 2 adds ordered command events and repeat state. Unknown fields, commands,
+Version 2 adds ordered command events and repeat state. Version 3 adds typed envelope
+assets and stable source assignments. Voice-only editing preserves the source version.
+Unknown fields, commands,
 bad operands and unsupported resources are errors; opening a document does not
-rewrite or upgrade it. A v2 document is still not a lossless native S3K program.
+rewrite or upgrade it. A v3 document is still not a lossless native S3K program.
 
 ## Delivered command catalogue
 
@@ -79,10 +81,33 @@ is bounded to one 32 KiB bank.
 
 The raw binary validator intentionally retains its older finite subset (`E3/F2`
 stops, `E7/E8`, local `EF`, PSG `F3`, and the accepted single-byte commands).
-Accepting these raw inputs does not make them editable project features. Only
-four-byte `F0` and zero-byte `FA` are added to that boundary. Unknown/meta commands,
+Accepting these raw inputs does not make them editable project features. Four-byte `F0`, zero-byte `FA` and resolved one-byte `F4/F5` are supported.
+Byte-only input rejects nonzero unresolved resources; the resource-aware path validates
+every declaration, even unused ones. Unknown/meta commands,
 pointers, DAC triggers, missing operands and unresolved resources still fail
 before PCM output.
+
+## Delivered voice and envelope assets
+
+FM parameter edits preserve all unedited native bits and stored operator order.
+TL bit7 independently enables track attenuation; algorithm edits do not recompute
+those flags. Native/raw forms are separate explicit drafts. Create/duplicate/
+rename/edit and deletion of unused assets use the same undo/live-file path.
+
+The initial envelope profile accepts PSG data 00..0F and modulation data 00..7F,
+plus80 reset and81/83 rest/hold. PSG81 retains volume while83 silences; modulation
+81/83 hold the current frequency offset. Programs 1..256 bytes end explicitly in
+80/81/83 and cannot start80. Native IDs are allocated independently: PSG 1..255,
+modulation 1..127;128 is reserved for custom modulation. Source RESET/CARRY sets
+F5/F4 at its established reset boundaries, including zero to clear previous state.
+
+Branch82, multiplier84 and negative modulation offsets85..FF are explicitly
+rejected until their native/pinned behavior is resolved. These are temporary
+limits, not complete envelope support. The driver’s unbounded PSG immediate loop
+makes validation necessary before injection. See the
+[native package contract](native-asset-package.md) for every exported resource,
+hash, stable ID/native index and engine adapter boundary. The archive does not
+have an OpenGGF loader yet and does not establish arbitrary-track export support.
 
 ## Pinned engine limits and native compatibility candidates
 
@@ -105,6 +130,7 @@ an editor field alone cannot supply missing engine semantics.
 | `E3` silence stop | Stops/mutes, without native full FM silence burst | Native retail path has extra chip writes, including an unusual PSG/FM interaction |
 | `FE` FM3 special mode | Consumes four operands and retains a special-mode bit; no special-frequency execution | Native routine is broken and can corrupt driver code. Define a deliberate represent/render/export contract rather than claim implemented frequency behavior |
 | `FF01/02/03` | Consume 1/1/3 operands only | Sound dispatch, all-music halt/resume and stream memory mutation are not implemented |
+| Modulation negative offsets and envelope control | Values85..FF become HOLD; PSG84 consumes without applying multiplier; branch82 uses bounded byte-index semantics | Native negative offsets and native82/84 code-memory quirks need focused comparison/re-pin; this slice rejects them |
 | Envelope/control-flow safety | Bounded semantic adapters, 16 return slots; main command loop and PSG-envelope loop can cycle without yielding | Future packages need graph validation, bounded zero-time execution and explicit handling of native memory/stack behavior |
 
 OpenGGF's local research inventory finds no shipped loader-supported route to
@@ -124,9 +150,10 @@ claim that this editor has independently certified arbitrary native-console audi
 
 ## Remaining sequence before import
 
-1. Add native voice editing and a typed, bounded dependency package: local/shared/
-   global/cross-song voices, PSG/modulation envelopes, DAC PCM, mappings and rates.
-   Resolve every reference before rendering; export the complete dependency set.
+1. Extend the delivered native local-voice editor and bounded envelope package to
+   shared/global/cross-song voices and DAC PCM, mappings and rates. Resolve every
+   reference before rendering and export the complete dependency set. Complete
+   native envelope semantics beyond the current profile, including negative offsets.
 2. Add DAC and FM6 with deliberate shared-channel ownership, PSG noise, FM volume
    envelopes and SSG-EG. Verify sound and chip writes, including interactions.
 3. Design the native stream/gate and control-flow representation: attack versus
@@ -156,3 +183,8 @@ round trips, validation, edits, persistence and UI integration separately.
 These checks establish the delivered bounded behavior against the pinned core.
 Extraction parity, broader native fidelity, dependency completeness and all-track
 coverage are different obligations and are not inferred from this test passing.
+
+Voice/asset evidence is recorded in [the validation report](../validation/2026-11-17-voices-assets.md).
+Asset tests independently compare PCM/frame-stamped writes, native slot register
+placement and TL-bit7 effects; package tests cover every declared resource, hashes,
+source round trips, deterministic bytes and refusal to overwrite outputs.

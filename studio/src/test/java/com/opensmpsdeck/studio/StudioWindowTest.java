@@ -204,6 +204,87 @@ class StudioWindowTest {
         });
     }
 
+    @Test void nativeVoiceControlsPreserveBytesAndUseCommonUndoAndSave() throws Exception {
+        fx(()->{
+            window.showAssets();layout();window.voices.selectVoice("voice-lead");
+            Voice before=window.document().project().voices().getFirst();
+            @SuppressWarnings("unchecked") ComboBox<Integer> algorithm=(ComboBox<Integer>)window.scene().lookup("#voice-algorithm");algorithm.setValue(7);
+            ((CheckBox)window.scene().lookup("#voice-0-track-volume")).setSelected(true);
+            button("apply-voice").fire();
+            Voice after=window.document().project().voices().getFirst();
+            assertEquals(7,after.bytes().getFirst()&7);assertEquals(before.bytes().get(21)|128,after.bytes().get(21));
+            assertEquals(before.bytes().subList(1,21),after.bytes().subList(1,21));
+            assertEquals(1,window.document().project().formatVersion());
+            key(window.scene().getRoot(),KeyCode.Z,true);assertEquals(before,window.document().project().voices().getFirst());
+            button("duplicate-voice").fire();assertEquals(3,window.document().project().voices().size());
+            String copyId=window.voices.selectedVoiceId();assertNotEquals(before.id(),copyId);
+            ListView<?> list=(ListView<?>)window.scene().lookup("#voice-list");list.requestFocus();key(list,KeyCode.DELETE,false);
+            assertEquals(2,window.document().project().voices().size());assertEquals(8,window.document().project().clips().size());
+            window.voices.selectVoice("voice-lead");button("delete-voice").fire();assertEquals(2,window.document().project().voices().size(),"referenced voices cannot be deleted");
+            button("add-voice").fire();assertEquals(3,window.document().project().voices().size());
+            assertEquals(0x98,window.document().project().voices().getLast().bytes().get(21));
+            window.document().save();snapshot(".voices.png");return null;
+        });
+        assertEquals(3,ProjectFiles.load(file).project().voices().size());
+    }
+
+    @Test void envelopeAssignmentSavesAndAssetDraftsSurviveAgentUpdatesAndRemoval() throws Exception {
+        String id=fx(()->{
+            window.showEnvelopes();layout();button("add-psg-envelope").fire();
+            String created=window.envelopes.selectedEnvelopeId();assertNotNull(created);assertEquals(3,window.document().project().formatVersion());
+            ((ListView<?>)window.scene().lookup("#sequence-browser")).getSelectionModel().select(3);
+            window.showCommands();layout();
+            @SuppressWarnings("unchecked") ComboBox<String> assignment=(ComboBox<String>)window.scene().lookup("#source-psg-envelope");assignment.setValue(created);
+            button("apply-source").fire();assertEquals(created,window.document().project().sequences().getLast().psgEnvelopeId());
+            button("edit-source-psg-envelope").fire();layout();assertEquals(created,window.envelopes.selectedEnvelopeId());
+            ((TextField)window.scene().lookup("#envelope-name")).setText("Human pluck");button("apply-envelope").fire();
+            window.document().save();
+            ((TextArea)window.scene().lookup("#envelope-bytes")).setText("00 07 83");return created;
+        });
+        StudioProject original=ProjectFiles.load(file).project();
+        StudioProject external=ProjectEdits.updateEnvelope(original,new Envelope(id,"Agent pluck","PSG_VOLUME",List.of(0,10,0x83)));
+        replace(ProjectFormat.write(external));await(()->window.document().project().envelopes().getFirst().name().equals("Agent pluck"));
+        fx(()->{
+            assertEquals(id,window.envelopes.selectedEnvelopeId());assertEquals("00 07 83",((TextArea)window.scene().lookup("#envelope-bytes")).getText());
+            button("apply-envelope").fire();assertFalse(window.document().dirty());assertEquals(List.of(0,10,0x83),window.document().project().envelopes().getFirst().bytes());
+            button("reload-envelope").fire();assertEquals("00 0A 83",((TextArea)window.scene().lookup("#envelope-bytes")).getText());
+            ((TextArea)window.scene().lookup("#envelope-bytes")).setText("00 05 83");snapshot(".envelopes.png");return null;
+        });
+        StudioProject removed=ProjectEdits.deleteEnvelope(ProjectEdits.setSourceEnvelopes(external,"seq-answer",null,null),id);
+        replace(ProjectFormat.write(removed));await(()->window.document().project().envelopes().isEmpty());
+        fx(()->{assertEquals(id,window.envelopes.selectedEnvelopeId());assertEquals("00 05 83",((TextArea)window.scene().lookup("#envelope-bytes")).getText());button("apply-envelope").fire();assertFalse(window.document().dirty());assertTrue(window.document().project().envelopes().isEmpty());return null;});
+    }
+
+    @Test void voiceDraftsSurviveExternalChangesAndExplicitDocumentResetClearsThem() throws Exception {
+        Voice original=DemoProject.create().voices().getFirst();
+        fx(()->{
+            window.showAssets();layout();window.voices.selectVoice(original.id());
+            ((TextField)window.scene().lookup("#voice-name")).setText("Human draft");
+            ((TextArea)window.scene().lookup("#voice-bytes")).setText("F7"+VoiceEditorPane.formatVoiceBytes(original.bytes()).substring(2));return null;
+        });
+        var changedBytes=new ArrayList<>(original.bytes());changedBytes.set(0,7);
+        StudioProject external=ProjectEdits.updateVoice(DemoProject.create(),new Voice(original.id(),"Agent voice",changedBytes));
+        replace(ProjectFormat.write(external));await(()->window.document().project().voices().getFirst().name().equals("Agent voice"));
+        fx(()->{
+            assertEquals("Human draft",((TextField)window.scene().lookup("#voice-name")).getText());
+            assertTrue(((TextArea)window.scene().lookup("#voice-bytes")).getText().startsWith("F7"));
+            button("apply-voice").fire();button("apply-voice-bytes").fire();assertFalse(window.document().dirty());assertEquals(7,window.document().project().voices().getFirst().bytes().getFirst());
+            button("reload-voice").fire();assertEquals("Agent voice",((TextField)window.scene().lookup("#voice-name")).getText());
+            ((TextArea)window.scene().lookup("#voice-bytes")).setText("F7"+VoiceEditorPane.formatVoiceBytes(changedBytes).substring(2));button("apply-voice-bytes").fire();
+            Voice raw=window.document().project().voices().getFirst();assertEquals(0xF7,raw.bytes().getFirst());assertEquals("Agent voice",raw.name());
+            button("apply-voice").fire();assertEquals(raw,window.document().project().voices().getFirst(),"unchanged parameters preserve raw reserved bits");
+            window.document().save();
+            // StudioWindow explicitly resets panes when another document opens.
+            ((TextField)window.scene().lookup("#voice-name")).setText("Old document draft");window.voices.setProject(null);window.voices.setProject(DemoProject.create());
+            assertEquals("voice-lead",window.voices.selectedVoiceId());assertEquals("Glass keys",((TextField)window.scene().lookup("#voice-name")).getText());return null;
+        });
+    }
+
+    private void snapshot(String suffix)throws Exception{
+        String target=System.getProperty("studio.snapshot");if(target==null)return;
+        layout();ImageIO.write(SwingFXUtils.fromFXImage(window.scene().snapshot(null),null),"png",Path.of(target+suffix).toFile());
+    }
+
     private com.opensmpsdeck.project.Sequence source(){return window.document().project().sequences().getFirst();}
     private Button button(String id){return (Button)window.scene().lookup("#"+id);}
     @SuppressWarnings("unchecked") private void commandForm(NativeCommand type,int tick,String bytes){

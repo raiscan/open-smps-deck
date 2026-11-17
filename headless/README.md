@@ -16,6 +16,7 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render /path/
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project /path/to/project.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project /path/to/project.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project /path/to/project.json /path/to/project.bin
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package /path/to/project.json /path/to/project.smps.zip
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project /path/to/project.json /path/to/project.wav --frames 120
 ```
 
@@ -25,13 +26,20 @@ lanes and compiler limits, then reports the project name, sequence/clip counts
 and compiled byte count. `compile-project` exports finite standalone S3K bytes.
 `render-project` compiles the same source and renders it through the pinned core.
 
-Projects use JSON format version 1 and mode `S3K`, with named local FM voices,
+Projects read/write JSON versions 1–3 and mode `S3K`, with named local FM voices,
 monophonic FM/PSG note sequences and linked clips on FM1–FM5/PSG1–PSG3. Clip length
 can repeat a sequence or trim its final repetition. Time is integer sequencer
 ticks; `ticksPerBeat` controls the ruler and `tempo` is the native S3K byte, not
 BPM. Unknown fields, missing fields, overlapping notes/clips and unresolved IDs
-are errors. This first format does not accept raw SMPS commands, DAC samples,
-or envelope packages.
+are errors. Version2 adds timed native controls and RESET/CARRY repetition; version3
+adds typed envelope assets and stable source references. Native voices are exact
+25-byte definitions. DAC and arbitrary control flow remain subsequent work.
+
+`render-project` includes declared envelope resources. `compile-package` exports
+a deterministic ZIP of baked track bytes, raw envelopes, source and a hashed
+manifest. `compile-project` refuses declared envelopes, including unused ones,
+so a bare binary export never silently loses them. The [package contract](../docs/architecture/native-asset-package.md)
+explains how the maps feed OpenGGF; the engine does not load the ZIP directly.
 
 `--frames` counts **60 Hz NTSC presentations**, not PCM samples. Its default is
 120 and its range is 1–36000. Each presentation services the production session
@@ -58,14 +66,19 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
 - A local voice table, if used, occupies the end of the binary and contains
   complete native-order 25-byte voices. FM notes require that table; referenced
   voices must exist. No operator-order conversion is applied during rendering.
-- PSG header modulation and volume-envelope IDs must both be zero. No envelope
-  tables, global/shared voice banks, or DAC samples are supplied implicitly.
+- Byte-only inputs have no implicit resources: nonzero PSG header or F4/F5
+  envelope IDs must resolve through the resource-aware CompiledProject API.
+  Global/shared voice banks and DAC samples are not supplied implicitly.
 - Notes/rests, nonzero duration bytes, `E3`/`F2` stops and `E7` holds are accepted.
 - Single-operand events: detune (`E1`), absolute volume (`E4`), note stop (`E8`),
   absolute transpose (`ED`) and additive transpose (`FB`); FM pan (`E0`), volume
   (`E6`) and local voice (`EF`); PSG volume (`EC`) and noise control (`F3`).
+- Custom F0 modulation consumes exactly four operands; FA disables modulation.
+  F4 selects a modulation envelope and PSG F5 selects a volume envelope, each
+  with one resolved ID operand (zero disables). Every declared resource is
+  validated, including unused assets. See the bounded profile in the project format.
 - Every track must terminate before the next track or voice-table boundary.
-  Calls, jumps, loops, modulation, envelope changes, direct register writes,
+  Calls, jumps, loops, other envelope commands, direct register writes,
   DAC triggers and all other commands are rejected explicitly. Unknown commands
   never silently fall through into notes or partially rendered audio.
 
@@ -73,7 +86,8 @@ A normal legacy OpenSMPSDeck export may contain loops or require external
 resources and therefore be rejected. This boundary does **not** claim arbitrary
 SMPS/ROM import support. The project compiler emits this supported subset with
 inline repeated content, positional stopped channels and local FM voices.
-Envelope/sample packaging and arbitrary control flow remain future work.
+Native envelope semantics outside the bounded profile, DAC/sample packaging and
+arbitrary control flow remain future work.
 
 ## Embedding and verification
 
@@ -81,6 +95,10 @@ Envelope/sample packaging and arbitrary control flow remain future work.
 `S3kRenderer.render(byte[], int, PcmSink)` validates and copies its input, creates a
 fresh session and invokes the sink synchronously once per presentation with a
 reused 1600-short interleaved stereo buffer. Copy it if retaining PCM.
+`S3kRenderer.render(CompiledProject, int, PcmSink)` and its observer overload
+validate all declared resources and install owned native tables before creating
+the sequencer/session snapshot. `WaveFile.render(CompiledProject, ...)` uses the
+same path and validates before creating the output.
 
 Activation uses `PreparedSmpsMusicActivation` and the actual S3K physical policy;
 it does not attach a sequencer directly and bypass the production load boundary.

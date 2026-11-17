@@ -9,6 +9,12 @@ The source editor includes Notes and Commands tabs, with timed native controls,
 linked voice/volume settings and explicit RESET/CARRY repetition. See the
 [S3K support matrix](../docs/architecture/s3k-support.md) for remaining coverage.
 
+**Assets** adds native FM voice editing, separate parameter/raw-byte drafts, PSG
+volume and modulation envelope assets, and linked source assignment. Preview/WAV
+include the resources; **Export package** writes their native bytes and manifest.
+The [package contract](../docs/architecture/native-asset-package.md) documents
+engine integration and the currently bounded envelope profile.
+
 ## Run
 
 Build with JDK 25 and Maven, on a desktop with JavaFX-supported native libraries:

@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.WaveFile;
+import com.opensmpsdeck.headless.ProjectPackage;
 import com.opensmpsdeck.project.*;
 import com.opensmpsdeck.project.Sequence;
 import javafx.application.Platform;
@@ -27,8 +28,11 @@ public final class StudioWindow implements AutoCloseable {
     final TimelineView timeline=new TimelineView();
     final PianoRollView piano=new PianoRollView();
     final CommandEditorPane commands=new CommandEditorPane(edit->change(edit),text->status.setText(text));
+    final VoiceEditorPane voices=new VoiceEditorPane(edit->change(edit),text->status.setText(text));
+    final EnvelopeEditorPane envelopes=new EnvelopeEditorPane(edit->change(edit),text->status.setText(text));
     private final TabPane sourceModes=new TabPane();
-    private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands");
+    private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands"),assetMode=new Tab("Assets");
+    private final TabPane assetKinds=new TabPane();
     private final StudioPlayback playback=new StudioPlayback();
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
     private final Deque<StudioProject> undo=new ArrayDeque<>(), redo=new ArrayDeque<>();
@@ -54,6 +58,8 @@ public final class StudioWindow implements AutoCloseable {
     }
     void showNotes(){sourceModes.getSelectionModel().select(noteMode);editors.showNotes();}
     void showCommands(){sourceModes.getSelectionModel().select(commandMode);editors.showNotes();}
+    void showAssets(){sourceModes.getSelectionModel().select(assetMode);editors.showNotes();}
+    void showEnvelopes(){showAssets();assetKinds.getSelectionModel().select(1);}
     private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
     ProjectDocument document(){return document;}
     Scene scene(){return stage.getScene();}
@@ -83,7 +89,8 @@ public final class StudioWindow implements AutoCloseable {
         });
         browser.setOnMouseClicked(e->{if(e.getClickCount()==2)showNotes();});
         browser.setOnDragDetected(e->{var s=browser.getSelectionModel().getSelectedItem();if(s!=null){var board=browser.startDragAndDrop(TransferMode.COPY);var content=new ClipboardContent();content.putString("smps-sequence:"+s.id());board.setContent(content);e.consume();}});
-        VBox library=new VBox(12,label("SEQUENCES","section"),label("Reusable musical sources","muted"),browser,button("+ Place on timeline",this::place),button("+ New sequence",this::newSequence));
+        Button assets=button("Voices & assets",this::showAssets);assets.setId("show-assets");
+        VBox library=new VBox(12,label("SEQUENCES","section"),label("Reusable musical sources","muted"),browser,button("+ Place on timeline",this::place),button("+ New sequence",this::newSequence),assets);
         library.getStyleClass().add("library");library.setMinWidth(170);VBox.setVgrow(browser,Priority.ALWAYS);
         timeline.openNotes=this::showNotes;
         timeline.selection=id->{selectedClip=id;selectedNote=null;if(id!=null)selectedSequence=clip().sequenceId();refreshView();};
@@ -95,6 +102,8 @@ public final class StudioWindow implements AutoCloseable {
         arrangeHeader.getStyleClass().add("panelbar");
         VBox arrangement=new VBox(arrangeHeader,timeline.scroll);VBox.setVgrow(timeline.scroll,Priority.ALWAYS);
         piano.commandSelection=id->{showCommands();commands.selectCommand(id);};
+        commands.voiceEditor=id->{showAssets();assetKinds.getSelectionModel().select(0);if(id!=null)voices.selectVoice(id);};
+        commands.envelopeEditor=id->{showEnvelopes();if(id!=null)envelopes.selectEnvelope(id);};
         piano.selection=id->{selectedNote=id;refreshNoteInspector();};
         piano.edit=n->change(p->ProjectEdits.updateNote(p,selectedSequence,n));
         piano.addition=n->{if(change(p->ProjectEdits.addNote(p,selectedSequence,n))){selectedNote=n.id();refreshView();}};
@@ -102,7 +111,10 @@ public final class StudioWindow implements AutoCloseable {
         HBox pianoHeader=new HBox(12,detail,spacer(),linked);pianoHeader.getStyleClass().add("panelbar");
         noteInspector.getStyleClass().add("note-inspector");
         VBox noteBody=new VBox(piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
-        noteMode.setClosable(false);commandMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);sourceModes.getTabs().setAll(noteMode,commandMode);sourceModes.setId("source-editor-modes");
+        Tab fmAssets=new Tab("FM voices",voices),envAssets=new Tab("Envelopes",envelopes);fmAssets.setClosable(false);envAssets.setClosable(false);assetKinds.getTabs().setAll(fmAssets,envAssets);assetKinds.setId("asset-editor-tabs");
+        Button packageExport=button("Export package…",this::exportPackage);packageExport.setId("export-package");
+        VBox assetBody=new VBox(new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport),assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
+        noteMode.setClosable(false);commandMode.setClosable(false);assetMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);assetMode.setContent(assetBody);sourceModes.getTabs().setAll(noteMode,commandMode,assetMode);sourceModes.setId("source-editor-modes");
         VBox notes=new VBox(pianoHeader,sourceModes);VBox.setVgrow(sourceModes,Priority.ALWAYS);
         editors=new ResponsiveEditors(arrangement,notes);
         inspector.getStyleClass().add("inspector");inspector.setMinWidth(0);inspector.setPrefWidth(240);
@@ -115,7 +127,7 @@ public final class StudioWindow implements AutoCloseable {
         ProjectDocument replacement=ProjectDocument.open(path);
         ProjectWatcher replacementWatcher=new ProjectWatcher(path,()->watchChanged(replacement));
         if(watcher!=null)watcher.close();
-        playback.stop();document=replacement;watcher=replacementWatcher;
+        playback.stop();voices.setProject(null);envelopes.setProject(null);commands.setSource(null,null);document=replacement;watcher=replacementWatcher;
         document.refresh(); // close the open/register race
         selectedClip=null;selectedSequence=document.project().sequences().isEmpty()?null:document.project().sequences().getFirst().id();selectedNote=null;
         undo.clear();redo.clear();refreshView();
@@ -149,6 +161,7 @@ public final class StudioWindow implements AutoCloseable {
         browser.getSelectionModel().clearSelection();browser.getItems().setAll(p.sequences());
         if(source()!=null)browser.getSelectionModel().select(source());
         timeline.setProject(p,selectedClip);piano.setSequence(source(),selectedNote,p.ticksPerBeat());commands.setSource(p,selectedSequence);
+        voices.setProject(p);envelopes.setProject(p);
         detail.setText(source()==null?"NOTE EDITOR":source().name().toUpperCase(Locale.ROOT));
         long uses=p.clips().stream().filter(c->c.sequenceId().equals(selectedSequence)).count();
         linked.setText(source()==null?"Double-click to add notes":"Linked source · "+uses+" instance"+(uses==1?"":"s")+" · double-click to add notes");
@@ -203,7 +216,7 @@ public final class StudioWindow implements AutoCloseable {
         if(dialog.showAndWait().orElse(ButtonType.CANCEL)!=ButtonType.OK)return;
         if(document.project()!=baseline){error(new IllegalArgumentException("Project changed while settings were open; reopen settings to edit the current version"));return;}
         try {int nativeTempo=Integer.parseInt(tempo.getText()),ticks=Integer.parseInt(beat.getText());
-            change(p->new StudioProject(p.formatVersion(),name.getText(),p.mode(),ticks,nativeTempo,p.voices(),p.sequences(),p.clips()));
+            change(p->new StudioProject(p.formatVersion(),name.getText(),p.mode(),ticks,nativeTempo,p.voices(),p.sequences(),p.clips(),p.envelopes()));
         }catch(IllegalArgumentException e){error(e);}
     }
 
@@ -212,9 +225,9 @@ public final class StudioWindow implements AutoCloseable {
         TextField name=new TextField("New phrase");ComboBox<String> type=new ComboBox<>();type.getItems().setAll("FM","PSG");type.setValue("FM");
         dialog.getDialogPane().setContent(new VBox(10,new Label("Name"),name,new Label("Channel type"),type));dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK,ButtonType.CANCEL);
         if(dialog.showAndWait().orElse(ButtonType.CANCEL)!=ButtonType.OK)return;
-        try{StudioProject p=document.project();String voice=type.getValue().equals("FM")?p.voices().stream().findFirst().orElseThrow(()->new IllegalArgumentException("Add a native FM voice in the project file first")).id():null;
+        try{StudioProject p=document.project();String voice=type.getValue().equals("FM")?p.voices().stream().findFirst().orElseThrow(()->new IllegalArgumentException("Create an FM voice in Voices & assets first")).id():null;
             Sequence s=new Sequence("seq-"+UUID.randomUUID(),name.getText(),type.getValue(),(int)Math.min(Integer.MAX_VALUE,p.ticksPerBeat()*4L),voice,100,List.of());
-            if(change(old->{List<Sequence> seq=new ArrayList<>(old.sequences());seq.add(s);return new StudioProject(old.formatVersion(),old.name(),old.mode(),old.ticksPerBeat(),old.tempo(),old.voices(),seq,old.clips());})){selectedSequence=s.id();selectedClip=null;selectedNote=null;refreshView();}
+            if(change(old->{List<Sequence> seq=new ArrayList<>(old.sequences());seq.add(s);return new StudioProject(old.formatVersion(),old.name(),old.mode(),old.ticksPerBeat(),old.tempo(),old.voices(),seq,old.clips(),old.envelopes());})){selectedSequence=s.id();selectedClip=null;selectedNote=null;refreshView();}
         }catch(IllegalArgumentException e){error(e);}
     }
     private void deleteClip(){if(clip()!=null){String id=selectedClip;if(change(p->ProjectEdits.deleteClip(p,id))){selectedClip=null;refreshView();}}}
@@ -226,7 +239,7 @@ public final class StudioWindow implements AutoCloseable {
         if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
         else if(e.getCode()==KeyCode.SPACE){if(playback.playing())stop();else play();e.consume();}
-        else if(e.getCode()==KeyCode.DELETE||e.getCode()==KeyCode.BACK_SPACE){if(commands.ownsFocus(stage.getScene().getFocusOwner()))commands.deleteSelected();else if(piano.canvas.isFocused())deleteNote();else if(timeline.canvas.isFocused())deleteClip();e.consume();}
+        else if(e.getCode()==KeyCode.DELETE||e.getCode()==KeyCode.BACK_SPACE){if(voices.ownsFocus(stage.getScene().getFocusOwner()))voices.deleteSelected();else if(envelopes.ownsFocus(stage.getScene().getFocusOwner()))envelopes.deleteSelected();else if(commands.ownsFocus(stage.getScene().getFocusOwner()))commands.deleteSelected();else if(piano.canvas.isFocused())deleteNote();else if(timeline.canvas.isFocused())deleteClip();e.consume();}
     }
     private void play(){long epoch=++playbackEpoch;StudioProject snapshot=document.project();playback.play(snapshot,text->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch)status.setText(text);}),tick->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch){timeline.playhead=tick;timeline.draw();}}));}
     private void stop(){playbackEpoch++;playback.stop();timeline.playhead=-1;timeline.draw();status.setText("Stopped");}
@@ -243,7 +256,12 @@ public final class StudioWindow implements AutoCloseable {
     private void export(boolean wav){
         var chooser=chooser(wav?"Export WAV (choose a new file)":"Export baked SMPS (choose a new file)",wav?"wav":"bin");chooser.setInitialFileName(wav?"track.wav":"track.bin");var file=chooser.showSaveDialog(stage);if(file==null)return;
         StudioProject snapshot=document.project();status.setText("Exporting…");
-        io.submit(()->{try{byte[] bytes=ProjectCompiler.compile(snapshot);if(wav)WaveFile.render(bytes,file.toPath(),StudioPlayback.presentationCount(snapshot));else Files.write(file.toPath(),bytes,StandardOpenOption.CREATE_NEW);Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
+        io.submit(()->{try{var compiled=ProjectCompiler.compileWithAssets(snapshot);if(wav)WaveFile.render(compiled,file.toPath(),StudioPlayback.presentationCount(snapshot));else {if(compiled.requiresAssets())throw new IllegalArgumentException("This project declares envelope assets. Use Export package to keep its dependencies.");Files.write(file.toPath(),compiled.song(),StandardOpenOption.CREATE_NEW);}Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
+    }
+    private void exportPackage(){
+        var chooser=chooser("Export native track and assets (choose a new file)","zip");chooser.setInitialFileName("track.smps.zip");var file=chooser.showSaveDialog(stage);if(file==null)return;
+        StudioProject snapshot=document.project();status.setText("Exporting native package…");
+        io.submit(()->{try{ProjectPackage.write(snapshot,file.toPath());Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
     @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();io.shutdownNow();}

@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.CompiledProject;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -10,6 +11,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 
 /** Source compilation and pinned S3K playback, independent of JavaFX and audio devices. */
 public final class Main {
@@ -28,7 +30,8 @@ public final class Main {
                     requireArguments(args, 2);
                     Path input = Path.of(args[1]);
                     var project = ProjectFiles.load(input).project();
-                    byte[] song = ProjectCompiler.compile(project);
+                    var compiled = ProjectCompiler.compileWithAssets(project);
+                    byte[] song = S3kBinary.validateAndCopy(compiled.song(), compiled.psgEnvelopes(), compiled.modulationEnvelopes());
                     out.println("Valid S3K project \"" + project.name() + "\": " + project.sequences().size()
                             + " sequences, " + project.clips().size() + " clips, " + song.length
                             + " compiled bytes (" + input + ")");
@@ -37,9 +40,18 @@ public final class Main {
                     requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
-                    byte[] song = ProjectCompiler.compile(ProjectFiles.load(input).project());
+                    var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
+                    if (compiled.requiresAssets()) throw new IllegalArgumentException("Project declares envelope assets; use compile-package for a complete export");
+                    byte[] song = S3kBinary.validateAndCopy(compiled.song());
                     writeNewBinary(output, song);
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
+                }
+                case "compile-package" -> {
+                    requireArguments(args, 3);
+                    Path input = Path.of(args[1]), output = Path.of(args[2]);
+                    requireDifferentFiles(input, output);
+                    ProjectPackage.write(ProjectFiles.load(input).project(), output);
+                    out.println("Compiled S3K project and complete resources to " + output);
                 }
                 case "demo-project" -> {
                     requireArguments(args, 2);
@@ -76,17 +88,17 @@ public final class Main {
         }
         S3kRenderer.validatePresentations(presentations);
         Path output = Path.of(args[demo ? 1 : 2]);
-        byte[] song;
+        CompiledProject song;
         if (demo) {
-            song = S3kDemo.song();
+            song = new CompiledProject(S3kDemo.song(), List.of());
         } else {
             Path input = Path.of(args[1]);
             requireDifferentFiles(input, output);
             if (args[0].equals("render-project")) {
-                song = ProjectCompiler.compile(ProjectFiles.load(input).project());
+                song = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
             } else {
                 try (var stream = Files.newInputStream(input)) {
-                    song = stream.readNBytes(S3kBinary.MAX_BYTES + 1);
+                    song = new CompiledProject(stream.readNBytes(S3kBinary.MAX_BYTES + 1), List.of());
                 }
             }
         }
@@ -130,9 +142,10 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
         out.println("N: 1..36000 NTSC presentations, default 120. Outputs must not already exist.");
-        out.println("Projects: strict JSON version 1, S3K FM/PSG notes and linked clips.");
-        out.println("Binary input: finite linear S3K data, local FM voices, no external envelopes or DAC samples.");
+        out.println("Projects: strict JSON versions 1–3, S3K FM/PSG clips, native commands and explicit envelope assets.");
+        out.println("Binary input: finite linear S3K data, local FM voices; external envelopes require render-project. No DAC samples.");
     }
 }

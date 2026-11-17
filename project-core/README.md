@@ -110,6 +110,54 @@ banked voice references need asset support. Unused voice definitions are retaine
 The [S3K support matrix](../docs/architecture/s3k-support.md) tracks everything
 still needed before importing can target a complete authoring representation.
 
+## Version 3 voices and envelope assets
+
+Local FM voices can now be created, duplicated and edited in Studio. They remain
+exactly 25 native bytes; voice-only edits preserve the existing project version.
+The parameter editor preserves unrelated bits and native stored order. Stored
+slots0..3 map to YM register offsets 00,08,04,0C. TL bits0..6 are attenuation;
+bit7 independently enables track-volume attenuation for that operator. Algorithm
+changes do not rewrite those flags. Existing definitions are never normalized.
+
+Version 3 adds a required top-level `envelopes` array and required nullable
+`psgEnvelopeId` / `modulationEnvelopeId` fields on every sequence. V1/V2 retain
+their exact field sets and compilation. Example:
+
+```json
+"envelopes": [
+  {"id": "pluck", "name": "Pluck", "type": "PSG_VOLUME", "bytes": [0, 2, 5, 10, 15, 131]},
+  {"id": "lift", "name": "Pitch lift", "type": "MODULATION", "bytes": [0, 1, 2, 1, 0, 129]}
+]
+```
+
+References use stable IDs. PSG-volume assignments require PSG sources; modulation
+assignments support either chip. The compiler allocates native IDs separately in
+asset-list order: PSG 1..255 and modulation 1..127; zero disables an envelope and
+native modulation 128 is reserved for custom modulation. Editing or deleting an
+unrelated asset cannot redirect an ID-based source reference. Removing referenced
+assets is rejected until those references are changed or cleared.
+
+The first renderable profile accepts PSG attenuation00..0F, modulation offsets
+00..7F, and controls80 reset /81 rest-or-hold /83 silence-or-hold. PSG81 retains
+the latched volume;83 silences. Modulation81/83 hold the current offset. Programs
+contain 1..256 raw bytes, end explicitly in80/81/83, and cannot start80 (a zero-time
+reset loop). Initial81/83 is valid. Branch82, multiplier84 and negative modulation
+values85..FF need further driver/native work and are explicitly rejected. This is
+a bounded subset of native envelope programs, not full envelope support.
+
+V3 source reset emits F5 with the selected PSG ID (or0), then F4 with the selected
+modulation ID (or0), after the v2 prefix. RESET and CARRY retain their documented
+clip/repetition rules. Authored F0 can replace the source modulation envelope.
+Every declared envelope, including unused assets, is validated before rendering
+or output creation. Preview and WAV rendering inject the same native tables.
+See [the example](../examples/voices-and-envelopes.smps.json).
+
+A bare binary cannot carry these external tables. `compile-project` and Studio's
+binary export refuse any declared envelope assets and direct you to
+`compile-package` / **Export package**. The package contains already compiled
+native track bytes and raw resource bytes, with a manifest mapping IDs to native
+indices. See [the package contract](../docs/architecture/native-asset-package.md).
+
 ## External editing and concurrency
 
 Write a complete UTF-8 sibling file, then atomically rename it over the project
@@ -137,7 +185,8 @@ then adopts valid disk content. Invalid disk content never discards local work.
 mvn -B -pl headless -am package
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project examples/lantern-walk.smps.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project examples/lantern-walk.smps.json /path/to/new-track.bin
-java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project examples/lantern-walk.smps.json /path/to/new-track.wav --frames 1800
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project examples/voices-and-envelopes.smps.json /path/to/new-track.wav --frames 1800
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package examples/voices-and-envelopes.smps.json /path/to/new-track.smps.zip
 ```
 
 Output files must not already exist. `render-project` defaults to 120

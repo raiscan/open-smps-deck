@@ -44,6 +44,10 @@ def verify(root, source, scratch):
         # Compile the same authored adapter against each independent core as well.
         adapter = root / "headless/src/main/java/com/opensmpsdeck/headless"
         adapters = [adapter / f"{name}.java" for name in ("S3kBinary", "S3kDemo", "S3kRenderer")]
+        # Renderer resource records and the bounded envelope grammar use only
+        # the JDK. Keep this independent bridge free of Gson/project persistence.
+        project = root / "project-core/src/main/java/com/opensmpsdeck/project"
+        adapters += [project / f"{name}.java" for name in ("CompiledProject", "Envelope", "EnvelopeProgram")]
         reference = run_probe(originals + [stub] + adapters, workspace / "reference-classes", probe)
         actual = run_probe(vendored + adapters, workspace / "vendored-classes", probe)
         if actual != reference:

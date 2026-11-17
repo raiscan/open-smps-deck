@@ -25,7 +25,7 @@ final class StudioPlayback implements AutoCloseable {
         long version = generation.incrementAndGet(); playing = true;
         worker.submit(() -> {
             try {
-                byte[] binary = ProjectCompiler.compile(project);
+                var binary = ProjectCompiler.compileWithAssets(project);
                 int frames = presentationCount(project);
                 var format = new AudioFormat(48000,16,2,true,false);
                 SourceDataLine output = AudioSystem.getSourceDataLine(format);
