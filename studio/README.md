@@ -15,6 +15,11 @@ include the resources; **Export package** writes their native bytes and manifest
 The [package contract](../docs/architecture/native-asset-package.md) documents
 engine integration and the currently bounded envelope profile.
 
+**DAC samples** adds WAV and raw unsigned PCM import, waveform and rate
+editing, and a linked one-shot hit grid on the DAC lane. Preview and package
+export carry the sample data. Open the
+[DAC percussion example](../examples/dac-percussion.smps.json) to try it.
+
 ## Run
 
 Build with JDK 25 and Maven, on a desktop with JavaFX-supported native libraries:

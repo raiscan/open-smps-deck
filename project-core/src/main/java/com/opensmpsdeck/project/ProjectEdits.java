@@ -46,13 +46,80 @@ public final class ProjectEdits {
         },true);
     }
     public static StudioProject setRepeatState(StudioProject p,String sequenceId,String state) {
-        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),state,s.psgEnvelopeId(),s.modulationEnvelopeId()),true);
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),state,s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()),true);
     }
     public static StudioProject setSourceSettings(StudioProject p,String sequenceId,String voiceId,int volume) {
-        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),voiceId,volume,s.notes(),s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()));
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),voiceId,volume,s.notes(),s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()));
     }
     public static StudioProject setSourceEnvelopes(StudioProject p,String sequenceId,String psgId,String modulationId) {
-        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),s.repeatState(),psgId,modulationId),3);
+        return changeSequence(p,sequenceId,s->new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),s.repeatState(),psgId,modulationId,s.triggers()),3);
+    }
+
+    public static StudioProject addSequence(StudioProject p,Sequence sequence) {
+        ProjectFormat.validate(p);
+        List<Sequence> sequences=new ArrayList<>(p.sequences());
+        sequences.add(sequence);
+        int version="DAC".equals(sequence.type())?4:p.formatVersion();
+        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
+    }
+
+    public static StudioProject addSample(StudioProject p,DacSample sample) {
+        ProjectFormat.validate(p);
+        List<DacSample> samples=new ArrayList<>(p.samples());
+        samples.add(sample);
+        return withSamples(p,samples);
+    }
+    public static StudioProject updateSample(StudioProject p,DacSample sample) {
+        return changeSample(p,sample.id(),old->sample);
+    }
+    public static StudioProject deleteSample(StudioProject p,String sampleId) {
+        ProjectFormat.validate(p);
+        if(p.sequences().stream().flatMap(s->s.triggers().stream()).anyMatch(t->t.sampleId().equals(sampleId)))
+            throw new IllegalArgumentException("Sample '"+sampleId+"' is referenced by a source");
+        return changeSample(p,sampleId,old->null);
+    }
+    private static StudioProject changeSample(StudioProject p,String id,UnaryOperator<DacSample> change) {
+        ProjectFormat.validate(p);
+        List<DacSample> samples=new ArrayList<>();
+        boolean found=false;
+        for(DacSample sample : p.samples()) {
+            if(sample.id().equals(id)) { found=true; sample=change.apply(sample); }
+            if(sample!=null) samples.add(sample);
+        }
+        if(!found) throw new IllegalArgumentException("Unknown sample '"+id+"'");
+        return withSamples(p,samples);
+    }
+    private static StudioProject withSamples(StudioProject p,List<DacSample> samples) {
+        return checked(new StudioProject(4,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),samples));
+    }
+
+    public static StudioProject addTrigger(StudioProject p,String sequenceId,SampleTrigger trigger) {
+        return changeSequence(p,sequenceId,s->{
+            List<SampleTrigger> triggers=new ArrayList<>(s.triggers());
+            triggers.add(trigger);
+            return withTriggers(s,triggers);
+        },4);
+    }
+    public static StudioProject updateTrigger(StudioProject p,String sequenceId,SampleTrigger trigger) {
+        return changeTrigger(p,sequenceId,trigger.id(),old->trigger);
+    }
+    public static StudioProject deleteTrigger(StudioProject p,String sequenceId,String triggerId) {
+        return changeTrigger(p,sequenceId,triggerId,old->null);
+    }
+    private static StudioProject changeTrigger(StudioProject p,String sequenceId,String triggerId,UnaryOperator<SampleTrigger> change) {
+        return changeSequence(p,sequenceId,s->{
+            List<SampleTrigger> triggers=new ArrayList<>();
+            boolean found=false;
+            for(SampleTrigger trigger : s.triggers()) {
+                if(trigger.id().equals(triggerId)) { found=true; trigger=change.apply(trigger); }
+                if(trigger!=null) triggers.add(trigger);
+            }
+            if(!found) throw new IllegalArgumentException("Unknown trigger '"+triggerId+"' in sequence '"+sequenceId+"'");
+            return withTriggers(s,triggers);
+        },4);
+    }
+    private static Sequence withTriggers(Sequence s,List<SampleTrigger> triggers) {
+        return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),triggers);
     }
 
     public static StudioProject addVoice(StudioProject p,Voice voice) {
@@ -100,7 +167,7 @@ public final class ProjectEdits {
         return withAssets(p,3,p.voices(),envelopes);
     }
     private static StudioProject withAssets(StudioProject p,int version,List<Voice> voices,List<Envelope> envelopes) {
-        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes));
+        return checked(new StudioProject(Math.max(p.formatVersion(),version),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes,p.samples()));
     }
 
     private static StudioProject changeClip(StudioProject p,String id,UnaryOperator<Clip> change) {
@@ -130,10 +197,10 @@ public final class ProjectEdits {
         ProjectFormat.validate(p); List<Sequence> sequences=new ArrayList<>(); boolean found=false, changed=false;
         for(Sequence s : p.sequences()) { if(s.id().equals(id)) { found=true; Sequence next=change.apply(s); changed=!next.equals(s); s=next; } sequences.add(s); }
         if(!found) throw new IllegalArgumentException("Unknown sequence '"+id+"'");
-        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes()));
+        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
     }
-    private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()); }
-    private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId()); }
-    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes())); }
+    private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
+    private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
+    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes(),p.samples())); }
     private static StudioProject checked(StudioProject p) { ProjectFormat.validate(p); return p; }
 }

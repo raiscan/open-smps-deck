@@ -31,7 +31,7 @@ public final class Main {
                     Path input = Path.of(args[1]);
                     var project = ProjectFiles.load(input).project();
                     var compiled = ProjectCompiler.compileWithAssets(project);
-                    byte[] song = S3kBinary.validateAndCopy(compiled.song(), compiled.psgEnvelopes(), compiled.modulationEnvelopes());
+                    byte[] song = S3kBinary.validateAndCopy(compiled);
                     out.println("Valid S3K project \"" + project.name() + "\": " + project.sequences().size()
                             + " sequences, " + project.clips().size() + " clips, " + song.length
                             + " compiled bytes (" + input + ")");
@@ -41,7 +41,7 @@ public final class Main {
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
                     var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
-                    if (compiled.requiresAssets()) throw new IllegalArgumentException("Project declares envelope assets; use compile-package for a complete export");
+                    if (compiled.requiresAssets()) throw new IllegalArgumentException("Project declares envelope or DAC sample assets; use compile-package for a complete export");
                     byte[] song = S3kBinary.validateAndCopy(compiled.song());
                     writeNewBinary(output, song);
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
@@ -95,7 +95,10 @@ public final class Main {
             Path input = Path.of(args[1]);
             requireDifferentFiles(input, output);
             if (args[0].equals("render-project")) {
-                song = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
+                var project = ProjectFiles.load(input).project();
+                song = ProjectCompiler.compileWithAssets(project);
+                if (args.length == positional && project.clips().stream().anyMatch(clip -> clip.lane().equals("DAC")))
+                    presentations = Math.max(presentations, ProjectRenderTiming.presentationCount(project));
             } else {
                 try (var stream = Files.newInputStream(input)) {
                     song = new CompiledProject(stream.readNBytes(S3kBinary.MAX_BYTES + 1), List.of());
@@ -144,8 +147,8 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
-        out.println("N: 1..36000 NTSC presentations, default 120. Outputs must not already exist.");
-        out.println("Projects: strict JSON versions 1–3, S3K FM/PSG clips, native commands and explicit envelope assets.");
-        out.println("Binary input: finite linear S3K data, local FM voices; external envelopes require render-project. No DAC samples.");
+        out.println("N: 1..36000 NTSC presentations, default 120; DAC source projects include their natural sample tail by default.");
+        out.println("Outputs must not already exist. Projects: strict JSON versions 1–4 with explicit envelope/DAC assets.");
+        out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
 }

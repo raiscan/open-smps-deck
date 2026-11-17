@@ -14,7 +14,7 @@ public final class ProjectCompiler {
     private ProjectCompiler() {}
 
     public static CompiledProject compileWithAssets(StudioProject project) {
-        return new CompiledProject(compile(project),project.envelopes());
+        return new CompiledProject(compile(project),project.envelopes(),project.samples());
     }
 
     public static byte[] compile(StudioProject project) {
@@ -32,12 +32,12 @@ public final class ProjectCompiler {
         int fm=1, psg=0;
         for(Clip c : project.clips()) {
             if(c.lane().startsWith("FM")) fm=Math.max(fm,1+Integer.parseInt(c.lane().substring(2)));
-            else psg=Math.max(psg,Integer.parseInt(c.lane().substring(3)));
+            else if(c.lane().startsWith("PSG")) psg=Math.max(psg,Integer.parseInt(c.lane().substring(3)));
         }
         int header=6+4*fm+6*psg;
         Bank out=new Bank(); for(int i=0;i<header;i++) out.put(0);
         out.set(2,fm); out.set(3,psg); out.set(4,1); out.set(5,project.tempo());
-        out.word(6,out.size()); out.put(STOP); // DAC must always be the first positional slot.
+        dacLane(out,project,sources); // DAC must always be the first positional slot.
         for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices,psgEnvelopes,modulationEnvelopes);
         for(int channel=1;channel<=psg;channel++) lane(out,project,"PSG"+channel,6+4*fm+6*(channel-1),sources,notes,voices,psgEnvelopes,modulationEnvelopes);
         if(!project.voices().isEmpty()) {
@@ -45,6 +45,91 @@ public final class ProjectCompiler {
             for(Voice v : project.voices()) for(int b : v.bytes()) out.put(b);
         }
         return out.bytes();
+    }
+
+    /** Exclusive DAC stop tick, including the final surviving trigger's playback tail. */
+    public static long dacEndTick(StudioProject project) {
+        ProjectFormat.validate(project);
+        Map<String,Sequence> sources=new HashMap<>();
+        for(Sequence source : project.sequences()) sources.put(source.id(),source);
+        return dacEndTick(project,sources,dacClips(project));
+    }
+
+    private static List<Clip> dacClips(StudioProject project) {
+        return project.clips().stream().filter(c->c.lane().equals("DAC"))
+                .sorted(Comparator.comparingInt(Clip::startTick)).toList();
+    }
+
+    private static long dacEndTick(StudioProject project,Map<String,Sequence> sources,List<Clip> clips) {
+        if(clips.isEmpty()) return 0;
+        Clip last=clips.getLast();
+        long end=(long)last.startTick()+last.lengthTicks();
+        // Later attacks replace earlier samples. Walk back to the last clip with a surviving attack.
+        for(Clip clip : clips.reversed()) {
+            Sequence source=sources.get(clip.sequenceId());
+            long finalOffset=-1;
+            SampleTrigger finalTrigger=null;
+            for(SampleTrigger trigger : source.triggers()) {
+                long available=(long)clip.lengthTicks()-1-trigger.tick();
+                if(available<0) continue;
+                long offset=available/source.lengthTicks()*source.lengthTicks()+trigger.tick();
+                if(offset>finalOffset) {
+                    finalOffset=offset;
+                    finalTrigger=trigger;
+                }
+            }
+            if(finalTrigger!=null) {
+                String sampleId=finalTrigger.sampleId();
+                DacSample sample=project.samples().stream().filter(s->s.id().equals(sampleId)).findFirst().orElseThrow();
+                long cyclesPerByte=ceilDivide(5L*DacSample.periodCycles(sample.rate()),28)+37;
+                long tailFrames=ceilDivide((sample.pcm().length+1L)*cyclesPerByte,21334)+2;
+                long tailTicks=ceilDivide(tailFrames*(256-project.tempo()),256)+2;
+                return Math.max(end,clip.startTick()+finalOffset+tailTicks);
+            }
+        }
+        return end;
+    }
+
+    private static long ceilDivide(long numerator,long divisor) {
+        return (numerator+divisor-1)/divisor;
+    }
+
+    private static void dacLane(Bank out,StudioProject project,Map<String,Sequence> sources) {
+        out.word(6,out.size());
+        List<Clip> clips=dacClips(project);
+        Map<String,Integer> sampleNotes=new HashMap<>();
+        for(DacSample sample : project.samples()) sampleNotes.put(sample.id(),DacSample.FIRST_NOTE+sampleNotes.size());
+        int cursor=0;
+        for(Clip clip : clips) {
+            rest(out,clip.startTick()-cursor);
+            Sequence source=sources.get(clip.sequenceId());
+            var triggers=source.triggers().stream().sorted(Comparator.comparingInt(SampleTrigger::tick)).toList();
+            if(triggers.isEmpty()) {
+                rest(out,clip.lengthTicks());
+                cursor=clip.startTick()+clip.lengthTicks();
+                continue;
+            }
+            int remaining=clip.lengthTicks();
+            while(remaining>0) {
+                int length=Math.min(remaining,source.lengthTicks());
+                int at=0;
+                for(int i=0;i<triggers.size();i++) {
+                    SampleTrigger trigger=triggers.get(i);
+                    if(trigger.tick()>=length) break;
+                    rest(out,trigger.tick()-at);
+                    int next=i+1<triggers.size()?Math.min(length,triggers.get(i+1).tick()):length;
+                    int duration=Math.min(127,next-trigger.tick());
+                    out.put(sampleNotes.get(trigger.sampleId()));
+                    out.put(duration);
+                    at=trigger.tick()+duration;
+                }
+                rest(out,length-at);
+                remaining-=length;
+            }
+            cursor=clip.startTick()+clip.lengthTicks();
+        }
+        rest(out,dacEndTick(project,sources,clips)-cursor);
+        out.put(STOP);
     }
 
     private static void lane(Bank out,StudioProject project,String lane,int pointer,
@@ -90,7 +175,7 @@ public final class ProjectCompiler {
         if(source.type().equals("FM")) { out.put(0xE0); out.put(0xC0); }
         out.put(0xED); out.put(0x40);
         if(version>=2) { out.put(0xE1); out.put(0); out.put(0xE8); out.put(0); out.put(0xFA); }
-        if(version==3) {
+        if(version>=3) {
             if(source.type().equals("PSG")) { out.put(0xF5);out.put(source.psgEnvelopeId()==null?0:psgEnvelopes.get(source.psgEnvelopeId())); }
             out.put(0xF4);out.put(source.modulationEnvelopeId()==null?0:modulationEnvelopes.get(source.modulationEnvelopeId()));
         }
@@ -122,8 +207,8 @@ public final class ProjectCompiler {
             at=next;
         }
     }
-    private static void rest(Bank out,int ticks) {
-        while(ticks>0) { int duration=Math.min(ticks,127); out.put(REST); out.put(duration); ticks-=duration; }
+    private static void rest(Bank out,long ticks) {
+        while(ticks>0) { int duration=(int)Math.min(ticks,127); out.put(REST); out.put(duration); ticks-=duration; }
     }
     private static void note(Bank out,String type,int pitch,int ticks) {
         // FM byte 81 is C0 (MIDI12), but S3K's PSG table starts at C2

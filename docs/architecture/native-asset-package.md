@@ -1,8 +1,8 @@
-# Native asset package, version 1
+# Native asset package
 
 `compile-package PROJECT.json OUTPUT.smps.zip` and Studio's **Assets → Export
 package** write a bounded native track plus its dependencies. The source remains
-the shared JSON project; track and envelope bytes are already compiled/native.
+the shared JSON project; the package contains baked track bytes, raw envelopes, and DAC PCM.
 OpenGGF does not currently have a loader for this ZIP. This is an explicit
 adapter contract for tools and engine integration, not a new driver dialect.
 
@@ -37,8 +37,27 @@ The manifest contains:
 }
 ```
 
+A project with sample declarations produces schema version 2, which also
+contains a `dac` object:
+
+```json
+{
+  "baseCycles": 297,
+  "samples": [{
+    "id": "kick", "name": "Kick", "sampleId": 0,
+    "note": 129, "rate": 12, "path": "dac/000.pcm", "sha256": "<hex SHA-256>"
+  }]
+}
+```
+
+The sample ID is its zero-based asset-list index. The native note byte is
+129 + sample ID. Each `dac/NNN.pcm` entry stores decoded unsigned 8-bit mono
+bytes, with a numeric ordinal in the filename. All declared samples are
+included after the envelope resources, including unreferenced ones.
+Projects without DAC sample declarations retain schema version 1.
+
 ZIP entries are UTF-8, stored without compression, and have fixed timestamps.
-Entry order is track, source, manifest, then envelope resources in source order.
+Entry order is track, source, manifest, then envelope resources and DAC samples in source order.
 Identical source produces identical archive bytes. Validation, compilation,
 resource resolution and source-size checks precede file creation. Export uses
 CREATE_NEW; an existing output or symlink is never overwritten. Failure or
@@ -60,7 +79,10 @@ data.setModEnvelopes(modulationPrograms);
 `S3kRenderer.render(CompiledProject, ...)` already performs resource validation,
 copies those maps and installs them before sequencer/snapshot creation. Studio
 preview, project WAV export and `render-project` use that path. Byte-only `render`
-has no external tables and refuses nonzero unresolved envelope references.
+has no external tables and refuses unresolved envelope references and DAC triggers.
+For DAC playback, construct `DacData` with the PCM indexed by sample ID, the
+native-note map to `DacData.DacEntry(sampleId, rate)`, and base cycles 297.
+Use this same object in the sequencer and session's `SmpsDacSelection`.
 
 The project compiler emits F5/F4 assignments at v3 source resets; its notes and
 commands refer to the corresponding native indices. No resource conversion is
@@ -74,7 +96,7 @@ envelope profile. Every asset, including unused declarations, must validate.
 Control-only reset cycles, unsupported envelope commands, unknown kinds, missing
 references and reserved modulation indices fail before PCM or output creation.
 
-DAC samples/mappings/rates, banked/shared/global voices, full envelope control
+FM6 ownership switching, DAC coordination commands, banked/shared/global voices, full envelope control
 semantics and cross-song dependencies remain tracked in the
 [S3K support matrix](s3k-support.md). The archive is dependency-complete for this
-slice's supported local voices and envelope profiles, not arbitrary S3K tracks.
+slice's supported local voices, envelope profiles and DAC samples, not arbitrary S3K tracks.

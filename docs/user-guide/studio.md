@@ -103,6 +103,29 @@ or deleted asset is refused; Reload adopts its current definition. A removed
 selection does not become a different asset. These forms use the shared project
 undo, Save and recovery flow; typing alone does not save a draft.
 
+## Samples and the DAC lane
+
+Open **Voices & assets → DAC samples** to import PCM WAV or raw unsigned 8-bit
+mono PCM (`.pcm` / `.bin`). WAV import supports 8-bit and 16-bit PCM mono or
+stereo. Studio downmixes stereo and resamples to a native S3K rate while
+preserving duration approximately. Raw PCM imports unchanged at rate `0C`.
+The sample library shows the waveform, native rate byte, and linked usage.
+Rename, change rate, replace the audio or duplicate a sample. Apply commits
+your changes. Clear a sample's hits before deleting it.
+
+Create a **DAC** sequence and place it on the **DAC** lane. Double-click a
+sample row in **DAC hits** to add a hit. Click a hit to edit its tick or sample.
+Use **Add hit**, **Apply hit** and **Delete hit** for exact edits. Drag a clip's
+right edge to repeat or trim its hits. Each hit starts a one-shot sample and
+replaces the previously playing sample. A sample can finish after the clip
+ends, and Studio includes that tail in preview and WAV export.
+
+The DAC lane uses the FM6 hardware channel, with fixed stereo output and
+sample level set by the PCM. Rate controls speed and pitch together. Rate
+`01` is fastest and `00` is slowest. Use **Export package** to include the
+PCM and native mapping with the track. Try the original
+[DAC percussion example](../../examples/dac-percussion.smps.json).
+
 ## Save, external changes and recovery
 
 **Save** writes the open project. **Save as** creates a new file, retaining the
@@ -137,12 +160,12 @@ frame budget. No audio device? The app reports the problem; WAV export still wor
 **Export WAV** renders the complete clip arrangement plus a short tail.
 **Export SMPS** writes the baked standalone binary. Choose a new output filename;
 existing files are preserved. A stopped export cleans up its incomplete WAV.
-Local voices are baked into the binary. Projects declaring envelopes require
+Local voices are baked into the binary. Projects declaring envelopes or samples require
 **Assets → Export package**, which writes native track/resource bytes plus their
 manifest and source JSON into a new `.smps.zip`. This adapter package is documented
 for engine integration; OpenGGF does not yet load the ZIP directly. Bare binary
 export refuses to drop those dependencies. Preview and WAV export use them.
 
-Nested multi-channel sequences, make-unique, DAC samples, remaining envelope semantics and other
+Nested multi-channel sequences, make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records the remaining authoring and driver gaps before importing.

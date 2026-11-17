@@ -44,6 +44,7 @@ class ProjectPackageTest {
 
         JsonObject manifest = JsonParser.parseString(new String(entries.get("manifest.json"), StandardCharsets.UTF_8)).getAsJsonObject();
         assertEquals(1, manifest.get("schemaVersion").getAsInt());
+        assertFalse(manifest.has("dac"));
         assertEquals("S3K", manifest.get("mode").getAsString());
         assertEquals(0, manifest.get("bankBase").getAsInt());
         assertReference(manifest.getAsJsonObject("track"), entries);
@@ -64,6 +65,56 @@ class ProjectPackageTest {
         }
         assertFalse(entries.keySet().stream().anyMatch(name -> name.contains("..") || name.startsWith("/")),
                 "asset IDs and names must never become filesystem paths");
+    }
+
+    @Test void dacPackageKeepsNativeOrdinalsRatesAndRawPcmEvenForUnusedAssets() throws Exception {
+        var original = fixture();
+        var samples = List.of(
+                DacSample.of("../../unused", "Unused / PCM", 0, new byte[]{(byte) 0x80, (byte) 0xFF}),
+                DacSample.of("hit", "Hit", 255, new byte[]{0, 17, (byte) 0xF0}));
+        var drums = new Sequence("drums", "Drums", "DAC", 6, null, 127, List.of(), List.of(),
+                "RESET", null, null, List.of(new SampleTrigger("one", 0, "hit")));
+        var project = new StudioProject(4, original.name(), "S3K", 24, 0, original.voices(),
+                List.of(original.sequences().getFirst(), drums),
+                List.of(original.clips().getFirst(), new Clip("drum-clip", "drums", "DAC", 0, 6)),
+                original.envelopes(), samples);
+        Path archive = directory.resolve("dac.zip"), second = directory.resolve("dac-again.zip");
+        ProjectPackage.write(project, archive);
+        ProjectPackage.write(project, second);
+        assertArrayEquals(Files.readAllBytes(archive), Files.readAllBytes(second));
+        var entries = read(archive);
+        assertEquals(List.of("track.bin", "source.smps.json", "manifest.json", "psg/001.bin", "mod/001.bin",
+                "psg/002.bin", "dac/000.pcm", "dac/001.pcm"), List.copyOf(entries.keySet()));
+        byte[] bank = entries.get("track.bin");
+        int dacPointer = (bank[6] & 0xFF) | ((bank[7] & 0xFF) << 8);
+        assertEquals(0x82, bank[dacPointer] & 0xFF, "the second declaration maps to the second DAC note");
+        assertEquals(project, ProjectFormat.read(new String(entries.get("source.smps.json"), StandardCharsets.UTF_8)));
+        var manifest = JsonParser.parseString(new String(entries.get("manifest.json"), StandardCharsets.UTF_8)).getAsJsonObject();
+        assertEquals(2, manifest.get("schemaVersion").getAsInt());
+        assertReference(manifest.getAsJsonObject("track"), entries);
+        assertReference(manifest.getAsJsonObject("source"), entries);
+        var dac = manifest.getAsJsonObject("dac");
+        assertEquals(297, dac.get("baseCycles").getAsInt());
+        var mappings = dac.getAsJsonArray("samples");
+        assertEquals(2, mappings.size());
+        for (int index = 0; index < samples.size(); index++) {
+            var sample = samples.get(index);
+            var mapping = mappings.get(index).getAsJsonObject();
+            String path = index == 0 ? "dac/000.pcm" : "dac/001.pcm";
+            assertReference(mapping, entries);
+            assertEquals(path, mapping.get("path").getAsString());
+            assertEquals(sample.id(), mapping.get("id").getAsString());
+            assertEquals(sample.name(), mapping.get("name").getAsString());
+            assertEquals(index, mapping.get("sampleId").getAsInt());
+            assertEquals(0x81 + index, mapping.get("note").getAsInt());
+            assertEquals(sample.rate(), mapping.get("rate").getAsInt());
+            assertArrayEquals(sample.pcm(), entries.get(path));
+        }
+        var missing = new StudioProject(4, project.name(), project.mode(), project.ticksPerBeat(), project.tempo(),
+                project.voices(), project.sequences(), project.clips(), project.envelopes(), List.of(samples.getFirst()));
+        Path invalid = directory.resolve("missing-hit.zip");
+        assertThrows(IllegalArgumentException.class, () -> ProjectPackage.write(missing, invalid));
+        assertFalse(Files.exists(invalid));
     }
 
     @Test void existingFilesAndSymlinkTargetsAreNeverOverwritten() throws Exception {

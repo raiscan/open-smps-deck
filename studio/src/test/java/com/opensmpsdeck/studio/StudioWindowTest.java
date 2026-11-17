@@ -280,6 +280,57 @@ class StudioWindowTest {
         });
     }
 
+    @Test void dacGridAndExactEditsShareTheTimelineAndUndo() throws Exception {
+        Path raw=Files.write(folder.resolve("Kick.pcm"),new byte[]{(byte)128,(byte)220,60,(byte)128});
+        StudioProject project=ProjectEdits.addSequence(DemoProject.create(),new Sequence("drums","Drums","DAC",24,null,127,List.of()));
+        replace(ProjectFormat.write(project));
+        await(()->window.document().project().formatVersion()==4);
+        fx(()->{window.showSamples();layout();window.samples.importFile(raw);return null;});
+        await(()->window.document().project().samples().size()==1);
+        DacSample imported=fx(()->window.document().project().samples().getFirst());
+        assertArrayEquals(Files.readAllBytes(raw),imported.pcm());
+        assertEquals(0x0c,imported.rate());
+        fx(()->{
+            ((ListView<?>)window.scene().lookup("#sequence-browser")).getSelectionModel().select(4);
+            window.showNotes();layout();
+            button("add-trigger").fire();
+            assertEquals(0,window.document().project().sequences().getLast().triggers().getFirst().tick());
+            ((TextField)window.scene().lookup("#trigger-tick")).setText("6");
+            button("apply-trigger").fire();
+            assertEquals(6,window.document().project().sequences().getLast().triggers().getFirst().tick());
+            button("place-sequence").fire();
+            assertEquals("DAC",window.document().project().clips().getLast().lane());
+            assertTrue(TimelineView.LANES.contains("DAC"));
+            key(window.scene().getRoot(),KeyCode.Z,true);
+            assertEquals(8,window.document().project().clips().size());
+            window.document().save();snapshot(".dac.png");return null;
+        });
+        assertEquals(imported.id(),ProjectFiles.load(file).project().sequences().getLast().triggers().getFirst().sampleId());
+    }
+
+    @Test void dacTriggerDraftCannotOverwriteAnAgentChange() throws Exception {
+        StudioProject base=ProjectEdits.addSample(DemoProject.create(),
+                DacSample.of("kick","Kick",12,new byte[]{(byte)128,(byte)220}));
+        base=ProjectEdits.addSequence(base,new Sequence("drums","Drums","DAC",24,null,127,List.of()));
+        base=ProjectEdits.addTrigger(base,"drums",new SampleTrigger("hit",0,"kick"));
+        replace(ProjectFormat.write(base));await(()->window.document().project().formatVersion()==4);
+        fx(()->{
+            ((ListView<?>)window.scene().lookup("#sequence-browser")).getSelectionModel().select(4);
+            window.showNotes();layout();
+            mouse(window.triggers.grid.canvas,MouseEvent.MOUSE_PRESSED,DacTriggerPane.GUTTER+1,DacTriggerPane.HEADER+12,true);
+            ((TextField)window.scene().lookup("#trigger-tick")).setText("9");return null;
+        });
+        replace(ProjectFormat.write(ProjectEdits.updateTrigger(base,"drums",new SampleTrigger("hit",12,"kick"))));
+        await(()->window.document().project().sequences().getLast().triggers().getFirst().tick()==12);
+        fx(()->{
+            assertEquals("9",((TextField)window.scene().lookup("#trigger-tick")).getText());
+            button("apply-trigger").fire();
+            assertFalse(window.document().dirty());
+            assertEquals(12,window.document().project().sequences().getLast().triggers().getFirst().tick());
+            return null;
+        });
+    }
+
     private void snapshot(String suffix)throws Exception{
         String target=System.getProperty("studio.snapshot");if(target==null)return;
         layout();ImageIO.write(SwingFXUtils.fromFXImage(window.scene().snapshot(null),null),"png",Path.of(target+suffix).toFile());

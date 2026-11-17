@@ -26,23 +26,24 @@ lanes and compiler limits, then reports the project name, sequence/clip counts
 and compiled byte count. `compile-project` exports finite standalone S3K bytes.
 `render-project` compiles the same source and renders it through the pinned core.
 
-Projects read/write JSON versions 1–3 and mode `S3K`, with named local FM voices,
+Projects read/write JSON versions 1–4 and mode `S3K`, with named local FM voices,
 monophonic FM/PSG note sequences and linked clips on FM1–FM5/PSG1–PSG3. Clip length
 can repeat a sequence or trim its final repetition. Time is integer sequencer
 ticks; `ticksPerBeat` controls the ruler and `tempo` is the native S3K byte, not
 BPM. Unknown fields, missing fields, overlapping notes/clips and unresolved IDs
 are errors. Version2 adds timed native controls and RESET/CARRY repetition; version3
 adds typed envelope assets and stable source references. Native voices are exact
-25-byte definitions. DAC and arbitrary control flow remain subsequent work.
+25-byte definitions. Version 4 adds a DAC lane with one-shot hits and inline samples.
 
 `render-project` includes declared envelope resources. `compile-package` exports
-a deterministic ZIP of baked track bytes, raw envelopes, source and a hashed
-manifest. `compile-project` refuses declared envelopes, including unused ones,
+a deterministic ZIP of baked track bytes, raw envelopes and DAC samples, source and a hashed
+manifest. `compile-project` refuses declared envelope and sample assets, including unused ones,
 so a bare binary export never silently loses them. The [package contract](../docs/architecture/native-asset-package.md)
 explains how the maps feed OpenGGF; the engine does not load the ZIP directly.
 
 `--frames` counts **60 Hz NTSC presentations**, not PCM samples. Its default is
-120 and its range is 1–36000. Each presentation services the production session
+120 and its range is 1–36000. Without an explicit limit, `render-project`
+expands the duration for DAC arrangements to include the last sample's tail. Each presentation services the production session
 once, then emits 800 stereo samples. WAV output is 48 kHz, stereo, signed 16-bit
 little-endian PCM. Synthesis uses OpenGGF's exact hardware-frame budget, which
 adjusts its internal synthesis rate to preserve chip time per presentation.
@@ -61,14 +62,15 @@ The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.
 These restrictions are in its validator, not in the extracted OpenGGF core:
 
 - Six-byte S3K music header, little-endian file-relative pointers with base zero.
-- One mandatory stopped DAC header slot, up to five following FM slots, and up
+- One mandatory first DAC header slot, up to five following FM slots, and up
   to three PSG slots. Slots are positional: include stopped entries for gaps.
 - A local voice table, if used, occupies the end of the binary and contains
   complete native-order 25-byte voices. FM notes require that table; referenced
   voices must exist. No operator-order conversion is applied during rendering.
 - Byte-only inputs have no implicit resources: nonzero PSG header or F4/F5
   envelope IDs must resolve through the resource-aware CompiledProject API.
-  Global/shared voice banks and DAC samples are not supplied implicitly.
+  The DAC slot supports finite explicit rests and mapped one-shot triggers.
+  `CompiledProject` supplies both envelope and DAC dependencies.
 - Notes/rests, nonzero duration bytes, `E3`/`F2` stops and `E7` holds are accepted.
 - Single-operand events: detune (`E1`), absolute volume (`E4`), note stop (`E8`),
   absolute transpose (`ED`) and additive transpose (`FB`); FM pan (`E0`), volume
@@ -79,14 +81,14 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   validated, including unused assets. See the bounded profile in the project format.
 - Every track must terminate before the next track or voice-table boundary.
   Calls, jumps, loops, other envelope commands, direct register writes,
-  DAC triggers and all other commands are rejected explicitly. Unknown commands
+  DAC coordination flags and all other commands are rejected explicitly. Unknown commands
   never silently fall through into notes or partially rendered audio.
 
 A normal legacy OpenSMPSDeck export may contain loops or require external
 resources and therefore be rejected. This boundary does **not** claim arbitrary
 SMPS/ROM import support. The project compiler emits this supported subset with
 inline repeated content, positional stopped channels and local FM voices.
-Native envelope semantics outside the bounded profile, DAC/sample packaging and
+Native envelope semantics outside the bounded profile, FM6/DAC ownership switching and
 arbitrary control flow remain future work.
 
 ## Embedding and verification

@@ -1,3 +1,6 @@
+import com.opensmpsdeck.headless.S3kRenderer;
+import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.DacSample;
 import com.openggf.audio.session.OwnedSmpsAudioStream;
 import com.openggf.audio.session.SmpsHardwareFrameBudget;
 import com.openggf.audio.smps.SmpsSequencer;
@@ -10,7 +13,9 @@ import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsData;
 
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 
 /** Compiled independently against original Git objects and the vendored core. */
 public final class S3kParityProbe {
@@ -19,12 +24,13 @@ public final class S3kParityProbe {
         probe("fm-call-loop", fm(true));
         probe("psg", psg());
         probeProduction();
+        probeProductionDac();
     }
 
     private static void probeProduction() throws Exception {
         MessageDigest pcm = MessageDigest.getInstance("SHA-256");
         long[] energy = {0};
-        com.opensmpsdeck.headless.S3kRenderer.render(
+        S3kRenderer.render(
                 com.opensmpsdeck.headless.S3kDemo.song(), 120, samples -> {
                     for (short sample : samples) {
                         pcm.update((byte) sample); pcm.update((byte) (sample >>> 8));
@@ -34,6 +40,39 @@ public final class S3kParityProbe {
         if (energy[0] == 0) throw new AssertionError("production demo rendered silence");
         System.out.println("production-demo pcm=" + HexFormat.of().formatHex(pcm.digest())
                 + " energy=" + energy[0]);
+    }
+
+    private static void probeProductionDac() throws Exception {
+        byte[] bank = {0, 0, 1, 0, 1, 0, 10, 0, 0, 0,
+                (byte) 0x81, 2, (byte) 0x80, 3, (byte) 0x82, 8, (byte) 0xF2};
+        byte[] slow = new byte[120];
+        Arrays.fill(slow, (byte) 0x20);
+        byte[] fast = {(byte) 0xFE, 0, (byte) 0xFF, 3, 5, 0x60};
+        var project = new CompiledProject(bank, List.of(), List.of(
+                DacSample.of("slow", "Slow", 0, slow), DacSample.of("fast", "Fast", 1, fast)));
+        MessageDigest pcm = MessageDigest.getInstance("SHA-256");
+        MessageDigest writes = MessageDigest.getInstance("SHA-256");
+        int[] streamBytes = {0};
+        var observer = new ChipWriteObserver() {
+            @Override public void onYm2612Write(int port, int register, int value) {
+                if (port == 0 && (register == 0x2A || register == 0x2B)) {
+                    writes.update((byte) register);
+                    writes.update((byte) value);
+                    if (register == 0x2A) streamBytes[0]++;
+                }
+            }
+            @Override public void onPsgWrite(int value) {}
+        };
+        S3kRenderer.render(project, 15, samples -> {
+            for (short sample : samples) {
+                pcm.update((byte) sample);
+                pcm.update((byte) (sample >>> 8));
+            }
+        }, observer);
+        if (streamBytes[0] <= fast.length || streamBytes[0] >= slow.length + fast.length)
+            throw new AssertionError("production DAC did not stream and replace its samples");
+        System.out.println("production-dac pcm=" + HexFormat.of().formatHex(pcm.digest())
+                + " writes=" + HexFormat.of().formatHex(writes.digest()) + " bytes=" + streamBytes[0]);
     }
 
     private static void probe(String name, byte[] song) throws Exception {

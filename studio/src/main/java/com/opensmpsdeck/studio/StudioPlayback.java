@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.S3kRenderer;
+import com.opensmpsdeck.headless.ProjectRenderTiming;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.StudioProject;
 import javax.sound.sampled.*;
@@ -61,10 +62,7 @@ final class StudioPlayback implements AutoCloseable {
         });
     }
     static int presentationCount(StudioProject project) {
-        int end=project.clips().stream().mapToInt(c->c.startTick()+c.lengthTicks()).max().orElse(0);
-        long frames=(long)Math.ceil((end+2L)*256.0/(256-project.tempo()))+60;
-        if(frames>S3kRenderer.MAX_PRESENTATIONS)throw new IllegalArgumentException("Song exceeds the current ten-minute preview limit; shorten it or reduce the native tempo delay");
-        return (int)Math.max(1,frames);
+        return ProjectRenderTiming.presentationCount(project);
     }
     static double tickAtPresentation(StudioProject project,int presentations) { return presentations*(256-project.tempo())/256.0; }
     synchronized void stop() { generation.incrementAndGet(); playing=false; releaseLine(); }

@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.DacSample;
 import com.openggf.audio.MusicRestoreSink;
 import com.openggf.audio.driver.SmpsDriver;
 import com.openggf.audio.rewind.SmpsDriverSnapshot;
@@ -67,7 +68,7 @@ public final class S3kRenderer {
         // this render and are installed before any sequencer state is captured.
         data.setPsgEnvelopes(nativeEnvelopes(psg));
         data.setModEnvelopes(nativeEnvelopes(mod));
-        var dac = new DacData(Map.of(), Map.of(), 297);
+        var dac = nativeDac(project.samples());
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
         var source = SmpsSourceDescriptor.from(data);
         MusicRestoreSink restore = () -> { throw new IllegalStateException("music restoration is outside the standalone proof"); };
@@ -105,6 +106,19 @@ public final class S3kRenderer {
             owned.put(index, bytes);
         });
         return Map.copyOf(owned);
+    }
+
+    private static DacData nativeDac(List<DacSample> declarations) {
+        Map<Integer, byte[]> samples = new HashMap<>();
+        Map<Integer, DacData.DacEntry> mapping = new HashMap<>();
+        for (int index = 0; index < declarations.size(); index++) {
+            DacSample sample = declarations.get(index);
+            samples.put(index, sample.pcm());
+            mapping.put(DacSample.FIRST_NOTE + index, new DacData.DacEntry(index, sample.rate()));
+        }
+        // DacData takes another private copy. The same immutable dependency is
+        // supplied both to logical sequencing and production physical activation.
+        return new DacData(samples, mapping, DacSample.BASE_CYCLES);
     }
 
     static void validatePresentations(int presentations) {

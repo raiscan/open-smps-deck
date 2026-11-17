@@ -4,6 +4,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.project.Envelope;
+import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.ProjectFormat;
@@ -38,7 +39,7 @@ public final class ProjectPackage {
             throw new IllegalArgumentException("Project exceeds the " + ProjectFiles.MAX_FILE_BYTES + " byte source limit");
 
         JsonObject manifest = new JsonObject();
-        manifest.addProperty("schemaVersion", 1);
+        manifest.addProperty("schemaVersion", compiled.samples().isEmpty() ? 1 : 2);
         manifest.addProperty("mode", "S3K");
         manifest.addProperty("bankBase", 0);
         manifest.add("track", reference("track.bin", song));
@@ -68,6 +69,23 @@ public final class ProjectPackage {
             envelopes.add(item);
         }
         manifest.add("envelopes", envelopes);
+        if (!compiled.samples().isEmpty()) {
+            JsonObject dac = new JsonObject();
+            dac.addProperty("baseCycles", DacSample.BASE_CYCLES);
+            JsonArray samples = new JsonArray();
+            for (int index = 0; index < compiled.samples().size(); index++) {
+                DacSample sample = compiled.samples().get(index);
+                String path = String.format(Locale.ROOT, "dac/%03d.pcm", index);
+                byte[] pcm = sample.pcm();
+                resources.add(new Entry(path, pcm));
+                JsonObject item = reference(path, pcm);
+                item.addProperty("id", sample.id()); item.addProperty("name", sample.name());
+                item.addProperty("sampleId", index); item.addProperty("note", DacSample.FIRST_NOTE + index);
+                item.addProperty("rate", sample.rate());
+                samples.add(item);
+            }
+            dac.add("samples", samples); manifest.add("dac", dac);
+        }
         byte[] manifestBytes = (new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(manifest) + "\n")
                 .getBytes(StandardCharsets.UTF_8);
 

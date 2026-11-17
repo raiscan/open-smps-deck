@@ -1,0 +1,493 @@
+{
+  "formatVersion": 4,
+  "name": "Lantern walk / DAC percussion",
+  "mode": "S3K",
+  "ticksPerBeat": 12,
+  "tempo": 192,
+  "voices": [
+    {
+      "id": "voice-lead",
+      "name": "Glass keys",
+      "bytes": [
+        4,
+        1,
+        2,
+        1,
+        2,
+        31,
+        31,
+        31,
+        31,
+        8,
+        7,
+        8,
+        7,
+        3,
+        3,
+        3,
+        3,
+        42,
+        42,
+        42,
+        42,
+        34,
+        8,
+        168,
+        136
+      ]
+    },
+    {
+      "id": "voice-bass",
+      "name": "Round bass",
+      "bytes": [
+        4,
+        1,
+        1,
+        1,
+        1,
+        31,
+        31,
+        31,
+        31,
+        10,
+        8,
+        10,
+        8,
+        3,
+        3,
+        3,
+        3,
+        26,
+        26,
+        26,
+        26,
+        32,
+        12,
+        168,
+        140
+      ]
+    }
+  ],
+  "sequences": [
+    {
+      "id": "seq-lead-a",
+      "name": "Lantern / A",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-lead",
+      "volume": 112,
+      "notes": [
+        {
+          "id": "a-1",
+          "tick": 0,
+          "duration": 9,
+          "pitch": 72
+        },
+        {
+          "id": "a-2",
+          "tick": 12,
+          "duration": 9,
+          "pitch": 76
+        },
+        {
+          "id": "a-3",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 79
+        },
+        {
+          "id": "a-4",
+          "tick": 48,
+          "duration": 9,
+          "pitch": 76
+        },
+        {
+          "id": "a-5",
+          "tick": 60,
+          "duration": 9,
+          "pitch": 74
+        },
+        {
+          "id": "a-6",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 72
+        }
+      ],
+      "commands": [
+        {
+          "id": "lead-mod",
+          "tick": 0,
+          "command": "MODULATION",
+          "arguments": [
+            1,
+            1,
+            1,
+            4
+          ]
+        },
+        {
+          "id": "lead-left",
+          "tick": 6,
+          "command": "PAN",
+          "arguments": [
+            128
+          ]
+        },
+        {
+          "id": "lead-volume",
+          "tick": 27,
+          "command": "VOLUME",
+          "arguments": [
+            100
+          ]
+        },
+        {
+          "id": "lead-stereo",
+          "tick": 48,
+          "command": "PAN",
+          "arguments": [
+            192
+          ]
+        },
+        {
+          "id": "lead-mod-off",
+          "tick": 72,
+          "command": "MODULATION_OFF",
+          "arguments": []
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "seq-lead-b",
+      "name": "Lantern / B",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-lead",
+      "volume": 112,
+      "notes": [
+        {
+          "id": "b-1",
+          "tick": 0,
+          "duration": 9,
+          "pitch": 69
+        },
+        {
+          "id": "b-2",
+          "tick": 12,
+          "duration": 9,
+          "pitch": 72
+        },
+        {
+          "id": "b-3",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 76
+        },
+        {
+          "id": "b-4",
+          "tick": 48,
+          "duration": 9,
+          "pitch": 74
+        },
+        {
+          "id": "b-5",
+          "tick": 60,
+          "duration": 9,
+          "pitch": 71
+        },
+        {
+          "id": "b-6",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 67
+        }
+      ],
+      "commands": [
+        {
+          "id": "answer-right",
+          "tick": 0,
+          "command": "PAN",
+          "arguments": [
+            64
+          ]
+        },
+        {
+          "id": "answer-detune",
+          "tick": 24,
+          "command": "DETUNE",
+          "arguments": [
+            1
+          ]
+        },
+        {
+          "id": "answer-transpose",
+          "tick": 48,
+          "command": "TRANSPOSE",
+          "arguments": [
+            76
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": "env-shimmer",
+      "triggers": []
+    },
+    {
+      "id": "seq-bass",
+      "name": "Stepping stones",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-bass",
+      "volume": 115,
+      "notes": [
+        {
+          "id": "bass-1",
+          "tick": 0,
+          "duration": 18,
+          "pitch": 48
+        },
+        {
+          "id": "bass-2",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 55
+        },
+        {
+          "id": "bass-3",
+          "tick": 48,
+          "duration": 18,
+          "pitch": 45
+        },
+        {
+          "id": "bass-4",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 52
+        }
+      ],
+      "commands": [
+        {
+          "id": "bass-fade",
+          "tick": 0,
+          "command": "FM_VOLUME",
+          "arguments": [
+            3
+          ]
+        }
+      ],
+      "repeatState": "CARRY",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "seq-answer",
+      "name": "Fireflies",
+      "type": "PSG",
+      "lengthTicks": 48,
+      "voiceId": null,
+      "volume": 76,
+      "notes": [
+        {
+          "id": "p-1",
+          "tick": 12,
+          "duration": 6,
+          "pitch": 84
+        },
+        {
+          "id": "p-2",
+          "tick": 24,
+          "duration": 6,
+          "pitch": 88
+        },
+        {
+          "id": "p-3",
+          "tick": 36,
+          "duration": 6,
+          "pitch": 91
+        }
+      ],
+      "commands": [
+        {
+          "id": "psg-detune",
+          "tick": 12,
+          "command": "DETUNE",
+          "arguments": [
+            1
+          ]
+        },
+        {
+          "id": "psg-fade",
+          "tick": 24,
+          "command": "PSG_VOLUME",
+          "arguments": [
+            1
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": "env-fireflies",
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "seq-drums",
+      "name": "Walking drums",
+      "type": "DAC",
+      "lengthTicks": 48,
+      "voiceId": null,
+      "volume": 127,
+      "notes": [],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": [
+        {
+          "id": "hit-1",
+          "tick": 0,
+          "sampleId": "kick"
+        },
+        {
+          "id": "hit-2",
+          "tick": 12,
+          "sampleId": "snare"
+        },
+        {
+          "id": "hit-3",
+          "tick": 24,
+          "sampleId": "kick"
+        },
+        {
+          "id": "hit-4",
+          "tick": 33,
+          "sampleId": "kick"
+        },
+        {
+          "id": "hit-5",
+          "tick": 36,
+          "sampleId": "snare"
+        }
+      ]
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip-a1",
+      "sequenceId": "seq-lead-a",
+      "lane": "FM1",
+      "startTick": 0,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-b1",
+      "sequenceId": "seq-lead-b",
+      "lane": "FM1",
+      "startTick": 96,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-a2",
+      "sequenceId": "seq-lead-a",
+      "lane": "FM1",
+      "startTick": 192,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-b2",
+      "sequenceId": "seq-lead-b",
+      "lane": "FM1",
+      "startTick": 288,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-bass",
+      "sequenceId": "seq-bass",
+      "lane": "FM3",
+      "startTick": 0,
+      "lengthTicks": 384
+    },
+    {
+      "id": "clip-answer1",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 48,
+      "lengthTicks": 48
+    },
+    {
+      "id": "clip-answer2",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 144,
+      "lengthTicks": 48
+    },
+    {
+      "id": "clip-answer3",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 240,
+      "lengthTicks": 144
+    },
+    {
+      "id": "clip-drums",
+      "sequenceId": "seq-drums",
+      "lane": "DAC",
+      "startTick": 0,
+      "lengthTicks": 384
+    }
+  ],
+  "envelopes": [
+    {
+      "id": "env-fireflies",
+      "name": "Firefly pluck",
+      "type": "PSG_VOLUME",
+      "bytes": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        15,
+        131
+      ]
+    },
+    {
+      "id": "env-shimmer",
+      "name": "Shimmer lift",
+      "type": "MODULATION",
+      "bytes": [
+        0,
+        1,
+        2,
+        3,
+        2,
+        1,
+        0,
+        128
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "id": "kick",
+      "name": "Soft kick",
+      "rate": 12,
+      "pcmBase64": "gImSmqOrsrrAx8zR1tnd3+Hi4uHg3tzY1dDLxsC6s6yknZWNhn52bmdgWVJLRUA7NjIuKyknJSUkJSYnKSwvMzc8QEZLUVdeZGtyeX+GjZSaoKassre8wMTIy87R0tTV1dXV1NPRz8zJxsK+ubWwqqWgmpSOiIJ9d3FrZmBbVlJNSUVBPjs5NjQzMjExMTEyMzU2OTs+QURITFBUWV1iZ2xxdnuAhYqPlJidoaaqrrG1uLu+wMLExsfIycnJycjIxsXEwsC9u7i1sa6rp6Ofm5eTjoqGgn15dXFtaWVhXVpXU1BOS0lHRUNBQD8+Pj09PT0+P0BBQ0RGSEpNT1JVV1teYWRoa29ydnp9gYSIi4+Slpmcn6KlqKqsr7Gztba4ubq7vLy9vb29vLy7urm4t7W0srCurKqnpaKgnZqXlJGOi4iFgn98eXZ0cW5raGZjYV9cWlhWVVNRUE9NTExLSkpJSUlJSUpKS0xMTU9QUVNUVldZW11fYWRmaGptb3J0d3l8foGDhYiKjY+RlJaYmpyeoKGjpaaoqaqrrK2ur7CwsLGxsbGxsbCwsK+ura2sq6mop6ako6GfnpyamJeVk5GPjYuJh4WDgH58enh2dXNxb21ramhmZWNiYV9eXVxbWllYWFdWVlVVVVVVVVVVVVVWVldXWFlZWltcXV5fYWJjZGZnaWpsbW9wcnN1d3h6fH1/gYKEhoeJioyNj5CSk5WWl5iZm5ydnp+goKGio6OkpKWlpaampqampqampqWlpaSko6OioaGgn56dnJuamZiXlpWUkpGQj42Mi4mIh4WEg4GAf318e3p4d3Z1c3JxcG9ubWxramloZ2ZmZWRjY2JiYWFhYGBgX19fX19fX19fX2BgYGFhYWJiY2NkZWVmZ2hoaWprbG1ubm9wcXJzdHZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGRkpOUlJWWlpeYmJmZmpqam5ubm5ycnJycnJycnJycnJycm5ubmpqamZmYmJeXlpaVlJSTk5KRkJCPjo2NjIuKiYiIh4aFhIOCgoGAf359fHx7enl4eHd2dXV0c3NycXFwb29ubm1tbGxra2tqamppaWlpaWhoaGhoaGhoaGhoaGhpaWlpaWpqamtra2xsbW1tbm5vb3BxcXJyc3N0dXV2d3d4eXl6e3t8fX1+f3+AgYGCg4OEhYWGh4eIiImKiouLjIyNjY6Oj4+QkJCRkZGSkpKSk5OTk5SUlJSUlJSUlJSUlJSUlJSUlJOTk5OTkpKSkpGRkZCQkI+Pjo6NjY2MjIuLioqJiYiIh4eGhoWEhIODgoKBgYCAf39+fX18fHt7enp5eXl4eHd3dnZ1dXV0dHRzc3NycnJycXFxcXBwcHBwcHBvb29vb29vb29vb29vb3BwcHBwcHBxcXFxcnJycnNzc3N0dHR1dXV2dnd3d3h4eHl5enp7e3t8fH19fn5+f3+AgIGBgYKCg4OEhISFhYWGhoeHh4iIiImJiYqKioqLi4uLjIyMjIyNjY2NjY2NjY6Ojo6Ojo6Ojo6Ojo6Ojo6OjY2NjY2NjY2MjIyMjIuLi4uKioqKiYmJiYiIiIeHh4aGhoaFhYWEhIODg4KCgoGBgYCAgH9/f35+fn19fXx8fHt7e3t6enp5eXl5eHh4eHh3d3d3d3Z2dnZ2dnZ1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXZ2dnZ2dnZ3d3d3d3d4eHh4eHl5eXl6enp6e3t7e3x8fHx9fX1+fn5+f39/f4CAgIGBgYGCgoKCg4ODg4SEhISFhYWFhYaGhoaGh4eHh4eHiIiIiIiIiIiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIiIiIiIiIh4eHh4eHh4aGhoaGhYWFhYWEhISEhIODg4ODgoKCgoGBgYGBgICAgH9/f39/fn5+fn59fX19fXx8fHx8fHt7e3t7e3p6enp6enp6enl5eXl5eXl5eXl5eXl5eXh4eHh4eHh4eHh4eXl5eXl5eXl5eXl5eXl5enp6enp6enp6e3t7e3t7e3x8fHx8fHx9fX19fX1+fn5+fn9/f39/f4CAgICAgIGBgYGBgYKCgoKCgoODg4ODg4OEhISEhISEhIWFhYWFhYWFhYWFhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhYWFhYWFhYWFhYWFhISEhISEhISEg4ODg4ODg4KCgoKCgoKCgYGBgYGBgYCAgICAgIB/f39/f39/fn5+fn5+fn5+fX19fX19fX19fHx8fHx8fHx8fHx8fHx7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7fHx8fHx8fHx8fHx8fHx8fX19fX19fX19fX5+fn5+fn5+fn5/f39/f39/f4CAgICAgICAgIGBgYGBgYGBgYGCgoKCgoKCgoKCgoODg4ODg4ODg4ODg4ODg4SEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEg4ODg4ODg4ODg4ODg4ODgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgICAgICAgICAgIB/f39/f39/f39/f39+fn5+fn5+fn5+fn5+fn5+fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX5+fn5+fn5+fn5+fn5+fn5+f39/f39/f39/f39/f3+AgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoODg4ODg4ODg4ODg4ODg4ODg4ODg4ODgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgYGBgYGBgYCAgICAgICAgICAgICAgICAf39/f39/f39/f39/f39/f39/f39/fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+f39/f39/f39/f39/f39/f39/f39/f39/gICAgICAgICAgICAgICAgICAgICAgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYCAgICAgICAgICAgICAgICAgICAgICAgICAgIB/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgH9/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGAgICAgICAgICAgICAgA=="
+    },
+    {
+      "id": "snare",
+      "name": "Brush snare",
+      "rate": 12,
+      "pcmBase64": "rEyZfJOChazDbL2rmbbAt5zIwZpvgHqHymKwlnCgdWGTkp1ufZmXTWdGMjuDWFCNjZlANjVdjJR9ln1KQ01Sj4aNgJ+Vo4GVW8SMc7JzfXhmjo2UqLuAbbyRspCwWGKnT4N2loR+gT5wX3VLT1WZbUmFlmFSS1SCZqKDW4JsWnWLsoWitod9oKtrnnqQqYSumpGUt3tvgI+afJesm4RwfKR0eodmbHSMfGGYhXJcXF5RaXVzbpRdZlCKYGdqkHKdXYyehpasj3mnfJCnj5mKr513q4Gym62dqXmfl5qdZW6kjmFtgIKWUl5iepOTa4hje1R2gW6NjXthcIZteohgjnKDY295lIdzi59weI2Ah62Ep66ciZyYb22RjZ5wmmeafXOFe21gbllqjlxzdZCIf3dxfH1peF1caGCSkYCIjXJ+mGh0cJJ2dIuPhoR4mZaQf35yjXlzoX6MfH2Lj4R7lpCUf3dokpCCaYyCY29vfHh8c2KDcm9/eXVrjYSJh3h8hXuIlHKAi4aSgnqUhH+gd4OQl5OCd4CDcoOPknt/e4dra4iIjnZwdoWEcmqMY3tyi29/bHp0amtscHhtgG96i29xdHOAj3OYkot4kZWZhI98j4eWeIp2kJR+lYN2k4h3fW2Ch3eJhIN+eXiCfG55d2xwaG94hnBwfHJ6fHRwj4OBe3eMjouGlHiPgYt3lX2UfpR4k5R9lICCi42JfYKPhIOHin1ze4l8e3V2eXduc25wdHJufX+Idn5wb4l3dH2IjY6Bg3yBjniIi5KJjpF6kIF9fY2Bkn2MkH53eIqNioV9hYR0gX17coN2goR8hYBxgXqAhHh+gHl0hIKHh3V+g3p9h3iCjYSJeX5+joZ8hYeMhXqJh4iMjox8gIGKiH96dn2IgHSCdn50dXh9gHt+g3NzgHl5gYV/eISDdn2BfYaChXh9fH99h4J8g4qLgoGHioV9iId7hISEfHuHhnx9iYKBgYWAgXh8gXaCfYB6g3+AfIB4fnx8doSFhoOGe3mAeXp8gH6FiHyEiIiChIGGfX+DhYWEf3yHiIOGf4J8gYeBgYJ/gnyFgX96eH56doOAgH19fYR/gIF8d3h6foR/e4Z+gYKEfn5/hn2HhoV9iH2GgoOFgoSDiICCf4KEfIJ9fnuAe3+AgIKAeYJ7fXx9fIOCg3+AgIOCfnuBgn+Ff4OBfn59f36EgX9/hIGChoeDhoaHh4SCg4OAg4GGgYCDgn6Bg4KBfYN9f3t8gX+Aen15gH56enyAgHyCgH2DgHt8g4CAg3+Ff4KGhYZ/gIKEgYKDfoSEg3+Efn2Afn6AfoOBgYB8fXt8fIF8gnx7fYJ+gH+BgICAf3uBe36AfoJ/f398g32Af4B/f4GAgH5/g4OFgIV/g4KCf3+BfoR9gICDgIN/foCCgX+Be4GBe3t/gHt9foF/e36Af39/gH+Cgn5+f4F/gIF/gYOCgIGEfoF/goKBg4OAgH6Ag4ODf35/gIJ/fX+CgIB9gH9+f32Afn5+gYB+f4B/gYF+gIF+fX5/fn+AfoN/gICAgYB/gIKCg4CBf3+EgoCAg4GDgoN+goKBf4CCf4J9gX5+fn2AgH9/fX5/gX99f4CAf3+Bf4J/f35+goJ/gX+CgoB/g4KBgoOBgICBgoCCg4CAgH+Af3+Cf4CCf4KBf4F/gX+AfX5/gX5+fX2Afn+AgH5+gIF+gX9/goB/goCAf4GBgIGAg4CCf4GAgYKCgIGBgH+BgX+AfoB+gH+Bfn6Bf39/fn+BgIGAgICAfoB/gH6AgH+Bf4B/gX+CgX+BgoGAgIF/f4F/goGBgIGBgYGBgoCAgoF/gIB/gX5/gH9+gX+AgYCBf3+Afn6AgH6Af4B/gYGBgIGAgYB/f4GAgIKCgICAgICBgIGBgoGAf3+BgH+AgIGAgIB/gYCAgIGAgH9+gH+Af36AgH+Bfn9/f4GAgICAgH+Af4F/gICBgIGBgICAgYCBgX+BgYGAgIGAgIGBgICAgICBgICAf3+BgYB/gH9/gICAgICAgH+AgH9/f3+AgIB/gYCAgIGBgYCBgYGBgIGBgYGBgYCAgICAgICBgYB/gICAgX+BgICAf4CAgH+AgH9/f4CAgIB/gH+AgIB/gICAgH+AgICAgYGAgICAgYCAgYGAgICAgICAgIGAgIGAgYGAf4F/gICAgICAgICAf39/gH+AgICAgICAgH+AgICAgH+AgYCBgICBgICBgYCAgYCAgYGAgICAgICBgICBgICBgYCAgICBgICAgICAgICAf3+AgIB/gICAf4CAf4CAf4CAf4CAgICAgICAgIGAgICAgIGAgIGAgIGBgICAgIGAgICAgICAgICAf4CAf39/f3+AgICAgICAgICAf4B/gICAgICAgICAgICAgIGBgICAgICAgICAgICAgICAgYCAgYCAgICAgICAgICAgICAgICAgICAgICA"
+    }
+  ]
+}

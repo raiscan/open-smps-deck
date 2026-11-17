@@ -26,8 +26,8 @@ Playback uses the unchanged OpenGGF snapshot pinned by
 | PSG noise | Not represented in v2 | Existing raw binary `F3` remains accepted | Missing | PSG noise/reset implemented |
 | PSG and modulation envelopes | v3 typed assets and stable source references; bounded profile below | Resolved F5/F4 tables installed before sequencer creation; native resource package | Asset CRUD/raw bytes, source assignments and editor links | Setters and F1/F4/F5; remaining semantic limits below |
 | FM volume envelope and SSG-EG | Missing | `FF05/06` rejected | Missing | Handlers present; FM volume envelope uses PSG-envelope map |
-| DAC samples, mappings and rates | Missing DAC source/lane and asset package | DAC slot must stop; renderer supplies empty `DacData` | Missing | PCM bytes plus note-to-sample/rate map; base cycles 297 |
-| FM6 and DAC/FM6 ownership | Missing | At most stopped DAC + five FM slots | Missing lane | Seven-entry channel map available; DAC shares physical FM6 |
+| DAC samples, mappings and rates | V4 native PCM assets and linked one-shot hits on DAC | Finite first-slot DAC stream, native sample/rate mapping, tail-aware rendering and ZIP | Sample library, WAV/PCM import, rate/waveform and DAC hit grid | Unsigned PCM via `DacData`, base cycles 297 |
+| FM6 and DAC/FM6 ownership | Dedicated DAC lane, FM6 switching pending | DAC + five FM slots | DAC lane | DAC shares physical FM6 |
 | FM3 special/raw-frequency data | Missing representation | `FD/FE` rejected | Missing | Raw frequency handler exists; `FE` retains state only |
 | Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | Missing native stream/gate model | Raw `E7/E8` accepted; compiler generates its own holds; zero duration rejected | Missing | Behavior is stateful and is not equivalent to MIDI note lengths |
 | Native jumps, calls, returns and counted loops | Source reuse currently expanded inline | Pointers rejected | Missing graph/stream view | `F6/F7/F8/F9`; stack and zero-count limitations below |
@@ -40,10 +40,11 @@ Playback uses the unchanged OpenGGF snapshot pinned by
 
 Version 1 remains readable/writable with its original field set and compilation.
 Version 2 adds ordered command events and repeat state. Version 3 adds typed envelope
-assets and stable source assignments. Voice-only editing preserves the source version.
+assets and stable source assignments. Version 4 adds DAC samples and one-shot
+triggers in the first native track slot. Voice-only editing preserves the source version.
 Unknown fields, commands,
 bad operands and unsupported resources are errors; opening a document does not
-rewrite or upgrade it. A v3 document is still not a lossless native S3K program.
+rewrite or upgrade it. A v4 document is still not a lossless native S3K program.
 
 ## Delivered command catalogue
 
@@ -84,7 +85,7 @@ stops, `E7/E8`, local `EF`, PSG `F3`, and the accepted single-byte commands).
 Accepting these raw inputs does not make them editable project features. Four-byte `F0`, zero-byte `FA` and resolved one-byte `F4/F5` are supported.
 Byte-only input rejects nonzero unresolved resources; the resource-aware path validates
 every declaration, even unused ones. Unknown/meta commands,
-pointers, DAC triggers, missing operands and unresolved resources still fail
+pointers, unmapped DAC triggers, missing operands and unresolved resources still fail
 before PCM output.
 
 ## Delivered voice and envelope assets
@@ -108,6 +109,16 @@ makes validation necessary before injection. See the
 [native package contract](native-asset-package.md) for every exported resource,
 hash, stable ID/native index and engine adapter boundary. The archive does not
 have an OpenGGF loader yet and does not establish arbitrary-track export support.
+
+## Delivered DAC playback
+
+The single DAC lane compiles one-shot hits to the first S3K header slot.
+Triggers select unsigned 8-bit mono PCM using a custom note map. The current
+asset package covers one rate byte per asset at native base cycles 297, with
+rate 0 retaining its loop wrap. Rest units leave the current sample playing.
+A later hit replaces it. Final stop includes a conservative playback bound
+for the last included hit. The pinned driver supports fixed stereo DAC in
+this workflow. Direct DAC pan/control flags and FM6 switching remain open.
 
 ## Pinned engine limits and native compatibility candidates
 
@@ -151,10 +162,10 @@ claim that this editor has independently certified arbitrary native-console audi
 ## Remaining sequence before import
 
 1. Extend the delivered native local-voice editor and bounded envelope package to
-   shared/global/cross-song voices and DAC PCM, mappings and rates. Resolve every
+   shared/global/cross-song voices and any remaining DAC resource types. Resolve every
    reference before rendering and export the complete dependency set. Complete
    native envelope semantics beyond the current profile, including negative offsets.
-2. Add DAC and FM6 with deliberate shared-channel ownership, PSG noise, FM volume
+2. Add FM6 with deliberate DAC ownership switching and native DAC flags, PSG noise, FM volume
    envelopes and SSG-EG. Verify sound and chip writes, including interactions.
 3. Design the native stream/gate and control-flow representation: attack versus
    HOLD, fill, raw frequency, initial state, labels, calls, counted/conditional

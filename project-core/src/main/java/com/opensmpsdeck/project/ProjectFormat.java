@@ -36,12 +36,14 @@ public final class ProjectFormat {
             if(!tree.isJsonObject()) throw invalid("project","must be an object");
             if(!tree.getAsJsonObject().has("formatVersion")) throw invalid("project.formatVersion","required field is missing");
             int version=integer(tree.getAsJsonObject(),"formatVersion");
-            if(version<1 || version>3) throw invalid("formatVersion", "only versions 1, 2 and 3 are supported");
-            JsonObject o = version==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
+            if(version<1 || version>4) throw invalid("formatVersion", "only versions 1, 2, 3 and 4 are supported");
+            JsonObject o = version==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
+                    : version==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
                     : object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips");
             StudioProject project = new StudioProject(version,string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),integer(o,"tempo"),
                     list(o,"voices",ProjectFormat::voice),list(o,"sequences",e->sequence(e,version)),list(o,"clips",ProjectFormat::clip),
-                    version==3?list(o,"envelopes",ProjectFormat::envelope):List.of());
+                    version>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
+                    version==4?list(o,"samples",ProjectFormat::sample):List.of());
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -71,8 +73,15 @@ public final class ProjectFormat {
                 }
                 x.add("commands",commands); x.addProperty("repeatState",s.repeatState());
             }
-            if(project.formatVersion()==3) {
+            if(project.formatVersion()>=3) {
                 x.addProperty("psgEnvelopeId",s.psgEnvelopeId());x.addProperty("modulationEnvelopeId",s.modulationEnvelopeId());
+            }
+            if(project.formatVersion()==4) {
+                JsonArray triggers=new JsonArray();
+                for(SampleTrigger trigger:s.triggers()) {
+                    JsonObject y=new JsonObject();y.addProperty("id",trigger.id());y.addProperty("tick",trigger.tick());y.addProperty("sampleId",trigger.sampleId());triggers.add(y);
+                }
+                x.add("triggers",triggers);
             }
             sequences.add(x);
         }
@@ -80,7 +89,7 @@ public final class ProjectFormat {
         JsonArray clips = new JsonArray();
         for (Clip c : project.clips()) { JsonObject x=new JsonObject(); x.addProperty("id",c.id()); x.addProperty("sequenceId",c.sequenceId()); x.addProperty("lane",c.lane()); x.addProperty("startTick",c.startTick()); x.addProperty("lengthTicks",c.lengthTicks()); clips.add(x); }
         o.add("clips",clips);
-        if(project.formatVersion()==3) {
+        if(project.formatVersion()>=3) {
             JsonArray envelopes=new JsonArray();
             for(Envelope envelope:project.envelopes()) {
                 JsonObject x=new JsonObject();x.addProperty("id",envelope.id());x.addProperty("name",envelope.name());x.addProperty("type",envelope.type());
@@ -88,12 +97,19 @@ public final class ProjectFormat {
             }
             o.add("envelopes",envelopes);
         }
+        if(project.formatVersion()==4) {
+            JsonArray samples=new JsonArray();
+            for(DacSample sample:project.samples()) {
+                JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());x.addProperty("pcmBase64",sample.pcmBase64());samples.add(x);
+            }
+            o.add("samples",samples);
+        }
         return GSON.toJson(o) + "\n";
     }
 
     public static void validate(StudioProject project) {
         if (project == null) throw invalid("project", "document is required");
-        if (project.formatVersion()<1 || project.formatVersion()>3) throw invalid("formatVersion", "only versions 1, 2 and 3 are supported");
+        if (project.formatVersion()<1 || project.formatVersion()>4) throw invalid("formatVersion", "only versions 1, 2, 3 and 4 are supported");
         text(project.name(),"name");
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
@@ -115,14 +131,31 @@ public final class ProjectFormat {
         }
         if(psgCount>255) throw invalid("envelopes","at most 255 PSG volume envelopes can be addressed");
         if(modulationCount>127) throw invalid("envelopes","at most 127 modulation envelopes can be addressed; index 128 is reserved for custom modulation");
+        if(project.formatVersion()<4 && !project.samples().isEmpty()) throw invalid("samples","DAC samples require formatVersion 4");
+        DacSample.validateAll(project.samples());
+        Map<String,DacSample> samples=unique(project.samples(),DacSample::id,"samples");
         Map<String,Sequence> sequences = unique(project.sequences(), Sequence::id, "sequences");
         for (Sequence s : project.sequences()) {
             String at="sequence '"+s.id()+"'"; text(s.name(),at+".name");
-            if (!"FM".equals(s.type()) && !"PSG".equals(s.type())) throw invalid(at+".type","use FM or PSG; DAC, groups and raw commands are not supported");
+            if (!"FM".equals(s.type()) && !"PSG".equals(s.type()) && !"DAC".equals(s.type())) throw invalid(at+".type","use FM, PSG or DAC; groups and raw commands are not supported");
+            if(project.formatVersion()<4 && ("DAC".equals(s.type()) || !s.triggers().isEmpty())) throw invalid(at,"DAC sources and sample triggers require formatVersion 4");
             range(s.lengthTicks(),1,Integer.MAX_VALUE,at+".lengthTicks"); range(s.volume(),0,127,at+".volume");
             if(!"RESET".equals(s.repeatState()) && !"CARRY".equals(s.repeatState())) throw invalid(at+".repeatState","use RESET or CARRY");
             if(project.formatVersion()==1 && (!s.commands().isEmpty() || !"RESET".equals(s.repeatState()))) throw invalid(at,"commands and repeat-state changes require formatVersion 2");
             if(project.formatVersion()<3 && (s.psgEnvelopeId()!=null || s.modulationEnvelopeId()!=null)) throw invalid(at,"envelope references require formatVersion 3");
+            if(s.type().equals("DAC")) {
+                if(s.voiceId()!=null || s.volume()!=127 || !s.notes().isEmpty() || !s.commands().isEmpty()
+                        || s.psgEnvelopeId()!=null || s.modulationEnvelopeId()!=null || !"RESET".equals(s.repeatState()))
+                    throw invalid(at,"DAC sources require voiceId null, volume 127, empty notes/commands, null envelope references and repeatState RESET");
+            } else if(!s.triggers().isEmpty()) throw invalid(at+".triggers","only DAC sources can contain sample triggers");
+            unique(s.triggers(),SampleTrigger::id,at+".triggers");
+            Set<Integer> triggerTicks=new HashSet<>();
+            for(SampleTrigger trigger:s.triggers()) {
+                String event=at+" trigger '"+trigger.id()+"'";
+                range(trigger.tick(),0,s.lengthTicks()-1,event+".tick");
+                if(!triggerTicks.add(trigger.tick())) throw invalid(event+".tick","another sample trigger already uses tick "+trigger.tick());
+                if(!samples.containsKey(trigger.sampleId())) throw invalid(event+".sampleId","undefined sample '"+trigger.sampleId()+"'");
+            }
             if(s.psgEnvelopeId()!=null) {
                 if(!s.type().equals("PSG")) throw invalid(at+".psgEnvelopeId","PSG volume envelopes require a PSG source");
                 envelopeReference(envelopes,s.psgEnvelopeId(),Envelope.PSG_VOLUME,at+".psgEnvelopeId");
@@ -130,7 +163,7 @@ public final class ProjectFormat {
             if(s.modulationEnvelopeId()!=null) envelopeReference(envelopes,s.modulationEnvelopeId(),Envelope.MODULATION,at+".modulationEnvelopeId");
             if (s.type().equals("FM")) {
                 if (!voices.containsKey(s.voiceId())) throw invalid(at+".voiceId","undefined FM voice '"+s.voiceId()+"'");
-            } else if (s.voiceId()!=null) throw invalid(at+".voiceId","PSG must use null; use psgEnvelopeId for a volume envelope");
+            } else if (s.voiceId()!=null) throw invalid(at+".voiceId",s.type()+" must use null; PSG uses psgEnvelopeId for a volume envelope");
             unique(s.notes(),NoteEvent::id,at+".notes");
             List<NoteEvent> sorted=s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList();
             long end=0;
@@ -163,7 +196,7 @@ public final class ProjectFormat {
             String at="clip '"+c.id()+"'";
             Sequence s=sequences.get(c.sequenceId());
             if (s==null) throw invalid(at+".sequenceId","undefined sequence '"+c.sequenceId()+"'");
-            if (c.lane()==null || !c.lane().matches("FM[1-5]|PSG[1-3]")) throw invalid(at+".lane","use FM1..FM5 or PSG1..PSG3; DAC/FM6 are not supported");
+            if (c.lane()==null || !c.lane().matches("FM[1-5]|PSG[1-3]|DAC")) throw invalid(at+".lane","use FM1..FM5, PSG1..PSG3 or DAC; explicit FM6 is not supported");
             if (!c.lane().startsWith(s.type())) throw invalid(at+".lane","lane type must match sequence type "+s.type());
             range(c.startTick(),0,Integer.MAX_VALUE,at+".startTick"); range(c.lengthTicks(),1,Integer.MAX_VALUE,at+".lengthTicks");
             if ((long)c.startTick()+c.lengthTicks()>Integer.MAX_VALUE) throw invalid(at,"end tick exceeds integer timeline range");
@@ -183,6 +216,14 @@ public final class ProjectFormat {
         JsonObject o=object(e,"envelope","id","name","type","bytes");
         return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),list(o,"bytes",x->integer(x,"envelope.bytes[]")));
     }
+    private static DacSample sample(JsonElement e) {
+        JsonObject o=object(e,"sample","id","name","rate","pcmBase64");
+        return new DacSample(string(o,"id"),string(o,"name"),integer(o,"rate"),string(o,"pcmBase64"));
+    }
+    private static SampleTrigger trigger(JsonElement e) {
+        JsonObject o=object(e,"trigger","id","tick","sampleId");
+        return new SampleTrigger(string(o,"id"),integer(o,"tick"),string(o,"sampleId"));
+    }
     private static void envelopeReference(Map<String,Envelope> envelopes,String id,String type,String at) {
         Envelope envelope=envelopes.get(id);
         if(envelope==null) throw invalid(at,"undefined envelope '"+id+"'");
@@ -191,11 +232,13 @@ public final class ProjectFormat {
     private static Sequence sequence(JsonElement e,int version) {
         JsonObject o=version==1 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes")
                 : version==2 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState")
-                : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState","psgEnvelopeId","modulationEnvelopeId");
+                : version==3 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState","psgEnvelopeId","modulationEnvelopeId")
+                : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState","psgEnvelopeId","modulationEnvelopeId","triggers");
         String voice=o.get("voiceId").isJsonNull()?null:string(o,"voiceId");
         return new Sequence(string(o,"id"),string(o,"name"),string(o,"type"),integer(o,"lengthTicks"),voice,integer(o,"volume"),list(o,"notes",ProjectFormat::note),
                 version==1?List.of():list(o,"commands",ProjectFormat::command),version==1?"RESET":string(o,"repeatState"),
-                version==3?nullableString(o,"psgEnvelopeId"):null,version==3?nullableString(o,"modulationEnvelopeId"):null);
+                version>=3?nullableString(o,"psgEnvelopeId"):null,version>=3?nullableString(o,"modulationEnvelopeId"):null,
+                version==4?list(o,"triggers",ProjectFormat::trigger):List.of());
     }
     private static CommandEvent command(JsonElement e) {
         JsonObject o=object(e,"command","id","tick","command","arguments");

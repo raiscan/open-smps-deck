@@ -1,12 +1,12 @@
 package com.opensmpsdeck.studio;
 
-import com.opensmpsdeck.project.ProjectFiles;
-import com.opensmpsdeck.project.NativeCommand;
+import com.opensmpsdeck.project.*;
 import javafx.application.Platform;
 import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.image.WritableImage;
@@ -93,14 +93,36 @@ public final class DpiStudioSmoke {
             var savedAssets=ProjectFiles.load(Path.of(args[1])).project();
             check(savedAssets.voices().getFirst().name().equals("Scaled FM voice"),"native voice edit not saved: "+savedAssets.voices().getFirst().name());
             check(savedAssets.envelopes().size()==1,"native envelope edit not saved: "+savedAssets.envelopes().size()+" assets; dirty="+fx(()->window.document().dirty())+", "+fx(()->window.document().message()));
-            fx(()->{window.showCommands();layout();return null;});
-            fx(()->{((ScrollPane)window.commands.getCenter()).setVvalue(0);layout();return null;});
+            // Refresh with an agent-authored DAC source, then add a hit with the native pointer.
+            var dac=ProjectEdits.addSample(savedAssets,DacSample.of("kick","Kick",12,new byte[]{(byte)128,(byte)200,50}));
+            dac=ProjectEdits.addSequence(dac,new Sequence("drums","Drums","DAC",24,null,127,java.util.List.of()));
+            ProjectFiles.save(Path.of(args[1]),dac,ProjectFiles.load(Path.of(args[1])).revision());
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(fx(()->window.document().project().samples().isEmpty())&&System.nanoTime()<deadline) Thread.sleep(25);
+            check(fx(()->!window.document().project().samples().isEmpty()),"native DAC fixture did not refresh");
+            fx(()->{
+                ListView<?> browser=(ListView<?>)window.scene().lookup("#sequence-browser");
+                browser.getSelectionModel().select(browser.getItems().size()-1);
+                window.showNotes();layout();return null;
+            });pause();
+            Point2D hit=fx(()->{
+                var canvas=window.triggers.grid.canvas;
+                var viewport=window.triggers.grid.scroll.lookup(".viewport");
+                var point=canvas.localToScreen(DacTriggerPane.GUTTER+2,DacTriggerPane.HEADER+15);
+                check(viewport.localToScreen(viewport.getBoundsInLocal()).contains(point),"DAC sample row is outside its viewport");
+                return point;
+            });
+            click(hit);click(hit);
+            check(fx(()->window.document().project().sequences().getLast().triggers().size()==1),"native DAC double-click failed");
+            click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
+            awaitSaved();
+            check(ProjectFiles.load(Path.of(args[1])).project().sequences().getLast().triggers().getFirst().sampleId().equals("kick"),"native DAC hit not saved");
             fx(()->{
                 WritableImage image=stage.getScene().snapshot(null);BufferedImage png=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);
                 for(int y=0;y<png.getHeight();y++)for(int x=0;x<png.getWidth();x++)png.setRGB(x,y,image.getPixelReader().getArgb(x,y));
                 ImageIO.write(png,"png",Path.of(args[2]).toFile());return null;
             });
-            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip/note/command edits, voice Apply, envelope creation, Save and work-area bounds");
+            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip/note/command edits, voice Apply, envelope creation, DAC hit, Save and work-area bounds");
         } catch(Exception|AssertionError failure){
             fx(()->{WritableImage image=stage.getScene().snapshot(null);BufferedImage png=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);for(int y=0;y<png.getHeight();y++)for(int x=0;x<png.getWidth();x++)png.setRGB(x,y,image.getPixelReader().getArgb(x,y));ImageIO.write(png,"png",Path.of(args[2]+".failure.png").toFile());return null;});throw failure;
         } finally {fx(()->{if(window!=null)window.close();if(stage!=null)stage.close();Platform.exit();return null;});}

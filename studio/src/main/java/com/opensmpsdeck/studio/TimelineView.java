@@ -12,7 +12,7 @@ import java.util.function.*;
 /** Clip arrangement on positional hardware lanes; right-edge drag repeats source. */
 final class TimelineView extends ViewportCanvas {
     static final int GUTTER=104, RULER=40, ROW=52;
-    static final List<String> LANES=List.of("FM1","FM2","FM3","FM4","FM5","PSG1","PSG2","PSG3");
+    static final List<String> LANES=List.of("FM1","FM2","FM3","FM4","FM5","PSG1","PSG2","PSG3","DAC");
     StudioProject project;
     String selected;
     String selectedLane="FM1";
@@ -113,24 +113,33 @@ final class TimelineView extends ViewportCanvas {
         for(int row=0;row<LANES.size();row++) {
             g.setFill(Color.web(LANES.get(row).equals(selectedLane)?"#d8f7ee":"#94a6bc"));
             g.fillText(LANES.get(row),16,RULER+row*ROW+29);
-            g.setFill(Color.web(row<5?"#5cddbc":"#7daefb")); g.fillOval(78,RULER+row*ROW+21,5,5);
+            g.setFill(Color.web(row<5?"#5cddbc":LANES.get(row).equals("DAC")?"#e7ab69":"#7daefb"));
+            g.fillOval(78,RULER+row*ROW+21,5,5);
         }
-        g.setFill(Color.web("#77889d")); g.fillText("DAC / sample support follows",GUTTER+12,canvas.getHeight()-5);
     }
     private void drawClip(GraphicsContext g,Clip c) {
         Sequence source=sequence(c.sequenceId()); if(source==null) return;
         double x=GUTTER+c.startTick()*scale-offset, width=c.lengthTicks()*scale;
         double y=RULER+LANES.indexOf(c.lane())*ROW+6;
         if(x+width<GUTTER || x>canvas.getWidth()) return;
-        Color fill=Color.web(source.type().equals("FM")?"#245f58":"#284d79");
+        boolean dac=source.type().equals("DAC");
+        boolean fm=source.type().equals("FM");
+        Color fill=Color.web(dac?"#634731":fm?"#245f58":"#284d79");
         g.setFill(fill); g.fillRoundRect(x,y,width,ROW-12,7,7);
-        g.setStroke(Color.web(c.id().equals(selected)?"#d9fff0":source.type().equals("FM")?"#48bca1":"#6399db"));
+        g.setStroke(Color.web(c.id().equals(selected)?"#d9fff0":dac?"#e7ab69":fm?"#48bca1":"#6399db"));
         g.setLineWidth(c.id().equals(selected)?2:1); g.strokeRoundRect(x+1,y+1,width-2,ROW-14,6,6); g.setLineWidth(1);
         g.save(); g.beginPath(); g.rect(Math.max(GUTTER,x)+3,y+2,Math.max(0,Math.min(x+width,canvas.getWidth())-Math.max(GUTTER,x)-6),ROW-16); g.clip();
         int firstRepeat=Math.max(0,(int)((offset-GUTTER-c.startTick()*scale)/(source.lengthTicks()*scale)));
         for(int repeat=firstRepeat;repeat*source.lengthTicks()<c.lengthTicks();repeat++) {
             double origin=x+repeat*source.lengthTicks()*scale; if(origin>canvas.getWidth()) break;
             if(repeat>0) { g.setStroke(Color.web("#89d7cf",0.4)); g.strokeLine(origin,y+4,origin,y+ROW-16); }
+            if(dac){
+                g.setStroke(Color.web("#ffcf95"));
+                for(SampleTrigger trigger:source.triggers()){
+                    double hitX=origin+trigger.tick()*scale;
+                    if(hitX<x+width) g.strokeLine(hitX,y+23,hitX,y+33);
+                }
+            }
             for(NoteEvent note:source.notes()) {
                 double noteX=origin+note.tick()*scale;
                 if(noteX>=x+width) continue;

@@ -158,6 +158,40 @@ binary export refuse any declared envelope assets and direct you to
 native track bytes and raw resource bytes, with a manifest mapping IDs to native
 indices. See [the package contract](../docs/architecture/native-asset-package.md).
 
+## Version 4 DAC samples and hits
+
+Version 4 adds a required top-level `samples` array and a required `triggers`
+array on every source. Files left at v1–v3 compile as before. Adding a sample
+or a DAC source upgrades the file and uses the v3 reset and envelope rules
+for existing FM and PSG clips.
+
+```json
+"samples": [{"id": "kick", "name": "Kick", "rate": 12, "pcmBase64": "gNyAgA=="}]
+```
+
+PCM is unsigned 8-bit mono. Byte `80` hex is the midpoint, and the sample ends
+at the end of its byte array. Use standard padded base64. Each sample holds
+1–65,535 bytes, with up to 95 samples and 512 KiB of decoded PCM per project.
+The project file retains its 1 MiB UTF-8 limit. Rates are raw bytes in decimal
+0–255. Rate 1 is fastest, larger values slow playback, and 0 means 256 loops
+and is slowest. Rate 12 gives approximately 12.28 kHz on NTSC hardware.
+
+A source with `"type": "DAC"` uses null voice/envelope references,
+`"volume": 127`, `"repeatState": "RESET"`, and empty notes and commands.
+A hit is `{"id":"downbeat","tick":0,"sampleId":"kick"}`. Each hit starts one
+sample by stable ID. Hit ticks are unique within a DAC source, and other
+source types use an empty triggers array. Place DAC clips on the single
+`DAC` lane. Clip repetition duplicates hits and trimming removes hits beyond
+the clip edge. A new hit cuts the previous sample, while rests let it continue.
+The compiler delays the final stop to allow the last sample to play out.
+
+Sample definitions compile in list order to note bytes `81`–`DF` hex with
+an explicit note-to-sample/rate table. Bare binary export requires a project
+without declared sample or envelope assets. `compile-package` includes both
+types of resources and their mapping. See the
+[DAC example](../examples/dac-percussion.smps.json) and
+[package contract](../docs/architecture/native-asset-package.md).
+
 ## External editing and concurrency
 
 Write a complete UTF-8 sibling file, then atomically rename it over the project

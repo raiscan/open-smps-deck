@@ -2,13 +2,14 @@ package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.EnvelopeProgram;
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.DacSample;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 
-/** Finite native-bank boundary with explicitly supplied, bounded envelope tables. */
+/** Finite native-bank boundary with explicitly supplied envelope and DAC assets. */
 final class S3kBinary {
     static final int MAX_BYTES = 0x8000;
     private S3kBinary() {}
@@ -31,11 +32,17 @@ final class S3kBinary {
             if (envelope.type().equals("PSG_VOLUME") && ++psgCount > 255) fail("at most 255 PSG envelopes can be addressed");
             if (envelope.type().equals("MODULATION") && ++modulationCount > 127) fail("at most 127 modulation envelopes can be addressed");
         }
-        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes());
+        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes(), project.samples());
     }
 
     static byte[] validateAndCopy(byte[] input, Map<Integer, List<Integer>> psgEnvelopes,
                                  Map<Integer, List<Integer>> modulationEnvelopes) {
+        return validateAndCopy(input, psgEnvelopes, modulationEnvelopes, List.of());
+    }
+
+    private static byte[] validateAndCopy(byte[] input, Map<Integer, List<Integer>> psgEnvelopes,
+                                          Map<Integer, List<Integer>> modulationEnvelopes, List<DacSample> samples) {
+        DacSample.validateAll(samples);
         validateEnvelopes(psgEnvelopes, "PSG_VOLUME", 255);
         validateEnvelopes(modulationEnvelopes, "MODULATION", 127);
         if (input == null || input.length < 10) fail("truncated S3K header (at least one DAC slot required)");
@@ -68,17 +75,16 @@ final class S3kBinary {
         }
         for (Track track : tracks) {
             int end = boundaries.higher(track.pointer);
-            scan(data, track, end, voices, psgEnvelopes, modulationEnvelopes);
+            scan(data, track, end, voices, psgEnvelopes, modulationEnvelopes, samples.size());
         }
         return data;
     }
 
     private static void scan(byte[] data, Track track, int end, int voices,
                              Map<Integer, List<Integer>> psgEnvelopes,
-                             Map<Integer, List<Integer>> modulationEnvelopes) {
+                             Map<Integer, List<Integer>> modulationEnvelopes, int sampleCount) {
         if (track.dac) {
-            int first = u8(data, track.pointer);
-            if (first != 0xF2 && first != 0xE3) fail("DAC sample playback is unsupported; DAC slot must stop immediately");
+            scanDac(data, track.pointer, end, sampleCount);
             return;
         }
         int position = track.pointer;
@@ -110,6 +116,22 @@ final class S3kBinary {
             if (command == 0xF5) requireEnvelope(psgEnvelopes, operand, "PSG", at);
         }
         fail("track has no stop before its data boundary at " + hex(end));
+    }
+
+    private static void scanDac(byte[] data, int position, int end, int sampleCount) {
+        while (position < end) {
+            int at = position, note = u8(data, position++);
+            if (note == 0xF2 || note == 0xE3) return;
+            if (note < 0x80 || note >= 0xE0)
+                fail("unsupported DAC event " + hex(note) + " at " + hex(at)
+                        + "; use explicit notes/rests and durations, without replay, HOLD or commands");
+            if (note != 0x80 && note - DacSample.FIRST_NOTE >= sampleCount)
+                fail("undefined DAC sample for note " + hex(note) + " at " + hex(at) + "; provide the complete asset package");
+            if (position >= end) fail("truncated DAC duration at " + hex(at));
+            int duration = u8(data, position++);
+            if (duration < 1 || duration > 127) fail("DAC note/rest requires an explicit duration in 1..127 at " + hex(at));
+        }
+        fail("DAC track has no stop before its data boundary at " + hex(end));
     }
 
     private static void validateEnvelopes(Map<Integer, List<Integer>> envelopes, String type, int maximum) {
