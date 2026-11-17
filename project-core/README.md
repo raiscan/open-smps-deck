@@ -192,6 +192,15 @@ types of resources and their mapping. See the
 [DAC example](../examples/dac-percussion.smps.json) and
 [package contract](../docs/architecture/native-asset-package.md).
 
+## Version 5 native bank
+
+Native projects keep the complete S3K byte bank and header offset with
+explicit asset slots. They retain shared phrase addresses, local voice table
+locations, global voices, and exact DAC note/rate bindings. Studio opens these
+projects in its Native bank view. See the
+[v5 contract](../docs/architecture/native-bank-source.md) and
+[example](../examples/native-evening-clock.smps.json).
+
 ## External editing and concurrency
 
 Write a complete UTF-8 sibling file, then atomically rename it over the project
@@ -223,7 +232,7 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-projec
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package examples/voices-and-envelopes.smps.json /path/to/new-track.smps.zip
 ```
 
-Output files must not already exist. `render-project` defaults to 120
-presentations, a bounded preview; supply enough `--frames` for your song.
-Studio's interactive preview/WAV export computes a whole-song duration plus a
-one-second tail and caps it at 36,000 presentations (ten minutes).
+Output files must not already exist. For native projects, Studio and
+`render-project` use the stored preview frame count. For arrangements, the CLI
+defaults to 120 presentations or extends DAC projects for the last sample tail.
+Studio previews the full arrangement and tail, up to 36,000 presentations.

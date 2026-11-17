@@ -331,6 +331,41 @@ class StudioWindowTest {
         });
     }
 
+    @Test void nativeBankKeepsExactAddressesThroughEditUndoAndExternalRefresh() throws Exception {
+        byte[] bank={0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
+        NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());
+        StudioProject project=new StudioProject(5,"Native fixture","S3K",12,64,List.of(),List.of(),List.of(),List.of(),List.of(),program);
+        replace(ProjectFormat.write(project));
+        await(()->window.document().project().nativeProgram()!=null);
+        fx(()->{
+            layout();
+            assertNotNull(window.scene().lookup("#native-program-tabs"));
+            assertEquals(1,((TableView<?>)window.scene().lookup("#native-events")).getItems().size());
+            TextArea raw=(TextArea)window.scene().lookup("#native-bank-bytes");
+            raw.setText(raw.getText().replace("40","50"));
+            button("apply-native-bank").fire();
+            assertEquals(80,window.document().project().tempo());
+            key(window.scene().getRoot(),KeyCode.Z,true);
+            assertArrayEquals(bank,window.document().project().nativeProgram().bank());
+            raw.setText(raw.getText().replace("40","60"));
+            window.document().save();
+            return null;
+        });
+        byte[] newer=bank.clone();
+        newer[5]=70;
+        replace(ProjectFormat.write(ProjectEdits.setNativeProgram(project,program.withBank(newer))));
+        await(()->window.document().project().tempo()==70);
+        fx(()->{
+            assertTrue(((TextArea)window.scene().lookup("#native-bank-bytes")).getText().contains("60"));
+            button("apply-native-bank").fire();
+            assertArrayEquals(newer,window.document().project().nativeProgram().bank());
+            button("reload-native-bank").fire();
+            assertTrue(((TextArea)window.scene().lookup("#native-bank-bytes")).getText().contains("46"));
+            snapshot(".native-bank.png");
+            return null;
+        });
+    }
+
     private void snapshot(String suffix)throws Exception{
         String target=System.getProperty("studio.snapshot");if(target==null)return;
         layout();ImageIO.write(SwingFXUtils.fromFXImage(window.scene().snapshot(null),null),"png",Path.of(target+suffix).toFile());

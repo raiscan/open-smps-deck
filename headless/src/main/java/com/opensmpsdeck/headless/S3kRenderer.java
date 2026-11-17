@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.NativeProgram;
 import com.openggf.audio.MusicRestoreSink;
 import com.openggf.audio.driver.SmpsDriver;
 import com.openggf.audio.rewind.SmpsDriverSnapshot;
@@ -15,6 +16,7 @@ import com.openggf.game.sonic3k.audio.Sonic3kSmpsPhysicalPolicy;
 import com.openggf.game.sonic3k.audio.Sonic3kSmpsSequencerConfig;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsData;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.List;
 import java.util.HashMap;
@@ -61,14 +63,16 @@ public final class S3kRenderer {
         Objects.requireNonNull(sink, "sink");
         Objects.requireNonNull(observer, "observer");
         Objects.requireNonNull(project, "project");
-        byte[] bytes = S3kBinary.validateAndCopy(project);
+        var nativeProgram = project.nativeProgram();
+        var data = nativeProgram == null
+                ? new Sonic3kSmpsData(S3kBinary.validateAndCopy(project), 0)
+                : new NativeBankData(project, S3kBinary.inspectNative(project));
         Map<Integer, List<Integer>> psg = project.psgEnvelopes(), mod = project.modulationEnvelopes();
-        var data = new Sonic3kSmpsData(bytes, 0);
         // The pinned setters retain their inputs. These arrays belong only to
         // this render and are installed before any sequencer state is captured.
         data.setPsgEnvelopes(nativeEnvelopes(psg));
         data.setModEnvelopes(nativeEnvelopes(mod));
-        var dac = nativeDac(project.samples());
+        var dac = nativeDac(project.samples(), nativeProgram);
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
         var source = SmpsSourceDescriptor.from(data);
         MusicRestoreSink restore = () -> { throw new IllegalStateException("music restoration is outside the standalone proof"); };
@@ -108,17 +112,72 @@ public final class S3kRenderer {
         return Map.copyOf(owned);
     }
 
-    private static DacData nativeDac(List<DacSample> declarations) {
+    private static DacData nativeDac(List<DacSample> declarations, NativeProgram nativeProgram) {
         Map<Integer, byte[]> samples = new HashMap<>();
         Map<Integer, DacData.DacEntry> mapping = new HashMap<>();
+        Map<String, Integer> sampleIndices = new HashMap<>();
         for (int index = 0; index < declarations.size(); index++) {
             DacSample sample = declarations.get(index);
             samples.put(index, sample.pcm());
-            mapping.put(DacSample.FIRST_NOTE + index, new DacData.DacEntry(index, sample.rate()));
+            if (nativeProgram == null) {
+                mapping.put(DacSample.FIRST_NOTE + index, new DacData.DacEntry(index, sample.rate()));
+            } else {
+                sampleIndices.put(sample.id(), index);
+            }
+        }
+        if (nativeProgram != null) {
+            for (var slot : nativeProgram.dacSlots()) {
+                mapping.put(slot.note(), new DacData.DacEntry(sampleIndices.get(slot.sampleId()), slot.rate()));
+            }
         }
         // DacData takes another private copy. The same immutable dependency is
         // supplied both to logical sequencing and production physical activation.
         return new DacData(samples, mapping, DacSample.BASE_CYCLES);
+    }
+
+    private static final class NativeBankData extends Sonic3kSmpsData {
+        private static final int VOICE_BYTES = 25;
+        private final byte[] bank;
+        private final byte[] globalVoices;
+        private final int voiceOffset;
+        private final int localVoiceCount;
+        private final int globalVoiceOffset;
+
+        NativeBankData(CompiledProject project, NativeBankAnalysis.Analysis analysis) {
+            super(analysis.header(), analysis.headerAddress());
+            bank = analysis.bank();
+            setBankData(bank, project.nativeProgram().bankBase());
+            voiceOffset = analysis.voiceOffset();
+            localVoiceCount = analysis.localVoiceCount();
+            globalVoiceOffset = analysis.globalVoiceOffset();
+            globalVoices = new byte[project.globalVoices().size() * VOICE_BYTES];
+            int at = 0;
+            for (var voice : project.globalVoices()) {
+                for (int value : voice.bytes()) globalVoices[at++] = (byte) value;
+            }
+            setGlobalVoiceData(globalVoices);
+        }
+
+        @Override
+        public int fmPointerCount() {
+            // The retail loader overwrites a declared seventh DAC/FM slot
+            // when it initializes PSG1. Keep its header bytes for export.
+            return Math.min(super.fmPointerCount(), 6);
+        }
+
+        @Override
+        public byte[] getVoice(int voiceId) {
+            if (voiceId < 0 || voiceId >= 128) return null;
+            if (voiceOffset >= 0) {
+                if (voiceId >= localVoiceCount) return null;
+                int offset = voiceOffset + voiceId * VOICE_BYTES;
+                return Arrays.copyOfRange(bank, offset, offset + VOICE_BYTES);
+            }
+            if (globalVoiceOffset < 0) return null;
+            int offset = (globalVoiceOffset + voiceId) * VOICE_BYTES;
+            return offset + VOICE_BYTES <= globalVoices.length
+                    ? Arrays.copyOfRange(globalVoices, offset, offset + VOICE_BYTES) : null;
+        }
     }
 
     static void validatePresentations(int presentations) {

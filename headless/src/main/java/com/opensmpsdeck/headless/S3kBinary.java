@@ -20,10 +20,20 @@ final class S3kBinary {
 
     static byte[] validateAndCopy(CompiledProject project) {
         if (project == null) fail("compiled project is required");
+        if (project.nativeProgram() != null) return inspectNative(project).bank();
+        validateEnvelopeDeclarations(project);
+        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes(), project.samples());
+    }
+
+    static NativeBankAnalysis.Analysis inspectNative(CompiledProject project) {
+        return NativeBankAnalysis.inspect(project);
+    }
+
+    private static void validateEnvelopeDeclarations(CompiledProject project) {
         var ids = new HashSet<String>();
         int psgCount = 0, modulationCount = 0;
         // CompiledProject is also a public raw-input carrier. Validate every
-        // declaration, including unreferenced kinds that map accessors omit.
+        // declaration, including unreferenced assets.
         for (var envelope : project.envelopes()) {
             if (envelope.id() == null || envelope.id().isBlank() || !ids.add(envelope.id()))
                 fail("envelope IDs must be nonblank and unique");
@@ -32,7 +42,6 @@ final class S3kBinary {
             if (envelope.type().equals("PSG_VOLUME") && ++psgCount > 255) fail("at most 255 PSG envelopes can be addressed");
             if (envelope.type().equals("MODULATION") && ++modulationCount > 127) fail("at most 127 modulation envelopes can be addressed");
         }
-        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes(), project.samples());
     }
 
     static byte[] validateAndCopy(byte[] input, Map<Integer, List<Integer>> psgEnvelopes,

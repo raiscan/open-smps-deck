@@ -56,8 +56,30 @@ bytes, with a numeric ordinal in the filename. All declared samples are
 included after the envelope resources, including unreferenced ones.
 Projects without DAC sample declarations retain schema version 1.
 
+## Schema version 3
+
+Version 5 projects use schema 3. The `track.bin` entry contains the entire
+addressed bank. The manifest records `bankBase`, `headerOffset`,
+`localVoiceCount` and `previewFrames`. The header address is
+`bankBase + headerOffset`. Embedded voices stay at their recorded addresses.
+The optional `globalVoices` entry references `voices/global.bin` with a hash
+and ordered `voices` index list. Each entry occupies 25 bytes.
+
+- `envelopes` lists hashed files under `psg/asset-NNN.bin` or
+  `mod/asset-NNN.bin`, with asset IDs and kinds. `envelopeBindings` is the list
+  of `assetId` and numeric `slot` pairs in each matching kind's namespace.
+- `dac.samples` lists hashed PCM and the asset's default rate.
+  `dac.bindings` maps each exact `note` to a `sampleId` and an authoritative
+  playback `rate`. A sample can appear in multiple bindings.
+
+Schema 3 validates source structure and resolved declared asset IDs before
+writing. The [native playback preflight](native-bank-source.md) checks reached
+instructions and resources separately. An archive can preserve programs whose
+playback requires a newer driver or runtime context.
+
 ZIP entries are UTF-8, stored without compression, and have fixed timestamps.
-Entry order is track, source, manifest, then envelope resources and DAC samples in source order.
+Entry order is track, source, manifest, optional global voices, then envelope
+resources and DAC samples in source order.
 Identical source produces identical archive bytes. Validation, compilation,
 resource resolution and source-size checks precede file creation. Export uses
 CREATE_NEW; an existing output or symlink is never overwritten. Failure or
@@ -84,6 +106,11 @@ For DAC playback, construct `DacData` with the PCM indexed by sample ID, the
 native-note map to `DacData.DacEntry(sampleId, rate)`, and base cycles 297.
 Use this same object in the sequencer and session's `SmpsDacSelection`.
 
+For schema 3, construct from the header bytes at the recorded header address
+and supply the full bank at `bankBase` using `setBankData`. The renderer's
+native adapter enforces local/global voice boundaries and installs the exact
+slot and note bindings.
+
 The project compiler emits F5/F4 assignments at v3 source resets; its notes and
 commands refer to the corresponding native indices. No resource conversion is
 needed. This repository does not yet provide an archive reader or an OpenGGF
@@ -92,11 +119,9 @@ in-engine ZIP loader, so existing-song importing is unaffected.
 ## Current resource boundary
 
 The [project format](../../project-core/README.md) defines the bounded renderable
-envelope profile. Every asset, including unused declarations, must validate.
-Control-only reset cycles, unsupported envelope commands, unknown kinds, missing
-references and reserved modulation indices fail before PCM or output creation.
+envelope profile. Control-only reset cycles, unsupported envelope commands,
+unknown kinds, missing references and reserved modulation indices fail before
+PCM. Schema 3 preserves structurally valid envelope bytes outside this profile.
 
-FM6 ownership switching, DAC coordination commands, banked/shared/global voices, full envelope control
-semantics and cross-song dependencies remain tracked in the
-[S3K support matrix](s3k-support.md). The archive is dependency-complete for this
-slice's supported local voices, envelope profiles and DAC samples, not arbitrary S3K tracks.
+The [S3K support matrix](s3k-support.md) tracks the remaining playback and
+dependency gaps, including cross-song voices and game runtime context.

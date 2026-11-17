@@ -15,6 +15,7 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo /path/to
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render /path/to/song.bin /path/to/song.wav --frames 120
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project /path/to/project.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project /path/to/project.json
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project examples/native-evening-clock.smps.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project /path/to/project.json /path/to/project.bin
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package /path/to/project.json /path/to/project.smps.zip
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project /path/to/project.json /path/to/project.wav --frames 120
@@ -26,7 +27,7 @@ lanes and compiler limits, then reports the project name, sequence/clip counts
 and compiled byte count. `compile-project` exports finite standalone S3K bytes.
 `render-project` compiles the same source and renders it through the pinned core.
 
-Projects read/write JSON versions 1–4 and mode `S3K`, with named local FM voices,
+Arrangement projects read/write JSON versions 1–4 and mode `S3K`, with named local FM voices,
 monophonic FM/PSG note sequences and linked clips on FM1–FM5/PSG1–PSG3. Clip length
 can repeat a sequence or trim its final repetition. Time is integer sequencer
 ticks; `ticksPerBeat` controls the ruler and `tempo` is the native S3K byte, not
@@ -41,9 +42,16 @@ manifest. `compile-project` refuses declared envelope and sample assets, includi
 so a bare binary export never silently loses them. The [package contract](../docs/architecture/native-asset-package.md)
 explains how the maps feed OpenGGF; the engine does not load the ZIP directly.
 
+[Version 5](../docs/architecture/native-bank-source.md) keeps an exact bank,
+song header address and native asset mappings. `inspect-project` reports the
+reachable addresses and instructions after playback preflight. Native banks
+export via `compile-package`, which preserves their bytes and bindings even
+when playback preflight reports an unsupported operation.
+
 `--frames` counts **60 Hz NTSC presentations**, not PCM samples. Its default is
 120 and its range is 1–36000. Without an explicit limit, `render-project`
-expands the duration for DAC arrangements to include the last sample's tail. Each presentation services the production session
+expands the duration for DAC arrangements to include the last sample's tail
+and uses the stored preview length for v5 banks. Each presentation services the production session
 once, then emits 800 stereo samples. WAV output is 48 kHz, stereo, signed 16-bit
 little-endian PCM. Synthesis uses OpenGGF's exact hardware-frame budget, which
 adjusts its internal synthesis rate to preserve chip time per presentation.

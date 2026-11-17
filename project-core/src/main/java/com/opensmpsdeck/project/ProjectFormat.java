@@ -36,14 +36,18 @@ public final class ProjectFormat {
             if(!tree.isJsonObject()) throw invalid("project","must be an object");
             if(!tree.getAsJsonObject().has("formatVersion")) throw invalid("project.formatVersion","required field is missing");
             int version=integer(tree.getAsJsonObject(),"formatVersion");
-            if(version<1 || version>4) throw invalid("formatVersion", "only versions 1, 2, 3 and 4 are supported");
-            JsonObject o = version==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
+            if(version<1 || version>5) throw invalid("formatVersion", "only versions 1 through 5 are supported");
+            JsonObject o = version==5 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "voices", "envelopes", "samples", "nativeProgram")
+                    : version==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
                     : version==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
                     : object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips");
-            StudioProject project = new StudioProject(version,string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),integer(o,"tempo"),
-                    list(o,"voices",ProjectFormat::voice),list(o,"sequences",e->sequence(e,version)),list(o,"clips",ProjectFormat::clip),
+            NativeProgram nativeProgram = version==5 ? nativeProgram(o.get("nativeProgram")) : null;
+            StudioProject project = new StudioProject(version,string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),nativeProgram==null?integer(o,"tempo"):nativeProgram.tempo(),
+                    list(o,"voices",ProjectFormat::voice),
+                    version==5?List.of():list(o,"sequences",e->sequence(e,version)),
+                    version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     version>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
-                    version==4?list(o,"samples",ProjectFormat::sample):List.of());
+                    version>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram);
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -51,11 +55,27 @@ public final class ProjectFormat {
         }
     }
 
+    private static NativeProgram nativeProgram(JsonElement element) {
+        JsonObject o = object(element,"nativeProgram","bankBase","headerOffset","localVoiceCount","previewFrames",
+                "bankBase64","envelopeSlots","dacSlots");
+        return new NativeProgram(integer(o,"bankBase"),integer(o,"headerOffset"),integer(o,"localVoiceCount"),
+                integer(o,"previewFrames"),string(o,"bankBase64"),
+                list(o,"envelopeSlots",entry -> {
+                    JsonObject slot = object(entry,"envelope slot","assetId","slot");
+                    return new NativeProgram.EnvelopeSlot(string(slot,"assetId"),integer(slot,"slot"));
+                }),
+                list(o,"dacSlots",entry -> {
+                    JsonObject slot = object(entry,"DAC slot","note","sampleId","rate");
+                    return new NativeProgram.DacSlot(integer(slot,"note"),string(slot,"sampleId"),integer(slot,"rate"));
+                }));
+    }
+
     public static String write(StudioProject project) {
         validate(project);
         JsonObject o = new JsonObject();
         o.addProperty("formatVersion",project.formatVersion()); o.addProperty("name",project.name()); o.addProperty("mode",project.mode());
-        o.addProperty("ticksPerBeat",project.ticksPerBeat()); o.addProperty("tempo",project.tempo());
+        o.addProperty("ticksPerBeat",project.ticksPerBeat());
+        if (project.nativeProgram()==null) o.addProperty("tempo",project.tempo());
         JsonArray voices = new JsonArray();
         for (Voice v : project.voices()) { JsonObject x=new JsonObject(); x.addProperty("id",v.id()); x.addProperty("name",v.name()); JsonArray b=new JsonArray(); v.bytes().forEach(b::add); x.add("bytes",b); voices.add(x); }
         o.add("voices",voices);
@@ -85,10 +105,10 @@ public final class ProjectFormat {
             }
             sequences.add(x);
         }
-        o.add("sequences",sequences);
+        if (project.nativeProgram()==null) o.add("sequences",sequences);
         JsonArray clips = new JsonArray();
         for (Clip c : project.clips()) { JsonObject x=new JsonObject(); x.addProperty("id",c.id()); x.addProperty("sequenceId",c.sequenceId()); x.addProperty("lane",c.lane()); x.addProperty("startTick",c.startTick()); x.addProperty("lengthTicks",c.lengthTicks()); clips.add(x); }
-        o.add("clips",clips);
+        if (project.nativeProgram()==null) o.add("clips",clips);
         if(project.formatVersion()>=3) {
             JsonArray envelopes=new JsonArray();
             for(Envelope envelope:project.envelopes()) {
@@ -97,22 +117,34 @@ public final class ProjectFormat {
             }
             o.add("envelopes",envelopes);
         }
-        if(project.formatVersion()==4) {
+        if(project.formatVersion()>=4) {
             JsonArray samples=new JsonArray();
             for(DacSample sample:project.samples()) {
                 JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());x.addProperty("pcmBase64",sample.pcmBase64());samples.add(x);
             }
             o.add("samples",samples);
         }
+        if (project.nativeProgram()!=null) o.add("nativeProgram",GSON.toJsonTree(project.nativeProgram()));
         return GSON.toJson(o) + "\n";
     }
 
     public static void validate(StudioProject project) {
         if (project == null) throw invalid("project", "document is required");
-        if (project.formatVersion()<1 || project.formatVersion()>4) throw invalid("formatVersion", "only versions 1, 2, 3 and 4 are supported");
+        if (project.formatVersion()<1 || project.formatVersion()>5) throw invalid("formatVersion", "only versions 1 through 5 are supported");
         text(project.name(),"name");
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
+        NativeProgram nativeProgram = project.nativeProgram();
+        if ((project.formatVersion()==5) != (nativeProgram!=null))
+            throw invalid("nativeProgram","required in formatVersion 5 and unavailable in earlier versions");
+        if (nativeProgram!=null) {
+            if (!project.sequences().isEmpty() || !project.clips().isEmpty())
+                throw invalid("nativeProgram","native projects cannot contain sequences or clips");
+            if (project.tempo()!=nativeProgram.tempo())
+                throw invalid("tempo","must match the native header");
+            if (project.voices().size()>128)
+                throw invalid("voices","at most 128 global voices can be addressed");
+        }
         if (project.voices().size()>256) throw invalid("voices", "at most 256 local voices can be addressed");
         Map<String,Voice> voices = unique(project.voices(), Voice::id, "voices");
         for (Voice v : project.voices()) {
@@ -125,15 +157,39 @@ public final class ProjectFormat {
         int psgCount=0,modulationCount=0;
         for(Envelope envelope:project.envelopes()) {
             String at="envelope '"+envelope.id()+"'";text(envelope.name(),at+".name");
-            try { EnvelopeProgram.validate(envelope.type(),envelope.bytes()); }
-            catch(IllegalArgumentException e) { throw invalid(at+".bytes",e.getMessage()); }
-            if(Envelope.PSG_VOLUME.equals(envelope.type())) psgCount++;else modulationCount++;
+            boolean psg = Envelope.PSG_VOLUME.equals(envelope.type());
+            if (nativeProgram!=null) {
+                if (!psg && !Envelope.MODULATION.equals(envelope.type()))
+                    throw invalid(at+".type","must be PSG_VOLUME or MODULATION");
+                range(envelope.bytes().size(),1,256,at+".bytes length");
+                for (int value : envelope.bytes()) range(value,0,255,at+".bytes");
+            } else {
+                try { EnvelopeProgram.validate(envelope.type(),envelope.bytes()); }
+                catch(IllegalArgumentException e) { throw invalid(at+".bytes",e.getMessage()); }
+            }
+            if (psg) psgCount++; else modulationCount++;
         }
         if(psgCount>255) throw invalid("envelopes","at most 255 PSG volume envelopes can be addressed");
         if(modulationCount>127) throw invalid("envelopes","at most 127 modulation envelopes can be addressed; index 128 is reserved for custom modulation");
         if(project.formatVersion()<4 && !project.samples().isEmpty()) throw invalid("samples","DAC samples require formatVersion 4");
         DacSample.validateAll(project.samples());
         Map<String,DacSample> samples=unique(project.samples(),DacSample::id,"samples");
+        if (nativeProgram!=null) {
+            Set<Integer> psgSlots = new HashSet<>();
+            Set<Integer> modulationSlots = new HashSet<>();
+            for (NativeProgram.EnvelopeSlot slot : nativeProgram.envelopeSlots()) {
+                Envelope envelope = envelopes.get(slot.assetId());
+                if (envelope==null) throw invalid("envelopeSlots","undefined envelope '"+slot.assetId()+"'");
+                boolean psg = Envelope.PSG_VOLUME.equals(envelope.type());
+                range(slot.slot(),1,psg?255:127,"envelope slot");
+                if (!(psg?psgSlots:modulationSlots).add(slot.slot()))
+                    throw invalid("envelopeSlots","duplicate "+envelope.type()+" slot "+slot.slot());
+            }
+            for (NativeProgram.DacSlot slot : nativeProgram.dacSlots()) {
+                if (!samples.containsKey(slot.sampleId()))
+                    throw invalid("dacSlots","undefined sample '"+slot.sampleId()+"'");
+            }
+        }
         Map<String,Sequence> sequences = unique(project.sequences(), Sequence::id, "sequences");
         for (Sequence s : project.sequences()) {
             String at="sequence '"+s.id()+"'"; text(s.name(),at+".name");

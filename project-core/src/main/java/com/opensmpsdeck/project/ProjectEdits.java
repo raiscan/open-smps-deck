@@ -7,6 +7,11 @@ import java.util.function.UnaryOperator;
 /** Pure source edits. A failed edit leaves the original immutable document intact. */
 public final class ProjectEdits {
     private ProjectEdits() {}
+    public static StudioProject setNativeProgram(StudioProject p, NativeProgram program) {
+        return checked(new StudioProject(5,p.name(),p.mode(),p.ticksPerBeat(),program.tempo(),
+                p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples(),program));
+    }
+
     public static StudioProject addClip(StudioProject p,Clip clip) {
         ProjectFormat.validate(p); List<Clip> clips=new ArrayList<>(p.clips()); clips.add(clip); return withClips(p,clips);
     }
@@ -59,8 +64,8 @@ public final class ProjectEdits {
         ProjectFormat.validate(p);
         List<Sequence> sequences=new ArrayList<>(p.sequences());
         sequences.add(sequence);
-        int version="DAC".equals(sequence.type())?4:p.formatVersion();
-        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
+        int version="DAC".equals(sequence.type())?Math.max(4,p.formatVersion()):p.formatVersion();
+        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples(),p.nativeProgram()));
     }
 
     public static StudioProject addSample(StudioProject p,DacSample sample) {
@@ -90,7 +95,7 @@ public final class ProjectEdits {
         return withSamples(p,samples);
     }
     private static StudioProject withSamples(StudioProject p,List<DacSample> samples) {
-        return checked(new StudioProject(4,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),samples));
+        return checked(new StudioProject(Math.max(4,p.formatVersion()),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),samples,p.nativeProgram()));
     }
 
     public static StudioProject addTrigger(StudioProject p,String sequenceId,SampleTrigger trigger) {
@@ -130,6 +135,7 @@ public final class ProjectEdits {
         return changeVoice(p,voice.id(),old->voice);
     }
     public static StudioProject deleteVoice(StudioProject p,String voiceId) {
+        if (p.nativeProgram()!=null) throw new IllegalArgumentException("Native global voice indices must be preserved");
         ProjectFormat.validate(p);
         if(p.sequences().stream().anyMatch(s->voiceId.equals(s.voiceId()))) throw new IllegalArgumentException("Voice '"+voiceId+"' is referenced by a source");
         return changeVoice(p,voiceId,old->null);
@@ -167,7 +173,7 @@ public final class ProjectEdits {
         return withAssets(p,3,p.voices(),envelopes);
     }
     private static StudioProject withAssets(StudioProject p,int version,List<Voice> voices,List<Envelope> envelopes) {
-        return checked(new StudioProject(Math.max(p.formatVersion(),version),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes,p.samples()));
+        return checked(new StudioProject(Math.max(p.formatVersion(),version),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes,p.samples(),p.nativeProgram()));
     }
 
     private static StudioProject changeClip(StudioProject p,String id,UnaryOperator<Clip> change) {
@@ -197,10 +203,10 @@ public final class ProjectEdits {
         ProjectFormat.validate(p); List<Sequence> sequences=new ArrayList<>(); boolean found=false, changed=false;
         for(Sequence s : p.sequences()) { if(s.id().equals(id)) { found=true; Sequence next=change.apply(s); changed=!next.equals(s); s=next; } sequences.add(s); }
         if(!found) throw new IllegalArgumentException("Unknown sequence '"+id+"'");
-        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
+        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples(),p.nativeProgram()));
     }
     private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
     private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
-    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes(),p.samples())); }
+    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes(),p.samples(),p.nativeProgram())); }
     private static StudioProject checked(StudioProject p) { ProjectFormat.validate(p); return p; }
 }

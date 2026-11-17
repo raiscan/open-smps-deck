@@ -149,6 +149,14 @@ external revision; undo never secretly crosses into another writer's version.
 
 ## Listen and export
 
+Open the [native bank example](../../examples/native-evening-clock.smps.json)
+to inspect a v5 project. Select an event to highlight its bytes and address
+in **Native bank**. Edit the hex and use **Apply bank** to commit an
+in-place change. Use **Preview frames** to set playback and WAV length.
+Edits use the usual undo, save and external refresh. An unsupported
+instruction appears as a playback diagnostic. **Export package** still
+preserves the exact bank and asset bindings.
+
 **Play** previews from the beginning; Space toggles Play/Stop outside text fields.
 Edits or adopted external changes stop the previous playback snapshot. Use **Song settings** to rename the project or change native tempo and ruler
 resolution. The inspector shows approximate BPM for context. The native
@@ -157,7 +165,8 @@ resolution is in the project file. Playback and WAV export allow up to ten minut
 and use 48 kHz stereo at 60 NTSC presentations per second with upstream's hardware
 frame budget. No audio device? The app reports the problem; WAV export still works.
 
-**Export WAV** renders the complete clip arrangement plus a short tail.
+**Export WAV** renders the complete clip arrangement plus a short tail, or the
+selected number of presentation frames for a native bank.
 **Export SMPS** writes the baked standalone binary. Choose a new output filename;
 existing files are preserved. A stopped export cleans up its incomplete WAV.
 Local voices are baked into the binary. Projects declaring envelopes or samples require

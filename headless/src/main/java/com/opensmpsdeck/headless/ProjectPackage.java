@@ -20,6 +20,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -33,26 +34,57 @@ public final class ProjectPackage {
 
     public static void write(StudioProject project, Path output) throws IOException {
         var compiled = ProjectCompiler.compileWithAssets(project);
-        byte[] song = S3kBinary.validateAndCopy(compiled);
+        var nativeProgram = compiled.nativeProgram();
+        boolean nativeBank = nativeProgram != null;
+        // Native packages preserve structurally valid source and dependencies
+        // even when the pinned renderer cannot execute a reachable instruction.
+        byte[] song = nativeBank ? compiled.song() : S3kBinary.validateAndCopy(compiled);
         byte[] source = ProjectFormat.write(project).getBytes(StandardCharsets.UTF_8);
         if (source.length > ProjectFiles.MAX_FILE_BYTES)
             throw new IllegalArgumentException("Project exceeds the " + ProjectFiles.MAX_FILE_BYTES + " byte source limit");
 
         JsonObject manifest = new JsonObject();
-        manifest.addProperty("schemaVersion", compiled.samples().isEmpty() ? 1 : 2);
+        manifest.addProperty("schemaVersion", nativeBank ? 3 : compiled.samples().isEmpty() ? 1 : 2);
         manifest.addProperty("mode", "S3K");
-        manifest.addProperty("bankBase", 0);
+        manifest.addProperty("bankBase", nativeBank ? nativeProgram.bankBase() : 0);
         manifest.add("track", reference("track.bin", song));
         manifest.add("source", reference("source.smps.json", source));
-        JsonArray voices = new JsonArray();
-        for (int index = 0; index < project.voices().size(); index++) {
-            var voice = project.voices().get(index);
-            JsonObject item = new JsonObject();
-            item.addProperty("id", voice.id()); item.addProperty("name", voice.name()); item.addProperty("index", index);
-            voices.add(item);
-        }
-        manifest.add("voices", voices);
         List<Entry> resources = new ArrayList<>();
+        JsonArray voices = new JsonArray();
+        if (nativeBank) {
+            manifest.addProperty("headerOffset", nativeProgram.headerOffset());
+            manifest.addProperty("localVoiceCount", nativeProgram.localVoiceCount());
+            manifest.addProperty("previewFrames", nativeProgram.previewFrames());
+            if (!compiled.globalVoices().isEmpty()) {
+                var globalVoices = compiled.globalVoices();
+                byte[] bytes = new byte[globalVoices.size() * 25];
+                for (int index = 0; index < globalVoices.size(); index++) {
+                    var voice = globalVoices.get(index);
+                    byte[] data = bytes(voice.bytes());
+                    System.arraycopy(data, 0, bytes, index * 25, data.length);
+                    voices.add(voiceEntry(index, voice.id(), voice.name()));
+                }
+                String path = "voices/global.bin";
+                resources.add(new Entry(path, bytes));
+                JsonObject table = reference(path, bytes);
+                table.add("voices", voices);
+                manifest.add("globalVoices", table);
+            }
+            JsonArray bindings = new JsonArray();
+            for (var slot : nativeProgram.envelopeSlots()) {
+                JsonObject binding = new JsonObject();
+                binding.addProperty("assetId", slot.assetId());
+                binding.addProperty("slot", slot.slot());
+                bindings.add(binding);
+            }
+            manifest.add("envelopeBindings", bindings);
+        } else {
+            for (int index = 0; index < project.voices().size(); index++) {
+                var voice = project.voices().get(index);
+                voices.add(voiceEntry(index, voice.id(), voice.name()));
+            }
+            manifest.add("voices", voices);
+        }
         JsonArray envelopes = new JsonArray();
         int psgIndex = 0, modulationIndex = 0;
         for (Envelope envelope : compiled.envelopes()) {
@@ -60,12 +92,14 @@ public final class ProjectPackage {
             int index = psg ? ++psgIndex : ++modulationIndex;
             // IDs and display names never become paths. Native indices have
             // independent namespaces and stable authored order within each kind.
-            String path = String.format(Locale.ROOT, "%s/%03d.bin", psg ? "psg" : "mod", index);
+            String path = String.format(Locale.ROOT, nativeBank ? "%s/asset-%03d.bin" : "%s/%03d.bin",
+                    psg ? "psg" : "mod", index);
             byte[] bytes = bytes(envelope.bytes());
             resources.add(new Entry(path, bytes));
             JsonObject item = reference(path, bytes);
             item.addProperty("kind", envelope.type()); item.addProperty("id", envelope.id());
-            item.addProperty("name", envelope.name()); item.addProperty("index", index);
+            item.addProperty("name", envelope.name());
+            if (!nativeBank) item.addProperty("index", index);
             envelopes.add(item);
         }
         manifest.add("envelopes", envelopes);
@@ -73,6 +107,7 @@ public final class ProjectPackage {
             JsonObject dac = new JsonObject();
             dac.addProperty("baseCycles", DacSample.BASE_CYCLES);
             JsonArray samples = new JsonArray();
+            var sampleIndices = new HashMap<String, Integer>();
             for (int index = 0; index < compiled.samples().size(); index++) {
                 DacSample sample = compiled.samples().get(index);
                 String path = String.format(Locale.ROOT, "dac/%03d.pcm", index);
@@ -80,11 +115,28 @@ public final class ProjectPackage {
                 resources.add(new Entry(path, pcm));
                 JsonObject item = reference(path, pcm);
                 item.addProperty("id", sample.id()); item.addProperty("name", sample.name());
-                item.addProperty("sampleId", index); item.addProperty("note", DacSample.FIRST_NOTE + index);
+                item.addProperty("sampleId", index);
+                if (nativeBank) {
+                    sampleIndices.put(sample.id(), index);
+                } else {
+                    item.addProperty("note", DacSample.FIRST_NOTE + index);
+                }
                 item.addProperty("rate", sample.rate());
                 samples.add(item);
             }
-            dac.add("samples", samples); manifest.add("dac", dac);
+            dac.add("samples", samples);
+            if (nativeBank) {
+                JsonArray bindings = new JsonArray();
+                for (var slot : nativeProgram.dacSlots()) {
+                    JsonObject binding = new JsonObject();
+                    binding.addProperty("note", slot.note());
+                    binding.addProperty("sampleId", sampleIndices.get(slot.sampleId()));
+                    binding.addProperty("rate", slot.rate());
+                    bindings.add(binding);
+                }
+                dac.add("bindings", bindings);
+            }
+            manifest.add("dac", dac);
         }
         byte[] manifestBytes = (new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(manifest) + "\n")
                 .getBytes(StandardCharsets.UTF_8);
@@ -118,6 +170,14 @@ public final class ProjectPackage {
         archive.putNextEntry(entry);
         archive.write(value.bytes());
         archive.closeEntry();
+    }
+
+    private static JsonObject voiceEntry(int index, String id, String name) {
+        JsonObject item = new JsonObject();
+        item.addProperty("id", id);
+        item.addProperty("name", name);
+        item.addProperty("index", index);
+        return item;
     }
 
     private static JsonObject reference(String path, byte[] bytes) {

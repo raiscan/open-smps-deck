@@ -1,9 +1,10 @@
 # S3K representation and playback coverage
 
 The delivery target is complete S3K track representation, editing, rendering and
-dependency-complete export **before importing songs**. The current native-command
-lane is one bounded step. Consuming an opcode's operands does not establish its
-behavior, and supporting a handwritten demo does not establish full-track coverage.
+dependency-complete export **before importing songs**. Versions 1–4 provide the
+musical arrangement workflow. [Version 5](native-bank-source.md) keeps original
+bank bytes and addresses for native editing, inspection, bounded playback and
+export. Retail coverage requires whole-track tests of the reached semantics.
 
 This matrix covers the new `project-core` / `headless` / `studio` path. The legacy
 `app` and `synth-core` are separate and do not confer support on the new editor.
@@ -18,33 +19,32 @@ Playback uses the unchanged OpenGGF snapshot pinned by
 | FM1–FM5 and PSG1–PSG3 notes/rests | Supported, monophonic linked sequences and finite inline clips | Supported | Timeline and piano roll | Supported |
 | Long sustained notes | Native HOLD continuations beyond 127 ticks | Supported | Note duration | Supported |
 | Pan/AMS/FMS, detune, absolute volume, FM/PSG volume change, absolute/additive transpose | Nine-command v2 catalogue below | Native finite stream | Commands table and raw-byte inspector | Supported within the pin's semantics |
-| Two-operand FM volume change `E5` | Not offered in v2 | Raw binary rejected | Missing | First operand ignored, second is signed FM attenuation delta |
+| Two-operand FM volume change `E5` | v5 native bytes | v5 preflight follows both operands | Native bank bytes and event list | First operand ignored, second is signed FM attenuation delta |
 | Four-byte custom modulation and modulation off | v2; setup restricted to explicit note attack ticks | `F0` and `FA` accepted with exact arities | Command help and arguments | Pending setup and native attack preparation |
 | Event ordering and repetition state | Stable authored order at equal ticks; RESET/CARRY; independent clips reset | Compiles inline; trimmed events omitted | Reorder and repeat-state controls | Native mutable track state |
 | Local FM voices | Exact 25-byte entries; source selection and pure asset CRUD | Terminal local table; package manifest indices | Native algorithm/feedback, four stored operators, independent TL high-bit flags, raw bytes | Local/shared/global lookup |
-| Arbitrary voice changes, shared/global/cross-song voices | Missing references and resolution | No dependency bundle | Missing | Basic lookup available; native high-bit `EF` is a limitation below |
-| PSG noise | Not represented in v2 | Existing raw binary `F3` remains accepted | Missing | PSG noise/reset implemented |
+| Voice changes and shared/global/cross-song voices | v5 records the in-bank voice table location or supplies an ordered global table | v5 resolves low-bit `EF` and exports the exact table; cross-song voices pending | Native bank view and global voice editor | High-bit `EF` remains a limitation below |
+| PSG noise | v5 native `F3` bytes | Canonical latch or zero passes preflight | Native bank bytes and event list | PSG noise/reset implemented |
 | PSG and modulation envelopes | v3 typed assets and stable source references; bounded profile below | Resolved F5/F4 tables installed before sequencer creation; native resource package | Asset CRUD/raw bytes, source assignments and editor links | Setters and F1/F4/F5; remaining semantic limits below |
 | FM volume envelope and SSG-EG | Missing | `FF05/06` rejected | Missing | Handlers present; FM volume envelope uses PSG-envelope map |
-| DAC samples, mappings and rates | V4 native PCM assets and linked one-shot hits on DAC | Finite first-slot DAC stream, native sample/rate mapping, tail-aware rendering and ZIP | Sample library, WAV/PCM import, rate/waveform and DAC hit grid | Unsigned PCM via `DacData`, base cycles 297 |
+| DAC samples, mappings and rates | v4 linked one-shot hits; v5 sparse, per-note PCM/rate bindings | Native DAC replay profile, exact mapping and ZIP; v4 pads the sample tail | Sample library, waveform and DAC hit grid; v5 bank display | Unsigned PCM via `DacData`, base cycles 297; rest replay and stop limitations |
 | FM6 and DAC/FM6 ownership | Dedicated DAC lane, FM6 switching pending | DAC + five FM slots | DAC lane | DAC shares physical FM6 |
 | FM3 special/raw-frequency data | Missing representation | `FD/FE` rejected | Missing | Raw frequency handler exists; `FE` retains state only |
-| Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | Missing native stream/gate model | Raw `E7/E8` accepted; compiler generates its own holds; zero duration rejected | Missing | Behavior is stateful and is not equivalent to MIDI note lengths |
-| Native jumps, calls, returns and counted loops | Source reuse currently expanded inline | Pointers rejected | Missing graph/stream view | `F6/F7/F8/F9`; stack and zero-count limitations below |
+| Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | v5 preserves raw stream | Supports saved durations and HOLD; rejects unsupported scaling, wrap and HOLD with nonzero fill | Native bank bytes and event list | Fill and wrap limitations below |
+| Native jumps, calls, returns and counted loops | v5 preserves native pointers | Bounded `F6/F7/F8/F9` traversal includes pre-header targets and loops that advance time | Native bank bytes and event list | Native return/loop capacity and zero-count limitations below |
 | Conditional loop exit | Missing | `EB` rejected | Missing | Native arity/behavior mismatch below |
-| Header transpose/volume/envelope state and bank addresses | Compiler chooses normalized headers, base zero | Header/resource restrictions explicit | Missing native initial-state editor | Header decoder and full bank address space available |
-| Tempo changes, dividing timing, PAL and speed changes | Fixed header tempo, dividing timing 1 | `FF00/04` rejected; 60 Hz NTSC, 48 kHz | Header tempo and approximate fixed-tempo playhead only | Tempo/divider and session timing support exist |
-| Fade/restore, spindash state and continuous SFX | Missing execution context and external triggers | `E2/E9/FC/FF07` rejected; restore sink unavailable | Missing | Require session/shared runtime state |
+| Header transpose/volume/envelope state and bank addresses | v5 stores the exact header and offset at base 0 or 0x8000 | Seventh declared FM slot is inactive when PSG1 overwrites it | Native bank bytes; arrangement has normalized headers | Header decoder and full bank address space |
+| Tempo changes, dividing timing, PAL and speed changes | v5 preserves divider and `FF00` tempo changes | Native frame-limited NTSC preview at 48 kHz; `FF04` rejected | Explicit preview length; arrangement keeps its fixed-tempo playhead | Tempo/divider and session timing support exist |
+| Fade/restore, spindash state and continuous SFX | v5 preserves context commands as bytes | Non-FF `E2` accepted for isolated music. `E2 FF/E9/FC/FF07` require runtime context | Native bank bytes | Restore sink exists; isolated preview supplies no prior song |
 | Sound dispatch, music halt and memory copy | Missing | `FF01/02/03` rejected | Missing | Syntax consumed only; semantic support absent |
-| Dependency-complete package for supported assets | v3 compiler returns native bank plus all declared envelopes | Deterministic ZIP, source, manifest, hashes and raw resources; bare export refuses dropping assets | Export package; resource-aware preview/WAV | Adapter maps install through existing setters; no in-engine ZIP loader yet |
+| Dependency-complete package for resolved assets | v5 bank, voices and exact bindings | Deterministic ZIP of source, exact bank, manifest and hashed resources | Export package; resource-aware preview/WAV | Adapter installs resources; in-engine ZIP loader pending |
 
 Version 1 remains readable/writable with its original field set and compilation.
 Version 2 adds ordered command events and repeat state. Version 3 adds typed envelope
 assets and stable source assignments. Version 4 adds DAC samples and one-shot
 triggers in the first native track slot. Voice-only editing preserves the source version.
-Unknown fields, commands,
-bad operands and unsupported resources are errors; opening a document does not
-rewrite or upgrade it. A v4 document is still not a lossless native S3K program.
+Version 5 stores native instructions and resources outside the supported playback
+profile for inspection and export. Opening a document preserves its source version.
 
 ## Delivered command catalogue
 
@@ -135,14 +135,15 @@ an editor field alone cannot supply missing engine semantics.
 | `EB` conditional jump | Advertises three operands but consumes four: index, comparison count, LE target | Native is index + LE target, testing whether decrement would reach zero. Do not accept native EB streams until resolved |
 | High-bit `EF` | Consumes one index, supports local IDs through 255 | Native high-bit index consumes a second source-song-bank operand. V2 rejects referenced local indices above 127; v1/raw compatibility does not establish native banked-voice support |
 | `F7` count zero | Unconditional jump | Native byte counter wraps to 256 iterations; explicit fixture required |
-| `E0` AMS/FMS retention | Replaces fields | Native OR-retains previous low six bits. Ordinary pan is covered; arbitrary AMS/FMS histories need native comparison |
+| `E0` panning | Replaces AMS/FMS fields and ignores DAC panning | Native OR-retains previous low six bits and writes DAC pan on FM6. Preflight gates unsupported histories and DAC pan |
 | `EE` direct FM write | Uses current track's FM port | Native always writes part I; do not expose as a faithful generic register write |
-| `E8` and duration scaling | Fill stores operand unscaled; duration uses integer product | Native uses dividing timing and byte wrap. Divider stays 1 in this delivery |
+| `E8` and duration scaling | Fill stores operand unscaled; duration uses integer product | Native uses dividing timing and byte wrap. Preflight rejects unsupported fill and duration scaling |
 | `E3` silence stop | Stops/mutes, without native full FM silence burst | Native retail path has extra chip writes, including an unusual PSG/FM interaction |
+| Voice and modulation state | HOLD suppresses upload after `EF`. `FA` clears envelope modulation | Preflight gates those cases and FM level changes before an instrument has been selected |
 | `FE` FM3 special mode | Consumes four operands and retains a special-mode bit; no special-frequency execution | Native routine is broken and can corrupt driver code. Define a deliberate represent/render/export contract rather than claim implemented frequency behavior |
 | `FF01/02/03` | Consume 1/1/3 operands only | Sound dispatch, all-music halt/resume and stream memory mutation are not implemented |
 | Modulation negative offsets and envelope control | Values85..FF become HOLD; PSG84 consumes without applying multiplier; branch82 uses bounded byte-index semantics | Native negative offsets and native82/84 code-memory quirks need focused comparison/re-pin; this slice rejects them |
-| Envelope/control-flow safety | Bounded semantic adapters, 16 return slots; main command loop and PSG-envelope loop can cycle without yielding | Future packages need graph validation, bounded zero-time execution and explicit handling of native memory/stack behavior |
+| Envelope/control-flow safety | Sequencer and PSG-envelope loops can cycle without yielding | Bank traversal bounds immediate work, return depth and loop slots. Render limits envelopes to validated programs |
 
 OpenGGF's local research inventory finds no shipped loader-supported route to
 `FF01/02/03`; the handler documents that boundary. Local native-source inventories
@@ -161,24 +162,15 @@ claim that this editor has independently certified arbitrary native-console audi
 
 ## Remaining sequence before import
 
-1. Extend the delivered native local-voice editor and bounded envelope package to
-   shared/global/cross-song voices and any remaining DAC resource types. Resolve every
-   reference before rendering and export the complete dependency set. Complete
-   native envelope semantics beyond the current profile, including negative offsets.
-2. Add FM6 with deliberate DAC ownership switching and native DAC flags, PSG noise, FM volume
-   envelopes and SSG-EG. Verify sound and chip writes, including interactions.
-3. Design the native stream/gate and control-flow representation: attack versus
-   HOLD, fill, raw frequency, initial state, labels, calls, counted/conditional
-   loops and shared-bank targets. Preserve state and bounded execution rather
-   than flattening away meaning or accepting non-yielding graphs.
-4. Add global tempo/divider events and explicit playback context. Replace the
-   fixed-tempo duration/playhead formulas; cover PAL/NTSC and stateful restoration,
-   spindash and continuous SFX where the supported track set requires them.
-5. Resolve or explicitly gate each pinned-engine limitation, including unused but
-   defined commands. Track representation, editing, semantic render and complete
-   export as four separate obligations. A blocked render cell stays blocked.
-6. Establish feature-complete fixtures and whole-track acceptance against that
-   matrix. Only after this gate is met should importing begin.
+1. Compare signed modulation, duration wrap, HOLD/fill, DAC stop/replay and
+   previous-song restoration against native evidence. Re-pin the covered OpenGGF
+   paths after upstream fixes.
+2. Resolve expanded playback context where the target tracks need it, including
+   cross-song voices and DAC/FM6 ownership. Verify defined commands and document
+   native broken or unreachable paths separately.
+3. Run the strict traversal and audio/register checks on the target retail
+   catalogue with complete local dependencies. Start importing after the
+   [readiness gates](native-bank-source.md#import-readiness) are met.
 
 ## Evidence for the command lane
 

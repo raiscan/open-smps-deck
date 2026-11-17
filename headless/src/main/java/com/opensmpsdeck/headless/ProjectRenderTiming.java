@@ -3,11 +3,12 @@ package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.StudioProject;
 
-/** Fixed-tempo presentation bound shared by project preview and source WAV export. */
+/** Presentation limit shared by project preview and source WAV export. */
 public final class ProjectRenderTiming {
     private ProjectRenderTiming() {}
 
     public static int presentationCount(StudioProject project) {
+        if (project.nativeProgram() != null) return project.nativeProgram().previewFrames();
         long end = project.clips().stream().mapToLong(clip -> (long) clip.startTick() + clip.lengthTicks()).max().orElse(0);
         end = Math.max(end, ProjectCompiler.dacEndTick(project));
         // Header-tempo phase/load allowance plus one second of chip/mixer tail.

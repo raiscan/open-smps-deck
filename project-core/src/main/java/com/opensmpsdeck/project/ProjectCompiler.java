@@ -14,11 +14,13 @@ public final class ProjectCompiler {
     private ProjectCompiler() {}
 
     public static CompiledProject compileWithAssets(StudioProject project) {
-        return new CompiledProject(compile(project),project.envelopes(),project.samples());
+        return new CompiledProject(compile(project),project.envelopes(),project.samples(),
+                project.nativeProgram(),project.nativeProgram()==null?List.of():project.voices());
     }
 
     public static byte[] compile(StudioProject project) {
         ProjectFormat.validate(project);
+        if (project.nativeProgram()!=null) return project.nativeProgram().bank();
         Map<String,Sequence> sources=new HashMap<>(); Map<String,List<NoteEvent>> notes=new HashMap<>();
         for (Sequence s : project.sequences()) { sources.put(s.id(),s); notes.put(s.id(),s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList()); }
         Map<String,Integer> voices=new HashMap<>(); for(int i=0;i<project.voices().size();i++) voices.put(project.voices().get(i).id(),i);

@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.List;
+import java.util.Locale;
 
 /** Source compilation and pinned S3K playback, independent of JavaFX and audio devices. */
 public final class Main {
@@ -32,15 +33,30 @@ public final class Main {
                     var project = ProjectFiles.load(input).project();
                     var compiled = ProjectCompiler.compileWithAssets(project);
                     byte[] song = S3kBinary.validateAndCopy(compiled);
-                    out.println("Valid S3K project \"" + project.name() + "\": " + project.sequences().size()
-                            + " sequences, " + project.clips().size() + " clips, " + song.length
-                            + " compiled bytes (" + input + ")");
+                    if (compiled.nativeProgram() != null) {
+                        out.printf(Locale.ROOT, "Valid native S3K project \"%s\" (%d bank bytes, header %04X)%n",
+                                project.name(), song.length,
+                                compiled.nativeProgram().bankBase() + compiled.nativeProgram().headerOffset());
+                    } else {
+                        out.println("Valid S3K project \"" + project.name() + "\": " + project.sequences().size()
+                                + " sequences, " + project.clips().size() + " clips, " + song.length
+                                + " compiled bytes (" + input + ")");
+                    }
+                }
+                case "inspect-project" -> {
+                    requireArguments(args, 2);
+                    var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(Path.of(args[1])).project());
+                    if (compiled.nativeProgram() == null)
+                        throw new IllegalArgumentException("inspect-project requires a native bank project");
+                    inspect(compiled, out);
                 }
                 case "compile-project" -> {
                     requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
                     var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
+                    if (compiled.nativeProgram() != null)
+                        throw new IllegalArgumentException("Use compile-package to preserve native bank addresses and resources");
                     if (compiled.requiresAssets()) throw new IllegalArgumentException("Project declares envelope or DAC sample assets; use compile-package for a complete export");
                     byte[] song = S3kBinary.validateAndCopy(compiled.song());
                     writeNewBinary(output, song);
@@ -51,7 +67,7 @@ public final class Main {
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
                     ProjectPackage.write(ProjectFiles.load(input).project(), output);
-                    out.println("Compiled S3K project and complete resources to " + output);
+                    out.println("Exported S3K bank and declared resources to " + output);
                 }
                 case "demo-project" -> {
                     requireArguments(args, 2);
@@ -68,6 +84,21 @@ public final class Main {
             return error(err, "output already exists: " + failure.getFile());
         } catch (IllegalArgumentException | IOException failure) {
             return error(err, failure.getMessage());
+        }
+    }
+
+    private static void inspect(CompiledProject compiled, PrintStream out) {
+        var analysis = S3kBinary.inspectNative(compiled);
+        out.printf(Locale.ROOT, "Native S3K bank %04X, header %04X, %d bytes%n",
+                compiled.nativeProgram().bankBase(), analysis.headerAddress(), analysis.bank().length);
+        out.println("Address  Bytes              Meaning");
+        for (var event : analysis.events()) {
+            var bytes = new StringBuilder();
+            for (int value : event.bytes()) {
+                if (!bytes.isEmpty()) bytes.append(' ');
+                bytes.append(String.format(Locale.ROOT, "%02X", value & 0xFF));
+            }
+            out.printf(Locale.ROOT, "%04X     %-18s %s%n", event.address(), bytes, event.meaning());
         }
     }
 
@@ -97,8 +128,13 @@ public final class Main {
             if (args[0].equals("render-project")) {
                 var project = ProjectFiles.load(input).project();
                 song = ProjectCompiler.compileWithAssets(project);
-                if (args.length == positional && project.clips().stream().anyMatch(clip -> clip.lane().equals("DAC")))
-                    presentations = Math.max(presentations, ProjectRenderTiming.presentationCount(project));
+                if (args.length == positional) {
+                    if (song.nativeProgram() != null) {
+                        presentations = ProjectRenderTiming.presentationCount(project);
+                    } else if (project.clips().stream().anyMatch(clip -> clip.lane().equals("DAC"))) {
+                        presentations = Math.max(presentations, ProjectRenderTiming.presentationCount(project));
+                    }
+                }
             } else {
                 try (var stream = Files.newInputStream(input)) {
                     song = new CompiledProject(stream.readNBytes(S3kBinary.MAX_BYTES + 1), List.of());
@@ -144,11 +180,12 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
-        out.println("N: 1..36000 NTSC presentations, default 120; DAC source projects include their natural sample tail by default.");
-        out.println("Outputs must not already exist. Projects: strict JSON versions 1–4 with explicit envelope/DAC assets.");
+        out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
+        out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
         out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
 }

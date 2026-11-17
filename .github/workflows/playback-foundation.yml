@@ -64,6 +64,9 @@ jobs:
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project examples/dac-percussion.smps.json
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project examples/dac-percussion.smps.json "$RUNNER_TEMP/dac-percussion.wav"
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package examples/dac-percussion.smps.json "$RUNNER_TEMP/dac-percussion.smps.zip"
+          java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project examples/native-evening-clock.smps.json
+          java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project examples/native-evening-clock.smps.json "$RUNNER_TEMP/native-evening-clock.wav"
+          java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package examples/native-evening-clock.smps.json "$RUNNER_TEMP/native-evening-clock.smps.zip"
       - name: Verify native DPI and physical pointer editing
         run: python3 tools/verify_studio_dpi.py --scratch "$RUNNER_TEMP"
       - name: Fetch only the locked upstream commit

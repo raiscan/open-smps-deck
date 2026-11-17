@@ -20,6 +20,12 @@ editing, and a linked one-shot hit grid on the DAC lane. Preview and package
 export carry the sample data. Open the
 [DAC percussion example](../examples/dac-percussion.smps.json) to try it.
 
+Open the [native bank example](../examples/native-evening-clock.smps.json)
+for an address-based event list and fixed-length hex edits. The Native bank
+view shares project undo, save, live refresh and asset export. Preview uses
+the frame limit stored in the bank source. See the
+[native source format](../docs/architecture/native-bank-source.md).
+
 ## Run
 
 Build with JDK 25 and Maven, on a desktop with JavaFX-supported native libraries:

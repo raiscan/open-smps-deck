@@ -33,9 +33,15 @@ public final class StudioWindow implements AutoCloseable {
     final EnvelopeEditorPane envelopes=new EnvelopeEditorPane(edit->change(edit),text->status.setText(text));
     final DacSampleEditorPane samples=new DacSampleEditorPane(edit->change(edit),status::setText);
     final DacTriggerPane triggers=new DacTriggerPane(edit->change(edit),status::setText,this::openSample);
+    final NativeProgramPane nativeBank=new NativeProgramPane(edit->change(edit),status::setText);
     private final TabPane sourceModes=new TabPane();
     private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands"),assetMode=new Tab("Assets");
     private final TabPane assetKinds=new TabPane();
+    private final Tab nativeAssets=new Tab("Voices & assets");
+    private final TabPane nativeTabs=new TabPane(new Tab("Native bank",nativeBank),nativeAssets);
+    private SplitPane arrangementLayout;
+    private VBox assetBody;
+    private Button songSettings, binaryExport, nativePackageExport;
     private VBox noteBody;
     private final StudioPlayback playback=new StudioPlayback();
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
@@ -77,8 +83,19 @@ public final class StudioWindow implements AutoCloseable {
         Label brand=label("OPEN / SMPS","brand");
         HBox top=new HBox(10,brand,label("STUDIO","tag"),spacer(),button("New",this::newProject),button("Open…",this::open),button("Save",this::save),button("Save as…",this::saveAs));
         top.getStyleClass().add("topbar");
-        title.getStyleClass().add("project-title");fileState.getStyleClass().add("file-state");
-        HBox projectLine=new HBox(14,title,spacer(),button("Song settings…",this::settings),button("▶  Play",this::play),button("■  Stop",this::stop),button("Export WAV…",()->export(true)),button("Export SMPS…",()->export(false)));
+        title.getStyleClass().add("project-title");title.setMinWidth(0);fileState.getStyleClass().add("file-state");
+        songSettings=button("Song settings…",this::settings);
+        binaryExport=button("Export SMPS…",()->export(false));
+        nativePackageExport=button("Export package…",this::exportPackage);
+        var projectActions=new FlowPane(8,6,songSettings,button("▶  Play",this::play),button("■  Stop",this::stop),
+                button("Export WAV…",()->export(true)),binaryExport,nativePackageExport);
+        projectActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+        for(Node action:projectActions.getChildren()){
+            action.managedProperty().bind(action.visibleProperty());
+            ((Button)action).setMinWidth(Region.USE_PREF_SIZE);
+        }
+        HBox projectLine=new HBox(12,title,spacer(),projectActions);
+        projectLine.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         projectLine.getStyleClass().add("projectbar");
         Button reload=button("Reload file + keep local recovery",this::reload);reload.setId("reload-file");
         HBox fileLine=new HBox(12,fileState,spacer(),reload);fileLine.getStyleClass().add("filebar");
@@ -128,13 +145,17 @@ public final class StudioWindow implements AutoCloseable {
         assetKinds.getTabs().setAll(fmAssets,envAssets,dacAssets);
         assetKinds.getTabs().forEach(tab->tab.setClosable(false));assetKinds.setId("asset-editor-tabs");
         Button packageExport=button("Export package…",this::exportPackage);packageExport.setId("export-package");
-        VBox assetBody=new VBox(new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport),assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
+        assetBody=new VBox(new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport),assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
         noteMode.setClosable(false);commandMode.setClosable(false);assetMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);assetMode.setContent(assetBody);sourceModes.getTabs().setAll(noteMode,commandMode,assetMode);sourceModes.setId("source-editor-modes");
         VBox notes=new VBox(pianoHeader,sourceModes);VBox.setVgrow(sourceModes,Priority.ALWAYS);
         editors=new ResponsiveEditors(arrangement,notes);
         inspector.getStyleClass().add("inspector");inspector.setMinWidth(0);inspector.setPrefWidth(240);
         ScrollPane inspectorScroll=new ScrollPane(inspector);inspectorScroll.setFitToWidth(true);inspectorScroll.setMinWidth(210);inspectorScroll.getStyleClass().add("editor-scroll");
-        SplitPane layout=new SplitPane(library,editors,inspectorScroll);layout.setDividerPositions(.15,.82);root.setCenter(layout);
+        arrangementLayout=new SplitPane(library,editors,inspectorScroll);
+        arrangementLayout.setDividerPositions(.15,.82);
+        nativeTabs.setId("native-program-tabs");
+        nativeTabs.getTabs().forEach(tab->tab.setClosable(false));
+        root.setCenter(arrangementLayout);
         status.getStyleClass().add("status");status.setWrapText(true);
         HBox bottom=new HBox(12,status,spacer(),label("S3&K  ·  LIVE FILES  ·  NATIVE PLAYBACK","muted"));bottom.getStyleClass().add("statusbar");root.setBottom(bottom);
     }
@@ -143,7 +164,8 @@ public final class StudioWindow implements AutoCloseable {
         ProjectWatcher replacementWatcher=new ProjectWatcher(path,()->watchChanged(replacement));
         if(watcher!=null)watcher.close();
         playback.stop();voices.setProject(null);envelopes.setProject(null);samples.setProject(null);
-        triggers.setSource(null,null);commands.setSource(null,null);document=replacement;watcher=replacementWatcher;
+        triggers.setSource(null,null);commands.setSource(null,null);nativeBank.setProject(null);
+        document=replacement;watcher=replacementWatcher;
         document.refresh(); // close the open/register race
         selectedClip=null;selectedSequence=document.project().sequences().isEmpty()?null:document.project().sequences().getFirst().id();selectedNote=null;
         undo.clear();redo.clear();refreshView();
@@ -170,6 +192,25 @@ public final class StudioWindow implements AutoCloseable {
         if(document==null)return;
         updating=true;
         StudioProject p=document.project();
+        boolean nativeMode=p.nativeProgram()!=null;
+        songSettings.setVisible(!nativeMode);
+        binaryExport.setVisible(!nativeMode);
+        nativePackageExport.setVisible(nativeMode);
+        if(nativeMode&&root.getCenter()!=nativeTabs){
+            assetMode.setContent(null);
+            nativeAssets.setContent(assetBody);
+            nativeTabs.getSelectionModel().selectFirst();
+            root.setCenter(nativeTabs);
+        }else if(!nativeMode&&root.getCenter()!=arrangementLayout){
+            nativeAssets.setContent(null);
+            assetMode.setContent(assetBody);
+            root.setCenter(arrangementLayout);
+        }
+        nativeBank.setProject(nativeMode?p:null);
+        if(nativeMode){
+            voices.setProject(p);envelopes.setProject(p);samples.setProject(p);
+            refreshStatus();updating=false;return;
+        }
         if(clip()==null)selectedClip=null;
         if(clip()!=null)selectedSequence=clip().sequenceId();
         if(source()==null){selectedSequence=null;selectedNote=null;}
@@ -306,7 +347,7 @@ public final class StudioWindow implements AutoCloseable {
     private void export(boolean wav){
         var chooser=chooser(wav?"Export WAV (choose a new file)":"Export baked SMPS (choose a new file)",wav?"wav":"bin");chooser.setInitialFileName(wav?"track.wav":"track.bin");var file=chooser.showSaveDialog(stage);if(file==null)return;
         StudioProject snapshot=document.project();status.setText("Exporting…");
-        io.submit(()->{try{var compiled=ProjectCompiler.compileWithAssets(snapshot);if(wav)WaveFile.render(compiled,file.toPath(),StudioPlayback.presentationCount(snapshot));else {if(compiled.requiresAssets())throw new IllegalArgumentException("This project declares sample or envelope assets. Use Export package to keep its dependencies.");Files.write(file.toPath(),compiled.song(),StandardOpenOption.CREATE_NEW);}Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
+        io.submit(()->{try{var compiled=ProjectCompiler.compileWithAssets(snapshot);if(wav)WaveFile.render(compiled,file.toPath(),StudioPlayback.presentationCount(snapshot));else {if(compiled.requiresAssets())throw new IllegalArgumentException("Use Export package to keep this project's native bank metadata and dependencies.");Files.write(file.toPath(),compiled.song(),StandardOpenOption.CREATE_NEW);}Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
     }
     private void exportPackage(){
         var chooser=chooser("Export native track and assets (choose a new file)","zip");chooser.setInitialFileName("track.smps.zip");var file=chooser.showSaveDialog(stage);if(file==null)return;
