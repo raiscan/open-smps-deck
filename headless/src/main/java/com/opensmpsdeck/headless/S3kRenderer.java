@@ -16,6 +16,7 @@ import com.openggf.game.sonic3k.audio.Sonic3kSmpsPhysicalPolicy;
 import com.openggf.game.sonic3k.audio.Sonic3kSmpsSequencerConfig;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsData;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.List;
@@ -63,43 +64,111 @@ public final class S3kRenderer {
         Objects.requireNonNull(sink, "sink");
         Objects.requireNonNull(observer, "observer");
         Objects.requireNonNull(project, "project");
+        MusicRestoreSink unexpectedRestore = () -> {
+            throw new IllegalStateException("music restoration requires a previous project");
+        };
+        var prepared = prepare(project, 0, false, unexpectedRestore);
+        try (var session = newSession(observer)) {
+            session.install();
+            session.queueActivation(prepared);
+            var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
+            for (int frame = 0; frame < presentations; frame++) {
+                advance(session, pcm);
+                sink.accept(pcm);
+            }
+        }
+    }
+
+    public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
+                                               CompiledProject cue, int presentations, PcmSink sink) throws IOException {
+        renderWithPreviousMusic(previous, previousPresentations, cue, presentations, sink, ChipWriteObserver.NONE);
+    }
+
+    /**
+     * Play the previous project to the specified interruption point, then render the cue and
+     * any music it restores. Warm-up PCM and chip writes are excluded from the supplied sinks.
+     */
+    public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
+                                               CompiledProject cue, int presentations, PcmSink sink,
+                                               ChipWriteObserver observer) throws IOException {
+        validatePreviousPresentations(previousPresentations);
+        validatePresentations(presentations);
+        Objects.requireNonNull(sink, "sink");
+        Objects.requireNonNull(observer, "observer");
+
+        var previousActivation = prepare(previous, 0, false, () -> {
+            throw new IllegalStateException("the previous project requested its own restoration");
+        });
+        boolean[] restoreRequested = {false};
+        // Distinct IDs ensure PushOverride saves the previous slot even when the banks match.
+        var cueActivation = prepare(cue, 1, true, () -> restoreRequested[0] = true);
+        try (var session = newSession(ChipWriteObserver.NONE)) {
+            session.install();
+            session.queueActivation(previousActivation);
+            var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
+            for (int frame = 0; frame < previousPresentations; frame++) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException("previous-project warm-up cancelled");
+                }
+                advance(session, pcm);
+            }
+            if (session.captureLogicalSnapshot().sequencers().stream().noneMatch(entry -> !entry.sfx())) {
+                throw new IllegalArgumentException("previous project has no music to restore after warm-up");
+            }
+            session.setChipWriteObserver(observer);
+            session.applyCommand(new SmpsSessionCommand.PushOverride(cueActivation));
+            for (int frame = 0; frame < presentations; frame++) {
+                // E2 stores a flag during track traversal. Apply it at the next
+                // presentation boundary, after the cue's service and DAC idle loop.
+                if (restoreRequested[0]) {
+                    restoreRequested[0] = false;
+                    session.applyCommand(new SmpsSessionCommand.RestoreOverride());
+                    session.fadeInRestoredMusic();
+                }
+                advance(session, pcm);
+                sink.accept(pcm);
+            }
+        }
+    }
+
+    private static void advance(SmpsDriverSession session, short[] pcm) {
+        session.serviceForward();
+        session.advanceDacIdleLoop(pcm, STEREO_FRAMES_PER_PRESENTATION);
+    }
+
+    private static PreparedSmpsMusicActivation prepare(CompiledProject project, int id, boolean allowRestore,
+                                                       MusicRestoreSink restore) {
+        Objects.requireNonNull(project, "project");
         var nativeProgram = project.nativeProgram();
         var data = nativeProgram == null
                 ? new Sonic3kSmpsData(S3kBinary.validateAndCopy(project), 0)
-                : new NativeBankData(project, S3kBinary.inspectNative(project));
-        Map<Integer, List<Integer>> psg = project.psgEnvelopes(), mod = project.modulationEnvelopes();
+                : new NativeBankData(project, S3kBinary.inspectNative(project, allowRestore));
+        data.setId(id);
         // The pinned setters retain their inputs. These arrays belong only to
         // this render and are installed before any sequencer state is captured.
-        data.setPsgEnvelopes(nativeEnvelopes(psg));
-        data.setModEnvelopes(nativeEnvelopes(mod));
+        data.setPsgEnvelopes(nativeEnvelopes(project.psgEnvelopes()));
+        data.setModEnvelopes(nativeEnvelopes(project.modulationEnvelopes()));
         var dac = nativeDac(project.samples(), nativeProgram);
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
         var source = SmpsSourceDescriptor.from(data);
-        MusicRestoreSink restore = () -> { throw new IllegalStateException("music restoration is outside the standalone proof"); };
         var detached = new SmpsDriver();
         var sequencer = new SmpsSequencer(data, dac, detached, detached, restore, config, source,
                 SmpsSequencer.SourceDescriptorTrust.PRECOMPUTED_IMMUTABLE);
         var incoming = new SmpsDriverSnapshot.SequencerEntry(false, source,
                 SmpsSequencer.SourceDescriptorTrust.PRECOMPUTED_IMMUTABLE,
                 null, data, dac, restore, config, sequencer.captureSnapshot());
-        var prepared = new PreparedSmpsMusicActivation(
+        return new PreparedSmpsMusicActivation(
                 new SmpsMusicActivation(source, data.getChannels(), data.getPsgChannels()),
                 incoming, SmpsLogicalTransitionPolicies.forConfig(config), new SmpsDacSelection(source, dac));
+    }
+
+    private static SmpsDriverSession newSession(ChipWriteObserver observer) {
         var settings = SmpsHardwareFrameBudget.presentationSettings(SAMPLE_RATE, PRESENTATIONS_PER_SECOND,
                 false, false, FmCoreSelection.ACCURATE, null);
         var policy = Sonic3kSmpsPhysicalPolicy.INSTANCE;
-        try (var session = new SmpsDriverSession(settings, policy, observer,
+        return new SmpsDriverSession(settings, policy, observer,
                 new SmpsSessionProfileFingerprint("s3k", 0, policy.identity(), settings),
-                SmpsDriverSessionConfiguration.DEFAULT)) {
-            session.install();
-            session.queueActivation(prepared);
-            short[] pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
-            for (int frame = 0; frame < presentations; frame++) {
-                session.serviceForward();
-                session.advanceDacIdleLoop(pcm, STEREO_FRAMES_PER_PRESENTATION);
-                sink.accept(pcm);
-            }
-        }
+                SmpsDriverSessionConfiguration.DEFAULT);
     }
 
     private static Map<Integer, byte[]> nativeEnvelopes(Map<Integer, List<Integer>> source) {
@@ -178,6 +247,11 @@ public final class S3kRenderer {
             return offset + VOICE_BYTES <= globalVoices.length
                     ? Arrays.copyOfRange(globalVoices, offset, offset + VOICE_BYTES) : null;
         }
+    }
+
+    static void validatePreviousPresentations(int presentations) {
+        if (presentations < 1 || presentations > MAX_PRESENTATIONS)
+            throw new IllegalArgumentException("--previous-frames must be between 1 and " + MAX_PRESENTATIONS);
     }
 
     static void validatePresentations(int presentations) {

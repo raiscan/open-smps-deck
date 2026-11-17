@@ -11,6 +11,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 
@@ -104,18 +105,35 @@ public final class Main {
 
     private static void render(String[] args, PrintStream out) throws IOException {
         boolean demo = args[0].equals("demo");
+        boolean projectRender = args[0].equals("render-project");
         int positional = demo ? 2 : 3;
-        if (args.length != positional && args.length != positional + 2) {
+        if (args.length < positional || (args.length - positional) % 2 != 0) {
             throw new IllegalArgumentException("wrong number of arguments for " + args[0]);
         }
         int presentations = 120;
-        if (args.length == positional + 2) {
-            if (!args[positional].equals("--frames")) throw new IllegalArgumentException("expected --frames N");
-            try {
-                presentations = Integer.parseInt(args[positional + 1]);
-            } catch (NumberFormatException failure) {
-                throw new IllegalArgumentException("--frames must be an integer from 1 to 36000");
+        int previousPresentations = 0;
+        Path previousPath = null;
+        var options = new HashSet<String>();
+        for (int at = positional; at < args.length; at += 2) {
+            String option = args[at];
+            String value = args[at + 1];
+            if (!options.add(option)) throw new IllegalArgumentException("duplicate option " + option);
+            switch (option) {
+                case "--frames" -> presentations = parsePresentations(option, value);
+                case "--previous-project" -> {
+                    if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
+                    previousPath = Path.of(value);
+                }
+                case "--previous-frames" -> {
+                    if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
+                    previousPresentations = parsePresentations(option, value);
+                    S3kRenderer.validatePreviousPresentations(previousPresentations);
+                }
+                default -> throw new IllegalArgumentException("unknown option " + option);
             }
+        }
+        if ((previousPath == null) != (previousPresentations == 0)) {
+            throw new IllegalArgumentException("--previous-project and --previous-frames must be used together");
         }
         S3kRenderer.validatePresentations(presentations);
         Path output = Path.of(args[demo ? 1 : 2]);
@@ -125,10 +143,10 @@ public final class Main {
         } else {
             Path input = Path.of(args[1]);
             requireDifferentFiles(input, output);
-            if (args[0].equals("render-project")) {
+            if (projectRender) {
                 var project = ProjectFiles.load(input).project();
                 song = ProjectCompiler.compileWithAssets(project);
-                if (args.length == positional) {
+                if (!options.contains("--frames")) {
                     if (song.nativeProgram() != null) {
                         presentations = ProjectRenderTiming.presentationCount(project);
                     } else if (project.clips().stream().anyMatch(clip -> clip.lane().equals("DAC"))) {
@@ -141,9 +159,23 @@ public final class Main {
                 }
             }
         }
-        WaveFile.render(song, output, presentations);
+        if (previousPath == null) {
+            WaveFile.render(song, output, presentations);
+        } else {
+            requireDifferentFiles(previousPath, output);
+            var previous = ProjectCompiler.compileWithAssets(ProjectFiles.load(previousPath).project());
+            WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, output, presentations);
+        }
         out.println("Rendered " + presentations + " presentations to " + output
                 + " (48 kHz stereo, pinned OpenGGF S3K accurate core)");
+    }
+
+    private static int parsePresentations(String option, String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException(option + " must be an integer from 1 to 36000");
+        }
     }
 
     private static void requireArguments(String[] args, int count) {
@@ -184,6 +216,8 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
+        out.println("           [--previous-project PROJECT.json --previous-frames N]");
+        out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
         out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");

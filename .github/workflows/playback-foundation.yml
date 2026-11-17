@@ -35,7 +35,7 @@ jobs:
           import hashlib, json, pathlib, sys, wave, zipfile
           with wave.open(sys.argv[1], 'rb') as wav:
               assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getnframes()) == (2, 2, 48000, 96000)
-              assert hashlib.sha256(wav.readframes(96000)).hexdigest() == '5e455223632e6ef88262ac953f08f9eab181d34f5e59076d60355f80f7219c73'
+              assert hashlib.sha256(wav.readframes(96000)).hexdigest() == 'acc6a3d5f35d293356edf1efb08401734348b41f2eb2b673e1a7c01128100451'
           lock_bytes = pathlib.Path('upstream/openggf-audio.lock.json').read_bytes()
           lock = json.loads(lock_bytes)
           with zipfile.ZipFile('headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar') as jar:

@@ -29,6 +29,10 @@ final class S3kBinary {
         return NativeBankAnalysis.inspect(project);
     }
 
+    static NativeBankAnalysis.Analysis inspectNative(CompiledProject project, boolean allowPreviousMusicRestore) {
+        return NativeBankAnalysis.inspect(project, allowPreviousMusicRestore);
+    }
+
     private static void validateEnvelopeDeclarations(CompiledProject project) {
         var ids = new HashSet<String>();
         int psgCount = 0, modulationCount = 0;

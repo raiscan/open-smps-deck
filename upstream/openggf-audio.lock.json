@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/OpenGGF/OpenGGF.git",
-  "revision": "a1c4aac7ae2708f5c487e8000da80502e854abe2",
+  "revision": "f3175b2225ad3b15be40d9075a7bb6a4dbeae4ca",
   "patches": [
     {
       "path": "src/main/java/com/openggf/audio/smps/SmpsSequencer.java",
@@ -42,8 +42,8 @@
     },
     {
       "path": "src/main/java/com/openggf/audio/driver/SmpsDriver.java",
-      "sourceSha256": "cd6c7b3f35ae145e9912bbb931a61a48b15b3ecd01ac38fa712734dbd0564cae",
-      "vendoredSha256": "cd6c7b3f35ae145e9912bbb931a61a48b15b3ecd01ac38fa712734dbd0564cae"
+      "sourceSha256": "c39001fe6fe12185b24b94f5e9116f639787f72187f2404c16562c55b2640c51",
+      "vendoredSha256": "c39001fe6fe12185b24b94f5e9116f639787f72187f2404c16562c55b2640c51"
     },
     {
       "path": "src/main/java/com/openggf/audio/driver/SmpsDriverServiceObserver.java",
@@ -72,8 +72,8 @@
     },
     {
       "path": "src/main/java/com/openggf/audio/rewind/SmpsTrackSnapshot.java",
-      "sourceSha256": "cd591e3f61b0fa8385b0c68cb6849852c57995e039f8fa0fd9a9e1f4dba5ee0a",
-      "vendoredSha256": "cd591e3f61b0fa8385b0c68cb6849852c57995e039f8fa0fd9a9e1f4dba5ee0a"
+      "sourceSha256": "ac1c5c8837f785eb062939c87047cd0dd28bddf86764154c6f5df14cf3a64a1f",
+      "vendoredSha256": "ac1c5c8837f785eb062939c87047cd0dd28bddf86764154c6f5df14cf3a64a1f"
     },
     {
       "path": "src/main/java/com/openggf/audio/session/LegacyCompatibilitySmpsPhysicalPolicy.java",
@@ -257,8 +257,8 @@
     },
     {
       "path": "src/main/java/com/openggf/audio/smps/SmpsLogicalWriteTarget.java",
-      "sourceSha256": "38c00b31f86c5216c3121344a213487a46af5c995c920459e7d437dc744594eb",
-      "vendoredSha256": "38c00b31f86c5216c3121344a213487a46af5c995c920459e7d437dc744594eb"
+      "sourceSha256": "662e49899da7be2a0d16531e4b7d80d2046d2069de593f3e8bef1f9427e7e3af",
+      "vendoredSha256": "662e49899da7be2a0d16531e4b7d80d2046d2069de593f3e8bef1f9427e7e3af"
     },
     {
       "path": "src/main/java/com/openggf/audio/smps/SmpsNoteListener.java",
@@ -272,8 +272,8 @@
     },
     {
       "path": "src/main/java/com/openggf/audio/smps/SmpsSequencer.java",
-      "sourceSha256": "9900a8e1d6f800169d01cdd99fb65b4b65221c883426194c68be1fc327040acd",
-      "vendoredSha256": "81b3fcfdb2b72e122a21d9c295883808588dbe653ddbbb8a33d352a15e24fd2b"
+      "sourceSha256": "526e8f636678786466ba1ca90819593d1f9db22c921a0ef25ee793a14c60fe6b",
+      "vendoredSha256": "60e2849c61227489135d36de91837acfe0468070024b24177ee13d219f3a36b4"
     },
     {
       "path": "src/main/java/com/openggf/audio/smps/SmpsSequencerConfig.java",
@@ -437,8 +437,8 @@
     },
     {
       "path": "src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kCoordFlagHandler.java",
-      "sourceSha256": "3895aabfc567bedd381fd2154e5f7441aff865ce1a2d1799e2c65b4548c344b2",
-      "vendoredSha256": "3895aabfc567bedd381fd2154e5f7441aff865ce1a2d1799e2c65b4548c344b2"
+      "sourceSha256": "7e7ba9ef8e126b01e72898781bdbeccf77c0f3092ca13d22b0a800f4a6723307",
+      "vendoredSha256": "7e7ba9ef8e126b01e72898781bdbeccf77c0f3092ca13d22b0a800f4a6723307"
     },
     {
       "path": "src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kSmpsData.java",

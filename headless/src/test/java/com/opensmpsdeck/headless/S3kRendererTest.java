@@ -43,7 +43,7 @@ class S3kRendererTest {
         // Independently measured against the exact upstream source at the
         // lockfile pin, using the production activation and hardware cadence.
         byte[] pcm = render(S3kDemo.song(), 120);
-        assertEquals("5e455223632e6ef88262ac953f08f9eab181d34f5e59076d60355f80f7219c73",
+        assertEquals("acc6a3d5f35d293356edf1efb08401734348b41f2eb2b673e1a7c01128100451",
                 HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(pcm)));
     }
 

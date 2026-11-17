@@ -25,6 +25,13 @@ Volume-envelope and DAC bindings can be sparse. Multiple DAC notes can point
 to the same PCM at different native rates. These mappings never depend on
 the arrangement's generated asset numbering.
 
+The bound modulation assets carry playback operands. OpenGGF's cartridge
+loader supplies a resolved view for `82` and `84`, whose retail operands
+come from the driver code table. Keep the original envelope bytes as an
+unbound asset when preserving a cartridge source. Both entries can travel
+in the same package. Branches and immediate control cycles are checked
+before rendering.
+
 The tempo field is derived from the header. The native project has no clip or
 sequence arrays. A header can carry seven declared FM/DAC entries so the source
 can preserve the retail inactive seventh entry. The playback profile only
@@ -57,6 +64,17 @@ keeps the stored byte array editable. Source save and schema 3 package export
 preserve unsupported data, including envelope programs outside the supported
 playback profile. See the [asset package contract](native-asset-package.md).
 
+A cue that uses `E2 FF` needs the music it restores. The CLI accepts that
+music as an explicit playback input. The warm-up advances the previous song
+to its interruption point and is excluded from the resulting WAV.
+
+```sh
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project cue.json cue.wav --previous-project prior.json --previous-frames 120
+```
+
+Contextual preview supports cues whose reachable `E2` commands all request
+restoration. Studio preview runs an isolated music bank.
+
 ## Import readiness
 
 A future importer can write an exact bank without first interpreting it as
@@ -67,13 +85,11 @@ native runtime dependencies. The following are concrete checks for that gate.
 | --- | --- |
 | Bank layout and dependencies | Reachability from the active tracks in each S3K variant. Resolve shared phrases and instrument data, table and header addresses, original numeric envelope indices, and per-note DAC sample/rate descriptors. Preserve any inactive header entries. |
 | Stream semantics | Native timing and register comparisons for explicit and reused durations, bare-duration replay, HOLD with fill, tempo changes, stack and loop counters, voice changes, PSG envelope/noise and DAC timing. |
-| Engine blockers | Signed modulation envelope values used in Carnival Night and Launch Base, exact wrapped duration and fill state, song restoration for the 1-UP cue, and DAC rest replay and active stop semantics. Re-pin after fixes are backed by native playback evidence. |
-| Whole-song acceptance | Run the strict traversal on every song in the selected retail variant with resolved dependencies. Use local user-supplied assets and record identity, coverage and timing evidence. Check silent lanes and cross-track timing as well as sound. |
+| Retail catalogue coverage | The locked-on catalogue passes strict traversal with resolved dependencies. The 1-Up cue uses explicit prior music. Preserve the original bank and asset identity when importing. |
+| Whole-song acceptance | Compare the selected retail variants against native PCM, track and chip timings over complete song sections. Use local user-supplied assets and record identity, coverage and results. |
 | Additional defined commands | Track native cross-song voices, conditional loop exit, direct register writes, FM3 special mode, custom FM envelopes, speed changes and game/SFX context separately from reached retail uses. |
 
-The synthetic example proves the v5 workflow, sparse mappings, tempo events and
-shared control-flow paths. In a local check of the locked-on retail catalogue,
-23 of 51 music IDs passed preflight, with one alias among the passes. The
-remaining 28 have their first blocker recorded in the
-[validation report](../validation/2026-11-17-native-import-target.md).
-Whole-song native PCM and register parity remain open.
+The initial [catalogue assessment](../validation/2026-11-17-native-import-target.md)
+records the 28 blockers that motivated the driver change. The
+[re-pin verification](../validation/2026-11-17-s3k-repin.md) records the
+follow-up catalogue check and its playback boundary.

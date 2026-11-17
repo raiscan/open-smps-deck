@@ -197,6 +197,11 @@ public final class ProjectCompiler {
             while(commandIndex<commands.size() && commands.get(commandIndex).tick()==at) {
                 CommandEvent event=commands.get(commandIndex++);
                 out.put(event.command().opcode()); for(int argument:event.arguments()) out.put(argument);
+                if(event.command()==NativeCommand.MODULATION_OFF && source.modulationEnvelopeId()!=null) {
+                    // Retail FA clears custom modulation's bit. Clear the
+                    // selected envelope too for the arrangement command.
+                    out.put(0xF4); out.put(0);
+                }
             }
             int next=at+(int)Math.min(127L,(long)length-at);
             if(note!=null) next=Math.min(next,sounding ? note.tick()+note.duration() : note.tick());

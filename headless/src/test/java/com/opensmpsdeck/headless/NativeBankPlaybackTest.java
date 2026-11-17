@@ -5,6 +5,7 @@ import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
+import com.opensmpsdeck.project.EnvelopeProgram;
 import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFormat;
@@ -128,6 +129,69 @@ class NativeBankPlaybackTest {
         assertEquals(44L + 2 * 3200L, Files.size(shortWav));
     }
 
+    @Test void rendersRestoreCueWithExplicitPreviousProjectWithoutIncludingWarmup() throws Exception {
+        var previous = previousMusicProject();
+        var cue = restoreCueProject();
+        Path previousPath = directory.resolve("previous.json");
+        Path cuePath = directory.resolve("cue.json");
+        Path wav = directory.resolve("cue.wav");
+        Files.writeString(previousPath, ProjectFormat.write(previous));
+        Files.writeString(cuePath, ProjectFormat.write(cue));
+        var errors = new ByteArrayOutputStream();
+        var err = new PrintStream(errors);
+        assertEquals(2, Main.run(new String[]{"render-project", cuePath.toString(), wav.toString()}, err, err));
+        assertTrue(errors.toString().contains("requires session context"));
+        assertFalse(Files.exists(wav));
+
+        errors.reset();
+        assertEquals(2, Main.run(new String[]{"render-project", cuePath.toString(), wav.toString(),
+                "--previous-project", previousPath.toString()}, err, err));
+        assertTrue(errors.toString().contains("must be used together"));
+        assertFalse(Files.exists(wav));
+
+        errors.reset();
+        assertEquals(0, Main.run(new String[]{"render-project", cuePath.toString(), wav.toString(),
+                "--previous-project", previousPath.toString(), "--previous-frames", "1"}, err, err), errors::toString);
+        assertEquals(44L + PREVIEW * 3200L, Files.size(wav));
+    }
+
+    @Test void restoreDefersToNextPresentationAndResumesSavedCursorWithAttenuatedVoice() throws Exception {
+        var previous = ProjectCompiler.compileWithAssets(previousMusicProject());
+        var cue = ProjectCompiler.compileWithAssets(restoreCueProject());
+        var uninterrupted = observe(previous);
+        var resumed = observe((sink, observer) ->
+                S3kRenderer.renderWithPreviousMusic(previous, 1, cue, PREVIEW, sink, observer));
+
+        var firstNote = uninterrupted.fm1FrequencyWrites(0);
+        var secondNote = uninterrupted.fm1FrequencyWrites(1);
+        assertFalse(secondNote.isEmpty());
+        assertNotEquals(firstNote, secondNote);
+        assertTrue(resumed.fm1FrequencyWrites(0).isEmpty(), "Warm-up writes must be excluded");
+        assertTrue(resumed.fm1FrequencyWrites(1).isEmpty());
+        assertTrue(resumed.fm1FrequencyWrites(2).isEmpty(), "The restore flag only queues the request");
+        assertEquals(secondNote, resumed.fm1FrequencyWrites(3), "Resume at the saved cursor");
+        assertTrue(resumed.writes().contains(new Write(3, 0x40, 0x61)),
+                "The restored voice includes the 0x40 attenuation");
+        assertTrue(resumed.hasAudio());
+    }
+
+    private static StudioProject previousMusicProject() {
+        return restoreFixture(new int[]{0xF2}, new int[]{0xEF, 0, 0xA1, 1, 0xB1, 16, 0xF2});
+    }
+
+    private static StudioProject restoreCueProject() {
+        return restoreFixture(new int[]{0x80, 2, 0xE2, 0xFF, 0xF2}, new int[]{0xF2});
+    }
+
+    private static StudioProject restoreFixture(int[] dac, int[] fm1) {
+        byte[] bank = new byte[0x50];
+        put(bank, HEADER, 0, 0, 2, 0, 1, 0, 0x30, 0x80, 0, 0, 0x40, 0x80, 0, 5);
+        put(bank, 0x30, dac);
+        put(bank, 0x40, fm1);
+        return new StudioProject(5, "Restore fixture", "S3K", 24, 0, List.of(VOICE), List.of(), List.of(),
+                List.of(), List.of(), NativeProgram.of(BASE, HEADER, 0, PREVIEW, bank, List.of(), List.of()));
+    }
+
     @Test void preservesAnUnsupportedNativeBankWithoutPublishingAudio() throws Exception {
         StudioProject original = project(0x80);
         byte[] bytes = original.nativeProgram().bank();
@@ -151,7 +215,7 @@ class NativeBankPlaybackTest {
 
     @Test void archivesRawModulationAssetsOutsidePlaybackProfile() throws Exception {
         StudioProject original = project(0x80);
-        var raw = new Envelope("negative", "Raw modulation", "MODULATION", List.of(1, 0xFF, 0x83));
+        var raw = new Envelope("negative", "Raw modulation", "MODULATION", List.of(1, 0xFF, 0x82, 2));
         var program = NativeProgram.of(BASE, HEADER, 0, PREVIEW, original.nativeProgram().bank(),
                 List.of(new NativeProgram.EnvelopeSlot("negative", 11)), List.of());
         var project = new StudioProject(5, original.name(), "S3K", 24, 0, original.voices(),
@@ -159,7 +223,7 @@ class NativeBankPlaybackTest {
         Path archive = directory.resolve("raw-envelope.zip");
         ProjectPackage.write(project, archive);
         try (var zip = new ZipFile(archive.toFile())) {
-            assertArrayEquals(new byte[]{1, (byte) 0xFF, (byte) 0x83}, read(zip, "mod/asset-001.bin"));
+            assertArrayEquals(new byte[]{1, (byte) 0xFF, (byte) 0x82, 2}, read(zip, "mod/asset-001.bin"));
         }
         Path wave = directory.resolve("raw-envelope.wav");
         var compiled = ProjectCompiler.compileWithAssets(project);
@@ -169,13 +233,20 @@ class NativeBankPlaybackTest {
         put(bytes, 0x32, 0xF4, 11, 0xF2);
         var used = new CompiledProject(bytes, List.of(raw), List.of(), program.withBank(bytes), original.voices());
         var error = assertThrows(IllegalArgumentException.class, () -> WaveFile.render(used, wave, PREVIEW));
-        assertTrue(error.getMessage().contains("modulation envelope 11"), error::getMessage);
+        assertTrue(error.getMessage().contains("modulation envelope 11: Envelope has a zero-time control cycle"), error::getMessage);
         assertFalse(Files.exists(wave));
         put(bytes, 0x34, 0xFA, 0xF2);
-        var safe = new Envelope("negative", "Valid modulation", "MODULATION", List.of(1, 0x83));
+        var safe = new Envelope("negative", "Valid modulation", "MODULATION", List.of(1, 0xFF, 0x82, 0));
         var active = new CompiledProject(bytes, List.of(safe), List.of(), program.withBank(bytes), original.voices());
-        var disable = assertThrows(IllegalArgumentException.class, () -> NativeBankAnalysis.inspect(active));
-        assertTrue(disable.getMessage().contains("FA with envelope modulation"), disable::getMessage);
+        assertTrue(NativeBankAnalysis.inspect(active).events().stream()
+                .anyMatch(event -> event.meaning().equals("Disable custom modulation")));
+    }
+
+    @Test void rejectsPsgControlsAfterARestThatAHeldEnvelopeSwitchCouldReach() {
+        assertThrows(IllegalArgumentException.class, () -> EnvelopeProgram.validateNativePlayback(
+                Envelope.PSG_VOLUME, List.of(0x81, 0x82, 1)));
+        assertDoesNotThrow(() -> EnvelopeProgram.validateNativePlayback(
+                Envelope.PSG_VOLUME, List.of(0x30, 0x80)));
     }
 
     private static byte[] read(ZipFile zip, String path) throws Exception {
@@ -207,11 +278,20 @@ class NativeBankPlaybackTest {
     }
 
     private static Observation observe(CompiledProject project) throws Exception {
+        return observe((sink, observer) -> S3kRenderer.render(project, PREVIEW, sink, observer));
+    }
+
+    @FunctionalInterface
+    private interface ObservedRender {
+        void render(S3kRenderer.PcmSink sink, ChipWriteObserver observer) throws java.io.IOException;
+    }
+
+    private static Observation observe(ObservedRender render) throws Exception {
         var writes = new ArrayList<Write>();
         var pcmFrames = new ArrayList<Integer>();
         int[] frame = {0};
         boolean[] hasAudio = {false};
-        S3kRenderer.render(project, PREVIEW, pcm -> {
+        render.render(pcm -> {
             pcmFrames.add(Arrays.hashCode(pcm));
             for (short sample : pcm) if (sample != 0) hasAudio[0] = true;
             frame[0]++;
@@ -228,6 +308,12 @@ class NativeBankPlaybackTest {
 
     private record Write(int frame, int register, int value) {}
     private record Observation(List<Write> writes, List<Integer> pcmFrames, boolean hasAudio) {
+        List<Integer> fm1FrequencyWrites(int frame) {
+            return writes.stream().filter(write -> write.frame() == frame &&
+                            (write.register() == 0xA0 || write.register() == 0xA4))
+                    .map(Write::value).toList();
+        }
+
         List<Integer> fm1Attacks() {
             return writes.stream().filter(write -> write.register() == 0x28 && write.value() == 0xF0)
                     .map(Write::frame).toList();

@@ -84,27 +84,27 @@ class NativeBankAnalysisTest {
     }
 
     @Test
-    void gatesNativeSilenceAndPanHistoriesThePinCannotPlay() {
+    void retainsNativePanHistoriesAndGatesUnimplementedSilence() {
         fails("silence and stop requires native E3 register writes", dac(0xE3));
         byte[] bank = new byte[25];
         put(bank, 0, 0, 0, 2, 0, 1, 0, 14, 0, 0, 0, 15, 0, 0, 0);
         put(bank, 14, 0xF2, 0xE0, 0x83, 0xE0, 0x43, 0xF2);
         assertEquals(4, inspect(bank, 0, 0, 0).events().size());
         bank[18] = 0x40;
-        fails("pan change requires native E0 low-bit retention", bank);
+        assertEquals(4, inspect(bank, 0, 0, 0).events().size());
         bank[16] = (byte) 0x88;
-        fails("pan change requires native E0 low-bit retention", bank);
+        assertEquals(4, inspect(bank, 0, 0, 0).events().size());
     }
 
     @Test
-    void rejectsMissingDurationsResourcesAndUnsupportedDivider() {
+    void rejectsMissingDurationsAndResourcesAndAcceptsNativeWrap() {
         fails("previously stored duration", dac(0x80, 0xF2));
         fails("previous note", dac(1, 0xF2));
         fails("undefined DAC sample", dac(0x81, 1, 0xF2));
-        fails("DAC duration-only replay of a rest", dac(0x80, 1, 2, 0xF2));
+        assertEquals(4, inspect(dac(0x80, 1, 2, 0xF2), 0, 0, 0).events().size());
         byte[] bank = dac(0x80, 0x40, 0xF2);
         bank[4] = 4;
-        fails("duration requires native byte-wrap support", bank);
+        assertEquals("Duration 64 → 256", inspect(bank, 0, 0, 0).events().get(1).meaning());
         bank[4] = 3;
         assertEquals(3, inspect(bank, 0, 0, 0).events().size());
     }
@@ -119,11 +119,9 @@ class NativeBankAnalysisTest {
         assertTrue(assertThrows(IllegalArgumentException.class, () -> inspect(fm, 0, 0, 1))
                 .getMessage().contains("cross-song FM voice"));
         put(fm, 15, 0xE7, 0xEF, 0, 0x81, 3, 0xF2);
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> inspect(fm, 0, 0, 1))
-                .getMessage().contains("FM voice change after HOLD"));
+        assertEquals(6, inspect(fm, 0, 0, 1).events().size());
         put(fm, 15, 0xE5, 0, 1, 0xEF, 0, 0x81, 3, 0xF2);
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> inspect(fm, 0, 0, 1))
-                .getMessage().contains("FM level change before EF"));
+        assertEquals(6, inspect(fm, 0, 0, 1).events().size());
 
         byte[] psg = new byte[20];
         put(psg, 0, 0, 0, 1, 1, 1, 0, 16, 0, 0, 0, 17, 0, 0, 0, 3, 0);
@@ -132,11 +130,11 @@ class NativeBankAnalysisTest {
     }
 
     @Test
-    void rejectsReachableHoldAndNonzeroFillOnTheSameTrack() {
+    void acceptsReachableHoldAndNonzeroFillOnTheSameTrack() {
         byte[] bank = new byte[25];
         put(bank, 2, 1, 1, 1, 0, 16, 0, 0, 0, 17, 0, 0, 0, 0, 0);
         put(bank, 16, 0xF2, 0xE8, 1, 0x81, 3, 0xE7, 3, 0xF2);
-        fails("HOLD and nonzero fill on one track require native fill support at 0x15", bank);
+        assertEquals(7, inspect(bank, 0, 0, 0).events().size());
         bank[18] = 0;
         assertEquals(7, inspect(bank, 0, 0, 0).events().size());
     }

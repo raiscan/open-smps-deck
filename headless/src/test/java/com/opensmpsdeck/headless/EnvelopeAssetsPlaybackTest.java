@@ -64,7 +64,10 @@ class EnvelopeAssetsPlaybackTest {
             Capture actual = equivalent(project, expected, Map.of(), Map.of(1, bytes(0, 2, 4, 0x81)), 16);
             if (type.equals("FM")) {
                 assertNotEquals(lastFm(actual, 0, 0xA0), lastFm(actual, 1, 0xA0));
-                assertEquals(lastFm(actual, 3, 0xA0), lastFm(actual, 8, 0xA0), "81 holds the offset");
+                assertEquals(lastFm(actual, 0, 0xA0) + 4, lastFm(actual, 2, 0xA0));
+                assertFalse(actual.writes.stream().anyMatch(write -> write.port() == 0
+                                && write.register() == 0xA0 && write.frame() >= 3 && write.frame() < 10),
+                        "81 sustains the last frequency without rewriting it");
             }
         }
     }
@@ -81,7 +84,7 @@ class EnvelopeAssetsPlaybackTest {
             var project = new StudioProject(3, source.name(), "S3K", 24, 0, List.of(),
                     List.of(source.sequences().getFirst(), plain),
                     List.of(source.clips().getFirst(), new Clip("plain-clip", "plain", "PSG1", 8, 4)), source.envelopes());
-            int[] phrase = {0x99, 2, 0xFA, 0xE7, 2};
+            int[] phrase = {0x99, 2, 0xFA, 0xF4, 0, 0xE7, 2};
             byte[] expected = psgBank(concat(psgReset(1, 1), phrase,
                     state.equals("RESET") ? psgReset(1, 1) : new int[0], phrase,
                     psgReset(0, 0), new int[]{0x99, 4, 0xF2}));
@@ -90,7 +93,7 @@ class EnvelopeAssetsPlaybackTest {
             assertTrue(actual.writes.contains(new Write(8, -1, -1, 0x90)), "the plain clip must clear inherited volume envelope");
             if (state.equals("RESET")) reset = actual; else carry = actual;
         }
-        assertNotEquals(reset.writes, carry.writes, "RESET restores selected modulation after FA; CARRY retains it disabled");
+        assertNotEquals(reset.writes, carry.writes, "RESET restores the selected envelope; CARRY retains the clear");
         assertFalse(Arrays.equals(reset.pcm.toByteArray(), carry.pcm.toByteArray()));
     }
 

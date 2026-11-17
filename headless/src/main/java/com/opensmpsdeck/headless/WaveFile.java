@@ -21,6 +21,26 @@ public final class WaveFile {
     public static void render(CompiledProject project, Path output, int presentations) throws IOException {
         S3kRenderer.validatePresentations(presentations);
         S3kBinary.validateAndCopy(project);
+        write(output, presentations, sink -> S3kRenderer.render(project, presentations, sink));
+    }
+
+    public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
+                                               CompiledProject cue, Path output, int presentations) throws IOException {
+        S3kRenderer.validatePresentations(presentations);
+        S3kRenderer.validatePreviousPresentations(previousPresentations);
+        S3kBinary.validateAndCopy(previous);
+        if (cue.nativeProgram() == null) S3kBinary.validateAndCopy(cue);
+        else S3kBinary.inspectNative(cue, true);
+        write(output, presentations, sink ->
+                S3kRenderer.renderWithPreviousMusic(previous, previousPresentations, cue, presentations, sink));
+    }
+
+    @FunctionalInterface
+    private interface Renderer {
+        void render(S3kRenderer.PcmSink sink) throws IOException;
+    }
+
+    private static void write(Path output, int presentations, Renderer renderer) throws IOException {
         // CREATE_NEW also rejects symlinks and concurrent creators; never truncate a user's file.
         OutputStream created = Files.newOutputStream(output, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         boolean complete = false;
@@ -32,7 +52,7 @@ public final class WaveFile {
             le32(out, S3kRenderer.SAMPLE_RATE); le32(out, S3kRenderer.SAMPLE_RATE * 4);
             le16(out, 4); le16(out, 16); ascii(out, "data"); le32(out, bytes);
             byte[] encoded = new byte[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 4];
-            S3kRenderer.render(project, presentations, pcm -> {
+            renderer.render(pcm -> {
                 if (Thread.currentThread().isInterrupted())
                     throw new java.io.InterruptedIOException("WAV export cancelled");
                 for (int i = 0; i < pcm.length; i++) {

@@ -21,6 +21,11 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-packa
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project /path/to/project.json /path/to/project.wav --frames 120
 ```
 
+A native cue can restore a previous project's live state. Pass
+`--previous-project prior.json --previous-frames N` together on
+`render-project`. The warm-up advances the prior song in the same session.
+The WAV begins at the cue and includes the resumed music after `E2 FF`.
+
 `demo-project` creates an original FM/PSG project that an external agent or the
 studio can edit. `validate-project` checks its strict schema, references, hardware
 lanes and compiler limits, then reports the project name, sequence/clip counts
