@@ -1,0 +1,58 @@
+name: S3K playback foundation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  playback:
+    runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Verify snapshot and extraction tests
+        run: |
+          python3 tools/openggf_audio.py check
+          python3 -m unittest discover -s tools/tests -v
+      - name: Build and test headless playback
+        run: mvn -B -pl headless -am verify
+      - name: Exercise the packaged CLI and verify bundled provenance
+        run: |
+          java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo "$RUNNER_TEMP/demo.wav" --frames 120
+          python3 - "$RUNNER_TEMP/demo.wav" <<'PY'
+          import hashlib, json, pathlib, sys, wave, zipfile
+          with wave.open(sys.argv[1], 'rb') as wav:
+              assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getnframes()) == (2, 2, 48000, 96000)
+              assert hashlib.sha256(wav.readframes(96000)).hexdigest() == '5e455223632e6ef88262ac953f08f9eab181d34f5e59076d60355f80f7219c73'
+          lock_bytes = pathlib.Path('upstream/openggf-audio.lock.json').read_bytes()
+          lock = json.loads(lock_bytes)
+          with zipfile.ZipFile('headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar') as jar:
+              base = 'META-INF/openggf-audio/'
+              assert jar.read(base + 'openggf-audio.lock.json') == lock_bytes
+              for entry in lock['files']:
+                  content = jar.read(base + 'sources/' + entry['path'].removeprefix('src/main/java/'))
+                  assert hashlib.sha256(content).hexdigest() == entry['vendoredSha256'], entry['path']
+              for entry in lock['licenses']:
+                  assert hashlib.sha256(jar.read(base + entry['destination'])).hexdigest() == entry['vendoredSha256'], entry['path']
+          PY
+      - name: Fetch only the locked upstream commit
+        run: |
+          revision=$(python3 -c 'import json; print(json.load(open("upstream/openggf-audio.lock.json"))["revision"])')
+          git init "$RUNNER_TEMP/openggf-reference"
+          git -C "$RUNNER_TEMP/openggf-reference" fetch --depth=1 https://github.com/OpenGGF/OpenGGF.git "$revision"
+      - name: Verify provenance and independent playback parity
+        run: |
+          python3 tools/openggf_audio.py check --source "$RUNNER_TEMP/openggf-reference"
+          python3 tools/verify_openggf_audio_parity.py --source "$RUNNER_TEMP/openggf-reference" --scratch "$RUNNER_TEMP"

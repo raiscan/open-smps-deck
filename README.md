@@ -1,5 +1,14 @@
 # OpenSMPSDeck
 
+**Reboot in progress:** the new direction is an externally scriptable SMPS
+workspace with a modern timeline editor. The first delivery establishes pinned
+OpenGGF S3&K playback and a [headless render proof](headless/README.md).
+The existing JavaFX app below still uses the legacy engine.
+See the [reboot design](docs/superpowers/specs/2026-11-17-reimagined-design.md)
+and [audio provenance/parity checks](openggf-audio/README.md).
+Building the complete reactor now requires **JDK 25**; the legacy modules retain
+their Java 21 source target.
+
 A standalone SMPS-native music tracker for composing YM2612 FM and SN76489 PSG music targeting the Sega Mega Drive / Genesis sound hardware.
 
 OpenSMPSDeck produces SMPS-compatible output that can be:
@@ -48,7 +57,7 @@ OpenSMPSDeck produces SMPS-compatible output that can be:
 
 ## Requirements
 
-- **Java 21** or later
+- **Java 25** for the complete build (legacy modules retain Java 21 source compatibility)
 - **Maven 3.8+** for building
 - **JavaFX 21** (pulled automatically by Maven)
 

@@ -23,6 +23,8 @@
     <modules>
         <module>synth-core</module>
         <module>app</module>
+        <module>openggf-audio</module>
+        <module>headless</module>
     </modules>
 
     <dependencyManagement>

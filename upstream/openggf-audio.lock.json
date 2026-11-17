@@ -1,0 +1,481 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/OpenGGF/OpenGGF.git",
+  "revision": "a1c4aac7ae2708f5c487e8000da80502e854abe2",
+  "patches": [
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsSequencer.java",
+      "removeExact": "import com.openggf.audio.AudioManager;\n",
+      "reason": "Remove the unused AudioManager import only; sequencer behavior is unchanged and the game composition root is not required."
+    }
+  ],
+  "files": [
+    {
+      "path": "src/main/java/com/openggf/audio/AudioStream.java",
+      "sourceSha256": "4c65afa7877a37f7ef10eb21a0585610aab6a1357eb688f855f3c38c3fe338fe",
+      "vendoredSha256": "4c65afa7877a37f7ef10eb21a0585610aab6a1357eb688f855f3c38c3fe338fe"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/MusicRestoreSink.java",
+      "sourceSha256": "27e1adeb8e02067bcbd42a00f7846473d9141f17ee75541cddf72717f9158685",
+      "vendoredSha256": "27e1adeb8e02067bcbd42a00f7846473d9141f17ee75541cddf72717f9158685"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/MusicTempoPercent.java",
+      "sourceSha256": "dc0334642d3fcddd155031bf69d3ec09a0ae2dc928c0e9a955ca91409dc66893",
+      "vendoredSha256": "dc0334642d3fcddd155031bf69d3ec09a0ae2dc928c0e9a955ca91409dc66893"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/PreparedSfxAdmission.java",
+      "sourceSha256": "63762bb17122744030bdb808394098782d58c17af672b71d3336a7204191f6a7",
+      "vendoredSha256": "63762bb17122744030bdb808394098782d58c17af672b71d3336a7204191f6a7"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/SfxContentionObserver.java",
+      "sourceSha256": "cd68f64709015df4f0b5d7162fc5a619ecdb1a0c72b2219e84249430c8ceaa8e",
+      "vendoredSha256": "cd68f64709015df4f0b5d7162fc5a619ecdb1a0c72b2219e84249430c8ceaa8e"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/SmpsChannelOwnershipProjection.java",
+      "sourceSha256": "1afd7eec89e78c9021ef889989d6078c3c1e07c56e01fb132cd684506e7bc867",
+      "vendoredSha256": "1afd7eec89e78c9021ef889989d6078c3c1e07c56e01fb132cd684506e7bc867"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/SmpsDriver.java",
+      "sourceSha256": "cd6c7b3f35ae145e9912bbb931a61a48b15b3ecd01ac38fa712734dbd0564cae",
+      "vendoredSha256": "cd6c7b3f35ae145e9912bbb931a61a48b15b3ecd01ac38fa712734dbd0564cae"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/SmpsDriverServiceObserver.java",
+      "sourceSha256": "42c15bce20c7b27873eb1ceafab494b0d719f2145a5efdd5a4b6ef07bfee78b2",
+      "vendoredSha256": "42c15bce20c7b27873eb1ceafab494b0d719f2145a5efdd5a4b6ef07bfee78b2"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/driver/SmpsDriverSessionAccess.java",
+      "sourceSha256": "49f53add1b10aeab156e84d7249d6cb20ff6d5534b78a0faedd08a53cc09c1e1",
+      "vendoredSha256": "49f53add1b10aeab156e84d7249d6cb20ff6d5534b78a0faedd08a53cc09c1e1"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/rewind/SmpsDriverSnapshot.java",
+      "sourceSha256": "a91849db806b2fba4b7199c78457b01100b54a5d2d729fcce8d1ae8686f6565e",
+      "vendoredSha256": "a91849db806b2fba4b7199c78457b01100b54a5d2d729fcce8d1ae8686f6565e"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/rewind/SmpsSequencerSnapshot.java",
+      "sourceSha256": "3ae6e51344ae09caf171b9e5bb4b6c0c5e268e5e20f3cce5f96a3f1ba38e21ac",
+      "vendoredSha256": "3ae6e51344ae09caf171b9e5bb4b6c0c5e268e5e20f3cce5f96a3f1ba38e21ac"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/rewind/SmpsSourceDescriptor.java",
+      "sourceSha256": "bf4b96b320a5a34ac74bdc6ec57bd80f3a44a17df3207a544f08dc53b7a54be1",
+      "vendoredSha256": "bf4b96b320a5a34ac74bdc6ec57bd80f3a44a17df3207a544f08dc53b7a54be1"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/rewind/SmpsTrackSnapshot.java",
+      "sourceSha256": "cd591e3f61b0fa8385b0c68cb6849852c57995e039f8fa0fd9a9e1f4dba5ee0a",
+      "vendoredSha256": "cd591e3f61b0fa8385b0c68cb6849852c57995e039f8fa0fd9a9e1f4dba5ee0a"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/LegacyCompatibilitySmpsPhysicalPolicy.java",
+      "sourceSha256": "6f99962ecdd789e78210006d354746fd19977cd8db1c3b722a2f1bee2ae8a7d0",
+      "vendoredSha256": "6f99962ecdd789e78210006d354746fd19977cd8db1c3b722a2f1bee2ae8a7d0"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/OwnedSmpsAudioStream.java",
+      "sourceSha256": "53740ec7ee0bb97a2c92f662cb443d549bfc2b1540b5a4cc802a4d9b8a99c520",
+      "vendoredSha256": "53740ec7ee0bb97a2c92f662cb443d549bfc2b1540b5a4cc802a4d9b8a99c520"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/PreparedSmpsMusicActivation.java",
+      "sourceSha256": "85dbc6f1890cde7518005fb1662237e8ac56285a6d483bf5aa460d4fa6abc7c3",
+      "vendoredSha256": "85dbc6f1890cde7518005fb1662237e8ac56285a6d483bf5aa460d4fa6abc7c3"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/PreparedSmpsSfxProgram.java",
+      "sourceSha256": "14d22c21d8f62cd5026e807ff823ad2eca7e4c879b35b294f75e077011777700",
+      "vendoredSha256": "14d22c21d8f62cd5026e807ff823ad2eca7e4c879b35b294f75e077011777700"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsChipWrite.java",
+      "sourceSha256": "d72cf2d46cfeea4f5ec1bf9d8533b229a041cb3031b4e4f7790d895711e2292c",
+      "vendoredSha256": "d72cf2d46cfeea4f5ec1bf9d8533b229a041cb3031b4e4f7790d895711e2292c"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsDacSelection.java",
+      "sourceSha256": "d56c183ee50b1f82568d91f17aaae1ef68a6d98d8056fdb9f7eb2f90cdc2110a",
+      "vendoredSha256": "d56c183ee50b1f82568d91f17aaae1ef68a6d98d8056fdb9f7eb2f90cdc2110a"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsDiagnosticQueue.java",
+      "sourceSha256": "985ddcbc14e5b8fe63d548ebefe84d521be608e3be9c7b0a6be2b6ccfab81fb7",
+      "vendoredSha256": "985ddcbc14e5b8fe63d548ebefe84d521be608e3be9c7b0a6be2b6ccfab81fb7"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsDriverSession.java",
+      "sourceSha256": "b2095c71b99da704cc31536b97e48641a74b78f0efc47958298bd9175a4ffe82",
+      "vendoredSha256": "b2095c71b99da704cc31536b97e48641a74b78f0efc47958298bd9175a4ffe82"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsDriverSessionConfiguration.java",
+      "sourceSha256": "6c5db8fc99f583f415d03bdfafbb8a9ce35381b87a2a856096526cd4be4081d1",
+      "vendoredSha256": "6c5db8fc99f583f415d03bdfafbb8a9ce35381b87a2a856096526cd4be4081d1"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsDriverSessionSnapshot.java",
+      "sourceSha256": "800d823882955d2a26260c2231c7410b458c748b8e2a89d5fba8df7bef3681a2",
+      "vendoredSha256": "800d823882955d2a26260c2231c7410b458c748b8e2a89d5fba8df7bef3681a2"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsFadeOutEffects.java",
+      "sourceSha256": "95ba5e0519d9b5da9cdbb2f054f1a3752ed6163aec3a34a5297e1bf05fc59e60",
+      "vendoredSha256": "95ba5e0519d9b5da9cdbb2f054f1a3752ed6163aec3a34a5297e1bf05fc59e60"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsHardwareFrameBudget.java",
+      "sourceSha256": "a51352026eaebacbec1c70b982d67333055642ffc9cc8a9f11f76947f4f12599",
+      "vendoredSha256": "a51352026eaebacbec1c70b982d67333055642ffc9cc8a9f11f76947f4f12599"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsLogicalTransitionPolicies.java",
+      "sourceSha256": "54b389ae940ff611a496f6599bd053977d28ffc49257e87c2de70a434c51d8fd",
+      "vendoredSha256": "54b389ae940ff611a496f6599bd053977d28ffc49257e87c2de70a434c51d8fd"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsLogicalTransitionPolicy.java",
+      "sourceSha256": "30a0199ea2d8396cb49602bcea8a8423f03360a07591e5469ca2ce7a87536603",
+      "vendoredSha256": "30a0199ea2d8396cb49602bcea8a8423f03360a07591e5469ca2ce7a87536603"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsMusicActivation.java",
+      "sourceSha256": "d08e3e192e35bc5a7ed3c477d74816c5ae07d63af61a1142071326b89a0a5796",
+      "vendoredSha256": "d08e3e192e35bc5a7ed3c477d74816c5ae07d63af61a1142071326b89a0a5796"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsNativePausePolicy.java",
+      "sourceSha256": "2a5e0da150056ee6700872f3034a421ab9475011d4ebd960984ec4a1b6362803",
+      "vendoredSha256": "2a5e0da150056ee6700872f3034a421ab9475011d4ebd960984ec4a1b6362803"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsNativePauseState.java",
+      "sourceSha256": "b7fa0f6b9edc45a6fb0276517bb48b346a7708286080f1b7d6d9d2cca8bf2ce1",
+      "vendoredSha256": "b7fa0f6b9edc45a6fb0276517bb48b346a7708286080f1b7d6d9d2cca8bf2ce1"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsPendingGlobalCommand.java",
+      "sourceSha256": "fb1e9f2b3d7aa44894374e0537365969c9a08098356730d4741b74e05c4de5d4",
+      "vendoredSha256": "fb1e9f2b3d7aa44894374e0537365969c9a08098356730d4741b74e05c4de5d4"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsPhysicalDevice.java",
+      "sourceSha256": "19c48f72f3dadabe56eb116eda5564359cf7245dbcc1f3818b6cc767e4fb960b",
+      "vendoredSha256": "19c48f72f3dadabe56eb116eda5564359cf7245dbcc1f3818b6cc767e4fb960b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsPhysicalPolicy.java",
+      "sourceSha256": "58172f4d72e5b292263d9c17d33c77c4a6e37610b3405edc87ffca71222c790e",
+      "vendoredSha256": "58172f4d72e5b292263d9c17d33c77c4a6e37610b3405edc87ffca71222c790e"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsPhysicalPort.java",
+      "sourceSha256": "5167d0a9d886532260986f5868ac522592e1b7d366de8b0c40e973d63288c555",
+      "vendoredSha256": "5167d0a9d886532260986f5868ac522592e1b7d366de8b0c40e973d63288c555"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsSegaPcmTransport.java",
+      "sourceSha256": "4e54138532b707f6c7685f75e96b0f370163f8dfd3b255a06d6ee99f20b9dd06",
+      "vendoredSha256": "4e54138532b707f6c7685f75e96b0f370163f8dfd3b255a06d6ee99f20b9dd06"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsSegaPcmTransportSnapshot.java",
+      "sourceSha256": "d6a4726b69cdc9a5f11014b254cef9fcb428c0f319724b8863f8c91215cbda1c",
+      "vendoredSha256": "d6a4726b69cdc9a5f11014b254cef9fcb428c0f319724b8863f8c91215cbda1c"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsServiceOutcome.java",
+      "sourceSha256": "48531ea04840cec01c4e4c3751205e1a934138ecf314d7e66f78846a12893d51",
+      "vendoredSha256": "48531ea04840cec01c4e4c3751205e1a934138ecf314d7e66f78846a12893d51"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsSessionCommand.java",
+      "sourceSha256": "e55d871d5ff1fdfe88cadf037530f94e573f2908cb6b4baac072a9777f564132",
+      "vendoredSha256": "e55d871d5ff1fdfe88cadf037530f94e573f2908cb6b4baac072a9777f564132"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsSessionProfileFingerprint.java",
+      "sourceSha256": "5262d81bd054afba50bdfb0c3d09c52ab80d706576830cb2d71733da03a0555f",
+      "vendoredSha256": "5262d81bd054afba50bdfb0c3d09c52ab80d706576830cb2d71733da03a0555f"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsStatefulCommandOperation.java",
+      "sourceSha256": "29042c014a9ca5919b0749b6098bce88985d6aee84d682da07203406f40edc3b",
+      "vendoredSha256": "29042c014a9ca5919b0749b6098bce88985d6aee84d682da07203406f40edc3b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsStatefulCommandPolicy.java",
+      "sourceSha256": "2057dad0e5015f4d14a46d9b9981b6cc0ebc5eec798a5cf2293a9ca3cfeb904f",
+      "vendoredSha256": "2057dad0e5015f4d14a46d9b9981b6cc0ebc5eec798a5cf2293a9ca3cfeb904f"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/session/SmpsWriteProgram.java",
+      "sourceSha256": "44ee7f4cf7abc0a1d9aef58b1708108e9c650f8ab9d813d752d9866ff26c11fd",
+      "vendoredSha256": "44ee7f4cf7abc0a1d9aef58b1708108e9c650f8ab9d813d752d9866ff26c11fd"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/AbstractSmpsData.java",
+      "sourceSha256": "c9478440e0923355ea41fe62ee4b27def8f20213f672e4c2d7c47e1617badd65",
+      "vendoredSha256": "c9478440e0923355ea41fe62ee4b27def8f20213f672e4c2d7c47e1617badd65"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/CoordFlagContext.java",
+      "sourceSha256": "43ebc9533d35b40f835952a55e01ed7bd5b3d09b51d5c57ac840046527b97c1b",
+      "vendoredSha256": "43ebc9533d35b40f835952a55e01ed7bd5b3d09b51d5c57ac840046527b97c1b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/CoordFlagHandler.java",
+      "sourceSha256": "3d97a767fab6542db983987ee5ce9e8d5bb4a1b5df64b0ce75239f6639c70f3e",
+      "vendoredSha256": "3d97a767fab6542db983987ee5ce9e8d5bb4a1b5df64b0ce75239f6639c70f3e"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/DacData.java",
+      "sourceSha256": "415f270c0403cf6487c9894d128cfed751347d5d2f5300a8856e8c44fa7dcd0a",
+      "vendoredSha256": "415f270c0403cf6487c9894d128cfed751347d5d2f5300a8856e8c44fa7dcd0a"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsCoordFlagRuntimeState.java",
+      "sourceSha256": "7f0990890631c942ffd80684a94b642bcf3807c851c5f1b47749ee38455bffbd",
+      "vendoredSha256": "7f0990890631c942ffd80684a94b642bcf3807c851c5f1b47749ee38455bffbd"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsHeaderDecoder.java",
+      "sourceSha256": "3ccf7946815337b419f6aa2fc7e3b259da64dba7f2893875b5571553b711c099",
+      "vendoredSha256": "3ccf7946815337b419f6aa2fc7e3b259da64dba7f2893875b5571553b711c099"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsLoadReadiness.java",
+      "sourceSha256": "49f798b145ff97723226be2118322d797da7e216da6e3e4510cc2d75b1622224",
+      "vendoredSha256": "49f798b145ff97723226be2118322d797da7e216da6e3e4510cc2d75b1622224"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsLogicalWriteTarget.java",
+      "sourceSha256": "38c00b31f86c5216c3121344a213487a46af5c995c920459e7d437dc744594eb",
+      "vendoredSha256": "38c00b31f86c5216c3121344a213487a46af5c995c920459e7d437dc744594eb"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsNoteListener.java",
+      "sourceSha256": "ffa971318a4f0d16e90cce0781e6c4fa704bedf227a299958dad31330f334743",
+      "vendoredSha256": "ffa971318a4f0d16e90cce0781e6c4fa704bedf227a299958dad31330f334743"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsProgramView.java",
+      "sourceSha256": "72cdf2cd67adc9a66eff7afc2d11d3390331ec0adbe735b320f69f1f62403060",
+      "vendoredSha256": "72cdf2cd67adc9a66eff7afc2d11d3390331ec0adbe735b320f69f1f62403060"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsSequencer.java",
+      "sourceSha256": "9900a8e1d6f800169d01cdd99fb65b4b65221c883426194c68be1fc327040acd",
+      "vendoredSha256": "81b3fcfdb2b72e122a21d9c295883808588dbe653ddbbb8a33d352a15e24fd2b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsSequencerConfig.java",
+      "sourceSha256": "a22bad8b17422974ad191f77ebbe0fb0529797672451596263cbf9e18f92d2e9",
+      "vendoredSha256": "a22bad8b17422974ad191f77ebbe0fb0529797672451596263cbf9e18f92d2e9"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsSequencerHost.java",
+      "sourceSha256": "9d8066373031e8399201fe08e4db7e0b148bcf82962921a3356c870c211d6282",
+      "vendoredSha256": "9d8066373031e8399201fe08e4db7e0b148bcf82962921a3356c870c211d6282"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/SmpsSfxData.java",
+      "sourceSha256": "b759feecb77545eeda88eeba29c0a6e660d8ded16aac06c093c243a054121a2d",
+      "vendoredSha256": "b759feecb77545eeda88eeba29c0a6e660d8ded16aac06c093c243a054121a2d"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/ZeroAddressFmVoiceProvider.java",
+      "sourceSha256": "b9fd031c013bce7a29a8938cd73b2ff766270cd97344e47b5e6fffc41971d90c",
+      "vendoredSha256": "b9fd031c013bce7a29a8938cd73b2ff766270cd97344e47b5e6fffc41971d90c"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/BlipDeltaBuffer.java",
+      "sourceSha256": "a9dba8f3f78061d66cbf76cf31f0256e915acf9c21bfdc825670c7de6a507876",
+      "vendoredSha256": "a9dba8f3f78061d66cbf76cf31f0256e915acf9c21bfdc825670c7de6a507876"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/BlipResampler.java",
+      "sourceSha256": "86b1c5c1c66693df099b81b57ee9d65d2c1ccb3fb826f84e31c271ab5f94f21d",
+      "vendoredSha256": "86b1c5c1c66693df099b81b57ee9d65d2c1ccb3fb826f84e31c271ab5f94f21d"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/ChipWriteObserver.java",
+      "sourceSha256": "242c90b60b430ea523d419bfe5ae769d32bd736566c7f2362aa9569d013ffcb2",
+      "vendoredSha256": "242c90b60b430ea523d419bfe5ae769d32bd736566c7f2362aa9569d013ffcb2"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/FastYm2612Chip.java",
+      "sourceSha256": "dce093b876775a9324eb6cb8aecc4a1c9f72b25cfb43f2b126c98de978bc94f4",
+      "vendoredSha256": "dce093b876775a9324eb6cb8aecc4a1c9f72b25cfb43f2b126c98de978bc94f4"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/FmChip.java",
+      "sourceSha256": "ffd6a18592c3d4a78a40bb9f11951db2776635cd46ec6f6236c18ab05f635b51",
+      "vendoredSha256": "ffd6a18592c3d4a78a40bb9f11951db2776635cd46ec6f6236c18ab05f635b51"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/FmCoreSelection.java",
+      "sourceSha256": "891c5603001c83db2cb89752a75d33b77f2c772f31af419863b2619037133f7e",
+      "vendoredSha256": "891c5603001c83db2cb89752a75d33b77f2c772f31af419863b2619037133f7e"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/FmDacTiming.java",
+      "sourceSha256": "ec08a9a16ff0662c9c36fe27480e98ed2b47c6496438a2297922060245af2e7b",
+      "vendoredSha256": "ec08a9a16ff0662c9c36fe27480e98ed2b47c6496438a2297922060245af2e7b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/MuslSin.java",
+      "sourceSha256": "f9c70ae71586e8c10b8a12ad5ca2d12d1c15ece7daefd5cff5c252155a7c09b6",
+      "vendoredSha256": "f9c70ae71586e8c10b8a12ad5ca2d12d1c15ece7daefd5cff5c252155a7c09b6"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/NativeCompatiblePcmOutput.java",
+      "sourceSha256": "8659561530ec6fb24c48872ec80272118fce27592ec9f7e0705af978bbfeb137",
+      "vendoredSha256": "8659561530ec6fb24c48872ec80272118fce27592ec9f7e0705af978bbfeb137"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/NativeCompatiblePsgOutput.java",
+      "sourceSha256": "1cb9cf47986adfa9497d1bcaa0d3c14fded72f3784a0dace20c68388cd80c845",
+      "vendoredSha256": "1cb9cf47986adfa9497d1bcaa0d3c14fded72f3784a0dace20c68388cd80c845"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/PsgChip.java",
+      "sourceSha256": "6775bc7e2ee4e45cd933660c7bc67285a4c145705df0517d2a718f0680ae63a2",
+      "vendoredSha256": "6775bc7e2ee4e45cd933660c7bc67285a4c145705df0517d2a718f0680ae63a2"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/Synthesizer.java",
+      "sourceSha256": "168e1d196c69742b9284e13e8f7c9d7d1a6cb63b72b0f99826ec11617015e7a1",
+      "vendoredSha256": "168e1d196c69742b9284e13e8f7c9d7d1a6cb63b72b0f99826ec11617015e7a1"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/VirtualSynthesizer.java",
+      "sourceSha256": "8b32b2c6fc23da0bd29de1dba7f01f357ddf2e4c122814eba2b393f2dd4d2f3d",
+      "vendoredSha256": "8b32b2c6fc23da0bd29de1dba7f01f357ddf2e4c122814eba2b393f2dd4d2f3d"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/Ym2612Chip.java",
+      "sourceSha256": "62793861346e1b029ab0092c6cb4098085d901f4b58c91906ee02cb5896b7914",
+      "vendoredSha256": "62793861346e1b029ab0092c6cb4098085d901f4b58c91906ee02cb5896b7914"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/blip/BlipBuf.java",
+      "sourceSha256": "a24b6056d90098142bdc70ba1de6783a87db0c413245a7b1096dda339d8696a3",
+      "vendoredSha256": "a24b6056d90098142bdc70ba1de6783a87db0c413245a7b1096dda339d8696a3"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/blip/package-info.java",
+      "sourceSha256": "4213b1c50e5899a57e72e16ccbb9cb294495653ebcfae8fd1c6143c33ea3e189",
+      "vendoredSha256": "4213b1c50e5899a57e72e16ccbb9cb294495653ebcfae8fd1c6143c33ea3e189"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/fast/FastFmCores.java",
+      "sourceSha256": "131cf72291dfa1dae616238bf0f62580978827b934156b3dc9aae68ff261dfe0",
+      "vendoredSha256": "131cf72291dfa1dae616238bf0f62580978827b934156b3dc9aae68ff261dfe0"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/fast/FastYm2612Dsp.java",
+      "sourceSha256": "ee2237160d9db4c266810941bf17868b0c7fc4b484bd4899dd4a3d6f1fd170d8",
+      "vendoredSha256": "ee2237160d9db4c266810941bf17868b0c7fc4b484bd4899dd4a3d6f1fd170d8"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/fast/FmDsp.java",
+      "sourceSha256": "4204a4f1e4112a831f18522e043e45139a492255b8ce50783409c84ae92d4a73",
+      "vendoredSha256": "4204a4f1e4112a831f18522e043e45139a492255b8ce50783409c84ae92d4a73"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/nuked/NukedOpn2.java",
+      "sourceSha256": "f1fc3fb5022b9057ce4ba75aec7f1934b390fc2335a2a0d31b57cc5314b5ce04",
+      "vendoredSha256": "f1fc3fb5022b9057ce4ba75aec7f1934b390fc2335a2a0d31b57cc5314b5ce04"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/nuked/NukedOpn2State.java",
+      "sourceSha256": "2b992ee151534fc424f1c7dad06954833cd991d500d2fcccc658568b926afe4c",
+      "vendoredSha256": "2b992ee151534fc424f1c7dad06954833cd991d500d2fcccc658568b926afe4c"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/nuked/NukedOpn2Tables.java",
+      "sourceSha256": "d18109e9b96532fb3a8272f7f426da4b7e9fd76da2e4fa754389dc7d5b070f1b",
+      "vendoredSha256": "d18109e9b96532fb3a8272f7f426da4b7e9fd76da2e4fa754389dc7d5b070f1b"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/synth/nuked/package-info.java",
+      "sourceSha256": "1b045494a52da05fb7e330902a0a97f97fb9b8bd3e7b15f5d523109e06852fd9",
+      "vendoredSha256": "1b045494a52da05fb7e330902a0a97f97fb9b8bd3e7b15f5d523109e06852fd9"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/ModApi.java",
+      "sourceSha256": "08b08321100cc33e92638d4303df26176e7a4bc565c11bc0a441e36d5c15c17d",
+      "vendoredSha256": "08b08321100cc33e92638d4303df26176e7a4bc565c11bc0a441e36d5c15c17d"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/Sonic3kSfx.java",
+      "sourceSha256": "9d3218af15fa42386ef106dc8c342758c788026a13d642a2cb1d6198ff3cc8a8",
+      "vendoredSha256": "9d3218af15fa42386ef106dc8c342758c788026a13d642a2cb1d6198ff3cc8a8"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/Sonic3kSmpsConstants.java",
+      "sourceSha256": "f52d70d90fab16c40eaaf4609e77eb129bb4d8ce35ce810f161904d12ed7d9b4",
+      "vendoredSha256": "f52d70d90fab16c40eaaf4609e77eb129bb4d8ce35ce810f161904d12ed7d9b4"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/Sonic3kSmpsPhysicalPolicy.java",
+      "sourceSha256": "cbb425c89bcc4133957b298c983561707d85444a46262d3481462b4a806cd250",
+      "vendoredSha256": "cbb425c89bcc4133957b298c983561707d85444a46262d3481462b4a806cd250"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/Sonic3kSmpsSequencerConfig.java",
+      "sourceSha256": "b66d0870c8a655860c14d0e4a6d3115e78a14ab59510aa4bb837500ab9a9405d",
+      "vendoredSha256": "b66d0870c8a655860c14d0e4a6d3115e78a14ab59510aa4bb837500ab9a9405d"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kCoordFlagHandler.java",
+      "sourceSha256": "3895aabfc567bedd381fd2154e5f7441aff865ce1a2d1799e2c65b4548c344b2",
+      "vendoredSha256": "3895aabfc567bedd381fd2154e5f7441aff865ce1a2d1799e2c65b4548c344b2"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kSmpsData.java",
+      "sourceSha256": "4a07dac4ffb1767aff5cc4ff0aca39f0ec8f74f32c08d6e495a3049d3b624430",
+      "vendoredSha256": "4a07dac4ffb1767aff5cc4ff0aca39f0ec8f74f32c08d6e495a3049d3b624430"
+    }
+  ],
+  "licenses": [
+    {
+      "path": "LICENSE",
+      "destination": "LICENSE.upstream",
+      "sourceSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "vendoredSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "LICENSES/LGPL-2.1.txt",
+      "destination": "LICENSES/LGPL-2.1.txt",
+      "sourceSha256": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331",
+      "vendoredSha256": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331"
+    },
+    {
+      "path": "LICENSES/MAME-BSD-3-Clause.txt",
+      "destination": "LICENSES/MAME-BSD-3-Clause.txt",
+      "sourceSha256": "a27554938d3dd6569931e5e18b93214a57f47bc1bb8b75fc32fdd18abe042a07",
+      "vendoredSha256": "a27554938d3dd6569931e5e18b93214a57f47bc1bb8b75fc32fdd18abe042a07"
+    },
+    {
+      "path": "LICENSES/OpenGGF-Mod-Exception.txt",
+      "destination": "LICENSES/OpenGGF-Mod-Exception.txt",
+      "sourceSha256": "3fd238dac4eb7a956ad58b23c67b2047c30eb3751124c3f766586118baa90438",
+      "vendoredSha256": "3fd238dac4eb7a956ad58b23c67b2047c30eb3751124c3f766586118baa90438"
+    },
+    {
+      "path": "NOTICE.md",
+      "destination": "NOTICE.upstream.md",
+      "sourceSha256": "967e609c768479ecdbe061f948a0037b5b5edc981cadb5030be5abd788d627fc",
+      "vendoredSha256": "967e609c768479ecdbe061f948a0037b5b5edc981cadb5030be5abd788d627fc"
+    }
+  ]
+}

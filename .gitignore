@@ -41,3 +41,7 @@ docs/Xm4smps-4.1.src.tar.gz
 *.tmp
 *.swp
 *~
+
+# Python verification tools
+__pycache__/
+*.py[cod]
