@@ -58,6 +58,14 @@ the representation, editing, rendering and dependency-complete export gate.
   compiler, render validator or inspected UI integration. Review did not substitute
   for the execution checks above.
 
+Hosted execution exposed an inherited workflow configuration error: `runner`
+context is unavailable in job-level `env`, so GitHub rejected the workflow
+before creating a job. Actionlint 1.7.12 reproduced the exact invalid-context
+error. Initialization now writes `JAVA_TOOL_OPTIONS` through `GITHUB_ENV` from
+the first runner step using `RUNNER_TEMP`; actionlint and a local execution of
+that step pass. The [GitHub context availability table](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)
+documents this scope restriction. No application source changed for this fix.
+
 ## Full-suite comparison and limits
 
 `xvfb-run ... mvn -B --fail-at-end verify -Dstudio.ui.test=true

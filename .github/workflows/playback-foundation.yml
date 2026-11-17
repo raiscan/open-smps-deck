@@ -10,9 +10,9 @@ permissions:
 jobs:
   playback:
     runs-on: ubuntu-latest
-    env:
-      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=${{ runner.temp }}
     steps:
+      - name: Configure Java temporary storage
+        run: printf 'JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
