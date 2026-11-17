@@ -57,7 +57,12 @@ final class S3kBinary {
                 if (!track.psg && command >= 0x81 && voices == 0) fail("FM notes require a local voice table");
                 continue;
             }
-            if (command == 0xE7) continue; // HOLD
+            if (command == 0xE7 || command == 0xFA) continue; // HOLD / modulation off
+            if (command == 0xF0) {
+                if (end - position < 4) fail("truncated modulation operands at " + hex(at));
+                position += 4; // Delay, rate, signed delta, steps: all are raw bytes.
+                continue;
+            }
             boolean both = command == 0xE1 || command == 0xE4 || command == 0xE8 || command == 0xED || command == 0xFB;
             boolean fm = command == 0xE0 || command == 0xE6 || command == 0xEF;
             boolean psg = command == 0xEC || command == 0xF3;

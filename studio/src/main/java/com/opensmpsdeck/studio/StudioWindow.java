@@ -26,6 +26,9 @@ public final class StudioWindow implements AutoCloseable {
     private final FlowPane noteInspector=new FlowPane(8,8);
     final TimelineView timeline=new TimelineView();
     final PianoRollView piano=new PianoRollView();
+    final CommandEditorPane commands=new CommandEditorPane(edit->change(edit),text->status.setText(text));
+    private final TabPane sourceModes=new TabPane();
+    private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands");
     private final StudioPlayback playback=new StudioPlayback();
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
     private final Deque<StudioProject> undo=new ArrayDeque<>(), redo=new ArrayDeque<>();
@@ -49,7 +52,8 @@ public final class StudioWindow implements AutoCloseable {
         stage.setOnCloseRequest(event->{if(!confirmLeave())event.consume();else close();});
         load(file);
     }
-    void showNotes(){editors.showNotes();}
+    void showNotes(){sourceModes.getSelectionModel().select(noteMode);editors.showNotes();}
+    void showCommands(){sourceModes.getSelectionModel().select(commandMode);editors.showNotes();}
     private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
     ProjectDocument document(){return document;}
     Scene scene(){return stage.getScene();}
@@ -71,7 +75,7 @@ public final class StudioWindow implements AutoCloseable {
         browser.setCellFactory(ignored->new ListCell<>(){
             @Override protected void updateItem(Sequence s,boolean empty){
                 super.updateItem(s,empty);setText(null);setGraphic(null);
-                if(!empty&&s!=null){VBox card=new VBox(5,label(s.name(),"sequence-name"),label(s.type()+"  /  "+s.lengthTicks()+" ticks  /  "+s.notes().size()+" notes","muted"));card.setPadding(new Insets(8,4,8,4));setGraphic(card);}
+                if(!empty&&s!=null){VBox card=new VBox(5,label(s.name(),"sequence-name"),label(s.type()+"  /  "+s.lengthTicks()+" ticks  /  "+s.notes().size()+" notes"+(s.commands().isEmpty()?"":" · "+s.commands().size()+" commands"),"muted"));card.setPadding(new Insets(8,4,8,4));setGraphic(card);}
             }
         });
         browser.getSelectionModel().selectedItemProperty().addListener((o,a,b)->{
@@ -90,13 +94,16 @@ public final class StudioWindow implements AutoCloseable {
         HBox arrangeHeader=new HBox(10,label("ARRANGEMENT","section"),label("Drag clips · drag their right edge to repeat","muted"),spacer(),label("ZOOM","muted"),zoom);
         arrangeHeader.getStyleClass().add("panelbar");
         VBox arrangement=new VBox(arrangeHeader,timeline.scroll);VBox.setVgrow(timeline.scroll,Priority.ALWAYS);
+        piano.commandSelection=id->{showCommands();commands.selectCommand(id);};
         piano.selection=id->{selectedNote=id;refreshNoteInspector();};
         piano.edit=n->change(p->ProjectEdits.updateNote(p,selectedSequence,n));
         piano.addition=n->{if(change(p->ProjectEdits.addNote(p,selectedSequence,n))){selectedNote=n.id();refreshView();}};
         detail.getStyleClass().add("section");linked.getStyleClass().add("muted");
         HBox pianoHeader=new HBox(12,detail,spacer(),linked);pianoHeader.getStyleClass().add("panelbar");
         noteInspector.getStyleClass().add("note-inspector");
-        VBox notes=new VBox(pianoHeader,piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
+        VBox noteBody=new VBox(piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
+        noteMode.setClosable(false);commandMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);sourceModes.getTabs().setAll(noteMode,commandMode);sourceModes.setId("source-editor-modes");
+        VBox notes=new VBox(pianoHeader,sourceModes);VBox.setVgrow(sourceModes,Priority.ALWAYS);
         editors=new ResponsiveEditors(arrangement,notes);
         inspector.getStyleClass().add("inspector");inspector.setMinWidth(0);inspector.setPrefWidth(240);
         ScrollPane inspectorScroll=new ScrollPane(inspector);inspectorScroll.setFitToWidth(true);inspectorScroll.setMinWidth(210);inspectorScroll.getStyleClass().add("editor-scroll");
@@ -141,7 +148,7 @@ public final class StudioWindow implements AutoCloseable {
         if(source()==null||source().notes().stream().noneMatch(n->n.id().equals(selectedNote)))selectedNote=null;
         browser.getSelectionModel().clearSelection();browser.getItems().setAll(p.sequences());
         if(source()!=null)browser.getSelectionModel().select(source());
-        timeline.setProject(p,selectedClip);piano.setSequence(source(),selectedNote,p.ticksPerBeat());
+        timeline.setProject(p,selectedClip);piano.setSequence(source(),selectedNote,p.ticksPerBeat());commands.setSource(p,selectedSequence);
         detail.setText(source()==null?"NOTE EDITOR":source().name().toUpperCase(Locale.ROOT));
         long uses=p.clips().stream().filter(c->c.sequenceId().equals(selectedSequence)).count();
         linked.setText(source()==null?"Double-click to add notes":"Linked source · "+uses+" instance"+(uses==1?"":"s")+" · double-click to add notes");
@@ -161,7 +168,7 @@ public final class StudioWindow implements AutoCloseable {
         inspector.getChildren().addAll(label("HARDWARE LANE","muted"),lane,label("START TICK","muted"),start,label("LENGTH IN TICKS","muted"),length);
         Label repeat=label(String.format(Locale.ROOT,"%.2f repetitions · %d ticks / source",(double)c.lengthTicks()/source().lengthTicks(),source().lengthTicks()),"muted");repeat.setWrapText(true);inspector.getChildren().add(repeat);
         Button apply=button("Apply clip changes",()->{try{change(pj->ProjectEdits.replaceClip(pj,new Clip(c.id(),c.sequenceId(),lane.getValue(),Integer.parseInt(start.getText()),Integer.parseInt(length.getText()))));}catch(IllegalArgumentException e){error(e);}});apply.setId("apply-clip");
-        inspector.getChildren().addAll(apply,button("Duplicate linked clip",()->{Clip copy=new Clip("clip-"+UUID.randomUUID(),c.sequenceId(),c.lane(),c.startTick()+c.lengthTicks(),c.lengthTicks());if(change(pj->ProjectEdits.addClip(pj,copy))){selectedClip=copy.id();refreshView();}}),button("Delete clip",this::deleteClip),new Separator(),label("Shared source","section"));
+        inspector.getChildren().addAll(apply,button("Duplicate linked clip",()->{Clip copy=new Clip("clip-"+UUID.randomUUID(),c.sequenceId(),c.lane(),c.startTick()+c.lengthTicks(),c.lengthTicks());if(change(pj->ProjectEdits.addClip(pj,copy))){selectedClip=copy.id();refreshView();}}),button("Delete clip",this::deleteClip),new Separator(),button("Source controls & commands",this::showCommands),label("Shared source","section"));
         Label help=label("Notes below belong to the sequence. Editing them changes every linked clip. Extending a clip repeats its source; it does not stretch the notes.","help");help.setWrapText(true);inspector.getChildren().add(help);
     }
     private TextField field(int value,String id){TextField f=new TextField(String.valueOf(value));f.setId(id);f.setPrefColumnCount(5);return f;}
@@ -215,11 +222,11 @@ public final class StudioWindow implements AutoCloseable {
     private void undo(boolean backwards){Deque<StudioProject> from=backwards?undo:redo,to=backwards?redo:undo;if(!from.isEmpty()){StudioProject next=from.pop();to.push(document.project());document.edit(next);stop();refreshView();}}
     private void key(KeyEvent e){
         if(e.isShortcutDown()&&e.getCode()==KeyCode.S){save();e.consume();return;}
-        if(e.getTarget() instanceof TextInputControl)return;
+        if(e.getTarget() instanceof TextInputControl||stage.getScene().getFocusOwner() instanceof ComboBoxBase<?>)return;
         if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
         else if(e.getCode()==KeyCode.SPACE){if(playback.playing())stop();else play();e.consume();}
-        else if(e.getCode()==KeyCode.DELETE||e.getCode()==KeyCode.BACK_SPACE){if(piano.canvas.isFocused())deleteNote();else deleteClip();e.consume();}
+        else if(e.getCode()==KeyCode.DELETE||e.getCode()==KeyCode.BACK_SPACE){if(commands.ownsFocus(stage.getScene().getFocusOwner()))commands.deleteSelected();else if(piano.canvas.isFocused())deleteNote();else if(timeline.canvas.isFocused())deleteClip();e.consume();}
     }
     private void play(){long epoch=++playbackEpoch;StudioProject snapshot=document.project();playback.play(snapshot,text->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch)status.setText(text);}),tick->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch){timeline.playhead=tick;timeline.draw();}}));}
     private void stop(){playbackEpoch++;playback.stop();timeline.playhead=-1;timeline.draw();status.setText("Stopped");}

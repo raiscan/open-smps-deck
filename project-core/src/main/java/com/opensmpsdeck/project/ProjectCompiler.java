@@ -18,6 +18,11 @@ public final class ProjectCompiler {
         Map<String,Sequence> sources=new HashMap<>(); Map<String,List<NoteEvent>> notes=new HashMap<>();
         for (Sequence s : project.sequences()) { sources.put(s.id(),s); notes.put(s.id(),s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList()); }
         Map<String,Integer> voices=new HashMap<>(); for(int i=0;i<project.voices().size();i++) voices.put(project.voices().get(i).id(),i);
+        if(project.formatVersion()==2) for(Clip clip:project.clips()) {
+            Sequence source=sources.get(clip.sequenceId());
+            if(source.type().equals("FM") && voices.get(source.voiceId())>=128)
+                throw new IllegalArgumentException("Sequence '"+source.id()+"': banked voice references need future asset support (local voice index "+voices.get(source.voiceId())+")");
+        }
         int fm=1, psg=0;
         for(Clip c : project.clips()) {
             if(c.lane().startsWith("FM")) fm=Math.max(fm,1+Integer.parseInt(c.lane().substring(2)));
@@ -45,30 +50,60 @@ public final class ProjectCompiler {
             rest(out,clip.startTick()-cursor);
             Sequence source=sources.get(clip.sequenceId());
             int remaining=clip.lengthTicks();
+            boolean first=true;
+            List<CommandEvent> commands=source.commands().stream().sorted(Comparator.comparingInt(CommandEvent::tick)).toList();
             while(remaining>0) {
                 int length=Math.min(remaining,source.lengthTicks());
-                reset(out,source,voices);
-                int at=0;
-                for(NoteEvent note : notes.get(source.id())) {
-                    if(note.tick()>=length) break;
-                    rest(out,note.tick()-at);
-                    int duration=Math.min(note.duration(),length-note.tick());
-                    note(out,source.type(),note.pitch(),duration);
-                    at=note.tick()+duration;
+                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) reset(out,source,voices,project.formatVersion()==2);
+                if(project.formatVersion()==1) {
+                    int at=0;
+                    for(NoteEvent note : notes.get(source.id())) {
+                        if(note.tick()>=length) break;
+                        rest(out,note.tick()-at);
+                        int duration=Math.min(note.duration(),length-note.tick());
+                        note(out,source.type(),note.pitch(),duration);
+                        at=note.tick()+duration;
+                    }
+                    rest(out,length-at);
+                } else {
+                    units(out,source,notes.get(source.id()),commands,length);
                 }
-                rest(out,length-at);
                 remaining-=length;
+                first=false;
             }
             cursor=clip.startTick()+clip.lengthTicks();
         }
         out.put(STOP);
     }
 
-    private static void reset(Bank out,Sequence source,Map<String,Integer> voices) {
+    private static void reset(Bank out,Sequence source,Map<String,Integer> voices,boolean expanded) {
         if(source.type().equals("FM")) { out.put(0xEF); out.put(voices.get(source.voiceId())); }
         out.put(0xE4); out.put(source.volume());
         if(source.type().equals("FM")) { out.put(0xE0); out.put(0xC0); }
         out.put(0xED); out.put(0x40);
+        if(expanded) { out.put(0xE1); out.put(0); out.put(0xE8); out.put(0); out.put(0xFA); }
+    }
+    /** Merge only source events, streaming bounded time units straight into the bank. */
+    private static void units(Bank out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length) {
+        int at=0, noteIndex=0, commandIndex=0;
+        while(at<length) {
+            while(noteIndex<notes.size() && notes.get(noteIndex).tick()+notes.get(noteIndex).duration()<=at) noteIndex++;
+            NoteEvent note=noteIndex<notes.size() ? notes.get(noteIndex) : null;
+            boolean sounding=note!=null && note.tick()<=at;
+            while(commandIndex<commands.size() && commands.get(commandIndex).tick()==at) {
+                CommandEvent event=commands.get(commandIndex++);
+                out.put(event.command().opcode()); for(int argument:event.arguments()) out.put(argument);
+            }
+            int next=at+(int)Math.min(127L,(long)length-at);
+            if(note!=null) next=Math.min(next,sounding ? note.tick()+note.duration() : note.tick());
+            if(commandIndex<commands.size()) next=Math.min(next,commands.get(commandIndex).tick());
+            if(sounding) {
+                if(note.tick()==at) out.put(encodedPitch(source.type(),note.pitch()));
+                else out.put(HOLD);
+            } else out.put(REST);
+            out.put(next-at);
+            at=next;
+        }
     }
     private static void rest(Bank out,int ticks) {
         while(ticks>0) { int duration=Math.min(ticks,127); out.put(REST); out.put(duration); ticks-=duration; }
@@ -76,9 +111,10 @@ public final class ProjectCompiler {
     private static void note(Bank out,String type,int pitch,int ticks) {
         // FM byte 81 is C0 (MIDI12), but S3K's PSG table starts at C2
         // (MIDI36). Sharing the FM bias raises every PSG note two octaves.
-        int encoded=0x81+pitch-(type.equals("PSG")?36:12); boolean continuation=false;
+        int encoded=encodedPitch(type,pitch); boolean continuation=false;
         while(ticks>0) { int duration=Math.min(ticks,127); if(continuation) out.put(HOLD); out.put(encoded); out.put(duration); ticks-=duration; continuation=true; }
     }
+    private static int encodedPitch(String type,int pitch) { return 0x81+pitch-(type.equals("PSG")?36:12); }
 
     /** Fixed-size writer bounds work even for billion-tick input; no expanded event list. */
     private static final class Bank {

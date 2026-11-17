@@ -1,10 +1,14 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.NativeCommand;
 import javafx.application.Platform;
 import javafx.geometry.Point2D;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.TextField;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.robot.Robot;
@@ -52,12 +56,36 @@ public final class DpiStudioSmoke {
             check(fx(()->save.getFont().getSize()>=14),"control text is undersized");click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
             check(!fx(()->window.document().dirty()),"native Save click failed");
             check(ProjectFiles.load(Path.of(args[1])).project().sequences().getFirst().notes().size()==7,"saved pointer edit not in shared file");
+            // Commands must remain reachable through the same scaled native UI.
+            fx(()->{
+                window.showCommands();layout();
+                @SuppressWarnings("unchecked") ComboBox<NativeCommand> type=(ComboBox<NativeCommand>)window.scene().lookup("#command-type");
+                type.setValue(NativeCommand.PAN);
+                ((TextField)window.scene().lookup("#command-tick")).setText("6");
+                ((TextField)window.scene().lookup("#command-bytes")).setText("80");
+                ScrollPane scroll=(ScrollPane)window.commands.getCenter();
+                Node add=window.scene().lookup("#add-command");
+                var bounds=scroll.getContent().sceneToLocal(add.localToScene(add.getBoundsInLocal()));
+                scroll.setVvalue(Math.clamp((bounds.getMinY()-15)/Math.max(1,scroll.getContent().getLayoutBounds().getHeight()-scroll.getViewportBounds().getHeight()),0,1));
+                layout();return null;
+            });pause();
+            Button add=fx(()->(Button)window.scene().lookup("#add-command"));
+            click(fx(()->{
+                Point2D point=add.localToScreen(add.getWidth()/2,add.getHeight()/2);
+                ScrollPane scroll=(ScrollPane)window.commands.getCenter();
+                Node viewport=scroll.lookup(".viewport");
+                check(viewport.localToScreen(viewport.getBoundsInLocal()).contains(point),"command Add is outside its viewport");return point;
+            }));
+            check(fx(()->window.document().project().formatVersion()==2&&window.document().project().sequences().getFirst().commands().size()==1),"native scaled command Add failed");
+            click(fx(()->save.localToScreen(save.getWidth()/2,save.getHeight()/2)));
+            check(ProjectFiles.load(Path.of(args[1])).project().sequences().getFirst().commands().getFirst().arguments().equals(java.util.List.of(128)),"native command not saved");
+            fx(()->{((ScrollPane)window.commands.getCenter()).setVvalue(0);layout();return null;});
             fx(()->{
                 WritableImage image=stage.getScene().snapshot(null);BufferedImage png=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);
                 for(int y=0;y<png.getHeight();y++)for(int x=0;x<png.getWidth();x++)png.setRGB(x,y,image.getPixelReader().getArgb(x,y));
                 ImageIO.write(png,"png",Path.of(args[2]).toFile());return null;
             });
-            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip drag, scrolled note entry/resize, Save and work-area bounds");
+            System.out.println("Packaged native DPI smoke PASS: "+args[0]+"x, clip drag, scrolled note entry/resize, command Add, Save and work-area bounds");
         } finally {fx(()->{if(window!=null)window.close();if(stage!=null)stage.close();Platform.exit();return null;});}
     }
     private static void reveal(int pitch) throws Exception {

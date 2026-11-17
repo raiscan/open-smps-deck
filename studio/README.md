@@ -5,6 +5,10 @@ Clips, linked sequences, a piano roll and external file refresh use the same
 source the headless CLI reads. Playback uses the pinned OpenGGF S3&K driver and
 accurate chip core.
 
+The source editor includes Notes and Commands tabs, with timed native controls,
+linked voice/volume settings and explicit RESET/CARRY repetition. See the
+[S3K support matrix](../docs/architecture/s3k-support.md) for remaining coverage.
+
 ## Run
 
 Build with JDK 25 and Maven, on a desktop with JavaFX-supported native libraries:

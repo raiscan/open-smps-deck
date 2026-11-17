@@ -31,8 +31,19 @@ public final class S3kRenderer {
     private S3kRenderer() {}
 
     public static void render(byte[] input, int presentations, PcmSink sink) throws IOException {
+        render(input, presentations, sink, ChipWriteObserver.NONE);
+    }
+
+    /**
+     * Render with a synchronous diagnostic observer of resolved chip writes.
+     * Session initialization and each presentation may emit writes; the sink is
+     * invoked after each presentation, allowing a caller to stamp that boundary.
+     * The observer must not modify the session or re-enter rendering.
+     */
+    public static void render(byte[] input, int presentations, PcmSink sink, ChipWriteObserver observer) throws IOException {
         validatePresentations(presentations);
         Objects.requireNonNull(sink, "sink");
+        Objects.requireNonNull(observer, "observer");
         byte[] bytes = S3kBinary.validateAndCopy(input);
         var data = new Sonic3kSmpsData(bytes, 0);
         var dac = new DacData(Map.of(), Map.of(), 297);
@@ -51,7 +62,7 @@ public final class S3kRenderer {
         var settings = SmpsHardwareFrameBudget.presentationSettings(SAMPLE_RATE, PRESENTATIONS_PER_SECOND,
                 false, false, FmCoreSelection.ACCURATE, null);
         var policy = Sonic3kSmpsPhysicalPolicy.INSTANCE;
-        try (var session = new SmpsDriverSession(settings, policy, ChipWriteObserver.NONE,
+        try (var session = new SmpsDriverSession(settings, policy, observer,
                 new SmpsSessionProfileFingerprint("s3k", 0, policy.identity(), settings),
                 SmpsDriverSessionConfiguration.DEFAULT)) {
             session.install();

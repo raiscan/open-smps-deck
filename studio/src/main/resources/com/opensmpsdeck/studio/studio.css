@@ -46,3 +46,11 @@
 .tab:selected { -fx-background-color: #245f58; }
 .tab-label { -fx-text-fill: #dfe9f7; }
 .library .button { -fx-wrap-text: true; -fx-min-width: 0; }
+
+#command-table { -fx-background-color: #101722; -fx-control-inner-background: #101722; -fx-border-color: #28374a; -fx-padding: 0; }
+#command-table .column-header, #command-table .filler { -fx-background-color: #1b293a; -fx-border-color: transparent #28374a #28374a transparent; }
+#command-table .table-row-cell { -fx-background-color: #131e2c; -fx-cell-size: 32px; }
+#command-table .table-row-cell:odd { -fx-background-color: #172333; }
+#command-table .table-row-cell:filled:selected { -fx-background-color: #254a46; }
+#command-table .table-row-cell:empty { -fx-background-color: #101722; }
+#command-table .table-cell { -fx-text-fill: #dcebf7; -fx-border-color: transparent; -fx-padding: 6 8; }

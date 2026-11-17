@@ -15,6 +15,7 @@ final class PianoRollView extends ViewportCanvas {
     String selected;
     int ticksPerBeat=24, topPitch=76, bottomPitch=48;
     double scale=9;
+    Consumer<String> commandSelection=ignored -> {};
     Consumer<String> selection=ignored -> {};
     Consumer<NoteEvent> edit=ignored -> {};
     Consumer<NoteEvent> addition=ignored -> {};
@@ -24,7 +25,12 @@ final class PianoRollView extends ViewportCanvas {
     PianoRollView() {
         dimensions(1000,400);
         canvas.setOnMousePressed(e -> {
-            canvas.requestFocus(); NoteEvent note=hit(e.getX(),e.getY()); selected=note==null?null:note.id(); selection.accept(selected);
+            canvas.requestFocus();
+            if(sequence!=null&&e.getY()>=HEADER-4&&e.getY()<=HEADER+9){
+                var marker=sequence.commands().stream().filter(c->Math.abs(KEYBOARD+c.tick()*scale-offset-e.getX())<=5).findFirst();
+                if(marker.isPresent()){commandSelection.accept(marker.get().id());return;}
+            }
+            NoteEvent note=hit(e.getX(),e.getY()); selected=note==null?null:note.id(); selection.accept(selected);
             dragging=note; ghost=note; pressX=e.getX(); pressY=e.getY();
             resizing=note!=null&&e.getX()>=KEYBOARD+(note.tick()+note.duration())*scale-offset-8;
             if(note==null&&e.getClickCount()==2&&sequence!=null&&e.getX()>KEYBOARD&&e.getY()>HEADER) {
@@ -86,6 +92,11 @@ final class PianoRollView extends ViewportCanvas {
                 g.setFill(Color.web(note.id().equals(selected)?"#b7f7df":"#57bfa6"));
                 g.fillRoundRect(x,y,Math.max(3,note.duration()*scale-2),NOTE_ROW-2,3,3);
             }
+        }
+        if(sequence!=null)for(var command:sequence.commands()){
+            double x=KEYBOARD+command.tick()*scale-offset;if(x<KEYBOARD||x>w)continue;
+            g.setStroke(Color.web("#ffcb77",.25));g.strokeLine(x,HEADER,x,canvas.getHeight());
+            g.setFill(Color.web("#ffcb77"));g.fillOval(x-3,HEADER+1,6,6);
         }
         g.setFill(Color.web("#172130")); g.fillRect(0,0,KEYBOARD,canvas.getHeight());
         for(int pitch=topPitch;pitch>=bottomPitch;pitch--) {

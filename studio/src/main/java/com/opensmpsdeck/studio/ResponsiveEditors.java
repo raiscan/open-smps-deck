@@ -14,6 +14,7 @@ final class ResponsiveEditors extends StackPane {
     private boolean compact;
     ResponsiveEditors(Node arrangement,Node notes) {
         this.arrangement=arrangement;this.notes=notes;
+        tabs.setId("compact-editor-tabs");
         arrangementTab.setClosable(false);notesTab.setClosable(false);
         split.setOrientation(Orientation.VERTICAL);split.getItems().setAll(arrangement,notes);split.setDividerPositions(.59);
         getChildren().setAll(split);

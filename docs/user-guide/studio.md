@@ -22,7 +22,7 @@ compatible lane. The snap is a quarter of the current beat, at least one tick.
 Drag its right edge to repeat or trim it; a partial final repeat is allowed.
 The inspector provides exact start/length and lane fields; press **Apply clip
 changes** to commit those fields. Duplicate creates another linked instance.
-Delete/Backspace removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
+Delete/Backspace with the arrangement focused removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
 for project undo/redo, outside text fields.
 
 ## Edit the source notes
@@ -39,6 +39,37 @@ Editing a clip's repeated length leaves the source unchanged. The header shows
 how many instances use that source. **New sequence** creates an empty FM or PSG
 source; a new project includes original starter FM voices. Custom voice editing
 currently uses the documented JSON file, not an instrument editor.
+
+## Edit native commands
+
+The source editor has **Notes** and **Commands** tabs. Choose **Commands**, or
+**Source controls & commands** in the clip inspector. Gold markers in the piano
+roll select events in the command table. These are linked source edits, affecting
+every clip that uses the source.
+
+Choose a command, enter a decimal tick and its raw **hex operand bytes**, then
+**Add**. The selector supplies the opcode: for left pan, choose Pan and enter
+`80`, not `E0 80`. Select an event to edit it and press **Apply**. Up/Down changes
+authored row order, which determines execution order at the same tick. Delete
+with the table focused removes an event. Commands use the same save and undo
+history as notes and clips. Typing in a form alone does not change the project.
+
+This slice supports pan/AMS/FMS, detune, absolute and relative chip volume,
+absolute and relative transpose, custom modulation setup and modulation off.
+Help describes the native operands and chip restrictions. Modulation setup must
+currently coincide with an explicit note attack. Transpose affects subsequent
+attacks; commands inside held notes do not retrigger them.
+
+**Linked source settings** selects an existing FM voice, base volume and repeat
+policy. **RESET** restores supported state each repetition. **CARRY** resets at
+clip entry, then lets relative changes accumulate across its repetitions.
+Independent clips always reset. Press **Apply source** to commit these fields.
+Try the [native controls example](../../examples/native-controls.smps.json).
+
+A form draft survives external changes to its source. Applying an outdated event
+is refused; use **Reload event** or **New form** to continue from the current
+source. Source settings merge untouched fields and refuse conflicting edits.
+These draft fields are not saved until applied.
 
 ## Save, external changes and recovery
 
@@ -76,6 +107,6 @@ frame budget. No audio device? The app reports the problem; WAV export still wor
 existing files are preserved. A stopped export cleans up its incomplete WAV.
 The binary's voices are local, so this slice requires no external assets.
 
-Nested multi-channel sequences, make-unique, DAC samples, envelopes and raw native
-event editing are subsequent work. This first editor is an FM/PSG composition
-slice, not a claim to expose the entire SMPS command set yet.
+Nested multi-channel sequences, make-unique, DAC samples, envelopes and remaining
+native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
+records the remaining authoring and driver gaps before importing.

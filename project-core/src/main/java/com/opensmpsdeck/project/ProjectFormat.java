@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
-/** Strict version-one source boundary. Unknown native features are rejected, never discarded. */
+/** Strict versioned source boundary. Unknown native features are rejected, never discarded. */
 public final class ProjectFormat {
     public static final int MAX_SOURCE_CHARS = 1_048_576;
     private static final Gson GSON = new GsonBuilder().serializeNulls().setPrettyPrinting().disableHtmlEscaping().create();
@@ -34,8 +34,10 @@ public final class ProjectFormat {
             JsonElement tree = readValue(reader, 0);
             if (reader.peek() != JsonToken.END_DOCUMENT) throw invalid("project", "unexpected content after document");
             JsonObject o = object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips");
-            StudioProject project = new StudioProject(integer(o,"formatVersion"),string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),integer(o,"tempo"),
-                    list(o,"voices",ProjectFormat::voice),list(o,"sequences",ProjectFormat::sequence),list(o,"clips",ProjectFormat::clip));
+            int version=integer(o,"formatVersion");
+            if(version!=1 && version!=2) throw invalid("formatVersion", "only versions 1 and 2 are supported");
+            StudioProject project = new StudioProject(version,string(o,"name"),string(o,"mode"),integer(o,"ticksPerBeat"),integer(o,"tempo"),
+                    list(o,"voices",ProjectFormat::voice),list(o,"sequences",e->sequence(e,version)),list(o,"clips",ProjectFormat::clip));
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -56,7 +58,16 @@ public final class ProjectFormat {
             JsonObject x=new JsonObject(); x.addProperty("id",s.id()); x.addProperty("name",s.name()); x.addProperty("type",s.type()); x.addProperty("lengthTicks",s.lengthTicks()); x.addProperty("voiceId",s.voiceId()); x.addProperty("volume",s.volume());
             JsonArray notes = new JsonArray();
             for (NoteEvent n : s.notes()) { JsonObject y=new JsonObject(); y.addProperty("id",n.id()); y.addProperty("tick",n.tick()); y.addProperty("duration",n.duration()); y.addProperty("pitch",n.pitch()); notes.add(y); }
-            x.add("notes",notes); sequences.add(x);
+            x.add("notes",notes);
+            if(project.formatVersion()==2) {
+                JsonArray commands=new JsonArray();
+                for(CommandEvent event:s.commands()) {
+                    JsonObject y=new JsonObject(); y.addProperty("id",event.id()); y.addProperty("tick",event.tick()); y.addProperty("command",event.command().name());
+                    JsonArray arguments=new JsonArray(); event.arguments().forEach(arguments::add); y.add("arguments",arguments); commands.add(y);
+                }
+                x.add("commands",commands); x.addProperty("repeatState",s.repeatState());
+            }
+            sequences.add(x);
         }
         o.add("sequences",sequences);
         JsonArray clips = new JsonArray();
@@ -67,7 +78,7 @@ public final class ProjectFormat {
 
     public static void validate(StudioProject project) {
         if (project == null) throw invalid("project", "document is required");
-        if (project.formatVersion()!=1) throw invalid("formatVersion", "only version 1 is supported");
+        if (project.formatVersion()!=1 && project.formatVersion()!=2) throw invalid("formatVersion", "only versions 1 and 2 are supported");
         text(project.name(),"name");
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
@@ -83,6 +94,8 @@ public final class ProjectFormat {
             String at="sequence '"+s.id()+"'"; text(s.name(),at+".name");
             if (!"FM".equals(s.type()) && !"PSG".equals(s.type())) throw invalid(at+".type","use FM or PSG; DAC, groups and raw commands are not supported");
             range(s.lengthTicks(),1,Integer.MAX_VALUE,at+".lengthTicks"); range(s.volume(),0,127,at+".volume");
+            if(!"RESET".equals(s.repeatState()) && !"CARRY".equals(s.repeatState())) throw invalid(at+".repeatState","use RESET or CARRY");
+            if(project.formatVersion()==1 && (!s.commands().isEmpty() || !"RESET".equals(s.repeatState()))) throw invalid(at,"commands and repeat-state changes require formatVersion 2");
             if (s.type().equals("FM")) {
                 if (!voices.containsKey(s.voiceId())) throw invalid(at+".voiceId","undefined FM voice '"+s.voiceId()+"'");
             } else if (s.voiceId()!=null) throw invalid(at+".voiceId","PSG must use null; external envelopes are not supported");
@@ -99,6 +112,17 @@ public final class ProjectFormat {
                 if (noteEnd>s.lengthTicks()) throw invalid(note,"must end within sequence length "+s.lengthTicks());
                 if (n.tick()<end) throw invalid(note,"overlaps another note; source sequences are monophonic");
                 end=noteEnd;
+            }
+            unique(s.commands(),CommandEvent::id,at+".commands");
+            Set<Integer> attacks=new HashSet<>(); s.notes().forEach(n->attacks.add(n.tick()));
+            for(CommandEvent event:s.commands()) {
+                String command=at+" command '"+event.id()+"'";
+                range(event.tick(),0,s.lengthTicks()-1,command+".tick");
+                if(event.command()==null) throw invalid(command+".command","a supported native command is required");
+                if(!event.command().supports(s.type())) throw invalid(command+".command",event.command()+" does not support "+s.type());
+                if(event.arguments().size()!=event.command().argumentCount()) throw invalid(command+".arguments","exactly "+event.command().argumentCount()+" raw byte arguments are required");
+                for(int argument:event.arguments()) range(argument,0,255,command+".arguments");
+                if(event.command()==NativeCommand.MODULATION && !attacks.contains(event.tick())) throw invalid(command,"MODULATION setup currently requires an explicit note attack tick; held setup has native history semantics");
             }
         }
         unique(project.clips(), Clip::id, "clips");
@@ -123,10 +147,18 @@ public final class ProjectFormat {
         JsonObject o=object(e,"voice","id","name","bytes");
         return new Voice(string(o,"id"),string(o,"name"),list(o,"bytes",x->integer(x,"voice.bytes[]")));
     }
-    private static Sequence sequence(JsonElement e) {
-        JsonObject o=object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes");
+    private static Sequence sequence(JsonElement e,int version) {
+        JsonObject o=version==1 ? object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes")
+                : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState");
         String voice=o.get("voiceId").isJsonNull()?null:string(o,"voiceId");
-        return new Sequence(string(o,"id"),string(o,"name"),string(o,"type"),integer(o,"lengthTicks"),voice,integer(o,"volume"),list(o,"notes",ProjectFormat::note));
+        return new Sequence(string(o,"id"),string(o,"name"),string(o,"type"),integer(o,"lengthTicks"),voice,integer(o,"volume"),list(o,"notes",ProjectFormat::note),
+                version==1?List.of():list(o,"commands",ProjectFormat::command),version==1?"RESET":string(o,"repeatState"));
+    }
+    private static CommandEvent command(JsonElement e) {
+        JsonObject o=object(e,"command","id","tick","command","arguments");
+        String name=string(o,"command"); NativeCommand command;
+        try { command=NativeCommand.valueOf(name); } catch(IllegalArgumentException ex) { throw invalid("command.command","unsupported native command '"+name+"'"); }
+        return new CommandEvent(string(o,"id"),integer(o,"tick"),command,list(o,"arguments",x->integer(x,"command.arguments[]")));
     }
     private static NoteEvent note(JsonElement e) {
         JsonObject o=object(e,"note","id","tick","duration","pitch"); return new NoteEvent(string(o,"id"),integer(o,"tick"),integer(o,"duration"),integer(o,"pitch"));

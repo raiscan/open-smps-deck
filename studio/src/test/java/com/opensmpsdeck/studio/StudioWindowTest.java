@@ -147,10 +147,72 @@ class StudioWindowTest {
     }
 
     @Test void shortLogicalWorkAreaUsesReachableEditorTabs() throws Exception {
-        fx(()->{stage.setHeight(610);return null;});await(()->window.scene().lookup(".tab-pane")!=null);
+        fx(()->{stage.setHeight(610);return null;});await(()->window.scene().lookup("#compact-editor-tabs")!=null);
         fx(()->{window.showNotes();window.scene().getRoot().applyCss();window.scene().getRoot().layout();assertTrue(window.piano.scroll.getViewportBounds().getHeight()>80,"compact notes editor needs usable height");return null;});
-        fx(()->{stage.setHeight(900);return null;});await(()->window.scene().lookup(".tab-pane")==null);
+        fx(()->{stage.setHeight(900);return null;});await(()->window.scene().lookup("#compact-editor-tabs")==null);
     }
+
+    @Test void nativeCommandsShareUndoSaveAndKeyboardRouting() throws Exception {
+        fx(()->{
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_PRESSED,TimelineView.GUTTER+20,TimelineView.RULER+20,true);
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,TimelineView.GUTTER+20,TimelineView.RULER+20,false);
+            window.showCommands();layout();
+            commandForm(NativeCommand.PAN,6,"80");button("add-command").fire();
+            assertEquals(2,window.document().project().formatVersion());
+            assertEquals(List.of(128),source().commands().getFirst().arguments());
+            commandForm(NativeCommand.VOLUME,6,"60");button("add-command").fire();
+            String volumeId=source().commands().getLast().id();
+            button("command-up").fire();
+            assertEquals(volumeId,source().commands().getFirst().id());
+            key(window.scene().getRoot(),KeyCode.Z,true);
+            assertEquals(volumeId,source().commands().getLast().id(),"command order is undoable");
+            window.commands.selectCommand(volumeId);
+            TableView<?> table=(TableView<?>)window.scene().lookup("#command-table");table.requestFocus();
+            assertTrue(table.isFocused());
+            key(table,KeyCode.DELETE,false);
+            assertEquals(1,source().commands().size());assertEquals(8,window.document().project().clips().size());
+            ((ComboBox<?>)window.scene().lookup("#repeat-state")).getSelectionModel().select(1);
+            ((TextField)window.scene().lookup("#source-volume")).setText("105");button("apply-source").fire();
+            assertEquals("CARRY",source().repeatState());assertEquals(105,source().volume());
+            String target=System.getProperty("studio.snapshot");
+            if(target!=null){layout();WritableImage image=window.scene().snapshot(null);ImageIO.write(SwingFXUtils.fromFXImage(image,null),"png",Path.of(target+".commands.png").toFile());}
+            window.document().save();return null;
+        });
+        StudioProject saved=ProjectFiles.load(file).project();
+        assertEquals(2,saved.formatVersion());assertEquals(1,saved.sequences().getFirst().commands().size());
+    }
+
+    @Test void nativeDraftSurvivesExternalRefreshAndCannotOverwriteIt() throws Exception {
+        StudioProject withCommand=ProjectEdits.addCommand(DemoProject.create(),"seq-lead-a",new CommandEvent("pan-1",6,NativeCommand.PAN,List.of(128)));
+        replace(ProjectFormat.write(withCommand));await(()->window.document().project().formatVersion()==2);
+        fx(()->{
+            window.showNotes();layout();
+            mouse(window.piano.canvas,MouseEvent.MOUSE_PRESSED,PianoRollView.KEYBOARD+6*window.piano.scale,PianoRollView.HEADER+2,true);
+            layout();assertEquals("pan-1",window.commands.selectedCommandId(),"marker selects its native event");
+            ((TextField)window.scene().lookup("#command-bytes")).setText("40");return null;
+        });
+        StudioProject external=ProjectEdits.updateCommand(withCommand,"seq-lead-a",new CommandEvent("pan-1",6,NativeCommand.PAN,List.of(192)));
+        replace(ProjectFormat.write(external));await(()->source().commands().getFirst().arguments().equals(List.of(192)));
+        fx(()->{
+            assertEquals("pan-1",window.commands.selectedCommandId());
+            assertEquals("40",((TextField)window.scene().lookup("#command-bytes")).getText());
+            button("apply-command").fire();
+            assertEquals(List.of(192),source().commands().getFirst().arguments());assertFalse(window.document().dirty());
+            button("reload-command").fire();assertEquals("C0",((TextField)window.scene().lookup("#command-bytes")).getText());
+            ((TextField)window.scene().lookup("#command-bytes")).setText("40");button("apply-command").fire();
+            assertEquals(List.of(64),source().commands().getFirst().arguments());assertTrue(window.document().dirty());return null;
+        });
+    }
+
+    private com.opensmpsdeck.project.Sequence source(){return window.document().project().sequences().getFirst();}
+    private Button button(String id){return (Button)window.scene().lookup("#"+id);}
+    @SuppressWarnings("unchecked") private void commandForm(NativeCommand type,int tick,String bytes){
+        ((ComboBox<NativeCommand>)window.scene().lookup("#command-type")).setValue(type);
+        ((TextField)window.scene().lookup("#command-tick")).setText(Integer.toString(tick));
+        ((TextField)window.scene().lookup("#command-bytes")).setText(bytes);
+    }
+    private void layout(){window.scene().getRoot().applyCss();window.scene().getRoot().layout();}
+    private static void key(Node node,KeyCode code,boolean shortcut){Event.fireEvent(node,new KeyEvent(KeyEvent.KEY_PRESSED,"","",code,false,shortcut,false,false));}
 
     @Test void snapshotRealEditor() throws Exception {
         String target=System.getProperty("studio.snapshot");Assumptions.assumeTrue(target!=null,"Optional visual QA artifact");

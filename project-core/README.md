@@ -61,6 +61,55 @@ and nested multi-channel groups are not yet exposed by this first editor.
   notes and bakes repeated clips inline. It does not yet optimize reuse into
   CALL/LOOP instructions. The pinned driver remains capable of those operations.
 
+## Version 2 native controls
+
+Version 1 files retain their original representation and compiled bytes. Adding a
+command or changing the repeat policy upgrades a project to version 2. Each
+version 2 sequence requires two additional fields:
+
+```json
+"commands": [
+  {"id": "pan-left", "tick": 6, "command": "PAN", "arguments": [128]}
+],
+"repeatState": "RESET"
+```
+
+Arguments are **decimal unsigned bytes** in JSON; Studio displays and edits them
+as hex. Commands run at integer source ticks, before that tick's note/time unit.
+At the same tick, their array order is execution order. IDs are unique within a
+source; tick must be within its length. Track-specific commands reject the wrong
+source type. See [native-controls.smps.json](../examples/native-controls.smps.json).
+
+| Command | Native bytes | Meaning |
+| --- | --- | --- |
+| `PAN` | E0 pp | FM pan, AMS and FMS |
+| `DETUNE` | E1 dd | Signed frequency offset |
+| `VOLUME` | E4 vv | Absolute volume, 00 silent to 7F loudest |
+| `FM_VOLUME` | E6 dd | Signed FM attenuation change |
+| `PSG_VOLUME` | EC dd | Signed PSG attenuation change |
+| `TRANSPOSE` | ED xx | Set transpose; 40 is neutral, 4C is +12 |
+| `TRANSPOSE_ADD` | FB dd | Add signed semitones |
+| `MODULATION` | F0 delay rate delta steps | Custom modulation setup |
+| `MODULATION_OFF` | FA | Disable modulation |
+
+Raw byte wrap/clamp behavior follows the pinned driver; these are not normalized
+DAW automation values. Transpose applies at the next attack. A command inside a
+held note splits its duration using E7 without reattacking or rereading pitch.
+For this slice, F0 setup must coincide with an explicit note attack, because
+mid-note setup depends on native pending/counter history. Zero operands remain
+valid native byte values.
+
+`RESET` restores voice, base volume, stereo FM pan, neutral transpose/detune,
+disabled note fill and disabled custom modulation at every repetition. `CARRY`
+does this at clip entry, then retains state across repetitions in that clip;
+relative volume/transpose commands can therefore accumulate. Every independent
+clip starts reset. This controls the supported state, not every possible S3K
+command. Version 2 currently requires referenced local FM voices below index 128;
+banked voice references need asset support. Unused voice definitions are retained.
+
+The [S3K support matrix](../docs/architecture/s3k-support.md) tracks everything
+still needed before importing can target a complete authoring representation.
+
 ## External editing and concurrency
 
 Write a complete UTF-8 sibling file, then atomically rename it over the project
