@@ -9,10 +9,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
 /** Fixed-length stereo PCM WAV written one presentation at a time. */
-final class WaveFile {
+public final class WaveFile {
     private WaveFile() {}
 
-    static void render(byte[] song, Path output, int presentations) throws IOException {
+    public static void render(byte[] song, Path output, int presentations) throws IOException {
         S3kRenderer.validatePresentations(presentations);
         byte[] validated = S3kBinary.validateAndCopy(song);
         // CREATE_NEW also rejects symlinks and concurrent creators; never truncate a user's file.
@@ -27,6 +27,8 @@ final class WaveFile {
             le16(out, 4); le16(out, 16); ascii(out, "data"); le32(out, bytes);
             byte[] encoded = new byte[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 4];
             S3kRenderer.render(validated, presentations, pcm -> {
+                if (Thread.currentThread().isInterrupted())
+                    throw new java.io.InterruptedIOException("WAV export cancelled");
                 for (int i = 0; i < pcm.length; i++) {
                     encoded[i * 2] = (byte) pcm[i];
                     encoded[i * 2 + 1] = (byte) (pcm[i] >>> 8);

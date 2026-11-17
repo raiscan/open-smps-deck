@@ -1,10 +1,9 @@
-# Headless S3&K playback proof
+# Headless project tools and S3&K playback
 
-This is the first reboot milestone: bounded `.bin` → WAV playback through the
-pinned OpenGGF production driver, physical policy, session and accurate FM core.
-It runs without JavaFX, an audio device, a ROM, or an embedded agent. It does not
-yet implement the new text project format, compiler, timeline, live refresh or MCP.
-The old app continues to use its original `synth-core` module.
+Validate and compile the shared JSON project, or render JSON/standalone `.bin`
+to WAV through the pinned OpenGGF production driver, physical policy, session
+and accurate FM core. These commands run without JavaFX, an audio device, a ROM,
+or an embedded agent. The old app continues to use its original `synth-core` module.
 
 ## Run
 
@@ -14,7 +13,25 @@ Requires JDK 25 and Maven. From the repository root:
 mvn -B -pl headless -am package
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo /path/to/demo.wav --frames 120
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render /path/to/song.bin /path/to/song.wav --frames 120
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project /path/to/project.json
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project /path/to/project.json
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project /path/to/project.json /path/to/project.bin
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project /path/to/project.json /path/to/project.wav --frames 120
 ```
+
+`demo-project` creates an original FM/PSG project that an external agent or the
+studio can edit. `validate-project` checks its strict schema, references, hardware
+lanes and compiler limits, then reports the project name, sequence/clip counts
+and compiled byte count. `compile-project` exports finite standalone S3K bytes.
+`render-project` compiles the same source and renders it through the pinned core.
+
+Projects use JSON format version 1 and mode `S3K`, with named local FM voices,
+monophonic FM/PSG note sequences and linked clips on FM1–FM5/PSG1–PSG3. Clip length
+can repeat a sequence or trim its final repetition. Time is integer sequencer
+ticks; `ticksPerBeat` controls the ruler and `tempo` is the native S3K byte, not
+BPM. Unknown fields, missing fields, overlapping notes/clips and unresolved IDs
+are errors. This first format does not accept raw SMPS commands, DAC samples,
+or envelope packages.
 
 `--frames` counts **60 Hz NTSC presentations**, not PCM samples. Its default is
 120 and its range is 1–36000. Each presentation services the production session
@@ -24,8 +41,10 @@ adjusts its internal synthesis rate to preserve chip time per presentation.
 
 Output files must not already exist. Validation happens before creating output;
 input and output cannot be the same file. Errors go to stderr with exit code 2.
-Rendering streams one presentation at a time and uses bounded memory. CLI binary
-input is limited to one 32 KiB bank. The demo is an original finite FM/PSG phrase
+Rendering streams one presentation at a time and uses bounded memory. JSON input
+is limited to 1 MiB; compiled output and CLI binary input are limited to one
+32 KiB bank. Source reads use `ProjectFiles` so CLI and studio share validation.
+The binary demo is an original finite FM/PSG phrase
 with a synthetic, deliberately asymmetric FM patch; it contains no ROM assets.
 
 ## Deliberately limited input contract
@@ -51,9 +70,10 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   never silently fall through into notes or partially rendered audio.
 
 A normal legacy OpenSMPSDeck export may contain loops or require external
-resources and therefore be rejected. This proof does **not** claim arbitrary
-SMPS/ROM import support. Packaging voices, envelopes and samples with a project,
-control-flow validation, and the new compiler come in subsequent milestones.
+resources and therefore be rejected. This boundary does **not** claim arbitrary
+SMPS/ROM import support. The project compiler emits this supported subset with
+inline repeated content, positional stopped channels and local FM voices.
+Envelope/sample packaging and arbitrary control flow remain future work.
 
 ## Embedding and verification
 
@@ -69,5 +89,8 @@ required to preserve session/chip timing and DAC completion handling.
 
 Tests cover independent FM/PSG sound, deterministic output, presentation chunk
 sizes, WAV format/length, bounded invalid input and preservation of existing
-files. Upstream-source parity is checked separately by the repository's pin
-verification tooling; a passing demo alone is not a claim of broad ROM parity.
+files. Project CLI tests check source validation, sparse channel positions,
+compiler/render integration, PCM equality with direct pinned-core rendering,
+bounded reads and file preservation. Upstream-source parity is checked separately
+by the repository's pin verification tooling; a passing demo alone is not a claim
+of broad ROM parity.

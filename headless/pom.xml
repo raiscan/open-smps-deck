@@ -16,6 +16,11 @@
     <dependencies>
         <dependency>
             <groupId>com.opensmps</groupId>
+            <artifactId>project-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.opensmps</groupId>
             <artifactId>openggf-audio</artifactId>
             <version>${project.version}</version>
         </dependency>

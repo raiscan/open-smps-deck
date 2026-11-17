@@ -92,6 +92,15 @@ class S3kRendererTest {
         assertFalse(Files.exists(invalid));
     }
 
+    @Test void cancelledWaveExportRemovesItsPartialOutput() throws Exception {
+        Path output=directory.resolve("cancelled.wav");
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(java.io.IOException.class,()->WaveFile.render(S3kDemo.song(),output,120));
+        } finally { Thread.interrupted(); }
+        assertFalse(Files.exists(output),"cancelled export must not leave a truncated WAV");
+    }
+
     private static void assertInvalid(byte[] song, String message) {
         var failure = assertThrows(IllegalArgumentException.class, () -> S3kRenderer.render(song, 1, ignored -> fail("must validate first")));
         assertTrue(failure.getMessage().toLowerCase().contains(message.toLowerCase()), failure.getMessage());
