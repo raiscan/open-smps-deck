@@ -92,6 +92,8 @@ class ReconstructionEchoTest {
         assertTrue(report.get("audioRefine").getAsBoolean());
         assertEquals(8, report.get("fmNotes").getAsInt());
         assertEquals(8, report.get("echoNotes").getAsInt());
+        assertTrue(report.getAsJsonObject("vibratoEstimates").isEmpty());
+        assertEquals(1, report.getAsJsonArray("reverbEstimates").size());
         assertEquals("repeat-supported", report.getAsJsonArray("echoEstimates").get(0).getAsJsonObject()
                 .get("status").getAsString());
         assertTrue(Files.isRegularFile(output.resolve("arrangement.smps.zip")));

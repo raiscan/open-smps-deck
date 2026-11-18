@@ -171,6 +171,40 @@ at the padding boundary had distorted the short noise results in the initial
 check. This measures retrieval of known sounds in the catalogue. Matching
 Suno stems requires separate validation.
 
+## Matching lead effects
+
+Use an editable S3&K arrangement with a lead and a matching FM double, each
+already on its own hardware lane. Supply the two sequence IDs and a time-aligned
+stereo WAV.
+
+```sh
+java -jar "$deck_jar" catalog match-effects cover.smps.json reference.wav \
+  matched.smps.json --lead lead --double lead-double
+```
+
+The command compares native renders of the current arrangement, stereo pan,
+fixed tuning offsets, and pitch movement. It measures stereo energy and pitch
+around paired lead notes. It fits on alternating four-second blocks and checks
+the result on the other blocks within the first minute. A supported profile
+is applied to the supplied sequences. The JSON response contains the selected
+profile, fit and check distances, and supporting note counts. Mono references
+and sparse paired notes produce a status and an unchanged arrangement.
+
+The current effect fit accepts tempo-zero editable projects. Each supplied
+sequence must have one untrimmed clip, both clips must start together, and
+neither sequence may already contain pan, detune, transpose, or relative or
+envelope volume commands. Existing note timing and the other tracks are
+preserved.
+
+With `reconstruct --audio-refine`, the reconstruction report also includes
+`vibratoEstimates` and `reverbEstimates`. Vibrato requires repeated periodic
+pitch motion on isolated held notes, and reports rate in Hz and peak depth in
+cents. The reverb analysis looks for repeatable post-note decay and marks
+ambiguous tails as unresolved. A supported decay describes the tail and
+cannot identify the original room or processor. These two analyses produce
+diagnostics. The existing echo path can still place supported repeats on
+available FM channels.
+
 ## Delivery sequence
 
 1. Build a user-local, repeatable index from the verified locked-on S3&K image.
