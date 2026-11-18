@@ -34,8 +34,9 @@ playback and access to driver operations outside the arrangement format.
 
 ## Instrument catalogue
 
-Run `catalog --help` for the local index, search, show, audition, and apply
-commands. Each successful operation writes versioned JSON. The
+Run `catalog --help` for the local index, search, show, match, audition, and apply
+commands. `catalog match` ranks chip-rendered variants against a short WAV
+excerpt and returns the distances with stable IDs. Each successful operation writes versioned JSON. The
 [instrument catalogue guide](../docs/architecture/instrument-catalogue.md#first-pass-in-use)
 covers source formats, filters, and Studio deployment.
 

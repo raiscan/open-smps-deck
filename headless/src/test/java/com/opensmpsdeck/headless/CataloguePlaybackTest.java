@@ -51,6 +51,38 @@ class CataloguePlaybackTest {
         }
     }
 
+    @Test void matchingProbeUsesOneRequestedAttackAndPreservesOnsetState() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] fmBytes = new byte[25];
+        var fmVoice = DemoProject.create().voices().getFirst();
+        for (int i = 0; i < fmBytes.length; i++) fmBytes[i] = fmVoice.bytes().get(i).byteValue();
+        String voice = builder.asset(Kind.FM_VOICE, "FM", fmBytes);
+        String envelope = builder.asset(Kind.MODULATION, "Vibrato", new byte[]{1, (byte) 0x80});
+        String variant = builder.variant(voice, "FM with onset settings", new Recipe(null, 0x80, 127, 40,
+                null, null, List.of(new NoteEvent("first", 8, 4, 60), new NoteEvent("later", 22, 4, 64)),
+                List.of(new CommandEvent("mod", 4, NativeCommand.MODULATION_ENVELOPE, List.of(), envelope),
+                        new CommandEvent("transpose", 0, NativeCommand.TRANSPOSE, List.of(0x4C)),
+                        new CommandEvent("hold", 8, NativeCommand.HOLD, List.of()),
+                        new CommandEvent("volume", 8, NativeCommand.VOLUME, List.of(120)),
+                        new CommandEvent("later-volume", 16, NativeCommand.VOLUME, List.of(0)))), null);
+        var catalogue = builder.build();
+        var probe = CataloguePlayback.matchProbe(catalogue, variant, 72, 180);
+        var tone = probe.sequences().getFirst();
+        assertEquals(List.of(new NoteEvent("match-note", 0, 180, 72)), tone.notes());
+        assertEquals(180, tone.lengthTicks());
+        assertEquals(List.of(NativeCommand.PAN, NativeCommand.MODULATION_ENVELOPE, NativeCommand.VOLUME),
+                tone.commands().stream().map(CommandEvent::command).toList());
+        assertTrue(tone.commands().stream().allMatch(command -> command.tick() == 0));
+        assertEquals(probe.envelopes().getFirst().id(), tone.commands().get(1).assetId());
+        assertThrows(IllegalArgumentException.class, () -> CataloguePlayback.matchProbe(catalogue, variant, 107, 60));
+        assertThrows(IllegalArgumentException.class, () -> CataloguePlayback.matchProbe(catalogue, variant, 72, 181));
+        boolean[] heard = {false};
+        S3kRenderer.render(ProjectCompiler.compileWithAssets(probe), ProjectRenderTiming.presentationCount(probe), pcm -> {
+            for (short sample : pcm) heard[0] |= sample != 0;
+        });
+        assertTrue(heard[0]);
+    }
+
     @Test void deploysNoiseWithLocalAssetsAndExactTimedCommandWithoutDuplicatingIt() {
         var builder = new InstrumentCatalogue.Builder();
         String volume = builder.asset(Kind.PSG_VOLUME, "Volume", new byte[]{0, 1, (byte) 0x83});

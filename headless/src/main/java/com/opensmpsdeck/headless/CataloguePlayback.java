@@ -1,6 +1,8 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
+import com.opensmpsdeck.headless.InstrumentCatalogue.Match;
+import com.opensmpsdeck.headless.InstrumentCatalogue.Recipe;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.DacSample;
@@ -18,6 +20,7 @@ import com.opensmpsdeck.project.Voice;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
@@ -30,10 +33,46 @@ public final class CataloguePlayback {
 
     /** Plays a fixed phrase or one-shot, with the entry's available playback context. */
     public static StudioProject audition(InstrumentCatalogue catalogue, String id) {
-        var match = catalogue.match(id);
+        Match match = catalogue.match(id);
+        return renderProbe(catalogue, match, recipe(match));
+    }
+
+    /**
+     * Renders the requested single attack with the variant's onset settings and local assets.
+     * Sample and noise entries retain their original audition and ignore the tonal arguments.
+     */
+    public static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks) {
+        Match match = catalogue.match(id);
+        if (match.asset().kind() == Kind.DAC_SAMPLE || match.asset().kind() == Kind.PSG_NOISE)
+            return renderProbe(catalogue, match, recipe(match));
+        if (gateTicks < 1 || gateTicks > 180)
+            throw new IllegalArgumentException("Matching note length must be 1–180 ticks (was " + gateTicks + ").");
+        String chip = probeChip(match);
+        int lowest = chip.equals("PSG") ? 45 : 12;
+        int highest = chip.equals("PSG") ? 117 : 106;
+        if (midi < lowest || midi > highest)
+            throw new IllegalArgumentException(chip + " matching probe supports MIDI " + lowest + "–" + highest
+                    + " (requested " + midi + ").");
+        Recipe source = recipe(match);
+        int onset = source.notes().stream().mapToInt(NoteEvent::tick).min().orElse(0);
+        List<CommandEvent> setup = source.commands().stream()
+                .filter(event -> event.tick() <= onset)
+                .filter(event -> switch (event.command()) {
+                    case HOLD, TRANSPOSE, TRANSPOSE_ADD -> false;
+                    default -> true;
+                })
+                .sorted(Comparator.comparingInt(CommandEvent::tick))
+                .map(event -> new CommandEvent(event.id(), 0, event.command(), event.arguments(), event.assetId()))
+                .toList();
+        var note = new NoteEvent("match-note", 0, gateTicks, midi);
+        var controlled = new Recipe(source.rate(), source.pan(), source.volume(), gateTicks,
+                source.volumeEnvelope(), source.modulationEnvelope(), List.of(note), setup);
+        return renderProbe(catalogue, match, controlled);
+    }
+
+    private static StudioProject renderProbe(InstrumentCatalogue catalogue, Match match, Recipe recipe) {
         var base = new StudioProject(4, name(match), "S3K", 15, 0, List.of(), List.of(), List.of());
         var install = new Install(catalogue, base);
-        var recipe = recipe(match);
         var asset = match.asset();
         Sequence probe;
         String lane;
@@ -45,7 +84,7 @@ public final class CataloguePlayback {
                 lane = "DAC";
             }
             case PSG_NOISE -> {
-                probe = install.tones(match, "probe", "PSG", null);
+                probe = install.tones(match, "probe", "PSG", null, recipe);
                 lane = "PSG3";
             }
             case FM_VOICE, PSG_VOLUME, MODULATION -> {
@@ -58,7 +97,7 @@ public final class CataloguePlayback {
                     install.voices.add(reference);
                     voice = reference.id();
                 }
-                probe = install.tones(match, "probe", chip, voice);
+                probe = install.tones(match, "probe", chip, voice, recipe);
                 lane = chip.equals("FM") ? "FM1" : "PSG3";
             }
             default -> throw new IllegalArgumentException("Unsupported catalogue probe for " + asset.kind());
@@ -196,8 +235,7 @@ public final class CataloguePlayback {
             return id;
         }
 
-        Sequence tones(InstrumentCatalogue.Match match, String id, String type, String voice) {
-            var recipe = recipe(match);
+        Sequence tones(Match match, String id, String type, String voice, Recipe recipe) {
             var asset = match.asset();
             int length = recipe.durationTicks();
             boolean noise = asset.kind() == Kind.PSG_NOISE;
@@ -249,7 +287,7 @@ public final class CataloguePlayback {
             version = 4;
             String base = match.variant().id();
             String id = freeId(base, candidate -> sequences.stream().anyMatch(source -> source.id().equals(candidate)));
-            Sequence source = tones(match, id, "PSG", null);
+            Sequence source = tones(match, id, "PSG", null, recipe(match));
             if (sequences.stream().anyMatch(existing -> sameSound(existing, source))) return;
             sequences.add(source);
             // PSG noise writes affect shared hardware. Appending after all current clips

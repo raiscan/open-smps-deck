@@ -124,6 +124,53 @@ index bytes. Every variant was rendered through the pinned chips for up to
 24 presentations. The scan retained six unresolved-envelope diagnostics
 and marked the Extra Life cue's request to restore previous music.
 
+## Matching a reference sound
+
+An agent can rank catalogue variants against a short WAV excerpt from a stem.
+Use one note or one drum hit with its tail. For a tone, supply the MIDI note.
+The matcher renders each eligible tone on the pinned S3&K chips at that note.
+DAC and PSG noise candidates keep their recorded rate or noise recipe.
+
+```sh
+java -jar "$deck_jar" catalog match instruments.json keys.wav --kind fm-voice \
+  --midi 64 --start 12.4 --duration 0.6 --gate-ticks 24 --limit 8
+java -jar "$deck_jar" catalog match instruments.json drums.wav --kind dac-sample \
+  --start 3.2 --duration 0.25
+java -jar "$deck_jar" catalog audition instruments.json "$variant_id" candidate.wav \
+  --midi 64 --gate-ticks 24
+```
+
+The matcher reads at most three seconds directly from the WAV. It averages
+stereo and accepts mono or stereo 16-, 24-, and 32-bit PCM or 32-bit float
+at 8–192 kHz. Choose **duration** for the note or hit and its audible release.
+For tone matching, **gate-ticks** is the held duration at 60 ticks per second.
+It defaults to the excerpt duration. The default MIDI note is 60. DAC and
+PSG noise auditions keep their existing recipes regardless of those options.
+
+The JSON response includes the profile version, IDs for the shortlist,
+and separate spectral and envelope distances. Lower means closer in this
+profile. The spectral score compares the balance of frequency bands and how
+it changes at the attack. The envelope score compares the shape over time
+after aligning the onset and normalizing gain. Brightness, noisiness, and
+attack and decay times help agents interpret the result. Results include
+the number of candidates compared and reasons for any skipped variants.
+
+For a Suno reconstruction, use the MIDI for note timing and pitch, and the
+WAV stems for timbre. Repeat the search on representative notes and drum
+hits, then audition the finalists in the actual arrangement. At this stage
+the matcher works on one isolated excerpt at a time. Source separation,
+polyphonic matching, and ranking the full rendered arrangement are
+separate steps.
+
+A controlled S3&K retrieval check used four reference sounds per kind from
+the 251 FM, 74 DAC, and 64 PSG noise variants. The references were resampled
+to 44.1 kHz and given lower gain and leading silence with a continuous DC
+baseline. The source ranked first for all eight FM and DAC references and
+three PSG references. The fourth PSG source ranked second. A discontinuity
+at the padding boundary had distorted the short noise results in the initial
+check. This measures retrieval of known sounds in the catalogue. Matching
+Suno stems requires separate validation.
+
 ## Delivery sequence
 
 1. Build a user-local, repeatable index from the verified locked-on S3&K image.

@@ -31,6 +31,7 @@ final class CatalogueCli {
                 case "scan" -> scan(args, out);
                 case "search" -> search(args, out);
                 case "show" -> show(args, out);
+                case "match" -> match(args, out);
                 case "audition" -> audition(args, out);
                 case "apply" -> apply(args, out);
                 default -> throw new IllegalArgumentException("Unknown catalogue command " + args[1]);
@@ -47,7 +48,9 @@ final class CatalogueCli {
         out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--driver S3K]");
         out.println("          [--role ROLE] [--source SOURCE] [--variant ID] [--offset N] [--limit N]");
         out.println("  catalog show INDEX.json ID");
-        out.println("  catalog audition INDEX.json ID OUTPUT.wav [--frames N]");
+        out.println("  catalog match INDEX.json REFERENCE.wav [--kind KIND] [--midi N] [--gate-ticks N]");
+        out.println("          [--start SECONDS] [--duration SECONDS] [--role ROLE] [--source SOURCE] [--limit N]");
+        out.println("  catalog audition INDEX.json ID OUTPUT.wav [--frames N] [--midi N] [--gate-ticks N]");
         out.println("  catalog apply INDEX.json ID PROJECT.json OUTPUT.json");
     }
 
@@ -92,10 +95,38 @@ final class CatalogueCli {
         print(out, new Details(VERSION, PROFILE, asset, variants));
     }
 
+    private static void match(String[] args, PrintStream out) throws IOException {
+        var options = options(args, 4, Set.of("--kind", "--role", "--source", "--midi", "--gate-ticks",
+                "--start", "--duration", "--limit"));
+        Kind kind = options.containsKey("--kind") ? parseKind(options.get("--kind")) : null;
+        Integer gate = options.containsKey("--gate-ticks") ? integer(options, "--gate-ticks", 0) : null;
+        var filters = new CatalogueMatcher.Options(kind, options.get("--role"), options.get("--source"),
+                integer(options, "--midi", 60), gate, integer(options, "--limit", 10));
+        var reference = ReferenceAudio.read(Path.of(args[3]), options.containsKey("--start")
+                ? decimal(options, "--start") : 0, options.containsKey("--duration")
+                ? decimal(options, "--duration") : null);
+        var index = InstrumentCatalogue.open(Path.of(args[2]));
+        print(out, CatalogueMatcher.match(index, reference, filters));
+    }
+
+    private static double decimal(Map<String, String> options, String flag) {
+        try {
+            double value = Double.parseDouble(options.get(flag));
+            if (Double.isFinite(value)) return value;
+        } catch (NumberFormatException ignored) {
+            // Report the option name, rather than the parser implementation.
+        }
+        throw new IllegalArgumentException(flag + " must be finite seconds");
+    }
+
     private static void audition(String[] args, PrintStream out) throws IOException {
-        var options = options(args, 5, Set.of("--frames"));
+        var options = options(args, 5, Set.of("--frames", "--midi", "--gate-ticks"));
         var catalogue = InstrumentCatalogue.open(Path.of(args[2]));
-        var project = CataloguePlayback.audition(catalogue, args[3]);
+        boolean matchProbe = options.containsKey("--midi") || options.containsKey("--gate-ticks");
+        var project = matchProbe
+                ? CataloguePlayback.matchProbe(catalogue, args[3], integer(options, "--midi", 60),
+                    integer(options, "--gate-ticks", 60))
+                : CataloguePlayback.audition(catalogue, args[3]);
         int frames = integer(options, "--frames", ProjectRenderTiming.presentationCount(project));
         WaveFile.render(ProjectCompiler.compileWithAssets(project), Path.of(args[4]), frames);
         print(out, new Output(VERSION, PROFILE, catalogue.match(args[3]).variant().id(), frames));
