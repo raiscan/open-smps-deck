@@ -145,7 +145,9 @@ catalogue's kick tag or verified Sonic 3 & Knuckles DAC slot roles.
 
 Add `--audio-refine` to check the WAV for missed notes and effects. The pitch
 pass can split a held note or fill a short gap when repeat measurements
-support a stable pitch. The echo pass needs quieter repeats at a consistent
+support a stable pitch. Bass notes can use a longer analysis window down to
+MIDI 26 (about 37 Hz). In this range the pitch must hold long enough for
+that window to resolve it. The echo pass needs quieter repeats at a consistent
 delay on separate notes. It writes a quieter FM copy into a free channel
 gap. Dry notes keep their placement. The report identifies accepted pitch
 changes, echo delay evidence, the number of echo notes, and unresolved tails.

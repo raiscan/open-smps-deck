@@ -13,7 +13,6 @@ import java.util.Set;
 
 /** Recovers short omissions when an aligned WAV establishes a stable, unambiguous pitch. */
 final class ReconstructionPitchRefinement {
-    private static final long HALF_WINDOW_US = 32_000;
     private static final long HOP_US = 10_000;
     private static final long MAX_TRANSITION_US = 50_000;
     private static final long MIN_CHANGE_US = 90_000;
@@ -22,13 +21,36 @@ final class ReconstructionPitchRefinement {
     private static final int MIN_ANCHOR_FRAMES = 4;
     private static final int MIN_CHANGE_FRAMES = 7;
     private static final int MAX_INTERVAL = 7;
-    private static final int LOW_PITCH = 38;
     private static final int HIGH_PITCH = 88;
     private static final double STEM_HARMONIC_ENERGY = .74;
     private static final double MIX_HARMONIC_ENERGY = .87;
     private static final Comparator<MidiScore.Note> NOTE_ORDER = Comparator
             .comparingLong(MidiScore.Note::startUs).thenComparingInt(MidiScore.Note::partId)
             .thenComparingInt(MidiScore.Note::pitch);
+
+    private enum Window {
+        STANDARD(32_000, 38, 35),
+        BASS(64_000, 26, 24);
+
+        final long halfUs;
+        final int minPitch;
+        final int minHz;
+
+        Window(long halfUs, int minPitch, int minHz) {
+            this.halfUs = halfUs;
+            this.minPitch = minPitch;
+            this.minHz = minHz;
+        }
+
+        static boolean canReachBass(int pitch) {
+            // The added range must be reachable within the existing interval limit.
+            return pitch < STANDARD.minPitch + MAX_INTERVAL;
+        }
+
+        boolean contains(int pitch) {
+            return pitch >= minPitch && pitch <= HIGH_PITCH;
+        }
+    }
 
     private ReconstructionPitchRefinement() {}
 
@@ -78,10 +100,17 @@ final class ReconstructionPitchRefinement {
                         || current.endUs() > analysis.endUs || !clear(competing, current.startUs(), current.endUs())) {
                     notes.add(current);
                 } else {
-                    split(current, analysis, stem, notes, changes);
+                    if (!split(current, analysis, stem, Window.STANDARD, notes, changes)
+                            && (!Window.canReachBass(current.pitch())
+                            || !split(current, analysis, stem, Window.BASS, notes, changes))) {
+                        notes.add(current);
+                    }
                     if (next != null && (i + 2 >= partNotes.size()
                             || partNotes.get(i + 2).startUs() >= next.endUs())) {
-                        fillGap(current, next, analysis, stem, competing, notes, changes);
+                        if (!fillGap(current, next, analysis, stem, Window.STANDARD, competing, notes, changes)
+                                && Window.canReachBass(Math.max(current.pitch(), next.pitch()))) {
+                            fillGap(current, next, analysis, stem, Window.BASS, competing, notes, changes);
+                        }
                     }
                 }
                 priorEnd = Math.max(priorEnd, current.endUs());
@@ -125,34 +154,41 @@ final class ReconstructionPitchRefinement {
         return true;
     }
 
-    private static void split(MidiScore.Note note, Analysis analysis, boolean stem, List<MidiScore.Note> notes,
-                              List<Change> changes) throws IOException {
-        if (!validPitch(note.pitch()) || note.endUs() - note.startUs() < 2 * MIN_CHANGE_US) {
-            notes.add(note);
-            return;
+    private static boolean split(MidiScore.Note note, Analysis analysis, boolean stem, Window window,
+                                 List<MidiScore.Note> notes, List<Change> changes) throws IOException {
+        if (!window.contains(note.pitch()) || note.endUs() - note.startUs() < 2 * MIN_CHANGE_US) {
+            return false;
         }
-        var runs = analysis.runs(note.startUs(), note.endUs(), stem);
+        var runs = analysis.runs(note.startUs(), note.endUs(), stem, window);
+        long maxTransitionUs = MAX_TRANSITION_US;
+        if (window == Window.BASS) {
+            // A longer window can resolve brief intermediate pitches while it straddles a change.
+            runs.removeIf(run -> run.frames() < MIN_ANCHOR_FRAMES);
+            maxTransitionUs += window.halfUs - Window.STANDARD.halfUs;
+        }
         long cursor = note.startUs();
         for (int i = 1; i < runs.size(); i++) {
             var before = runs.get(i - 1);
             var candidate = runs.get(i);
             if (!anchor(before, note.pitch()) || !nearby(candidate.pitch(), note.pitch())
+                    || window == Window.BASS && Window.STANDARD.contains(note.pitch())
+                    && Window.STANDARD.contains(candidate.pitch())
                     || candidate.frames() < MIN_CHANGE_FRAMES
-                    || candidate.firstUs() - before.lastUs() > MAX_TRANSITION_US) {
+                    || candidate.firstUs() - before.lastUs() > maxTransitionUs) {
                 continue;
             }
-            if (before.firstUs() > cursor + HALF_WINDOW_US + MAX_TRANSITION_US) {
+            if (before.firstUs() > cursor + window.halfUs + maxTransitionUs) {
                 continue;
             }
             long start = midpoint(before.lastUs(), candidate.firstUs());
             long end = note.endUs();
             if (i + 1 == runs.size()) {
-                if (end - candidate.lastUs() > HALF_WINDOW_US + HOP_US) {
+                if (end - candidate.lastUs() > window.halfUs + HOP_US) {
                     continue;
                 }
             } else {
                 var after = runs.get(i + 1);
-                if (!anchor(after, note.pitch()) || after.firstUs() - candidate.lastUs() > MAX_TRANSITION_US) {
+                if (!anchor(after, note.pitch()) || after.firstUs() - candidate.lastUs() > maxTransitionUs) {
                     continue;
                 }
                 end = midpoint(candidate.lastUs(), after.firstUs());
@@ -168,42 +204,49 @@ final class ReconstructionPitchRefinement {
                     candidate));
             cursor = end;
         }
-        if (cursor < note.endUs() || cursor == note.startUs()) {
-            notes.add(cursor == note.startUs() ? note
-                    : new MidiScore.Note(note.partId(), note.pitch(), note.velocity(), cursor, note.endUs()));
+        if (cursor == note.startUs()) {
+            return false;
         }
+        if (cursor < note.endUs()) {
+            notes.add(new MidiScore.Note(note.partId(), note.pitch(), note.velocity(), cursor, note.endUs()));
+        }
+        return true;
     }
 
-    private static void fillGap(MidiScore.Note previous, MidiScore.Note next, Analysis analysis, boolean stem,
-                                List<MidiScore.Note> competing, List<MidiScore.Note> notes, List<Change> changes)
+    private static boolean fillGap(MidiScore.Note previous, MidiScore.Note next, Analysis analysis, boolean stem,
+                                   Window window, List<MidiScore.Note> competing, List<MidiScore.Note> notes,
+                                   List<Change> changes)
             throws IOException {
         long start = previous.endUs();
         long end = next.startUs();
         long duration = end - start;
-        long anchorDuration = HALF_WINDOW_US * 2 + MIN_ANCHOR_FRAMES * HOP_US;
-        if (duration < MIN_CHANGE_US || duration > MAX_GAP_US || !validPitch(previous.pitch())
-                || !validPitch(next.pitch()) || next.endUs() > analysis.endUs
+        long anchorDuration = window.halfUs * 2 + MIN_ANCHOR_FRAMES * HOP_US;
+        if (duration < MIN_CHANGE_US || duration > MAX_GAP_US || !window.contains(previous.pitch())
+                || !window.contains(next.pitch()) || next.endUs() > analysis.endUs
                 || previous.endUs() - previous.startUs() < anchorDuration
                 || next.endUs() - next.startUs() < anchorDuration
                 || !clear(competing, start - anchorDuration, end + anchorDuration)) {
-            return;
+            return false;
         }
-        var before = analysis.runs(start - anchorDuration, start, stem);
-        var after = analysis.runs(end, end + anchorDuration, stem);
-        var gap = analysis.runs(start, end, stem);
+        var before = analysis.runs(start - anchorDuration, start, stem, window);
+        var after = analysis.runs(end, end + anchorDuration, stem, window);
+        var gap = analysis.runs(start, end, stem, window);
         if (before.size() != 1 || !anchor(before.getFirst(), previous.pitch())
                 || after.size() != 1 || !anchor(after.getFirst(), next.pitch()) || gap.size() != 1) {
-            return;
+            return false;
         }
         var candidate = gap.getFirst();
-        if (candidate.frames() < MIN_CHANGE_FRAMES || !nearby(candidate.pitch(), previous.pitch())
-                || !nearby(candidate.pitch(), next.pitch()) || candidate.firstUs() - start > HALF_WINDOW_US + HOP_US
-                || end - candidate.lastUs() > HALF_WINDOW_US + HOP_US) {
-            return;
+        if (window == Window.BASS && Window.STANDARD.contains(previous.pitch())
+                && Window.STANDARD.contains(next.pitch()) && Window.STANDARD.contains(candidate.pitch())
+                || candidate.frames() < MIN_CHANGE_FRAMES || !nearby(candidate.pitch(), previous.pitch())
+                || !nearby(candidate.pitch(), next.pitch()) || candidate.firstUs() - start > window.halfUs + HOP_US
+                || end - candidate.lastUs() > window.halfUs + HOP_US) {
+            return false;
         }
         notes.add(new MidiScore.Note(previous.partId(), candidate.pitch(), (previous.velocity() + next.velocity()) / 2,
                 start, end));
         changes.add(change(previous.partId(), -1, start, end, "short-gap-pitch", analysis, stem, candidate));
+        return true;
     }
 
     private static boolean anchor(Run run, int pitch) {
@@ -212,10 +255,6 @@ final class ReconstructionPitchRefinement {
 
     private static boolean nearby(int candidate, int anchor) {
         return candidate != anchor && Math.abs(candidate - anchor) <= MAX_INTERVAL;
-    }
-
-    private static boolean validPitch(int pitch) {
-        return pitch >= LOW_PITCH && pitch <= HIGH_PITCH;
     }
 
     private static long midpoint(long left, long right) {
@@ -243,7 +282,8 @@ final class ReconstructionPitchRefinement {
         private static final int FFT_SIZE = 4_096;
         private final Path source;
         private final long endUs;
-        private final Map<Long, Frame> frames = new HashMap<>();
+        private final Map<Long, Frame> standardFrames = new HashMap<>();
+        private final Map<Long, Frame> bassFrames = new HashMap<>();
         private final double[] real = new double[FFT_SIZE];
         private final double[] imaginary = new double[FFT_SIZE];
         private final double[] power = new double[FFT_SIZE / 2];
@@ -256,19 +296,20 @@ final class ReconstructionPitchRefinement {
             this.endUs = endUs;
         }
 
-        List<Run> runs(long start, long end, boolean stem) throws IOException {
+        List<Run> runs(long start, long end, boolean stem, Window window) throws IOException {
             var runs = new ArrayList<Run>();
-            if (start < 0 || end > endUs || end - start < 2 * HALF_WINDOW_US) {
+            if (start < 0 || end > endUs || end - start < 2 * window.halfUs) {
                 return runs;
             }
+            var frames = window == Window.BASS ? bassFrames : standardFrames;
             Run run = null;
             double threshold = stem ? STEM_HARMONIC_ENERGY : MIX_HARMONIC_ENERGY;
-            long firstCenter = start + HALF_WINDOW_US;
+            long firstCenter = start + window.halfUs;
             firstCenter += (HOP_US - firstCenter % HOP_US) % HOP_US;
-            for (long center = firstCenter; center <= end - HALF_WINDOW_US; center += HOP_US) {
+            for (long center = firstCenter; center <= end - window.halfUs; center += HOP_US) {
                 Frame frame = frames.get(center);
                 if (frame == null) {
-                    frame = frame(center);
+                    frame = frame(center, window);
                     frames.put(center, frame);
                 }
                 if (frame.harmonicEnergy() < threshold) {
@@ -291,11 +332,11 @@ final class ReconstructionPitchRefinement {
             return runs;
         }
 
-        private Frame frame(long center) throws IOException {
+        private Frame frame(long center, Window window) throws IOException {
             long bucket = center / CHUNK_US;
             if (chunkBucket != bucket) {
-                chunkStart = Math.max(0, bucket * CHUNK_US - HALF_WINDOW_US);
-                long end = Math.min(endUs, (bucket + 1) * CHUNK_US + HALF_WINDOW_US);
+                chunkStart = Math.max(0, bucket * CHUNK_US - Window.BASS.halfUs);
+                long end = Math.min(endUs, (bucket + 1) * CHUNK_US + Window.BASS.halfUs);
                 chunk = ReferenceAudio.read(source, chunkStart / 1_000_000.0, (end - chunkStart) / 1_000_000.0);
                 chunkBucket = bucket;
             }
@@ -304,8 +345,8 @@ final class ReconstructionPitchRefinement {
                 return Frame.UNPITCHED;
             }
             int stride = Math.max(1, rate / 12_000);
-            int start = (int) ((center - HALF_WINDOW_US - chunkStart) * rate / 1_000_000);
-            int length = (int) (2 * HALF_WINDOW_US * rate / 1_000_000) / stride;
+            int start = (int) ((center - window.halfUs - chunkStart) * rate / 1_000_000);
+            int length = (int) (2 * window.halfUs * rate / 1_000_000) / stride;
             float[] samples = chunk.samples();
             length = Math.min(length, (samples.length - start) / stride);
             Arrays.fill(real, 0);
@@ -327,12 +368,12 @@ final class ReconstructionPitchRefinement {
             for (int i = 0; i < power.length; i++) {
                 power[i] = real[i] * real[i] + imaginary[i] * imaginary[i];
             }
-            return estimate(rate / (double) stride / FFT_SIZE, length);
+            return estimate(rate / (double) stride / FFT_SIZE, length, window);
         }
 
         // Require a measurable fundamental and enough energy in that complete harmonic series.
-        private Frame estimate(double binHz, int windowSamples) {
-            int firstBin = (int) Math.ceil(35 / binHz);
+        private Frame estimate(double binHz, int windowSamples, Window window) {
+            int firstBin = (int) Math.ceil(window.minHz / binHz);
             int strongest = firstBin;
             double total = 0;
             for (int i = 0; i < power.length; i++) {
@@ -354,7 +395,7 @@ final class ReconstructionPitchRefinement {
                 double hz = peakFrequency(i, binHz);
                 double midi = 69 + 12 * Math.log(hz / 440.0) / Math.log(2);
                 int pitch = (int) Math.round(midi);
-                if (!validPitch(pitch) || Math.abs(pitch - midi) > .27) {
+                if (!window.contains(pitch) || Math.abs(pitch - midi) > .27) {
                     continue;
                 }
 

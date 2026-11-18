@@ -62,6 +62,66 @@ class ReconstructionPitchRefinementTest {
                 note(64, 420_000, 650_000)), refined.score().notes());
     }
 
+    @Test void splitsAHeldBassNoteAtTheLowEndOfTheAnalysisRange() throws Exception {
+        Path stem = wave("bass-stem.wav", 2, (sample, time) -> tone(time, time < .94 ? 33 : 28));
+        MidiScore original = score(note(33, 650_000, 1_290_000));
+
+        var refined = ReconstructionPitchRefinement.refine(original, null, Map.of(0, stem), 1_290_000);
+
+        assertEquals(List.of(33, 28), refined.score().notes().stream().map(MidiScore.Note::pitch).toList());
+        assertEquals(1, refined.changes().size());
+        assertTrue(Math.abs(refined.changes().getFirst().startUs() - 940_000) <= 30_000);
+    }
+
+    @Test void resolvesTheLowestBassPitchesInTheReconstructionReference() throws Exception {
+        for (int pitch : new int[]{26, 27}) {
+            Path stem = wave("deep-bass-" + pitch + ".wav", 2,
+                    (sample, time) -> tone(time, time < .94 ? 32 : pitch));
+            MidiScore original = score(note(32, 650_000, 1_290_000));
+
+            var refined = ReconstructionPitchRefinement.refine(original, null, Map.of(0, stem), 1_290_000);
+
+            assertEquals(List.of(32, pitch), refined.score().notes().stream().map(MidiScore.Note::pitch).toList());
+            assertEquals(1, refined.changes().size());
+            assertTrue(Math.abs(refined.changes().getFirst().startUs() - 940_000) <= 30_000);
+        }
+    }
+
+    @Test void fillsAnUnambiguousBassGapFromTheMix() throws Exception {
+        Path mix = wave("bass-gap.wav", (sample, time) -> tone(time, time < .25 ? 40 : time < .50 ? 37 : 41));
+        MidiScore original = score(note(40, 0, 250_000), note(41, 500_000, 750_000));
+
+        var refined = ReconstructionPitchRefinement.refine(original, mix, Map.of(), 750_000);
+
+        assertEquals(List.of(note(40, 0, 250_000), note(37, 250_000, 500_000),
+                note(41, 500_000, 750_000)), refined.score().notes());
+    }
+
+    @Test void stillRecoversAShortGapWithinTheStandardRange() throws Exception {
+        Path mix = wave("short-standard-gap.wav",
+                (sample, time) -> tone(time, time < .25 ? 40 : time < .40 ? 42 : 44));
+        MidiScore original = score(note(40, 0, 250_000), note(44, 400_000, 650_000));
+
+        var refined = ReconstructionPitchRefinement.refine(original, mix, Map.of(), 650_000);
+
+        assertEquals(List.of(note(40, 0, 250_000), note(42, 250_000, 400_000),
+                note(44, 400_000, 650_000)), refined.score().notes());
+    }
+
+    @Test void leavesAnAmbiguousBassMixAndAnUnchangedBassStemAlone() throws Exception {
+        Path mix = wave("bass-mix.wav", (sample, time) -> tone(time, time < .30 ? 33 : 28) + tone(time, 54));
+        Path stem = wave("sustained-bass.wav", (sample, time) -> tone(time, 33));
+        MidiScore original = score(note(33, 0, 650_000));
+
+        var mixed = ReconstructionPitchRefinement.refine(original, mix, Map.of(), 650_000);
+        var isolated = ReconstructionPitchRefinement.refine(original, null, Map.of(0, stem), 650_000);
+
+        assertSame(original, mixed.score());
+        assertTrue(mixed.changes().isEmpty());
+        assertSame(original, isolated.score());
+        assertTrue(isolated.changes().isEmpty());
+    }
+
     @Test void leavesADenseMixAndUnpitchedStemAlone() throws Exception {
         Path mix = wave("mix.wav", (sample, time) -> tone(time, time < .28 ? 60 : 64) + tone(time, 67));
         Random random = new Random(7);
