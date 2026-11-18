@@ -2,9 +2,11 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.headless.ProjectPackage;
+import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.project.*;
 import com.opensmpsdeck.project.Sequence;
 import javafx.application.Platform;
+import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -20,6 +22,7 @@ import java.util.function.UnaryOperator;
 
 /** Human editor over exactly the project files external tools edit. */
 public final class StudioWindow implements AutoCloseable {
+    private static final int EXTRA_LIFE_ID = 0x2A;
     private final Stage stage;
     private final BorderPane root=new BorderPane();
     private final Label title=new Label(), fileState=new Label(), status=new Label("Ready"), detail=new Label("Choose a sequence"), linked=new Label();
@@ -41,7 +44,7 @@ public final class StudioWindow implements AutoCloseable {
     private final TabPane nativeTabs=new TabPane(new Tab("Native bank",nativeBank),nativeAssets);
     private SplitPane arrangementLayout;
     private VBox assetBody;
-    private Button songSettings, binaryExport, nativePackageExport;
+    private Button songSettings, binaryExport, nativePackageExport, romImport;
     private VBox noteBody;
     private final StudioPlayback playback=new StudioPlayback();
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
@@ -81,7 +84,14 @@ public final class StudioWindow implements AutoCloseable {
     private Region spacer(){Region r=new Region();HBox.setHgrow(r,Priority.ALWAYS);return r;}
     private void build() {
         Label brand=label("OPEN / SMPS","brand");
-        HBox top=new HBox(10,brand,label("STUDIO","tag"),spacer(),button("New",this::newProject),button("Open…",this::open),button("Save",this::save),button("Save as…",this::saveAs));
+        romImport=button("Import S3&K…",this::importRom);
+        romImport.setId("import-s3k");
+        var fileActions=new FlowPane(8,6,button("New",this::newProject),button("Open…",this::open),romImport,
+                button("Save",this::save),button("Save as…",this::saveAs));
+        fileActions.setPrefWrapLength(560);
+        fileActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
+        for(Node action:fileActions.getChildren())((Button)action).setMinWidth(Region.USE_PREF_SIZE);
+        HBox top=new HBox(10,brand,label("STUDIO","tag"),spacer(),fileActions);
         top.getStyleClass().add("topbar");
         title.getStyleClass().add("project-title");title.setMinWidth(0);fileState.getStyleClass().add("file-state");
         songSettings=button("Song settings…",this::settings);
@@ -340,6 +350,128 @@ public final class StudioWindow implements AutoCloseable {
     private void open(){if(!confirmLeave())return;var file=chooser("Open shared project","json").showOpenDialog(stage);if(file!=null)try{load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
     private void saveAs(){var chooser=chooser("Save a project copy (choose a new file)","json");chooser.setInitialFileName("project-copy.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{ProjectFiles.save(file.toPath(),document.project(),null);load(file.toPath());status.setText("Saved project copy");}catch(IOException|IllegalArgumentException e){error(e);}}
     private void newProject(){if(!confirmLeave())return;var chooser=chooser("Create a shared project","json");chooser.setInitialFileName("untitled.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{StudioProject demo=DemoProject.create();ProjectFiles.save(file.toPath(),new StudioProject(1,"Untitled","S3K",demo.ticksPerBeat(),demo.tempo(),demo.voices(),List.of(),List.of()),null);selectedClip=null;selectedSequence=null;selectedNote=null;load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
+    private void importRom() {
+        FileChooser cartridge = new FileChooser();
+        cartridge.setTitle("Choose your locked-on Sonic 3 & Knuckles ROM");
+        cartridge.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Mega Drive cartridge images", "*.bin", "*.md", "*.gen", "*.rom"),
+                new FileChooser.ExtensionFilter("All files", "*"));
+        var file = cartridge.showOpenDialog(stage);
+        if (file == null || closed) return;
+
+        Path rom = file.toPath();
+        ProjectDocument source = document;
+        romImport.setDisable(true);
+        status.setText("Reading S3&K music list…");
+        Task<List<S3kRomImporter.Song>> scan = new Task<>() {
+            @Override protected List<S3kRomImporter.Song> call() throws IOException {
+                return S3kRomImporter.listSongs(rom);
+            }
+        };
+        scan.setOnSucceeded(event -> {
+            if (closed) return;
+            romImport.setDisable(false);
+            if (source != document) {
+                status.setText("S3&K import cancelled because a different project is open");
+                return;
+            }
+            chooseRomSong(source, rom, scan.getValue());
+        });
+        scan.setOnFailed(event -> importFailed(scan.getException()));
+        io.execute(scan);
+    }
+
+    private void chooseRomSong(ProjectDocument source, Path rom, List<S3kRomImporter.Song> songs) {
+        if (songs.isEmpty()) {
+            status.setText("No supported music IDs found in this cartridge");
+            return;
+        }
+        status.setText("Choose a song to import");
+        ListView<S3kRomImporter.Song> music = new ListView<>();
+        music.getItems().setAll(songs);
+        music.setPrefSize(380, 280);
+        music.setCellFactory(list -> new ListCell<>() {
+            @Override protected void updateItem(S3kRomImporter.Song song, boolean empty) {
+                super.updateItem(song, empty);
+                setText(empty ? null : String.format(Locale.ROOT, "$%02X  %s", song.id(), song.name()));
+            }
+        });
+        music.getSelectionModel().selectFirst();
+        ButtonType next = new ButtonType("Choose destination…", ButtonBar.ButtonData.OK_DONE);
+        Dialog<S3kRomImporter.Song> selection = new Dialog<>();
+        selection.initOwner(stage);
+        selection.setTitle("Import S3&K music");
+        selection.setHeaderText("Choose a song from " + rom.getFileName());
+        Label context = new Label("Extra Life ($2A) needs a previous song for preview. "
+                + "Use the headless renderer with --previous-project.");
+        context.setWrapText(true);
+        context.visibleProperty().bind(music.getSelectionModel().selectedItemProperty()
+                .map(song -> song.id() == EXTRA_LIFE_ID).orElse(false));
+        context.managedProperty().bind(context.visibleProperty());
+        selection.getDialogPane().setContent(new VBox(8, music, context));
+        selection.getDialogPane().getButtonTypes().addAll(next, ButtonType.CANCEL);
+        selection.setResultConverter(button -> button == next ? music.getSelectionModel().getSelectedItem() : null);
+        var song = selection.showAndWait().orElse(null);
+        if (closed) return;
+        if (song == null) {
+            status.setText("S3&K import cancelled");
+            return;
+        }
+        var output = chooser("Save imported S3&K project (choose a new file)", "json");
+        output.setInitialFileName(String.format(Locale.ROOT, "s3k-%02X.smps.json", song.id()));
+        var file = output.showSaveDialog(stage);
+        if (closed) return;
+        if (file == null) {
+            status.setText("S3&K import cancelled");
+            return;
+        }
+        saveRomSong(source, rom, song, file.toPath());
+    }
+
+    private void saveRomSong(ProjectDocument source, Path rom, S3kRomImporter.Song song, Path destination) {
+        romImport.setDisable(true);
+        status.setText("Importing " + song.name() + "…");
+        Task<Void> saveImport = new Task<>() {
+            @Override protected Void call() throws IOException {
+                ProjectFiles.save(destination, S3kRomImporter.readSong(rom, song.id()), null);
+                return null;
+            }
+        };
+        saveImport.setOnSucceeded(event -> {
+            if (closed) return;
+            romImport.setDisable(false);
+            openImportedProject(source, song, destination);
+        });
+        saveImport.setOnFailed(event -> importFailed(saveImport.getException()));
+        io.execute(saveImport);
+    }
+
+    void openImportedProject(ProjectDocument source, S3kRomImporter.Song song, Path destination) {
+        if (closed) return;
+        if (document != source) {
+            status.setText("Imported " + destination.getFileName() + " · use Open to switch to it");
+            return;
+        }
+        status.setText("Imported " + destination.getFileName());
+        try {
+            // Pending editor drafts belong to the source window, even when its document is clean.
+            Stage importedStage = new Stage();
+            StudioWindow imported = new StudioWindow(importedStage, destination);
+            imported.status.setText(song.id() == EXTRA_LIFE_ID
+                    ? "Extra Life needs a previous song for preview. Use --previous-project in the headless renderer."
+                    : "Imported " + song.name());
+            importedStage.show();
+        } catch (IOException | IllegalArgumentException error) {
+            status.setText("Imported " + destination.getFileName() + "; could not open it: " + error.getMessage());
+        }
+    }
+
+    private void importFailed(Throwable error) {
+        if (closed) return;
+        romImport.setDisable(false);
+        status.setText("S3&K import failed: " + error.getMessage());
+    }
+
     private boolean confirmLeave(){
         if(document==null||!document.dirty())return true;
         ButtonType save=new ButtonType("Save"),discard=new ButtonType("Discard local edits");Alert prompt=new Alert(Alert.AlertType.CONFIRMATION,"This project has unsaved edits.",save,discard,ButtonType.CANCEL);prompt.initOwner(stage);prompt.setHeaderText("Keep your changes?");var choice=prompt.showAndWait().orElse(ButtonType.CANCEL);return choice.equals(discard)||(choice.equals(save)&&save());

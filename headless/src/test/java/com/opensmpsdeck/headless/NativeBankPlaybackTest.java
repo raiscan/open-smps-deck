@@ -137,6 +137,12 @@ class NativeBankPlaybackTest {
         Path wav = directory.resolve("cue.wav");
         Files.writeString(previousPath, ProjectFormat.write(previous));
         Files.writeString(cuePath, ProjectFormat.write(cue));
+        var inspection = new ByteArrayOutputStream();
+        try (var out = new PrintStream(inspection)) {
+            assertEquals(0, Main.run(new String[]{"inspect-project", cuePath.toString()}, out, out));
+        }
+        assertTrue(inspection.toString().contains("Restore previous song"), inspection::toString);
+        assertTrue(inspection.toString().contains("Playback requires"), inspection::toString);
         var errors = new ByteArrayOutputStream();
         var err = new PrintStream(errors);
         assertEquals(2, Main.run(new String[]{"render-project", cuePath.toString(), wav.toString()}, err, err));

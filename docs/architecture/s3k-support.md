@@ -1,7 +1,7 @@
 # S3K representation and playback coverage
 
-The delivery target is complete S3K track representation, editing, rendering and
-dependency-complete export **before importing songs**. Versions 1–4 provide the
+The locked-on S3&K music importer preserves tracks and their dependencies.
+Versions 1–4 provide the
 musical arrangement workflow. [Version 5](native-bank-source.md) keeps original
 bank bytes and addresses for native editing, inspection, bounded playback and
 export. Retail coverage requires whole-track tests of the reached semantics.

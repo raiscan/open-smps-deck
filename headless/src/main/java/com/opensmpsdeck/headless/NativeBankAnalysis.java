@@ -26,7 +26,8 @@ public final class NativeBankAnalysis {
     }
 
     public record Analysis(byte[] bank, byte[] header, int headerAddress, List<Event> events,
-                           int voiceOffset, int localVoiceCount, int globalVoiceOffset) {
+                           int voiceOffset, int localVoiceCount, int globalVoiceOffset,
+                           boolean requiresPreviousMusic) {
         public Analysis {
             bank = bank.clone();
             header = header.clone();
@@ -46,9 +47,10 @@ public final class NativeBankAnalysis {
     private final byte[] bank;
     private final int base;
     private final int header;
-    private final int localVoiceCount;
+    private int localVoiceCount;
     private final int globalVoiceCount;
     private final boolean allowPreviousMusicRestore;
+    private final boolean discoverLocalVoices;
     private final Map<Integer, List<Integer>> psgEnvelopes;
     private final Map<Integer, List<Integer>> modulationEnvelopes;
     private final Set<Integer> checkedPsgEnvelopes = new HashSet<>();
@@ -64,7 +66,7 @@ public final class NativeBankAnalysis {
     private boolean restoresPreviousMusic;
     private boolean setsOtherAdmissionState;
 
-    private NativeBankAnalysis(CompiledProject project, boolean allowPreviousMusicRestore) {
+    private NativeBankAnalysis(CompiledProject project, boolean allowPreviousMusicRestore, boolean discoverLocalVoices) {
         NativeProgram program = project.nativeProgram();
         if (program == null) throw new IllegalArgumentException("native bank is required");
         bank = program.bank();
@@ -73,6 +75,7 @@ public final class NativeBankAnalysis {
         localVoiceCount = program.localVoiceCount();
         globalVoiceCount = project.globalVoices().size();
         this.allowPreviousMusicRestore = allowPreviousMusicRestore;
+        this.discoverLocalVoices = discoverLocalVoices;
         validateResources(project, program);
         psgEnvelopes = project.psgEnvelopes();
         modulationEnvelopes = project.modulationEnvelopes();
@@ -85,8 +88,17 @@ public final class NativeBankAnalysis {
         return inspect(project, false);
     }
 
+    /** Inspect a cue's events without requiring a previous song to be loaded. */
+    public static Analysis inspectForEditing(CompiledProject project) {
+        return inspect(project, true);
+    }
+
     static Analysis inspect(CompiledProject project, boolean allowPreviousMusicRestore) {
-        return new NativeBankAnalysis(project, allowPreviousMusicRestore).inspect();
+        return new NativeBankAnalysis(project, allowPreviousMusicRestore, false).inspect();
+    }
+
+    static int discoverLocalVoiceCount(CompiledProject project) {
+        return new NativeBankAnalysis(project, true, true).inspect().localVoiceCount();
     }
 
     private static void validateResources(CompiledProject project, NativeProgram program) {
@@ -129,6 +141,7 @@ public final class NativeBankAnalysis {
         int headerLength = 6 + 4 * fm + 6 * psg;
         reserve(header, headerLength);
         int voicePointer = word(header);
+        if (discoverLocalVoices && voicePointer >= base && voicePointer != 0) localVoiceCount = 1;
         if (localVoiceCount != 0) {
             if (voicePointer == 0) throw invalid(header, "zero voice pointer selects the global table");
             voiceOffset = address(voicePointer, header);
@@ -161,7 +174,8 @@ public final class NativeBankAnalysis {
             throw invalid(header, "contextual preview requires E2 FF without other E2 values");
         }
         return new Analysis(bank, Arrays.copyOfRange(bank, header, header + headerLength),
-                base + header, List.copyOf(events.values()), voiceOffset, localVoiceCount, globalVoiceOffset);
+                base + header, List.copyOf(events.values()), voiceOffset, localVoiceCount, globalVoiceOffset,
+                restoresPreviousMusic);
     }
 
     private void walk(int pc, Track track) {
@@ -337,6 +351,12 @@ public final class NativeBankAnalysis {
 
     private void requireVoice(int index, int pc) {
         int count = localVoiceCount != 0 ? localVoiceCount : globalVoiceCount - globalVoiceOffset;
+        if (discoverLocalVoices && localVoiceCount != 0 && index >= localVoiceCount) {
+            int additionalVoices = index + 1 - localVoiceCount;
+            reserve(voiceOffset + VOICE_BYTES * localVoiceCount, VOICE_BYTES * additionalVoices);
+            localVoiceCount = index + 1;
+            return;
+        }
         if (index >= count) throw invalid(pc, "undefined FM voice " + index);
     }
 
@@ -365,7 +385,7 @@ public final class NativeBankAnalysis {
     private void reserve(int pc, int size) {
         requireBytes(pc, size);
         for (int index = pc; index < pc + size; index++) {
-            if (owners[index] != -1) throw invalid(index, "header and voice table overlap");
+            if (owners[index] != -1) throw invalid(index, "header or voice table overlaps occupied bytes");
             owners[index] = -2;
         }
     }

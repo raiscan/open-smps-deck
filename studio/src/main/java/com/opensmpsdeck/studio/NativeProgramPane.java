@@ -121,9 +121,11 @@ final class NativeProgramPane extends BorderPane {
         bankInfo.setText(String.format(Locale.ROOT, "S3K bank %04X · header %04X · %,d bytes",
                 program.bankBase(), program.bankBase() + program.headerOffset(), program.bank().length));
         try {
-            var analysis = NativeBankAnalysis.inspect(ProjectCompiler.compileWithAssets(project));
+            var analysis = NativeBankAnalysis.inspectForEditing(ProjectCompiler.compileWithAssets(project));
             events.getItems().setAll(analysis.events());
-            diagnostic.setText("Playback preflight passed · " + analysis.events().size() + " reachable events");
+            String playback = analysis.requiresPreviousMusic()
+                    ? "Playback requires a previous song" : "Playback preflight passed";
+            diagnostic.setText(playback + " · " + analysis.events().size() + " reachable events");
         } catch (IllegalArgumentException failure) {
             events.getItems().clear();
             diagnostic.setText("Playback blocked · " + failure.getMessage());

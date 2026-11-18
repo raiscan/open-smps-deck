@@ -26,6 +26,11 @@ view shares project undo, save, live refresh and asset export. Preview uses
 the frame limit stored in the bank source. See the
 [native source format](../docs/architecture/native-bank-source.md).
 
+**Import S3&K…** lists the music catalogue from a verified local locked-on
+cartridge image and saves the selected song as a new native project.
+The imported project opens in a separate window with live refresh.
+[Studio import steps](../docs/user-guide/studio.md#import-s3k-music)
+
 ## Run
 
 Build with JDK 25 and Maven, on a desktop with JavaFX-supported native libraries:

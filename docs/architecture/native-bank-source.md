@@ -1,6 +1,6 @@
 # Address-preserving S3K bank projects
 
-Version 5 is the native source destination for a future importer. One byte
+Version 5 is the source format used by the locked-on S3&K importer. One byte
 array owns the complete bank, including the selected song header, shared
 phrases, embedded voices, and bytes outside the reached instructions. This
 preserves positional addresses and raw initial channel state. Versions 1–4
@@ -27,9 +27,9 @@ the arrangement's generated asset numbering.
 
 The bound modulation assets carry playback operands. OpenGGF's cartridge
 loader supplies a resolved view for `82` and `84`, whose retail operands
-come from the driver code table. Keep the original envelope bytes as an
-unbound asset when preserving a cartridge source. Both entries can travel
-in the same package. Branches and immediate control cycles are checked
+come from the driver code table. The importer keeps differing original
+envelope bytes as unbound assets. Both entries travel in the same package.
+Branches and immediate control cycles are checked
 before rendering.
 
 The tempo field is derived from the header. The native project has no clip or
@@ -58,7 +58,8 @@ asset slots, operand/address bounds, return depth, and whether repeating control
 flow lets time advance. An explicit duration byte can also be a separately
 reached event. A pointer into a command operand fails preflight.
 
-Validation, Studio preview, and WAV rendering use the same playback boundary.
+Validation and standalone preview and WAV rendering require a playable bank
+in isolation. Inspection can display events for cues that need a previous song.
 If preflight finds unsupported semantics, Studio shows the exact reason and
 keeps the stored byte array editable. Source save and schema 3 package export
 preserve unsupported data, including envelope programs outside the supported
@@ -75,11 +76,17 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-projec
 Contextual preview supports cues whose reachable `E2` commands all request
 restoration. Studio preview runs an isolated music bank.
 
-## Import readiness
+## Cartridge import
 
-A future importer can write an exact bank without first interpreting it as
-piano-roll notes. The remaining gate is compatibility of shipped music and
-native runtime dependencies. The following are concrete checks for that gate.
+The importer verifies the locked-on ROM revision and uses the pinned
+OpenGGF loader to find the song and resolve its resources. It preserves the
+whole bank, including shared data and unvisited bytes. The local voice extent
+covers the voice references reached by the analyzer. Duplicate DAC PCM can
+share an asset while each note retains its own rate.
+
+Imported songs use the Native bank editor and preserve their original stream
+structure. Playback boundaries for each cartridge variant and command remain
+tracked in the [coverage matrix](s3k-support.md).
 
 | Gate | Evidence needed |
 | --- | --- |

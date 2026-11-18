@@ -5,6 +5,23 @@ to WAV through the pinned OpenGGF production driver, physical policy, session
 and accurate FM core. These commands run without JavaFX, an audio device, a ROM,
 or an embedded agent. The old app continues to use its original `synth-core` module.
 
+## Import locked-on S3&K music
+
+Use your own unheadered 4 MiB locked-on cartridge image. The importer verifies
+the ROM revision before reading its music banks and resource tables.
+
+```sh
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs /path/to/locked-on.gen
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song /path/to/locked-on.gen 0x0D launch-base.smps.json
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project launch-base.smps.json
+```
+
+Use a decimal ID or the `0xNN` form printed by the catalogue. The output
+is a v5 native project containing the entire addressed bank and its assets.
+Choose a destination that does not exist. The imported preview defaults to
+3,600 presentations (60 seconds). Use `--frames` to override WAV length.
+Import the previous song separately to render the Extra Life cue (`0x2A`).
+
 ## Run
 
 Requires JDK 25 and Maven. From the repository root:
@@ -98,8 +115,8 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   never silently fall through into notes or partially rendered audio.
 
 A normal legacy OpenSMPSDeck export may contain loops or require external
-resources and therefore be rejected. This boundary does **not** claim arbitrary
-SMPS/ROM import support. The project compiler emits this supported subset with
+resources and therefore be rejected. Raw binary rendering and locked-on
+cartridge import have separate entry points. The project compiler emits this supported subset with
 inline repeated content, positional stopped channels and local FM voices.
 Native envelope semantics outside the bounded profile, FM6/DAC ownership switching and
 arbitrary control flow remain future work.

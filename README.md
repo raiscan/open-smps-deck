@@ -2,7 +2,8 @@
 
 **Reboot in progress:** the new [Timeline Studio](studio/README.md) provides
 editable clips, a piano roll and live refresh from shared JSON project files,
-with pinned OpenGGF S3&K playback and a [headless CLI](headless/README.md).
+with pinned OpenGGF S3&K playback, locked-on cartridge music import and a
+[headless CLI](headless/README.md).
 The existing JavaFX app below still uses the legacy engine.
 See the [reboot design](docs/superpowers/specs/2026-11-17-reimagined-design.md)
 and [audio provenance/parity checks](openggf-audio/README.md).

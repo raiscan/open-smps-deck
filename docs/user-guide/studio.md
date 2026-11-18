@@ -10,6 +10,18 @@ Restart after changing desktop scale. On a short logical screen, use the
 **Arrangement** and **Notes** tabs to give each editor enough space. Double-click
 a clip or source to open Notes. The inspector has its own scroll area.
 
+## Import S3&K music
+
+1. Click **Import S3&K…** and choose your 4 MiB locked-on S3&K cartridge image.
+2. Select a song by title or hex ID.
+3. Choose a new `.smps.json` destination. The imported song opens in a separate
+   Studio window, where you can inspect and edit its **Native bank**.
+
+Imported projects carry the bank and native asset bindings, so they can be
+opened and rendered without the cartridge. **Extra Life** restores previous
+music and uses the headless renderer's `--previous-project` and
+`--previous-frames` options for that context. [CLI import and rendering](../../headless/README.md#import-locked-on-s3k-music)
+
 ## Arrange clips
 
 The sequence browser on the left contains reusable musical sources. Drag one
@@ -177,4 +189,4 @@ export refuses to drop those dependencies. Preview and WAV export use them.
 
 Nested multi-channel sequences, make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
-records the remaining authoring and driver gaps before importing.
+records coverage for the retail importer and the remaining driver gaps.

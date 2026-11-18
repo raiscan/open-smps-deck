@@ -28,6 +28,22 @@ public final class Main {
             }
             if (args.length == 0) throw new IllegalArgumentException("expected a command");
             switch (args[0]) {
+                case "list-rom-songs" -> {
+                    requireArguments(args, 2);
+                    for (var song : S3kRomImporter.listSongs(Path.of(args[1]))) {
+                        out.printf(Locale.ROOT, "0x%02X\t%s%n", song.id(), song.name());
+                    }
+                }
+                case "import-rom-song" -> {
+                    requireArguments(args, 4);
+                    Path input = Path.of(args[1]), output = Path.of(args[3]);
+                    requireDifferentFiles(input, output);
+                    int id = parseMusicId(args[2]);
+                    var song = S3kRomImporter.readSong(input, id);
+                    ProjectFiles.save(output, song, null);
+                    out.printf(Locale.ROOT, "Imported 0x%02X %s to %s%n", id, song.name(), output);
+                    if (id == 0x2A) out.println("Extra Life restores prior music. Render with --previous-project and --previous-frames.");
+                }
                 case "validate-project" -> {
                     requireArguments(args, 2);
                     Path input = Path.of(args[1]);
@@ -89,9 +105,12 @@ public final class Main {
     }
 
     private static void inspect(CompiledProject compiled, PrintStream out) {
-        var analysis = S3kBinary.inspectNative(compiled);
+        var analysis = NativeBankAnalysis.inspectForEditing(compiled);
         out.printf(Locale.ROOT, "Native S3K bank %04X, header %04X, %d bytes%n",
                 compiled.nativeProgram().bankBase(), analysis.headerAddress(), analysis.bank().length);
+        if (analysis.requiresPreviousMusic()) {
+            out.println("Playback requires --previous-project and --previous-frames.");
+        }
         out.println("Address  Bytes              Meaning");
         for (var event : analysis.events()) {
             var bytes = new StringBuilder();
@@ -178,6 +197,15 @@ public final class Main {
         }
     }
 
+    private static int parseMusicId(String value) {
+        try {
+            return value.regionMatches(true, 0, "0x", 0, 2)
+                    ? Integer.parseInt(value.substring(2), 16) : Integer.parseInt(value);
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException("Music ID must be decimal or hexadecimal with a 0x prefix");
+        }
+    }
+
     private static void requireArguments(String[] args, int count) {
         if (args.length != count) throw new IllegalArgumentException("wrong number of arguments for " + args[0]);
     }
@@ -211,6 +239,8 @@ public final class Main {
         out.println("Usage: java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs ROM");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");

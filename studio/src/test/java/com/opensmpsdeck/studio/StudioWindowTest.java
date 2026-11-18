@@ -1,5 +1,6 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.project.*;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
@@ -9,6 +10,8 @@ import javafx.scene.control.*;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.*;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import javax.imageio.ImageIO;
@@ -33,6 +36,54 @@ class StudioWindowTest {
         fx(()->{stage=new Stage();window=new StudioWindow(stage,file);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
+
+    @Test void completedImportOpensAnotherWatchedWindowAndKeepsSourceEdits() throws Exception {
+        Path imported = folder.resolve("s3k-81.smps.json");
+        byte[] bank = {0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
+        var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
+        var fixture = new StudioProject(5, "Imported fixture", "S3K", 12, 64,
+                List.of(), List.of(), List.of(), List.of(), List.of(), program);
+        ProjectFiles.save(imported, fixture, null);
+        Stage importedStage = fx(() -> {
+            assertTrue(window.scene().lookup("#import-s3k").isVisible());
+            var source = window.document();
+            var song = new S3kRomImporter.Song(0x81, "Synthetic song");
+            int windowCount = Window.getWindows().size();
+            window.openImportedProject(ProjectDocument.open(file), song, imported);
+            assertEquals(windowCount, Window.getWindows().size());
+
+            var canvas = window.timeline.canvas;
+            mouse(canvas, MouseEvent.MOUSE_PRESSED, TimelineView.GUTTER + 20, TimelineView.RULER + 20, true);
+            mouse(canvas, MouseEvent.MOUSE_RELEASED, TimelineView.GUTTER + 20, TimelineView.RULER + 20, false);
+            var pending = (TextField) window.scene().lookup("#clip-start");
+            pending.setText("19");
+            var edited = ProjectEdits.moveClip(source.project(), "clip-a1", "FM2", 0);
+            source.edit(edited);
+            window.openImportedProject(source, song, imported);
+            assertEquals("19", pending.getText());
+            assertSame(pending, window.scene().lookup("#clip-start"));
+            assertSame(source, window.document());
+            assertSame(edited, source.project());
+            assertTrue(source.dirty());
+            Stage opened = Window.getWindows().stream()
+                    .filter(Stage.class::isInstance).map(Stage.class::cast)
+                    .filter(candidate -> candidate.getTitle().startsWith("Imported fixture"))
+                    .findFirst().orElseThrow();
+            assertNotNull(opened.getScene().lookup("#native-program-tabs"));
+            return opened;
+        });
+        try {
+            var refreshed = new StudioProject(5, "Imported watcher revision", "S3K", 12, 64,
+                    List.of(), List.of(), List.of(), List.of(), List.of(), program);
+            ProjectFiles.save(imported, refreshed, ProjectFiles.load(imported).revision());
+            await(() -> importedStage.getTitle().startsWith("Imported watcher revision"));
+        } finally {
+            fx(() -> {
+                importedStage.fireEvent(new WindowEvent(importedStage, WindowEvent.WINDOW_CLOSE_REQUEST));
+                return null;
+            });
+        }
+    }
 
     @Test void mouseMoveRepeatAndNoteEditsSaveBackToSharedSource() throws Exception {
         // Move the first lead clip to empty FM2 using real canvas mouse events.
