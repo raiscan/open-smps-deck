@@ -1,17 +1,20 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.project.CommandEvent;
+import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectEdits;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.Voice;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TabPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
 
@@ -45,6 +48,7 @@ public class StudioDesignCapture {
                     source.mode(), source.ticksPerBeat(), source.tempo(), source.voices(), source.sequences(),
                     source.clips(), source.envelopes(), source.samples(), source.nativeProgram());
             if (scene.endsWith("commands")) renamed = withCommands(renamed, scene.startsWith("dense"));
+            if (scene.endsWith("-assets")) renamed = withAssets(renamed);
             ProjectFiles.save(fixture, renamed, null);
             fx(() -> {
                 stage = new Stage();
@@ -53,7 +57,9 @@ public class StudioDesignCapture {
                 if (scene.endsWith("commands")) {
                     window.showCommands();
                     window.commands.selectCommand("review-envelope");
-                }
+                } else if (scene.equals("voice-assets")) window.showAssets();
+                else if (scene.equals("envelope-assets")) window.showEnvelopes();
+                else if (scene.equals("dac-assets")) window.showSamples();
                 return null;
             });
             if (source.nativeProgram() != null) {
@@ -66,6 +72,12 @@ public class StudioDesignCapture {
             }
             fx(() -> {
                 capture(Path.of(args[2]));
+                if (scene.endsWith("-assets")) reportAssetControls(scene);
+                if (scene.endsWith("commands") && window.scene().lookup("#browse-commands") instanceof ToggleButton browse
+                        && browse.isVisible()) {
+                    browse.fire();
+                    capture(Path.of(args[2] + ".browse.png"));
+                }
                 if (source.nativeProgram() != null) {
                     var tabs = (TabPane) window.scene().lookup("#native-program-tabs");
                     tabs.getSelectionModel().select(1);
@@ -100,6 +112,39 @@ public class StudioDesignCapture {
             }
         }
         return project;
+    }
+
+    private static StudioProject withAssets(StudioProject project) {
+        var voice = project.voices().getFirst();
+        project = ProjectEdits.updateVoice(project,
+                new Voice(voice.id(), "Glass keys · Bright bell with a long decay", voice.bytes()));
+        project = ProjectEdits.addEnvelope(project, new Envelope("review-volume",
+                "Plucked tone with a gradually fading tail", Envelope.PSG_VOLUME, List.of(0, 1, 3, 6, 10, 0x83)));
+        project = ProjectEdits.addEnvelope(project, new Envelope("review-vibrato",
+                "Slow vibrato", Envelope.MODULATION, List.of(0, 1, 2, 1, 0x81)));
+        byte[] pcm = new byte[512];
+        for (int i = 0; i < pcm.length; i++) {
+            pcm[i] = (byte) Math.round(128 + 120 * Math.sin(i * 0.29) * (1 - i / 512.0));
+        }
+        return ProjectEdits.addSample(project,
+                DacSample.of("review-kick", "Punchy kick · Deep tail at the native rate", 12, pcm));
+    }
+
+    private static void reportAssetControls(String scene) {
+        switch (scene) {
+            case "voice-assets" -> reportControl("apply-voice", (ScrollPane) window.voices.getCenter());
+            case "envelope-assets" -> reportControl("apply-envelope", (ScrollPane) window.envelopes.getCenter());
+            case "dac-assets" -> reportControl("apply-sample", (ScrollPane) window.samples.getCenter());
+            default -> throw new IllegalArgumentException("Unknown asset view " + scene);
+        }
+    }
+
+    private static void reportControl(String id, ScrollPane scroll) {
+        var control = window.scene().lookup("#" + id);
+        var viewport = scroll.lookup(".viewport");
+        var bounds = control.localToScene(control.getBoundsInLocal());
+        var visible = viewport.localToScene(viewport.getBoundsInLocal());
+        System.out.printf("%s bottom %.0f, viewport bottom %.0f%n", id, bounds.getMaxY(), visible.getMaxY());
     }
 
     private static void capture(Path imagePath) throws Exception {

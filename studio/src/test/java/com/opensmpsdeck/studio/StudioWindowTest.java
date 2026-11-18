@@ -260,6 +260,51 @@ class StudioWindowTest {
         assertNull(command.assetId());
     }
 
+    @Test void compactCommandBrowserNavigatesAndReordersTheSameEvents() throws Exception {
+        var project = DemoProject.create();
+        for (int i = 0; i < 12; i++) {
+            project = ProjectEdits.addCommand(project, "seq-lead-a",
+                    new CommandEvent("pan-" + i, 6, NativeCommand.PAN, List.of(128)));
+        }
+        replace(ProjectFormat.write(project));
+        await(() -> source().commands().size() == 12);
+        fx(() -> {
+            stage.setMinHeight(400);
+            stage.setHeight(600);
+            window.showCommands();
+            return null;
+        });
+        await(() -> window.scene().lookup("#browse-commands") instanceof ToggleButton toggle && toggle.isVisible());
+        fx(() -> {
+            layout();
+            var browse = (ToggleButton) window.scene().lookup("#browse-commands");
+            var operands = (TextField) window.scene().lookup("#command-bytes");
+            window.commands.selectCommand("pan-0");
+            operands.setText("40");
+            assertEquals("Browse (12)", browse.getText());
+            browse.fire();
+            assertTrue(browse.isSelected());
+            assertFalse(button("apply-command").isVisible());
+            browse.fire();
+            assertEquals("40", operands.getText(), "Switching views keeps uncommitted input");
+            browse.fire();
+            var table = (TableView<?>) window.scene().lookup("#command-table");
+            key(table, KeyCode.END, false);
+            assertEquals("pan-11", window.commands.selectedCommandId());
+            button("command-up").fire();
+            assertEquals("pan-11", source().commands().get(10).id());
+            browse.fire();
+            assertEquals("pan-11", window.commands.selectedCommandId());
+            operands.setText("C0");
+            button("apply-command").fire();
+            window.document().save();
+            return null;
+        });
+        var saved = ProjectFiles.load(file).project().sequences().getFirst().commands();
+        assertEquals("pan-11", saved.get(10).id());
+        assertEquals(List.of(192), saved.get(10).arguments());
+    }
+
     @Test void nativeDraftSurvivesExternalRefreshAndCannotOverwriteIt() throws Exception {
         StudioProject withCommand=ProjectEdits.addCommand(DemoProject.create(),"seq-lead-a",new CommandEvent("pan-1",6,NativeCommand.PAN,List.of(128)));
         replace(ProjectFormat.write(withCommand));await(()->window.document().project().formatVersion()==2);
@@ -337,6 +382,13 @@ class StudioWindowTest {
         Voice original=DemoProject.create().voices().getFirst();
         fx(()->{
             window.showAssets();layout();window.voices.selectVoice(original.id());
+            ((Hyperlink) window.scene().lookup("#show-voice-bytes")).fire();
+            layout();
+            var rawEditor = (TextArea) window.scene().lookup("#voice-bytes");
+            var viewport = ((ScrollPane) window.voices.getCenter()).lookup(".viewport");
+            assertTrue(rawEditor.isFocused());
+            assertTrue(viewport.localToScene(viewport.getBoundsInLocal())
+                    .intersects(rawEditor.localToScene(rawEditor.getBoundsInLocal())));
             ((TextField)window.scene().lookup("#voice-name")).setText("Human draft");
             ((TextArea)window.scene().lookup("#voice-bytes")).setText("F7"+VoiceEditorPane.formatVoiceBytes(original.bytes()).substring(2));return null;
         });

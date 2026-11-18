@@ -35,7 +35,7 @@ final class VoiceEditorPane extends BorderPane {
     private final TextArea raw = new TextArea();
     private final Map<Parameter, Control> globals = new EnumMap<>(Parameter.class);
     private final List<Map<Parameter, Control>> operators = new ArrayList<>();
-    private final Label selected = label("Choose an FM voice", "section");
+    private final Label selected = label("Choose an FM voice", "inspector-title");
     private final Label linked = label("", "muted");
     private final Label parameterNotice = label("", "muted"), rawNotice = label("", "muted");
     private final Button add, duplicate, delete, reload, apply, applyRaw;
@@ -55,10 +55,13 @@ final class VoiceEditorPane extends BorderPane {
             @Override protected void updateItem(Voice voice, boolean empty) {
                 super.updateItem(voice, empty);
                 setText(null); setGraphic(null);
+                // Let the list size the cell and wrap the graphic within that width.
+                setPrefWidth(1);
+                setTooltip(empty || voice == null ? null : new Tooltip(voice.id()));
                 if (!empty && voice != null) {
                     long uses = sourceUses(voice.id());
-                    setGraphic(new VBox(3, label(voice.name(), "sequence-name"),
-                            label(voice.id() + " · " + uses + " source" + (uses == 1 ? "" : "s"), "muted")));
+                    setGraphic(new VBox(2, label(voice.name(), "sequence-name"),
+                            label(uses == 0 ? "Unused" : uses + (uses == 1 ? " source" : " sources"), "muted")));
                 }
             }
         });
@@ -68,10 +71,10 @@ final class VoiceEditorPane extends BorderPane {
         add = button("New", "add-voice", this::addVoice);
         duplicate = button("Duplicate", "duplicate-voice", this::duplicateVoice);
         duplicate.setTooltip(new Tooltip("Duplicate the applied voice. Unapplied form values are not part of the copy."));
-        delete = button("Delete unused voice", "delete-voice", this::deleteSelected);
+        delete = button("Delete unused", "delete-voice", this::deleteSelected);
         reload = button("Reload voice", "reload-voice", this::reloadVoice);
-        FlowPane actions = new FlowPane(8, 8, add, duplicate, delete, reload);
-        name.setId("voice-name"); name.setPrefColumnCount(24);
+        FlowPane actions = new FlowPane(8, 8, add, duplicate, delete);
+        name.setId("voice-name"); name.setPrefColumnCount(18);
         name.textProperty().addListener((o, a, b) -> changed());
         name.setOnAction(e -> applyParameters());
         FlowPane header = new FlowPane(12, 8, field("Voice name", name));
@@ -107,21 +110,40 @@ final class VoiceEditorPane extends BorderPane {
             }
             operatorCards.getChildren().add(card);
         }
-        apply = button("Apply parameters + name", "apply-voice", this::applyParameters);
+        apply = button("Apply voice", "apply-voice", this::applyParameters);
         Label parameterHelp = label("Parameters edit the native stored slots without reordering. Values are decimal; TL 0 is loudest and 127 is quietest. Apply track volume is an independent TL high-bit flag. Algorithm changes retain those flags and all other native bits.", "help");
-        parameterForm = new VBox(10, header, operatorCards, apply, parameterHelp, parameterNotice);
+        var rawLink = new Hyperlink("Raw bytes");
+        rawLink.setId("show-voice-bytes");
+        rawLink.setTooltip(new Tooltip("Jump to the independent raw-byte editor"));
+        var parameterActions = new FlowPane(8, 6, apply, reload, rawLink);
+        parameterNotice.visibleProperty().bind(parameterNotice.textProperty().isNotEmpty());
+        parameterNotice.managedProperty().bind(parameterNotice.visibleProperty());
+        rawNotice.visibleProperty().bind(rawNotice.textProperty().isNotEmpty());
+        rawNotice.managedProperty().bind(rawNotice.visibleProperty());
+        parameterForm = new VBox(8, parameterActions, parameterNotice, header, operatorCards, parameterHelp);
         raw.setId("voice-bytes"); raw.setPrefRowCount(3); raw.setWrapText(true);
         raw.setPromptText("Exactly 25 raw hex bytes in native S3K order");
         raw.textProperty().addListener((o, a, b) -> changed());
         applyRaw = button("Apply raw bytes", "apply-voice-bytes", this::applyRaw);
         Label rawHelp = label("Exactly 25 native bytes, 00–FF, separated by spaces; 0x prefixes are accepted. Order: algorithm/feedback, DT/MUL, RS/AR, AM/D1R, D2R, D1L/RR, TL. Apply raw bytes changes bytes only; the name belongs to the parameter form. These two drafts are independent. Reload voice replaces both drafts with the current asset.", "help");
         VBox inventory=new VBox(10,label("LOCAL FM VOICES","section"),voices,actions);inventory.setMinWidth(150);inventory.setPrefWidth(200);inventory.setMaxWidth(200);
-        VBox editor=new VBox(10,selected,linked,parameterForm,new Separator(),label("EXACT NATIVE BYTES","section"),raw,applyRaw,rawHelp,rawNotice);editor.setMinWidth(210);HBox.setHgrow(editor,Priority.ALWAYS);
+        VBox identity = new VBox(2, selected, linked);
+        VBox rawForm = new VBox(8, label("EXACT NATIVE BYTES", "section"), raw,
+                applyRaw, rawNotice, rawHelp);
+        VBox editor=new VBox(8,identity,parameterForm,new Separator(),rawForm);editor.setMinWidth(210);HBox.setHgrow(editor,Priority.ALWAYS);
         HBox body=new HBox(12,inventory,editor);
         VBox content = new VBox(10,body);
         content.setPadding(new Insets(12)); content.setMinWidth(0);
         ScrollPane scroll = new ScrollPane(content); scroll.setFitToWidth(true); scroll.setMinSize(0, 0);
         scroll.getStyleClass().add("editor-scroll"); setCenter(scroll);
+        rawLink.setOnAction(e -> {
+            double range = content.getHeight() - scroll.getViewportBounds().getHeight();
+            if (range > 0) {
+                double top = rawForm.localToScene(0, 0).getY() - content.localToScene(0, 0).getY();
+                scroll.setVvalue(Math.clamp(top / range, 0, 1));
+            }
+            raw.requestFocus();
+        });
         updateState();
     }
 
@@ -275,13 +297,17 @@ final class VoiceEditorPane extends BorderPane {
     private void updateState() {
         if (apply == null) return;
         Voice current = findVoice(project, selectedId);
-        selected.setText(selectedId == null ? "Choose an FM voice" : selectedId + (current == null ? " · removed" : ""));
+        Voice displayed = current == null ? parameterBaseline : current;
+        selected.setText(displayed == null ? "Choose an FM voice" : displayed.name() + (current == null ? " · removed" : ""));
+        selected.setTooltip(selectedId == null ? null : new Tooltip("Asset ID " + selectedId));
+        selected.setAccessibleHelp(selectedId == null ? null : "Asset ID " + selectedId);
         Set<String> sources = project == null || selectedId == null ? Set.of() : project.sequences().stream()
                 .filter(s -> usesVoice(s, selectedId)).map(s -> s.id()).collect(Collectors.toSet());
         int uses = sources.size();
         long clips = project == null ? 0 : project.clips().stream().filter(c -> sources.contains(c.sequenceId())).count();
         linked.setText(selectedId == null ? "Voices are linked assets. Assign them to a source or a timed voice command."
-                : "Linked FM voice · " + uses + " source" + (uses == 1 ? "" : "s") + " · " + clips + " clip instance" + (clips == 1 ? "" : "s") + ". Editing changes every reference; deletion requires no remaining references.");
+                : "FM voice · " + (uses == 0 ? "Unused" : uses + (uses == 1 ? " source" : " sources")
+                + " · " + clips + (clips == 1 ? " clip" : " clips")));
         parameterNotice.setText(draftNotice(current, parameterBaseline, parametersChanged(), "Parameter / name"));
         rawNotice.setText(draftNotice(current, rawBaseline, rawChanged(), "Raw bytes"));
         add.setDisable(project == null); duplicate.setDisable(current == null);
@@ -293,7 +319,7 @@ final class VoiceEditorPane extends BorderPane {
         if (baseline == null) return "";
         if (current == null) return kind + " draft retained: the selected voice was removed. Select a voice or create a new one.";
         if (!current.equals(baseline)) return kind + " draft retained: the voice changed. Reload voice / reselect it before applying. Reload replaces both drafts.";
-        return changed ? kind + " draft is unapplied. Apply commits it; typing alone is not saved." : kind + " are current. Apply preserves all untouched native bits.";
+        return changed ? kind + " draft has unapplied changes." : "";
     }
 
     private boolean parametersChanged() {

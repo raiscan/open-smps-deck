@@ -4,6 +4,7 @@ import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.ProjectEdits;
 import com.opensmpsdeck.project.StudioProject;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
 import javafx.scene.canvas.Canvas;
@@ -13,10 +14,12 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.stage.FileChooser;
@@ -75,12 +78,21 @@ final class DacSampleEditorPane extends BorderPane {
         this.edit = Objects.requireNonNull(edit);
         this.error = Objects.requireNonNull(error);
         list.setId("sample-list");
-        list.setPrefHeight(150);
-        list.setMinHeight(90);
+        list.setFixedCellSize(31);
+        list.prefHeightProperty().bind(Bindings.size(list.getItems()).map(count ->
+                Math.clamp(count.intValue(), 1, 4) * list.getFixedCellSize() + 4));
+        list.setMinHeight(Region.USE_PREF_SIZE);
+        list.setPlaceholder(label("No samples", "muted"));
         list.setCellFactory(view -> new ListCell<>() {
+            {
+                // Allow long names to ellipsize inside the inventory column.
+                setPrefWidth(0);
+            }
             @Override protected void updateItem(DacSample sample, boolean empty) {
                 super.updateItem(sample, empty);
-                setText(empty || sample == null ? null : sample.name());
+                boolean filled = !empty && sample != null;
+                setText(filled ? sample.name() : null);
+                setTooltip(filled ? new Tooltip(sample.name() + "\nID " + sample.id()) : null);
             }
         });
         list.getSelectionModel().selectedItemProperty().addListener((obs, old, value) -> {
@@ -89,24 +101,31 @@ final class DacSampleEditorPane extends BorderPane {
         name.setId("sample-name");
         rate.setId("sample-rate");
         rate.setPrefColumnCount(4);
+        rate.setTooltip(new Tooltip("Native DAC rate in hex. 00 is slowest."));
         waveform.setId("sample-waveform");
         name.textProperty().addListener((obs, old, text) -> { if (!updating) refresh(); });
         rate.textProperty().addListener((obs, old, text) -> { if (!updating) refresh(); });
         name.setOnAction(event -> apply());
         rate.setOnAction(event -> apply());
 
-        var fields = new FlowPane(8, 6, rate, rateHz);
-        form.getChildren().addAll(label("Asset name", "muted"), name, usage,
-                label("Native rate byte (hex, 00 is slowest)", "muted"), fields,
-                waveform, audioSize, new FlowPane(8, 8, replace, apply, reload));
+        var nameField = new VBox(4, label("Sample name", "muted"), name);
+        nameField.setMinWidth(0);
+        HBox.setHgrow(nameField, Priority.ALWAYS);
+        var rateField = new VBox(4, label("Rate (hex)", "muted"), rate);
+        rateField.setPrefWidth(84);
+        var fields = new HBox(8, nameField, rateField);
+        form.getChildren().addAll(fields, new FlowPane(8, 6, apply, reload), notice,
+                waveform, new FlowPane(8, 4, rateHz, audioSize, usage), replace);
         form.setMinWidth(WAVE_WIDTH);
         HBox.setHgrow(form, Priority.ALWAYS);
         VBox inventory = new VBox(8, label("DAC SAMPLES", "section"), list,
                 new FlowPane(8, 8, importButton, duplicate, delete));
         inventory.setMinWidth(145);
-        inventory.setPrefWidth(190);
-        inventory.setMaxWidth(190);
-        var contents = new VBox(8, new HBox(12, inventory, form), notice);
+        inventory.setPrefWidth(172);
+        inventory.setMaxWidth(172);
+        notice.visibleProperty().bind(notice.textProperty().isNotEmpty());
+        notice.managedProperty().bind(notice.visibleProperty());
+        var contents = new HBox(12, inventory, form);
         contents.setPadding(new Insets(12));
         ScrollPane scroll = new ScrollPane(contents);
         scroll.setFitToWidth(true);
@@ -290,6 +309,7 @@ final class DacSampleEditorPane extends BorderPane {
         usage.setText(id == null ? "" : hits + (hits == 1 ? " linked hit" : " linked hits"));
         int parsed = parseRate(rate.getText());
         rateHz.setText(parsed < 0 ? "" : String.format(Locale.ROOT, "%.1f Hz", DacSample.sampleRateHz(parsed)));
+        usage.setTooltip(id == null ? null : new Tooltip("ID " + id));
         form.setDisable(baseline == null);
         rate.setDisable(reading);
         importButton.setDisable(project == null || reading);

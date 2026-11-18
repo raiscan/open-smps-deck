@@ -112,6 +112,48 @@ Voice and envelope layouts match. The Studio suite covered named envelope
 assignment, save and reopen, event order, and stale drafts. All six packaged
 DPI pointer checks passed again.
 
+## Round 3 · Compact browsing and project asset editors
+
+Short windows now show Browse beside Apply. Browse gives the existing
+command table a dedicated view with Delete, Up and Down. It uses the
+same selection, edits, and draft as the form. The normal-size Commands
+layout retains the round 2 table and form.
+
+Voice and envelope editors lead with the asset names and describe their
+kind and usage. Stable IDs remain in tooltips and accessibility help. FM
+voices retain both edit forms and can jump straight to Raw bytes. DAC
+names and rates sit on one row directly above the draft actions. All
+three asset editors gain space from dropping the note-selection header
+on the project-wide Assets tab.
+
+| Matched view and round | Type | Hier. | Space | Color | Icons | Consist. | Clarity | Overall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Compact Commands, round 2 | 6 | 6 | 5 | 7 | 5 | 7 | 5 | **6** |
+| Compact Commands, round 3 | 6 | 7 | 7 | 7 | 5 | 7 | 7 | **7** |
+| FM voices, round 2 | 6 | 5 | 5 | 7 | 5.5 | 6 | 5.5 | **5.5** |
+| FM voices, round 3 | 7 | 7.5 | 6.5 | 7 | 5.5 | 7.5 | 7.5 | **7** |
+| Envelopes, round 2 | 6 | 5.5 | 5.5 | 7 | 5.5 | 6 | 5.5 | **5.5** |
+| Envelopes, round 3 | 7 | 7.5 | 6.5 | 7 | 5.5 | 7.5 | 7.5 | **7** |
+| DAC samples, round 2 | 6.5 | 5.5 | 5 | 7 | 5 | 6 | 5.5 | **5.5** |
+| DAC samples, round 3 | 6.5 | 7 | 7 | 7 | 5 | 7 | 7 | **7** |
+
+Kept. At 200%, the dense Commands fixture shows three scrollable rows and
+the reorder controls as soon as Browse is selected. The edit view keeps
+Apply on the first action row. New form and Reload event still fall below
+the fold in that view. At 100%, the dense table still shows six rows.
+
+At 200%, voice, envelope, and sample Apply buttons end at y393, y395,
+and y381 inside a viewport ending at y448. Their round 2 bounds were
+y2599, y602, and y626. Long voice and envelope list entries wrap fully.
+Wrapping takes more vertical space for long names. DAC names ellipsize
+with a full-name tooltip. The deepest operator and native byte fields
+remain vertically scrollable.
+
+The isolated window tests covered a 12-event browse, keyboard End, same-tick
+reorder, keeping an unapplied draft across a view switch, and editing and
+saving the chosen event. The Raw bytes link was checked for focus and
+visibility in its viewport. All six packaged DPI pointer checks passed.
+
 ## Repeat the captures
 
 Build Studio and run its existing optional captures for commands and assets.
@@ -141,17 +183,20 @@ python3 tools/verify_studio_dpi.py --scratch "$capture_scratch"
 
 To capture Commands, use `lantern-walk` and append `commands` or
 `dense-commands` after the image path. Run both at 100% and 200%.
+The helper also captures Browse when it is available. For the asset forms,
+use the same project with `voice-assets`, `envelope-assets`, or `dac-assets`.
+The asset fixtures use long names and include a synthetic waveform.
 
-Local images and measurement logs for all three rounds are in
+Local images and measurement logs for rounds 0–3 are in
 `studio/target/qa/design-review/`. The compact captures use 903 logical
 pixels at 200%. To compare bars, use matching fixture names. Capture on
 both sides of the change, with no other layout edits between runs.
 
 ## Next candidate
 
-Check compact event browsing with the same dense fixture. The desired state
-keeps Apply visible and makes the event table easy to find by mouse or keyboard.
-The asset editors are another candidate. FM voices can lead with the voice
-name, keep the technical identifier secondary, and keep Apply reachable while
-preserving every operator value. Recapture Notes, DAC, and both asset editors
-after either change.
+The sequence browser still truncates its placement action and source metadata
+in the compact window. The clip inspector also takes width when no clip is
+selected. Review both together using an empty selection, a dense arrangement,
+and complete keyboard navigation. The project asset forms are candidates for
+the shared search and audition flow described in the
+[instrument catalogue design](../instrument-catalogue.md).

@@ -92,6 +92,10 @@ Version 4 allows modulation setup during a hold. Older project versions
 require the setup at a note attack. Transpose applies when the driver reads
 a new pitch.
 
+On a short window, **Browse** opens the command list with its reorder
+controls. Choose a row and use **Edit command** to return to its fields.
+Switching views keeps the current selection and draft.
+
 **Linked source settings** selects an existing FM voice, base volume and repeat
 policy. **RESET** restores supported state each repetition. **CARRY** resets at
 clip entry, then lets relative changes accumulate across its repetitions.
@@ -114,8 +118,8 @@ settings**, then **Apply source**.
 The voice editor exposes algorithm/feedback and four native stored slots, labelled
 with their YM register offsets. Values are decimal. Total level0 is loudest and
 127 is quietest. **Apply track volume** is an independent native TL high-bit flag;
-algorithm changes retain it. **Apply parameters + name** commits those fields.
-**Apply raw bytes** separately commits exactly25 hex bytes in native order.
+algorithm changes retain it. **Apply voice** commits those fields.
+**Raw bytes** jumps to the second form. **Apply raw bytes** commits exactly 25 hex bytes in native order.
 The two drafts are independent; Reload replaces both with the current voice.
 
 The **Envelopes** view creates PSG volume or modulation envelopes. Give the asset

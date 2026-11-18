@@ -9,8 +9,10 @@ import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.beans.value.ObservableValue;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.util.StringConverter;
@@ -30,6 +32,7 @@ final class CommandEditorPane extends BorderPane {
     private final Consumer<UnaryOperator<StudioProject>> edit;
     private final Consumer<String> error;
     private final TableView<CommandEvent> table = new TableView<>();
+    private final ToggleButton browse = new ToggleButton();
     private final ComboBox<NativeCommand> command = new ComboBox<>();
     private final ComboBox<String> eventAsset = new ComboBox<>();
     private final VBox eventAssetField = field("Command asset", eventAsset);
@@ -62,8 +65,6 @@ final class CommandEditorPane extends BorderPane {
         table.getColumns().addAll(List.of(tickColumn, commandColumn, bytesColumn));
         table.setPlaceholder(label("No native events. Fill the form and choose Add.", "muted"));
         table.setFixedCellSize(32);
-        table.prefHeightProperty().bind(Bindings.size(table.getItems())
-                .map(rows -> 32 + Math.clamp(rows.intValue(), 1, 6) * table.getFixedCellSize()));
         table.setMinHeight(Region.USE_PREF_SIZE);
         table.setMaxHeight(Region.USE_PREF_SIZE);
         table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> {
@@ -109,7 +110,20 @@ final class CommandEditorPane extends BorderPane {
         });
         FlowPane eventFields = new FlowPane(10, 8, field("Native command", command), field("Tick (decimal)", tick),
                 operandField, eventAssetField);
-        FlowPane eventButtons = new FlowPane(8, 8, add, apply, delete, up, down, fresh, reloadEvent);
+        FlowPane eventButtons = new FlowPane(8, 8, add, apply, browse, delete, up, down, fresh, reloadEvent);
+        var compact = sceneProperty().flatMap(Scene::heightProperty)
+                .map(height -> height.doubleValue() < 700).orElse(false);
+        var editing = browse.selectedProperty().not();
+        browse.setId("browse-commands");
+        showWhen(browse, compact);
+        compact.addListener((observable, old, active) -> {
+            if (!active) browse.setSelected(false);
+        });
+        var rowCount = Bindings.size(table.getItems());
+        browse.textProperty().bind(Bindings.createStringBinding(() -> browse.isSelected()
+                ? "Edit command" : "Browse (" + rowCount.get() + ")", browse.selectedProperty(), rowCount));
+        browse.setAccessibleHelp("Switch between editing a command and browsing the command list.");
+        for (Node node : List.of(eventFields, add, apply, fresh, reloadEvent, help)) showWhen(node, editing);
         Label ordering = label("At the same tick, authored row order is execution order. Up / Down changes that order.", "muted");
         tick.setOnAction(e -> commitForm()); bytes.setOnAction(e -> commitForm());
 
@@ -139,12 +153,35 @@ final class CommandEditorPane extends BorderPane {
         FlowPane assetLinks=new FlowPane(8,8,editVoice,editPsg,editMod);
         Label repeatHelp = label("RESET restores supported native state on every repetition. CARRY retains it between repetitions of one clip. Each independent clip always starts reset.", "muted");
         FlowPane envelopeSettings=new FlowPane(10,8,field("PSG volume envelope",psgEnvelope),field("Modulation envelope",modEnvelope));
-        VBox contents = new VBox(10, eventFields, eventButtons, draftNotice, table, ordering, help,
-                new Separator(), label("LINKED SOURCE SETTINGS", "section"), linked,
-                settings, envelopeSettings, settingButtons, assetLinks, repeatHelp, settingsNotice);
+        VBox sourceSettings = new VBox(10, new Separator(), label("LINKED SOURCE SETTINGS", "section"),
+                linked, settings, envelopeSettings, settingButtons, assetLinks, repeatHelp, settingsNotice);
+        showWhen(sourceSettings, editing);
+        VBox contents = new VBox(10, eventFields, eventButtons, draftNotice, table, ordering, help, sourceSettings);
         contents.setPadding(new Insets(12)); contents.setMinWidth(0);
         ScrollPane scroll = new ScrollPane(contents); scroll.setFitToWidth(true); scroll.setMinSize(0, 0);
         scroll.getStyleClass().add("editor-scroll"); setCenter(scroll);
+        table.prefHeightProperty().bind(Bindings.createDoubleBinding(() -> {
+            double rowHeight = table.getFixedCellSize();
+            int visibleRows = 6;
+            if (browse.isSelected()) {
+                // Leave room for the action row, column header and ordering hint.
+                double available = scroll.getViewportBounds().getHeight() - 110;
+                if (draftNotice.isVisible()) available -= draftNotice.getHeight() + 10;
+                visibleRows = Math.clamp((int) (available / rowHeight), 1, 6);
+            }
+            return 32 + Math.clamp(rowCount.get(), 1, visibleRows) * rowHeight;
+        }, rowCount, browse.selectedProperty(), scroll.viewportBoundsProperty(),
+                draftNotice.visibleProperty(), draftNotice.heightProperty()));
+        browse.selectedProperty().addListener((observable, old, browsing) -> {
+            scroll.setVvalue(0);
+            if (browsing) {
+                if (table.getSelectionModel().getSelectedItem() != null)
+                    table.scrollTo(table.getSelectionModel().getSelectedIndex());
+                table.requestFocus();
+            } else {
+                command.requestFocus();
+            }
+        });
         setSource(null, null);
     }
 
@@ -196,6 +233,7 @@ final class CommandEditorPane extends BorderPane {
     void selectCommand(String id) {
         CommandEvent event = findCommand(id);
         if (event == null) return;
+        browse.setSelected(false);
         updating = true;
         try { table.getSelectionModel().select(event); table.scrollTo(event); fillCommand(event); }
         finally { updating = false; }
@@ -276,7 +314,12 @@ final class CommandEditorPane extends BorderPane {
         Sequence expected = commandBaseline; String id = selectedId;
         int before = commandIndex(source, id);
         submit(p -> ProjectEdits.moveCommand(guardSource(p, expected), expected.id(), id, direction));
-        if (source != null && commandIndex(source, id) != before) { commandBaseline = source; updateNotices(); }
+        int after = source == null ? before : commandIndex(source, id);
+        if (after != before) {
+            commandBaseline = source;
+            updateNotices();
+            if (browse.isSelected()) table.scrollTo(after);
+        }
     }
 
     private void applySource() {
@@ -492,6 +535,11 @@ final class CommandEditorPane extends BorderPane {
 
     private static Button button(String text, String id, Runnable action) {
         Button button = new Button(text); button.setId(id); button.setOnAction(e -> action.run()); return button;
+    }
+
+    private static void showWhen(Node node, ObservableValue<Boolean> visible) {
+        node.visibleProperty().bind(visible);
+        node.managedProperty().bind(node.visibleProperty());
     }
 
     private static VBox field(String text, Control control) {

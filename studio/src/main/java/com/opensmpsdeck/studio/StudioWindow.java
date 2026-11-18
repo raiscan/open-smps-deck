@@ -166,6 +166,8 @@ public final class StudioWindow implements AutoCloseable {
         Button packageExport=button("Export package…",this::exportPackage);packageExport.setId("export-package");
         assetBody=new VBox(new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport),assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
         noteMode.setClosable(false);commandMode.setClosable(false);assetMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);assetMode.setContent(assetBody);sourceModes.getTabs().setAll(noteMode,commandMode,assetMode);sourceModes.setId("source-editor-modes");
+        pianoHeader.visibleProperty().bind(sourceModes.getSelectionModel().selectedItemProperty().isNotEqualTo(assetMode));
+        pianoHeader.managedProperty().bind(pianoHeader.visibleProperty());
         VBox notes=new VBox(pianoHeader,sourceModes);VBox.setVgrow(sourceModes,Priority.ALWAYS);
         editors=new ResponsiveEditors(arrangement,notes);
         inspector.getStyleClass().add("inspector");inspector.setMinWidth(0);inspector.setPrefWidth(240);
