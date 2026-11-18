@@ -64,6 +64,50 @@ class ReconstructionVoicesTest {
         assertEquals("outside-audio", late.probes().getFirst().status());
     }
 
+    @Test void usesAnAlternateOnlyWhenSeparateExcerptsCorroborateIt() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var voices = DemoProject.create().voices();
+        for (var voice : voices) {
+            byte[] raw = new byte[voice.bytes().size()];
+            for (int i = 0; i < raw.length; i++) raw[i] = voice.bytes().get(i).byteValue();
+            var asset = builder.asset(Kind.FM_VOICE, voice.name(), raw);
+            builder.variant(asset, voice.name(), Recipe.plain(), null);
+        }
+        var catalogue = builder.build();
+        var first = catalogue.variants().getFirst();
+        var second = catalogue.variants().getLast();
+        var sourceVoices = List.of(first, second).stream().map(variant -> voices.stream()
+                .filter(voice -> voice.name().equals(variant.name())).findFirst().orElseThrow()).toList();
+        var note = new com.opensmpsdeck.project.NoteEvent("note", 0, 18, 72);
+        var sequences = java.util.stream.IntStream.range(0, 2).mapToObj(i ->
+                new com.opensmpsdeck.project.Sequence("seq" + i, "Tone " + i, "FM", 18,
+                        sourceVoices.get(i).id(), 127, List.of(note))).toList();
+        var clips = new java.util.ArrayList<com.opensmpsdeck.project.Clip>();
+        var scoreNotes = new java.util.ArrayList<MidiScore.Note>();
+        for (int time = 0; time < 48; time++) {
+            boolean alternate = (time >= 16 && time < 32) || time == 32 || time == 33;
+            clips.add(new com.opensmpsdeck.project.Clip("clip" + time, "seq" + (alternate ? 1 : 0),
+                    "FM1", time * 60, 18));
+            scoreNotes.add(new MidiScore.Note(0, 72, 100, time * 1_000_000L, time * 1_000_000L + 300_000));
+        }
+        var project = new com.opensmpsdeck.project.StudioProject(
+                4, "Alternate fixture", "S3K", 15, 0, sourceVoices, sequences, clips);
+        Path audio = directory.resolve("alternate.wav");
+        WaveFile.render(ProjectCompiler.compileWithAssets(project), audio, 48 * 60);
+        var score = new MidiScore(List.of(new MidiScore.Part(0, "Part", 0, false)), scoreNotes, List.of());
+        var base = new ReconstructionVoices.Choice(first.assetId(), first.id(), first.name(), null,
+                "matched", List.of(), List.of());
+        var plan = ReconstructionVoices.refineSections(catalogue, audio, Map.of(0, audio), score, scoreNotes,
+                48_000_000, Map.of(new ReconstructionVoices.Key(0, null), base));
+        assertNull(plan.choices().get(new ReconstructionVoices.Key(0, null, 0L)));
+        assertEquals(second.id(), plan.choices().get(new ReconstructionVoices.Key(0, null, 16_000_000L)).variantId());
+        assertNull(plan.choices().get(new ReconstructionVoices.Key(0, null, 32_000_000L)));
+        var rejected = plan.trials().stream().filter(trial -> trial.key().sectionStartUs() == 32_000_000L)
+                .findFirst().orElseThrow();
+        assertFalse(rejected.accepted());
+        assertEquals(2, rejected.validation().size());
+    }
+
     private Path render(InstrumentCatalogue catalogue, String variant, int midi, String filename) throws Exception {
         Path output = directory.resolve(filename);
         var probe = CataloguePlayback.matchProbe(catalogue, variant, midi, 18);

@@ -129,7 +129,14 @@ The command creates a new output directory with four files.
 Use `--stem PART=stem.wav` to match a part against a time-aligned stem. Get
 zero-based part IDs from the report. The matcher uses the mix for other parts.
 It pools candidate rankings across several MIDI note windows and marks choices
-with weak evidence. It auditions the FM patch or PSG envelope the arrangement
+with weak evidence. A part can change FM patches in a 16-second section when
+a local candidate improves the match on two separate excerpts held out from
+the default and local patch selections. The report records the candidates
+and both distances. Use `--whole-part-voices` for a single FM patch per part.
+Reconstruction excludes track data inferred to be Azure Lake FM voices on the
+verified locked-on ROM. Native playback still uses the original bytes.
+
+The matcher auditions the FM patch or PSG envelope the arrangement
 can deploy, and DAC samples at their native rates with centered pan.
 
 The arrangement quantizes MIDI timing to 60 Hz and uses five FM channels.

@@ -16,7 +16,26 @@ final class ReconstructionVoices {
     private static final int SHORTLIST_SIZE = 8;
     private static final long MICROS_PER_SECOND = 1_000_000;
 
-    record Key(int partId, Integer drumPitch) {}
+    static final long SECTION_US = 16 * MICROS_PER_SECOND;
+    private static final long INDEPENDENT_US = 500_000;
+
+    record Key(int partId, Integer drumPitch, Long sectionStartUs) {
+        Key(int partId, Integer drumPitch) {
+            this(partId, drumPitch, null);
+        }
+
+        static Key section(MidiScore.Note note) {
+            return new Key(note.partId(), null, note.startUs() / SECTION_US * SECTION_US);
+        }
+    }
+
+    record Check(long startUs, long durationUs, int midi, int gateTicks, int overlappingNotes,
+                 double defaultDistance, double candidateDistance) {}
+
+    record SectionTrial(Key key, String defaultVariant, Choice candidate, List<Check> validation,
+                        boolean accepted) {}
+
+    record SectionPlan(Map<Key, Choice> choices, List<SectionTrial> trials) {}
 
     record Probe(long startUs, long durationUs, int midi, int gateTicks, int overlappingNotes,
                  String source, String status, int compared, List<Hit> matches) {}
@@ -117,6 +136,14 @@ final class ReconstructionVoices {
     private static Choice choose(InstrumentCatalogue catalogue, Path audio, long audioEndUs, String source, Timeline timeline,
                                  List<MidiScore.Note> notes, Kind kind) throws IOException {
         boolean drums = kind == Kind.DAC_SAMPLE;
+        var windows = windows(notes, timeline, audioEndUs, kind);
+        long spacing = drums ? 180_000 : INDEPENDENT_US;
+        return rank(catalogue, audio, source, timeline, kind,
+                pickWindows(windows, drums ? 3 : 4, spacing, drums));
+    }
+
+    private static List<Window> windows(List<MidiScore.Note> notes, Timeline timeline, long audioEndUs, Kind kind) {
+        boolean drums = kind == Kind.DAC_SAMPLE;
         int lowest = kind == Kind.PSG_VOLUME ? 45 : 12;
         int highest = kind == Kind.PSG_VOLUME ? 117 : 106;
         var windows = new ArrayList<Window>();
@@ -133,16 +160,17 @@ final class ReconstructionVoices {
                 .thenComparingLong(window -> window.note().startUs())
                 .thenComparingInt(window -> window.note().pitch()));
 
-        var probes = new ArrayList<Probe>();
-        var evidence = new LinkedHashMap<String, Evidence>();
+        return windows;
+    }
+
+    private static List<Window> pickWindows(List<Window> windows, int limit, long spacing, boolean drums) {
         var pitches = new HashSet<Integer>();
         var times = new HashSet<Long>();
         var selected = new ArrayList<Window>();
-        int limit = drums ? 3 : 4;
         for (int i = 0; i < limit && !windows.isEmpty(); i++) {
             Window window = windows.stream()
                     .filter(candidate -> selected.stream().noneMatch(previous ->
-                            Math.abs(previous.note().startUs() - candidate.note().startUs()) < (drums ? 180_000 : 80_000)))
+                            Math.abs(previous.note().startUs() - candidate.note().startUs()) < spacing))
                     .min(Comparator.comparingInt((Window candidate) ->
                                     candidate.overlappingNotes() + (candidate.durationUs() < 30_000 ? 1_000 : 0)
                                             + (times.contains(timeBand(candidate)) ? 1 : 0)
@@ -152,6 +180,16 @@ final class ReconstructionVoices {
             selected.add(window);
             pitches.add(window.note().pitch());
             times.add(timeBand(window));
+        }
+        return selected;
+    }
+
+    private static Choice rank(InstrumentCatalogue catalogue, Path audio, String source, Timeline timeline,
+                               Kind kind, List<Window> windows) throws IOException {
+        boolean drums = kind == Kind.DAC_SAMPLE;
+        var probes = new ArrayList<Probe>();
+        var evidence = new LinkedHashMap<String, Evidence>();
+        for (Window window : windows) {
             Probe probe = probe(catalogue, audio, source, kind, window, timeline);
             probes.add(probe);
             double weight = 1.0 / (1.0 + probe.overlappingNotes() * 0.25);
@@ -180,6 +218,81 @@ final class ReconstructionVoices {
                 List.copyOf(probes), shortlist);
     }
 
+    static SectionPlan refineSections(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems,
+                                      MidiScore source, List<MidiScore.Note> notes, long limitUs,
+                                      Map<Key, Choice> defaults) throws IOException {
+        var choices = new LinkedHashMap<>(defaults);
+        var trials = new ArrayList<SectionTrial>();
+        var sections = new LinkedHashMap<Key, List<MidiScore.Note>>();
+        if (limitUs <= SECTION_US) return new SectionPlan(defaults, List.of());
+        for (var note : notes) {
+            Choice fallback = defaults.get(new Key(note.partId(), null));
+            if (fallback != null && fallback.variantId() != null && note.endUs() > note.startUs())
+                sections.computeIfAbsent(Key.section(note), ignored -> new ArrayList<>()).add(note);
+        }
+        var originals = source.notes().stream().filter(note -> note.endUs() > note.startUs()).toList();
+        var mixTimeline = new Timeline(originals);
+        var stemTimelines = new java.util.HashMap<Integer, Timeline>();
+        var stemEnds = new java.util.HashMap<Integer, Long>();
+        for (var stem : stems.entrySet()) {
+            int id = stem.getKey();
+            stemTimelines.put(id, new Timeline(originals.stream().filter(note -> note.partId() == id).toList()));
+            stemEnds.put(id, ReferenceAudio.durationMicros(stem.getValue()));
+        }
+        for (var section : sections.entrySet()) {
+            Key key = section.getKey();
+            Choice fallback = defaults.get(new Key(key.partId(), null));
+            Path audio = stems.getOrDefault(key.partId(), mix);
+            var timeline = stemTimelines.getOrDefault(key.partId(), mixTimeline);
+            long endUs = Math.min(key.sectionStartUs() + SECTION_US, Math.min(limitUs, stemEnds.getOrDefault(key.partId(), limitUs)));
+            var available = windows(section.getValue(), timeline, endUs, Kind.FM_VOICE).stream()
+                    .filter(window -> window.durationUs() >= 60_000)
+                    .filter(window -> fallback.probes().stream().noneMatch(probe ->
+                            Math.abs(probe.startUs() - window.note().startUs()) < INDEPENDENT_US))
+                    .toList();
+            var selected = pickWindows(available, 4, INDEPENDENT_US, false);
+            if (selected.size() < 4) continue;
+            Choice candidate = rank(catalogue, audio, stems.containsKey(key.partId()) ? "stem" : "mix",
+                    timeline, Kind.FM_VOICE, List.of(selected.get(0), selected.get(2)));
+            if (candidate.assetId() == null || candidate.assetId().equals(fallback.assetId())) continue;
+            var validation = new ArrayList<Check>();
+            for (Window window : List.of(selected.get(1), selected.get(3))) {
+                Check check = check(catalogue, audio, fallback, candidate, window);
+                if (check != null) validation.add(check);
+            }
+            boolean accepted = validation.size() == 2 && validation.stream().allMatch(check ->
+                    check.defaultDistance() - check.candidateDistance() >= Math.max(0.01, check.defaultDistance() * 0.10));
+            trials.add(new SectionTrial(key, fallback.variantId(), candidate, List.copyOf(validation), accepted));
+            if (accepted) choices.put(key, candidate);
+        }
+        return new SectionPlan(Collections.unmodifiableMap(choices), List.copyOf(trials));
+    }
+
+    private static Check check(InstrumentCatalogue catalogue, Path input, Choice fallback, Choice candidate,
+                               Window window) throws IOException {
+        var note = window.note();
+        var audio = ReferenceAudio.read(input, note.startUs() / (double) MICROS_PER_SECOND,
+                window.durationUs() / (double) MICROS_PER_SECOND);
+        AudioFingerprint reference;
+        try {
+            reference = AudioFingerprint.extract(audio.samples(), audio.sampleRate());
+        } catch (IllegalArgumentException silent) {
+            if (!"Fingerprint audio is silent".equals(silent.getMessage())) throw silent;
+            return null;
+        }
+        int frames = (int) Math.ceil(audio.samples().length * (double) S3kRenderer.PRESENTATIONS_PER_SECOND / audio.sampleRate());
+        int gate = gateTicks(note);
+        double original = CatalogueMatcher.assetDistance(catalogue, reference, fallback.variantId(), note.pitch(), gate, frames);
+        double replacement = CatalogueMatcher.assetDistance(catalogue, reference, candidate.variantId(), note.pitch(), gate, frames);
+        return new Check(note.startUs(), window.durationUs(), note.pitch(), gate, window.overlappingNotes(),
+                original, replacement);
+    }
+
+    private static int gateTicks(MidiScore.Note note) {
+        return Math.clamp(Math.round((note.endUs() - note.startUs())
+                * (double) S3kRenderer.PRESENTATIONS_PER_SECOND / MICROS_PER_SECOND), 1, 180);
+    }
+
     private static long timeBand(Window window) {
         return window.note().startUs() / (8 * MICROS_PER_SECOND);
     }
@@ -189,8 +302,7 @@ final class ReconstructionVoices {
         var note = window.note();
         long start = note.startUs();
         int midi = kind == Kind.DAC_SAMPLE ? Math.clamp(note.pitch(), 12, 117) : note.pitch();
-        int gateTicks = Math.clamp(Math.round((note.endUs() - start)
-                * (double) S3kRenderer.PRESENTATIONS_PER_SECOND / MICROS_PER_SECOND), 1, 180);
+        int gateTicks = gateTicks(note);
         long duration = window.durationUs();
         if (duration < 10_000)
             return new Probe(start, duration, midi, gateTicks, window.overlappingNotes(), source,

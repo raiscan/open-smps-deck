@@ -25,11 +25,11 @@ import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 final class ReconstructionCli {
     private static final long MICROS_PER_SECOND = 1_000_000;
-    private static final int REPORT_VERSION = 1;
+    private static final int REPORT_VERSION = 2;
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
-    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly,
+    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices,
                            Map<Integer, Path> stems) {}
     private record FileEvidence(String file, String sha256) {}
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
@@ -38,13 +38,19 @@ final class ReconstructionCli {
                           int sourceNotes, int fmNotes, int psgNotes, int dacHits, boolean keepOctaves, boolean fmOnly,
                           Map<String, FileEvidence> inputs, Map<String, FileEvidence> outputs,
                           List<PartEvidence> parts, List<MatchEvidence> matches, List<String> midiWarnings,
+                          boolean wholePartVoices, List<ReconstructionVoices.SectionTrial> sectionTrials,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio) {}
+
+    @FunctionalInterface
+    private interface Matching<T> {
+        T run() throws IOException;
+    }
 
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
-        out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--stem PART=WAV]...");
+        out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--stem PART=WAV]...");
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
@@ -77,8 +83,11 @@ final class ReconstructionCli {
         var choices = select(catalogue, reference, options, score, prepared, durationUs, Kind.FM_VOICE);
         var spill = options.fmOnly() ? Map.<ReconstructionVoices.Key, ReconstructionVoices.Choice>of()
                 : select(catalogue, reference, options, score, prepared, durationUs, Kind.PSG_VOLUME);
+        var sectionPlan = options.wholePartVoices() ? new ReconstructionVoices.SectionPlan(choices, List.of())
+                : matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
+                        score, prepared.notes(), durationUs, choices));
         var result = S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                catalogue, choices, spill);
+                catalogue, sectionPlan.choices(), spill);
         var compiled = ProjectCompiler.compileWithAssets(result.project());
         Files.createDirectory(target);
         boolean complete = false;
@@ -103,13 +112,13 @@ final class ReconstructionCli {
             var partEvidence = score.parts().stream().map(p -> new PartEvidence(p.id(), p.name(), p.program(),
                     p.drums(), noteCounts.getOrDefault(p.id(), 0))).toList();
             var matches = new java.util.ArrayList<MatchEvidence>();
-            choices.forEach((key, choice) -> matches.add(
+            sectionPlan.choices().forEach((key, choice) -> matches.add(
                     new MatchEvidence(key.drumPitch() == null ? Kind.FM_VOICE : Kind.DAC_SAMPLE, key, choice)));
             spill.forEach((key, choice) -> matches.add(new MatchEvidence(Kind.PSG_VOLUME, key, choice)));
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
-                    matches, score.warnings(),
+                    matches, score.warnings(), options.wholePartVoices(), sectionPlan.trials(),
                     result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
@@ -127,12 +136,17 @@ final class ReconstructionCli {
     private static Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> select(
             InstrumentCatalogue catalogue, Path reference, Options options, MidiScore score,
             S3kReconstruction.Score prepared, long durationUs, Kind kind) throws IOException {
+        return matchQuietly(() -> ReconstructionVoices.select(catalogue, reference, options.stems(),
+                score, prepared.notes(), durationUs, kind));
+    }
+
+    private static <T> T matchQuietly(Matching<T> matching) throws IOException {
         // The engine logs its chip selection at INFO for every probe render.
         Logger logger = Logger.getLogger("com.openggf.audio.session.SmpsPhysicalDevice");
         Level previous = logger.getLevel();
         try {
             if (logger.isLoggable(Level.INFO)) logger.setLevel(Level.WARNING);
-            return ReconstructionVoices.select(catalogue, reference, options.stems(), score, prepared.notes(), durationUs, kind);
+            return matching.run();
         } finally {
             logger.setLevel(previous);
         }
@@ -144,6 +158,7 @@ final class ReconstructionCli {
         int ticksPerBeat = 30;
         boolean keepOctaves = false;
         boolean fmOnly = false;
+        boolean wholePartVoices = false;
         var stems = new java.util.TreeMap<Integer, Path>();
         var seen = new java.util.HashSet<String>();
         for (int i = 5; i < args.length; i++) {
@@ -155,6 +170,10 @@ final class ReconstructionCli {
             }
             if (option.equals("--fm-only")) {
                 fmOnly = true;
+                continue;
+            }
+            if (option.equals("--whole-part-voices")) {
+                wholePartVoices = true;
                 continue;
             }
             if (++i == args.length) throw new IllegalArgumentException("Missing argument to " + option);
@@ -183,7 +202,7 @@ final class ReconstructionCli {
             }
         }
         if (name.isBlank()) throw new IllegalArgumentException("Project name must not be blank");
-        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, stems);
+        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, stems);
     }
 
     private static FileEvidence evidence(Path path) throws IOException {

@@ -128,7 +128,8 @@ final class S3kReconstruction {
         Map<String, Envelope> envelopes = new LinkedHashMap<>();
         for (var note : score.notes()) {
             var part = parts.get(note.partId());
-            var choice = choices.get(new ReconstructionVoices.Key(part.id(), part.drums() ? note.pitch() : null));
+            var fallback = choices.get(new ReconstructionVoices.Key(part.id(), part.drums() ? note.pitch() : null));
+            var choice = part.drums() ? fallback : choices.getOrDefault(ReconstructionVoices.Key.section(note), fallback);
             if (choice == null || choice.assetId() == null) {
                 reductions.add(new Reduction(note, Change.NO_MATCH));
                 continue;

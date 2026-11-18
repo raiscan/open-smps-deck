@@ -10,11 +10,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Ranks catalogue playback variants against one isolated reference sound. */
 public final class CatalogueMatcher {
     public static final String PROFILE = "s3k-ntsc-match-v1";
-    static final String ASSET_PROFILE = "s3k-ntsc-match-assets-v1";
+    static final String ASSET_PROFILE = "s3k-ntsc-match-assets-v2";
+    static final String LOCKED_ON_S3K = "sha256:fba0677fde9f76df93f3e98d6310d8af68b9847bde16e253d73cd4dd8134ed23";
 
     public record Options(Kind kind, String role, String source, int midi, Integer gateTicks, int limit) {
         public Options {
@@ -62,6 +64,7 @@ public final class CatalogueMatcher {
         var ranked = new ArrayList<Ranked>();
         var skipped = new ArrayList<Skipped>();
         var emitted = new HashSet<EmittedAsset>();
+        Set<String> trackData = rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
         int eligible;
         int offset = 0;
         do {
@@ -73,6 +76,10 @@ public final class CatalogueMatcher {
                 checkInterrupted();
                 var variant = hit.variant();
                 if (rawAssets && !emitted.add(new EmittedAsset(variant.assetId(), variant.recipe().rate()))) continue;
+                if (trackData.contains(variant.assetId())) {
+                    skipped.add(new Skipped(variant.id(), "Azure Lake reads track data past its five local FM voices"));
+                    continue;
+                }
                 try {
                     var probe = CataloguePlayback.matchProbe(index, variant.id(), options.midi(), gate, rawAssets);
                     var fingerprint = describeProbe(probe, referenceFrames);
@@ -89,6 +96,29 @@ public final class CatalogueMatcher {
                 .thenComparing(Ranked::variantId));
         return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? ASSET_PROFILE : PROFILE, options.midi(), gate, seconds, eligible,
                 ranked.size(), reference.summary(), ranked.subList(0, Math.min(options.limit(), ranked.size())), skipped);
+    }
+
+    private static Set<String> inferredAzureLakeSlots(InstrumentCatalogue index) {
+        Set<String> inferred = new HashSet<>();
+        Set<String> supported = new HashSet<>();
+        for (var variant : index.variants()) {
+            if (variant.occurrences().isEmpty() || variant.occurrences().stream().anyMatch(occurrence ->
+                    !(LOCKED_ON_S3K.equals(occurrence.revision()) && Integer.valueOf(32).equals(occurrence.songId())
+                            && "local-fm".equals(occurrence.table()) && occurrence.slot() != null && occurrence.slot() >= 5))) {
+                supported.add(variant.assetId());
+            } else {
+                inferred.add(variant.assetId());
+            }
+        }
+        inferred.removeAll(supported);
+        return inferred;
+    }
+
+    static double assetDistance(InstrumentCatalogue index, AudioFingerprint reference, String variant,
+                                int midi, int gateTicks, int frames) throws IOException {
+        checkInterrupted();
+        return reference.distance(describeProbe(
+                CataloguePlayback.matchProbe(index, variant, midi, gateTicks, true), frames)).total();
     }
 
     private static AudioFingerprint describeProbe(StudioProject probe, int referenceFrames) throws IOException {

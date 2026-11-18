@@ -60,6 +60,32 @@ class CatalogueMatcherTest {
         assertArrayEquals(Files.readAllBytes(reference), Files.readAllBytes(replay));
     }
 
+    @Test void rawReconstructionSkipsAzureLakeDataWithoutIndependentVoiceProvenance() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var voices = DemoProject.create().voices();
+        for (int i = 0; i < voices.size(); i++) {
+            var voice = voices.get(i);
+            byte[] raw = new byte[voice.bytes().size()];
+            for (int j = 0; j < raw.length; j++) raw[j] = voice.bytes().get(j).byteValue();
+            String asset = builder.asset(Kind.FM_VOICE, voice.name(), raw);
+            var occurrence = new InstrumentCatalogue.Occurrence("rom", "S3K", CatalogueMatcher.LOCKED_ON_S3K,
+                    "Azure Lake", 32, i == 0 ? 16 : 4, null, null, false, "local-fm");
+            builder.variant(asset, voice.name(), Recipe.plain(), occurrence);
+        }
+        var index = builder.build();
+        var unused = index.variants().stream().filter(v -> v.occurrences().getFirst().slot() == 16)
+                .findFirst().orElseThrow();
+        var audio = directory.resolve("query.wav");
+        var probe = CataloguePlayback.matchProbe(index, unused.id(), 72, 16);
+        WaveFile.render(ProjectCompiler.compileWithAssets(probe), audio, 20);
+        var reference = ReferenceAudio.read(audio, 0, null);
+        var options = new CatalogueMatcher.Options(Kind.FM_VOICE, null, null, 72, 16, 5);
+        assertEquals(unused.id(), CatalogueMatcher.match(index, reference, options).matches().getFirst().variantId());
+        var result = CatalogueMatcher.matchAssets(index, reference, options);
+        assertEquals(1, result.compared());
+        assertEquals(unused.id(), result.skipped().getFirst().variantId());
+    }
+
     @Test void keepsAnAudibleDacHitNearTheTopWithGainChangeAndLeadingSilence() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         byte[] low = new byte[1_500];
