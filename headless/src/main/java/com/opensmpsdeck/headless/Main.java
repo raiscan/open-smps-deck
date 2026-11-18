@@ -28,6 +28,19 @@ public final class Main {
             }
             if (args.length == 0) throw new IllegalArgumentException("expected a command");
             switch (args[0]) {
+                case "copy-arrangement" -> {
+                    requireArguments(args, 3);
+                    Path input = Path.of(args[1]), output = Path.of(args[2]);
+                    requireDifferentFiles(input, output);
+                    try {
+                        var copy = NativeArrangement.editableCopy(ProjectFiles.load(input).project());
+                        ProjectFiles.save(output, copy, null);
+                        out.printf("Saved editable copy with %d clips to %s%n", copy.clips().size(), output);
+                    } catch (InterruptedException stopped) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Arrangement conversion interrupted", stopped);
+                    }
+                }
                 case "list-rom-songs" -> {
                     requireArguments(args, 2);
                     for (var song : S3kRomImporter.listSongs(Path.of(args[1]))) {
@@ -241,6 +254,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs ROM");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement PROJECT.json OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");

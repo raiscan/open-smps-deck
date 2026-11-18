@@ -7,12 +7,17 @@ import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.Slider;
+import javafx.scene.control.Tooltip;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
 import java.util.Locale;
@@ -29,6 +34,7 @@ final class NativeArrangementPane extends VBox implements AutoCloseable {
     final TimelineView timeline = new TimelineView(true);
     final PianoRollView piano = new PianoRollView(true);
 
+    private final Button editableCopy = new Button("Save editable copy…");
     private final Label message = new Label();
     private final Label detail = new Label();
     private final ListView<SampleTrigger> hits = new ListView<>();
@@ -45,14 +51,28 @@ final class NativeArrangementPane extends VBox implements AutoCloseable {
     private Future<?> pending;
     private long generation;
 
-    NativeArrangementPane(Runnable openBank) {
+    NativeArrangementPane(Runnable openBank, Runnable saveEditableCopy) {
         setId("native-arrangement");
         message.getStyleClass().add("muted");
         message.setWrapText(true);
-        var bank = new javafx.scene.control.Button("Edit in Native bank");
+        var bank = new Button("Edit in Native bank");
         bank.setOnAction(e -> openBank.run());
-        var actions = new HBox(10, bank, message);
+        bank.setMinWidth(Region.USE_PREF_SIZE);
+        editableCopy.setId("save-editable-copy");
+        editableCopy.setOnAction(e -> saveEditableCopy.run());
+        editableCopy.setMinWidth(Region.USE_PREF_SIZE);
+        String copyHelp = "Rebuilds the finite preview as editable notes, DAC hits and selected instruments. "
+                + "The original keeps its native effects. Playback in the copy may differ.";
+        var help = new Tooltip(copyHelp);
+        help.setWrapText(true);
+        help.setMaxWidth(340);
+        editableCopy.setTooltip(help);
+        editableCopy.setAccessibleHelp(copyHelp);
+        var actions = new FlowPane(10, 6, bank, editableCopy, message);
         actions.getStyleClass().add("panelbar");
+        message.maxWidthProperty().bind(Bindings.createDoubleBinding(() -> Math.max(0,
+                actions.getWidth() - actions.getInsets().getLeft() - actions.getInsets().getRight()),
+                actions.widthProperty(), actions.insetsProperty()));
         var zoom = new Slider(0.5, 8, 2);
         timeline.scale = zoom.getValue();
         piano.scale = 4;
@@ -82,6 +102,10 @@ final class NativeArrangementPane extends VBox implements AutoCloseable {
         getChildren().setAll(actions, editors);
         VBox.setVgrow(editors, Priority.ALWAYS);
         select(null);
+    }
+
+    void setSavingEditableCopy(boolean saving) {
+        editableCopy.setDisable(saving);
     }
 
     void setCompact(boolean compact) {

@@ -14,6 +14,7 @@ the ROM revision before reading its music banks and resource tables.
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs /path/to/locked-on.gen
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song /path/to/locked-on.gen 0x0D launch-base.smps.json
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project launch-base.smps.json
+java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement launch-base.smps.json launch-base-editable.smps.json
 ```
 
 Use a decimal ID or the `0xNN` form printed by the catalogue. The output
@@ -21,6 +22,12 @@ is a v5 native project containing the entire addressed bank and its assets.
 Choose a destination that does not exist. The imported preview defaults to
 3,600 presentations (60 seconds). Use `--frames` to override WAV length.
 Import the previous song separately to render the Extra Life cue (`0x2A`).
+
+`copy-arrangement` reconstructs the native preview as a separate v4 arrangement
+with editable clips, notes, FM voices and rate-specific DAC samples. A timeline
+tick represents one 60 Hz presentation. Playback can differ because the copy
+approximates live effects and expands loops across the chosen preview interval.
+The v5 source retains its original playback and export.
 
 ## Run
 

@@ -20,8 +20,17 @@ a clip or source to open Notes. The inspector has its own scroll area.
 The pinned sequencer lays out FM and PSG notes and DAC hits in eight-second
 clips. The ruler measures playback time, so tempo changes and loops stay
 aligned with the playhead. Select a clip to see its piano roll or DAC hits.
-Use **Edit in Native bank** for source changes. The arrangement is read-only
-and refreshes after edits, undo and external file changes.
+Use **Edit in Native bank** to change the bank and refresh its arrangement.
+
+Click **Save editable copy…** in the imported arrangement and choose a new
+file. Studio opens that file in a separate window with the usual clip, piano
+roll, and DAC editors. The copy rebuilds the preview interval as editable
+notes and hits, including the FM voices and sample playback rates it uses.
+Loops are laid out as played within that interval. Playback can differ when
+the original uses features such as modulation, PSG noise and ties across
+pitch changes. The original file keeps its native bank and assets. Reduce
+**Preview frames** in the Native bank tab if a long preview exceeds the
+project or compiled bank size limit.
 
 Imported projects carry the bank and native asset bindings, so they can be
 opened and rendered without the cartridge. **Extra Life** restores previous

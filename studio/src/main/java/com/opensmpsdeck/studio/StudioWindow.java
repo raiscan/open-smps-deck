@@ -1,5 +1,6 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.headless.NativeArrangement;
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.headless.ProjectPackage;
 import com.opensmpsdeck.headless.S3kRomImporter;
@@ -41,7 +42,7 @@ public final class StudioWindow implements AutoCloseable {
     private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands"),assetMode=new Tab("Assets");
     private final TabPane assetKinds=new TabPane();
     private final Tab nativeBankTab=new Tab("Native bank",nativeBank);
-    final NativeArrangementPane nativeArrangement=new NativeArrangementPane(this::showNativeBank);
+    final NativeArrangementPane nativeArrangement=new NativeArrangementPane(this::showNativeBank, this::chooseEditableCopy);
     private final Tab nativeAssets=new Tab("Voices & assets");
     private final TabPane nativeTabs=new TabPane(new Tab("Arrangement",nativeArrangement),nativeBankTab,nativeAssets);
     private SplitPane arrangementLayout;
@@ -371,6 +372,42 @@ public final class StudioWindow implements AutoCloseable {
     private void open(){if(!confirmLeave())return;var file=chooser("Open shared project","json").showOpenDialog(stage);if(file!=null)try{load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
     private void saveAs(){var chooser=chooser("Save a project copy (choose a new file)","json");chooser.setInitialFileName("project-copy.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{ProjectFiles.save(file.toPath(),document.project(),null);load(file.toPath());status.setText("Saved project copy");}catch(IOException|IllegalArgumentException e){error(e);}}
     private void newProject(){if(!confirmLeave())return;var chooser=chooser("Create a shared project","json");chooser.setInitialFileName("untitled.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{StudioProject demo=DemoProject.create();ProjectFiles.save(file.toPath(),new StudioProject(1,"Untitled","S3K",demo.ticksPerBeat(),demo.tempo(),demo.voices(),List.of(),List.of()),null);selectedClip=null;selectedSequence=null;selectedNote=null;load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
+    private void chooseEditableCopy() {
+        var output = chooser("Save editable copy (choose a new file)", "json");
+        output.setInitialFileName("editable-copy.smps.json");
+        var file = output.showSaveDialog(stage);
+        if (file != null && !closed) saveEditableCopy(file.toPath());
+    }
+
+    void saveEditableCopy(Path destination) {
+        StudioProject snapshot = document.project();
+        nativeArrangement.setSavingEditableCopy(true);
+        status.setText("Building editable copy…");
+        Task<Void> saveCopy = new Task<>() {
+            @Override protected Void call() throws IOException, InterruptedException {
+                ProjectFiles.save(destination, NativeArrangement.editableCopy(snapshot), null);
+                return null;
+            }
+        };
+        saveCopy.setOnSucceeded(event -> {
+            if (closed) return;
+            nativeArrangement.setSavingEditableCopy(false);
+            String saved = "Saved editable copy to " + destination.getFileName();
+            status.setText(saved);
+            try {
+                openSavedProject(destination, "Editable copy · playback may differ from the native preview");
+            } catch (IOException | IllegalArgumentException error) {
+                status.setText(saved + ". Could not open it: " + error.getMessage());
+            }
+        });
+        saveCopy.setOnFailed(event -> {
+            if (closed) return;
+            nativeArrangement.setSavingEditableCopy(false);
+            status.setText("Could not save editable copy: " + saveCopy.getException().getMessage());
+        });
+        io.execute(saveCopy);
+    }
+
     private void importRom() {
         FileChooser cartridge = new FileChooser();
         cartridge.setTitle("Choose your locked-on Sonic 3 & Knuckles ROM");
@@ -475,16 +512,20 @@ public final class StudioWindow implements AutoCloseable {
         }
         status.setText("Imported " + destination.getFileName());
         try {
-            // Pending editor drafts belong to the source window, even when its document is clean.
-            Stage importedStage = new Stage();
-            StudioWindow imported = new StudioWindow(importedStage, destination);
-            imported.status.setText(song.id() == EXTRA_LIFE_ID
+            openSavedProject(destination, song.id() == EXTRA_LIFE_ID
                     ? "Extra Life needs a previous song for preview. Use --previous-project in the headless renderer."
                     : "Imported " + song.name());
-            importedStage.show();
         } catch (IOException | IllegalArgumentException error) {
             status.setText("Imported " + destination.getFileName() + "; could not open it: " + error.getMessage());
         }
+    }
+
+    private static void openSavedProject(Path destination, String message) throws IOException {
+        // Pending editor drafts belong to the source window, even when its document is clean.
+        Stage newStage = new Stage();
+        StudioWindow opened = new StudioWindow(newStage, destination);
+        opened.status.setText(message);
+        newStage.show();
     }
 
     private void importFailed(Throwable error) {

@@ -409,6 +409,52 @@ class StudioWindowTest {
         });
     }
 
+    @Test void editableCopyOpensInAnotherWindowAndCanSaveTimelineEdits() throws Exception {
+        byte[] bank = {0,0,2,0,1,64,14,(byte)128,0,0,15,(byte)128,0,0,(byte)0xf2,(byte)0x99,12,(byte)0xf2};
+        var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
+        var voice = new Voice("voice", "Fixture voice", Collections.nCopies(25, 0));
+        var project = new StudioProject(5, "Editable copy fixture", "S3K", 12, 64,
+                List.of(voice), List.of(), List.of(), List.of(), List.of(), program);
+        replace(ProjectFormat.write(project));
+        await(() -> window.nativeArrangement.timeline.project != null);
+
+        Path destination = folder.resolve("editable.smps.json");
+        List<Window> originalWindows = fx(() -> {
+            layout();
+            assertNotNull(button("save-editable-copy"));
+            var originals = List.copyOf(Window.getWindows());
+            window.saveEditableCopy(destination);
+            return originals;
+        });
+        await(() -> Window.getWindows().stream().anyMatch(candidate -> !originalWindows.contains(candidate)));
+        Stage opened = fx(() -> Window.getWindows().stream()
+                .filter(candidate -> !originalWindows.contains(candidate))
+                .filter(Stage.class::isInstance).map(Stage.class::cast).findFirst().orElseThrow());
+        try {
+            var saved = ProjectFiles.load(destination).project();
+            assertNull(saved.nativeProgram());
+            assertFalse(saved.sequences().getFirst().notes().isEmpty());
+            fx(() -> {
+                var root = opened.getScene().getRoot();
+                root.applyCss();
+                root.layout();
+                assertNull(root.lookup("#native-program-tabs"));
+                ((Button) root.lookup("#place-sequence")).fire();
+                key(root, KeyCode.S, true);
+                assertEquals(project, window.document().project());
+                assertFalse(window.document().dirty());
+                return null;
+            });
+            assertEquals(saved.clips().size() + 1, ProjectFiles.load(destination).project().clips().size());
+            assertEquals(project, ProjectFiles.load(file).project());
+        } finally {
+            fx(() -> {
+                opened.fireEvent(new WindowEvent(opened, WindowEvent.WINDOW_CLOSE_REQUEST));
+                return null;
+            });
+        }
+    }
+
     @Test void nativeBankKeepsExactAddressesThroughEditUndoAndExternalRefresh() throws Exception {
         byte[] bank={0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
         NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());

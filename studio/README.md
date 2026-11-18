@@ -30,7 +30,9 @@ the frame limit stored in the bank source. See the
 cartridge image and saves the selected song as a new native project.
 The imported project opens on a read-only arrangement in a separate watched
 window. Select a clip to inspect the sequencer's note or DAC events, or use
-**Edit in Native bank** to change the source.
+**Edit in Native bank** to change the source. **Save editable copy…** opens
+a separate arrangement project with editable notes, clips and DAC hits
+reconstructed from the preview.
 [Studio import steps](../docs/user-guide/studio.md#import-s3k-music)
 
 ## Run
