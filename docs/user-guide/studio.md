@@ -26,11 +26,15 @@ Click **Save editable copy…** in the imported arrangement and choose a new
 file. Studio opens that file in a separate window with the usual clip, piano
 roll, and DAC editors. The copy rebuilds the preview interval as editable
 notes and hits, including the FM voices and sample playback rates it uses.
-Loops are laid out as played within that interval. Playback can differ when
-the original uses features such as modulation, PSG noise and ties across
-pitch changes. The original file keeps its native bank and assets. Reduce
-**Preview frames** in the Native bank tab if a long preview exceeds the
-project or compiled bank size limit.
+Open **Commands** to edit imported modulation, envelope and voice changes,
+PSG noise, pan, detune, level changes, SSG-EG and holds. The copy keeps the
+envelope bytes as linked assets. Loop iterations appear where they played.
+
+The editable timeline uses one tick per presentation. A song's original tempo
+and divider can advance effect counters at a different rate. Commands outside
+the arrangement format, such as raw frequency and global driver operations,
+still require **Native bank** for exact playback and export. Reduce **Preview
+frames** if a long preview exceeds the project or compiled bank size limit.
 
 Imported projects carry the bank and native asset bindings, so they can be
 opened and rendered without the cartridge. **Extra Life** restores previous
@@ -80,11 +84,13 @@ authored row order, which determines execution order at the same tick. Delete
 with the table focused removes an event. Commands use the same save and undo
 history as notes and clips. Typing in a form alone does not change the project.
 
-This slice supports pan/AMS/FMS, detune, absolute and relative chip volume,
-absolute and relative transpose, custom modulation setup and modulation off.
-Help describes the native operands and chip restrictions. Modulation setup must
-currently coincide with an explicit note attack. Transpose affects subsequent
-attacks; commands inside held notes do not retrigger them.
+Commands include pan/AMS/FMS, detune, chip volume, transpose and custom
+modulation. Version 4 also supports holds, PSG noise, SSG-EG and timed
+voice or envelope selections. For an asset command, select its named voice
+or envelope alongside any raw operands. Choose **Off** to disable an envelope.
+Version 4 allows modulation setup during a hold. Older project versions
+require the setup at a note attack. Transpose applies when the driver reads
+a new pitch.
 
 **Linked source settings** selects an existing FM voice, base volume and repeat
 policy. **RESET** restores supported state each repetition. **CARRY** resets at
@@ -119,11 +125,11 @@ envelope on the next source reset. Envelopes are linked: editing one changes all
 assigned sources and clips. Their steps advance with the driver, independently
 of the piano-roll tick ruler.
 
-This first profile accepts PSG00–0F attenuation, modulation00–7F frequency offsets,
-and80 reset /81 rest-or-hold /83 silence-or-hold. End in80/81/83; starting80 is
-rejected to prevent an immediate reset loop. Branches, multiplier commands and
-negative modulation offsets await driver work. Help and validation keep those
-limits explicit. Try [voices-and-envelopes.smps.json](../../examples/voices-and-envelopes.smps.json).
+Version 3 uses the basic envelope profile with PSG attenuation 00–0F,
+modulation offsets 00–7F, and 80 / 81 / 83 controls. Version 4 also accepts
+native signed modulation offsets and resolved 82 jump and 84 multiplier
+operands. Validation rejects programs that can run outside their bytes or
+cycle without advancing time. Try [voices-and-envelopes.smps.json](../../examples/voices-and-envelopes.smps.json).
 
 Voice/envelope drafts survive external changes to the same asset. Applying a stale
 or deleted asset is refused; Reload adopts its current definition. A removed

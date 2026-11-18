@@ -233,6 +233,33 @@ class StudioWindowTest {
         assertEquals(2,saved.formatVersion());assertEquals(1,saved.sequences().getFirst().commands().size());
     }
 
+    @Test void timedEnvelopeCanBeAssignedByNameAndTurnedOff() throws Exception {
+        var envelope = new Envelope("vibrato", "Slow vibrato", Envelope.MODULATION, List.of(0, 1, 0x81));
+        replace(ProjectFormat.write(ProjectEdits.addEnvelope(DemoProject.create(), envelope)));
+        await(() -> window.document().project().envelopes().size() == 1);
+        fx(() -> {
+            window.showCommands();
+            layout();
+            commandForm(NativeCommand.MODULATION_ENVELOPE, 6, "");
+            @SuppressWarnings("unchecked")
+            ComboBox<String> asset = (ComboBox<String>) window.scene().lookup("#command-asset");
+            assertTrue(asset.getItems().contains(envelope.id()));
+            assertTrue(asset.getConverter().toString(envelope.id()).contains(envelope.name()));
+            asset.getSelectionModel().select(envelope.id());
+            button("add-command").fire();
+            assertEquals(envelope.id(), source().commands().getFirst().assetId());
+            snapshot(".timed-envelope.png");
+            asset.getSelectionModel().select(0);
+            button("apply-command").fire();
+            assertNull(source().commands().getFirst().assetId());
+            window.document().save();
+            return null;
+        });
+        var command = ProjectFiles.load(file).project().sequences().getFirst().commands().getFirst();
+        assertEquals(NativeCommand.MODULATION_ENVELOPE, command.command());
+        assertNull(command.assetId());
+    }
+
     @Test void nativeDraftSurvivesExternalRefreshAndCannotOverwriteIt() throws Exception {
         StudioProject withCommand=ProjectEdits.addCommand(DemoProject.create(),"seq-lead-a",new CommandEvent("pan-1",6,NativeCommand.PAN,List.of(128)));
         replace(ProjectFormat.write(withCommand));await(()->window.document().project().formatVersion()==2);

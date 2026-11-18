@@ -2,7 +2,9 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.project.NativeFmVoice;
 import com.opensmpsdeck.project.NativeFmVoice.Parameter;
+import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectEdits;
+import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import javafx.geometry.Insets;
@@ -273,12 +275,12 @@ final class VoiceEditorPane extends BorderPane {
     private void updateState() {
         if (apply == null) return;
         Voice current = findVoice(project, selectedId);
-        long uses = sourceUses(selectedId);
         selected.setText(selectedId == null ? "Choose an FM voice" : selectedId + (current == null ? " · removed" : ""));
         Set<String> sources = project == null || selectedId == null ? Set.of() : project.sequences().stream()
-                .filter(s -> Objects.equals(s.voiceId(), selectedId)).map(s -> s.id()).collect(Collectors.toSet());
+                .filter(s -> usesVoice(s, selectedId)).map(s -> s.id()).collect(Collectors.toSet());
+        int uses = sources.size();
         long clips = project == null ? 0 : project.clips().stream().filter(c -> sources.contains(c.sequenceId())).count();
-        linked.setText(selectedId == null ? "Voices are linked assets. Assign them through a source's voice selector."
+        linked.setText(selectedId == null ? "Voices are linked assets. Assign them to a source or a timed voice command."
                 : "Linked FM voice · " + uses + " source" + (uses == 1 ? "" : "s") + " · " + clips + " clip instance" + (clips == 1 ? "" : "s") + ". Editing changes every reference; deletion requires no remaining references.");
         parameterNotice.setText(draftNotice(current, parameterBaseline, parametersChanged(), "Parameter / name"));
         rawNotice.setText(draftNotice(current, rawBaseline, rawChanged(), "Raw bytes"));
@@ -308,7 +310,13 @@ final class VoiceEditorPane extends BorderPane {
     }
 
     private long sourceUses(String id) {
-        return project == null || id == null ? 0 : project.sequences().stream().filter(s -> Objects.equals(s.voiceId(), id)).count();
+        return project == null || id == null ? 0 : project.sequences().stream().filter(s -> usesVoice(s, id)).count();
+    }
+
+    private static boolean usesVoice(Sequence source, String id) {
+        return Objects.equals(source.voiceId(), id)
+                || source.commands().stream().anyMatch(event -> event.command().asset() == NativeCommand.Asset.VOICE
+                        && Objects.equals(event.assetId(), id));
     }
 
     static StudioProject guardVoice(StudioProject project, Voice expected) {

@@ -24,10 +24,13 @@ Choose a destination that does not exist. The imported preview defaults to
 Import the previous song separately to render the Extra Life cue (`0x2A`).
 
 `copy-arrangement` reconstructs the native preview as a separate v4 arrangement
-with editable clips, notes, FM voices and rate-specific DAC samples. A timeline
-tick represents one 60 Hz presentation. Playback can differ because the copy
-approximates live effects and expands loops across the chosen preview interval.
-The v5 source retains its original playback and export.
+with editable clips, notes, voices and DAC samples. Timed effects include
+custom modulation, volume and modulation envelopes, PSG noise, pitch-changing
+holds, voice changes, SSG-EG, pan, detune and volume. Asset references use
+stable IDs. A timeline tick represents one 60 Hz presentation. The copy
+expands loops over the preview interval, and its effect clock can differ
+from the original on tempo changes. The v5 source retains exact bank
+playback and access to driver operations outside the arrangement format.
 
 ## Run
 
@@ -114,8 +117,10 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   (`E6`) and local voice (`EF`); PSG volume (`EC`) and noise control (`F3`).
 - Custom F0 modulation consumes exactly four operands; FA disables modulation.
   F4 selects a modulation envelope and PSG F5 selects a volume envelope, each
-  with one resolved ID operand (zero disables). Every declared resource is
-  validated, including unused assets. See the bounded profile in the project format.
+  with one resolved ID operand (zero disables). FM accepts FF05 SSG-EG and
+  FF06 volume envelope selection. The latter requires a declared PSG-volume
+  envelope if its ID is nonzero. All resources are validated, including
+  unused ones.
 - Every track must terminate before the next track or voice-table boundary.
   Calls, jumps, loops, other envelope commands, direct register writes,
   DAC coordination flags and all other commands are rejected explicitly. Unknown commands

@@ -34,8 +34,8 @@ final class EnvelopeEditorPane extends BorderPane {
         name.textProperty().addListener((o,a,b)->{if(!updating)refreshNotice();});bytes.textProperty().addListener((o,a,b)->{if(!updating)refreshNotice();});
         FlowPane actions=new FlowPane(8,8,button("New PSG envelope","add-psg-envelope",()->create("PSG_VOLUME")),button("New modulation","add-mod-envelope",()->create("MODULATION")),button("Duplicate","duplicate-envelope",this::duplicate),button("Delete unused","delete-envelope",this::deleteSelected));
         form.getChildren().addAll(description,usage,label("Asset name","muted"),name,label("Native bytes (hex)","muted"),bytes,new FlowPane(8,8,button("Apply envelope","apply-envelope",this::apply),button("Reload envelope","reload-envelope",this::reload)),notice,
-                label("PSG data: 00–0F attenuation. Modulation data: 00–7F frequency offsets. 80 resets; 81 and 83 rest/hold (PSG 83 silences). End explicitly in 80 / 81 / 83. Branches, multiplier changes and negative modulation offsets await driver support.","help"),
-                label("Envelopes are linked project assets. Editing an asset changes every assigned source. Native envelope steps advance with the driver; these bytes are not piano-roll duration ticks.","muted"));
+                label("80 resets and 81 / 83 rest or hold (PSG 83 also silences). Version 4 projects support native signed modulation data and resolved 82 jump / 84 multiplier operands. Older projects use the basic envelope profile.","help"),
+                label("Envelopes are linked project assets. Editing one changes every source or command that uses it. Native envelope steps advance with the driver; these bytes are not piano-roll duration ticks.","muted"));
         VBox inventory=new VBox(10,label("NATIVE ENVELOPES","section"),list,actions);inventory.setMinWidth(150);inventory.setPrefWidth(200);inventory.setMaxWidth(200);
         form.setMinWidth(240);HBox.setHgrow(form,Priority.ALWAYS);
         HBox contents=new HBox(12,inventory,form);contents.setPadding(new Insets(12));contents.setMinWidth(0);
@@ -90,7 +90,15 @@ final class EnvelopeEditorPane extends BorderPane {
     private void reload(){Envelope current=find(selectedId);if(current==null)error.accept("That envelope was removed. Choose another asset or create a new one; your draft is retained.");else selectEnvelope(current.id());}
     private void submit(UnaryOperator<StudioProject> operation){try{edit.accept(operation);}catch(IllegalArgumentException failure){error.accept(failure.getMessage());}}
     private Envelope find(String id){return project==null||id==null?null:project.envelopes().stream().filter(e->e.id().equals(id)).findFirst().orElse(null);}
-    private long uses(String id){return project==null?0:project.sequences().stream().filter(s->Objects.equals(s.psgEnvelopeId(),id)||Objects.equals(s.modulationEnvelopeId(),id)).count();}
+    private long uses(String id) {
+        if (project == null || id == null) return 0;
+        return project.sequences().stream().filter(source -> Objects.equals(source.psgEnvelopeId(), id)
+                || Objects.equals(source.modulationEnvelopeId(), id)
+                || source.commands().stream().anyMatch(event ->
+                        (event.command().asset() == NativeCommand.Asset.PSG_VOLUME
+                                || event.command().asset() == NativeCommand.Asset.MODULATION)
+                                && Objects.equals(event.assetId(), id))).count();
+    }
     private boolean draftChanged(){return baseline!=null&&(!name.getText().equals(baseline.name())||!bytes.getText().trim().equalsIgnoreCase(CommandEditorPane.hexArguments(baseline.bytes())));}
     private void refreshNotice(){
         Envelope current=find(selectedId);

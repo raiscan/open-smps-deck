@@ -30,6 +30,8 @@ final class CommandEditorPane extends BorderPane {
     private final Consumer<String> error;
     private final TableView<CommandEvent> table = new TableView<>();
     private final ComboBox<NativeCommand> command = new ComboBox<>();
+    private final ComboBox<String> eventAsset = new ComboBox<>();
+    private final VBox eventAssetField = field("Command asset", eventAsset);
     private final TextField tick = new TextField("0"), bytes = new TextField();
     private final ComboBox<String> voice = new ComboBox<>(), repeat = new ComboBox<>();
     private final ComboBox<String> psgEnvelope = new ComboBox<>(), modEnvelope = new ComboBox<>();
@@ -54,7 +56,7 @@ final class CommandEditorPane extends BorderPane {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         TableColumn<CommandEvent, String> tickColumn = column("Tick", e -> Integer.toString(e.tick()));
         TableColumn<CommandEvent, String> commandColumn = column("Command", e -> e.command().label());
-        TableColumn<CommandEvent, String> bytesColumn = column("Hex bytes", CommandEditorPane::commandBytes);
+        TableColumn<CommandEvent, String> bytesColumn = column("Bytes / asset", this::commandBytes);
         tickColumn.setPrefWidth(65); commandColumn.setPrefWidth(180); bytesColumn.setPrefWidth(200);
         table.getColumns().addAll(List.of(tickColumn, commandColumn, bytesColumn));
         table.setPlaceholder(label("No native events. Fill the form and choose Add.", "muted"));
@@ -65,15 +67,21 @@ final class CommandEditorPane extends BorderPane {
         command.setId("command-type"); command.setPrefWidth(240); command.setMaxWidth(Double.MAX_VALUE);
         command.setConverter(new StringConverter<>() {
             @Override public String toString(NativeCommand value) {
-                return value == null ? "" : String.format(Locale.ROOT, "%s · %02X", value.label(), value.opcode());
+                return value == null ? "" : value.label() + " · " + commandOpcode(value);
             }
             @Override public NativeCommand fromString(String value) { throw new UnsupportedOperationException(); }
         });
         tick.setId("command-tick"); tick.setPrefColumnCount(6);
         bytes.setId("command-bytes"); bytes.setPrefColumnCount(18); bytes.setPromptText("Operands only: C0 or 00 01 01 04");
+        configureAssetPicker(eventAsset, "command-asset", () -> assetKind(command.getValue()) == NativeCommand.Asset.VOICE
+                ? "Choose an FM voice" : "Off",
+                id -> assetName(assetKind(command.getValue()), id));
+        eventAssetField.managedProperty().bind(eventAssetField.visibleProperty());
         command.valueProperty().addListener((o, a, b) -> {
             if (!updating) {
                 bytes.setText(b == null ? "" : hexArguments(b.defaultArguments()));
+                var retainedAsset = assetKind(a) == assetKind(b) ? eventAsset.getValue() : null;
+                updateEventAssetChoices(retainedAsset);
                 updateHelp(); updateNotices();
             }
         });
@@ -90,10 +98,10 @@ final class CommandEditorPane extends BorderPane {
             if (current == null) report("That event is no longer present. Choose New form or select an event.");
             else loadCommand(current);
         });
-        FlowPane eventFields = new FlowPane(10, 8, field("Native command", command), field("Tick (decimal)", tick), field("Raw operand bytes (hex)", bytes));
+        FlowPane eventFields = new FlowPane(10, 8, field("Native command", command), field("Tick (decimal)", tick), field("Raw operand bytes (hex)", bytes), eventAssetField);
         FlowPane eventButtons = new FlowPane(8, 8, add, apply, delete, up, down, fresh, reloadEvent);
         Label ordering = label("At the same tick, authored row order is execution order. Up / Down changes that order.", "muted");
-        Label inputGuide = label("Operands are raw hex bytes 00–FF, separated by spaces (0x prefixes accepted). The opcode is supplied by the command selector. Press Enter or Apply to commit a draft; typing alone is not saved.", "muted");
+        Label inputGuide = label("Operands are raw hex bytes 00–FF, separated by spaces (0x prefixes accepted). The command and asset selectors supply their bytes. Press Enter or Apply to commit a draft; typing alone is not saved.", "muted");
         tick.setOnAction(e -> commitForm()); bytes.setOnAction(e -> commitForm());
 
         voice.setId("source-voice"); voice.setPrefWidth(240); voice.setMaxWidth(Double.MAX_VALUE);
@@ -137,12 +145,14 @@ final class CommandEditorPane extends BorderPane {
         boolean settingsDraft = same && settingsDraftChanged();
         updating = true;
         try {
+            String previousEventAsset = eventAsset.getValue();
             this.project = project; this.sequenceId = sequenceId; source = next;
             table.getSelectionModel().clearSelection();
             table.getItems().setAll(next == null ? List.of() : next.commands());
             NativeCommand previousType = command.getValue();
             command.getItems().setAll(Arrays.stream(NativeCommand.values()).filter(c -> next == null || c.supports(next.type())).toList());
             command.setValue((same && (commandDraft || selectedId != null)) || command.getItems().contains(previousType) ? previousType : command.getItems().getFirst());
+            updateEventAssetChoices(same ? previousEventAsset : null);
             String previousVoice = voice.getValue();
             voice.getItems().setAll(project == null ? List.of() : project.voices().stream().map(Voice::id).toList());
             voice.setValue(previousVoice); voice.setDisable(next == null || !next.type().equals("FM"));
@@ -192,6 +202,7 @@ final class CommandEditorPane extends BorderPane {
     private void fillCommand(CommandEvent event) {
         selectedId = event.id(); originalCommand = event; commandBaseline = source;
         command.setValue(event.command()); tick.setText(Integer.toString(event.tick())); bytes.setText(hexArguments(event.arguments()));
+        updateEventAssetChoices(event.assetId());
     }
 
     private void newForm() {
@@ -202,6 +213,7 @@ final class CommandEditorPane extends BorderPane {
             if (!command.getItems().contains(command.getValue())) command.setValue(command.getItems().getFirst());
             emptyFormType = command.getValue();
             tick.setText("0"); bytes.setText(hexArguments(command.getValue().defaultArguments()));
+            updateEventAssetChoices(null);
         } finally { updating = false; }
         updateHelp(); updateNotices();
     }
@@ -280,7 +292,10 @@ final class CommandEditorPane extends BorderPane {
         catch (NumberFormatException e) { throw new IllegalArgumentException("Command tick must be a decimal integer within the source."); }
         NativeCommand type = command.getValue();
         if (type == null) throw new IllegalArgumentException("Choose a native command.");
-        return new CommandEvent(id, at, type, parseHexArguments(bytes.getText()));
+        String assetId = type.asset() == NativeCommand.Asset.NONE ? null : eventAsset.getValue();
+        if (type.asset() == NativeCommand.Asset.VOICE && assetId == null)
+            throw new IllegalArgumentException("Choose an FM voice for this command.");
+        return new CommandEvent(id, at, type, parseHexArguments(bytes.getText()), assetId);
     }
 
     private void submit(UnaryOperator<StudioProject> transform) {
@@ -291,8 +306,8 @@ final class CommandEditorPane extends BorderPane {
 
     private void updateHelp() {
         NativeCommand type = command.getValue();
-        help.setText(type == null ? "" : "Operand bytes: " + type.argumentCount() + ". " + type.help() + (type == NativeCommand.MODULATION
-                ? " F0 setup is currently allowed only on an explicit note attack tick; held-note setup needs native history semantics." : ""));
+        help.setText(type == null ? "" : "Raw operand bytes: " + type.argumentCount() + ". " + type.help() + (type == NativeCommand.MODULATION && project != null
+                && project.formatVersion() < 4 ? " This project version requires an explicit note attack tick." : ""));
     }
 
     private void updateNotices() {
@@ -315,7 +330,8 @@ final class CommandEditorPane extends BorderPane {
         List<Integer> initialBytes = originalCommand == null && initialType != null ? initialType.defaultArguments()
                 : originalCommand == null ? List.of() : originalCommand.arguments();
         return command.getValue() != initialType || !tick.getText().trim().equals(Integer.toString(initialTick))
-                || !bytes.getText().trim().equalsIgnoreCase(hexArguments(initialBytes));
+                || !bytes.getText().trim().equalsIgnoreCase(hexArguments(initialBytes))
+                || !Objects.equals(eventAsset.getValue(), originalCommand == null ? null : originalCommand.assetId());
     }
 
     private boolean settingsDraftChanged() {
@@ -358,15 +374,61 @@ final class CommandEditorPane extends BorderPane {
         return ProjectEdits.setSourceEnvelopes(updated,expected.id(),psgChanged?psg:latest.psgEnvelopeId(),modChanged?mod:latest.modulationEnvelopeId());
     }
 
-    private void configureEnvelope(ComboBox<String> box,String id){
-        box.setId(id);box.setPrefWidth(240);box.setMaxWidth(Double.MAX_VALUE);box.setPromptText("None");
-        box.setConverter(new StringConverter<>(){
-            @Override public String toString(String value){return value==null?"None":project==null?value:project.envelopes().stream().filter(e->e.id().equals(value)).findFirst().map(e->e.name()+" · "+e.id()).orElse(value+" (unavailable)");}
-            @Override public String fromString(String value){return value;}
-        });
-        box.setCellFactory(ignored->new ListCell<>(){@Override protected void updateItem(String value,boolean empty){super.updateItem(value,empty);setText(empty?null:box.getConverter().toString(value));}});
-        box.valueProperty().addListener((o,a,b)->{if(!updating)updateNotices();});
+    private void configureEnvelope(ComboBox<String> box, String id) {
+        configureAssetPicker(box, id, () -> "None", assetId -> assetName(NativeCommand.Asset.MODULATION, assetId));
     }
+
+    private void configureAssetPicker(ComboBox<String> box, String id,
+                                      java.util.function.Supplier<String> emptyText,
+                                      java.util.function.Function<String, String> name) {
+        box.setId(id);
+        box.setPrefWidth(240);
+        box.setMaxWidth(Double.MAX_VALUE);
+        box.setPromptText(emptyText.get());
+        box.setConverter(new StringConverter<>() {
+            @Override public String toString(String value) {
+                return value == null ? emptyText.get() : name.apply(value);
+            }
+            @Override public String fromString(String value) { return value; }
+        });
+        box.setCellFactory(ignored -> new ListCell<>() {
+            @Override protected void updateItem(String value, boolean empty) {
+                super.updateItem(value, empty);
+                setText(empty ? null : box.getConverter().toString(value));
+            }
+        });
+        box.valueProperty().addListener((o, a, b) -> { if (!updating) updateNotices(); });
+    }
+
+    private static NativeCommand.Asset assetKind(NativeCommand type) {
+        return type == null ? NativeCommand.Asset.NONE : type.asset();
+    }
+
+    private void updateEventAssetChoices(String selected) {
+        var kind = assetKind(command.getValue());
+        eventAssetField.setVisible(kind != NativeCommand.Asset.NONE);
+        if (kind == NativeCommand.Asset.NONE) {
+            eventAsset.getItems().clear();
+            eventAsset.setValue(null);
+            return;
+        }
+        eventAsset.setPromptText(eventAsset.getConverter().toString(null));
+        if (kind == NativeCommand.Asset.VOICE) {
+            eventAsset.getItems().setAll(project == null ? List.of() : project.voices().stream().map(Voice::id).toList());
+        } else {
+            updateEnvelopeChoices(eventAsset, kind == NativeCommand.Asset.PSG_VOLUME ? Envelope.PSG_VOLUME : Envelope.MODULATION);
+        }
+        eventAsset.setValue(selected);
+    }
+
+    private String assetName(NativeCommand.Asset kind, String id) {
+        if (project == null) return id;
+        var name = kind == NativeCommand.Asset.VOICE
+                ? project.voices().stream().filter(v -> v.id().equals(id)).findFirst().map(Voice::name)
+                : project.envelopes().stream().filter(e -> e.id().equals(id)).findFirst().map(Envelope::name);
+        return name.map(value -> value + " · " + id).orElse(id + " (unavailable)");
+    }
+
     private void updateEnvelopeChoices(ComboBox<String> box,String type){
         String previous=box.getValue();List<String> ids=new ArrayList<>();ids.add(null);
         if(project!=null)project.envelopes().stream().filter(e->e.type().equals(type)).map(Envelope::id).forEach(ids::add);
@@ -388,8 +450,17 @@ final class CommandEditorPane extends BorderPane {
         return String.join(" ", values.stream().map(v -> String.format(Locale.ROOT, "%02X", v)).toList());
     }
 
-    private static String commandBytes(CommandEvent event) {
-        return String.format(Locale.ROOT, "%02X", event.command().opcode()) + (event.arguments().isEmpty() ? "" : " " + hexArguments(event.arguments()));
+    private String commandBytes(CommandEvent event) {
+        String encoded = commandOpcode(event.command());
+        if (!event.arguments().isEmpty()) encoded += " " + hexArguments(event.arguments());
+        var kind = event.command().asset();
+        if (kind == NativeCommand.Asset.NONE) return encoded;
+        return encoded + " · " + (event.assetId() == null ? "Off" : assetName(kind, event.assetId()));
+    }
+
+    private static String commandOpcode(NativeCommand type) {
+        String opcode = String.format(Locale.ROOT, "%02X", type.opcode());
+        return type.subOpcode() < 0 ? opcode : opcode + String.format(Locale.ROOT, " %02X", type.subOpcode());
     }
 
     private static Sequence findSource(StudioProject project, String id) {

@@ -22,7 +22,7 @@ final class S3kBinary {
         if (project == null) fail("compiled project is required");
         if (project.nativeProgram() != null) return inspectNative(project).bank();
         validateEnvelopeDeclarations(project);
-        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes(), project.samples());
+        return validateAndCopy(project.song(), project.psgEnvelopes(), project.modulationEnvelopes(), project.samples(), true);
     }
 
     static NativeBankAnalysis.Analysis inspectNative(CompiledProject project) {
@@ -42,7 +42,7 @@ final class S3kBinary {
             if (envelope.id() == null || envelope.id().isBlank() || !ids.add(envelope.id()))
                 fail("envelope IDs must be nonblank and unique");
             if (envelope.name() == null || envelope.name().isBlank()) fail("envelope name is required");
-            EnvelopeProgram.validate(envelope.type(), envelope.bytes());
+            EnvelopeProgram.validateNativePlayback(envelope.type(), envelope.bytes());
             if (envelope.type().equals("PSG_VOLUME") && ++psgCount > 255) fail("at most 255 PSG envelopes can be addressed");
             if (envelope.type().equals("MODULATION") && ++modulationCount > 127) fail("at most 127 modulation envelopes can be addressed");
         }
@@ -50,14 +50,15 @@ final class S3kBinary {
 
     static byte[] validateAndCopy(byte[] input, Map<Integer, List<Integer>> psgEnvelopes,
                                  Map<Integer, List<Integer>> modulationEnvelopes) {
-        return validateAndCopy(input, psgEnvelopes, modulationEnvelopes, List.of());
+        return validateAndCopy(input, psgEnvelopes, modulationEnvelopes, List.of(), false);
     }
 
     private static byte[] validateAndCopy(byte[] input, Map<Integer, List<Integer>> psgEnvelopes,
-                                          Map<Integer, List<Integer>> modulationEnvelopes, List<DacSample> samples) {
+                                          Map<Integer, List<Integer>> modulationEnvelopes, List<DacSample> samples,
+                                          boolean compiledAssets) {
         DacSample.validateAll(samples);
-        validateEnvelopes(psgEnvelopes, "PSG_VOLUME", 255);
-        validateEnvelopes(modulationEnvelopes, "MODULATION", 127);
+        validateEnvelopes(psgEnvelopes, "PSG_VOLUME", 255, compiledAssets);
+        validateEnvelopes(modulationEnvelopes, "MODULATION", 127, compiledAssets);
         if (input == null || input.length < 10) fail("truncated S3K header (at least one DAC slot required)");
         if (input.length > MAX_BYTES) fail("binary exceeds one 32 KiB bank");
         byte[] data = input.clone();
@@ -115,6 +116,23 @@ final class S3kBinary {
                 position += 4; // Delay, rate, signed delta, steps: all are raw bytes.
                 continue;
             }
+            if (command == 0xFF && !track.psg) {
+                if (position >= end) fail("truncated FM meta command at " + hex(at));
+                int subcommand = u8(data, position++);
+                switch (subcommand) {
+                    case 0x05 -> {
+                        if (end - position < 4) fail("truncated SSG-EG operands at " + hex(at));
+                        position += 4;
+                    }
+                    case 0x06 -> {
+                        if (end - position < 2) fail("truncated FM volume envelope operands at " + hex(at));
+                        requireEnvelope(psgEnvelopes, u8(data, position), "FM volume", at);
+                        position += 2;
+                    }
+                    default -> fail("unsupported FM meta command " + hex(subcommand) + " at " + hex(at));
+                }
+                continue;
+            }
             boolean both = command == 0xE1 || command == 0xE4 || command == 0xE8 || command == 0xED || command == 0xF4 || command == 0xFB;
             boolean fm = command == 0xE0 || command == 0xE6 || command == 0xEF;
             boolean psg = command == 0xEC || command == 0xF3 || command == 0xF5;
@@ -124,7 +142,7 @@ final class S3kBinary {
             }
             if (position >= end) fail("truncated command operand at " + hex(at));
             int operand = u8(data, position++);
-            if (command == 0xEF && operand >= voices) fail("undefined local FM voice " + operand + " at " + hex(at));
+            if (command == 0xEF && (operand >= 128 || operand >= voices)) fail("undefined local FM voice " + operand + " at " + hex(at));
             if (command == 0xF4) requireEnvelope(modulationEnvelopes, operand, "modulation", at);
             if (command == 0xF5) requireEnvelope(psgEnvelopes, operand, "PSG", at);
         }
@@ -147,12 +165,13 @@ final class S3kBinary {
         fail("DAC track has no stop before its data boundary at " + hex(end));
     }
 
-    private static void validateEnvelopes(Map<Integer, List<Integer>> envelopes, String type, int maximum) {
+    private static void validateEnvelopes(Map<Integer, List<Integer>> envelopes, String type, int maximum, boolean compiledAssets) {
         if (envelopes == null || envelopes.size() > maximum) fail("invalid " + type + " envelope table");
         for (var entry : envelopes.entrySet()) {
             Integer index = entry.getKey();
             if (index == null || index < 1 || index > maximum) fail("invalid " + type + " envelope index " + index);
-            EnvelopeProgram.validate(type, entry.getValue());
+            if (compiledAssets) EnvelopeProgram.validateNativePlayback(type, entry.getValue());
+            else EnvelopeProgram.validate(type, entry.getValue());
         }
     }
 

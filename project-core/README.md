@@ -110,6 +110,27 @@ banked voice references need asset support. Unused voice definitions are retaine
 The [S3K support matrix](../docs/architecture/s3k-support.md) tracks everything
 still needed before importing can target a complete authoring representation.
 
+## Version 4 timed effects
+
+Version 4 supports the following additional command names. The optional
+`assetId` refers to a named voice or envelope. The compiler supplies the
+resolved slot byte. `arguments` contains only the other raw operand bytes.
+
+| Command | Native bytes | Asset |
+| --- | --- | --- |
+| `HOLD` | E7 | |
+| `PSG_NOISE` | F3 nn | |
+| `FM_VOICE` | EF vv | FM voice required |
+| `PSG_ENVELOPE` | F5 ee | PSG volume envelope |
+| `MODULATION_ENVELOPE` | F4 ee | Modulation envelope |
+| `FM_VOLUME_ENVELOPE` | FF 06 ee mm | PSG volume envelope, plus operator mask mm |
+| `SSG_EG` | FF 05 o1 o2 o3 o4 | |
+
+An omitted envelope ID emits slot zero. F0 may run inside a held note in
+version 4, which retains the native pending-parameter and live-counter
+behavior. V4 accepts validated native envelope bytes, including signed
+modulation data and resolved 82 / 84 operands.
+
 ## Version 3 voices and envelope assets
 
 Local FM voices can now be created, duplicated and edited in Studio. They remain

@@ -326,8 +326,16 @@ public final class NativeBankAnalysis {
             case 0xFF -> {
                 requireBytes(pc, 2);
                 int subcommand = read(pc + 1);
-                if (subcommand != 0) throw invalid(pc, "unsupported native meta command FF " + hex(subcommand));
-                yield instruction(pc, 3, "Global tempo");
+                yield switch (subcommand) {
+                    case 0x00 -> instruction(pc, 3, "Global tempo");
+                    case 0x05 -> trackCommand(pc, track, Track.FM, 6, "SSG-EG");
+                    case 0x06 -> {
+                        int size = trackCommand(pc, track, Track.FM, 4, "FM volume envelope");
+                        if ((read(pc + 3) & 0x0F) != 0) requireEnvelope(read(pc + 2), pc, Envelope.PSG_VOLUME);
+                        yield size;
+                    }
+                    default -> throw invalid(pc, "unsupported native meta command FF " + hex(subcommand));
+                };
             }
             default -> throw invalid(pc, "unsupported native command " + hex(command));
         };

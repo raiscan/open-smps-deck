@@ -89,7 +89,9 @@ public final class ProjectFormat {
                 JsonArray commands=new JsonArray();
                 for(CommandEvent event:s.commands()) {
                     JsonObject y=new JsonObject(); y.addProperty("id",event.id()); y.addProperty("tick",event.tick()); y.addProperty("command",event.command().name());
-                    JsonArray arguments=new JsonArray(); event.arguments().forEach(arguments::add); y.add("arguments",arguments); commands.add(y);
+                    JsonArray arguments=new JsonArray(); event.arguments().forEach(arguments::add); y.add("arguments",arguments);
+                    if (event.assetId()!=null) y.addProperty("assetId",event.assetId());
+                    commands.add(y);
                 }
                 x.add("commands",commands); x.addProperty("repeatState",s.repeatState());
             }
@@ -164,7 +166,10 @@ public final class ProjectFormat {
                 range(envelope.bytes().size(),1,256,at+".bytes length");
                 for (int value : envelope.bytes()) range(value,0,255,at+".bytes");
             } else {
-                try { EnvelopeProgram.validate(envelope.type(),envelope.bytes()); }
+                try {
+                    if (project.formatVersion()==4) EnvelopeProgram.validateNativePlayback(envelope.type(),envelope.bytes());
+                    else EnvelopeProgram.validate(envelope.type(),envelope.bytes());
+                }
                 catch(IllegalArgumentException e) { throw invalid(at+".bytes",e.getMessage()); }
             }
             if (psg) psgCount++; else modulationCount++;
@@ -240,10 +245,26 @@ public final class ProjectFormat {
                 String command=at+" command '"+event.id()+"'";
                 range(event.tick(),0,s.lengthTicks()-1,command+".tick");
                 if(event.command()==null) throw invalid(command+".command","a supported native command is required");
+                if(project.formatVersion()<event.command().minimumVersion()) throw invalid(command,"requires formatVersion "+event.command().minimumVersion());
                 if(!event.command().supports(s.type())) throw invalid(command+".command",event.command()+" does not support "+s.type());
                 if(event.arguments().size()!=event.command().argumentCount()) throw invalid(command+".arguments","exactly "+event.command().argumentCount()+" raw byte arguments are required");
                 for(int argument:event.arguments()) range(argument,0,255,command+".arguments");
-                if(event.command()==NativeCommand.MODULATION && !attacks.contains(event.tick())) throw invalid(command,"MODULATION setup currently requires an explicit note attack tick; held setup has native history semantics");
+                String assetId=event.assetId();
+                switch(event.command().asset()) {
+                    case NONE -> {
+                        if(assetId!=null) throw invalid(command+".assetId","command does not take an asset");
+                    }
+                    case VOICE -> {
+                        if(assetId==null || !voices.containsKey(assetId)) throw invalid(command+".assetId","requires a local FM voice");
+                    }
+                    case PSG_VOLUME -> {
+                        if(assetId!=null) envelopeReference(envelopes,assetId,Envelope.PSG_VOLUME,command+".assetId");
+                    }
+                    case MODULATION -> {
+                        if(assetId!=null) envelopeReference(envelopes,assetId,Envelope.MODULATION,command+".assetId");
+                    }
+                }
+                if(project.formatVersion()<4 && event.command()==NativeCommand.MODULATION && !attacks.contains(event.tick())) throw invalid(command,"MODULATION setup currently requires an explicit note attack tick; held setup has native history semantics");
             }
         }
         unique(project.clips(), Clip::id, "clips");
@@ -292,15 +313,18 @@ public final class ProjectFormat {
                 : object(e,"sequence","id","name","type","lengthTicks","voiceId","volume","notes","commands","repeatState","psgEnvelopeId","modulationEnvelopeId","triggers");
         String voice=o.get("voiceId").isJsonNull()?null:string(o,"voiceId");
         return new Sequence(string(o,"id"),string(o,"name"),string(o,"type"),integer(o,"lengthTicks"),voice,integer(o,"volume"),list(o,"notes",ProjectFormat::note),
-                version==1?List.of():list(o,"commands",ProjectFormat::command),version==1?"RESET":string(o,"repeatState"),
+                version==1?List.of():list(o,"commands",entry->command(entry,version)),version==1?"RESET":string(o,"repeatState"),
                 version>=3?nullableString(o,"psgEnvelopeId"):null,version>=3?nullableString(o,"modulationEnvelopeId"):null,
                 version==4?list(o,"triggers",ProjectFormat::trigger):List.of());
     }
-    private static CommandEvent command(JsonElement e) {
-        JsonObject o=object(e,"command","id","tick","command","arguments");
+    private static CommandEvent command(JsonElement e,int version) {
+        boolean hasAsset=version==4 && e.isJsonObject() && e.getAsJsonObject().has("assetId");
+        JsonObject o=hasAsset ? object(e,"command","id","tick","command","arguments","assetId")
+                : object(e,"command","id","tick","command","arguments");
         String name=string(o,"command"); NativeCommand command;
         try { command=NativeCommand.valueOf(name); } catch(IllegalArgumentException ex) { throw invalid("command.command","unsupported native command '"+name+"'"); }
-        return new CommandEvent(string(o,"id"),integer(o,"tick"),command,list(o,"arguments",x->integer(x,"command.arguments[]")));
+        return new CommandEvent(string(o,"id"),integer(o,"tick"),command,list(o,"arguments",x->integer(x,"command.arguments[]")),
+                hasAsset?nullableString(o,"assetId"):null);
     }
     private static NoteEvent note(JsonElement e) {
         JsonObject o=object(e,"note","id","tick","duration","pitch"); return new NoteEvent(string(o,"id"),integer(o,"tick"),integer(o,"duration"),integer(o,"pitch"));

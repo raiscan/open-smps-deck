@@ -125,14 +125,29 @@ class NativeCommandsTest {
     }
 
     @Test void everyCatalogueCommandRoundTripsRawByteExtremesInBothSupportedTrackTypes() {
+        var extraVoice = NativeFmVoice.initial("other", "Other");
+        var volume = new Envelope("volume", "Volume", Envelope.PSG_VOLUME, List.of(0, 0x83));
+        var modulation = new Envelope("mod", "Modulation", Envelope.MODULATION, List.of(0xFF, 0x82, 0));
         for(String type:List.of("FM","PSG")) {
             List<CommandEvent> commands=new ArrayList<>();
             for(NativeCommand command:NativeCommand.values()) if(command.supports(type)) {
-                commands.add(new CommandEvent(command.name(),0,command,java.util.Collections.nCopies(command.argumentCount(),255)));
+                String asset = switch (command.asset()) {
+                    case NONE -> null;
+                    case VOICE -> extraVoice.id();
+                    case PSG_VOLUME -> volume.id();
+                    case MODULATION -> modulation.id();
+                };
+                commands.add(new CommandEvent(command.name(),0,command,
+                        java.util.Collections.nCopies(command.argumentCount(),255),asset));
             }
-            var p=project(source(type,12,List.of(new NoteEvent("n",0,12,60)),commands,"RESET"),12);
+            var p=new StudioProject(4,"Commands","S3K",24,128,
+                    List.of(ProjectCompilerTest.VOICE,extraVoice),
+                    List.of(source(type,12,List.of(new NoteEvent("n",0,12,60)),commands,"RESET")),
+                    List.of(new Clip("c","s",type+"1",0,12)),List.of(volume,modulation),List.of());
             assertEquals(p,ProjectFormat.read(ProjectFormat.write(p)));
             byte[] compiled=track(p); assertEquals(0xF2,compiled[compiled.length-1]&255);
+            assertThrows(IllegalArgumentException.class,()->ProjectEdits.deleteEnvelope(p,"mod"));
+            if(type.equals("FM")) assertThrows(IllegalArgumentException.class,()->ProjectEdits.deleteVoice(p,"other"));
         }
         var empty=project(source("FM",12,List.of(),List.of(),"RESET"),12);
         String json=ProjectFormat.write(empty);

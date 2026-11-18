@@ -33,12 +33,12 @@ public final class ProjectEdits {
     }
     public static StudioProject deleteNote(StudioProject p,String sequenceId,String noteId) { return changeNote(p,sequenceId,noteId,n->null); }
     public static StudioProject addCommand(StudioProject p,String sequenceId,CommandEvent event) {
-        return changeSequence(p,sequenceId,s->{ List<CommandEvent> commands=new ArrayList<>(s.commands()); commands.add(event); return withCommands(s,commands); },true);
+        return changeSequence(p,sequenceId,s->{ List<CommandEvent> commands=new ArrayList<>(s.commands()); commands.add(event); return withCommands(s,commands); },commandVersion(event));
     }
     public static StudioProject updateCommand(StudioProject p,String sequenceId,CommandEvent event) {
-        return changeCommand(p,sequenceId,event.id(),old->event);
+        return changeCommand(p,sequenceId,event.id(),old->event,commandVersion(event));
     }
-    public static StudioProject deleteCommand(StudioProject p,String sequenceId,String commandId) { return changeCommand(p,sequenceId,commandId,event->null); }
+    public static StudioProject deleteCommand(StudioProject p,String sequenceId,String commandId) { return changeCommand(p,sequenceId,commandId,event->null,2); }
     public static StudioProject moveCommand(StudioProject p,String sequenceId,String commandId,int direction) {
         if(direction!=-1 && direction!=1) throw new IllegalArgumentException("Command move direction must be -1 or +1");
         return changeSequence(p,sequenceId,s->{
@@ -137,7 +137,8 @@ public final class ProjectEdits {
     public static StudioProject deleteVoice(StudioProject p,String voiceId) {
         if (p.nativeProgram()!=null) throw new IllegalArgumentException("Native global voice indices must be preserved");
         ProjectFormat.validate(p);
-        if(p.sequences().stream().anyMatch(s->voiceId.equals(s.voiceId()))) throw new IllegalArgumentException("Voice '"+voiceId+"' is referenced by a source");
+        if(p.sequences().stream().anyMatch(s->voiceId.equals(s.voiceId()) || s.commands().stream()
+                .anyMatch(event->event.command().asset()==NativeCommand.Asset.VOICE && voiceId.equals(event.assetId())))) throw new IllegalArgumentException("Voice '"+voiceId+"' is referenced by a source");
         return changeVoice(p,voiceId,old->null);
     }
     public static StudioProject addEnvelope(StudioProject p,Envelope envelope) {
@@ -149,7 +150,8 @@ public final class ProjectEdits {
     }
     public static StudioProject deleteEnvelope(StudioProject p,String envelopeId) {
         ProjectFormat.validate(p);
-        if(p.sequences().stream().anyMatch(s->envelopeId.equals(s.psgEnvelopeId()) || envelopeId.equals(s.modulationEnvelopeId())))
+        if(p.sequences().stream().anyMatch(s->envelopeId.equals(s.psgEnvelopeId()) || envelopeId.equals(s.modulationEnvelopeId())
+                || s.commands().stream().anyMatch(event->event.command().asset()!=NativeCommand.Asset.VOICE && envelopeId.equals(event.assetId()))))
             throw new IllegalArgumentException("Envelope '"+envelopeId+"' is referenced by a source");
         return changeEnvelope(p,envelopeId,old->null);
     }
@@ -187,11 +189,14 @@ public final class ProjectEdits {
             if(!found) throw new IllegalArgumentException("Unknown note '"+noteId+"' in sequence '"+sequenceId+"'"); return withNotes(s,notes);
         });
     }
-    private static StudioProject changeCommand(StudioProject p,String sequenceId,String commandId,UnaryOperator<CommandEvent> change) {
+    private static int commandVersion(CommandEvent event) {
+        return event.command()==null ? 2 : event.command().minimumVersion();
+    }
+    private static StudioProject changeCommand(StudioProject p,String sequenceId,String commandId,UnaryOperator<CommandEvent> change,int minimumVersion) {
         return changeSequence(p,sequenceId,s->{ List<CommandEvent> commands=new ArrayList<>(); boolean found=false;
             for(CommandEvent event:s.commands()) { if(event.id().equals(commandId)) { found=true; event=change.apply(event); } if(event!=null) commands.add(event); }
             if(!found) throw new IllegalArgumentException("Unknown command '"+commandId+"' in sequence '"+sequenceId+"'"); return withCommands(s,commands);
-        },true);
+        },minimumVersion);
     }
     private static StudioProject changeSequence(StudioProject p,String id,UnaryOperator<Sequence> change) {
         return changeSequence(p,id,change,false);

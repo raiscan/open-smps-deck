@@ -19,17 +19,17 @@ Playback uses the exact OpenGGF revision recorded in
 | Long sustained notes | Native HOLD continuations beyond 127 ticks | Supported | Note duration | Supported |
 | Pan/AMS/FMS, detune, absolute volume, FM/PSG volume change, absolute/additive transpose | Nine-command v2 catalogue below | Native finite stream | Commands table and raw-byte inspector | `E0` retains low six bits in FM and DAC |
 | Two-operand FM volume change `E5` | v5 native bytes | v5 preflight follows both operands | Native bank bytes and event list | First operand ignored, second is signed FM attenuation delta |
-| Four-byte custom modulation and modulation off | v2; setup restricted to explicit note attack ticks | `F0` and `FA` accepted with exact arities | Command help and arguments | Pending setup and native attack preparation |
+| Four-byte custom modulation and modulation off | v2 at note attacks, v4 also on held notes | `F0` and `FA` accepted with exact arities | Command help and arguments | Pending setup and native attack preparation |
 | Event ordering and repetition state | Stable authored order at equal ticks; RESET/CARRY; independent clips reset | Compiles inline; trimmed events omitted | Reorder and repeat-state controls | Native mutable track state |
 | Local FM voices | Exact 25-byte entries; source selection and pure asset CRUD | Terminal local table; package manifest indices | Native algorithm/feedback, four stored operators, independent TL high-bit flags, raw bytes | Local/shared/global lookup |
-| Voice changes and shared/global/cross-song voices | v5 records the in-bank voice table location or supplies an ordered global table | v5 resolves local FM `EF` and PSG envelope `EF`; cross-song FM voices pending | Native bank view and global voice editor | PSG `EF` preserves cursor and consumes its signed-index operand shape |
-| PSG noise | v5 native `F3` bytes | Canonical latch or zero passes preflight | Native bank bytes and event list | PSG noise/reset implemented |
-| PSG and modulation envelopes | v3 bounded assets; v5 accepts full range and resolved modulation control operands | Tables installed before sequencer creation; native resource package | Asset CRUD/raw bytes, source assignments and editor links | Native PSG volume byte, signed modulation and cursor-zero paths |
-| FM volume envelope and SSG-EG | Missing | `FF05/06` rejected | Missing | Handlers present; FM volume envelope uses PSG-envelope map |
+| Voice changes and shared/global/cross-song voices | v4 timed local voices, v5 native voice table binding | v5 resolves local FM `EF` and PSG envelope `EF`; cross-song FM voices pending | Commands asset picker and native bank | PSG `EF` preserves cursor and consumes its signed-index operand shape |
+| PSG noise | v4 typed `F3` and v5 native bytes | Native noise latch and reset | Commands table and native bank | PSG noise/reset implemented |
+| PSG and modulation envelopes | v3 basic profile, v4 and v5 accept validated native data and resolved operands | Tables installed before sequencer creation; native resource package | Asset CRUD, source assignments, and timed selections | Native PSG volume byte, signed modulation and cursor-zero paths |
+| FM volume envelope and SSG-EG | v4 typed commands and v5 native bytes | `FF05/06` preflight checks operands and resource bindings | Commands table and native bank | FM volume envelope uses PSG-envelope map |
 | DAC samples, mappings and rates | v4 linked one-shot hits; v5 sparse, per-note PCM/rate bindings | Native DAC pan, rest replay and sample tail; exact mapping and ZIP | Sample library, waveform and DAC hit grid; v5 bank display | Unsigned PCM via `DacData`, base cycles 297 |
 | FM6 and DAC/FM6 ownership | Dedicated DAC lane, FM6 switching pending | DAC + five FM slots | DAC lane | DAC shares physical FM6 |
 | FM3 special/raw-frequency data | Missing representation | `FD/FE` rejected | Missing | Raw frequency handler exists; `FE` retains state only |
-| Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | v5 preserves raw stream | Native saved duration, byte wrap, divider and fill through HOLD | Native bank bytes and event list | Timers follow the S3K byte counters and chip-specific tails |
+| Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | v4 can express ties, v5 preserves raw stream | Native saved duration, byte wrap, divider and fill through HOLD | Native bank bytes and event list | Timers follow the S3K byte counters and chip-specific tails |
 | Native jumps, calls, returns and counted loops | v5 preserves native pointers | Bounded `F6/F7/F8/F9` traversal includes pre-header targets and loops that advance time | Native bank bytes and event list | Native return/loop capacity and zero-count limitations below |
 | Conditional loop exit | Missing | `EB` rejected | Missing | Native arity/behavior mismatch below |
 | Header transpose/volume/envelope state and bank addresses | v5 stores the exact header and offset at base 0 or 0x8000 | Seventh declared FM slot is inactive when PSG1 overwrites it | Native bank bytes; arrangement has normalized headers | Header decoder and full bank address space |
@@ -62,9 +62,11 @@ byte interpretation. Same-tick commands execute in source list order.
 | `MODULATION` | `F0 delay rate delta steps` | FM/PSG | Pending custom setup; zero rate means 256; delta signed; initial steps halved |
 | `MODULATION_OFF` | `FA` or `FA F4 00` | FM/PSG | Clear custom modulation and, when the source selects an envelope, clear that envelope too |
 
-`F0` may currently occur only at an explicit note attack. Setting it during HOLD
-has native history semantics that need the later stream/gate model. This is a
-temporary authoring restriction. It is not silently moved to a different tick.
+Version 4 adds HOLD, PSG noise, FM voice changes, timed PSG and modulation
+envelopes, FM volume envelopes and SSG-EG. The [project contract](../../project-core/README.md)
+describes the editable commands and asset IDs. Version 4 allows F0 on held
+notes and retains native counter and pending-parameter behaviour. Versions 2
+and 3 require an explicit note attack.
 
 Commands are read only when the current duration expires. The compiler therefore
 splits notes/rests at event ticks. A sounding note continues as `commands; E7;
@@ -80,13 +82,11 @@ voice, volume, FM stereo pan, transpose, detune, fill and modulation. Native
 original reset bytes. No full-bank expansion is allocated for enormous timelines; output
 is bounded to one 32 KiB bank.
 
-The raw binary validator intentionally retains its older finite subset (`E3/F2`
-stops, `E7/E8`, local `EF`, PSG `F3`, and the accepted single-byte commands).
-Accepting these raw inputs does not make them editable project features. Four-byte `F0`, zero-byte `FA` and resolved one-byte `F4/F5` are supported.
-Byte-only input rejects nonzero unresolved resources; the resource-aware path validates
-every declaration, even unused ones. Unknown/meta commands,
-pointers, unmapped DAC triggers, missing operands and unresolved resources still fail
-before PCM output.
+The finite binary validator accepts the listed controls and FM FF05 and FF06.
+Byte-only input rejects unresolved resources. The resource-aware path validates
+every declaration, including unused assets. Unsupported commands, pointers,
+unmapped DAC triggers, missing operands and unresolved resources fail before PCM
+output.
 
 ## Delivered voice and envelope assets
 
@@ -102,10 +102,10 @@ plus80 reset and81/83 rest/hold. PSG81 retains volume while83 silences; modulati
 modulation 1..127;128 is reserved for custom modulation. Source RESET/CARRY sets
 F5/F4 at its established reset boundaries, including zero to clear previous state.
 
-Branch82, multiplier84 and negative modulation offsets85..FF are explicitly
-rejected until their native/pinned behavior is resolved. These are temporary
-limits, not complete envelope support. The driver’s unbounded PSG immediate loop
-makes validation necessary before injection. See the
+Version 4 accepts the validated native envelope profile, including resolved
+modulation jumps (82), multiplier changes (84) and signed offsets (85–FF).
+The initial profile still applies to version 3. Validation bounds immediate
+control work before injection. See the
 [native package contract](native-asset-package.md) for every exported resource,
 hash, stable ID/native index and engine adapter boundary. The archive does not
 have an OpenGGF loader yet and does not establish arbitrary-track export support.

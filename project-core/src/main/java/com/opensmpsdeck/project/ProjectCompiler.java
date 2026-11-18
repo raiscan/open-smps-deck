@@ -2,6 +2,7 @@ package com.opensmpsdeck.project;
 
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -140,6 +141,7 @@ public final class ProjectCompiler {
         out.word(pointer,out.size());
         List<Clip> clips=project.clips().stream().filter(c->c.lane().equals(lane)).sorted(Comparator.comparingInt(Clip::startTick)).toList();
         int cursor=0;
+        var activeEffects=EnumSet.noneOf(NativeCommand.class);
         for(Clip clip : clips) {
             rest(out,clip.startTick()-cursor);
             Sequence source=sources.get(clip.sequenceId());
@@ -148,7 +150,15 @@ public final class ProjectCompiler {
             List<CommandEvent> commands=source.commands().stream().sorted(Comparator.comparingInt(CommandEvent::tick)).toList();
             while(remaining>0) {
                 int length=Math.min(remaining,source.lengthTicks());
-                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) reset(out,source,voices,project.formatVersion(),psgEnvelopes,modulationEnvelopes);
+                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) {
+                    if(activeEffects.remove(NativeCommand.PSG_NOISE)) {
+                        out.put(0xF3); out.put(0);
+                    }
+                    if(activeEffects.remove(NativeCommand.FM_VOLUME_ENVELOPE)) {
+                        out.put(0xFF); out.put(0x06); out.put(0); out.put(0);
+                    }
+                    reset(out,source,voices,project.formatVersion(),psgEnvelopes,modulationEnvelopes);
+                }
                 if(project.formatVersion()==1) {
                     int at=0;
                     for(NoteEvent note : notes.get(source.id())) {
@@ -160,7 +170,7 @@ public final class ProjectCompiler {
                     }
                     rest(out,length-at);
                 } else {
-                    units(out,source,notes.get(source.id()),commands,length);
+                    units(out,source,notes.get(source.id()),commands,length,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
                 }
                 remaining-=length;
                 first=false;
@@ -188,7 +198,9 @@ public final class ProjectCompiler {
         return indices;
     }
     /** Merge only source events, streaming bounded time units straight into the bank. */
-    private static void units(Bank out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length) {
+    private static void units(Bank out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length,
+                              Map<String,Integer> voices,Map<String,Integer> psgEnvelopes,
+                              Map<String,Integer> modulationEnvelopes,EnumSet<NativeCommand> activeEffects) {
         int at=0, noteIndex=0, commandIndex=0;
         while(at<length) {
             while(noteIndex<notes.size() && notes.get(noteIndex).tick()+notes.get(noteIndex).duration()<=at) noteIndex++;
@@ -196,7 +208,32 @@ public final class ProjectCompiler {
             boolean sounding=note!=null && note.tick()<=at;
             while(commandIndex<commands.size() && commands.get(commandIndex).tick()==at) {
                 CommandEvent event=commands.get(commandIndex++);
-                out.put(event.command().opcode()); for(int argument:event.arguments()) out.put(argument);
+                NativeCommand command=event.command();
+                out.put(command.opcode());
+                if(command.subOpcode()>=0) out.put(command.subOpcode());
+                String asset=event.assetId();
+                switch(command.asset()) {
+                    case NONE -> { }
+                    case VOICE -> {
+                        int index=voices.get(asset);
+                        if(index>=128) throw new IllegalArgumentException("Command '"+event.id()+"': banked voice references need future asset support");
+                        out.put(index);
+                    }
+                    case PSG_VOLUME -> out.put(asset==null ? 0 : psgEnvelopes.get(asset));
+                    case MODULATION -> out.put(asset==null ? 0 : modulationEnvelopes.get(asset));
+                }
+                for(int argument:event.arguments()) out.put(argument);
+                switch(command) {
+                    case PSG_NOISE -> {
+                        if(event.arguments().getFirst()==0) activeEffects.remove(command);
+                        else activeEffects.add(command);
+                    }
+                    case FM_VOLUME_ENVELOPE -> {
+                        if(asset==null || (event.arguments().getFirst() & 0x0F)==0) activeEffects.remove(command);
+                        else activeEffects.add(command);
+                    }
+                    default -> { }
+                }
                 if(event.command()==NativeCommand.MODULATION_OFF && source.modulationEnvelopeId()!=null) {
                     // Retail FA clears custom modulation's bit. Clear the
                     // selected envelope too for the arrangement command.

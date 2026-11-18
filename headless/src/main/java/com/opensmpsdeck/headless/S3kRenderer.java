@@ -14,6 +14,7 @@ import com.openggf.audio.synth.ChipWriteObserver;
 import com.openggf.audio.synth.FmCoreSelection;
 import com.openggf.game.sonic3k.audio.Sonic3kSmpsPhysicalPolicy;
 import com.openggf.game.sonic3k.audio.Sonic3kSmpsSequencerConfig;
+import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsData;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -155,10 +156,11 @@ public final class S3kRenderer {
                 incoming, SmpsLogicalTransitionPolicies.forConfig(config), new SmpsDacSelection(source, dac));
     }
 
-    static SmpsSequencer timelineSequencer(CompiledProject project, MusicRestoreSink restore) {
+    static SmpsSequencer timelineSequencer(CompiledProject project, MusicRestoreSink restore,
+                                          Sonic3kCoordFlagHandler handler) {
         var data = prepareData(project, true);
         var dac = nativeDac(project.samples(), project.nativeProgram());
-        var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
+        var config = Sonic3kSmpsSequencerConfig.create(handler);
         return new SmpsSequencer(data, dac, restore, config);
     }
 

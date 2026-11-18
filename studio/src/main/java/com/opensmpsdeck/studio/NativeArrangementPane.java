@@ -61,7 +61,7 @@ final class NativeArrangementPane extends VBox implements AutoCloseable {
         editableCopy.setId("save-editable-copy");
         editableCopy.setOnAction(e -> saveEditableCopy.run());
         editableCopy.setMinWidth(Region.USE_PREF_SIZE);
-        String copyHelp = "Rebuilds the finite preview as editable notes, DAC hits and selected instruments. "
+        String copyHelp = "Rebuilds the finite preview as editable notes, DAC hits, instruments and supported effects. "
                 + "The original keeps its native effects. Playback in the copy may differ.";
         var help = new Tooltip(copyHelp);
         help.setWrapText(true);

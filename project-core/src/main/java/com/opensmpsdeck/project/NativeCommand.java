@@ -11,17 +11,35 @@ public enum NativeCommand {
     PSG_VOLUME(0xEC, "PSG", "PSG volume change", "Signed attenuation change with native byte wrap then unsigned clamp to 0F; positive is quieter.", List.of(1)),
     TRANSPOSE(0xED, "", "Set transpose", "Biased native transpose: 40 hex is neutral, 4C is +12; subtraction wraps as a signed byte. Applies to the next note attack.", List.of(0x40)),
     TRANSPOSE_ADD(0xFB, "", "Add transpose", "Signed semitone addition with byte wrapping; FF means -1. Applies to the next note attack.", List.of(0)),
-    MODULATION(0xF0, "", "Modulation setup", "Four raw bytes: delay, rate, signed delta, steps. Native pending parameters are prepared on an attack; setup is currently restricted to explicit note attack ticks. Zero values retain native counter wrap.", List.of(1,1,1,4)),
-    MODULATION_OFF(0xFA, "", "Modulation off", "Disables modulation and clears its accumulator. Latent counters are prepared by the next attacked modulation setup.", List.of());
+    MODULATION(0xF0, "", "Modulation setup", "Four raw bytes: delay, rate, signed delta, steps. Native pending parameters are prepared on an attack. Tied setup retains the active counters. Zero values retain native counter wrap.", List.of(1,1,1,4)),
+    MODULATION_OFF(0xFA, "", "Modulation off", "Disables custom modulation. The next attacked setup prepares fresh counters. A source-level envelope assignment also clears.", List.of()),
+    HOLD(0xE7, "", "Hold", "Suppresses the next note attack while allowing pitch changes.", List.of()),
+    PSG_NOISE(0xF3, "PSG", "PSG noise", "Native PSG noise byte. 00 restores tone mode. Low nonzero bytes set the noise mode from their low nibble.", List.of(0xE7)),
+    PSG_ENVELOPE(0xF5, -1, "PSG", "Set PSG envelope", "Selects a PSG volume envelope; no asset disables it.", Asset.PSG_VOLUME, List.of()),
+    MODULATION_ENVELOPE(0xF4, -1, "", "Set modulation envelope", "Selects a modulation envelope; no asset disables it.", Asset.MODULATION, List.of()),
+    FM_VOICE(0xEF, -1, "FM", "Set FM voice", "Loads a local FM voice.", Asset.VOICE, List.of()),
+    FM_VOLUME_ENVELOPE(0xFF, 0x06, "FM", "FM volume envelope", "Selects a volume envelope and a raw operator mask; no asset disables it.", Asset.PSG_VOLUME, List.of(0x0F)),
+    SSG_EG(0xFF, 0x05, "FM", "SSG-EG", "Four raw SSG-EG register values in native operator order.", Asset.NONE, List.of(0, 0, 0, 0));
 
-    private final int opcode;
+    public enum Asset { NONE, VOICE, PSG_VOLUME, MODULATION }
+
+    private final int opcode, subOpcode;
+    private final Asset asset;
     private final String type, label, help;
     private final List<Integer> defaults;
 
     NativeCommand(int opcode, String type, String label, String help, List<Integer> defaults) {
+        this(opcode, -1, type, label, help, Asset.NONE, defaults);
+    }
+
+    NativeCommand(int opcode, int subOpcode, String type, String label, String help, Asset asset, List<Integer> defaults) {
+        this.subOpcode=subOpcode; this.asset=asset;
         this.opcode=opcode; this.type=type; this.label=label; this.help=help; this.defaults=defaults;
     }
     public int opcode() { return opcode; }
+    public int subOpcode() { return subOpcode; }
+    public Asset asset() { return asset; }
+    int minimumVersion() { return ordinal() >= HOLD.ordinal() ? 4 : 2; }
     public int argumentCount() { return defaults.size(); }
     public boolean supports(String trackType) { return ("FM".equals(trackType) || "PSG".equals(trackType)) && (type.isEmpty() || type.equals(trackType)); }
     public String label() { return label; }
