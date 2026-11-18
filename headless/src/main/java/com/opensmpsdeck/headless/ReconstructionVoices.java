@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 final class ReconstructionVoices {
     private static final int SHORTLIST_SIZE = 8;
@@ -18,6 +19,9 @@ final class ReconstructionVoices {
 
     static final long SECTION_US = 16 * MICROS_PER_SECOND;
     private static final long INDEPENDENT_US = 500_000;
+    // Standalone kick slots from skdisasm's S3K DAC equates. Hybrids such as dKickHey
+    // and dOddSnareKick can have strong bass but add a voice or another percussion hit.
+    private static final Set<Integer> S3K_KICK_SLOTS = Set.of(0x86, 0x9D, 0xA4, 0xA7, 0xA8, 0xBD);
 
     record Key(int partId, Integer drumPitch, Long sectionStartUs) {
         Key(int partId, Integer drumPitch) {
@@ -46,7 +50,12 @@ final class ReconstructionVoices {
                      double score, double meanDistance) {}
 
     record Choice(String assetId, String variantId, String name, Integer sampleRate, String status,
-                  List<Probe> probes, List<Candidate> shortlist) {}
+                  List<Probe> probes, List<Candidate> shortlist, String rankingPolicy) {
+        Choice(String assetId, String variantId, String name, Integer sampleRate, String status,
+               List<Probe> probes, List<Candidate> shortlist) {
+            this(assetId, variantId, name, sampleRate, status, probes, shortlist, null);
+        }
+    }
 
     private record Window(MidiScore.Note note, long durationUs, int overlappingNotes) {}
 
@@ -189,8 +198,9 @@ final class ReconstructionVoices {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var probes = new ArrayList<Probe>();
         var evidence = new LinkedHashMap<String, Evidence>();
+        Set<String> kicks = drums ? corroboratedKicks(catalogue, audio, windows) : Set.of();
         for (Window window : windows) {
-            Probe probe = probe(catalogue, audio, source, kind, window, timeline);
+            Probe probe = probe(catalogue, audio, source, kind, window, timeline, kicks);
             probes.add(probe);
             double weight = 1.0 / (1.0 + probe.overlappingNotes() * 0.25);
             for (int rank = 0; rank < probe.matches().size(); rank++) {
@@ -215,7 +225,7 @@ final class ReconstructionVoices {
                 probe.overlappingNotes() == 0 && probe.matches().stream()
                         .anyMatch(hit -> drums ? hit.variantId().equals(first.variantId()) : hit.assetId().equals(first.assetId())));
         return new Choice(first.assetId(), first.variantId(), first.name(), rate, weak ? "weak-evidence" : "matched",
-                List.copyOf(probes), shortlist);
+                List.copyOf(probes), shortlist, kicks.contains(first.variantId()) ? "low-transient-kick" : null);
     }
 
     static SectionPlan refineSections(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems,
@@ -297,8 +307,63 @@ final class ReconstructionVoices {
         return window.note().startUs() / (8 * MICROS_PER_SECOND);
     }
 
+    private static Set<String> corroboratedKicks(InstrumentCatalogue catalogue, Path audio, List<Window> windows)
+            throws IOException {
+        if (windows.size() < 2) return Set.of();
+        int pitch = windows.getFirst().note().pitch();
+        if (pitch != 35 && pitch != 36) return Set.of();
+
+        var kicks = new HashSet<String>();
+        for (var variant : catalogue.variants()) {
+            if (variant.roles().contains("kick") || variant.occurrences().stream().anyMatch(occurrence ->
+                    CatalogueMatcher.LOCKED_ON_S3K.equals(occurrence.revision())
+                            && "S3K".equals(occurrence.driver()) && "dac".equals(occurrence.table())
+                            && occurrence.slot() != null && S3K_KICK_SLOTS.contains(occurrence.slot()))) {
+                kicks.add(variant.id());
+            }
+        }
+        if (kicks.isEmpty()) return kicks;
+
+        int transients = 0;
+        for (var window : windows) {
+            if (hasLowTransient(audio, window) && ++transients == 2) return kicks;
+        }
+        return Set.of();
+    }
+
+    private static boolean hasLowTransient(Path audio, Window window) throws IOException {
+        long start = window.note().startUs();
+        if (start < 80_000 || window.durationUs() < 155_000) return false;
+        var excerpt = ReferenceAudio.read(audio, (start - 80_000) / (double) MICROS_PER_SECOND, 0.235);
+        float[] samples = excerpt.samples();
+        int rate = excerpt.sampleRate();
+        double lowCoefficient = 1 - Math.exp(-2 * Math.PI * 140 / rate);
+        double dcCoefficient = 1 - Math.exp(-2 * Math.PI * 30 / rate);
+        double low = samples[0];
+        double dc = low;
+        double before = 0;
+        double attack = 0;
+        double tail = 0;
+        double broadbandAttack = 0;
+        // Equal 50 ms blocks placed before, just after, and well after the onset.
+        for (int i = 0; i < samples.length; i++) {
+            double sample = samples[i];
+            low += lowCoefficient * (sample - low);
+            dc += dcCoefficient * (low - dc);
+            double band = low - dc;
+            if (i >= rate * 20 / 1_000 && i < rate * 70 / 1_000) before += band * band;
+            if (i >= rate * 90 / 1_000 && i < rate * 140 / 1_000) {
+                attack += band * band;
+                broadbandAttack += sample * sample;
+            }
+            if (i >= rate * 185 / 1_000) tail += band * band;
+        }
+        // Require a material bass component and at least 3 dB of rise and fall.
+        return attack > 0 && attack >= broadbandAttack * 0.25 && attack >= before * 2 && attack >= tail * 2;
+    }
+
     private static Probe probe(InstrumentCatalogue catalogue, Path path, String source, Kind kind, Window window,
-                               Timeline timeline) throws IOException {
+                               Timeline timeline, Set<String> kicks) throws IOException {
         var note = window.note();
         long start = note.startUs();
         int midi = kind == Kind.DAC_SAMPLE ? Math.clamp(note.pitch(), 12, 117) : note.pitch();
@@ -313,7 +378,9 @@ final class ReconstructionVoices {
         try {
             var options = new CatalogueMatcher.Options(kind, null, null, midi, gateTicks,
                     kind == Kind.DAC_SAMPLE ? SHORTLIST_SIZE : InstrumentCatalogue.PAGE_LIMIT);
-            var report = CatalogueMatcher.matchAssets(catalogue, audio, options);
+            var report = CatalogueMatcher.matchAssets(catalogue, audio, options, kicks);
+            if (!kicks.isEmpty() && report.matches().isEmpty())
+                report = CatalogueMatcher.matchAssets(catalogue, audio, options);
             var seenAssets = new HashSet<String>();
             var hits = report.matches().stream()
                     .filter(row -> kind == Kind.DAC_SAMPLE || seenAssets.add(row.assetId()))

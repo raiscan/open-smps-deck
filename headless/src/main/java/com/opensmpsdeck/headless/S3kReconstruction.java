@@ -37,7 +37,8 @@ final class S3kReconstruction {
 
     record Reduction(MidiScore.Note note, Change change) {}
     record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
-    record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, List<Reduction> reductions) {}
+    record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
+                  List<Reduction> reductions) {}
 
     private record Event(MidiScore.Note note, int start, int end, int priority, String assetId, int volume) {}
 
@@ -119,6 +120,13 @@ final class S3kReconstruction {
     static Result arrange(String name, int ticksPerBeat, int frames, Score score, InstrumentCatalogue catalogue,
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices,
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> spillChoices) {
+        return arrange(name, ticksPerBeat, frames, score, catalogue, choices, spillChoices, Map.of());
+    }
+
+    static Result arrange(String name, int ticksPerBeat, int frames, Score score, InstrumentCatalogue catalogue,
+                          Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices,
+                          Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> spillChoices,
+                          Map<Integer, ReconstructionEcho.Estimate> echoes) {
         var parts = indexParts(score.parts());
         var reductions = new ArrayList<>(score.reductions());
         var tones = new ArrayList<Event>();
@@ -167,6 +175,8 @@ final class S3kReconstruction {
         var unplacedPsg = new ArrayList<Event>();
         List<List<Placement>> psg = allocateTones(spill, PSG_LANES, reductions, unplacedPsg);
         unplacedPsg.forEach(event -> reductions.add(new Reduction(event.note(), Change.PSG_BUSY)));
+        int fmNotes = fm.stream().mapToInt(List::size).sum();
+        int echoNotes = addEchoes(fm, echoes, frames);
         List<Event> dac = allocateDac(drumHits, reductions);
         if (fm.stream().allMatch(List::isEmpty) && dac.isEmpty())
             throw new IllegalArgumentException("No MIDI notes had a playable catalogue match in the requested interval");
@@ -183,8 +193,43 @@ final class S3kReconstruction {
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
                 samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList());
-        return new Result(project, fm.stream().mapToInt(List::size).sum(), psg.stream().mapToInt(List::size).sum(),
-                dac.size(), List.copyOf(reductions));
+        return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
+                dac.size(), echoNotes, List.copyOf(reductions));
+    }
+
+    private static int addEchoes(List<List<Placement>> lanes, Map<Integer, ReconstructionEcho.Estimate> estimates,
+                                 int frames) {
+        if (estimates.values().stream().noneMatch(e -> e.delayTicks() != null)) return 0;
+        var dry = lanes.stream().flatMap(List::stream).sorted(Comparator.comparingInt(p -> p.event.start())).toList();
+        int count = 0;
+        for (var original : dry) {
+            if (count >= 128) break;
+            Event event = original.event;
+            var estimate = estimates.get(event.note().partId());
+            int duration = original.end - event.start();
+            if (estimate == null || estimate.delayTicks() == null || duration < 2
+                    || duration >= estimate.delayTicks() - 1) continue;
+            int start = event.start() + estimate.delayTicks();
+            int end = Math.min(start + duration, frames);
+            if (end <= start) continue;
+            int attenuation = (int) Math.round(-20 * Math.log10(estimate.amplitudeRatio()) / .75);
+            var echo = new Event(event.note(), start, end, event.priority(), event.assetId(),
+                    Math.max(1, event.volume() - attenuation));
+            for (var lane : lanes.reversed()) {
+                int low = 0, high = lane.size();
+                while (low < high) {
+                    int mid = (low + high) >>> 1;
+                    if (lane.get(mid).event.start() < start) low = mid + 1;
+                    else high = mid;
+                }
+                if (low > 0 && lane.get(low - 1).end + 1 >= start) continue;
+                if (low < lane.size() && lane.get(low).event.start() <= end + 1) continue;
+                lane.add(low, new Placement(echo));
+                count++;
+                break;
+            }
+        }
+        return count;
     }
 
     private static final Comparator<Event> ORDER = Comparator.comparingInt(Event::start)

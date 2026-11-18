@@ -25,11 +25,11 @@ import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 final class ReconstructionCli {
     private static final long MICROS_PER_SECOND = 1_000_000;
-    private static final int REPORT_VERSION = 2;
+    private static final int REPORT_VERSION = 3;
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
-    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices,
+    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
                            Map<Integer, Path> stems) {}
     private record FileEvidence(String file, String sha256) {}
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
@@ -39,6 +39,8 @@ final class ReconstructionCli {
                           Map<String, FileEvidence> inputs, Map<String, FileEvidence> outputs,
                           List<PartEvidence> parts, List<MatchEvidence> matches, List<String> midiWarnings,
                           boolean wholePartVoices, List<ReconstructionVoices.SectionTrial> sectionTrials,
+                          boolean audioRefine, int refinedNotes, List<ReconstructionPitchRefinement.Change> pitchChanges,
+                          List<ReconstructionEcho.Estimate> echoEstimates, int echoNotes, boolean echoBankLimit,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio) {}
 
     @FunctionalInterface
@@ -50,7 +52,7 @@ final class ReconstructionCli {
 
     static void usage(PrintStream out) {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
-        out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--stem PART=WAV]...");
+        out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
@@ -71,12 +73,18 @@ final class ReconstructionCli {
             throw new IllegalArgumentException("Reconstruction interval must fit in "
                     + S3kRenderer.MAX_PRESENTATIONS + " presentations. Use --seconds for a shorter interval.");
         int frames = (int) presentations;
-        MidiScore score = MidiScore.read(midi);
+        MidiScore original = MidiScore.read(midi);
         for (int part : options.stems().keySet()) {
-            if (score.parts().stream().noneMatch(p -> p.id() == part))
+            if (original.parts().stream().noneMatch(p -> p.id() == part))
                 throw new IllegalArgumentException("Unknown MIDI part ID for --stem: " + part);
             ReferenceAudio.durationMicros(options.stems().get(part));
         }
+        var refinement = options.audioRefine()
+                ? ReconstructionPitchRefinement.refine(original, reference, options.stems(), durationUs)
+                : new ReconstructionPitchRefinement.Result(original, List.of());
+        MidiScore score = refinement.score();
+        var echoes = options.audioRefine() ? ReconstructionEcho.detect(score, reference, options.stems(), durationUs)
+                : Map.<Integer, ReconstructionEcho.Estimate>of();
         var prepared = S3kReconstruction.prepare(score, durationUs, options.keepOctaves());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
         InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
@@ -87,8 +95,18 @@ final class ReconstructionCli {
                 : matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
                         score, prepared.notes(), durationUs, choices));
         var result = S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                catalogue, sectionPlan.choices(), spill);
-        var compiled = ProjectCompiler.compileWithAssets(result.project());
+                catalogue, sectionPlan.choices(), spill, echoes);
+        com.opensmpsdeck.project.CompiledProject compiled;
+        boolean echoBankLimit = false;
+        try {
+            compiled = ProjectCompiler.compileWithAssets(result.project());
+        } catch (IllegalArgumentException failure) {
+            if (result.echoNotes() == 0 || !failure.getMessage().contains("32 KiB S3K bank")) throw failure;
+            echoBankLimit = true;
+            result = S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
+                    catalogue, sectionPlan.choices(), spill);
+            compiled = ProjectCompiler.compileWithAssets(result.project());
+        }
         Files.createDirectory(target);
         boolean complete = false;
         try {
@@ -108,7 +126,7 @@ final class ReconstructionCli {
             outputEvidence.put("package", evidence(packagePath));
             outputEvidence.put("wav", evidence(audio));
             var noteCounts = new LinkedHashMap<Integer, Integer>();
-            for (var note : score.notes()) if (note.startUs() < durationUs) noteCounts.merge(note.partId(), 1, Integer::sum);
+            for (var note : original.notes()) if (note.startUs() < durationUs) noteCounts.merge(note.partId(), 1, Integer::sum);
             var partEvidence = score.parts().stream().map(p -> new PartEvidence(p.id(), p.name(), p.program(),
                     p.drums(), noteCounts.getOrDefault(p.id(), 0))).toList();
             var matches = new java.util.ArrayList<MatchEvidence>();
@@ -119,6 +137,8 @@ final class ReconstructionCli {
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
                     matches, score.warnings(), options.wholePartVoices(), sectionPlan.trials(),
+                    options.audioRefine(), (int) score.notes().stream().filter(note -> note.startUs() < durationUs).count(),
+                    refinement.changes(), List.copyOf(echoes.values()), result.echoNotes(), echoBankLimit,
                     result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
@@ -159,6 +179,7 @@ final class ReconstructionCli {
         boolean keepOctaves = false;
         boolean fmOnly = false;
         boolean wholePartVoices = false;
+        boolean audioRefine = false;
         var stems = new java.util.TreeMap<Integer, Path>();
         var seen = new java.util.HashSet<String>();
         for (int i = 5; i < args.length; i++) {
@@ -174,6 +195,10 @@ final class ReconstructionCli {
             }
             if (option.equals("--whole-part-voices")) {
                 wholePartVoices = true;
+                continue;
+            }
+            if (option.equals("--audio-refine")) {
+                audioRefine = true;
                 continue;
             }
             if (++i == args.length) throw new IllegalArgumentException("Missing argument to " + option);
@@ -202,7 +227,7 @@ final class ReconstructionCli {
             }
         }
         if (name.isBlank()) throw new IllegalArgumentException("Project name must not be blank");
-        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, stems);
+        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems);
     }
 
     private static FileEvidence evidence(Path path) throws IOException {

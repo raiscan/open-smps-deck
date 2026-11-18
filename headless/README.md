@@ -139,6 +139,20 @@ verified locked-on ROM. Native playback still uses the original bytes.
 The matcher auditions the FM patch or PSG envelope the arrangement
 can deploy, and DAC samples at their native rates with centered pan.
 
+For GM kick notes 35 and 36, the matcher favors standalone kick samples after
+two distinct excerpts support a low-frequency rise and decay. It uses the
+catalogue's kick tag or verified Sonic 3 & Knuckles DAC slot roles.
+
+Add `--audio-refine` to check the WAV for missed notes and effects. The pitch
+pass can split a held note or fill a short gap when repeat measurements
+support a stable pitch. The echo pass needs quieter repeats at a consistent
+delay on separate notes. It writes a quieter FM copy into a free channel
+gap. Dry notes keep their placement. The report identifies accepted pitch
+changes, echo delay evidence, the number of echo notes, and unresolved tails.
+A tail alone can come from a synth release or reverb. The command records
+that case without adding a repeat. Time-aligned stems give both passes
+cleaner evidence than the mix.
+
 The arrangement quantizes MIDI timing to 60 Hz and uses five FM channels.
 Three PSG channels carry notes that miss an FM slot, within their supported
 pitch range. `--fm-only` disables the PSG overflow channels. A single DAC lane

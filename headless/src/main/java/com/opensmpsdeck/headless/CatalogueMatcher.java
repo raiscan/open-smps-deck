@@ -47,15 +47,20 @@ public final class CatalogueMatcher {
     private CatalogueMatcher() {}
 
     public static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
-        return match(index, audio, options, false);
+        return match(index, audio, options, false, Set.of());
     }
 
     static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
-        return match(index, audio, options, true);
+        return matchAssets(index, audio, options, Set.of());
+    }
+
+    static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options,
+                              Set<String> variants) throws IOException {
+        return match(index, audio, options, true, variants);
     }
 
     private static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options,
-                                boolean rawAssets) throws IOException {
+                                boolean rawAssets, Set<String> variants) throws IOException {
         float[] samples = audio.samples();
         var reference = AudioFingerprint.extract(samples, audio.sampleRate());
         double seconds = samples.length / (double) audio.sampleRate();
@@ -65,16 +70,19 @@ public final class CatalogueMatcher {
         var skipped = new ArrayList<Skipped>();
         var emitted = new HashSet<EmittedAsset>();
         Set<String> trackData = rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
-        int eligible;
+        int total;
+        int eligible = 0;
         int offset = 0;
         do {
             var query = new InstrumentCatalogue.Query(null, options.kind(), null, options.role(),
                     options.source(), null, offset, InstrumentCatalogue.PAGE_LIMIT);
             var page = index.search(query);
-            eligible = page.total();
+            total = page.total();
             for (var hit : page.items()) {
                 checkInterrupted();
                 var variant = hit.variant();
+                if (!variants.isEmpty() && !variants.contains(variant.id())) continue;
+                eligible++;
                 if (rawAssets && !emitted.add(new EmittedAsset(variant.assetId(), variant.recipe().rate()))) continue;
                 if (trackData.contains(variant.assetId())) {
                     skipped.add(new Skipped(variant.id(), "Azure Lake reads track data past its five local FM voices"));
@@ -90,7 +98,7 @@ public final class CatalogueMatcher {
                 }
             }
             offset += page.items().size();
-        } while (offset < eligible);
+        } while (offset < total);
 
         ranked.sort(Comparator.comparingDouble((Ranked row) -> row.distance().total())
                 .thenComparing(Ranked::variantId));
