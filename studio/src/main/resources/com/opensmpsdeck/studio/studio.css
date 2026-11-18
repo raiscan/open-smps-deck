@@ -6,7 +6,9 @@
 .button { -fx-background-color: #253448; -fx-text-fill: #dfe9f7; -fx-background-radius: 5; -fx-padding: 8 12; -fx-cursor: hand; }
 .button:hover { -fx-background-color: #32475f; }
 .button:focused { -fx-border-color: #61d9b6; -fx-border-radius: 5; }
-.projectbar { -fx-padding: 12 20; -fx-background-color: #172130; -fx-alignment: center-left; }
+.projectbar { -fx-padding: 8 20; -fx-background-color: #172130; -fx-alignment: center-left; }
+.projectbar .play-action { -fx-background-color: #245f58; }
+.projectbar .play-action:hover { -fx-background-color: #30786e; }
 .project-title { -fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #f0f6ff; }
 .filebar { -fx-padding: 8 20; -fx-background-color: #121c29; -fx-alignment: center-left; }
 .file-state { -fx-text-fill: #8bcab9; -fx-font-size: 13px; }

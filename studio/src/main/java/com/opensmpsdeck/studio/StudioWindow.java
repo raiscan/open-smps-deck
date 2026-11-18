@@ -101,14 +101,19 @@ public final class StudioWindow implements AutoCloseable {
         songSettings=button("Song settings…",this::settings);
         binaryExport=button("Export SMPS…",()->export(false));
         nativePackageExport=button("Export package…",this::exportPackage);
-        var projectActions=new FlowPane(8,6,songSettings,button("▶  Play",this::play),button("■  Stop",this::stop),
+        Button playButton=button("▶  Play",this::play),stopButton=button("■  Stop",this::stop);
+        playButton.getStyleClass().add("play-action");
+        HBox projectActions=new HBox(8,songSettings,playButton,stopButton,
                 button("Export WAV…",()->export(true)),binaryExport,nativePackageExport);
+        projectActions.setMinWidth(Region.USE_PREF_SIZE);
         projectActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
         for(Node action:projectActions.getChildren()){
             action.managedProperty().bind(action.visibleProperty());
             ((Button)action).setMinWidth(Region.USE_PREF_SIZE);
         }
-        HBox projectLine=new HBox(12,title,spacer(),projectActions);
+        HBox projectLine=new HBox(12,title,projectActions);
+        HBox.setHgrow(title,Priority.ALWAYS);
+        title.setMaxWidth(Double.MAX_VALUE);
         projectLine.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         projectLine.getStyleClass().add("projectbar");
         Button reload=button("Reload file + keep local recovery",this::reload);reload.setId("reload-file");

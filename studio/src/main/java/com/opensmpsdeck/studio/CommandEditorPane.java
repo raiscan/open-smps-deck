@@ -7,6 +7,7 @@ import com.opensmpsdeck.project.ProjectEdits;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
@@ -33,10 +34,10 @@ final class CommandEditorPane extends BorderPane {
     private final ComboBox<String> eventAsset = new ComboBox<>();
     private final VBox eventAssetField = field("Command asset", eventAsset);
     private final TextField tick = new TextField("0"), bytes = new TextField();
+    private final VBox operandField = field("Raw operand bytes (hex)", bytes);
     private final ComboBox<String> voice = new ComboBox<>(), repeat = new ComboBox<>();
     private final ComboBox<String> psgEnvelope = new ComboBox<>(), modEnvelope = new ComboBox<>();
     private final TextField volume = new TextField();
-    private final Label heading = label("SOURCE COMMANDS", "section");
     private final Label linked = label("Choose a source", "muted");
     private final Label help = label("", "help"), draftNotice = label("", "muted");
     private final Label settingsNotice = label("", "muted");
@@ -60,7 +61,11 @@ final class CommandEditorPane extends BorderPane {
         tickColumn.setPrefWidth(65); commandColumn.setPrefWidth(180); bytesColumn.setPrefWidth(200);
         table.getColumns().addAll(List.of(tickColumn, commandColumn, bytesColumn));
         table.setPlaceholder(label("No native events. Fill the form and choose Add.", "muted"));
-        table.setPrefHeight(220); table.setMinHeight(120);
+        table.setFixedCellSize(32);
+        table.prefHeightProperty().bind(Bindings.size(table.getItems())
+                .map(rows -> 32 + Math.clamp(rows.intValue(), 1, 6) * table.getFixedCellSize()));
+        table.setMinHeight(Region.USE_PREF_SIZE);
+        table.setMaxHeight(Region.USE_PREF_SIZE);
         table.getSelectionModel().selectedItemProperty().addListener((o, a, b) -> {
             if (!updating && b != null) loadCommand(b);
         });
@@ -73,6 +78,10 @@ final class CommandEditorPane extends BorderPane {
         });
         tick.setId("command-tick"); tick.setPrefColumnCount(6);
         bytes.setId("command-bytes"); bytes.setPrefColumnCount(18); bytes.setPromptText("Operands only: C0 or 00 01 01 04");
+        bytes.setTooltip(new Tooltip("Use hex bytes 00–FF separated by spaces. Optional 0x prefixes are accepted."));
+        operandField.managedProperty().bind(operandField.visibleProperty());
+        draftNotice.visibleProperty().bind(draftNotice.textProperty().isNotEmpty());
+        draftNotice.managedProperty().bind(draftNotice.visibleProperty());
         configureAssetPicker(eventAsset, "command-asset", () -> assetKind(command.getValue()) == NativeCommand.Asset.VOICE
                 ? "Choose an FM voice" : "Off",
                 id -> assetName(assetKind(command.getValue()), id));
@@ -98,10 +107,10 @@ final class CommandEditorPane extends BorderPane {
             if (current == null) report("That event is no longer present. Choose New form or select an event.");
             else loadCommand(current);
         });
-        FlowPane eventFields = new FlowPane(10, 8, field("Native command", command), field("Tick (decimal)", tick), field("Raw operand bytes (hex)", bytes), eventAssetField);
+        FlowPane eventFields = new FlowPane(10, 8, field("Native command", command), field("Tick (decimal)", tick),
+                operandField, eventAssetField);
         FlowPane eventButtons = new FlowPane(8, 8, add, apply, delete, up, down, fresh, reloadEvent);
         Label ordering = label("At the same tick, authored row order is execution order. Up / Down changes that order.", "muted");
-        Label inputGuide = label("Operands are raw hex bytes 00–FF, separated by spaces (0x prefixes accepted). The command and asset selectors supply their bytes. Press Enter or Apply to commit a draft; typing alone is not saved.", "muted");
         tick.setOnAction(e -> commitForm()); bytes.setOnAction(e -> commitForm());
 
         voice.setId("source-voice"); voice.setPrefWidth(240); voice.setMaxWidth(Double.MAX_VALUE);
@@ -130,8 +139,9 @@ final class CommandEditorPane extends BorderPane {
         FlowPane assetLinks=new FlowPane(8,8,editVoice,editPsg,editMod);
         Label repeatHelp = label("RESET restores supported native state on every repetition. CARRY retains it between repetitions of one clip. Each independent clip always starts reset.", "muted");
         FlowPane envelopeSettings=new FlowPane(10,8,field("PSG volume envelope",psgEnvelope),field("Modulation envelope",modEnvelope));
-        VBox contents = new VBox(10, heading, linked, table, ordering, eventFields, eventButtons, help, inputGuide,
-                draftNotice, new Separator(), label("LINKED SOURCE SETTINGS", "section"), settings, envelopeSettings, settingButtons, assetLinks, repeatHelp, settingsNotice);
+        VBox contents = new VBox(10, eventFields, eventButtons, draftNotice, table, ordering, help,
+                new Separator(), label("LINKED SOURCE SETTINGS", "section"), linked,
+                settings, envelopeSettings, settingButtons, assetLinks, repeatHelp, settingsNotice);
         contents.setPadding(new Insets(12)); contents.setMinWidth(0);
         ScrollPane scroll = new ScrollPane(contents); scroll.setFitToWidth(true); scroll.setMinSize(0, 0);
         scroll.getStyleClass().add("editor-scroll"); setCenter(scroll);
@@ -158,9 +168,8 @@ final class CommandEditorPane extends BorderPane {
             voice.setValue(previousVoice); voice.setDisable(next == null || !next.type().equals("FM"));
             updateEnvelopeChoices(psgEnvelope,"PSG_VOLUME");updateEnvelopeChoices(modEnvelope,"MODULATION");
             psgEnvelope.setDisable(next==null||!next.type().equals("PSG"));modEnvelope.setDisable(next==null);
-            heading.setText(next == null ? "SOURCE COMMANDS" : next.name().toUpperCase(Locale.ROOT) + " · COMMANDS");
             long count = next == null ? 0 : project.clips().stream().filter(c -> c.sequenceId().equals(next.id())).count();
-            linked.setText(next == null ? "Choose a source in the sequence browser" : "Linked source · " + count + " clip instance" + (count == 1 ? "" : "s") + " · event, voice, volume and repeat edits affect every linked clip");
+            linked.setText(next == null ? "Choose a source in the sequence browser" : "Command and source edits affect all " + count + " linked clip instance" + (count == 1 ? "" : "s"));
             if (!same) {
                 selectedId = null; originalCommand = null; commandBaseline = next; emptyFormType = command.getValue();
                 tick.setText("0"); bytes.setText(hexArguments(command.getValue().defaultArguments()));
@@ -306,7 +315,10 @@ final class CommandEditorPane extends BorderPane {
 
     private void updateHelp() {
         NativeCommand type = command.getValue();
-        help.setText(type == null ? "" : "Raw operand bytes: " + type.argumentCount() + ". " + type.help() + (type == NativeCommand.MODULATION && project != null
+        boolean hasOperands = type != null && type.argumentCount() > 0;
+        operandField.setVisible(hasOperands);
+        help.setText(type == null ? "" : (hasOperands ? "Raw operand bytes: " + type.argumentCount() + ". " : "")
+                + type.help() + (type == NativeCommand.MODULATION && project != null
                 && project.formatVersion() < 4 ? " This project version requires an explicit note attack tick." : ""));
     }
 
@@ -317,7 +329,7 @@ final class CommandEditorPane extends BorderPane {
         draftNotice.setText(removed ? "Selected event was removed. Your draft is retained; select an event or choose New form."
                 : stale ? "Source changed while this form was open. Your draft is retained; reselect the event / Reload event, or choose New form before applying."
                 : commandDraftChanged() ? "Unapplied event draft · Enter / Apply commits changes; Add inserts a new event."
-                : "Choose an event to edit it, or fill the form and Add.");
+                : "");
         settingsNotice.setText(settingsDraftChanged() ? "Unapplied source settings · Apply source commits these values. Changed fields are checked against the current source; untouched fields keep their latest values." : "");
         apply.setDisable(selectedId == null); delete.setDisable(selectedId == null);
         int index = source == null ? -1 : commandIndex(source, selectedId);
