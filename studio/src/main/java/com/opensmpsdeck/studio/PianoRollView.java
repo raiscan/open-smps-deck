@@ -19,10 +19,14 @@ final class PianoRollView extends ViewportCanvas {
     Consumer<String> selection=ignored -> {};
     Consumer<NoteEvent> edit=ignored -> {};
     Consumer<NoteEvent> addition=ignored -> {};
+    private final boolean readOnly;
     private NoteEvent dragging, ghost;
     private double pressX,pressY;
     private boolean resizing;
-    PianoRollView() {
+    PianoRollView() { this(false); }
+
+    PianoRollView(boolean readOnly) {
+        this.readOnly=readOnly;
         dimensions(1000,400);
         canvas.setOnMousePressed(e -> {
             canvas.requestFocus();
@@ -31,6 +35,7 @@ final class PianoRollView extends ViewportCanvas {
                 if(marker.isPresent()){commandSelection.accept(marker.get().id());return;}
             }
             NoteEvent note=hit(e.getX(),e.getY()); selected=note==null?null:note.id(); selection.accept(selected);
+            if(readOnly){draw();return;}
             dragging=note; ghost=note; pressX=e.getX(); pressY=e.getY();
             resizing=note!=null&&e.getX()>=KEYBOARD+(note.tick()+note.duration())*scale-offset-8;
             if(note==null&&e.getClickCount()==2&&sequence!=null&&e.getX()>KEYBOARD&&e.getY()>HEADER) {
@@ -84,7 +89,7 @@ final class PianoRollView extends ViewportCanvas {
             for(long b=first;b<=last;b++) {
                 double x=KEYBOARD+(double)b*ticksPerBeat*scale-offset; if(x>w)break; if(x<KEYBOARD)continue;
                 g.setStroke(Color.web(b%4==0?"#415169":"#2a374a")); g.strokeLine(x,HEADER,x,canvas.getHeight());
-                g.setFill(Color.web("#8fa2bb")); g.fillText(String.valueOf(b+1),x+5,17);
+                g.setFill(Color.web("#8fa2bb")); g.fillText(readOnly?b+" s":String.valueOf(b+1),x+5,17);
             }
             for(NoteEvent n:sequence.notes()) {
                 NoteEvent note=ghost!=null&&ghost.id().equals(n.id())?ghost:n;

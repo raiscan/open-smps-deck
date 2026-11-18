@@ -139,16 +139,9 @@ public final class S3kRenderer {
     private static PreparedSmpsMusicActivation prepare(CompiledProject project, int id, boolean allowRestore,
                                                        MusicRestoreSink restore) {
         Objects.requireNonNull(project, "project");
-        var nativeProgram = project.nativeProgram();
-        var data = nativeProgram == null
-                ? new Sonic3kSmpsData(S3kBinary.validateAndCopy(project), 0)
-                : new NativeBankData(project, S3kBinary.inspectNative(project, allowRestore));
+        var data = prepareData(project, allowRestore);
         data.setId(id);
-        // The pinned setters retain their inputs. These arrays belong only to
-        // this render and are installed before any sequencer state is captured.
-        data.setPsgEnvelopes(nativeEnvelopes(project.psgEnvelopes()));
-        data.setModEnvelopes(nativeEnvelopes(project.modulationEnvelopes()));
-        var dac = nativeDac(project.samples(), nativeProgram);
+        var dac = nativeDac(project.samples(), project.nativeProgram());
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
         var source = SmpsSourceDescriptor.from(data);
         var detached = new SmpsDriver();
@@ -160,6 +153,24 @@ public final class S3kRenderer {
         return new PreparedSmpsMusicActivation(
                 new SmpsMusicActivation(source, data.getChannels(), data.getPsgChannels()),
                 incoming, SmpsLogicalTransitionPolicies.forConfig(config), new SmpsDacSelection(source, dac));
+    }
+
+    static SmpsSequencer timelineSequencer(CompiledProject project, MusicRestoreSink restore) {
+        var data = prepareData(project, true);
+        var dac = nativeDac(project.samples(), project.nativeProgram());
+        var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
+        return new SmpsSequencer(data, dac, restore, config);
+    }
+
+    private static Sonic3kSmpsData prepareData(CompiledProject project, boolean allowRestore) {
+        var data = project.nativeProgram() == null
+                ? new Sonic3kSmpsData(S3kBinary.validateAndCopy(project), 0)
+                : new NativeBankData(project, S3kBinary.inspectNative(project, allowRestore));
+        // These arrays belong to this sequencer and are installed before any
+        // sequencer state is captured.
+        data.setPsgEnvelopes(nativeEnvelopes(project.psgEnvelopes()));
+        data.setModEnvelopes(nativeEnvelopes(project.modulationEnvelopes()));
+        return data;
     }
 
     private static SmpsDriverSession newSession(ChipWriteObserver observer) {

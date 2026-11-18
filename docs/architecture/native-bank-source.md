@@ -84,8 +84,12 @@ whole bank, including shared data and unvisited bytes. The local voice extent
 covers the voice references reached by the analyzer. Duplicate DAC PCM can
 share an asset while each note retains its own rate.
 
-Imported songs use the Native bank editor and preserve their original stream
-structure. Playback boundaries for each cartridge variant and command remain
+Imported songs open on an arrangement derived from the pinned sequencer's
+presentation-time events. The display project exists in memory. It uses
+eight-second windows on each active lane, and sequences contain the notes
+and DAC hits for those windows. The original native stream drives playback
+and export. **Native bank** edits refresh the derived arrangement.
+Playback boundaries for each cartridge variant and command remain
 tracked in the [coverage matrix](s3k-support.md).
 
 | Gate | Evidence needed |

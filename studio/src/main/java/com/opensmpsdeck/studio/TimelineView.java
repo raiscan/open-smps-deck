@@ -22,16 +22,21 @@ final class TimelineView extends ViewportCanvas {
     Consumer<String> selection=ignored -> {};
     Consumer<Clip> edit=ignored -> {};
     Consumer<Clip> placement=ignored -> {};
+    private final boolean readOnly;
     private Clip dragging, ghost;
     private double pressX;
     private boolean resizing;
 
-    TimelineView() {
+    TimelineView() { this(false); }
+
+    TimelineView(boolean readOnly) {
+        this.readOnly=readOnly;
         dimensions(1400,RULER+LANES.size()*ROW+20);
         canvas.setOnMousePressed(e -> {
             canvas.requestFocus(); selectedLane=laneAt(e.getY());
             Clip clip=hit(e.getX(),e.getY());
             selected=clip==null?null:clip.id(); selection.accept(selected);
+            if(readOnly){draw();return;}
             dragging=clip; ghost=clip; pressX=e.getX();
             resizing=clip!=null && e.getX()>=GUTTER+(clip.startTick()+clip.lengthTicks())*scale-offset-10;
             draw();
@@ -49,6 +54,7 @@ final class TimelineView extends ViewportCanvas {
             draw();
         });
         canvas.setOnMouseClicked(e->{if(e.getClickCount()==2&&e.isStillSincePress()&&selected!=null)openNotes.run();});
+        if(readOnly)return;
         canvas.setOnDragOver(e -> {
             if(e.getDragboard().hasString() && e.getDragboard().getString().startsWith("smps-sequence:")) e.acceptTransferModes(TransferMode.COPY);
             e.consume();
@@ -68,8 +74,9 @@ final class TimelineView extends ViewportCanvas {
         if(project!=value){dragging=null;ghost=null;}
         double previousOffset=offset;
         project=value; selected=selectedId;
+        if(project==null){updateViewport();return;}
         int end=project.clips().stream().mapToInt(c->c.startTick()+c.lengthTicks()).max().orElse(0);
-        double minimum=project.ticksPerBeat()*32.0;
+        double minimum=project.ticksPerBeat()*(readOnly?8.0:32.0);
         dimensions(GUTTER+(Math.max(minimum,end)+project.ticksPerBeat()*4.0)*scale,RULER+LANES.size()*ROW+20);
         double scrollable=Math.max(0,contentWidth-scroll.getViewportBounds().getWidth());
         scroll.setHvalue(scrollable==0?0:Math.clamp(previousOffset/scrollable,0,1));
@@ -98,10 +105,10 @@ final class TimelineView extends ViewportCanvas {
         for(long b=first;b<=last;b++) {
             double x=GUTTER+(double)b*beat*scale-offset;
             if(x<GUTTER) continue;
-            boolean bar=b%4==0;
+            boolean bar=readOnly||b%4==0;
             g.setStroke(Color.web(bar?"#344257":"#233043")); g.strokeLine(x,RULER,x,canvas.getHeight());
             g.setFill(Color.web(bar?"#d1dbe8":"#6f8198"));
-            g.fillText(bar?String.valueOf(b/4+1):"·",x+6,24);
+            g.fillText(readOnly?b+" s":bar?String.valueOf(b/4+1):"·",x+6,24);
         }
         for(Clip clip:project.clips()) drawClip(g,ghost!=null&&clip.id().equals(ghost.id())?ghost:clip);
         if(playhead>=0) {
@@ -137,7 +144,7 @@ final class TimelineView extends ViewportCanvas {
                 g.setStroke(Color.web("#ffcf95"));
                 for(SampleTrigger trigger:source.triggers()){
                     double hitX=origin+trigger.tick()*scale;
-                    if(hitX<x+width) g.strokeLine(hitX,y+23,hitX,y+33);
+                    if(hitX>=GUTTER&&hitX<x+width&&hitX<=canvas.getWidth()) g.strokeLine(hitX,y+23,hitX,y+33);
                 }
             }
             for(NoteEvent note:source.notes()) {
@@ -150,6 +157,6 @@ final class TimelineView extends ViewportCanvas {
         }
         g.setFill(Color.web("#e5f8f4")); g.setFont(Font.font("System",13)); g.fillText(source.name(),Math.max(x+8,GUTTER+8),y+15);
         g.restore();
-        g.setFill(Color.web("#d4f3ef",0.7)); g.fillRoundRect(x+width-6,y+12,2,16,2,2);
+        if(!readOnly){g.setFill(Color.web("#d4f3ef",0.7)); g.fillRoundRect(x+width-6,y+12,2,16,2,2);}
     }
 }

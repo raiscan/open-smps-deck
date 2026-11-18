@@ -40,8 +40,10 @@ public final class StudioWindow implements AutoCloseable {
     private final TabPane sourceModes=new TabPane();
     private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands"),assetMode=new Tab("Assets");
     private final TabPane assetKinds=new TabPane();
+    private final Tab nativeBankTab=new Tab("Native bank",nativeBank);
+    final NativeArrangementPane nativeArrangement=new NativeArrangementPane(this::showNativeBank);
     private final Tab nativeAssets=new Tab("Voices & assets");
-    private final TabPane nativeTabs=new TabPane(new Tab("Native bank",nativeBank),nativeAssets);
+    private final TabPane nativeTabs=new TabPane(new Tab("Arrangement",nativeArrangement),nativeBankTab,nativeAssets);
     private SplitPane arrangementLayout;
     private VBox assetBody;
     private Button songSettings, binaryExport, nativePackageExport, romImport;
@@ -69,13 +71,14 @@ public final class StudioWindow implements AutoCloseable {
         stage.setOnCloseRequest(event->{if(!confirmLeave())event.consume();else close();});
         load(file);
     }
+    private void showNativeBank(){nativeTabs.getSelectionModel().select(nativeBankTab);}
     void showNotes(){sourceModes.getSelectionModel().select(noteMode);editors.showNotes();}
     void showCommands(){sourceModes.getSelectionModel().select(commandMode);editors.showNotes();}
     void showAssets(){sourceModes.getSelectionModel().select(assetMode);editors.showNotes();}
     void showEnvelopes(){showAssets();assetKinds.getSelectionModel().select(1);}
     void showSamples(){showAssets();assetKinds.getSelectionModel().select(2);}
     private void openSample(String id){showSamples();samples.selectSample(id);}
-    private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
+    private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);nativeArrangement.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
     ProjectDocument document(){return document;}
     Scene scene(){return stage.getScene();}
     String selectedClip(){return selectedClip;}
@@ -173,7 +176,7 @@ public final class StudioWindow implements AutoCloseable {
         ProjectDocument replacement=ProjectDocument.open(path);
         ProjectWatcher replacementWatcher=new ProjectWatcher(path,()->watchChanged(replacement));
         if(watcher!=null)watcher.close();
-        playback.stop();voices.setProject(null);envelopes.setProject(null);samples.setProject(null);
+        stopPlayback();nativeArrangement.setProject(null);voices.setProject(null);envelopes.setProject(null);samples.setProject(null);
         triggers.setSource(null,null);commands.setSource(null,null);nativeBank.setProject(null);
         document=replacement;watcher=replacementWatcher;
         document.refresh(); // close the open/register race
@@ -217,6 +220,7 @@ public final class StudioWindow implements AutoCloseable {
             root.setCenter(arrangementLayout);
         }
         nativeBank.setProject(nativeMode?p:null);
+        nativeArrangement.setProject(nativeMode?p:null);
         if(nativeMode){
             voices.setProject(p);envelopes.setProject(p);samples.setProject(p);
             refreshStatus();updating=false;return;
@@ -342,8 +346,25 @@ public final class StudioWindow implements AutoCloseable {
             e.consume();
         }
     }
-    private void play(){long epoch=++playbackEpoch;StudioProject snapshot=document.project();playback.play(snapshot,text->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch)status.setText(text);}),tick->Platform.runLater(()->{if(!closed&&epoch==playbackEpoch){timeline.playhead=tick;timeline.draw();}}));}
-    private void stop(){playbackEpoch++;playback.stop();timeline.playhead=-1;timeline.draw();status.setText("Stopped");}
+    private void play(){
+        long epoch=++playbackEpoch;
+        StudioProject snapshot=document.project();
+        playback.play(snapshot,text->Platform.runLater(()->{
+            if(!closed&&epoch==playbackEpoch)status.setText(text);
+        }),tick->Platform.runLater(()->{
+            if(closed||epoch!=playbackEpoch)return;
+            if(snapshot.nativeProgram()!=null)nativeArrangement.setPlayhead(tick);
+            else {timeline.playhead=tick;timeline.draw();}
+        }));
+    }
+    private void stopPlayback(){
+        playbackEpoch++;
+        playback.stop();
+        timeline.playhead=-1;
+        timeline.draw();
+        nativeArrangement.setPlayhead(-1);
+    }
+    private void stop(){stopPlayback();status.setText("Stopped");}
     private boolean save(){try{document.save();refreshStatus();status.setText("Saved "+document.path().getFileName());return true;}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();return false;}}
     private void reload(){try{Path recovery=document.reloadKeepingRecovery();stop();undo.clear();redo.clear();refreshView();status.setText(recovery==null?"Reloaded file":"Local edits preserved in "+recovery.getFileName());}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();}}
     private FileChooser chooser(String heading,String extension){FileChooser chooser=new FileChooser();chooser.setTitle(heading);chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extension.equals("json")?"SMPS Studio project":"Export ("+extension+")","*."+extension));return chooser;}
@@ -487,5 +508,5 @@ public final class StudioWindow implements AutoCloseable {
         io.submit(()->{try{ProjectPackage.write(snapshot,file.toPath());Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
-    @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();samples.close();io.shutdownNow();}
+    @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();samples.close();nativeArrangement.close();io.shutdownNow();}
 }

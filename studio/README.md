@@ -28,7 +28,9 @@ the frame limit stored in the bank source. See the
 
 **Import S3&K…** lists the music catalogue from a verified local locked-on
 cartridge image and saves the selected song as a new native project.
-The imported project opens in a separate window with live refresh.
+The imported project opens on a read-only arrangement in a separate watched
+window. Select a clip to inspect the sequencer's note or DAC events, or use
+**Edit in Native bank** to change the source.
 [Studio import steps](../docs/user-guide/studio.md#import-s3k-music)
 
 ## Run

@@ -382,6 +382,33 @@ class StudioWindowTest {
         });
     }
 
+    @Test void nativeArrangementShowsReadOnlyNotesAndKeepsTheSourceDocument() throws Exception {
+        byte[] bank={0,0,2,0,1,64,14,(byte)128,0,0,15,(byte)128,0,0,(byte)0xf2,(byte)0x99,12,(byte)0xf2};
+        NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());
+        var voice = new Voice("voice", "Original fixture voice", java.util.Collections.nCopies(25, 0));
+        StudioProject project=new StudioProject(5,"Native arrangement","S3K",12,64,List.of(voice),List.of(),List.of(),List.of(),List.of(),program);
+        replace(ProjectFormat.write(project));
+        await(()->window.nativeArrangement.timeline.project!=null);
+        fx(()->{
+            layout();
+            var tabs=(TabPane)window.scene().lookup("#native-program-tabs");
+            assertEquals("Arrangement",tabs.getSelectionModel().getSelectedItem().getText());
+            assertFalse(window.nativeArrangement.piano.sequence.notes().isEmpty());
+            var timeline=window.nativeArrangement.timeline;
+            var clip=timeline.project.clips().getFirst();
+            double x=TimelineView.GUTTER+clip.startTick()*timeline.scale+1;
+            double y=TimelineView.RULER+TimelineView.LANES.indexOf(clip.lane())*TimelineView.ROW+20;
+            mouse(timeline.canvas,MouseEvent.MOUSE_PRESSED,x,y,true);
+            mouse(timeline.canvas,MouseEvent.MOUSE_DRAGGED,x+30,y+TimelineView.ROW,true);
+            mouse(timeline.canvas,MouseEvent.MOUSE_RELEASED,x+30,y+TimelineView.ROW,false);
+            assertEquals(clip.id(),timeline.selected);
+            assertEquals(clip,timeline.project.clips().getFirst());
+            assertEquals(project,window.document().project());
+            assertFalse(window.document().dirty());
+            return null;
+        });
+    }
+
     @Test void nativeBankKeepsExactAddressesThroughEditUndoAndExternalRefresh() throws Exception {
         byte[] bank={0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
         NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());
@@ -390,7 +417,9 @@ class StudioWindowTest {
         await(()->window.document().project().nativeProgram()!=null);
         fx(()->{
             layout();
-            assertNotNull(window.scene().lookup("#native-program-tabs"));
+            var tabs=(TabPane)window.scene().lookup("#native-program-tabs");
+            tabs.getSelectionModel().select(1);
+            layout();
             assertEquals(1,((TableView<?>)window.scene().lookup("#native-events")).getItems().size());
             TextArea raw=(TextArea)window.scene().lookup("#native-bank-bytes");
             raw.setText(raw.getText().replace("40","50"));

@@ -64,7 +64,9 @@ final class StudioPlayback implements AutoCloseable {
     static int presentationCount(StudioProject project) {
         return ProjectRenderTiming.presentationCount(project);
     }
-    static double tickAtPresentation(StudioProject project,int presentations) { return presentations*(256-project.tempo())/256.0; }
+    static double tickAtPresentation(StudioProject project,int presentations) {
+        return project.nativeProgram()!=null?presentations:presentations*(256-project.tempo())/256.0;
+    }
     synchronized void stop() { generation.incrementAndGet(); playing=false; releaseLine(); }
     private void releaseLine() { if(line!=null) { line.stop(); line.flush(); line.close(); line=null; } }
     @Override public void close() { stop(); worker.shutdownNow(); }

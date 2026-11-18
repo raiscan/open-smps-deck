@@ -14,8 +14,14 @@ a clip or source to open Notes. The inspector has its own scroll area.
 
 1. Click **Import S3&K…** and choose your 4 MiB locked-on S3&K cartridge image.
 2. Select a song by title or hex ID.
-3. Choose a new `.smps.json` destination. The imported song opens in a separate
-   Studio window, where you can inspect and edit its **Native bank**.
+3. Choose a new `.smps.json` destination. The song opens in a separate Studio
+   window, with its **Arrangement** tab selected.
+
+The pinned sequencer lays out FM and PSG notes and DAC hits in eight-second
+clips. The ruler measures playback time, so tempo changes and loops stay
+aligned with the playhead. Select a clip to see its piano roll or DAC hits.
+Use **Edit in Native bank** for source changes. The arrangement is read-only
+and refreshes after edits, undo and external file changes.
 
 Imported projects carry the bank and native asset bindings, so they can be
 opened and rendered without the cartridge. **Extra Life** restores previous
