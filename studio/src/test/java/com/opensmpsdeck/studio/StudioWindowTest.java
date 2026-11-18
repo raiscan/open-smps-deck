@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.S3kRomImporter;
+import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.project.*;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
@@ -36,6 +37,62 @@ class StudioWindowTest {
         fx(()->{stage=new Stage();window=new StudioWindow(stage,file);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
+
+    @Test void instrumentCataloguePagesFiltersAndAppliesWithProjectUndo() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        String asset = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope",
+                new byte[]{0, 1, (byte) 0x83});
+        var occurrence = new InstrumentCatalogue.Occurrence("fixture.s3k", "S3K", "review",
+                "Evening clock", 42, 3, "PSG1", 0, true);
+        for (int i = 1; i <= 31; i++)
+            builder.variant(asset, "Test variant %02d".formatted(i),
+                    new InstrumentCatalogue.Recipe(null, null, 12, i, null, null, List.of(), List.of()),
+                    occurrence);
+        Path index = folder.resolve("instruments.json");
+        builder.build().save(index);
+        StudioProject original = fx(() -> {
+            window.openCatalogue(index);
+            return window.document().project();
+        });
+
+        await(() -> catalogueResultCount() == 30 && !button("catalogue-next").isDisabled());
+        fx(() -> { button("catalogue-next").fire(); return null; });
+        await(() -> catalogueResultCount() == 1 && button("catalogue-next").isDisabled());
+        fx(() -> {
+            var kinds = (ComboBox<?>) window.scene().lookup("#catalogue-kind");
+            kinds.getSelectionModel().select(InstrumentCatalogue.Kind.FM_VOICE.ordinal() + 1);
+            return null;
+        });
+        await(() -> catalogueResultCount() == 0 && !window.scene().lookup("#catalogue-search").isDisabled());
+        fx(() -> {
+            var kinds = (ComboBox<?>) window.scene().lookup("#catalogue-kind");
+            kinds.getSelectionModel().select(InstrumentCatalogue.Kind.PSG_VOLUME.ordinal() + 1);
+            ((TextField) window.scene().lookup("#catalogue-search")).setText("variant 18");
+            return null;
+        });
+        await(() -> catalogueResultCount() == 1 && button("catalogue-previous").isDisabled());
+        fx(() -> {
+            button("catalogue-inspect").fire();
+            layout();
+            var detail = (TextArea) window.scene().lookup("#catalogue-details");
+            assertTrue(detail.getText().contains("Test variant 18"));
+            assertTrue(detail.getText().contains("fixture.s3k"));
+            assertTrue(detail.getText().contains("Evening clock"));
+            assertTrue(detail.getText().contains("18 ticks"));
+            button("catalogue-apply").fire();
+            assertEquals(original.clips(), window.document().project().clips());
+            assertEquals(original.envelopes().size() + 1, window.document().project().envelopes().size());
+            assertTrue(window.document().dirty());
+            key(window.scene().getRoot(), KeyCode.Z, true);
+            assertEquals(original, window.document().project());
+            return null;
+        });
+    }
+
+    private int catalogueResultCount() {
+        var list = (ListView<?>) window.scene().lookup("#catalogue-results");
+        return list == null ? -1 : list.getItems().size();
+    }
 
     @Test void completedImportOpensAnotherWatchedWindowAndKeepsSourceEdits() throws Exception {
         Path imported = folder.resolve("s3k-81.smps.json");

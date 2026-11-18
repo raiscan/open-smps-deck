@@ -140,6 +140,18 @@ or deleted asset is refused; Reload adopts its current definition. A removed
 selection does not become a different asset. These forms use the shared project
 undo, Save and recovery flow; typing alone does not save a draft.
 
+## Browse the instrument catalogue
+
+Under **Voices & assets → Catalogue**, choose **Open catalogue…** and select a
+local index. Search or choose an asset kind. **View variant** shows its native
+settings and source occurrences. **Audition** previews it through the same
+chips as the project and uses the shared Stop control. **Add to project**
+is undoable. Added assets are saved with the project. A PSG noise recipe
+adds a linked PSG3 clip after your current arrangement.
+
+Use the headless `catalog scan` command to create an index from a verified
+S3&K image or compatible rips. [Catalogue guide](../architecture/instrument-catalogue.md#first-pass-in-use)
+
 ## Samples and the DAC lane
 
 Open **Voices & assets → DAC samples** to import PCM WAV or raw unsigned 8-bit

@@ -71,7 +71,60 @@ from fixed chip-rendered probes. Store the version of the audition and feature
 profiles. Add human or agent annotations such as bass, snare, or texture
 as contextual suggestions. A voice may play more than one role.
 
-## First delivery
+## First pass in use
+
+Studio opens the index from **Voices & assets → Catalogue**. Choose **Open
+catalogue…**, filter by kind or search the names and source songs, then inspect
+a variant. **Audition** uses the pinned chips and replaces the current
+transport playback. **Add to project** is undoable. It copies exact voices and
+envelopes, or a reusable DAC sample at the chosen rate. A PSG noise recipe
+brings its referenced envelopes and appends a PSG3 clip after the existing
+arrangement. It plays at the target project's tempo. Native bank documents
+can audition the catalogue and use an editable copy for deployment.
+
+The CLI writes versioned JSON to standard output and accepts explicit local
+paths. Scan either source or combine both in a single index.
+
+```sh
+deck_jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
+java -jar "$deck_jar" catalog scan instruments.json --rom "$s3k_rom"
+java -jar "$deck_jar" catalog scan rip-instruments.json --rips "$rip_directory"
+java -jar "$deck_jar" catalog search instruments.json --kind dac-sample --limit 10
+java -jar "$deck_jar" catalog show instruments.json "$variant_id"
+java -jar "$deck_jar" catalog audition instruments.json "$variant_id" audition.wav
+java -jar "$deck_jar" catalog apply instruments.json "$variant_id" song.smps.json song-with-asset.smps.json
+```
+
+Search returns summaries with asset and variant IDs. It also accepts
+`--query`, `--driver`, `--role`, `--source`, `--variant`, and `--offset`.
+Show returns exact Base64 payloads and occurrence records. An asset with
+several variants needs a specific variant ID for audition and apply.
+Output files use new names. Applying an identical asset reuses the
+project's existing entry.
+
+The first rip reader accepts verified, self-contained `.s3k` banks and Studio
+`.smps.json` or `.smps.zip` sources with explicit bindings. Loose rips with
+missing dependencies and unsupported dialects are listed in scan diagnostics.
+A standalone bank must carry its local voices. Use a bound Studio source for
+external assets. Broad SMPSPlay companion parsing remains a separate adapter.
+
+The S3&K scan distinguishes declared and played entries and records the
+original voice table or slot. Playback tracing covers the bounded preview
+and records the first heard occurrence per song, lane, slot, and variant.
+It retains observable pitch and envelope settings in short noise recipes.
+Envelope bytes that need unresolved driver operands or unsupported controls
+stay inspectable by asset ID. The scan diagnostic gives the ID. That data has
+no audition variant. Native DAC pan is available in audition. Editable DAC deployment
+uses the sample bytes and rate. Initial role filters describe measurable
+properties such as FM algorithm, one-shot playback, and noise clock.
+
+The locked-on scan produced 426 playable variants, including 74 DAC variants
+across rate and pan and 64 PSG noise recipes. Two scans produced the same
+index bytes. Every variant was rendered through the pinned chips for up to
+24 presentations. The scan retained six unresolved-envelope diagnostics
+and marked the Extra Life cue's request to restore previous music.
+
+## Delivery sequence
 
 1. Build a user-local, repeatable index from the verified locked-on S3&K image.
    Record reachable song occurrences alongside declared assets. Start the

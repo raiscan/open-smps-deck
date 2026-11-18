@@ -2,6 +2,8 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.NativeArrangement;
 import com.opensmpsdeck.headless.WaveFile;
+import com.opensmpsdeck.headless.InstrumentCatalogue;
+import com.opensmpsdeck.headless.CataloguePlayback;
 import com.opensmpsdeck.headless.ProjectPackage;
 import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.project.*;
@@ -41,6 +43,8 @@ public final class StudioWindow implements AutoCloseable {
     private final TabPane sourceModes=new TabPane();
     private final Tab noteMode=new Tab("Notes"),commandMode=new Tab("Commands"),assetMode=new Tab("Assets");
     private final TabPane assetKinds=new TabPane();
+    final InstrumentCataloguePane catalogue=new InstrumentCataloguePane(this::auditionCatalogue,this::applyCatalogue);
+    private final Tab catalogueTab=new Tab("Catalogue",catalogue);
     private final Tab nativeBankTab=new Tab("Native bank",nativeBank);
     final NativeArrangementPane nativeArrangement=new NativeArrangementPane(this::showNativeBank, this::chooseEditableCopy);
     private final Tab nativeAssets=new Tab("Voices & assets");
@@ -75,7 +79,15 @@ public final class StudioWindow implements AutoCloseable {
     private void showNativeBank(){nativeTabs.getSelectionModel().select(nativeBankTab);}
     void showNotes(){sourceModes.getSelectionModel().select(noteMode);editors.showNotes();}
     void showCommands(){sourceModes.getSelectionModel().select(commandMode);editors.showNotes();}
-    void showAssets(){sourceModes.getSelectionModel().select(assetMode);editors.showNotes();}
+    void showAssets(){
+        if(root.getCenter()==nativeTabs)nativeTabs.getSelectionModel().select(nativeAssets);
+        else {sourceModes.getSelectionModel().select(assetMode);editors.showNotes();}
+    }
+    void openCatalogue(Path path){
+        showAssets();
+        assetKinds.getSelectionModel().select(catalogueTab);
+        catalogue.open(path);
+    }
     void showEnvelopes(){showAssets();assetKinds.getSelectionModel().select(1);}
     void showSamples(){showAssets();assetKinds.getSelectionModel().select(2);}
     private void openSample(String id){showSamples();samples.selectSample(id);}
@@ -161,10 +173,14 @@ public final class StudioWindow implements AutoCloseable {
         noteInspector.getStyleClass().add("note-inspector");
         noteBody=new VBox(piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
         Tab fmAssets=new Tab("FM voices",voices),envAssets=new Tab("Envelopes",envelopes),dacAssets=new Tab("DAC samples",samples);
-        assetKinds.getTabs().setAll(fmAssets,envAssets,dacAssets);
+        catalogueTab.setId("instrument-catalogue-tab");
+        assetKinds.getTabs().setAll(fmAssets,envAssets,dacAssets,catalogueTab);
         assetKinds.getTabs().forEach(tab->tab.setClosable(false));assetKinds.setId("asset-editor-tabs");
         Button packageExport=button("Export package…",this::exportPackage);packageExport.setId("export-package");
-        assetBody=new VBox(new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport),assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
+        HBox assetActions=new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport);
+        assetActions.visibleProperty().bind(assetKinds.getSelectionModel().selectedItemProperty().isNotEqualTo(catalogueTab));
+        assetActions.managedProperty().bind(assetActions.visibleProperty());
+        assetBody=new VBox(assetActions,assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
         noteMode.setClosable(false);commandMode.setClosable(false);assetMode.setClosable(false);noteMode.setContent(noteBody);commandMode.setContent(commands);assetMode.setContent(assetBody);sourceModes.getTabs().setAll(noteMode,commandMode,assetMode);sourceModes.setId("source-editor-modes");
         pianoHeader.visibleProperty().bind(sourceModes.getSelectionModel().selectedItemProperty().isNotEqualTo(assetMode));
         pianoHeader.managedProperty().bind(pianoHeader.visibleProperty());
@@ -214,6 +230,7 @@ public final class StudioWindow implements AutoCloseable {
         updating=true;
         StudioProject p=document.project();
         boolean nativeMode=p.nativeProgram()!=null;
+        catalogue.setEditable(!nativeMode);
         songSettings.setVisible(!nativeMode);
         binaryExport.setVisible(!nativeMode);
         nativePackageExport.setVisible(nativeMode);
@@ -341,7 +358,12 @@ public final class StudioWindow implements AutoCloseable {
         if(e.getTarget() instanceof TextInputControl||stage.getScene().getFocusOwner() instanceof ComboBoxBase<?>)return;
         if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
-        else if(e.getCode()==KeyCode.SPACE){if(playback.playing())stop();else play();e.consume();}
+        else if(e.getCode()==KeyCode.SPACE){
+            Node focus=stage.getScene().getFocusOwner();
+            if(focus instanceof ButtonBase&&catalogue.ownsFocus(focus))return;
+            if(playback.playing())stop();else play();
+            e.consume();
+        }
         else if(e.getCode()==KeyCode.DELETE||e.getCode()==KeyCode.BACK_SPACE){
             Node focus=stage.getScene().getFocusOwner();
             if(samples.ownsFocus(focus)) samples.deleteSelected();
@@ -364,6 +386,21 @@ public final class StudioWindow implements AutoCloseable {
             if(snapshot.nativeProgram()!=null)nativeArrangement.setPlayhead(tick);
             else {timeline.playhead=tick;timeline.draw();}
         }));
+    }
+    private void auditionCatalogue(InstrumentCatalogue index,String variantId){
+        try{
+            StudioProject probe=CataloguePlayback.audition(index,variantId);
+            stopPlayback();
+            long epoch=playbackEpoch;
+            status.setText("Preparing instrument audition…");
+            playback.play(probe,text->Platform.runLater(()->{
+                if(!closed&&epoch==playbackEpoch)status.setText(text.startsWith("Playing")?"Auditioning instrument":text);
+            }),ignored->{});
+        }catch(IllegalArgumentException failure){error(failure);}
+    }
+    private void applyCatalogue(InstrumentCatalogue index,String variantId){
+        if(document.project().nativeProgram()!=null)return;
+        if(change(project->CataloguePlayback.apply(index,variantId,project)))status.setText("Catalogue variant added to project");
     }
     private void stopPlayback(){
         playbackEpoch++;
@@ -556,5 +593,5 @@ public final class StudioWindow implements AutoCloseable {
         io.submit(()->{try{ProjectPackage.write(snapshot,file.toPath());Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
-    @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();samples.close();nativeArrangement.close();io.shutdownNow();}
+    @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();samples.close();nativeArrangement.close();catalogue.close();io.shutdownNow();}
 }

@@ -28,6 +28,7 @@ public final class Main {
             }
             if (args.length == 0) throw new IllegalArgumentException("expected a command");
             switch (args[0]) {
+                case "catalog" -> CatalogueCli.run(args, out);
                 case "copy-arrangement" -> {
                     requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
@@ -261,6 +262,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
