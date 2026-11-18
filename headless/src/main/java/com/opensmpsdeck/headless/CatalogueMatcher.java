@@ -8,11 +8,13 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 
 /** Ranks catalogue playback variants against one isolated reference sound. */
 public final class CatalogueMatcher {
     public static final String PROFILE = "s3k-ntsc-match-v1";
+    static final String ASSET_PROFILE = "s3k-ntsc-match-assets-v1";
 
     public record Options(Kind kind, String role, String source, int midi, Integer gateTicks, int limit) {
         public Options {
@@ -38,9 +40,20 @@ public final class CatalogueMatcher {
         }
     }
 
+    private record EmittedAsset(String id, Integer dacRate) {}
+
     private CatalogueMatcher() {}
 
     public static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
+        return match(index, audio, options, false);
+    }
+
+    static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
+        return match(index, audio, options, true);
+    }
+
+    private static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options,
+                                boolean rawAssets) throws IOException {
         float[] samples = audio.samples();
         var reference = AudioFingerprint.extract(samples, audio.sampleRate());
         double seconds = samples.length / (double) audio.sampleRate();
@@ -48,6 +61,7 @@ public final class CatalogueMatcher {
         int gate = options.gateTicks() == null ? referenceFrames : options.gateTicks();
         var ranked = new ArrayList<Ranked>();
         var skipped = new ArrayList<Skipped>();
+        var emitted = new HashSet<EmittedAsset>();
         int eligible;
         int offset = 0;
         do {
@@ -58,8 +72,9 @@ public final class CatalogueMatcher {
             for (var hit : page.items()) {
                 checkInterrupted();
                 var variant = hit.variant();
+                if (rawAssets && !emitted.add(new EmittedAsset(variant.assetId(), variant.recipe().rate()))) continue;
                 try {
-                    var probe = CataloguePlayback.matchProbe(index, variant.id(), options.midi(), gate);
+                    var probe = CataloguePlayback.matchProbe(index, variant.id(), options.midi(), gate, rawAssets);
                     var fingerprint = describeProbe(probe, referenceFrames);
                     ranked.add(new Ranked(hit.asset().id(), variant.id(), hit.asset().kind(), variant.name(),
                             variant.roles(), reference.distance(fingerprint), fingerprint.summary()));
@@ -72,7 +87,7 @@ public final class CatalogueMatcher {
 
         ranked.sort(Comparator.comparingDouble((Ranked row) -> row.distance().total())
                 .thenComparing(Ranked::variantId));
-        return new Report(InstrumentCatalogue.FORMAT_VERSION, PROFILE, options.midi(), gate, seconds, eligible,
+        return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? ASSET_PROFILE : PROFILE, options.midi(), gate, seconds, eligible,
                 ranked.size(), reference.summary(), ranked.subList(0, Math.min(options.limit(), ranked.size())), skipped);
     }
 

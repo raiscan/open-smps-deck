@@ -104,6 +104,48 @@ is limited to 1 MiB; compiled output and CLI binary input are limited to one
 The binary demo is an original finite FM/PSG phrase
 with a synthetic, deliberately asymmetric FM patch; it contains no ROM assets.
 
+## Reconstruct a track from MIDI and WAV
+
+Export MIDI and a WAV from the same time origin. Build a local [instrument
+catalogue](../docs/architecture/instrument-catalogue.md) before you run:
+
+```sh
+deck_jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
+java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json first-minute \
+  --seconds 60 --name "Song"
+java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json full-song --name "Song"
+```
+
+The command creates a new output directory with four files.
+
+- `arrangement.smps.json` contains editable clips and local assets.
+- `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
+- `render.wav` contains the 48 kHz stereo output from the pinned OpenGGF chips.
+- `report.json` records input and output hashes, source part IDs, instrument
+  shortlists and probe windows, and each note dropped or shortened. Ten-second
+  audio sections report mono RMS and pair volume rises within 100 ms. The
+  audio statistics measure level and timing, with no estimate of timbre fidelity.
+
+Use `--stem PART=stem.wav` to match a part against a time-aligned stem. Get
+zero-based part IDs from the report. The matcher uses the mix for other parts.
+It pools candidate rankings across several MIDI note windows and marks choices
+with weak evidence. It auditions the FM patch or PSG envelope the arrangement
+can deploy, and DAC samples at their native rates with centered pan.
+
+The arrangement quantizes MIDI timing to 60 Hz and uses five FM channels.
+Three PSG channels carry notes that miss an FM slot, within their supported
+pitch range. `--fm-only` disables the PSG overflow channels. A single DAC lane
+plays percussion, so simultaneous hits compete for one slot. The converter
+removes systematic bass octave doubles in synth lead parts. Use
+`--keep-octaves` to keep those events in the allocation. It translates note
+velocity to coarse tone volume. MIDI controllers, including sustain and
+pitch bend, are outside this pass.
+
+Without `--seconds`, the output covers the WAV duration. Bank and source size
+limits still apply. Set `--ticks-per-beat` to fit the Studio ruler without
+changing playback timing. To check a render from an edited project, use
+`render-project` with the report's `presentations` as `--frames`.
+
 ## Deliberately limited input contract
 
 The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.

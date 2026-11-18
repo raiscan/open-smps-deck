@@ -60,6 +60,13 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
     private record Format(int encoding, int channels, int sampleRate, int bits, int frameBytes) {}
     private record Wave(Format format, long dataStart, long dataBytes) {}
 
+    static long durationMicros(Path path) throws IOException {
+        try (var channel = FileChannel.open(path, StandardOpenOption.READ)) {
+            var wave = header(channel);
+            return (wave.dataBytes() / wave.format().frameBytes()) * 1_000_000L / wave.format().sampleRate();
+        }
+    }
+
     private static Wave header(FileChannel channel) throws IOException {
         // Chunk identifiers are literal ASCII bytes, independent of numeric field endianness.
         ByteBuffer file = readAt(channel, 0, 12);
