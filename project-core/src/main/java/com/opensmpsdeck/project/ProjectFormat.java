@@ -24,6 +24,7 @@ import java.util.function.Function;
 public final class ProjectFormat {
     public static final int MAX_SOURCE_CHARS = 1_048_576;
     private static final Gson GSON = new GsonBuilder().serializeNulls().setPrettyPrinting().disableHtmlEscaping().create();
+    private static final Gson REVIEW_GSON = new GsonBuilder().disableHtmlEscaping().create();
     private ProjectFormat() {}
 
     public static StudioProject read(String json) {
@@ -31,12 +32,15 @@ public final class ProjectFormat {
         if (json.length() > MAX_SOURCE_CHARS) throw invalid("project", "source exceeds 1 MiB character limit");
         try (JsonReader reader = new JsonReader(new StringReader(json))) {
             reader.setLenient(false);
-            JsonElement tree = readValue(reader, 0);
+            JsonElement tree = readValue(reader, 0, false);
             if (reader.peek() != JsonToken.END_DOCUMENT) throw invalid("project", "unexpected content after document");
             if(!tree.isJsonObject()) throw invalid("project","must be an object");
             if(!tree.getAsJsonObject().has("formatVersion")) throw invalid("project.formatVersion","required field is missing");
             int version=integer(tree.getAsJsonObject(),"formatVersion");
             if(version<1 || version>5) throw invalid("formatVersion", "only versions 1 through 5 are supported");
+            JsonObject root = tree.getAsJsonObject();
+            var references = optionalList(root.remove("references"), "references", ProjectFormat::reference);
+            var notes = optionalList(root.remove("notes"), "notes", ProjectFormat::reviewNote);
             JsonObject o = version==5 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "voices", "envelopes", "samples", "nativeProgram")
                     : version==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
                     : version==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
@@ -47,12 +51,70 @@ public final class ProjectFormat {
                     version==5?List.of():list(o,"sequences",e->sequence(e,version)),
                     version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     version>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
-                    version>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram);
+                    version>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes);
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
             throw new IllegalArgumentException("Invalid project JSON: " + e.getMessage(), e);
         }
+    }
+
+    private static AudioReference reference(JsonElement element) {
+        var o = reviewObject(element, "reference", Set.of("role"), "id", "label", "path", "offsetSeconds", "gainDb");
+        return new AudioReference(string(o, "id"), string(o, "label"), string(o, "path"),
+                decimal(o, "offsetSeconds"), decimal(o, "gainDb"), optionalString(o, "role"));
+    }
+
+    private static ReviewNote reviewNote(JsonElement element) {
+        var o = reviewObject(element, "review note", Set.of("endSeconds", "laneId", "clipId", "reply"),
+                "id", "startSeconds", "text", "author", "status", "createdAt");
+        ReviewNote.Reply reply = null;
+        if (o.has("reply")) {
+            var r = object(o.get("reply"), "reply", "text", "author", "createdAt");
+            reply = new ReviewNote.Reply(string(r, "text"), string(r, "author"), string(r, "createdAt"));
+        }
+        return new ReviewNote(string(o, "id"), decimal(o, "startSeconds"),
+                o.has("endSeconds") ? decimal(o, "endSeconds") : null,
+                optionalString(o, "laneId"), optionalString(o, "clipId"), string(o, "text"),
+                string(o, "author"), string(o, "status"), string(o, "createdAt"), reply);
+    }
+
+    /** Standalone JSON array with the same representation used in project files. */
+    public static String writeReviewNotes(List<ReviewNote> notes) {
+        return GSON.toJson(REVIEW_GSON.toJsonTree(notes)) + "\n";
+    }
+
+    private static JsonObject reviewObject(JsonElement value, String at, Set<String> optional, String... required) {
+        if (!value.isJsonObject()) throw invalid(at, "must be an object");
+        var o = value.getAsJsonObject();
+        var keys = Set.of(required);
+        for (String key : o.keySet()) {
+            if (!keys.contains(key) && !optional.contains(key)) throw invalid(at + "." + key, "unknown field");
+        }
+        for (String key : required) {
+            if (!o.has(key)) throw invalid(at + "." + key, "required field is missing");
+        }
+        return o;
+    }
+
+    private static <T> List<T> optionalList(JsonElement value, String key, Function<JsonElement,T> convert) {
+        if (value == null) return List.of();
+        if (!value.isJsonArray()) throw invalid(key, "must be an array");
+        List<T> result = new ArrayList<>();
+        for (JsonElement element : value.getAsJsonArray()) result.add(convert.apply(element));
+        return result;
+    }
+
+    private static String optionalString(JsonObject o, String key) {
+        return o.has(key) ? string(o, key) : null;
+    }
+
+    private static double decimal(JsonObject o, String key) {
+        var value = o.get(key);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+            throw invalid(key, "must be a number");
+        }
+        return value.getAsDouble();
     }
 
     private static NativeProgram nativeProgram(JsonElement element) {
@@ -127,12 +189,15 @@ public final class ProjectFormat {
             o.add("samples",samples);
         }
         if (project.nativeProgram()!=null) o.add("nativeProgram",GSON.toJsonTree(project.nativeProgram()));
+        if (!project.references().isEmpty()) o.add("references", REVIEW_GSON.toJsonTree(project.references()));
+        if (!project.notes().isEmpty()) o.add("notes", REVIEW_GSON.toJsonTree(project.notes()));
         return GSON.toJson(o) + "\n";
     }
 
     public static void validate(StudioProject project) {
         if (project == null) throw invalid("project", "document is required");
         if (project.formatVersion()<1 || project.formatVersion()>5) throw invalid("formatVersion", "only versions 1 through 5 are supported");
+        validateReview(project);
         text(project.name(),"name");
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
@@ -332,6 +397,41 @@ public final class ProjectFormat {
     private static Clip clip(JsonElement e) {
         JsonObject o=object(e,"clip","id","sequenceId","lane","startTick","lengthTicks"); return new Clip(string(o,"id"),string(o,"sequenceId"),string(o,"lane"),integer(o,"startTick"),integer(o,"lengthTicks"));
     }
+    private static void validateReview(StudioProject project) {
+        unique(project.references(), AudioReference::id, "references");
+        unique(project.notes(), ReviewNote::id, "notes");
+        for (var reference : project.references()) {
+            text(reference.label(), "reference.label");
+            text(reference.path(), "reference.path");
+            java.nio.file.Path.of(reference.path());
+            if (reference.role() != null) text(reference.role(), "reference.role");
+            if (!Double.isFinite(reference.offsetSeconds()) || !Double.isFinite(reference.gainDb())) {
+                throw invalid("reference", "offsetSeconds and gainDb must be finite");
+            }
+        }
+        for (var note : project.notes()) {
+            text(note.text(), "note.text");
+            text(note.author(), "note.author");
+            if (note.laneId() != null) text(note.laneId(), "note.laneId");
+            if (note.clipId() != null) text(note.clipId(), "note.clipId");
+            if (!Double.isFinite(note.startSeconds()) || note.startSeconds() < 0
+                    || note.endSeconds() != null && (!Double.isFinite(note.endSeconds())
+                    || note.endSeconds() < note.startSeconds())) {
+                throw invalid("note", "require finite times and 0 <= startSeconds <= endSeconds");
+            }
+            if (!ReviewNote.OPEN.equals(note.status()) && !ReviewNote.RESOLVED.equals(note.status())) {
+                throw invalid("note.status", "must be open or resolved");
+            }
+            ReviewNote.validateTimestamp(note.createdAt());
+            if (note.reply() != null) {
+                if (note.isOpen()) throw invalid("note.reply", "requires resolved status");
+                text(note.reply().text(), "note.reply.text");
+                text(note.reply().author(), "note.reply.author");
+                ReviewNote.validateTimestamp(note.reply().createdAt());
+            }
+        }
+    }
+
     private static JsonObject object(JsonElement value,String at,String... names) {
         if (!value.isJsonObject()) throw invalid(at,"must be an object");
         JsonObject o=value.getAsJsonObject(); Set<String> allowed=Set.of(names);
@@ -348,7 +448,7 @@ public final class ProjectFormat {
     private static int integer(JsonObject o,String key) { return integer(o.get(key),key); }
     private static int integer(JsonElement e,String at) {
         if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isNumber()) throw invalid(at,"must be an integer");
-        return e.getAsInt(); // readValue already checked lexical integrality and exact int range
+        return e.getAsInt(); // readValue checks the original integer spelling and range
     }
     private static <T> List<T> list(JsonObject o,String key,Function<JsonElement,T> convert) {
         JsonElement value=o.get(key); if (!value.isJsonArray()) throw invalid(key,"must be an array");
@@ -364,20 +464,26 @@ public final class ProjectFormat {
     private static IllegalArgumentException invalid(String at,String message) { return new IllegalArgumentException(at+": "+message); }
 
     /** Gson's tree parser accepts duplicate names; retain strict checks before making a tree. */
-    private static JsonElement readValue(JsonReader r,int depth) throws IOException {
+    private static JsonElement readValue(JsonReader r,int depth,boolean reviewNumbers) throws IOException {
         if (depth>32) throw invalid(r.getPath(),"JSON nesting is too deep");
         return switch(r.peek()) {
             case BEGIN_OBJECT -> {
                 JsonObject o=new JsonObject(); Set<String> seen=new HashSet<>(); r.beginObject();
-                while(r.hasNext()) { String name=r.nextName(); if(!seen.add(name)) throw invalid(r.getPath(),"duplicate field '"+name+"'"); o.add(name,readValue(r,depth+1)); }
+                while (r.hasNext()) {
+                    String name = r.nextName();
+                    if (!seen.add(name)) throw invalid(r.getPath(), "duplicate field '" + name + "'");
+                    boolean reviewField = depth == 0 && (name.equals("references") || name.equals("notes"));
+                    o.add(name, readValue(r, depth + 1, reviewNumbers || reviewField));
+                }
                 r.endObject(); yield o;
             }
-            case BEGIN_ARRAY -> { JsonArray a=new JsonArray(); r.beginArray(); while(r.hasNext()) a.add(readValue(r,depth+1)); r.endArray(); yield a; }
+            case BEGIN_ARRAY -> { JsonArray a=new JsonArray(); r.beginArray(); while(r.hasNext()) a.add(readValue(r,depth+1,reviewNumbers)); r.endArray(); yield a; }
             case STRING -> new JsonPrimitive(r.nextString());
             case BOOLEAN -> new JsonPrimitive(r.nextBoolean());
             case NULL -> { r.nextNull(); yield JsonNull.INSTANCE; }
             case NUMBER -> {
                 String path=r.getPath(), number=r.nextString();
+                if (reviewNumbers) yield new JsonPrimitive(Double.parseDouble(number));
                 if (!number.matches("-?(0|[1-9][0-9]*)")) throw invalid(path,"must be an integer without fractional or exponential notation");
                 try { yield new JsonPrimitive(Integer.parseInt(number)); } catch(NumberFormatException e) { throw invalid(path,"integer is outside 32-bit range"); }
             }

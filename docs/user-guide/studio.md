@@ -196,6 +196,36 @@ separate working copy. Reload will not discard work if the disk file is invalid.
 New/Open/Close ask about unsaved changes. Undo history resets on adopting an
 external revision; undo never secretly crosses into another writer's version.
 
+## Review a reconstruction
+
+1. Open the shared project and choose **Review → Add reference…**. Pick a
+   16- or 24-bit PCM WAV with one or two channels and up to 256 MiB of PCM.
+   For several guides or stems,
+   use the reference picker to choose the visible and audible WAV. The
+   waveform shares the arrangement's horizontal scroll, zoom and playhead.
+   Drag it to align the guide, or focus it and use Left/Right to move it by
+   10 ms. Studio saves the alignment with the project.
+2. Click the ruler to position the playhead. Select **Render**, **Reference**
+   or **A/B**, then press Play. In A/B, press **R** to switch sources at
+   the current position. **R** also enters A/B from either source. On the
+   render lanes, click **S** to solo or **M** to mute. Multiple solos are
+   allowed and mute takes precedence. These controls affect Studio audition.
+3. Shift-drag the ruler to loop a range, or select a clip and click **Loop
+   selection**. Clear it with **Clear loop**.
+4. Press **N** or click **Add note**. The note takes its time from the
+   active range, selected clip, or playhead. Click an empty lane to attach
+   lane context, or click the ruler to place a note without a lane.
+   Enter the feedback and click **Add**, then **Save** to share it.
+5. Click an open note or its ruler/lane marker to jump and set a loop with
+   1.5 seconds of context on each side. Agent-authored notes use violet
+   markers and text. After reviewing a note, select it and click **Resolve
+   selected**, then save.
+
+Review edits use the same undo, save and conflict behavior as arrangement
+edits. A clean window picks up notes written by the CLI, and a draft in the
+composer stays available across a refresh. The
+[review protocol](../architecture/review-loop.md) covers the agent side.
+
 ## Listen and export
 
 Open the [native bank example](../../examples/native-evening-clock.smps.json)
@@ -206,7 +236,7 @@ Edits use the usual undo, save and external refresh. An unsupported
 instruction appears as a playback diagnostic. **Export package** still
 preserves the exact bank and asset bindings.
 
-**Play** previews from the beginning; Space toggles Play/Stop outside text fields.
+**Play** previews from the playhead. Space toggles Play/Stop outside text fields.
 Edits or adopted external changes stop the previous playback snapshot. Use **Song settings** to rename the project or change native tempo and ruler
 resolution. The inspector shows approximate BPM for context. The native
 S3K tempo byte controls delay frames: larger is slower, zero is valid. Tick ruler
