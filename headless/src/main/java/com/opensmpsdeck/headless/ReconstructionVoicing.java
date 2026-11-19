@@ -35,14 +35,13 @@ final class ReconstructionVoicing {
 
     private ReconstructionVoicing() {}
 
+    /**
+     * Default articulation is the written note length for every role. Shorter gates are still
+     * offered as evidence-checked alternatives in the voice stage, but as defaults they lowered
+     * melody F1 on the benchmark without reducing measured release energy.
+     */
     static Articulation articulation(Role role) {
-        return switch (role) {
-            case melody -> new Articulation("legato", .95, 0);
-            case counter -> new Articulation("lightly-separated", .91, 0);
-            case harmony -> new Articulation("separated", .84, 0);
-            case bass -> new Articulation("tight", .86, 0);
-            default -> WRITTEN;
-        };
+        return WRITTEN;
     }
 
     static Effects idiom(Role role, String freeLane) {
