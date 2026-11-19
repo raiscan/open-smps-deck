@@ -1,5 +1,7 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.GroupArrangement;
+
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeCommand;
@@ -205,7 +207,7 @@ final class CommandEditorPane extends BorderPane {
             voice.setValue(previousVoice); voice.setDisable(next == null || !next.type().equals("FM"));
             updateEnvelopeChoices(psgEnvelope,"PSG_VOLUME");updateEnvelopeChoices(modEnvelope,"MODULATION");
             psgEnvelope.setDisable(next==null||!next.type().equals("PSG"));modEnvelope.setDisable(next==null);
-            long count = next == null ? 0 : project.clips().stream().filter(c -> c.sequenceId().equals(next.id())).count();
+            long count = next == null ? 0 : GroupArrangement.authoredClips(project).filter(c -> c.sequenceId().equals(next.id())).count();
             linked.setText(next == null ? "Choose a source in the sequence browser" : "Command and source edits affect all " + count + " linked clip instance" + (count == 1 ? "" : "s"));
             if (!same) {
                 selectedId = null; originalCommand = null; commandBaseline = next; emptyFormType = command.getValue();
@@ -362,7 +364,7 @@ final class CommandEditorPane extends BorderPane {
         operandField.setVisible(hasOperands);
         help.setText(type == null ? "" : (hasOperands ? "Raw operand bytes: " + type.argumentCount() + ". " : "")
                 + type.help() + (type == NativeCommand.MODULATION && project != null
-                && project.formatVersion() < 4 ? " This project version requires an explicit note attack tick." : ""));
+                && project.arrangementVersion() < 4 ? " This project version requires an explicit note attack tick." : ""));
     }
 
     private void updateNotices() {

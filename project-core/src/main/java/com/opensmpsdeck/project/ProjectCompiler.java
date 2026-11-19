@@ -20,8 +20,13 @@ public final class ProjectCompiler {
     }
 
     public static byte[] compile(StudioProject project) {
-        ProjectFormat.validate(project);
+        List<Clip> clips = ProjectFormat.validatedClips(project);
         if (project.nativeProgram()!=null) return project.nativeProgram().bank();
+        if (project.formatVersion() == 6) {
+            project = new StudioProject(project.arrangementVersion(), project.name(), project.mode(),
+                    project.ticksPerBeat(), project.tempo(), project.voices(), project.sequences(), clips,
+                    project.envelopes(), project.samples());
+        }
         Map<String,Sequence> sources=new HashMap<>(); Map<String,List<NoteEvent>> notes=new HashMap<>();
         for (Sequence s : project.sequences()) { sources.put(s.id(),s); notes.put(s.id(),s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList()); }
         Map<String,Integer> voices=new HashMap<>(); for(int i=0;i<project.voices().size();i++) voices.put(project.voices().get(i).id(),i);
@@ -52,14 +57,14 @@ public final class ProjectCompiler {
 
     /** Exclusive DAC stop tick, including the final surviving trigger's playback tail. */
     public static long dacEndTick(StudioProject project) {
-        ProjectFormat.validate(project);
+        var clips = ProjectFormat.validatedClips(project);
         Map<String,Sequence> sources=new HashMap<>();
         for(Sequence source : project.sequences()) sources.put(source.id(),source);
-        return dacEndTick(project,sources,dacClips(project));
+        return dacEndTick(project,sources,dacClips(clips));
     }
 
-    private static List<Clip> dacClips(StudioProject project) {
-        return project.clips().stream().filter(c->c.lane().equals("DAC"))
+    private static List<Clip> dacClips(List<Clip> clips) {
+        return clips.stream().filter(c->c.lane().equals("DAC"))
                 .sorted(Comparator.comparingInt(Clip::startTick)).toList();
     }
 
@@ -99,7 +104,7 @@ public final class ProjectCompiler {
 
     private static void dacLane(Bank out,StudioProject project,Map<String,Sequence> sources) {
         out.word(6,out.size());
-        List<Clip> clips=dacClips(project);
+        List<Clip> clips=dacClips(project.clips());
         Map<String,Integer> sampleNotes=new HashMap<>();
         for(DacSample sample : project.samples()) sampleNotes.put(sample.id(),DacSample.FIRST_NOTE+sampleNotes.size());
         int cursor=0;

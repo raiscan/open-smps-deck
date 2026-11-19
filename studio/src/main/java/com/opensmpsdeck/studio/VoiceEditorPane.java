@@ -1,5 +1,7 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.GroupArrangement;
+
 import com.opensmpsdeck.project.NativeFmVoice;
 import com.opensmpsdeck.project.NativeFmVoice.Parameter;
 import com.opensmpsdeck.project.NativeCommand;
@@ -304,7 +306,7 @@ final class VoiceEditorPane extends BorderPane {
         Set<String> sources = project == null || selectedId == null ? Set.of() : project.sequences().stream()
                 .filter(s -> usesVoice(s, selectedId)).map(s -> s.id()).collect(Collectors.toSet());
         int uses = sources.size();
-        long clips = project == null ? 0 : project.clips().stream().filter(c -> sources.contains(c.sequenceId())).count();
+        long clips = project == null ? 0 : GroupArrangement.authoredClips(project).filter(c -> sources.contains(c.sequenceId())).count();
         linked.setText(selectedId == null ? "Voices are linked assets. Assign them to a source or a timed voice command."
                 : "FM voice · " + (uses == 0 ? "Unused" : uses + (uses == 1 ? " source" : " sources")
                 + " · " + clips + (clips == 1 ? " clip" : " clips")));

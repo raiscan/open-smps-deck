@@ -38,6 +38,147 @@ class StudioWindowTest {
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
 
+    @Test void groupAndUngroupAcrossLanesWithUndoAndRedo() throws Exception {
+        fx(()->{
+            var original=window.document().project();
+            clickTimeline(9,0,false,1);
+            clickTimeline(56,5,true,1);
+            key(window.timeline.canvas,KeyCode.G,true);
+            var grouped=window.document().project();
+            assertEquals(2,grouped.groupSequences().getFirst().clips().size());
+            assertEquals(1,grouped.groupPlacements().size());
+            assertArrayEquals(ProjectCompiler.compile(original),ProjectCompiler.compile(grouped));
+            key(window.timeline.canvas,KeyCode.Z,true);
+            assertEquals(original,window.document().project());
+            shortcut(KeyCode.Z,true);
+            assertEquals(grouped,window.document().project());
+            clickTimeline(9,0,false,1);
+            shortcut(KeyCode.G,true);
+            var flat=window.document().project();
+            assertTrue(flat.groupPlacements().isEmpty());
+            assertEquals(Set.copyOf(original.clips()),Set.copyOf(flat.clips()));
+            key(window.timeline.canvas,KeyCode.Z,true);
+            assertEquals(grouped,window.document().project());
+            return null;
+        });
+    }
+
+    @Test void editingInsideOneGroupUpdatesBothLinkedPlacements() throws Exception {
+        prepareGroups();
+        fx(()->{
+            clickTimeline(9,0,false,2);
+            assertEquals("Chorus",button("arrangement-level-1").getText());
+            clickTimeline(9,0,false,1);
+            ((TextField)window.scene().lookup("#clip-start")).setText("6");
+            ((TextField)window.scene().lookup("#clip-length")).setText("90");
+            button("apply-clip").fire();
+            var project=window.document().project();
+            var resolver=new GroupArrangement(project);
+            for (var placement: project.groupPlacements()) {
+                var lead=resolver.expand(placement).stream().filter(c->c.lane().equals("FM1")).findFirst().orElseThrow();
+                assertEquals(placement.startTick()+6,lead.startTick());
+                assertEquals(90,lead.lengthTicks());
+            }
+            key(window.timeline.canvas,KeyCode.ESCAPE,false);
+            assertNull(window.scene().lookup("#arrangement-level-1"));
+            return null;
+        });
+    }
+
+    @Test void resizingGroupRepeatsWithAPartialFinalRepeat() throws Exception {
+        prepareGroups();
+        fx(()->{
+            var zoom=(Slider)window.scene().lookup("#timeline-zoom");
+            zoom.setValue(1.1);
+            layout();
+            double edge=timelineX(480)-3, y=TimelineView.RULER+15;
+            var canvas=window.timeline.canvas;
+            mouse(canvas,MouseEvent.MOUSE_PRESSED,edge,y,true);
+            mouse(canvas,MouseEvent.MOUSE_DRAGGED,edge+27*window.timeline.scale,y,true);
+            mouse(canvas,MouseEvent.MOUSE_RELEASED,edge+27*window.timeline.scale,y,false);
+            var project=window.document().project();
+            var instance=project.groupPlacements().getLast();
+            assertEquals(123,instance.lengthTicks());
+            assertTrue(new GroupArrangement(project).expand(instance).stream()
+                    .anyMatch(c->c.startTick()==480 && c.lengthTicks()==27));
+            return null;
+        });
+    }
+
+    @Test void draggingGroupAcrossAnOccupiedLaneIsRefused() throws Exception {
+        prepareGroups();
+        fx(()->{
+            var unchanged=window.document().project();
+            double x=timelineX(9), y=TimelineView.RULER+15;
+            var canvas=window.timeline.canvas;
+            mouse(canvas,MouseEvent.MOUSE_PRESSED,x,y,true);
+            mouse(canvas,MouseEvent.MOUSE_DRAGGED,x+48*window.timeline.scale,y,true);
+            mouse(canvas,MouseEvent.MOUSE_RELEASED,x+48*window.timeline.scale,y,false);
+            assertEquals(unchanged,window.document().project());
+            assertTrue(window.scene().getRoot().lookupAll(".status").stream().filter(Label.class::isInstance)
+                    .map(Label.class::cast).anyMatch(l->l.getText().contains("lane conflict on FM1")));
+            return null;
+        });
+    }
+
+    @Test void externalRefreshInsideGroupRetainsPathAndCancelsStaleDrag() throws Exception {
+        prepareGroups();
+        fx(()->{
+            clickTimeline(9,0,false,2);
+            clickTimeline(9,0,false,1);
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_PRESSED,timelineX(9),TimelineView.RULER+20,true);
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_DRAGGED,timelineX(15),TimelineView.RULER+20,true);
+            return null;
+        });
+        var loaded=ProjectFiles.load(file);
+        var external=GroupEdits.updateSource(loaded.project(),"chorus","Revised chorus",96);
+        ProjectFiles.save(file,external,loaded.revision());
+        await(()->window.document().project().equals(external));
+        fx(()->{
+            assertEquals("Revised chorus",button("arrangement-level-1").getText());
+            assertEquals("clip-a1",window.selectedClip());
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,timelineX(15),TimelineView.RULER+20,false);
+            assertEquals(external,window.document().project());
+            assertFalse(window.document().dirty());
+            return null;
+        });
+        loaded=ProjectFiles.load(file);
+        var removed=GroupEdits.remove(loaded.project(),null,"chorus-placement");
+        ProjectFiles.save(file,removed,loaded.revision());
+        await(()->window.document().project().equals(removed));
+        fx(()->{
+            assertNull(window.scene().lookup("#arrangement-level-1"));
+            assertNull(window.selectedClip());
+            return null;
+        });
+    }
+
+    private void prepareGroups() throws Exception {
+        var loaded=ProjectFiles.load(file);
+        var grouped=GroupEdits.create(loaded.project(),null,"chorus","Chorus",Set.of("clip-a1","clip-answer1"));
+        var linked=GroupEdits.place(grouped,null,new GroupPlacement("second","chorus",384,96));
+        ProjectFiles.save(file,linked,loaded.revision());
+        await(()->window.document().project().equals(linked));
+    }
+
+    private double timelineX(int tick) {
+        return TimelineView.GUTTER+tick*window.timeline.scale-window.timeline.offset;
+    }
+
+    private void clickTimeline(int tick,int row,boolean add,int count) {
+        var canvas=window.timeline.canvas;
+        double x=timelineX(tick), y=TimelineView.RULER+row*TimelineView.ROW+15;
+        for (var type:List.of(MouseEvent.MOUSE_PRESSED,MouseEvent.MOUSE_RELEASED,MouseEvent.MOUSE_CLICKED)) {
+            Event.fireEvent(canvas,new MouseEvent(type,x,y,x,y,MouseButton.PRIMARY,count,false,add,false,false,
+                    type==MouseEvent.MOUSE_PRESSED,false,false,false,false,true,
+                    new PickResult(canvas,new javafx.geometry.Point3D(x,y,0),0)));
+        }
+    }
+
+    private void shortcut(KeyCode code,boolean shift) {
+        Event.fireEvent(window.timeline.canvas,new KeyEvent(KeyEvent.KEY_PRESSED,"","",code,shift,true,false,false));
+    }
+
     @Test void instrumentCataloguePagesFiltersAndAppliesWithProjectUndo() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope",
