@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.GsonBuilder;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
+import com.opensmpsdeck.project.LoadedProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
@@ -120,7 +121,7 @@ final class ReconstructionCli {
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, List.of(),
                 (echoes, copies) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                        catalogue, sectionPlan.choices(), spill, echoes), out);
+                        catalogue, sectionPlan.choices(), spill, echoes), out, null);
     }
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
@@ -131,7 +132,10 @@ final class ReconstructionCli {
 
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                                   ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing,
-                                  PrintStream out) throws IOException {
+                                  PrintStream out, boolean preserveReview) throws IOException {
+        Path destination = work.resolve(OUTPUTS.getFirst());
+        var existing = preserveReview && Files.exists(destination, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ? ProjectFiles.load(destination) : null;
         var inputs = score.inputs();
         Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
@@ -149,9 +153,16 @@ final class ReconstructionCli {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), score.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out);
-            for (String name : OUTPUTS) Files.move(staging.resolve(name), work.resolve(name),
-                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
+            if (preserveReview) {
+                ProjectFiles.save(destination, ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project(),
+                        existing == null ? null : existing.revision());
+            }
+            for (String name : OUTPUTS) {
+                if (preserveReview && name.equals(OUTPUTS.getFirst())) continue;
+                Files.move(staging.resolve(name), work.resolve(name),
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            }
         } finally {
             for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
             Files.deleteIfExists(staging);
@@ -196,7 +207,7 @@ final class ReconstructionCli {
     private static void render(Path midi, Path reference, Path index, Path target, Path destination,
                                Options options, ReconstructionStages.Score transcription, Matched matched,
                                Effects effects, ReconstructionStructure.Result structure, List<String> copyLanes,
-                               Arrangement arrangement, PrintStream out) throws IOException {
+                               Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
         long durationUs = transcription.durationUs();
         int frames = transcription.frames();
         MidiScore score = transcription.source();
@@ -216,7 +227,9 @@ final class ReconstructionCli {
             Path source = target.resolve(OUTPUTS.get(0));
             Path packagePath = target.resolve(OUTPUTS.get(1));
             Path audio = target.resolve(OUTPUTS.get(2));
-            ProjectFiles.save(source, result.project(), null);
+            var project = result.project();
+            if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
+            ProjectFiles.save(source, project, null);
             ProjectPackage.write(result.project(), packagePath);
             WaveFile.render(compiled, audio, frames);
             var inputEvidence = new LinkedHashMap<String, FileEvidence>();

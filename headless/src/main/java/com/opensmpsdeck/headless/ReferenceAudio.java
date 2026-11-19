@@ -59,28 +59,41 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
 
     /** Bounded stereo comparison prefix, with linear resampling for uncommon WAV rates. */
     static float[] stereoPrefix(Path path, int rate, int frames) throws IOException {
+        return stereoRange(path, rate, 0, frames, false);
+    }
+
+    /** Read an aligned range in stereo, duplicating mono and resampling when necessary. */
+    public static float[] stereoRange(Path path, int rate, long startFrame, int frames) throws IOException {
+        return stereoRange(path, rate, startFrame, frames, true);
+    }
+
+    private static float[] stereoRange(Path path, int rate, long startFrame, int frames, boolean allowMono)
+            throws IOException {
         try (var channel = FileChannel.open(path, StandardOpenOption.READ)) {
             var wave = header(channel);
             var format = wave.format();
-            if (format.channels() == 1) return null;
+            int channels = format.channels();
+            if (channels == 1 && !allowMono) return null;
             long available = wave.dataBytes() / format.frameBytes();
+            if (allowMono && ((startFrame + frames - 1) * format.sampleRate() / rate >= available))
+                throw invalid("comparison range exceeds WAV duration: " + path);
             var output = new float[frames * 2];
             for (int first = 0; first < frames; first += rate) {
                 int end = Math.min(frames, first + rate);
-                long sourceFirst = (long) first * format.sampleRate() / rate;
-                long sourceEnd = Math.min(available, (long) (end - 1) * format.sampleRate() / rate + 2);
+                long sourceFirst = (startFrame + first) * format.sampleRate() / rate;
+                long sourceEnd = Math.min(available, (startFrame + end - 1) * format.sampleRate() / rate + 2);
                 var data = readAt(channel, wave.dataStart() + sourceFirst * format.frameBytes(),
                         Math.toIntExact((sourceEnd - sourceFirst) * format.frameBytes()));
-                var decoded = new float[(int) (sourceEnd - sourceFirst) * 2];
+                var decoded = new float[(int) (sourceEnd - sourceFirst) * channels];
                 for (int i = 0; i < decoded.length; i++) decoded[i] = sample(data, format);
                 for (int i = first; i < end; i++) {
-                    double position = (long) i * format.sampleRate() / (double) rate - sourceFirst;
+                    double position = (startFrame + i) * format.sampleRate() / (double) rate - sourceFirst;
                     int low = (int) position;
-                    int high = Math.min(low + 1, decoded.length / 2 - 1);
+                    int high = Math.min(low + 1, decoded.length / channels - 1);
                     double fraction = position - low;
                     for (int side = 0; side < 2; side++)
-                        output[2*i + side] = (float) (decoded[2*low + side] * (1 - fraction)
-                                + decoded[2*high + side] * fraction);
+                        output[2*i + side] = (float) (decoded[channels * low + side % channels] * (1 - fraction)
+                                + decoded[channels * high + side % channels] * fraction);
                 }
             }
             return output;

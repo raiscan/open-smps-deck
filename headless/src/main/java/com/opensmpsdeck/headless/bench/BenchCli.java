@@ -127,11 +127,20 @@ public final class BenchCli {
             if (args.length != 6 || !args[4].equals("--tolerance"))
                 throw new IllegalArgumentException("Expected bench compare OLD.json NEW.json [--tolerance N]");
             tolerance = Double.parseDouble(args[5]);
-            if (!Double.isFinite(tolerance) || tolerance < 0)
-                throw new IllegalArgumentException("--tolerance must be finite and nonnegative");
         }
-        return BenchScorecard.compare(BenchFiles.read(Path.of(args[2]), BenchScorecard.Card.class),
-                BenchFiles.read(Path.of(args[3]), BenchScorecard.Card.class), tolerance, out);
+        return BenchScorecard.print(compareCards(Path.of(args[2]), Path.of(args[3]), tolerance), out);
+    }
+
+    public static com.google.gson.JsonObject compareJson(Path old, Path current, double tolerance) throws IOException {
+        return new com.google.gson.GsonBuilder().serializeNulls().create()
+                .toJsonTree(compareCards(old, current, tolerance)).getAsJsonObject();
+    }
+
+    private static BenchScorecard.Comparison compareCards(Path old, Path current, double tolerance) throws IOException {
+        if (!Double.isFinite(tolerance) || tolerance < 0)
+            throw new IllegalArgumentException("--tolerance must be finite and nonnegative");
+        return BenchScorecard.compare(BenchFiles.read(old, BenchScorecard.Card.class),
+                BenchFiles.read(current, BenchScorecard.Card.class), tolerance);
     }
 
     private static int songId(String text) {

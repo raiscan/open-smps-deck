@@ -36,11 +36,12 @@ public final class WaveFile {
     }
 
     @FunctionalInterface
-    private interface Renderer {
+    public interface Renderer {
         void render(S3kRenderer.PcmSink sink) throws IOException;
     }
 
-    private static void write(Path output, int presentations, Renderer renderer) throws IOException {
+    public static void write(Path output, int presentations, Renderer renderer) throws IOException {
+        S3kRenderer.validatePresentations(presentations);
         // CREATE_NEW also rejects symlinks and concurrent creators; never truncate a user's file.
         OutputStream created = Files.newOutputStream(output, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         boolean complete = false;

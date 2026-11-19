@@ -78,17 +78,19 @@ final class BenchScorecard {
                 label, group.cases, key, value, group.measured.get(key))));
     }
 
-    static int compare(Card old, Card current, double tolerance, PrintStream out) {
+    record Delta(String metric, Double before, Double after, Double delta, String result) {}
+    record Comparison(boolean passed, boolean failedCases, List<Delta> deltas) {}
+
+    static Comparison compare(Card old, Card current, double tolerance) {
         if (old.version != 1 || current.version != 1 || old.holdout != current.holdout
                 || !old.manifestSha256.equals(current.manifestSha256) || !old.goldInputs.equals(current.goldInputs)
                 || !caseIds(old).equals(caseIds(current))) {
             throw new IllegalArgumentException("Comparison requires the same corpus, case selection, gold inputs and holdout mode");
         }
-        boolean failed = old.cases.stream().anyMatch(c -> c.error != null)
+        boolean failedCases = old.cases.stream().anyMatch(c -> c.error != null)
                 || current.cases.stream().anyMatch(c -> c.error != null);
-        if (failed) out.println("A scorecard contains failed cases.");
-        out.println("| Metric | Old | New | Delta | Result |");
-        out.println("|---|---:|---:|---:|---|");
+        boolean failed = failedCases;
+        var deltas = new ArrayList<Delta>();
         for (String metric : HEADLINES) {
             Double before = old.overall.mean.getOrDefault(metric, old.gold.mean.get(metric));
             Double after = current.overall.mean.getOrDefault(metric, current.gold.mean.get(metric));
@@ -96,17 +98,27 @@ final class BenchScorecard {
             if (before == null || after == null) {
                 boolean lost = after == null;
                 failed |= lost;
-                out.printf(Locale.ROOT, "| %s | %s | %s | — | %s |%n", metric, number(before), number(after),
-                        lost ? "missing" : "new");
+                deltas.add(new Delta(metric, before, after, null, lost ? "missing" : "new"));
                 continue;
             }
             double delta = after - before;
             boolean regression = (LOWER.contains(metric) ? delta : -delta) > tolerance + 1e-12;
             failed |= regression;
-            out.printf(Locale.ROOT, "| %s | %.6f | %.6f | %+.6f | %s |%n", metric, before, after, delta,
-                    regression ? "regression" : "pass");
+            deltas.add(new Delta(metric, before, after, delta, regression ? "regression" : "pass"));
         }
-        return failed ? 1 : 0;
+        return new Comparison(!failed, failedCases, List.copyOf(deltas));
+    }
+
+    static int print(Comparison comparison, PrintStream out) {
+        if (comparison.failedCases) out.println("A scorecard contains failed cases.");
+        out.println("| Metric | Old | New | Delta | Result |");
+        out.println("|---|---:|---:|---:|---|");
+        for (var row : comparison.deltas) {
+            String delta = row.delta == null ? "—" : String.format(Locale.ROOT, "%+.6f", row.delta);
+            out.printf(Locale.ROOT, "| %s | %s | %s | %s | %s |%n",
+                    row.metric, number(row.before), number(row.after), delta, row.result);
+        }
+        return comparison.passed ? 0 : 1;
     }
 
     private static List<String> caseIds(Card card) {

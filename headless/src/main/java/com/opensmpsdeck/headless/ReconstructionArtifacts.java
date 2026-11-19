@@ -34,13 +34,17 @@ final class ReconstructionArtifacts {
             var tree = JSON.getAdapter(JsonElement.class).read(stream);
             require(stream.peek() == JsonToken.END_DOCUMENT,
                     file.toString(), "unexpected content after JSON object");
-            shape(file.getFileName().toString(), type, tree);
-            var version = tree.getAsJsonObject().get("version");
-            require(version.getAsInt() == ReconstructionStages.VERSION, file + ".version", "unsupported artifact version");
-            return JSON.fromJson(tree, type);
+            return decode(file, type, tree);
         } catch (JsonParseException | MalformedJsonException | EOFException malformed) {
             throw new IllegalArgumentException(file + ": " + malformed.getMessage(), malformed);
         }
+    }
+
+    static <T> T decode(Path file, Class<T> type, JsonElement tree) {
+        shape(file.getFileName().toString(), type, tree);
+        var version = tree.getAsJsonObject().get("version");
+        require(version.getAsInt() == ReconstructionStages.VERSION, file + ".version", "unsupported artifact version");
+        return JSON.fromJson(tree, type);
     }
 
     static void write(Path file, Object value) throws IOException {
