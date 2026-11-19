@@ -106,7 +106,7 @@ public final class CatalogueMatcher {
                 ranked.size(), reference.summary(), ranked.subList(0, Math.min(options.limit(), ranked.size())), skipped);
     }
 
-    private static Set<String> inferredAzureLakeSlots(InstrumentCatalogue index) {
+    static Set<String> inferredAzureLakeSlots(InstrumentCatalogue index) {
         Set<String> inferred = new HashSet<>();
         Set<String> supported = new HashSet<>();
         for (var variant : index.variants()) {

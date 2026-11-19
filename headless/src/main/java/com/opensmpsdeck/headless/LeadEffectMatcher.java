@@ -368,7 +368,7 @@ final class LeadEffectMatcher {
     }
 
     /** Reusable radix-2 transform for short, zero-padded stereo windows. */
-    private static final class Spectrum {
+    static final class Spectrum {
         private static final int BITS = Integer.numberOfTrailingZeros(BINS);
         private static final double[] COS = new double[BINS / 2];
         private static final double[] SIN = new double[BINS / 2];
@@ -388,6 +388,18 @@ final class LeadEffectMatcher {
                 double weight = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
                 real[Integer.reverse(i) >>> (32 - BITS)] = audio[2 * (center - length / 2 + i) + channel] * weight;
             }
+            fft();
+        }
+
+        void transform(float[] mono, int start, double[] window) {
+            java.util.Arrays.fill(real, 0);
+            java.util.Arrays.fill(imag, 0);
+            for (int i = 0; i < window.length; i++)
+                real[Integer.reverse(i) >>> (32 - BITS)] = mono[start + i] * window[i];
+            fft();
+        }
+
+        private void fft() {
             for (int width = 2; width <= BINS; width *= 2) {
                 int half = width / 2;
                 int stride = BINS / width;

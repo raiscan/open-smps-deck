@@ -19,7 +19,7 @@ final class BenchReconstruction {
     record Part(int id, boolean drums) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
-                  List<Reduction> reductions) {}
+                  List<Reduction> reductions, List<String> effectCopyLanes) {}
     record Reduction(String change, String reason) {}
     record Change(int partId, int pitch, long startUs, long endUs) {}
     record Match(String kind, String lane, Key key, Choice choice) {}
@@ -52,7 +52,7 @@ final class BenchReconstruction {
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
-        var events = BenchMetrics.events(truth, drums, false);
+        var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
         var reductions = new java.util.TreeMap<String, Long>();
         if (report.reductions() != null) {
@@ -61,6 +61,11 @@ final class BenchReconstruction {
         }
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
                 output.resolve("render.wav"), report.referenceUs(), reductions);
+    }
+
+    static List<BenchMetrics.Event> excludeEffectCopies(List<BenchMetrics.Event> events, List<String> lanes) {
+        if (lanes == null || lanes.isEmpty()) return events;
+        return events.stream().filter(event -> !lanes.contains(event.lane())).toList();
     }
 
     static final class Attribution {

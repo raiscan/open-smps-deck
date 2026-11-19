@@ -26,6 +26,18 @@ final class ReconstructionEcho {
 
     private ReconstructionEcho() {}
 
+    static int fmVolumeFloor(byte[] patch) {
+        int floor = 0;
+        // S3K adds attenuation only to carriers, and wraps the result at 128.
+        for (int i = 21; i < 25; i++)
+            if ((patch[i] & 128) != 0) floor = Math.max(floor, patch[i] & 127);
+        return floor;
+    }
+
+    static int scaleVolume(int volume, double gain) {
+        return gain == 0 ? 0 : Math.clamp(volume + (int) Math.round(20 * Math.log10(gain) / .75), 0, 127);
+    }
+
     static Map<Integer, Estimate> detect(MidiScore score, Path mix, Map<Integer, Path> stems,
                                          long limitUs) throws IOException {
         var result = new LinkedHashMap<Integer, Estimate>();
