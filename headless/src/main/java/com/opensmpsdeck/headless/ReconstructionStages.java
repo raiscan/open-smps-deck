@@ -142,7 +142,16 @@ public final class ReconstructionStages {
                     case ROLES -> {
                         var structure = readStructure(structureFile, score);
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
-                        ReconstructionArtifacts.write(rolesFile, ReconstructionRoles.assign(structure, score.source.parts(), rate));
+                        Path planFile = work.resolve("roleplan.json");
+                        ReconstructionRoles.Result roles;
+                        if (Files.notExists(planFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate);
+                        } else {
+                            var plan = ReconstructionArtifacts.read(planFile, ReconstructionRolePlan.class);
+                            ReconstructionChecks.rolePlan(plan, structure, score);
+                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan);
+                        }
+                        ReconstructionArtifacts.write(rolesFile, roles);
                     }
                     case ALLOCATE -> {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
@@ -173,6 +182,20 @@ public final class ReconstructionStages {
         }
     }
 
+    public static Path planTemplate(Path work) throws IOException {
+        var score = readScore(work.resolve("score.json"));
+        var structure = readStructure(work.resolve("structure.json"), score);
+        Path path = work.resolve("roleplan.json");
+        if (Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new java.nio.file.FileAlreadyExistsException(path.toString());
+        var heuristic = ReconstructionRoles.assign(structure, score.source.parts(), score.inputs.harmonyMaxHz);
+        var plan = ReconstructionRolePlan.template(structure, heuristic);
+        // CREATE_NEW also protects edits made concurrently after the existence check.
+        Files.writeString(path, new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(plan) + "\n",
+                java.nio.file.StandardOpenOption.CREATE_NEW);
+        return path;
+    }
+
     private static String stageName(Stage stage) {
         return stage.name().toLowerCase(Locale.ROOT);
     }
@@ -188,6 +211,9 @@ public final class ReconstructionStages {
             switch (file.getFileName().toString()) {
                 case "structure.json" -> ReconstructionChecks.structure(
                         ReconstructionArtifacts.decode(file, ReconstructionStructure.Result.class, value), score);
+                case "roleplan.json" -> ReconstructionChecks.rolePlan(
+                        ReconstructionArtifacts.decode(file, ReconstructionRolePlan.class, value),
+                        readStructure(work.resolve("structure.json"), score), score);
                 case "roles.json" -> ReconstructionChecks.roles(
                         ReconstructionArtifacts.decode(file, ReconstructionRoles.Result.class, value), score);
                 case "allocation.json" -> ReconstructionChecks.allocation(
@@ -302,13 +328,13 @@ public final class ReconstructionStages {
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
 
-    private static Score readScore(Path file) throws IOException {
+    static Score readScore(Path file) throws IOException {
         Score score = ReconstructionArtifacts.read(file, Score.class);
         ReconstructionChecks.score(score);
         return score;
     }
 
-    private static ReconstructionStructure.Result readStructure(Path file, Score score) throws IOException {
+    static ReconstructionStructure.Result readStructure(Path file, Score score) throws IOException {
         var structure = ReconstructionArtifacts.read(file, ReconstructionStructure.Result.class);
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),

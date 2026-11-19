@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionStages;
 
 import java.io.IOException;
@@ -18,7 +19,7 @@ import static com.opensmpsdeck.headless.mcp.McpJson.object;
 
 final class McpReconstruction {
     static final String[] STAGES = {"transcribe", "structure", "roles", "allocate", "voice", "assemble"};
-    static final String[] ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing"};
+    static final String[] ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan"};
     static final JsonObject INPUTS = schema(
             field("midi", "string", "Absolute MIDI file path"),
             field("wav", "string", "Absolute aligned mix WAV path"),
@@ -41,7 +42,7 @@ final class McpReconstruction {
             field("audioRepeats", "boolean", "Include audio chroma in repeat matching").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json");
+            "voicing.json", "roleplan.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json");
 
     private McpReconstruction() {}
 
@@ -94,6 +95,31 @@ final class McpReconstruction {
         return object(Map.of("workDir", work.toString(), "files", files));
     }
 
+    static JsonObject describe(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", "roles.json")) McpPaths.managed(work, file);
+        boolean json = args.has("json") && args.get("json").getAsBoolean();
+        String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
+                optional(args, "parts"), optional(args, "bars"));
+        if (args.has("output")) {
+            Path output = McpPaths.output(work, string(args, "output"));
+            Files.writeString(output, description, java.nio.file.StandardOpenOption.CREATE_NEW);
+            return object(Map.of("path", output.toString()));
+        }
+        if (json) return McpJson.parse(new java.io.StringReader(description)).getAsJsonObject();
+        return object(Map.of("text", description));
+    }
+
+    static JsonObject planTemplate(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", "roleplan.json")) McpPaths.managed(work, file);
+        return object(Map.of("path", ReconstructionStages.planTemplate(work).toString()));
+    }
+
+    private static String optional(JsonObject args, String key) {
+        return args.has(key) ? string(args, key) : null;
+    }
+
     static JsonObject artifact(JsonObject args, boolean write) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
         Path path = McpPaths.managed(work, string(args, "artifact") + ".json");
@@ -101,6 +127,7 @@ final class McpReconstruction {
         if (write) {
             McpPaths.managed(work, "score.json");
             if (path.getFileName().toString().equals("voicing.json")) McpPaths.managed(work, "allocation.json");
+            if (path.getFileName().toString().equals("roleplan.json")) McpPaths.managed(work, "structure.json");
             JsonElement value = args.get("value");
             if (!selection.isEmpty()) {
                 var tree = read(path);

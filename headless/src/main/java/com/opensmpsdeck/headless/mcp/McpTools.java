@@ -36,7 +36,7 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "report"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("reconstruct_run",
@@ -50,6 +50,15 @@ final class McpTools {
                     choice("stage", "Stage to execute", McpReconstruction.STAGES),
                     field("inputs", McpReconstruction.INPUTS, "Required for transcribe in a new directory").optional(),
                     field("options", McpReconstruction.OPTIONS, "CLI reconstruction options").optional()),
+            tool("reconstruct_describe", "Inspect a compact score with part summaries and bar grids.",
+                    (args, progress) -> McpReconstruction.describe(args), WORK,
+                    field("json", "boolean", "Return structured JSON instead of text").optional(),
+                    field("section", "string", "Limit to a section ID").optional(),
+                    field("parts", "string", "Comma-separated MIDI part IDs").optional(),
+                    field("bars", "string", "Inclusive one-based bar range such as 17-24").optional(),
+                    field("output", "string", "Save inside the work directory instead of returning inline").optional()),
+            tool("reconstruct_plan_template", "Create roleplan.json from the heuristic's dominant roles per section and part.",
+                    (args, progress) -> McpReconstruction.planTemplate(args), WORK),
             tool("artifact_read", "Read a stage artifact or the assembly report as JSON.",
                     (args, progress) -> McpReconstruction.artifact(args, false), WORK,
                     choice("artifact", "Artifact name without .json", READABLE_ARTIFACTS), SELECTION),

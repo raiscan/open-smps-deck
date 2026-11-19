@@ -123,6 +123,7 @@ class ReconstructionCliTest {
         assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "roles", work.toString()},
                 System.out, new PrintStream(errors)), errors.toString());
         assertEquals(editedStructure, Files.readString(structureFile));
+        assertUnplannedArtifacts(work);
         var resumedAllocation = JsonParser.parseString(Files.readString(work.resolve("allocation.json"))).getAsJsonObject();
         assertEquals(77, resumedAllocation.getAsJsonArray("notes").asList().stream()
                 .map(e -> e.getAsJsonObject().getAsJsonObject("note"))
@@ -171,6 +172,33 @@ class ReconstructionCliTest {
         assertEquals(0, Main.run(new String[]{"reconstruct", "run", work.toString(), "--from", "allocate"},
                 System.out, new PrintStream(errors)), errors.toString());
         assertEquals(goodReport, Files.readString(work.resolve("report.json")));
+    }
+
+    private void assertUnplannedArtifacts(Path work) throws Exception {
+        // Golden hashes from the same synthetic fixture run on cb33c9f.
+        var expected = java.util.Map.of(
+                "allocation.json", "7bf830b90c59fb781aae61f577b624deb53aea4be799eda811893957c2e33cc8",
+                "arrangement.smps.json", "21861a5e2b6fda2b21272818ff737d10cae4056d15a22df8e1273f4fd330a215",
+                "arrangement.smps.zip", "eef042d163278aa871c4b9b3d15fc895cf96dce5da0f1d67cfbc9af39dbf0f18",
+                "render.wav", "579c150877ab4a0597e50b8e33d94b0c1bfacca5800f85814271491b15a7c62d",
+                "report.json", "6ed08ed3961f2dab1a5bafa5b4efab7510fdde3d750598c994e9c4e42551dd6d",
+                "roles.json", "5e08f63fe79f62cdacfaf8552fbe4ddc6612de1a2c7d6323927fa2ffa5324dd2",
+                "score.json", "c99fa96c50b6231654f9638622d064fd27c7cfb7c7c6386ac6752ad86615b1b2",
+                "structure.json", "b1de076dad1f84fac16e556f9364dada60e0c8001374243d6ee806ad9022cbd1",
+                "voicing.json", "12a1d154a475a39f676a0348a6099a3b5654e47a68a3c6a3b03d3957feea431c");
+        try (var paths = Files.list(work)) {
+            assertEquals(expected.keySet(), paths.map(path -> path.getFileName().toString())
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+        var digest = java.security.MessageDigest.getInstance("SHA-256");
+        for (var entry : expected.entrySet()) {
+            Path path = work.resolve(entry.getKey());
+            byte[] bytes = entry.getKey().equals("score.json")
+                    ? Files.readString(path).replace(directory.toString(), "@INPUT@")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                    : Files.readAllBytes(path);
+            assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(bytes)), entry.getKey());
+        }
     }
 
     @Test void emitsEditedVoicingOnBothResumePaths() throws Exception {

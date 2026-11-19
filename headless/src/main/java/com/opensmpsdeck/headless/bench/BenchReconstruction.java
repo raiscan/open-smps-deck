@@ -36,8 +36,9 @@ final class BenchReconstruction {
     private BenchReconstruction() {}
 
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
-                      Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks) throws IOException {
-        var args = new ArrayList<>(List.of("reconstruct", "run", midi.toString(), audio.toString(), catalogue.toString(),
+                      Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
+                      List<BenchMetrics.Event> oracleTruth) throws IOException {
+        var args = new ArrayList<>(List.of("reconstruct", oracleTruth == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
         if (refine) args.add("--audio-refine");
         if (seconds != null) {
@@ -49,6 +50,11 @@ final class BenchReconstruction {
             args.add(part + "=" + file);
         });
         hooks.reconstruction().run(args.toArray(String[]::new), QUIET);
+        if (oracleTruth != null) {
+            hooks.reconstruction().run(new String[]{"reconstruct", "structure", output.toString()}, QUIET);
+            BenchRolePlan.write(output, oracleTruth, hooks.reconstruction(), QUIET);
+            hooks.reconstruction().run(new String[]{"reconstruct", "run", "--from", "roles", output.toString()}, QUIET);
+        }
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
