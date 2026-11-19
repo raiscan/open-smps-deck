@@ -3,7 +3,7 @@
 Validate and compile the shared JSON project, or render JSON/standalone `.bin`
 to WAV through the pinned OpenGGF production driver, physical policy, session
 and accurate FM core. These commands run without JavaFX, an audio device, a ROM,
-or an embedded agent. The old app continues to use its original `synth-core` module.
+or an embedded agent. Studio uses the same pinned playback core.
 
 ## Import locked-on S3&K music
 
