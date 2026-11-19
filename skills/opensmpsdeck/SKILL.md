@@ -29,6 +29,8 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   decision. MCP `artifact_read` accepts a `selection` of keys and array indexes
   as strings, for example `["lanes", "FM1"]` within `voicing`. Prefer focused
   reads for long tracks.
+- [ ] Decide the musical roles before tuning sound. This is usually the
+  largest quality lever. See **Plan lead and backing** below.
 - [ ] Listen to the same time range in the S3K render and source. Use
   `render_clip` on `arrangement.smps.json` with `start`, `end` in project
   seconds and a new relative WAV filename in `output`. Use `solo: ["FM1"]`
@@ -46,12 +48,65 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 - [ ] Reply after verifying the change. Mention the specific change, lane
   and time range, and the clip filename. Keep unresolved issues open.
 
+## Plan lead and backing
+
+The default role pass decides note by note. On merged Suno parts it can
+hand the lead between instruments mid-phrase, or promote chord tops and
+fills to melody. Make the decision the way an arranger would, per section
+and part, in `roleplan.json`. The code still traces individual notes.
+
+1. Read the score: `reconstruct_describe {workDir}` (CLI
+   `reconstruct describe "$work" --out "$work/describe.txt"`). A full song
+   is about 30 KB. Start with the header and the per-part summary lines,
+   then drill into specific sections with `section`, `parts` and `bars`.
+2. For each section, decide:
+   - **Lead.** Look for a singable line: mostly single notes, stepwise
+     motion, longer notes on phrase ends, and usually the highest sustained
+     line. Repeated chord stabs (`[A#3+D4+F4]` on every other step) are
+     backing even when they sit on top. A part that goes quiet or turns
+     into pads hands the lead to another part. Some sections have no lead.
+   - **Bass.** Usually the lowest monophonic part. Assign it with
+     `voice: "all"` when the part is truly monophonic.
+   - **Backing.** Everything else is harmony.
+3. Create a starting plan with `reconstruct_plan_template` (CLI
+   `reconstruct plan-template "$work"`). It mirrors the default choices.
+   Edit it with a few broad rules followed by narrow overrides, since the
+   last matching rule wins. Typical rules:
+   - Lead on top of a merged part: `{"sections": ["*"], "part": 0, "role":
+     "melody", "voice": "top", "pitchMin": 70}`. Pick `pitchMin` from the
+     grid, just under the lowest lead note and above the chord stabs.
+   - A clean monophonic lead section: `{"sections": ["section-b57"], "part": 0,
+     "role": "melody", "voice": "all"}`.
+   - Demote a part while another carries the tune: `{"sections": ["section-b90"],
+     "part": 3, "role": "harmony", "voice": "all"}`.
+   - Use `bars` or `startSeconds`/`endSeconds` only for a mid-section
+     handoff.
+4. Validate with `artifact_write` (artifact `roleplan`), then run from
+   `roles`. Check `roles.json` reasons (`roleplan#N`) and the FM1 notes in
+   `allocation.json` for a sample window. The lead lane should hold one
+   part's line, with no octave jumps into chord tones.
+5. Solo the lead (`render_clip` with `solo: ["FM1"]`) and compare the same
+   window with the reference.
+
+Limits:
+- Leave a section with no rule when the lead is not clearly separable.
+  The default pass still applies there.
+- Pitch bounds cannot separate a mid-register fill from the chord stabs
+  around it. Leave those sections to the default pass, or use short time
+  windows.
+- Suno MIDI may have no vocal part. When a vocal carries the tune, either
+  write no lead for that section or ask the user which instrument should
+  take the vocal line.
+- Re-planning reruns allocation and voicing. Save any hand edits to
+  `voicing.json` first.
+
 ## Problem → artifact
 
 | Problem | Edit | Resume |
 | --- | --- | --- |
 | Wrong, missing or mistimed notes | `score.json` note events, or `structure.json` effective notes and their associated repeat corrections | `structure` for score, `roles` for structure |
-| Melody assigned to the wrong lane or buried by role priority | `roles.json` note roles and priorities. Check the resulting allocation. Use voicing gain for a correctly assigned lead that is simply too quiet. | `allocate` |
+| Lead swaps parts, chord tones in the lead, or backing taken as melody | `roleplan.json` section and part rules. See **Plan lead and backing**. | `roles` |
+| A few individual notes have the wrong role | `roles.json` note roles. Check the resulting allocation. Use voicing gain for a correctly assigned lead that is simply too quiet. | `allocate` |
 | Channel overflow, audible drops or clipped note lengths | `allocation.json` lane, timing and drop decisions | Run standalone `voice` to refit, then resume at `assemble` |
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
