@@ -3,6 +3,7 @@ package com.opensmpsdeck.studio;
 import com.opensmpsdeck.project.*;
 import com.opensmpsdeck.project.Sequence;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.TransferMode;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -16,12 +17,23 @@ final class TimelineView extends ViewportCanvas {
     StudioProject project;
     String selected;
     String selectedLane="FM1";
+    boolean laneSelected;
     double scale=5;
     double playhead=-1;
     Runnable openNotes=()->{};
     Consumer<String> selection=ignored -> {};
     Consumer<Clip> edit=ignored -> {};
     Consumer<Clip> placement=ignored -> {};
+    final ReferenceLane referenceLane = new ReferenceLane();
+    ReviewTransport.Lanes monitor = new ReviewTransport.Lanes();
+    Runnable maskChanged = () -> {};
+    DoubleConsumer seek = ignored -> {};
+    Consumer<ReviewTransport.Range> chooseLoop = ignored -> {};
+    Consumer<ReviewNote> openReviewNote = ignored -> {};
+    private List<ReviewNote> reviewNotes = List.of();
+    private ReviewTransport.Range loop, loopDrag;
+    private Double rangeStart;
+    private AudioReference reference;
     private final boolean readOnly;
     private Clip dragging, ghost;
     private double pressX;
@@ -32,8 +44,35 @@ final class TimelineView extends ViewportCanvas {
     TimelineView(boolean readOnly) {
         this.readOnly=readOnly;
         dimensions(1400,RULER+LANES.size()*ROW+20);
+        referenceLane.loaded = () -> setProject(project, selected);
         canvas.setOnMousePressed(e -> {
-            canvas.requestFocus(); selectedLane=laneAt(e.getY());
+            if (e.getButton() != MouseButton.PRIMARY) return;
+            canvas.requestFocus();
+            if (e.getX() >= GUTTER) {
+                if (e.getY() < RULER && e.isShiftDown()) {
+                    rangeStart = secondsAt(e.getX());
+                    return;
+                }
+                var note = markerAt(e.getX(), e.getY());
+                if (note != null) {
+                    openReviewNote.accept(note);
+                    return;
+                }
+                if (e.getY() < RULER) {
+                    laneSelected = false;
+                    seek.accept(secondsAt(e.getX()));
+                    return;
+                }
+            }
+            laneSelected = e.getY() >= RULER && e.getY() < RULER + LANES.size() * ROW;
+            selectedLane=laneAt(e.getY());
+            if (e.getY() >= RULER && e.getY() < RULER + LANES.size() * ROW
+                    && e.getX() >= 53 && e.getX() < GUTTER) {
+                monitor.toggle(selectedLane, e.getX() < 77);
+                maskChanged.run();
+                draw();
+                return;
+            }
             Clip clip=hit(e.getX(),e.getY());
             selected=clip==null?null:clip.id(); selection.accept(selected);
             if(readOnly){draw();return;}
@@ -42,6 +81,12 @@ final class TimelineView extends ViewportCanvas {
             draw();
         });
         canvas.setOnMouseDragged(e -> {
+            if (rangeStart != null) {
+                double current = secondsAt(e.getX());
+                loopDrag = range(current);
+                draw();
+                return;
+            }
             if(dragging==null) return;
             int delta=snap((e.getX()-pressX)/scale);
             if(resizing) ghost=new Clip(dragging.id(),dragging.sequenceId(),dragging.lane(),dragging.startTick(),(int)Math.clamp((long)dragging.lengthTicks()+delta,snapUnit(),Integer.MAX_VALUE));
@@ -49,6 +94,14 @@ final class TimelineView extends ViewportCanvas {
             draw();
         });
         canvas.setOnMouseReleased(e -> {
+            if (rangeStart != null) {
+                var range = range(secondsAt(e.getX()));
+                rangeStart = null;
+                loopDrag = null;
+                if (range != null) chooseLoop.accept(range);
+                draw();
+                return;
+            }
             Clip changed=ghost; dragging=null; ghost=null;
             if(changed!=null) edit.accept(changed);
             draw();
@@ -71,29 +124,85 @@ final class TimelineView extends ViewportCanvas {
         });
     }
     void setProject(StudioProject value,String selectedId) {
-        if(project!=value){dragging=null;ghost=null;}
+        if(project!=value){dragging=null;ghost=null;rangeStart=null;loopDrag=null;}
         double previousOffset=offset;
         project=value; selected=selectedId;
         if(project==null){updateViewport();return;}
         int end=project.clips().stream().mapToInt(c->c.startTick()+c.lengthTicks()).max().orElse(0);
         double minimum=project.ticksPerBeat()*(readOnly?8.0:32.0);
-        dimensions(GUTTER+(Math.max(minimum,end)+project.ticksPerBeat()*4.0)*scale,RULER+LANES.size()*ROW+20);
+        double reviewEnd = reviewNotes.stream().mapToDouble(n -> n.endSeconds() == null ? n.startSeconds() : n.endSeconds())
+                .max().orElse(0);
+        if (reference != null && referenceLane.wave() != null) {
+            reviewEnd = Math.max(reviewEnd, reference.offsetSeconds() + referenceLane.wave().duration());
+        }
+        double reviewTicks = Math.min(reviewEnd * ticksPerSecond(), 10_000_000 / scale);
+        dimensions(GUTTER+(Math.max(Math.max(minimum,end), reviewTicks)+project.ticksPerBeat()*4.0)*scale,
+                RULER+LANES.size()*ROW+20);
         double scrollable=Math.max(0,contentWidth-scroll.getViewportBounds().getWidth());
         scroll.setHvalue(scrollable==0?0:Math.clamp(previousOffset/scrollable,0,1));
         updateViewport();
     }
+    void review(java.nio.file.Path file, AudioReference ref, List<ReviewNote> notes) {
+        reference = ref;
+        reviewNotes = notes.stream().filter(ReviewNote::isOpen).toList();
+        referenceLane.source(file, ref);
+        setProject(project, selected);
+    }
+
+    void setLoop(ReviewTransport.Range range) {
+        loop = range;
+        draw();
+    }
+
+    void reveal(double seconds) {
+        double x = seconds * ticksPerSecond() * scale;
+        double width = canvas.getWidth() - GUTTER;
+        double scrollable = Math.max(0, contentWidth - canvas.getWidth());
+        if ((x < offset || x > offset + width) && scrollable > 0) {
+            scroll.setHvalue(Math.clamp((x - width / 4) / scrollable, 0, 1));
+        }
+    }
+
+    private double ticksPerSecond() {
+        return readOnly ? 60 : ReviewTransport.ticksPerSecond(project);
+    }
+
+    private double secondsAt(double x) {
+        return Math.max(0, (x - GUTTER + offset) / (scale * ticksPerSecond()));
+    }
+
+    private double reviewX(double seconds) {
+        return GUTTER + seconds * scale * ticksPerSecond() - offset;
+    }
+
+    private ReviewTransport.Range range(double other) {
+        return Math.abs(other - rangeStart) < .01 ? null
+                : new ReviewTransport.Range(Math.min(other, rangeStart), Math.max(other, rangeStart));
+    }
+
+    private ReviewNote markerAt(double x, double y) {
+        for (var note : reviewNotes) {
+            int row = LANES.indexOf(note.laneId() == null ? "" : note.laneId());
+            if ((y < RULER || row >= 0 && y >= RULER + row * ROW && y < RULER + (row + 1) * ROW)
+                    && Math.abs(reviewX(note.startSeconds()) - x) <= 6) return note;
+        }
+        return null;
+    }
+
     private int snapUnit() { return project==null?6:Math.max(1,project.ticksPerBeat()/4); }
     private int snap(double ticks) { return (int)Math.clamp(Math.round(ticks/snapUnit())*snapUnit(),Integer.MIN_VALUE,Integer.MAX_VALUE); }
     private String laneAt(double y) { return LANES.get(Math.clamp((int)((y-RULER)/ROW),0,LANES.size()-1)); }
     private Sequence sequence(String id) { return project==null?null:project.sequences().stream().filter(s->s.id().equals(id)).findFirst().orElse(null); }
     private Clip hit(double x,double y) {
-        if(project==null || y<RULER || x<GUTTER) return null;
+        if(project==null || y<RULER || y>=RULER+LANES.size()*ROW || x<GUTTER) return null;
         String lane=laneAt(y); double tick=(x-GUTTER+offset)/scale;
         return project.clips().stream().filter(c->c.lane().equals(lane)&&tick>=c.startTick()&&tick<c.startTick()+c.lengthTicks()).findFirst().orElse(null);
     }
     @Override void draw() {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
         g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
+        var shownLoop = loopDrag == null ? loop : loopDrag;
+        referenceLane.viewport(w, offset, scale * ticksPerSecond(), playhead / ticksPerSecond(), shownLoop);
         if(project==null) return;
         g.setFont(Font.font("System",13));
         for(int row=0;row<LANES.size();row++) {
@@ -111,6 +220,11 @@ final class TimelineView extends ViewportCanvas {
             g.fillText(readOnly?b+" s":bar?String.valueOf(b/4+1):"·",x+6,24);
         }
         for(Clip clip:project.clips()) drawClip(g,ghost!=null&&clip.id().equals(ghost.id())?ghost:clip);
+        if (shownLoop != null) {
+            g.setFill(Color.web("#ffcb77", .12));
+            g.fillRect(reviewX(shownLoop.start()), 0, reviewX(shownLoop.end()) - reviewX(shownLoop.start()), canvas.getHeight());
+        }
+        for (var note : reviewNotes) drawReviewMarker(g, note);
         if(playhead>=0) {
             double x=GUTTER+playhead*scale-offset;
             if(x>=GUTTER) { g.setStroke(Color.web("#ffcb77")); g.strokeLine(x,RULER,x,canvas.getHeight()); }
@@ -120,10 +234,30 @@ final class TimelineView extends ViewportCanvas {
         for(int row=0;row<LANES.size();row++) {
             g.setFill(Color.web(LANES.get(row).equals(selectedLane)?"#d8f7ee":"#94a6bc"));
             g.fillText(LANES.get(row),16,RULER+row*ROW+29);
-            g.setFill(Color.web(row<5?"#5cddbc":LANES.get(row).equals("DAC")?"#e7ab69":"#7daefb"));
-            g.fillOval(78,RULER+row*ROW+21,5,5);
+            String lane = LANES.get(row);
+            g.setFill(Color.web(monitor.soloed(lane) ? "#5cddbc" : "#74869d"));
+            g.fillText("S", 59, RULER + row * ROW + 29);
+            g.setFill(Color.web(monitor.muted(lane) ? "#ffcb77" : "#74869d"));
+            g.fillText("M", 82, RULER + row * ROW + 29);
         }
     }
+    private void drawReviewMarker(GraphicsContext g, ReviewNote note) {
+        double x = reviewX(note.startSeconds());
+        if (x < GUTTER || x > canvas.getWidth()) return;
+        Color color = Color.web("agent".equalsIgnoreCase(note.author()) ? "#b4a1ff" : "#ffcb77");
+        g.setFill(color);
+        g.fillPolygon(new double[]{x - 5, x + 5, x}, new double[]{29, 29, 39}, 3);
+        int row = LANES.indexOf(note.laneId() == null ? "" : note.laneId());
+        double top = row < 0 ? 29 : RULER + row * ROW + 2;
+        if (row >= 0) {
+            g.setStroke(color);
+            g.strokeLine(x, top, x, top + ROW - 4);
+        }
+        if (note.endSeconds() != null) {
+            g.fillRect(x, top, reviewX(note.endSeconds()) - x, 3);
+        }
+    }
+
     private void drawClip(GraphicsContext g,Clip c) {
         Sequence source=sequence(c.sequenceId()); if(source==null) return;
         double x=GUTTER+c.startTick()*scale-offset, width=c.lengthTicks()*scale;

@@ -5,13 +5,28 @@ import java.util.List;
 /** Versioned, linked source document. Use ProjectFormat.validate at trust boundaries. */
 public record StudioProject(int formatVersion, String name, String mode, int ticksPerBeat,
                             int tempo, List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                            List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram) {
+                            List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
+                            List<AudioReference> references, List<ReviewNote> notes) {
     public StudioProject {
         voices = List.copyOf(voices);
         sequences = List.copyOf(sequences);
         clips = List.copyOf(clips);
         envelopes = List.copyOf(envelopes);
         samples = List.copyOf(samples);
+        references = List.copyOf(references);
+        notes = List.copyOf(notes);
+    }
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
+                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, List.of(), List.of());
+    }
+
+    public StudioProject withReview(List<AudioReference> references, List<ReviewNote> notes) {
+        return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes);
     }
     public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
                          List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes,List<DacSample> samples) {

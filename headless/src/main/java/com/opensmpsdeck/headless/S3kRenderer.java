@@ -36,6 +36,11 @@ public final class S3kRenderer {
         void accept(short[] interleavedStereo) throws IOException;
     }
 
+    /** Set bits mute hardware outputs. FM bit 5 also covers DAC. */
+    public record ChannelMask(int fm, int psg) {
+        public static final ChannelMask NONE = new ChannelMask(0, 0);
+    }
+
     private S3kRenderer() {}
 
     public static void render(byte[] input, int presentations, PcmSink sink) throws IOException {
@@ -61,10 +66,20 @@ public final class S3kRenderer {
 
     /** Render one immutable native bank together with its explicitly supplied dependencies. */
     public static void render(CompiledProject project, int presentations, PcmSink sink, ChipWriteObserver observer) throws IOException {
+        render(project, presentations, ChannelMask.NONE, sink, observer);
+    }
+
+    public static void render(CompiledProject project, int presentations, ChannelMask mask, PcmSink sink) throws IOException {
+        render(project, presentations, mask, sink, ChipWriteObserver.NONE);
+    }
+
+    private static void render(CompiledProject project, int presentations, ChannelMask mask,
+                               PcmSink sink, ChipWriteObserver observer) throws IOException {
         validatePresentations(presentations);
         Objects.requireNonNull(sink, "sink");
         Objects.requireNonNull(observer, "observer");
         Objects.requireNonNull(project, "project");
+        Objects.requireNonNull(mask, "mask");
         MusicRestoreSink unexpectedRestore = () -> {
             throw new IllegalStateException("music restoration requires a previous project");
         };
@@ -72,6 +87,7 @@ public final class S3kRenderer {
         try (var session = newSession(observer)) {
             session.install();
             session.queueActivation(prepared);
+            if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
             var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
             for (int frame = 0; frame < presentations; frame++) {
                 advance(session, pcm);

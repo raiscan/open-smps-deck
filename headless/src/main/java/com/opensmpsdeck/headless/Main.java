@@ -29,6 +29,7 @@ public final class Main {
             if (args.length == 0) throw new IllegalArgumentException("expected a command");
             switch (args[0]) {
                 case "catalog" -> CatalogueCli.run(args, out);
+                case "notes", "reference" -> ReviewCli.run(args, out);
                 case "reconstruct" -> ReconstructionCli.run(args, out);
                 case "copy-arrangement" -> {
                     requireArguments(args, 3);
@@ -265,6 +266,7 @@ public final class Main {
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
         ReconstructionCli.usage(out);
+        ReviewCli.usage(out);
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");

@@ -643,6 +643,125 @@ class StudioWindowTest {
     private void layout(){window.scene().getRoot().applyCss();window.scene().getRoot().layout();}
     private static void key(Node node,KeyCode code,boolean shortcut){Event.fireEvent(node,new KeyEvent(KeyEvent.KEY_PRESSED,"","",code,false,shortcut,false,false));}
 
+    @Test void referenceLaneAppearsAndABSwitchKeepsTransportPosition() throws Exception {
+        Path wav = ReferenceWaveTest.wav(folder.resolve("guide.wav"), 16, 1, 24_000, -1000, 1000);
+        fx(() -> {
+            window.addReference(wav);
+            layout();
+            assertTrue(window.scene().lookup("#reference-lane").isVisible());
+            assertEquals("guide.wav", window.document().project().references().getFirst().path());
+            return null;
+        });
+        await(() -> window.timeline.referenceLane.wave() != null);
+        fx(() -> {
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, TimelineView.GUTTER + 45, 20, true);
+            double position = window.transport().seconds;
+            assertEquals(1, position);
+            key(window.timeline.canvas, KeyCode.R, false);
+            assertTrue(window.transport().referenceAudible());
+            assertEquals(position, window.transport().seconds);
+            key(window.timeline.canvas, KeyCode.R, false);
+            assertFalse(window.transport().referenceAudible());
+            assertEquals(position, window.transport().seconds);
+            return null;
+        });
+    }
+
+    @Test void referenceLaneDragAndKeyboardNudgeEditOffset() throws Exception {
+        Path wav = ReferenceWaveTest.wav(folder.resolve("guide.wav"), 16, 1, 24_000, -1000, 1000);
+        fx(() -> {
+            window.addReference(wav);
+            layout();
+            return null;
+        });
+        await(() -> window.timeline.referenceLane.wave() != null);
+        fx(() -> {
+            var waveCanvas = window.timeline.referenceLane.getChildrenUnmodifiable().getFirst();
+            mouse(waveCanvas, MouseEvent.MOUSE_PRESSED, 200, 32, true);
+            mouse(waveCanvas, MouseEvent.MOUSE_DRAGGED, 191, 32, true);
+            mouse(waveCanvas, MouseEvent.MOUSE_RELEASED, 191, 32, false);
+            assertEquals(-0.2, window.document().project().references().getFirst().offsetSeconds(), 1e-9);
+            key(waveCanvas, KeyCode.RIGHT, false);
+            assertEquals(-0.19, window.document().project().references().getFirst().offsetSeconds(), 1e-9);
+            return null;
+        });
+    }
+
+    @Test void addsAndResolvesReviewNoteThroughSharedEdits() throws Exception {
+        fx(() -> {
+            key(window.scene().getRoot(), KeyCode.N, false);
+            layout();
+            ((TextArea) window.scene().lookup("#review-note-text")).setText("Check the attack");
+            button("submit-review-note").fire();
+            var note = window.document().project().notes().getFirst();
+            assertEquals(0, note.startSeconds());
+            assertEquals("human", note.author());
+            assertTrue(note.isOpen());
+            reviewList().getSelectionModel().select(0);
+            assertEquals(0, window.transport().loop.start());
+            assertEquals(1.5, window.transport().loop.end());
+            button("resolve-review-note").fire();
+            assertFalse(window.document().project().notes().getFirst().isOpen());
+            assertTrue(reviewList().getItems().isEmpty());
+            key(window.scene().getRoot(), KeyCode.S, true);
+            return null;
+        });
+        assertFalse(ProjectFiles.load(file).project().notes().getFirst().isOpen());
+    }
+
+    @Test void externalNotesCommandRefreshesOpenListAndKeepsComposerDraft() throws Exception {
+        fx(() -> {
+            key(window.scene().getRoot(), KeyCode.N, false);
+            layout();
+            ((TextArea) window.scene().lookup("#review-note-text")).setText("Local draft");
+            return null;
+        });
+        cliNote("Agent marker");
+        await(() -> reviewList().getItems().size() == 1);
+        fx(() -> {
+            assertEquals("agent", reviewList().getItems().getFirst().author());
+            assertEquals("Local draft", ((TextArea) window.scene().lookup("#review-note-text")).getText());
+            button("submit-review-note").fire();
+            assertTrue(window.document().dirty());
+            return null;
+        });
+        cliNote("New agent revision");
+        await(() -> window.document().conflicted());
+        fx(() -> {
+            assertTrue(window.document().project().notes().stream().anyMatch(note -> note.text().equals("Local draft")));
+            assertThrows(java.io.IOException.class, () -> window.document().save());
+            Path recovered = window.document().reloadKeepingRecovery();
+            assertTrue(ProjectFiles.load(recovered).project().notes().stream().anyMatch(n -> n.text().equals("Local draft")));
+            assertTrue(window.document().project().notes().stream().anyMatch(n -> n.text().equals("New agent revision")));
+            return null;
+        });
+    }
+
+    @Test void arrangementSoloAndMuteSetTheHardwareRenderMask() throws Exception {
+        fx(() -> {
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(0, 0), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 62, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(62, 15), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 85, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(63, 15), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 62, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(1, 0), window.renderMask());
+            return null;
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private ListView<ReviewNote> reviewList() {
+        return (ListView<ReviewNote>) window.scene().lookup("#open-review-notes");
+    }
+
+    private void cliNote(String text) {
+        var output = new java.io.ByteArrayOutputStream();
+        var stream = new java.io.PrintStream(output);
+        assertEquals(0, com.opensmpsdeck.headless.Main.run(new String[]{"notes", "add", file.toString(),
+                "--at", "1.5", "--text", text, "--author", "agent"}, stream, stream), output::toString);
+    }
+
     @Test void snapshotRealEditor() throws Exception {
         String target=System.getProperty("studio.snapshot");Assumptions.assumeTrue(target!=null,"Optional visual QA artifact");
         fx(()->{

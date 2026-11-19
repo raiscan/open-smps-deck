@@ -40,6 +40,28 @@ excerpt and returns the distances with stable IDs. Each successful operation wri
 [instrument catalogue guide](../docs/architecture/instrument-catalogue.md#first-pass-in-use)
 covers source formats, filters, and Studio deployment.
 
+## Reference audio and review notes
+
+Use these arguments after `java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar`.
+
+```text
+reference add PROJECT WAV [--offset S] [--label L] [--role R]
+notes list PROJECT [--open]
+notes add PROJECT --at S [--end S] [--lane L] [--clip C] --text T --author A
+notes resolve PROJECT ID [--reply T --author A]
+```
+
+Times are project seconds. Reference offsets may be negative. For example,
+`notes add song.smps.json --at 20.125 --lane FM1 --text "Check the attack" --author human`
+adds a point note and prints its generated ID. `notes list` prints a JSON
+array, and `--open` filters it to unresolved feedback. To resolve with a
+reply, supply both `--reply` and `--author`.
+
+Writes are atomic and revision-checked. An open Studio window refreshes a
+clean project automatically. See the
+[review protocol](../docs/architecture/review-loop.md) for the edit, render
+and reply sequence.
+
 ## Run
 
 Requires JDK 25 and Maven. From the repository root:

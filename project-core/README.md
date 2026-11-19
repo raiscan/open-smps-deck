@@ -9,7 +9,7 @@ See [the example](../examples/lantern-walk.smps.json) and the
 ## Version 1 contract
 
 Every field shown below is required; unknown/duplicate fields, invalid UTF-8,
-non-integral numbers and unresolved references are errors. Files are capped at
+non-integral native fields and unresolved synthesis references are errors. Files are capped at
 1 MiB and compiled output at one 32 KiB bank. IDs are stable strings, independent
 of list positions. Names are for display; references always use IDs.
 
@@ -60,6 +60,50 @@ and nested multi-channel groups are not yet exposed by this first editor.
 - The compiler preserves positional hardware lanes, splits long rests, ties long
   notes and bakes repeated clips inline. It does not yet optimize reuse into
   CALL/LOOP instructions. The pinned driver remains capable of those operations.
+
+## Review metadata in versions 1–5
+
+Projects may include top-level `references` and `notes` arrays. This metadata
+does not change the format version, compiled bank, or WAV export. Empty arrays
+are omitted when Studio or the CLI saves the project. The top-level `notes`
+array is distinct from the musical `notes` inside a sequence.
+
+```json
+{
+  "references": [{
+    "id": "guide-mix",
+    "label": "Guide",
+    "path": "audio/guide.wav",
+    "offsetSeconds": -0.125,
+    "gainDb": -3,
+    "role": "mix"
+  }],
+  "notes": [{
+    "id": "lead-attack",
+    "startSeconds": 20.125,
+    "endSeconds": 21.25,
+    "laneId": "FM1",
+    "clipId": "lead-chorus",
+    "text": "Check the attack",
+    "author": "human",
+    "status": "open",
+    "createdAt": "2026-11-19T09:00:00Z"
+  }]
+}
+```
+
+- Each list has unique, stable string IDs. Paths may be absolute or relative to
+  the directory containing the project file. `offsetSeconds` is when the
+  first sample lands on the project timeline. Negative values trim the audible
+  lead-in at project time zero. `gainDb` is the reference playback gain.
+  `role` is an optional display hint such as `mix` or `bass stem`.
+- Times and gains accept finite JSON numbers. Note times are nonnegative.
+  `endSeconds` is optional and must be at or after `startSeconds`. `laneId`
+  and `clipId` are optional context and can outlive arrangement edits.
+- `author` is a nonblank string. Studio uses `human` and highlights `agent`.
+  `status` is `open` or `resolved`. The caller supplies `createdAt` as an
+  ISO-8601 instant. A resolved note may carry a `reply` object with its own
+  `text`, `author` and `createdAt`. Omit optional fields when absent.
 
 ## Version 2 native controls
 
