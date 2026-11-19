@@ -89,8 +89,8 @@ public final class ProjectEdits {
         ProjectFormat.validate(p);
         List<Sequence> sequences=new ArrayList<>(p.sequences());
         sequences.add(sequence);
-        int version="DAC".equals(sequence.type())?Math.max(4,p.formatVersion()):p.formatVersion();
-        return checked(new StudioProject(version,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples(),p.nativeProgram(),p.references(),p.notes()));
+        int version="DAC".equals(sequence.type())?Math.max(4,p.arrangementVersion()):p.arrangementVersion();
+        return checked(p.withArrangement(version,p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
     }
 
     public static StudioProject addSample(StudioProject p,DacSample sample) {
@@ -120,7 +120,7 @@ public final class ProjectEdits {
         return withSamples(p,samples);
     }
     private static StudioProject withSamples(StudioProject p,List<DacSample> samples) {
-        return checked(new StudioProject(Math.max(4,p.formatVersion()),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),samples,p.nativeProgram(),p.references(),p.notes()));
+        return checked(p.withArrangement(Math.max(4,p.arrangementVersion()),p.voices(),p.sequences(),p.clips(),p.envelopes(),samples));
     }
 
     public static StudioProject addTrigger(StudioProject p,String sequenceId,SampleTrigger trigger) {
@@ -154,7 +154,7 @@ public final class ProjectEdits {
 
     public static StudioProject addVoice(StudioProject p,Voice voice) {
         ProjectFormat.validate(p);List<Voice> voices=new ArrayList<>(p.voices());voices.add(voice);
-        return withAssets(p,p.formatVersion(),voices,p.envelopes());
+        return withAssets(p,p.arrangementVersion(),voices,p.envelopes());
     }
     public static StudioProject updateVoice(StudioProject p,Voice voice) {
         return changeVoice(p,voice.id(),old->voice);
@@ -188,7 +188,7 @@ public final class ProjectEdits {
             if(voice!=null) voices.add(voice);
         }
         if(!found) throw new IllegalArgumentException("Unknown voice '"+id+"'");
-        return withAssets(p,p.formatVersion(),voices,p.envelopes());
+        return withAssets(p,p.arrangementVersion(),voices,p.envelopes());
     }
     private static StudioProject changeEnvelope(StudioProject p,String id,UnaryOperator<Envelope> change) {
         ProjectFormat.validate(p);List<Envelope> envelopes=new ArrayList<>();boolean found=false;
@@ -200,7 +200,7 @@ public final class ProjectEdits {
         return withAssets(p,3,p.voices(),envelopes);
     }
     private static StudioProject withAssets(StudioProject p,int version,List<Voice> voices,List<Envelope> envelopes) {
-        return checked(new StudioProject(Math.max(p.formatVersion(),version),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),voices,p.sequences(),p.clips(),envelopes,p.samples(),p.nativeProgram(),p.references(),p.notes()));
+        return checked(p.withArrangement(Math.max(p.arrangementVersion(),version),voices,p.sequences(),p.clips(),envelopes,p.samples()));
     }
 
     private static StudioProject changeClip(StudioProject p,String id,UnaryOperator<Clip> change) {
@@ -233,10 +233,10 @@ public final class ProjectEdits {
         ProjectFormat.validate(p); List<Sequence> sequences=new ArrayList<>(); boolean found=false, changed=false;
         for(Sequence s : p.sequences()) { if(s.id().equals(id)) { found=true; Sequence next=change.apply(s); changed=!next.equals(s); s=next; } sequences.add(s); }
         if(!found) throw new IllegalArgumentException("Unknown sequence '"+id+"'");
-        return checked(new StudioProject(changed?Math.max(minimumVersion,p.formatVersion()):p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples(),p.nativeProgram(),p.references(),p.notes()));
+        return checked(p.withArrangement(changed?Math.max(minimumVersion,p.arrangementVersion()):p.arrangementVersion(),p.voices(),sequences,p.clips(),p.envelopes(),p.samples()));
     }
     private static Sequence withNotes(Sequence s,List<NoteEvent> notes) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),notes,s.commands(),s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
     private static Sequence withCommands(Sequence s,List<CommandEvent> commands) { return new Sequence(s.id(),s.name(),s.type(),s.lengthTicks(),s.voiceId(),s.volume(),s.notes(),commands,s.repeatState(),s.psgEnvelopeId(),s.modulationEnvelopeId(),s.triggers()); }
-    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(new StudioProject(p.formatVersion(),p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),clips,p.envelopes(),p.samples(),p.nativeProgram(),p.references(),p.notes())); }
+    private static StudioProject withClips(StudioProject p,List<Clip> clips) { return checked(p.withArrangement(p.arrangementVersion(),p.voices(),p.sequences(),clips,p.envelopes(),p.samples())); }
     private static StudioProject checked(StudioProject p) { ProjectFormat.validate(p); return p; }
 }

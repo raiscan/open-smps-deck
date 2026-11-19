@@ -56,6 +56,41 @@ changes** to commit those fields. Duplicate creates another linked instance.
 Delete/Backspace with the arrangement focused removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
 for project undo/redo, outside text fields.
 
+## Group clips into a sequence
+
+Try the original [Signal garden example](../../examples/signal-garden.smps.json).
+It has two linked **Chorus** placements, each containing a nested **Rhythm bed**.
+
+1. Click one clip, then Ctrl-click (Cmd-click on macOS) or Shift-click others
+   across lanes. Choose **Groups → Group into sequence** or press Ctrl+G
+   (Cmd+G). You can include existing group placements.
+2. Drag a group's purple header to move all its children in time. Drag the
+   right edge to trim or repeat the group. Vertical marks show the start of
+   each repeat, and the last repeat can be partial. The inspector accepts
+   exact start and length values.
+3. Double-click a group header or choose **Edit inside**. Studio shows the
+   children in place at that instance's first repeat, with the surrounding
+   song dimmed. Edit child clips and nested groups with the usual controls.
+   Inspector start ticks are relative to the open group. Every linked
+   instance updates together. Press Esc to go out one level or click a
+   breadcrumb to return to that level.
+4. Drag a group from **Sequences** onto the timeline to reuse it. A group
+   always keeps its authored hardware lanes, regardless of the drop lane.
+   **Place on timeline** appends a selected group after the current arrangement.
+   Use **Apply group source** in the inspector to rename the group or change
+   the duration of one repeat. The length of each placement stays independent.
+5. **Groups → Ungroup** or Ctrl+Shift+G (Cmd+Shift+G) restores the children of
+   the selected instance at their expanded positions and lengths. Nested
+   group children stay linked. The reusable source stays in the library.
+   Grouping, ungrouping and placement changes use the usual undo/redo.
+
+With groups, a hardware lane is occupied only where an expanded child clip
+lies. Gaps remain usable. Studio refuses a move, extension or linked edit if
+it would overlap another clip on the same lane in any instance. A cycle or
+more than four group levels is also rejected. Clean external refreshes keep
+your breadcrumb path by ID while it still exists, and return to the closest
+surviving level if a placement disappears.
+
 ## Edit the source notes
 
 Selecting a clip opens its source in the piano roll below. Notes are bars:
@@ -254,6 +289,6 @@ manifest and source JSON into a new `.smps.zip`. This adapter package is documen
 for engine integration; OpenGGF does not yet load the ZIP directly. Bare binary
 export refuses to drop those dependencies. Preview and WAV export use them.
 
-Nested multi-channel sequences, make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
+Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records coverage for the retail importer and the remaining driver gaps.

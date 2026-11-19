@@ -31,6 +31,7 @@ public final class Main {
             switch (args[0]) {
                 case "catalog" -> CatalogueCli.run(args, out);
                 case "notes", "reference" -> ReviewCli.run(args, out);
+                case "group" -> GroupCli.run(args, out);
                 case "reconstruct" -> ReconstructionCli.run(args, out);
                 case "bench" -> {
                     return BenchCli.run(args, out, new BenchCli.Hooks(ReconstructionCli::run,
@@ -65,7 +66,7 @@ public final class Main {
                     out.printf(Locale.ROOT, "Imported 0x%02X %s to %s%n", id, song.name(), output);
                     if (id == 0x2A) out.println("Extra Life restores prior music. Render with --previous-project and --previous-frames.");
                 }
-                case "validate-project" -> {
+                case "validate-project", "validate" -> {
                     requireArguments(args, 2);
                     Path input = Path.of(args[1]);
                     var project = ProjectFiles.load(input).project();
@@ -76,8 +77,10 @@ public final class Main {
                                 project.name(), song.length,
                                 compiled.nativeProgram().bankBase() + compiled.nativeProgram().headerOffset());
                     } else {
+                        String groups = project.groupSequences().isEmpty() ? ""
+                                : project.groupSequences().size() + " group sequences, ";
                         out.println("Valid S3K project \"" + project.name() + "\": " + project.sequences().size()
-                                + " sequences, " + project.clips().size() + " clips, " + song.length
+                                + " sequences, " + groups + project.clips().size() + " clips, " + song.length
                                 + " compiled bytes (" + input + ")");
                     }
                 }
@@ -189,7 +192,7 @@ public final class Main {
                 if (!options.contains("--frames")) {
                     if (song.nativeProgram() != null) {
                         presentations = ProjectRenderTiming.presentationCount(project);
-                    } else if (project.clips().stream().anyMatch(clip -> clip.lane().equals("DAC"))) {
+                    } else if (ProjectCompiler.dacEndTick(project) > 0) {
                         presentations = Math.max(presentations, ProjectRenderTiming.presentationCount(project));
                     }
                 }
@@ -264,6 +267,9 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement PROJECT.json OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group create PROJECT.json GROUP_ID NAME PLACEMENT_ID... [--in GROUP_ID]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group place PROJECT.json GROUP_ID PLACEMENT_ID START LENGTH [--in GROUP_ID]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group ungroup PROJECT.json PLACEMENT_ID [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
