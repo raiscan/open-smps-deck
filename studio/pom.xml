@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>com.opensmps</groupId><artifactId>opensmpsdeck-parent</artifactId><version>0.1.0-SNAPSHOT</version></parent>
+  <artifactId>opensmpsdeck-studio</artifactId>
+  <name>OpenSMPSDeck - Timeline Studio</name>
+  <properties><maven.compiler.source>25</maven.compiler.source><maven.compiler.target>25</maven.compiler.target><maven.compiler.release>25</maven.compiler.release></properties>
+  <dependencies>
+    <dependency><groupId>com.opensmps</groupId><artifactId>opensmpsdeck-headless</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>com.opensmps</groupId><artifactId>project-core</artifactId><version>${project.version}</version></dependency>
+    <dependency><groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId><version>${javafx.version}</version></dependency>
+    <dependency><groupId>org.openjfx</groupId><artifactId>javafx-swing</artifactId><version>${javafx.version}</version><scope>test</scope></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+  </dependencies>
+  <build><plugins>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.5.1</version><configuration><forceCreation>true</forceCreation></configuration></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-shade-plugin</artifactId><version>3.6.1</version>
+      <executions><execution><phase>package</phase><goals><goal>shade</goal></goals><configuration>
+        <createDependencyReducedPom>false</createDependencyReducedPom>
+        <filters><filter><artifact>*:*</artifact><excludes><exclude>module-info.class</exclude><exclude>META-INF/versions/**/module-info.class</exclude><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.RSA</exclude></excludes></filter><filter><artifact>com.opensmps:opensmpsdeck-headless</artifact><includes><include>com/opensmpsdeck/headless/**</include><include>META-INF/maven/com.opensmps/opensmpsdeck-headless/**</include></includes></filter></filters>
+        <transformers><transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"><mainClass>com.opensmpsdeck.studio.StudioLauncher</mainClass></transformer><transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/></transformers>
+      </configuration></execution></executions>
+    </plugin>
+  </plugins></build>
+</project>

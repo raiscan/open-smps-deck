@@ -1,0 +1,428 @@
+{
+  "formatVersion": 3,
+  "name": "Lantern walk / voices and envelopes",
+  "mode": "S3K",
+  "ticksPerBeat": 12,
+  "tempo": 192,
+  "voices": [
+    {
+      "id": "voice-lead",
+      "name": "Glass keys",
+      "bytes": [
+        4,
+        1,
+        2,
+        1,
+        2,
+        31,
+        31,
+        31,
+        31,
+        8,
+        7,
+        8,
+        7,
+        3,
+        3,
+        3,
+        3,
+        42,
+        42,
+        42,
+        42,
+        34,
+        8,
+        168,
+        136
+      ]
+    },
+    {
+      "id": "voice-bass",
+      "name": "Round bass",
+      "bytes": [
+        4,
+        1,
+        1,
+        1,
+        1,
+        31,
+        31,
+        31,
+        31,
+        10,
+        8,
+        10,
+        8,
+        3,
+        3,
+        3,
+        3,
+        26,
+        26,
+        26,
+        26,
+        32,
+        12,
+        168,
+        140
+      ]
+    }
+  ],
+  "sequences": [
+    {
+      "id": "seq-lead-a",
+      "name": "Lantern / A",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-lead",
+      "volume": 112,
+      "notes": [
+        {
+          "id": "a-1",
+          "tick": 0,
+          "duration": 9,
+          "pitch": 72
+        },
+        {
+          "id": "a-2",
+          "tick": 12,
+          "duration": 9,
+          "pitch": 76
+        },
+        {
+          "id": "a-3",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 79
+        },
+        {
+          "id": "a-4",
+          "tick": 48,
+          "duration": 9,
+          "pitch": 76
+        },
+        {
+          "id": "a-5",
+          "tick": 60,
+          "duration": 9,
+          "pitch": 74
+        },
+        {
+          "id": "a-6",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 72
+        }
+      ],
+      "commands": [
+        {
+          "id": "lead-mod",
+          "tick": 0,
+          "command": "MODULATION",
+          "arguments": [
+            1,
+            1,
+            1,
+            4
+          ]
+        },
+        {
+          "id": "lead-left",
+          "tick": 6,
+          "command": "PAN",
+          "arguments": [
+            128
+          ]
+        },
+        {
+          "id": "lead-volume",
+          "tick": 27,
+          "command": "VOLUME",
+          "arguments": [
+            100
+          ]
+        },
+        {
+          "id": "lead-stereo",
+          "tick": 48,
+          "command": "PAN",
+          "arguments": [
+            192
+          ]
+        },
+        {
+          "id": "lead-mod-off",
+          "tick": 72,
+          "command": "MODULATION_OFF",
+          "arguments": []
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null
+    },
+    {
+      "id": "seq-lead-b",
+      "name": "Lantern / B",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-lead",
+      "volume": 112,
+      "notes": [
+        {
+          "id": "b-1",
+          "tick": 0,
+          "duration": 9,
+          "pitch": 69
+        },
+        {
+          "id": "b-2",
+          "tick": 12,
+          "duration": 9,
+          "pitch": 72
+        },
+        {
+          "id": "b-3",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 76
+        },
+        {
+          "id": "b-4",
+          "tick": 48,
+          "duration": 9,
+          "pitch": 74
+        },
+        {
+          "id": "b-5",
+          "tick": 60,
+          "duration": 9,
+          "pitch": 71
+        },
+        {
+          "id": "b-6",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 67
+        }
+      ],
+      "commands": [
+        {
+          "id": "answer-right",
+          "tick": 0,
+          "command": "PAN",
+          "arguments": [
+            64
+          ]
+        },
+        {
+          "id": "answer-detune",
+          "tick": 24,
+          "command": "DETUNE",
+          "arguments": [
+            1
+          ]
+        },
+        {
+          "id": "answer-transpose",
+          "tick": 48,
+          "command": "TRANSPOSE",
+          "arguments": [
+            76
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": "env-shimmer"
+    },
+    {
+      "id": "seq-bass",
+      "name": "Stepping stones",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "voice-bass",
+      "volume": 115,
+      "notes": [
+        {
+          "id": "bass-1",
+          "tick": 0,
+          "duration": 18,
+          "pitch": 48
+        },
+        {
+          "id": "bass-2",
+          "tick": 24,
+          "duration": 18,
+          "pitch": 55
+        },
+        {
+          "id": "bass-3",
+          "tick": 48,
+          "duration": 18,
+          "pitch": 45
+        },
+        {
+          "id": "bass-4",
+          "tick": 72,
+          "duration": 18,
+          "pitch": 52
+        }
+      ],
+      "commands": [
+        {
+          "id": "bass-fade",
+          "tick": 0,
+          "command": "FM_VOLUME",
+          "arguments": [
+            3
+          ]
+        }
+      ],
+      "repeatState": "CARRY",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null
+    },
+    {
+      "id": "seq-answer",
+      "name": "Fireflies",
+      "type": "PSG",
+      "lengthTicks": 48,
+      "voiceId": null,
+      "volume": 76,
+      "notes": [
+        {
+          "id": "p-1",
+          "tick": 12,
+          "duration": 6,
+          "pitch": 84
+        },
+        {
+          "id": "p-2",
+          "tick": 24,
+          "duration": 6,
+          "pitch": 88
+        },
+        {
+          "id": "p-3",
+          "tick": 36,
+          "duration": 6,
+          "pitch": 91
+        }
+      ],
+      "commands": [
+        {
+          "id": "psg-detune",
+          "tick": 12,
+          "command": "DETUNE",
+          "arguments": [
+            1
+          ]
+        },
+        {
+          "id": "psg-fade",
+          "tick": 24,
+          "command": "PSG_VOLUME",
+          "arguments": [
+            1
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": "env-fireflies",
+      "modulationEnvelopeId": null
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip-a1",
+      "sequenceId": "seq-lead-a",
+      "lane": "FM1",
+      "startTick": 0,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-b1",
+      "sequenceId": "seq-lead-b",
+      "lane": "FM1",
+      "startTick": 96,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-a2",
+      "sequenceId": "seq-lead-a",
+      "lane": "FM1",
+      "startTick": 192,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-b2",
+      "sequenceId": "seq-lead-b",
+      "lane": "FM1",
+      "startTick": 288,
+      "lengthTicks": 96
+    },
+    {
+      "id": "clip-bass",
+      "sequenceId": "seq-bass",
+      "lane": "FM3",
+      "startTick": 0,
+      "lengthTicks": 384
+    },
+    {
+      "id": "clip-answer1",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 48,
+      "lengthTicks": 48
+    },
+    {
+      "id": "clip-answer2",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 144,
+      "lengthTicks": 48
+    },
+    {
+      "id": "clip-answer3",
+      "sequenceId": "seq-answer",
+      "lane": "PSG1",
+      "startTick": 240,
+      "lengthTicks": 144
+    }
+  ],
+  "envelopes": [
+    {
+      "id": "env-fireflies",
+      "name": "Firefly pluck",
+      "type": "PSG_VOLUME",
+      "bytes": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        15,
+        131
+      ]
+    },
+    {
+      "id": "env-shimmer",
+      "name": "Shimmer lift",
+      "type": "MODULATION",
+      "bytes": [
+        0,
+        1,
+        2,
+        3,
+        2,
+        1,
+        0,
+        128
+      ]
+    }
+  ]
+}

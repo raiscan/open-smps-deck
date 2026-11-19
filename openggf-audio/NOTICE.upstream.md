@@ -1,0 +1,272 @@
+# NOTICE
+
+OpenGGF is distributed under the GNU General Public License, version 3 only
+(`LICENSE`, `GPL-3.0-only`). This file lists the third-party components that carry their own
+licence terms and notices, which must accompany every copy of OpenGGF,
+including the executable JAR (`META-INF/openggf/`) and the release archives.
+
+## OpenGGF Mod Exception
+
+The OpenGGF contributors add a permission under GPL-3 section 7, the
+[OpenGGF Mod Exception](LICENSES/OpenGGF-Mod-Exception.txt): a mod that uses
+OpenGGF through its mod interface (the `@ModApi` types, the mod SDK and test kit,
+the documented manifest and resource formats, and any other engine types it
+calls or extends) without copying engine code may be conveyed under any terms,
+alone or with OpenGGF. OpenGGF itself stays under GPL-3.0-only.
+
+## Mod starter and example material
+
+- What `ggfmod init` writes into a new project, and the material it is made from
+  (`src/main/resources/META-INF/openggf-mod-sdk/templates/`, and the starter
+  projects in `src/test/resources/mods/sample-character-src/project/` and
+  `src/test/resources/mods/sample-standalone-src/project/`), is under
+  [MIT No Attribution](LICENSES/MIT-0.txt) (`MIT-0`). A new project carries no
+  licence until its creator chooses one.
+- The example mods in `examples/`, the bundled Time Attack mod in
+  `racing/time-attack/` and the creator kit's sample campaign are under the MIT
+  License; each carries its own `LICENSE` file.
+
+## Nuked OPN2
+
+The FM sound core in `src/main/java/com/openggf/audio/synth/nuked/` is a Java
+port of Nuked OPN2, a cycle-accurate Yamaha YM3438 / YM2612 emulator.
+
+- Copyright (C) 2017-2022 Alexey Khokholov (Nuke.YKT)
+- Upstream: https://github.com/nukeykt/Nuked-OPN2, commit
+  `335747d78cb0abbc3b55b004e62dad9763140115` (`ym3438.c` 1.0.12,
+  `ym3438.h` 1.0.9), pinned and hash-verified in
+  `tools/audio/nuked-opn2/PIN.md`
+- Licence: GNU Lesser General Public License, version 2.1 or (at your option)
+  any later version (`LGPL-2.1-or-later`); the licence text is in
+  `LICENSES/LGPL-2.1.txt`
+- Modified 2026-08 by the OpenGGF contributors: translated from C to Java;
+  chip type made per instance; state copy helpers and value equality added.
+  Modified 2026-11: `NukedOpn2.clocks`, which runs several cycles of
+  `OPN2_Clock` in one loop, added beside the per-cycle port.
+  Each modified file records this in its header (LGPL-2.1 section 2(b)).
+
+The ported files are conveyed under LGPL-2.1-or-later and are not converted to
+the GPL; the rest of OpenGGF uses them as a library, and they may be extracted
+and reused under that licence on their own. A distribution that includes them,
+with or without mods, must meet the LGPL's conditions for them, including
+section 6: its terms must permit modification for the recipient's own use and
+reverse engineering for debugging such modifications, and the recipient must be
+able to rebuild the program with a modified copy of these files, which
+OpenGGF's Corresponding Source provides. The LGPL headers and the upstream
+copyright notice are retained in every ported file. Releases up to and
+including 0.6.20260917 described the combination as conveyed under GPL-3
+through LGPL-2.1 section 3; later versions do not use that conversion.
+
+## blip_buf
+
+The band-limited delta buffer in `src/main/java/com/openggf/audio/synth/blip/`
+is a Java port of blip_buf 1.1.0 as modified for Genesis Plus GX. It is used
+only by the opt-in native-compatible PCM output stage, a capture and diagnostic
+configuration.
+
+- Copyright (C) 2003-2009 Shay Green; modified for Genesis Plus GX by EkeEke
+- Source: `core/sound/blip_buf.c` and `blip_buf.h` of the Genesis Plus GX tree
+  in BizHawk commit `427556b5ef3ac437eba754d90c5e7e9096c9a8df` (sha256 recorded
+  in the package documentation)
+- Licence: GNU Lesser General Public License, version 2.1 or (at your option)
+  any later version (`LGPL-2.1-or-later`); the licence text is in
+  `LICENSES/LGPL-2.1.txt`
+- Modified 2026-10 by the OpenGGF contributors: translated from C to Java;
+  stereo configuration only; state copy helpers and value equality added.
+  Each modified file records this in its header (LGPL-2.1 section 2(b)).
+
+The ported files are conveyed under LGPL-2.1-or-later and are not converted to
+the GPL; the rest of OpenGGF uses them as a library, and they may be extracted
+and reused under that licence on their own. A distribution that includes them,
+with or without mods, must meet the LGPL's conditions for them, including
+section 6: its terms must permit modification for the recipient's own use and
+reverse engineering for debugging such modifications, and the recipient must be
+able to rebuild the program with a modified copy of these files, which
+OpenGGF's Corresponding Source provides. The LGPL headers and the upstream
+copyright notice are retained in every ported file. Releases up to and
+including 0.6.20260917 described the combination as conveyed under GPL-3
+through LGPL-2.1 section 3; later versions do not use that conversion.
+
+## musl libm sin
+
+`src/main/java/com/openggf/audio/synth/MuslSin.java` is a Java port of musl's
+double-precision `sin` (`sin.c`, `__sin.c`, `__cos.c`, `__rem_pio2.c` without
+its large-argument path). `tools/audio/native-pcm/musl_sin.c` reproduces the
+`__sin` kernel branch for the vector generator. The BizHawk 2.11 Genesis Plus GX core links this
+`sin` for its equaliser cutoffs. The file retains both notices:
+
+- musl: Copyright © 2005-2020 Rich Felker, et al., MIT licence (text in the
+  file header)
+- origin FreeBSD msun: Copyright (C) 1993 by Sun Microsystems, Inc. All rights
+  reserved. Developed at SunPro, a Sun Microsystems, Inc. business. Permission
+  to use, copy, modify, and distribute this software is freely granted,
+  provided that this notice is preserved. `__rem_pio2` optimized by
+  Bruce D. Evans.
+
+## 3 Band EQ
+
+`NativeCompatiblePcmOutput.ThreeBandEq` ports `eq.c` from Genesis Plus GX:
+"3 Band EQ", (c) Neil C / Etanza Systems 2K6, after Paul Kellet's filter. The
+author placed it in the public domain.
+
+## buram
+
+The Sega CD backup-RAM code in `src/main/java/com/openggf/game/soniccd/backupram/`
+translates parts of buram, a Mega CD / Sega CD backup-RAM image tool. The BIOS
+owns this format, so it is not on the game disc.
+
+- Copyright (c) 2022 Ian Karlsson
+- Upstream: https://github.com/superctr/buram, commit
+  `98c27a650be9c8f8e35271f44f5d127ba450edb6` (`buram.c` sha256
+  `bcb41a1b90b865fa1122279af33ad494cde7180fcf3c9968e3b3c3b7575f114e`)
+- Licence: MIT; the upstream `COPYING` is `LICENSES/buram-MIT.txt`
+- Modified 2026-11 by the OpenGGF contributors: translated from C to Java.
+  - `CdBramEcc` translates the protected-block code: `buram_rs_init`,
+    `buram_rs_add_mod`, `buram_rs_encode`, `buram_rs_decode`,
+    `buram_crc_init`, `buram_crc`, the data, RS6 and RS8 interleave functions,
+    `buram_encode` and `buram_decode`, with upstream's generator-polynomial
+    and byte-order tables. A block with an uncorrectable symbol is rejected.
+  - `CdBackupRamVolume` translates the file-system functions `buram_format`,
+    `buram_read_repeat_code`, `buram_write_repeat_code`,
+    `buram_update_counters`, `buram_search`, `buram_read`, `buram_write` and
+    `buram_delete`, and the directory addressing of `buram_decode_buffer` and
+    `buram_encode_buffer`. It adds the BIOS's format check and `BRMVERIFY`,
+    and a read fails on any uncorrectable block.
+  - `CdBackupRamFile` writes and reads the 16-byte directory descriptor in
+    upstream's layout (`buram_write_file_desc`, `buram_read_file_desc`) with
+    its own code.
+
+  The two translated files record this in their headers. The other classes
+  in the package come from the Sonic CD disassembly and native captures, not
+  from buram.
+
+## MAME: RF5C164 PCM and Mega-CD graphics
+
+Sonic CD's PCM sound chip and stamp-graphics ("image rotation") unit in
+`src/main/java/com/openggf/game/soniccd/device/` translate parts of MAME.
+MAME as a whole is GPL-2.0; these files are individually BSD-3-Clause, as
+their SPDX headers state.
+
+- Upstream: https://github.com/mamedev/mame, commit
+  `9cf98d883e72e2ab8d4d73a7104989b4b306dda7`
+- `src/devices/sound/rf5c68.cpp` (sha256
+  `71e94d93dd9fdbbcf2c396c62ab2aa50d948bfcc2be688391f2f58268522aea9`) and
+  `rf5c68.h` (sha256
+  `00f9fa677404d17c151f31aa0dd52e3ae82b883749ce36d977e725d88e634785`):
+  copyright-holders Olivier Galibert, Aaron Giles
+- `src/mame/sega/megacd.cpp` (sha256
+  `4911ede42feb8f7cc48e1bdd35390cd5d4d917b61eba23a6962f44ca089e3f97`):
+  copyright-holders David Haywood
+- Licence: BSD-3-Clause; MAME's `docs/legal/BSD-3-Clause` is
+  `LICENSES/MAME-BSD-3-Clause.txt`
+- Modified 2026-11 by the OpenGGF contributors: translated from C++ to Java.
+  - `pcm/CdPcmDevice` translates `rf5c68_device::rf5c68_w`, `rf5c68_r`,
+    `rf5c68_mem_r`, `rf5c68_mem_w`, `sound_stream_update` and the
+    `rf5c164_map` decode. Where the native captures disagree, it follows them:
+    negative channel products round down and a loop jump is not stepped in the
+    same sample. Reset sets PAN to FF, which has no source. OpenGGF adds
+    `stepSplit`, not in MAME: the same sample, also reporting the part of the
+    channel sum from a given set of channels, so the host mix can apply music
+    and effect volumes.
+  - `CdStampGraphics` translates `segacd_trace_vector_base_address_w`,
+    `read_pixel_from_stampmap` and `write_pixel`, run line by line; reserved
+    priority mode 3 keeps the destination, which has no source.
+  - `CdStampGeometry` translates the stamp-map decoders
+    (`SCD_GET_TILE_INFO_*`), the `get_stampmap_*_tile_info_pixel` samplers and
+    the stamp `gfx_layout` tables, with the flipped quarter turns following the
+    native captures.
+
+  The three translated files carry the licence in their headers.
+  `CdPcmState`, `CdStampRenderRequest` and `CdStampRenderState` describe the
+  same registers and cite MAME for their decode without translating its code.
+
+## MAME: CHD v5 hunk map and CD codec framing
+
+The CHD disc reader in `src/main/java/com/openggf/data/cd/chd/` follows MAME's CHD
+format code. `ChdHuffman` follows the map Huffman decoder of
+`src/lib/util/huffman.cpp`, and `ChdHunkDecoder` the v5 map decoding
+(`decompress_v5_map`) of `src/lib/util/chd.cpp` and the CD codec framing
+(`chd_cd_decompressor`, `chd_cd_flac_decompressor`) of `src/lib/util/chdcodec.cpp`.
+
+- Upstream: https://github.com/mamedev/mame
+- Copyright-holders: Aaron Giles
+- Licence: BSD-3-Clause; `LICENSES/MAME-BSD-3-Clause.txt`
+- Modified 2026-11 by the OpenGGF contributors: rewritten in Java with bounded,
+  untrusted-input checks. Both files carry the licence in their headers.
+
+The LZMA, FLAC, Zstandard and CD-ROM ECC decoders beside them are written from their
+specifications (the LZMA SDK's public-domain `lzma-specification.txt`, RFC 9639,
+RFC 8878 and ECMA-130) and translate no third-party code.
+
+## Bundled fonts: Fusion Pixel, Noto and GNU Unifont
+
+Host interface text (`com.openggf.graphics.text.HostText`, drawn by `MenuPixelFont`) and
+`com.openggf.mods.ui.NameFont` (player-chosen display names) use these bundled fonts in
+`src/main/resources/fonts/`. None is modified: the BDFs are only gzip-compressed, the
+Unifont file is the upstream `.hex.gz`, and the TrueType files are byte-for-byte copies.
+`fonts/host-fonts.json` lists their fallback order.
+
+- `fusion-pixel-10px-proportional-ja.bdf.gz`, `-zh_hans.bdf.gz` and `-zh_hant.bdf.gz`:
+  Fusion Pixel Font 10px proportional with Japanese, Simplified Chinese and Traditional
+  Chinese glyph forms, release 2026.10.16, from https://github.com/TakWolf/fusion-pixel-font
+  (uncompressed BDF sha256 `29e86234c5c3f571a588a974868e72574400a936396f46e4ba69d0e33bb886cd`,
+  `39503d0b7d5632342440186e9595bbef84ebdc49ae712669a0488b0a380bc577` and
+  `94b4350dac442a05a5418961cb276c8bb09be36cd21da1d88df5612f6ba98878`).
+  Copyright (c) 2022, TakWolf. It incorporates Ark Pixel Font (Copyright (c)
+  2021, TakWolf), BoutiqueBitmap9x9 (Copyright 2026 fancy type foundry /
+  Cen-cyun, Liu) and Galmuri (Copyright (c) 2019-2025 Lee Minseo). Licence:
+  SIL Open Font License 1.1, with no Reserved Font Names; texts in
+  `LICENSES/OFL-1.1-Fusion-Pixel.txt`, `LICENSES/OFL-1.1-Ark-Pixel.txt`,
+  `LICENSES/OFL-1.1-BoutiqueBitmap9x9.txt` and `LICENSES/OFL-1.1-Galmuri.txt`.
+- Noto Sans Arabic UI, Noto Sans Devanagari UI, Noto Sans Bengali UI and Noto Sans Thai,
+  Regular and Bold hinted TrueType, from https://github.com/notofonts/notofonts.github.io
+  at commit `c1d3718e2a0eb25c2567a694ee017061fdaa5f51` (`fonts/<family>/hinted/ttf/`).
+  Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic,
+  `.../devanagari`, `.../bengali`, `.../thai`). Licence: SIL Open Font License 1.1; texts in
+  `LICENSES/OFL-1.1-Noto-Sans-Arabic.txt`, `LICENSES/OFL-1.1-Noto-Sans-Devanagari.txt`,
+  `LICENSES/OFL-1.1-Noto-Sans-Bengali.txt` and `LICENSES/OFL-1.1-Noto-Sans-Thai.txt`.
+  sha256:
+  `NotoSansArabicUI-Regular.ttf` `c56275c744ded6ff6df13de04963e6174632f0405a54a83f44d0fe5395f45ae6`,
+  `NotoSansArabicUI-Bold.ttf` `ba511a9cf3712cc801203f5fcaf5b35221830f975ec0fc91678e9a4ed07a1f6a`,
+  `NotoSansDevanagariUI-Regular.ttf` `43c9218d3b4fc2c19a40ed83b374dab9b212115e8daadd3a75bd3bec965bab6b`,
+  `NotoSansDevanagariUI-Bold.ttf` `4c0e2fd89ba7af5ee31844dc1bd652aa6dc389819bc52f31a635164090c7568b`,
+  `NotoSansBengaliUI-Regular.ttf` `ab2f54c0922024eb8813c3f33e335f137505861dba38d78195cf32b7c3ed8be2`,
+  `NotoSansBengaliUI-Bold.ttf` `0d46caf69318377337ca4c4e92907af11ea4bdef5465c8d5cfe17f8771d824a7`,
+  `NotoSansThai-Regular.ttf` `61cf814eec46b294d6ea4401ac295d0cecd5207bd2331dcc5a15e7301d30ee44`,
+  `NotoSansThai-Bold.ttf` `2ac6c6e8a478e23b15f76e4894af1fa2210f8f350e4e6e54aad530bec03efbfb`.
+- `unifont-18.0.01.hex.gz`: GNU Unifont 18.0.01, from https://unifoundry.com/unifont/
+  (sha256 `e66385c79a0b8b24a466f3129930e08a966a935b4bf3b28c6bb17a9df9bf791d`).
+  Originally by Roman Czyborra, maintained by Paul Hardy with many glyph
+  contributors (upstream `README`). Licence: SIL Open Font License 1.1, or GNU GPL 2.0 or later with the GNU
+  font embedding exception; the upstream `COPYING` is
+  `LICENSES/Unifont-OFL-1.1-GPL-2.0-font-exception.txt`.
+
+## FreeType and HarfBuzz
+
+Host text rasterizes and shapes OpenType fonts with the FreeType 2.14.1 and HarfBuzz 12.3.2
+libraries contained in the LWJGL 3.4.1 `lwjgl-freetype` native artifacts (HarfBuzz's API is
+exported by that same library and bound through `lwjgl-harfbuzz`).
+
+- FreeType: Portions of this software are copyright © 2025 The FreeType Project
+  (www.freetype.org). All rights reserved. Used under the FreeType License; text in
+  `LICENSES/FreeType-FTL.txt`.
+- HarfBuzz: "Old MIT" licence with the copyright notices in `LICENSES/HarfBuzz-MIT.txt`.
+
+Full contributor and third-party acknowledgements are in `CREDITS.md`.
+
+## ICU4J
+
+Host interface catalogs use ICU4J 78.3 for named whole-message formatting, CLDR
+plural rules and locale negotiation. ICU4J is licensed under Unicode-3.0; the
+copyright, permission and bundled-data notices from the artifact POM’s
+`maint/maint-78` licence source are retained in `LICENSES/ICU.txt`.
+Source: https://github.com/unicode-org/icu
+Licence source: https://raw.githubusercontent.com/unicode-org/icu/maint/maint-78/LICENSE
+SHA-256: `e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af`.
+
+## QR Code generator library
+
+The crash page draws its QR code of the issue form with Project Nayuki's QR Code
+generator library for Java (`io.nayuki:qrcodegen` 1.8.0), copyright (c) Project
+Nayuki, under the MIT License; the notice is in `LICENSES/MIT-qrcodegen.txt`.
+Source: https://www.nayuki.io/page/qr-code-generator-library

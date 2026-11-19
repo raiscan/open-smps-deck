@@ -1,0 +1,86 @@
+{
+  "formatVersion": 5,
+  "name": "Evening clock / native bank",
+  "mode": "S3K",
+  "ticksPerBeat": 12,
+  "voices": [
+    {
+      "id": "voice-lead",
+      "name": "Glass keys",
+      "bytes": [
+        4,
+        1,
+        2,
+        1,
+        2,
+        31,
+        31,
+        31,
+        31,
+        8,
+        7,
+        8,
+        7,
+        3,
+        3,
+        3,
+        3,
+        42,
+        42,
+        42,
+        42,
+        34,
+        8,
+        168,
+        136
+      ]
+    }
+  ],
+  "envelopes": [
+    {
+      "id": "env-fireflies",
+      "name": "Firefly pluck",
+      "type": "PSG_VOLUME",
+      "bytes": [
+        0,
+        0,
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        15,
+        131
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "id": "kick",
+      "name": "Soft kick",
+      "rate": 12,
+      "pcmBase64": "gImSmqOrsrrAx8zR1tnd3+Hi4uHg3tzY1dDLxsC6s6yknZWNhn52bmdgWVJLRUA7NjIuKyknJSUkJSYnKSwvMzc8QEZLUVdeZGtyeX+GjZSaoKassre8wMTIy87R0tTV1dXV1NPRz8zJxsK+ubWwqqWgmpSOiIJ9d3FrZmBbVlJNSUVBPjs5NjQzMjExMTEyMzU2OTs+QURITFBUWV1iZ2xxdnuAhYqPlJidoaaqrrG1uLu+wMLExsfIycnJycjIxsXEwsC9u7i1sa6rp6Ofm5eTjoqGgn15dXFtaWVhXVpXU1BOS0lHRUNBQD8+Pj09PT0+P0BBQ0RGSEpNT1JVV1teYWRoa29ydnp9gYSIi4+Slpmcn6KlqKqsr7Gztba4ubq7vLy9vb29vLy7urm4t7W0srCurKqnpaKgnZqXlJGOi4iFgn98eXZ0cW5raGZjYV9cWlhWVVNRUE9NTExLSkpJSUlJSUpKS0xMTU9QUVNUVldZW11fYWRmaGptb3J0d3l8foGDhYiKjY+RlJaYmpyeoKGjpaaoqaqrrK2ur7CwsLGxsbGxsbCwsK+ura2sq6mop6ako6GfnpyamJeVk5GPjYuJh4WDgH58enh2dXNxb21ramhmZWNiYV9eXVxbWllYWFdWVlVVVVVVVVVVVVVWVldXWFlZWltcXV5fYWJjZGZnaWpsbW9wcnN1d3h6fH1/gYKEhoeJioyNj5CSk5WWl5iZm5ydnp+goKGio6OkpKWlpaampqampqampqWlpaSko6OioaGgn56dnJuamZiXlpWUkpGQj42Mi4mIh4WEg4GAf318e3p4d3Z1c3JxcG9ubWxramloZ2ZmZWRjY2JiYWFhYGBgX19fX19fX19fX2BgYGFhYWJiY2NkZWVmZ2hoaWprbG1ubm9wcXJzdHZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGRkpOUlJWWlpeYmJmZmpqam5ubm5ycnJycnJycnJycnJycm5ubmpqamZmYmJeXlpaVlJSTk5KRkJCPjo2NjIuKiYiIh4aFhIOCgoGAf359fHx7enl4eHd2dXV0c3NycXFwb29ubm1tbGxra2tqamppaWlpaWhoaGhoaGhoaGhoaGhpaWlpaWpqamtra2xsbW1tbm5vb3BxcXJyc3N0dXV2d3d4eXl6e3t8fX1+f3+AgYGCg4OEhYWGh4eIiImKiouLjIyNjY6Oj4+QkJCRkZGSkpKSk5OTk5SUlJSUlJSUlJSUlJSUlJSUlJOTk5OTkpKSkpGRkZCQkI+Pjo6NjY2MjIuLioqJiYiIh4eGhoWEhIODgoKBgYCAf39+fX18fHt7enp5eXl4eHd3dnZ1dXV0dHRzc3NycnJycXFxcXBwcHBwcHBvb29vb29vb29vb29vb3BwcHBwcHBxcXFxcnJycnNzc3N0dHR1dXV2dnd3d3h4eHl5enp7e3t8fH19fn5+f3+AgIGBgYKCg4OEhISFhYWGhoeHh4iIiImJiYqKioqLi4uLjIyMjIyNjY2NjY2NjY6Ojo6Ojo6Ojo6Ojo6Ojo6OjY2NjY2NjY2MjIyMjIuLi4uKioqKiYmJiYiIiIeHh4aGhoaFhYWEhIODg4KCgoGBgYCAgH9/f35+fn19fXx8fHt7e3t6enp5eXl5eHh4eHh3d3d3d3Z2dnZ2dnZ1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXZ2dnZ2dnZ3d3d3d3d4eHh4eHl5eXl6enp6e3t7e3x8fHx9fX1+fn5+f39/f4CAgIGBgYGCgoKCg4ODg4SEhISFhYWFhYaGhoaGh4eHh4eHiIiIiIiIiIiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYiIiIiIiIiIh4eHh4eHh4aGhoaGhYWFhYWEhISEhIODg4ODgoKCgoGBgYGBgICAgH9/f39/fn5+fn59fX19fXx8fHx8fHt7e3t7e3p6enp6enp6enl5eXl5eXl5eXl5eXl5eXh4eHh4eHh4eHh4eXl5eXl5eXl5eXl5eXl5enp6enp6enp6e3t7e3t7e3x8fHx8fHx9fX19fX1+fn5+fn9/f39/f4CAgICAgIGBgYGBgYKCgoKCgoODg4ODg4OEhISEhISEhIWFhYWFhYWFhYWFhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhYWFhYWFhYWFhYWFhISEhISEhISEg4ODg4ODg4KCgoKCgoKCgYGBgYGBgYCAgICAgIB/f39/f39/fn5+fn5+fn5+fX19fX19fX19fHx8fHx8fHx8fHx8fHx7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7e3t7fHx8fHx8fHx8fHx8fHx8fX19fX19fX19fX5+fn5+fn5+fn5/f39/f39/f4CAgICAgICAgIGBgYGBgYGBgYGCgoKCgoKCgoKCgoODg4ODg4ODg4ODg4ODg4SEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEg4ODg4ODg4ODg4ODg4ODgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgICAgICAgICAgIB/f39/f39/f39/f39+fn5+fn5+fn5+fn5+fn5+fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX5+fn5+fn5+fn5+fn5+fn5+f39/f39/f39/f39/f3+AgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoODg4ODg4ODg4ODg4ODg4ODg4ODg4ODgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgYGBgYGBgYCAgICAgICAgICAgICAgICAf39/f39/f39/f39/f39/f39/f39/fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+f39/f39/f39/f39/f39/f39/f39/f39/gICAgICAgICAgICAgICAgICAgICAgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYCAgICAgICAgICAgICAgICAgICAgICAgICAgIB/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgH9/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGAgICAgICAgICAgICAgA=="
+    }
+  ],
+  "nativeProgram": {
+    "bankBase": 32768,
+    "headerOffset": 8,
+    "localVoiceCount": 0,
+    "previewFrames": 360,
+    "bankBase64": "5wb5AAAAAAAAAAIBAWAcgAAAH4AAADiAAAAADIkw8u8A/wCA5QACsQz4AIC2DLQG9wACJ4D2J4CdDIAMmAyADPY4gA==",
+    "envelopeSlots": [
+      {
+        "assetId": "env-fireflies",
+        "slot": 12
+      }
+    ],
+    "dacSlots": [
+      {
+        "note": 137,
+        "sampleId": "kick",
+        "rate": 14
+      }
+    ]
+  }
+}
