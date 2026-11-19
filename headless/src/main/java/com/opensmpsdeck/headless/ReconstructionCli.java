@@ -25,7 +25,7 @@ import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 final class ReconstructionCli {
     private static final long MICROS_PER_SECOND = 1_000_000;
-    private static final int REPORT_VERSION = 3;
+    private static final int REPORT_VERSION = 4;
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
@@ -41,6 +41,8 @@ final class ReconstructionCli {
                           boolean wholePartVoices, List<ReconstructionVoices.SectionTrial> sectionTrials,
                           boolean audioRefine, int refinedNotes, List<ReconstructionPitchRefinement.Change> pitchChanges,
                           List<ReconstructionEcho.Estimate> echoEstimates, int echoNotes, boolean echoBankLimit,
+                          Map<Integer, ReconstructionVibrato.Estimate> vibratoEstimates,
+                          List<ReconstructionReverb.Estimate> reverbEstimates,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio) {}
 
     @FunctionalInterface
@@ -85,6 +87,10 @@ final class ReconstructionCli {
         MidiScore score = refinement.score();
         var echoes = options.audioRefine() ? ReconstructionEcho.detect(score, reference, options.stems(), durationUs)
                 : Map.<Integer, ReconstructionEcho.Estimate>of();
+        var vibrato = options.audioRefine() ? ReconstructionVibrato.detect(score, reference, options.stems(), durationUs)
+                : Map.<Integer, ReconstructionVibrato.Estimate>of();
+        var reverb = options.audioRefine() ? ReconstructionReverb.detect(score, reference, options.stems(), durationUs)
+                : Map.<Integer, ReconstructionReverb.Estimate>of();
         var prepared = S3kReconstruction.prepare(score, durationUs, options.keepOctaves());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
         InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
@@ -139,7 +145,7 @@ final class ReconstructionCli {
                     matches, score.warnings(), options.wholePartVoices(), sectionPlan.trials(),
                     options.audioRefine(), (int) score.notes().stream().filter(note -> note.startUs() < durationUs).count(),
                     refinement.changes(), List.copyOf(echoes.values()), result.echoNotes(), echoBankLimit,
-                    result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
+                    vibrato, List.copyOf(reverb.values()), result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

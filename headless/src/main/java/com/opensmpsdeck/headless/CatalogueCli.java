@@ -32,6 +32,7 @@ final class CatalogueCli {
                 case "search" -> search(args, out);
                 case "show" -> show(args, out);
                 case "match" -> match(args, out);
+                case "match-effects" -> matchEffects(args, out);
                 case "audition" -> audition(args, out);
                 case "apply" -> apply(args, out);
                 default -> throw new IllegalArgumentException("Unknown catalogue command " + args[1]);
@@ -50,6 +51,7 @@ final class CatalogueCli {
         out.println("  catalog show INDEX.json ID");
         out.println("  catalog match INDEX.json REFERENCE.wav [--kind KIND] [--midi N] [--gate-ticks N]");
         out.println("          [--start SECONDS] [--duration SECONDS] [--role ROLE] [--source SOURCE] [--limit N]");
+        out.println("  catalog match-effects PROJECT.json REFERENCE.wav OUTPUT.json --lead ID --double ID");
         out.println("  catalog audition INDEX.json ID OUTPUT.wav [--frames N] [--midi N] [--gate-ticks N]");
         out.println("  catalog apply INDEX.json ID PROJECT.json OUTPUT.json");
     }
@@ -107,6 +109,20 @@ final class CatalogueCli {
                 ? decimal(options, "--duration") : null);
         var index = InstrumentCatalogue.open(Path.of(args[2]));
         print(out, CatalogueMatcher.match(index, reference, filters));
+    }
+
+    private static void matchEffects(String[] args, PrintStream out) throws IOException {
+        var options = options(args, 5, Set.of("--lead", "--double"));
+        String lead = options.get("--lead"), doubled = options.get("--double");
+        if (lead == null || doubled == null)
+            throw new IllegalArgumentException("match-effects requires --lead and --double sequence IDs");
+        Path output = Path.of(args[4]);
+        if (java.nio.file.Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new java.nio.file.FileAlreadyExistsException(output.toString());
+        var source = ProjectFiles.load(Path.of(args[2])).project();
+        var result = LeadEffectMatcher.match(source, Path.of(args[3]), lead, doubled);
+        ProjectFiles.save(output, result.project(), null);
+        print(out, result.report());
     }
 
     private static double decimal(Map<String, String> options, String flag) {

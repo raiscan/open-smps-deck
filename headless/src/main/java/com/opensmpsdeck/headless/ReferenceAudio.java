@@ -57,6 +57,36 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
         }
     }
 
+    /** Bounded stereo comparison prefix, with linear resampling for uncommon WAV rates. */
+    static float[] stereoPrefix(Path path, int rate, int frames) throws IOException {
+        try (var channel = FileChannel.open(path, StandardOpenOption.READ)) {
+            var wave = header(channel);
+            var format = wave.format();
+            if (format.channels() == 1) return null;
+            long available = wave.dataBytes() / format.frameBytes();
+            var output = new float[frames * 2];
+            for (int first = 0; first < frames; first += rate) {
+                int end = Math.min(frames, first + rate);
+                long sourceFirst = (long) first * format.sampleRate() / rate;
+                long sourceEnd = Math.min(available, (long) (end - 1) * format.sampleRate() / rate + 2);
+                var data = readAt(channel, wave.dataStart() + sourceFirst * format.frameBytes(),
+                        Math.toIntExact((sourceEnd - sourceFirst) * format.frameBytes()));
+                var decoded = new float[(int) (sourceEnd - sourceFirst) * 2];
+                for (int i = 0; i < decoded.length; i++) decoded[i] = sample(data, format);
+                for (int i = first; i < end; i++) {
+                    double position = (long) i * format.sampleRate() / (double) rate - sourceFirst;
+                    int low = (int) position;
+                    int high = Math.min(low + 1, decoded.length / 2 - 1);
+                    double fraction = position - low;
+                    for (int side = 0; side < 2; side++)
+                        output[2*i + side] = (float) (decoded[2*low + side] * (1 - fraction)
+                                + decoded[2*high + side] * fraction);
+                }
+            }
+            return output;
+        }
+    }
+
     private record Format(int encoding, int channels, int sampleRate, int bits, int frameBytes) {}
     private record Wave(Format format, long dataStart, long dataBytes) {}
 
