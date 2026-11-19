@@ -6,8 +6,8 @@ musical arrangement workflow. [Version 5](native-bank-source.md) keeps original
 bank bytes and addresses for native editing, inspection, bounded playback and
 export. Retail coverage requires whole-track tests of the reached semantics.
 
-This matrix covers the new `project-core` / `headless` / `studio` path. The legacy
-`app` and `synth-core` are separate and do not confer support on the new editor.
+This matrix covers the `project-core` / `headless` / `studio` path. The retired
+legacy tracker (tag `legacy-final`) confers no support here.
 Playback uses the exact OpenGGF revision recorded in
 [openggf-audio.lock.json](../../upstream/openggf-audio.lock.json).
 

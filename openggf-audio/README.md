@@ -1,8 +1,7 @@
 # Pinned OpenGGF audio
 
 This module contains a reviewed dependency closure from OpenGGF, preserving its
-Java packages. The legacy JavaFX app still uses `synth-core`; this is the reboot's
-new playback foundation. It also includes the cartridge reader and S3K loader
+Java packages. It is the project's sole playback foundation. It also includes the cartridge reader and S3K loader
 used for local music import. Build the new modules with **JDK 25**.
 
 The authoritative pin, source SHA-256 values, licenses and exact local patch
