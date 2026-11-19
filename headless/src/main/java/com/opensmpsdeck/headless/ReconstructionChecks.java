@@ -49,26 +49,69 @@ final class ReconstructionChecks {
                     at + ".source.notes", "invalid original MIDI note for part " + note.partId());
         }
         checkBars(at, value.bars(), duration(value));
+        if (value.tempo() != null) {
+            var tempo = value.tempo();
+            require(Set.of("estimated", "override", "midi").contains(tempo.source()), at + ".tempo.source",
+                    "unknown grid source");
+            require(unit(tempo.confidence()) && unit(tempo.midiEvidence()) && unit(tempo.audioEvidence()),
+                    at + ".tempo", "confidence and evidence must be between 0 and 1");
+            validateGrid(tempo.selected(), at + ".tempo.selected");
+            for (var grid : tempo.alternatives()) validateGrid(grid, at + ".tempo.alternatives");
+        }
+        if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
         checkNotes(at, value.notes(), value, Set.of("midi", "audio-refine", "external"));
+    }
+
+    private static void validateGrid(ReconstructionTempo.Grid grid, String at) {
+        require(grid.bpm() >= 20 && grid.bpm() <= 400 && grid.beatsPerBar() >= 1
+                        && grid.beatsPerBar() <= 255 && grid.beatPhase() >= 0 && grid.beatPhase() < 60 / grid.bpm()
+                        && grid.barOffset() >= 0 && grid.barOffset() < grid.barLength(),
+                at, "invalid tempo, meter or phase");
+    }
+
+    private static boolean unit(double value) {
+        return value >= 0 && value <= 1;
     }
 
     static void structure(ReconstructionStructure.Result result, ReconstructionStages.Score score) {
         String at = "structure.json";
         var bars = checkBars(at, result.bars(), duration(score));
         var order = result.bars().stream().map(ReconstructionStructure.Bar::id).toList();
-        unique(at + ".sections", result.sections(), ReconstructionStructure.Section::id);
-        var flattened = result.sections().stream().flatMap(s -> s.bars().stream()).toList();
-        require(flattened.equals(order) && result.sections().stream().noneMatch(s -> s.bars().isEmpty()),
-                at + ".sections", "sections must partition the bars in order");
-        unique(at + ".repeats", result.repeats(), ReconstructionStructure.Repeat::id);
-        var repeated = new HashMap<String, Set<String>>();
-        for (var repeat : result.repeats()) {
-            var instances = new HashSet<>(repeat.bars());
-            require(instances.size() >= 2 && instances.size() == repeat.bars().size(),
-                    at + ".repeats." + repeat.id(), "repeat must have at least two distinct bars");
-            for (String id : repeat.bars()) {
-                require(bars.containsKey(id) && bars.get(id).complete() && repeated.putIfAbsent(id, instances) == null,
-                        at + ".repeats." + repeat.id(), "unknown, partial or already grouped bar " + id);
+        var repeated = validateLayout(at, result.sections(), result.repeats(), order, bars);
+        var votingBars = bars;
+        if (result.roleLayout() != null) {
+            var layout = result.roleLayout();
+            votingBars = checkBars(at + ".roleLayout", layout.bars(), duration(score));
+            repeated = validateLayout(at + ".roleLayout", layout.sections(), layout.repeats(),
+                    layout.bars().stream().map(ReconstructionStructure.Bar::id).toList(), votingBars);
+        }
+        var phrases = new HashMap<String, Map<String, Integer>>();
+        if (result.phrases() != null) {
+            unique(at + ".phrases", result.phrases(), ReconstructionPhrases.Group::id);
+            var index = new HashMap<String, Integer>();
+            for (int i = 0; i < order.size(); i++) index.put(order.get(i), i);
+            for (var phrase : result.phrases()) {
+                String where = at + ".phrases." + phrase.id();
+                require(unit(phrase.similarity()) && unit(phrase.melodySimilarity()) && unit(phrase.partSimilarity())
+                                && (phrase.audioSimilarity() == null || unit(phrase.audioSimilarity())),
+                        where, "similarities must be between 0 and 1");
+                require(phrase.instances().size() >= 2, where, "expected at least two instances");
+                int length = phrase.instances().getFirst().bars().size();
+                require(length == 1 || length == 2 || length == 4, where, "expected 1, 2 or 4 bars per instance");
+                var members = new HashMap<String, Integer>();
+                int instance = 0;
+                for (var span : phrase.instances()) {
+                    require(span.bars().size() == length && index.containsKey(span.bars().getFirst()),
+                            where, "invalid phrase span");
+                    int start = index.get(span.bars().getFirst());
+                    require(start + length <= order.size() && span.bars().equals(order.subList(start, start + length)),
+                            where, "expected consecutive bars");
+                    for (String id : span.bars())
+                        require(bars.get(id).complete() && members.putIfAbsent(id, instance) == null,
+                                where, "partial or overlapping bar " + id);
+                    instance++;
+                }
+                phrases.put(phrase.id(), members);
             }
         }
         unique(at + ".corrections", result.corrections(), ReconstructionStructure.Correction::id);
@@ -77,24 +120,34 @@ final class ReconstructionChecks {
         for (var correction : result.corrections()) {
             String where = at + ".corrections." + correction.id();
             var group = repeated.get(correction.barId());
-            require(group != null, where, "target bar is not in a repeat group");
-            var target = bars.get(correction.barId());
+            var phrase = correction.phraseId() == null ? null : phrases.get(correction.phraseId());
+            require(correction.phraseId() == null ? group != null
+                            : phrase != null && phrase.containsKey(correction.barId()),
+                    where, "target bar must belong to its repeat or phrase group");
+            var correctionBars = phrase == null ? votingBars : bars;
+            var target = correctionBars.get(correction.barId());
             var candidate = correction.note();
             note(candidate, partIds(score), duration(score), where);
             require(candidate.source().equals("consensus") && candidate.start() >= target.start() && candidate.start() < target.end(),
                     where, "consensus note must attack in the target bar");
             var voterBars = new HashSet<String>();
+            var voterInstances = new HashSet<Integer>();
             require(correction.votes().size() >= 2, where, "at least two other instances must vote");
             for (var vote : correction.votes()) {
                 var votingNote = original.get(vote.noteId());
-                var votingBar = bars.get(vote.barId());
-                require(group.contains(vote.barId()) && !vote.barId().equals(correction.barId()) && voterBars.add(vote.barId())
-                                && votingNote != null && !votingNote.source().equals("external")
+                var votingBar = correctionBars.get(vote.barId());
+                boolean member = phrase == null
+                        ? group.contains(vote.barId()) && !vote.barId().equals(correction.barId()) && voterBars.add(vote.barId())
+                        : phrase.containsKey(vote.barId()) && !phrase.get(vote.barId()).equals(phrase.get(correction.barId()))
+                            && voterInstances.add(phrase.get(vote.barId()));
+                require(member && votingNote != null && !votingNote.source().equals("external")
                                 && votingNote.part() == candidate.part() && votingNote.pitch() == candidate.pitch()
                                 && votingNote.start() >= votingBar.start() && votingNote.start() < votingBar.end(),
                         where, "invalid vote from " + vote.barId() + " for " + vote.noteId());
             }
-            require(!correction.applied() || voterBars.size() * 3 >= group.size() * 2, where,
+            int votes = phrase == null ? voterBars.size() : voterInstances.size();
+            int instances = phrase == null ? group.size() : new HashSet<>(phrase.values()).size();
+            require(!correction.applied() || votes * 3 >= instances * 2, where,
                     "applied correction needs votes from at least two thirds of its repeat group");
             require(correction.replaces() == null || correction.replaces().equals(candidate.id())
                             && original.containsKey(correction.replaces()),
@@ -105,6 +158,27 @@ final class ReconstructionChecks {
             }
         }
         checkNotes(at, result.notes(), score, Set.of("midi", "audio-refine", "consensus"));
+    }
+
+    private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
+                                                               List<ReconstructionStructure.Repeat> repeats,
+                                                               List<String> order, Map<String, ReconstructionStructure.Bar> bars) {
+        unique(at + ".sections", sections, ReconstructionStructure.Section::id);
+        var flattened = sections.stream().flatMap(s -> s.bars().stream()).toList();
+        require(flattened.equals(order) && sections.stream().noneMatch(s -> s.bars().isEmpty()),
+                at + ".sections", "sections must partition the bars in order");
+        unique(at + ".repeats", repeats, ReconstructionStructure.Repeat::id);
+        var repeated = new HashMap<String, Set<String>>();
+        for (var repeat : repeats) {
+            var instances = new HashSet<>(repeat.bars());
+            require(instances.size() >= 2 && instances.size() == repeat.bars().size(),
+                    at + ".repeats." + repeat.id(), "repeat must have at least two distinct bars");
+            for (String id : repeat.bars()) {
+                require(bars.containsKey(id) && bars.get(id).complete() && repeated.putIfAbsent(id, instances) == null,
+                        at + ".repeats." + repeat.id(), "unknown, partial or already grouped bar " + id);
+            }
+        }
+        return repeated;
     }
 
     static void roles(ReconstructionRoles.Result roles, ReconstructionStages.Score score) {

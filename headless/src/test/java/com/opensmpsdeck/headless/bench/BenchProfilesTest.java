@@ -36,7 +36,17 @@ class BenchProfilesTest {
             BenchMidi.write(events, profile, second);
             assertEquals(-1, Files.mismatch(first, second));
             var tracks = MidiSystem.getSequence(first.toFile()).getTracks();
-            assertEquals(profile == BenchMidi.Profile.clean ? 9 : 3, tracks.length);
+            assertEquals(switch (profile) { case clean -> 9; case sunoLike -> 4; default -> 3; }, tracks.length);
+            if (profile == BenchMidi.Profile.sunoLike) {
+                var tempo = (javax.sound.midi.MetaMessage) tracks[0].get(0).getMessage();
+                assertEquals(0x51, tempo.getType());
+                assertArrayEquals(new byte[]{7, (byte) 0xa1, 0x20}, tempo.getData());
+                int phase = BenchMidi.offsetFrames(1, 2, 360);
+                assertEquals(phase, BenchMidi.offsetFrames(1, 2, 360));
+                assertTrue(phase > 0 && phase < 120);
+                assertEquals(events.getFirst().start() + phase / 60.0,
+                        BenchMidi.shift(events, phase, 6).getFirst().start(), 1e-9);
+            }
             int attacks = 0, drumAttacks = 0;
             for (var track : tracks) {
                 for (int i = 0; i < track.size(); i++) {

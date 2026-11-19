@@ -23,7 +23,7 @@ final class ReconstructionMelody {
 
     private ReconstructionMelody() {}
 
-    static Selection extract(ReconstructionStructure.Result structure, List<Note> tones,
+    static Selection extract(ReconstructionStructure.Layout structure, List<Note> tones,
                                Map<Integer, Integer> programs) {
         var byPart = new LinkedHashMap<Integer, List<Note>>();
         for (var note : tones) byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);

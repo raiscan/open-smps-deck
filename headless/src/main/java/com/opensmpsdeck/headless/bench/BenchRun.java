@@ -21,7 +21,8 @@ import java.util.logging.Logger;
 
 final class BenchRun {
     record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly) {}
-    private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index) {}
+    private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
+                        BenchTimeline.Truth nativeTruth) {}
 
     private BenchRun() {}
 
@@ -76,7 +77,7 @@ final class BenchRun {
                     Path truthFile = c.truth().resolve(corpus);
                     var truth = BenchFiles.read(truthFile, BenchTimeline.Truth.class);
                     song = new Song(truthFile, BenchMetrics.events(truth, drums, true),
-                            BenchAudio.mono(BenchAudio.read(c.reference().resolve(corpus))), useIndex);
+                            BenchAudio.mono(BenchAudio.read(c.reference().resolve(corpus))), useIndex, truth);
                     songs.put(c.song(), song);
                 } else if (!song.truthFile.equals(c.truth().resolve(corpus))) {
                     throw new IllegalArgumentException("Inconsistent truth files for " + c.songName());
@@ -148,6 +149,8 @@ final class BenchRun {
             float[] audio = BenchAudio.mono(BenchAudio.read(reconstruction.audio()));
             var distance = BenchAudio.compare(song.reference, audio);
             var metrics = new TreeMap<String, Double>();
+            if (c.grid() != null)
+                BenchStructure.measure(output, c.grid(), song.nativeTruth, reconstruction.referenceUs() / 1e6, metrics);
             metrics.put("noteF1", notes.f1());
             metrics.put("notePrecision", notes.precision());
             metrics.put("noteRecall", notes.recall());

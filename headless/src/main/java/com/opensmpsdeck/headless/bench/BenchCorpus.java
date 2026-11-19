@@ -31,13 +31,18 @@ final class BenchCorpus {
     }
 
     record Case(String id, int song, String songName, BenchMidi.Profile profile, BenchAudio.Variant variant,
-                File truth, File midi, File audio, File reference) {}
+                File truth, File midi, File audio, File reference, BenchStructure.Grid grid) {
+        Case(String id, int song, String songName, BenchMidi.Profile profile, BenchAudio.Variant variant,
+             File truth, File midi, File audio, File reference) {
+            this(id, song, songName, profile, variant, truth, midi, audio, reference, null);
+        }
+    }
     record Manifest(int version, String romSha256, String catalogueSha256, int frames, List<Case> cases) {}
 
     private BenchCorpus() {}
 
     static void build(Path rom, Path index, Path root, List<Integer> songs, int frames, PrintStream out,
-                      BenchCli.SequencerFactory factory) throws IOException {
+                      BenchCli.SequencerFactory factory, boolean sunoLike) throws IOException {
         var catalogue = InstrumentCatalogue.open(index);
         String romHash = BenchFiles.hash(rom);
         var drums = new BenchDrums(catalogue, "sha256:" + romHash);
@@ -51,12 +56,18 @@ final class BenchCorpus {
             String key = String.format(Locale.ROOT, "%02x", id);
             Path folder = Files.createDirectory(root.resolve(key));
             Path reference = folder.resolve("reference.wav");
+            double seconds = frames / 60.0;
+            BenchStructure.Grid grid = sunoLike ? BenchStructure.nativeGrid(source, id, frames) : null;
             WaveFile.render(compiled, reference, frames);
+            var audio = BenchAudio.read(reference);
+            if (grid != null) {
+                audio = BenchAudio.shift(audio, grid.offsetFrames());
+                BenchAudio.write(audio, reference);
+            }
             Path truthPath = folder.resolve("truth.json");
-            BenchFiles.write(truthPath, truth);
+            BenchFiles.write(truthPath, grid == null ? truth : BenchStructure.shift(truth, grid, seconds));
             var truthFile = File.at(root, truthPath);
             var referenceFile = File.at(root, reference);
-            var audio = BenchAudio.read(reference);
             var variants = new ArrayList<File>();
             for (var variant : BenchAudio.Variant.values()) {
                 Path path = folder.resolve(variant + ".wav");
@@ -64,13 +75,17 @@ final class BenchCorpus {
                 else BenchAudio.write(BenchAudio.degrade(audio, variant), path);
                 variants.add(File.at(root, path));
             }
-            for (var profile : BenchMidi.Profile.values()) {
+            var profiles = sunoLike ? List.of(BenchMidi.Profile.sunoLike)
+                    : List.of(BenchMidi.Profile.clean, BenchMidi.Profile.merged, BenchMidi.Profile.noisy);
+            for (var profile : profiles) {
                 Path midi = folder.resolve(profile + ".mid");
-                BenchMidi.write(BenchMidi.events(truth, drums, profile, frames / 60.0, id), profile, midi);
+                var events = BenchMidi.events(truth, drums, profile, seconds, id);
+                if (grid != null) events = BenchMidi.shift(events, grid.offsetFrames(), seconds);
+                BenchMidi.write(events, profile, midi);
                 var midiFile = File.at(root, midi);
                 for (var variant : BenchAudio.Variant.values()) {
                     cases.add(new Case(key + "/" + profile + "/" + variant, id, source.name(), profile, variant,
-                            truthFile, midiFile, variants.get(variant.ordinal()), referenceFile));
+                            truthFile, midiFile, variants.get(variant.ordinal()), referenceFile, grid));
                 }
             }
             out.printf("Built %s %s%n", key, source.name());
