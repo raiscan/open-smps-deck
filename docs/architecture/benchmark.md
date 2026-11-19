@@ -56,11 +56,12 @@ Each song has three MIDI representations and three reference conditions.
 
 The manifest gives each case ID and SHA-256 hashes for its truth, MIDI,
 matcher input and dry reference. The runner checks these hashes. Every
-condition is scored against the **dry** native render. `--holdout` drops an
-entire content asset when any variant lists that song in its provenance and
-drops recipes that reference removed assets. Declarations count as provenance.
-An index that declares all shared DAC samples under every song can therefore
-leave no eligible DAC entries during holdout.
+condition is scored against the **dry** native render. `--holdout` drops a
+content asset that the song uses (declarations count) unless at least two other
+songs also use it, and drops recipes that reference removed assets. Assets
+shared that widely, such as the common DAC drum kit, are library sounds any
+real reconstruction would have, so they stay. Song-specific FM voices are
+removed.
 
 `run` writes `scorecard.json` and `scorecard.md` to a fresh output
 directory. It reports case failures and returns a nonzero status if any fail.

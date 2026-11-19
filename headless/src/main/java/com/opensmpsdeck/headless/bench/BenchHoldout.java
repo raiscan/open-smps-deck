@@ -2,7 +2,9 @@ package com.opensmpsdeck.headless.bench;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Set;
 import java.util.Objects;
 import java.util.List;
 
@@ -12,16 +14,31 @@ final class BenchHoldout {
 
     private BenchHoldout() {}
 
+    /** Assets used by at least this many other songs are shared library sounds and stay available. */
+    static final int SHARED_SONG_THRESHOLD = 2;
+
     /**
-     * Remove the content asset if any of its variants names the held-out song,
-     * including declaration-only occurrences. Drop recipes that reference excluded assets.
+     * Remove a content asset that the held-out song uses (including declaration-only occurrences)
+     * unless at least {@link #SHARED_SONG_THRESHOLD} other songs also use it. Shared assets, such
+     * as the common DAC drum kit, are part of any realistic library. Drop recipes that reference
+     * excluded assets.
      */
     static Index filter(InstrumentCatalogue source, String revision, int song, String name) {
-        var excluded = new HashSet<String>();
+        var heldOut = new HashSet<String>();
+        var otherSongs = new HashMap<String, Set<String>>();
         for (var variant : source.variants()) {
-            if (variant.occurrences().stream().anyMatch(o -> belongs(o, revision, song, name))) {
-                excluded.add(variant.assetId());
+            for (var occurrence : variant.occurrences()) {
+                if (belongs(occurrence, revision, song, name)) {
+                    heldOut.add(variant.assetId());
+                } else {
+                    otherSongs.computeIfAbsent(variant.assetId(), id -> new HashSet<>())
+                            .add(occurrence.revision() + "#" + occurrence.songId() + "#" + occurrence.song());
+                }
             }
+        }
+        var excluded = new HashSet<String>();
+        for (var id : heldOut) {
+            if (otherSongs.getOrDefault(id, Set.of()).size() < SHARED_SONG_THRESHOLD) excluded.add(id);
         }
         var remaining = source.variants().stream()
                 .filter(variant -> !excluded.contains(variant.assetId()))

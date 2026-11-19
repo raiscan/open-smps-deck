@@ -44,6 +44,25 @@ class BenchCliTest {
         assertEquals(List.of("keep"), reopened.variants().stream().map(InstrumentCatalogue.Variant::name).toList());
     }
 
+    @Test void holdoutKeepsLibraryAssetsUsedByEnoughOtherSongs() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        String kit = builder.asset(FM_VOICE, "kit", voice(0));
+        String own = builder.asset(FM_VOICE, "own", voice(1));
+        var song = new InstrumentCatalogue.Occurrence("test", "S3K", "rom", "Song", 1, 0, null, null, false);
+        var second = new InstrumentCatalogue.Occurrence("test", "S3K", "rom", "Second", 2, 0, null, null, false);
+        var third = new InstrumentCatalogue.Occurrence("test", "S3K", "rom", "Third", 3, 0, null, null, false);
+        builder.variant(kit, "kit in song", InstrumentCatalogue.Recipe.plain(), song);
+        builder.variant(kit, "kit elsewhere", new InstrumentCatalogue.Recipe(null, null, 99, 60,
+                null, null, List.of(), List.of()), second);
+        builder.variant(kit, "kit third", new InstrumentCatalogue.Recipe(null, null, 98, 60,
+                null, null, List.of(), List.of()), third);
+        builder.variant(own, "own", InstrumentCatalogue.Recipe.plain(), song);
+        var filtered = directory.resolve("library.json");
+        BenchFiles.write(filtered, BenchHoldout.filter(builder.build(), "rom", 1, "Song"));
+        var reopened = InstrumentCatalogue.open(filtered);
+        assertEquals(List.of(kit), reopened.assets().stream().map(InstrumentCatalogue.Asset::id).toList());
+    }
+
     @Test void compareUsesMetricDirectionAndAbsoluteTolerance() throws Exception {
         Path old = directory.resolve("old.json");
         Path changed = directory.resolve("changed.json");
