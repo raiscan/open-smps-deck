@@ -32,7 +32,7 @@ final class BenchScorecard {
         var variants = new TreeMap<String, Group>();
         for (var profile : BenchMidi.Profile.values()) {
             var matches = corpus.stream().filter(c -> c.profile == profile).toList();
-            if (!matches.isEmpty()) profiles.put(profile.name(), mean(matches));
+            if (!matches.isEmpty()) profiles.put(profile.toString(), mean(matches));
         }
         for (var variant : BenchAudio.Variant.values()) {
             var matches = corpus.stream().filter(c -> c.variant == variant).toList();

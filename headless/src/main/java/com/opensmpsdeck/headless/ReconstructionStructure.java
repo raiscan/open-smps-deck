@@ -23,11 +23,20 @@ final class ReconstructionStructure {
 
     record Section(String id, List<String> bars) {}
     record Repeat(String id, List<String> bars) {}
+    record Layout(List<Bar> bars, List<Section> sections, List<Repeat> repeats) {}
     record Vote(String barId, String noteId) {}
     record Correction(String id, String barId, Note note, @ReconstructionStages.Nullable String replaces, List<Vote> votes,
-                      @ReconstructionStages.Nullable String externalCandidate, boolean applied) {}
+                      @ReconstructionStages.Nullable String externalCandidate, boolean applied,
+                      @ReconstructionStages.Nullable String phraseId) {}
     record Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
-                  List<Correction> corrections, List<Note> notes) {}
+                  List<Correction> corrections, List<Note> notes,
+                  @ReconstructionStages.Nullable List<ReconstructionPhrases.Group> phrases,
+                  @ReconstructionStages.Nullable Layout roleLayout) {
+        Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
+               List<Correction> corrections, List<Note> notes) {
+            this(version, bars, sections, repeats, corrections, notes, null, null);
+        }
+    }
 
     private record Pattern(Bar bar, List<Note> notes) {
         double onset(Note note) { return bar.fraction(note.start()); }
@@ -52,12 +61,24 @@ final class ReconstructionStructure {
     private ReconstructionStructure() {}
 
     static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts) {
+        return analyze(bars, score, parts, null, false);
+    }
+
+    static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
+                          ReconstructionRhythmAudio audio, boolean inferred) {
+        return analyze(bars, score, parts, audio, inferred, 4, null);
+    }
+
+    static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
+                          ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars) {
         var drums = new HashSet<Integer>();
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
         var candidates = score.stream().filter(note -> note.source().equals("external")).toList();
-        var patterns = patterns(bars, originals.stream().filter(note -> !drums.contains(note.part())).toList());
-        var groups = group(patterns);
+        var tones = originals.stream().filter(note -> !drums.contains(note.part())).toList();
+        var patterns = patterns(bars, tones);
+        var rolePatterns = midiBars == null ? patterns : patterns(midiBars, tones);
+        var groups = inferred && midiBars == null ? List.<List<Pattern>>of() : group(rolePatterns);
         var repeats = new ArrayList<Repeat>();
         var corrections = new ArrayList<Correction>();
         var corrected = new LinkedHashMap<String, Note>();
@@ -68,8 +89,22 @@ final class ReconstructionStructure {
             repeats.add(new Repeat(id, group.stream().map(pattern -> pattern.bar.id).toList()));
             consensus(group, candidates, corrected, corrections, bars.getLast().end());
         }
+        var sections = sections(patterns, midiBars == null ? repeats : List.of());
+        var roleLayout = midiBars == null ? null : new Layout(midiBars, sections(rolePatterns, repeats), repeats);
+        var byBar = new LinkedHashMap<String, List<Note>>();
+        for (var pattern : patterns) byBar.put(pattern.bar.id, pattern.notes);
+        var programs = new HashMap<Integer, Integer>();
+        for (var part : parts) programs.put(part.id(), part.program());
+        var prepared = corrected.values().stream().filter(note -> !drums.contains(note.part()))
+                .sorted(ReconstructionStages.NOTE_ORDER).toList();
+        var melody = ReconstructionRoles.melody(roleLayout == null ? new Layout(bars, sections, repeats) : roleLayout,
+                prepared, programs);
+        var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter);
+        phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end());
         var notes = corrected.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
-        return new Result(VERSION, bars, sections(patterns, repeats), repeats, corrections, notes);
+        var linked = inferred ? identicalBars(bars, notes, phrases) : repeats;
+        return new Result(VERSION, bars, sections, linked, corrections, notes,
+                phrases.stream().map(ReconstructionPhrases.Match::evidence).toList(), roleLayout);
     }
 
     private static List<Pattern> patterns(List<Bar> bars, List<Note> notes) {
@@ -182,13 +217,106 @@ final class ReconstructionStructure {
                 String noteId = wrong == null ? id : wrong.id();
                 var newNote = new Note(noteId, slot.first.part(), start, end, slot.first.pitch(), velocity, "consensus", confidence);
                 changes.add(new Correction(id, target.bar.id, newNote, wrong == null ? null : wrong.id(), votes,
-                        external == null ? null : external.id(), apply));
+                        external == null ? null : external.id(), apply, null));
                 if (apply) {
                     protectedNotes.add(noteId);
                     corrected.put(noteId, newNote);
                 }
             }
         }
+    }
+
+    private record RelativeNote(int part, int pitch, int velocity, long start, long end) {}
+    private record BarContent(long length, List<RelativeNote> notes) {}
+
+    private static List<Repeat> identicalBars(List<Bar> bars, List<Note> notes, List<ReconstructionPhrases.Match> phrases) {
+        var eligible = new HashSet<String>();
+        for (var match : phrases) for (var window : match.windows()) for (var bar : window.bars()) eligible.add(bar.id());
+        var groups = new LinkedHashMap<BarContent, List<String>>();
+        for (var pattern : patterns(bars, notes)) {
+            Bar bar = pattern.bar;
+            if (!eligible.contains(bar.id) || pattern.notes.isEmpty()) continue;
+            long start = Math.round(bar.start * 60), end = Math.round(bar.end * 60);
+            if (pattern.notes.stream().anyMatch(n -> Math.round(n.end() * 60) > end)) continue;
+            var signature = pattern.notes.stream().map(n -> new RelativeNote(n.part(), n.pitch(), n.velocity(),
+                    Math.round(n.start() * 60) - start, Math.round(n.end() * 60) - start)).toList();
+            groups.computeIfAbsent(new BarContent(end - start, signature), ignored -> new ArrayList<>()).add(bar.id);
+        }
+        return groups.values().stream().filter(group -> group.size() >= 2)
+                .map(group -> new Repeat("repeat-" + group.getFirst(), group)).toList();
+    }
+
+    private static void phraseConsensus(List<ReconstructionPhrases.Match> phrases, List<Note> candidates,
+                                        Map<String, Note> corrected, List<Correction> changes, double scoreEnd) {
+        for (var phrase : phrases) {
+            var windows = phrase.windows();
+            if (windows.size() < 3) continue;
+            var remaining = new LinkedHashMap<ReconstructionPhrases.Window, List<Note>>();
+            for (var window : windows) remaining.put(window, window.notes());
+            // Walk exemplars until every attack has an alignment slot. A note absent
+            // from the first instance can still seed a slot in a later instance.
+            for (var exemplar : windows) {
+                var anchors = remaining.remove(exemplar);
+                var slots = new LinkedHashMap<String, Map<ReconstructionPhrases.Window, Note>>();
+                for (var note : anchors) slots.put(note.id(), new LinkedHashMap<>(Map.of(exemplar, note)));
+                for (var entry : remaining.entrySet()) {
+                    var used = new HashSet<String>();
+                    for (var link : ReconstructionPhrases.votingAlignment(exemplar, entry.getKey(), anchors, entry.getValue())) {
+                        slots.get(link.first().id()).put(entry.getKey(), link.second());
+                        used.add(link.second().id());
+                    }
+                    entry.setValue(entry.getValue().stream().filter(note -> !used.contains(note.id())).toList());
+                }
+                for (var anchor : anchors) {
+                    var voters = slots.get(anchor.id());
+                    if (voters.size() < 2) continue;
+                    for (var target : windows) {
+                        if (voters.containsKey(target)) continue;
+                        propose(phrase, target, anchor, voters, candidates, corrected, changes, scoreEnd);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void propose(ReconstructionPhrases.Match match, ReconstructionPhrases.Window target, Note anchor,
+                                Map<ReconstructionPhrases.Window, Note> voters, List<Note> candidates,
+                                Map<String, Note> corrected, List<Correction> changes, double scoreEnd) {
+        double similarity = voters.keySet().stream().mapToDouble(w ->
+                ReconstructionPhrases.partSimilarity(w, target, anchor.part())).min().orElse(0);
+        if (similarity < .76) return;
+        double relative = median(voters.entrySet().stream().mapToDouble(v -> v.getKey().relative(v.getValue())).toArray());
+        double start = target.start() + relative * target.length();
+        double duration = median(voters.values().stream().mapToDouble(n -> n.end() - n.start()).toArray());
+        double end = Math.min(start + duration, scoreEnd);
+        if (end <= start) return;
+        double tolerance = target.tolerance() * target.length();
+        // A nearby octave-equivalent attack already supplies this slot.
+        if (corrected.values().stream().anyMatch(n -> n.part() == anchor.part()
+                && Math.floorMod(n.pitch() - anchor.pitch(), 12) == 0 && Math.abs(n.start() - start) <= tolerance)) return;
+        if (changes.stream().anyMatch(c -> c.phraseId() == null && c.note().part() == anchor.part()
+                && c.note().pitch() == anchor.pitch() && Math.abs(c.note().start() - start) <= tolerance)) return;
+        Note external = candidates.stream().filter(n -> n.part() == anchor.part() && n.pitch() == anchor.pitch()
+                && Math.abs(n.start() - start) <= tolerance).findFirst().orElse(null);
+        double spread = voters.entrySet().stream().mapToDouble(v ->
+                Math.abs(v.getKey().relative(v.getValue()) - relative) * target.length()).max().orElse(0);
+        int velocity = (int) Math.round(median(voters.values().stream().mapToDouble(Note::velocity).toArray()));
+        double confidence = Math.min(1, .67 + .19 * voters.size() / match.windows().size()
+                - .05 * spread / tolerance + (external == null ? 0 : .08));
+        int targetCount = (int) target.notes().stream().filter(n -> n.part() == anchor.part()).count();
+        double typicalCount = median(voters.keySet().stream().mapToDouble(w ->
+                w.notes().stream().filter(n -> n.part() == anchor.part()).count()).toArray());
+        boolean isolatedGap = typicalCount - targetCount >= 1 && typicalCount - targetCount <= 2;
+        boolean apply = voters.size() * 3 >= match.windows().size() * 2 && confidence >= CORRECTION_THRESHOLD
+                && (isolatedGap || external != null);
+        String targetBar = target.barAt(start);
+        String id = "consensus-" + match.evidence().id() + "-" + targetBar + "-" + anchor.id();
+        var note = new Note(id, anchor.part(), start, end, anchor.pitch(), velocity, "consensus", confidence);
+        var votes = voters.entrySet().stream().sorted(java.util.Comparator.comparingInt(v -> v.getKey().index()))
+                .map(v -> new Vote(v.getKey().barAt(v.getValue().start()), v.getValue().id())).toList();
+        changes.add(new Correction(id, targetBar, note, null, votes, external == null ? null : external.id(),
+                apply, match.evidence().id()));
+        if (apply) corrected.put(id, note);
     }
 
     private static double median(double[] values) {

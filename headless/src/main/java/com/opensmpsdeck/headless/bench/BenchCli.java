@@ -35,7 +35,7 @@ public final class BenchCli {
     private BenchCli() {}
 
     public static void usage(PrintStream out) {
-        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N]");
+        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N]");
@@ -59,11 +59,17 @@ public final class BenchCli {
         require(args, 5);
         List<Integer> songs = BenchCorpus.DEFAULT;
         int frames = 30 * 60;
+        boolean sunoLike = false;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick" -> songs = BenchCorpus.QUICK;
+                case "--profile" -> {
+                    if (!value(args, ++i, flag).equals("suno-like"))
+                        throw new IllegalArgumentException("The separate corpus profile is suno-like");
+                    sunoLike = true;
+                }
                 case "--seconds" -> {
                     double seconds = Double.parseDouble(value(args, ++i, flag));
                     if (!(seconds >= 1.0 / 60 && seconds <= 600))
@@ -81,8 +87,10 @@ public final class BenchCli {
         }
         if (seen.contains("--quick") && seen.contains("--songs"))
             throw new IllegalArgumentException("Choose either --quick or --songs");
+        if (sunoLike && frames < 2)
+            throw new IllegalArgumentException("A shifted corpus needs at least two presentations");
         BenchCorpus.build(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]).toAbsolutePath().normalize(),
-                songs, frames, out, hooks.sequencer());
+                songs, frames, out, hooks.sequencer(), sunoLike);
         return 0;
     }
 

@@ -39,11 +39,13 @@ final class ReconstructionRoles {
             roles.put(note.id(), drums.contains(note.part()) ? Role.drums : Role.harmony);
             if (!drums.contains(note.part())) tones.add(note);
         }
-        var byBar = byBar(structure.bars(), tones);
-        var melody = ReconstructionMelody.extract(structure, tones, programs);
+        var layout = structure.roleLayout() == null
+                ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
+                : structure.roleLayout();
+        var byBar = byBar(layout.bars(), tones);
+        var melody = melody(layout, tones, programs);
         for (String id : melody.lead()) roles.put(id, Role.melody);
-        alignRepeatedMelody(structure, byBar, roles);
-        for (var section : structure.sections()) {
+        for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
             labelLine(notes, roles, programs, Role.bass);
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
@@ -52,6 +54,19 @@ final class ReconstructionRoles {
         if (harmonyHz > 0)
             for (String id : melody.octaveDoubles()) if (roles.get(id) == Role.harmony) roles.put(id, Role.drop);
         return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz));
+    }
+
+    static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
+                                                  Map<Integer, Integer> programs) {
+        var melody = ReconstructionMelody.extract(layout, tones, programs);
+        var roles = new HashMap<String, Role>();
+        for (var note : tones) roles.put(note.id(), melody.lead().contains(note.id()) ? Role.melody : Role.harmony);
+        alignRepeatedMelody(layout, byBar(layout.bars(), tones), roles);
+        var lead = new HashSet<String>();
+        roles.forEach((id, role) -> {
+            if (role == Role.melody) lead.add(id);
+        });
+        return new ReconstructionMelody.Selection(lead, melody.octaveDoubles());
     }
 
     static Map<String, List<Note>> byBar(List<ReconstructionStructure.Bar> bars, List<Note> sorted) {
@@ -65,7 +80,7 @@ final class ReconstructionRoles {
         return byBar;
     }
 
-    private static void alignRepeatedMelody(ReconstructionStructure.Result structure, Map<String, List<Note>> byBar,
+    private static void alignRepeatedMelody(ReconstructionStructure.Layout structure, Map<String, List<Note>> byBar,
                                             Map<String, Role> roles) {
         var bars = new HashMap<String, ReconstructionStructure.Bar>();
         for (var bar : structure.bars()) bars.put(bar.id(), bar);

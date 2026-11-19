@@ -72,6 +72,7 @@ final class ReconstructionCli {
     static void usage(PrintStream out) {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
+        out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");

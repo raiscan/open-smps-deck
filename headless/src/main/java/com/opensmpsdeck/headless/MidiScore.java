@@ -120,6 +120,36 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
         return new MidiScore(parts, notes, warnings);
     }
 
+    record GridMetadata(boolean defaultTempo, int meter) {}
+
+    static GridMetadata gridMetadata(Path path) throws IOException {
+        try {
+            int tempoEvents = 0;
+            boolean defaultValue = true;
+            int meter = 0;
+            for (Track track : MidiSystem.getSequence(path.toFile()).getTracks()) {
+                for (int i = 0; i < track.size(); i++) {
+                    var event = track.get(i);
+                    if (!(event.getMessage() instanceof MetaMessage meta)) continue;
+                    byte[] data = meta.getData();
+                    if (meta.getType() == SET_TEMPO && data.length == 3) {
+                        int tempo = (data[0] & 255) << 16 | (data[1] & 255) << 8 | data[2] & 255;
+                        if (tempo > 0) {
+                            tempoEvents++;
+                            defaultValue &= tempo == DEFAULT_TEMPO;
+                        }
+                    } else if (meta.getType() == 0x58 && event.getTick() == 0 && data.length >= 2
+                            && data[1] == 2) {
+                        meter = Byte.toUnsignedInt(data[0]);
+                    }
+                }
+            }
+            return new GridMetadata(tempoEvents <= 1 && defaultValue, meter);
+        } catch (InvalidMidiDataException e) {
+            throw new IOException("Invalid MIDI file: " + path, e);
+        }
+    }
+
     /** Boundaries on the PPQ grid, integrating the same tempo map used for note times. */
     static List<ReconstructionStructure.Bar> bars(Path path, long durationUs) throws IOException {
         Sequence sequence;

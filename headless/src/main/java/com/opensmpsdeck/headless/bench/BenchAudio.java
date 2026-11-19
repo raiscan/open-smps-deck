@@ -53,6 +53,13 @@ final class BenchAudio {
         }
     }
 
+    static Pcm shift(Pcm pcm, int presentations) {
+        var output = new short[pcm.stereo.length];
+        int shift = (int) Math.min(output.length, 2 * ((long) presentations * pcm.rate / 60));
+        System.arraycopy(pcm.stereo, 0, output, shift, output.length - shift);
+        return new Pcm(output, pcm.rate);
+    }
+
     static Pcm degrade(Pcm pcm, Variant variant) {
         return switch (variant) {
             case dry -> new Pcm(pcm.stereo.clone(), pcm.rate);

@@ -54,6 +54,20 @@ Each song has three MIDI representations and three reference conditions.
 | Room | Four feedback delays per side, nominal 0.8 s RT60 and 25% wet mix. |
 | Lo-fi | 8 kHz low-pass and light 2:1 peak compression above one-quarter scale. |
 
+Build the shifted profile separately to keep existing manifests comparable.
+
+```sh
+java -jar "$jar" bench build-corpus "$rom" "$catalogue" "$bench/corpus-sunolike" --profile suno-like
+java -jar "$jar" bench run "$bench/corpus-sunolike/manifest.json" "$catalogue" "$bench/suno-like"
+```
+
+`suno-like` uses the same attacks and perturbations as noisy, writes one
+explicit 120 BPM event, and adds a deterministic, nonzero random delay of
+less than one native bar. The delay is in whole 60 Hz presentations.
+Reference WAVs and truth receive the same delay, with a silent prefix in
+the WAV. The end is clipped to the original window. Existing note, melody,
+voice, drum and audio metrics use their unchanged definitions.
+
 The manifest gives each case ID and SHA-256 hashes for its truth, MIDI,
 matcher input and dry reference. The runner checks these hashes. Every
 condition is scored against the **dry** native render. `--holdout` drops a
@@ -89,6 +103,31 @@ of 1, with exactly one empty side giving 0.
 | Log-mel distance | Mean absolute log-mel magnitude difference between mono dry truth and output, over 40 bands, 512/1024/2048-sample Hann windows and 10 ms hops at 24 kHz. |
 | Onset correlation | Pearson correlation of the positive differences of successive 10 ms RMS windows. |
 | Release energy | Mean-square energy projected onto each matched note's fundamental in the 100 ms following truth note-off, truncated at the next reconstructed attack of the same pitch. This mix-based estimate can include energy from other simultaneous sources. |
+
+### Musical grid and repeats
+
+These measurements use the nominal native clock in the shifted manifest.
+A quarter note has the native project's declared ticks per beat multiplied
+by the header divider. The initial S3K tempo byte holds duration counters
+on a fraction `tempo / 256` of presentations. That gives a nominal
+quarter-note BPM of `3600 × (1 − tempo / 256) / ticksPerQuarter`. Truth
+bars use four quarter notes from the known shift of the native time
+origin. This nominal clock assumes constant tempo and a downbeat at
+native time zero. It does not infer mid-song meter or tempo changes.
+
+| Metric | Measurement |
+|---|---|
+| Tempo error (%) | Absolute BPM deviation divided by truth BPM. The default PPQ grid measures as 120 BPM. |
+| Bar-phase error (ms) | Circular distance from the estimated downbeat to the known shifted origin, modulo the truth bar length. The default PPQ grid measures as offset zero. |
+| Repeat precision and recall | Pairwise precision and recall for equally long, nonoverlapping 1-, 2-, and 4-bar windows. Truth is exact equality of the nonempty melodic attack lists across all FM and tonal PSG lanes, keyed by lane, pitch, and relative attack and release rounded to nominal native ticks. Timbre, DAC hits and PSG noise are excluded. An attack belongs to the window containing its rounded onset. A release can extend beyond the window. |
+
+A prediction comes from each pair of instances in a phrase group or an
+exact bar repeat group. Duplicate pairs count once. Both span boundaries
+must align within one eighth of a native bar, or the prediction is a
+false positive. Repeat precision is undefined without a prediction.
+Repeat recall is undefined without a truth pair. The scorecard reports
+how many cases contribute to each mean. The existing regression
+comparison continues to gate the original headline metrics.
 
 Higher is better except for log-mel distance, holdout voice spectral distance,
 and release energy. `compare` returns 1 if an overall headline or gold metric

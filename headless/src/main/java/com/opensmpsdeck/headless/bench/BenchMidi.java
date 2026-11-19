@@ -16,7 +16,11 @@ import java.util.List;
 import java.util.Random;
 
 final class BenchMidi {
-    enum Profile { clean, merged, noisy }
+    enum Profile {
+        clean, merged, noisy, @com.google.gson.annotations.SerializedName("suno-like") sunoLike;
+
+        @Override public String toString() { return this == sunoLike ? "suno-like" : name(); }
+    }
     record Event(String track, boolean drum, double start, double end, int pitch) {}
     private record Message(long tick, int order, int pitch, int channel) {}
 
@@ -45,7 +49,7 @@ final class BenchMidi {
                         drums.classify(hit.sampleHash(), hit.slot()).gm));
             }
         }
-        if (profile != Profile.noisy) {
+        if (profile != Profile.noisy && profile != Profile.sunoLike) {
             target.addAll(melodic);
         } else {
             var random = new Random(SEED + song);
@@ -68,9 +72,25 @@ final class BenchMidi {
         return List.copyOf(target);
     }
 
+    static int offsetFrames(int song, double barSeconds, int frames) {
+        return 1 + new Random(SEED ^ song).nextInt(Math.max(1, Math.min(frames - 1,
+                (int) Math.ceil(barSeconds * 60) - 1)));
+    }
+
+    static List<Event> shift(List<Event> events, int offsetFrames, double seconds) {
+        double delay = offsetFrames / 60.0;
+        return events.stream().filter(e -> e.start() + delay <= seconds - .0001)
+                .map(e -> new Event(e.track(), e.drum(), e.start() + delay,
+                        Math.min(seconds, e.end() + delay), e.pitch())).toList();
+    }
+
     static void write(List<Event> events, Profile profile, Path target) throws IOException {
         try {
             var midi = new Sequence(Sequence.PPQ, PPQ);
+            if (profile == Profile.sunoLike) {
+                var tempo = new byte[]{0x07, (byte) 0xa1, 0x20};
+                midi.createTrack().add(new MidiEvent(new MetaMessage(0x51, tempo, tempo.length), 0));
+            }
             var tracks = new LinkedHashMap<String, List<Message>>();
             for (var event : events) {
                 int channel = event.drum() ? 9 : 0;
