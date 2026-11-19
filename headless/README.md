@@ -262,3 +262,32 @@ assets from the catalogue, and `--gold` accepts private hand-labelled lead regio
 generated datasets outside the repository. See the
 [benchmark guide](../docs/architecture/benchmark.md) for commands and metric
 definitions.
+
+
+## Build nested arrangements
+
+Use `group create` to turn existing placements in a shared project into
+one reusable group. The first instance ID is `GROUP_ID-placement` (with a
+numeric suffix if needed). `group place` adds a linked instance by ID at an
+explicit tick and length. `group ungroup` replaces the named placement with
+its immediate children, expanding full and partial repeats.
+
+```sh
+java -jar "$CLI" group create song.smps.json chorus "Chorus" lead-clip bass-clip drums-clip
+java -jar "$CLI" group create song.smps.json rhythm "Rhythm bed" bass-clip drums-clip --in chorus
+java -jar "$CLI" group place song.smps.json chorus chorus-second 384 144
+java -jar "$CLI" validate song.smps.json
+java -jar "$CLI" group ungroup song.smps.json chorus-second
+```
+
+Set `CLI` to the path of the packaged headless JAR. The example assumes the
+first three placements exist in the song and tick 384 is available. Append
+`--in GROUP_ID` to any group command to operate on a group's source timeline
+instead of the song. Each successful command saves the file using the loaded
+revision. A failed edit leaves the file intact. `validate` is an alias for
+`validate-project` and reports invalid links, cycles, depth and lane conflicts
+with a nonzero exit status.
+
+Agents can also author the [version 6 JSON fields](../project-core/README.md#version-6-group-sequences)
+directly. See [Signal garden](../examples/signal-garden.smps.json) for a nested
+arrangement with linked instances and partial repeats.

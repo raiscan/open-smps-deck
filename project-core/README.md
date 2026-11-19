@@ -36,8 +36,7 @@ of list positions. Names are for display; references always use IDs.
 This repeats a four-beat source for ten beats (two full repetitions and half of
 another). Notes crossing the final clip boundary are trimmed there. Extending a
 clip repeats its source; it does not stretch notes. All instances refer to the
-same sequence, so editing its notes changes every instance. Independent copies
-and nested multi-channel groups are not yet exposed by this first editor.
+same sequence, so editing its notes changes every instance. Use a group sequence to link placements across hardware lanes (see version 6).
 
 - Time is integer SMPS duration ticks, dividing timing 1. `ticksPerBeat` affects
   the musical ruler; notes and clips retain their tick positions when it changes.
@@ -61,7 +60,7 @@ and nested multi-channel groups are not yet exposed by this first editor.
   notes and bakes repeated clips inline. It does not yet optimize reuse into
   CALL/LOOP instructions. The pinned driver remains capable of those operations.
 
-## Review metadata in versions 1–5
+## Review metadata in versions 1–6
 
 Projects may include top-level `references` and `notes` arrays. This metadata
 does not change the format version, compiled bank, or WAV export. Empty arrays
@@ -265,6 +264,63 @@ locations, global voices, and exact DAC note/rate bindings. Studio opens these
 projects in its Native bank view. See the
 [v5 contract](../docs/architecture/native-bank-source.md) and
 [example](../examples/native-evening-clock.smps.json).
+
+## Version 6 group sequences
+
+Grouping an editable project upgrades it to version 6. Set
+`arrangementVersion` to the prior version (1–4). Use that version's exact
+arrangement fields and add the fields below. The arrangement version keeps
+legacy reset prefixes, asset rules and playback behavior intact. Adding a
+feature that requires a newer arrangement version updates that value as
+before. V5 native banks use their existing format and can be converted to an
+editable copy before grouping.
+
+```json
+"arrangementVersion": 1,
+"groupSequences": [{
+  "id": "chorus",
+  "name": "Chorus",
+  "lengthTicks": 96,
+  "clips": [
+    {"id": "melody-entry", "sequenceId": "melody", "lane": "PSG1", "startTick": 0, "lengthTicks": 96}
+  ],
+  "groupPlacements": []
+}],
+"groupPlacements": [
+  {"id": "chorus-first", "groupId": "chorus", "startTick": 24, "lengthTicks": 144}
+]
+```
+
+Both group arrays are required in version 6. Each group is a named source with
+its own positive length and local timeline. Its `clips` and `groupPlacements`
+use ticks relative to that timeline and must end within the source length.
+Clip and group placement IDs are unique together within their containing
+timeline. Group source IDs are unique within the group library. A group
+placement can target a group from the song or another group. Up to four
+levels of groups are allowed and every group definition is checked for cycles,
+including unused definitions.
+
+The example places one and a half iterations of Chorus at song tick 24. Each
+group repeat independently instantiates its children. A partial repeat cuts
+child placements at its boundary and drops children whose start is past the
+boundary. Expanded children keep their hardware lanes. Each expanded clip
+begins with the usual clip-entry reset. `CARRY` applies within that clip's own
+sequence repeats. Rests inside a child clip occupy its lane, while gaps between
+children and the unused portion of a group rectangle do not. The validator
+reports the conflicting placements, lane and tick. A timeline expansion is
+bounded to 32,768 clips, and the usual 32 KiB compiled bank limit still applies.
+
+The compiler feeds the resulting channel clips into the existing finite S3K
+compiler. The equivalent manually flattened arrangement yields the same bank
+and PCM. A DAC sample's tail follows the usual one-shot rules. Trailing empty
+space in a group affects the authored timeline extent, while playback and WAV
+duration follow the expanded clips and DAC tails.
+
+**Ungroup** expands one placement into its immediate children for every
+surviving repeat. It preserves their source references and reuses child IDs
+where available. Other instances and the group definition remain linked.
+See the [nested example](../examples/signal-garden.smps.json) and the
+[headless group commands](../headless/README.md#build-nested-arrangements).
 
 ## External editing and concurrency
 
