@@ -38,6 +38,147 @@ class StudioWindowTest {
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
 
+    @Test void groupAndUngroupAcrossLanesWithUndoAndRedo() throws Exception {
+        fx(()->{
+            var original=window.document().project();
+            clickTimeline(9,0,false,1);
+            clickTimeline(56,5,true,1);
+            key(window.timeline.canvas,KeyCode.G,true);
+            var grouped=window.document().project();
+            assertEquals(2,grouped.groupSequences().getFirst().clips().size());
+            assertEquals(1,grouped.groupPlacements().size());
+            assertArrayEquals(ProjectCompiler.compile(original),ProjectCompiler.compile(grouped));
+            key(window.timeline.canvas,KeyCode.Z,true);
+            assertEquals(original,window.document().project());
+            shortcut(KeyCode.Z,true);
+            assertEquals(grouped,window.document().project());
+            clickTimeline(9,0,false,1);
+            shortcut(KeyCode.G,true);
+            var flat=window.document().project();
+            assertTrue(flat.groupPlacements().isEmpty());
+            assertEquals(Set.copyOf(original.clips()),Set.copyOf(flat.clips()));
+            key(window.timeline.canvas,KeyCode.Z,true);
+            assertEquals(grouped,window.document().project());
+            return null;
+        });
+    }
+
+    @Test void editingInsideOneGroupUpdatesBothLinkedPlacements() throws Exception {
+        prepareGroups();
+        fx(()->{
+            clickTimeline(9,0,false,2);
+            assertEquals("Chorus",button("arrangement-level-1").getText());
+            clickTimeline(9,0,false,1);
+            ((TextField)window.scene().lookup("#clip-start")).setText("6");
+            ((TextField)window.scene().lookup("#clip-length")).setText("90");
+            button("apply-clip").fire();
+            var project=window.document().project();
+            var resolver=new GroupArrangement(project);
+            for (var placement: project.groupPlacements()) {
+                var lead=resolver.expand(placement).stream().filter(c->c.lane().equals("FM1")).findFirst().orElseThrow();
+                assertEquals(placement.startTick()+6,lead.startTick());
+                assertEquals(90,lead.lengthTicks());
+            }
+            key(window.timeline.canvas,KeyCode.ESCAPE,false);
+            assertNull(window.scene().lookup("#arrangement-level-1"));
+            return null;
+        });
+    }
+
+    @Test void resizingGroupRepeatsWithAPartialFinalRepeat() throws Exception {
+        prepareGroups();
+        fx(()->{
+            var zoom=(Slider)window.scene().lookup("#timeline-zoom");
+            zoom.setValue(1.1);
+            layout();
+            double edge=timelineX(480)-3, y=TimelineView.RULER+15;
+            var canvas=window.timeline.canvas;
+            mouse(canvas,MouseEvent.MOUSE_PRESSED,edge,y,true);
+            mouse(canvas,MouseEvent.MOUSE_DRAGGED,edge+27*window.timeline.scale,y,true);
+            mouse(canvas,MouseEvent.MOUSE_RELEASED,edge+27*window.timeline.scale,y,false);
+            var project=window.document().project();
+            var instance=project.groupPlacements().getLast();
+            assertEquals(123,instance.lengthTicks());
+            assertTrue(new GroupArrangement(project).expand(instance).stream()
+                    .anyMatch(c->c.startTick()==480 && c.lengthTicks()==27));
+            return null;
+        });
+    }
+
+    @Test void draggingGroupAcrossAnOccupiedLaneIsRefused() throws Exception {
+        prepareGroups();
+        fx(()->{
+            var unchanged=window.document().project();
+            double x=timelineX(9), y=TimelineView.RULER+15;
+            var canvas=window.timeline.canvas;
+            mouse(canvas,MouseEvent.MOUSE_PRESSED,x,y,true);
+            mouse(canvas,MouseEvent.MOUSE_DRAGGED,x+48*window.timeline.scale,y,true);
+            mouse(canvas,MouseEvent.MOUSE_RELEASED,x+48*window.timeline.scale,y,false);
+            assertEquals(unchanged,window.document().project());
+            assertTrue(window.scene().getRoot().lookupAll(".status").stream().filter(Label.class::isInstance)
+                    .map(Label.class::cast).anyMatch(l->l.getText().contains("lane conflict on FM1")));
+            return null;
+        });
+    }
+
+    @Test void externalRefreshInsideGroupRetainsPathAndCancelsStaleDrag() throws Exception {
+        prepareGroups();
+        fx(()->{
+            clickTimeline(9,0,false,2);
+            clickTimeline(9,0,false,1);
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_PRESSED,timelineX(9),TimelineView.RULER+20,true);
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_DRAGGED,timelineX(15),TimelineView.RULER+20,true);
+            return null;
+        });
+        var loaded=ProjectFiles.load(file);
+        var external=GroupEdits.updateSource(loaded.project(),"chorus","Revised chorus",96);
+        ProjectFiles.save(file,external,loaded.revision());
+        await(()->window.document().project().equals(external));
+        fx(()->{
+            assertEquals("Revised chorus",button("arrangement-level-1").getText());
+            assertEquals("clip-a1",window.selectedClip());
+            mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,timelineX(15),TimelineView.RULER+20,false);
+            assertEquals(external,window.document().project());
+            assertFalse(window.document().dirty());
+            return null;
+        });
+        loaded=ProjectFiles.load(file);
+        var removed=GroupEdits.remove(loaded.project(),null,"chorus-placement");
+        ProjectFiles.save(file,removed,loaded.revision());
+        await(()->window.document().project().equals(removed));
+        fx(()->{
+            assertNull(window.scene().lookup("#arrangement-level-1"));
+            assertNull(window.selectedClip());
+            return null;
+        });
+    }
+
+    private void prepareGroups() throws Exception {
+        var loaded=ProjectFiles.load(file);
+        var grouped=GroupEdits.create(loaded.project(),null,"chorus","Chorus",Set.of("clip-a1","clip-answer1"));
+        var linked=GroupEdits.place(grouped,null,new GroupPlacement("second","chorus",384,96));
+        ProjectFiles.save(file,linked,loaded.revision());
+        await(()->window.document().project().equals(linked));
+    }
+
+    private double timelineX(int tick) {
+        return TimelineView.GUTTER+tick*window.timeline.scale-window.timeline.offset;
+    }
+
+    private void clickTimeline(int tick,int row,boolean add,int count) {
+        var canvas=window.timeline.canvas;
+        double x=timelineX(tick), y=TimelineView.RULER+row*TimelineView.ROW+15;
+        for (var type:List.of(MouseEvent.MOUSE_PRESSED,MouseEvent.MOUSE_RELEASED,MouseEvent.MOUSE_CLICKED)) {
+            Event.fireEvent(canvas,new MouseEvent(type,x,y,x,y,MouseButton.PRIMARY,count,false,add,false,false,
+                    type==MouseEvent.MOUSE_PRESSED,false,false,false,false,true,
+                    new PickResult(canvas,new javafx.geometry.Point3D(x,y,0),0)));
+        }
+    }
+
+    private void shortcut(KeyCode code,boolean shift) {
+        Event.fireEvent(window.timeline.canvas,new KeyEvent(KeyEvent.KEY_PRESSED,"","",code,shift,true,false,false));
+    }
+
     @Test void instrumentCataloguePagesFiltersAndAppliesWithProjectUndo() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope",
@@ -642,6 +783,125 @@ class StudioWindowTest {
     }
     private void layout(){window.scene().getRoot().applyCss();window.scene().getRoot().layout();}
     private static void key(Node node,KeyCode code,boolean shortcut){Event.fireEvent(node,new KeyEvent(KeyEvent.KEY_PRESSED,"","",code,false,shortcut,false,false));}
+
+    @Test void referenceLaneAppearsAndABSwitchKeepsTransportPosition() throws Exception {
+        Path wav = ReferenceWaveTest.wav(folder.resolve("guide.wav"), 16, 1, 24_000, -1000, 1000);
+        fx(() -> {
+            window.addReference(wav);
+            layout();
+            assertTrue(window.scene().lookup("#reference-lane").isVisible());
+            assertEquals("guide.wav", window.document().project().references().getFirst().path());
+            return null;
+        });
+        await(() -> window.timeline.referenceLane.wave() != null);
+        fx(() -> {
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, TimelineView.GUTTER + 45, 20, true);
+            double position = window.transport().seconds;
+            assertEquals(1, position);
+            key(window.timeline.canvas, KeyCode.R, false);
+            assertTrue(window.transport().referenceAudible());
+            assertEquals(position, window.transport().seconds);
+            key(window.timeline.canvas, KeyCode.R, false);
+            assertFalse(window.transport().referenceAudible());
+            assertEquals(position, window.transport().seconds);
+            return null;
+        });
+    }
+
+    @Test void referenceLaneDragAndKeyboardNudgeEditOffset() throws Exception {
+        Path wav = ReferenceWaveTest.wav(folder.resolve("guide.wav"), 16, 1, 24_000, -1000, 1000);
+        fx(() -> {
+            window.addReference(wav);
+            layout();
+            return null;
+        });
+        await(() -> window.timeline.referenceLane.wave() != null);
+        fx(() -> {
+            var waveCanvas = window.timeline.referenceLane.getChildrenUnmodifiable().getFirst();
+            mouse(waveCanvas, MouseEvent.MOUSE_PRESSED, 200, 32, true);
+            mouse(waveCanvas, MouseEvent.MOUSE_DRAGGED, 191, 32, true);
+            mouse(waveCanvas, MouseEvent.MOUSE_RELEASED, 191, 32, false);
+            assertEquals(-0.2, window.document().project().references().getFirst().offsetSeconds(), 1e-9);
+            key(waveCanvas, KeyCode.RIGHT, false);
+            assertEquals(-0.19, window.document().project().references().getFirst().offsetSeconds(), 1e-9);
+            return null;
+        });
+    }
+
+    @Test void addsAndResolvesReviewNoteThroughSharedEdits() throws Exception {
+        fx(() -> {
+            key(window.scene().getRoot(), KeyCode.N, false);
+            layout();
+            ((TextArea) window.scene().lookup("#review-note-text")).setText("Check the attack");
+            button("submit-review-note").fire();
+            var note = window.document().project().notes().getFirst();
+            assertEquals(0, note.startSeconds());
+            assertEquals("human", note.author());
+            assertTrue(note.isOpen());
+            reviewList().getSelectionModel().select(0);
+            assertEquals(0, window.transport().loop.start());
+            assertEquals(1.5, window.transport().loop.end());
+            button("resolve-review-note").fire();
+            assertFalse(window.document().project().notes().getFirst().isOpen());
+            assertTrue(reviewList().getItems().isEmpty());
+            key(window.scene().getRoot(), KeyCode.S, true);
+            return null;
+        });
+        assertFalse(ProjectFiles.load(file).project().notes().getFirst().isOpen());
+    }
+
+    @Test void externalNotesCommandRefreshesOpenListAndKeepsComposerDraft() throws Exception {
+        fx(() -> {
+            key(window.scene().getRoot(), KeyCode.N, false);
+            layout();
+            ((TextArea) window.scene().lookup("#review-note-text")).setText("Local draft");
+            return null;
+        });
+        cliNote("Agent marker");
+        await(() -> reviewList().getItems().size() == 1);
+        fx(() -> {
+            assertEquals("agent", reviewList().getItems().getFirst().author());
+            assertEquals("Local draft", ((TextArea) window.scene().lookup("#review-note-text")).getText());
+            button("submit-review-note").fire();
+            assertTrue(window.document().dirty());
+            return null;
+        });
+        cliNote("New agent revision");
+        await(() -> window.document().conflicted());
+        fx(() -> {
+            assertTrue(window.document().project().notes().stream().anyMatch(note -> note.text().equals("Local draft")));
+            assertThrows(java.io.IOException.class, () -> window.document().save());
+            Path recovered = window.document().reloadKeepingRecovery();
+            assertTrue(ProjectFiles.load(recovered).project().notes().stream().anyMatch(n -> n.text().equals("Local draft")));
+            assertTrue(window.document().project().notes().stream().anyMatch(n -> n.text().equals("New agent revision")));
+            return null;
+        });
+    }
+
+    @Test void arrangementSoloAndMuteSetTheHardwareRenderMask() throws Exception {
+        fx(() -> {
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(0, 0), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 62, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(62, 15), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 85, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(63, 15), window.renderMask());
+            mouse(window.timeline.canvas, MouseEvent.MOUSE_PRESSED, 62, TimelineView.RULER + 27, true);
+            assertEquals(new com.opensmpsdeck.headless.S3kRenderer.ChannelMask(1, 0), window.renderMask());
+            return null;
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private ListView<ReviewNote> reviewList() {
+        return (ListView<ReviewNote>) window.scene().lookup("#open-review-notes");
+    }
+
+    private void cliNote(String text) {
+        var output = new java.io.ByteArrayOutputStream();
+        var stream = new java.io.PrintStream(output);
+        assertEquals(0, com.opensmpsdeck.headless.Main.run(new String[]{"notes", "add", file.toString(),
+                "--at", "1.5", "--text", text, "--author", "agent"}, stream, stream), output::toString);
+    }
 
     @Test void snapshotRealEditor() throws Exception {
         String target=System.getProperty("studio.snapshot");Assumptions.assumeTrue(target!=null,"Optional visual QA artifact");

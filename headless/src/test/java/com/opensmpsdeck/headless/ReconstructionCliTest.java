@@ -84,6 +84,156 @@ class ReconstructionCliTest {
                 assertTrue(window.get("startUs").getAsLong() + window.get("durationUs").getAsLong() <= 500_000);
             }
         }
+
+        Path work = directory.resolve("stages");
+        Path candidates = directory.resolve("candidates.json");
+        Files.writeString(candidates, """
+                {"version":1,"notes":[{"id":"external-1","part":0,"start":0.06,"end":0.2,"pitch":80,"velocity":90}]}
+                """);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), work.toString(), "--seconds", ".5", "--candidates", candidates.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        var score = JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
+        assertEquals(60, score.get("ticksPerSecond").getAsInt());
+        assertEquals(30, score.get("frames").getAsInt());
+        assertEquals("external", score.getAsJsonArray("notes").asList().stream()
+                .map(n -> n.getAsJsonObject()).filter(n -> n.get("pitch").getAsInt() == 80)
+                .findFirst().orElseThrow().get("source").getAsString());
+
+        Path overrideWork = directory.resolve("override");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), overrideWork.toString(), "--seconds", ".5", "--candidates", candidates.toString(),
+                "--tempo", "150", "--bar-offset", ".15"}, System.out, new PrintStream(errors)), errors.toString());
+        var override = JsonParser.parseString(Files.readString(overrideWork.resolve("score.json"))).getAsJsonObject();
+        assertEquals(score.get("notes"), override.get("notes"));
+        var firstBar = override.getAsJsonArray("bars").get(0).getAsJsonObject();
+        assertEquals(.15, firstBar.get("end").getAsDouble(), 1e-9);
+        assertFalse(firstBar.get("complete").getAsBoolean());
+
+        for (String stage : List.of("structure", "roles"))
+            assertEquals(0, Main.run(new String[]{"reconstruct", stage, work.toString()},
+                    System.out, new PrintStream(errors)), errors.toString());
+        Path structureFile = work.resolve("structure.json");
+        var structure = JsonParser.parseString(Files.readString(structureFile)).getAsJsonObject();
+        var structureNote = structure.getAsJsonArray("notes").get(0).getAsJsonObject();
+        String structureNoteId = structureNote.get("id").getAsString();
+        structureNote.addProperty("velocity", 77);
+        String editedStructure = structure.toString();
+        Files.writeString(structureFile, editedStructure);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "roles", work.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(editedStructure, Files.readString(structureFile));
+        var resumedAllocation = JsonParser.parseString(Files.readString(work.resolve("allocation.json"))).getAsJsonObject();
+        assertEquals(77, resumedAllocation.getAsJsonArray("notes").asList().stream()
+                .map(e -> e.getAsJsonObject().getAsJsonObject("note"))
+                .filter(n -> n.get("id").getAsString().equals(structureNoteId))
+                .findFirst().orElseThrow().get("velocity").getAsInt());
+
+        Path roleFile = work.resolve("roles.json");
+        var roles = JsonParser.parseString(Files.readString(roleFile)).getAsJsonObject();
+        var assignments = roles.getAsJsonArray("notes");
+        assertEquals(7, assignments.size());
+        var lead = assignments.asList().stream().map(element -> element.getAsJsonObject())
+                .filter(assignment -> assignment.get("role").getAsString().equals("melody")).findFirst().orElseThrow();
+        var note = lead.getAsJsonObject("note");
+        String editedId = note.get("id").getAsString();
+        note.addProperty("pitch", 73);
+        String edited = roles.toString();
+        Files.writeString(roleFile, edited);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "allocate", work.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(edited, Files.readString(roleFile));
+        var allocation = JsonParser.parseString(Files.readString(work.resolve("allocation.json"))).getAsJsonObject();
+        var placed = allocation.getAsJsonArray("notes").asList().stream().map(n -> n.getAsJsonObject())
+                .filter(entry -> entry.getAsJsonObject("note").get("id").getAsString().equals(editedId))
+                .findFirst().orElseThrow();
+        assertEquals("FM1", placed.get("lane").getAsString());
+        assertEquals(73, placed.getAsJsonObject("note").get("pitch").getAsInt());
+        var updated = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var fm1 = updated.clips().stream().filter(c -> c.lane().equals("FM1")).findFirst().orElseThrow();
+        assertEquals(73, updated.sequences().stream().filter(s -> s.id().equals(fm1.sequenceId()))
+                .findFirst().orElseThrow().notes().getFirst().pitch());
+
+        placed.addProperty("lane", "FM4");
+        Files.writeString(work.resolve("allocation.json"), allocation.toString());
+        errors.reset();
+        String goodReport = Files.readString(work.resolve("report.json"));
+        assertEquals(2, Main.run(new String[]{"reconstruct", "assemble", work.toString()}, System.out, new PrintStream(errors)));
+        assertTrue(errors.toString().contains("invalid lane for melody"), errors.toString());
+        assertEquals(goodReport, Files.readString(work.resolve("report.json")));
+
+        Files.writeString(work.resolve("allocation.json"), "{");
+        errors.reset();
+        assertEquals(2, Main.run(new String[]{"reconstruct", "assemble", work.toString()},
+                System.out, new PrintStream(errors)));
+        assertTrue(errors.toString().contains("allocation.json"), errors.toString());
+
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", work.toString(), "--from", "allocate"},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(goodReport, Files.readString(work.resolve("report.json")));
+    }
+
+    @Test void emitsEditedVoicingOnBothResumePaths() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        bytes[1] ^= 1;
+        String other = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Edited", bytes);
+        String editVariant = builder.variant(other, "Edited", InstrumentCatalogue.Recipe.plain(), null);
+        var catalogue = builder.build();
+        Path index = directory.resolve("index.json");
+        catalogue.save(index);
+        Path wav = directory.resolve("input.wav");
+        WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, variant, 72, 24)), wav, 60);
+        Path midi = directory.resolve("lead.mid");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 72, 96), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 72, 0), 384));
+        MidiSystem.write(source, 0, midi.toFile());
+
+        Path work = directory.resolve("voice-work");
+        var errors = new ByteArrayOutputStream();
+        var err = new PrintStream(errors);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
+                index.toString(), work.toString()}, System.out, err), errors.toString());
+        Path file = work.resolve("voicing.json");
+        String original = Files.readString(file);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString()}, System.out, err), errors.toString());
+        assertEquals(original, Files.readString(file));
+        var artifact = JsonParser.parseString(original).getAsJsonObject();
+        var lane = artifact.getAsJsonObject("lanes").getAsJsonObject("FM1");
+        var art = lane.getAsJsonObject("articulation");
+        lane.addProperty("variantId", editVariant);
+        lane.addProperty("gain", .5);
+        art.addProperty("gate", .5);
+        art.addProperty("minimumReleaseRate", 15);
+        lane.add("effects", new com.google.gson.Gson().toJsonTree(ReconstructionVoicing.idiom(
+                ReconstructionRoles.Role.melody, "FM5")));
+        String edited = artifact.toString();
+        Files.writeString(file, edited);
+
+        for (String stage : List.of("voice", "assemble")) {
+            assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", stage, work.toString()},
+                    System.out, err), errors.toString());
+            assertEquals(edited, Files.readString(file));
+            var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+            var lead = project.sequences().stream().filter(s -> s.id().startsWith("FM1-")).findFirst().orElseThrow();
+            assertEquals(12, lead.notes().getFirst().duration());
+            var compiled = ProjectCompiler.compileWithAssets(project).song();
+            int voiceOffset = Byte.toUnsignedInt(compiled[0]) | Byte.toUnsignedInt(compiled[1]) << 8;
+            assertEquals(bytes[1], compiled[voiceOffset + 1]);
+            for (int offset = 17; offset < 21; offset++)
+                assertEquals((bytes[offset] & 0xf0) | 15, Byte.toUnsignedInt(compiled[voiceOffset + offset]));
+            var nativeBytes = java.util.HexFormat.of().formatHex(compiled);
+            assertTrue(nativeBytes.contains("f00a020204"), "native delayed vibrato");
+            var report = JsonParser.parseString(Files.readString(work.resolve("report.json"))).getAsJsonObject();
+            assertEquals("FM5", report.getAsJsonArray("effectCopyLanes").get(0).getAsString());
+            assertEquals(1, report.get("echoNotes").getAsInt());
+        }
     }
 
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {

@@ -1,6 +1,8 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.AudioReference;
 import com.opensmpsdeck.project.CommandEvent;
+import com.opensmpsdeck.project.ReviewNote;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeCommand;
@@ -49,6 +51,15 @@ public class StudioDesignCapture {
                     source.clips(), source.envelopes(), source.samples(), source.nativeProgram());
             if (scene.endsWith("commands")) renamed = withCommands(renamed, scene.startsWith("dense"));
             if (scene.endsWith("-assets")) renamed = withAssets(renamed);
+            if (scene.equals("reference-review")) {
+                Path wav = Path.of(args[4]);
+                renamed = ProjectEdits.addReference(renamed, new AudioReference("synthetic", "Synthetic guide",
+                        AudioReference.pathFor(fixture, wav), -.15, -3, "mix"));
+                renamed = ProjectEdits.addReviewNote(renamed, new ReviewNote("phrasing", 2.15, 3.2, "FM1", null,
+                        "Check the lead entrance against the guide.", "human", "open", "2026-11-19T00:00:00Z", null));
+                renamed = ProjectEdits.addReviewNote(renamed, new ReviewNote("bass", 4.15, null, "FM2", null,
+                        "Bass sustain ready for review.", "agent", "open", "2026-11-19T00:00:01Z", null));
+            }
             ProjectFiles.save(fixture, renamed, null);
             fx(() -> {
                 stage = new Stage();
@@ -62,6 +73,14 @@ public class StudioDesignCapture {
                 else if (scene.equals("dac-assets")) window.showSamples();
                 return null;
             });
+            if (scene.equals("reference-review")) {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!fx(() -> window.timeline.referenceLane.wave() != null) && System.nanoTime() < deadline) {
+                    Thread.sleep(20);
+                }
+                if (!fx(() -> window.timeline.referenceLane.wave() != null))
+                    throw new IllegalStateException("Synthetic reference did not load");
+            }
             if (source.nativeProgram() != null) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!fx(() -> window.nativeArrangement.timeline.project != null) && System.nanoTime() < deadline) {

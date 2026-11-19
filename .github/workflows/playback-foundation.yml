@@ -28,6 +28,8 @@ jobs:
           python3 -m unittest discover -s tools/tests -v
       - name: Build and test headless playback
         run: mvn -B -pl headless -am verify
+      - name: Exercise the stdio MCP server
+        run: python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$RUNNER_TEMP"
       - name: Exercise the packaged CLI and verify bundled provenance
         run: |
           java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo "$RUNNER_TEMP/demo.wav" --frames 120

@@ -120,6 +120,84 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
         return new MidiScore(parts, notes, warnings);
     }
 
+    record GridMetadata(boolean defaultTempo, int meter) {}
+
+    static GridMetadata gridMetadata(Path path) throws IOException {
+        try {
+            int tempoEvents = 0;
+            boolean defaultValue = true;
+            int meter = 0;
+            for (Track track : MidiSystem.getSequence(path.toFile()).getTracks()) {
+                for (int i = 0; i < track.size(); i++) {
+                    var event = track.get(i);
+                    if (!(event.getMessage() instanceof MetaMessage meta)) continue;
+                    byte[] data = meta.getData();
+                    if (meta.getType() == SET_TEMPO && data.length == 3) {
+                        int tempo = (data[0] & 255) << 16 | (data[1] & 255) << 8 | data[2] & 255;
+                        if (tempo > 0) {
+                            tempoEvents++;
+                            defaultValue &= tempo == DEFAULT_TEMPO;
+                        }
+                    } else if (meta.getType() == 0x58 && event.getTick() == 0 && data.length >= 2
+                            && data[1] == 2) {
+                        meter = Byte.toUnsignedInt(data[0]);
+                    }
+                }
+            }
+            return new GridMetadata(tempoEvents <= 1 && defaultValue, meter);
+        } catch (InvalidMidiDataException e) {
+            throw new IOException("Invalid MIDI file: " + path, e);
+        }
+    }
+
+    /** Boundaries on the PPQ grid, integrating the same tempo map used for note times. */
+    static List<ReconstructionStructure.Bar> bars(Path path, long durationUs) throws IOException {
+        Sequence sequence;
+        try {
+            sequence = MidiSystem.getSequence(path.toFile());
+        } catch (InvalidMidiDataException e) {
+            throw new IOException("Invalid MIDI file: " + path, e);
+        }
+        int resolution = sequence.getResolution();
+        Track[] tracks = sequence.getTracks();
+        var tempos = tempoMap(tracks, resolution);
+        var meters = new TreeMap<Long, Meter>();
+        meters.put(0L, new Meter(4, 4));
+        for (Track track : tracks) for (int i = 0; i < track.size(); i++) {
+            var event = track.get(i);
+            if (event.getMessage() instanceof MetaMessage meta && meta.getType() == 0x58) {
+                byte[] data = meta.getData();
+                if (data.length >= 2 && Byte.toUnsignedInt(data[0]) > 0 && Byte.toUnsignedInt(data[1]) <= 7)
+                    meters.put(event.getTick(), new Meter(Byte.toUnsignedInt(data[0]), 1 << data[1]));
+            }
+        }
+        var bars = new ArrayList<ReconstructionStructure.Bar>();
+        long tick = 0;
+        long time = 0;
+        while (time < durationUs) {
+            if (bars.size() >= S3kRenderer.MAX_PRESENTATIONS)
+                throw new IllegalArgumentException("MIDI meter and tempo produce too many bars for the requested interval");
+            var meter = meters.floorEntry(tick);
+            long unit = (long) resolution * meter.getValue().beats() * 4;
+            int denominator = meter.getValue().denominator();
+            // Round each boundary from the meter origin to avoid cumulative PPQ rounding.
+            long barsSinceMeter = Math.round((tick - meter.getKey()) * (double) denominator / unit);
+            long natural = meter.getKey() + Math.max(tick - meter.getKey() + 1,
+                    ((barsSinceMeter + 1) * unit + denominator / 2) / denominator);
+            Long nextMeter = meters.higherKey(tick);
+            long next = nextMeter == null ? natural : Math.min(natural, nextMeter);
+            long end = micros(tempos, next, resolution);
+            if (end <= time) throw new IllegalArgumentException("MIDI bar duration is below one microsecond");
+            bars.add(new ReconstructionStructure.Bar("b" + (bars.size() + 1), time / 1_000_000.0,
+                    Math.min(end, durationUs) / 1_000_000.0, end <= durationUs && next == natural));
+            tick = next;
+            time = end;
+        }
+        return List.copyOf(bars);
+    }
+
+    private record Meter(int beats, int denominator) {}
+
     private static TreeMap<Long, TempoPoint> tempoMap(Track[] tracks, int resolution) {
         var changes = new TreeMap<Long, Integer>();
         changes.put(0L, DEFAULT_TEMPO);

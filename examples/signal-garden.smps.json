@@ -1,0 +1,136 @@
+{
+  "formatVersion": 6,
+  "arrangementVersion": 1,
+  "name": "Signal garden",
+  "mode": "S3K",
+  "ticksPerBeat": 12,
+  "tempo": 146,
+  "voices": [
+    {
+      "id": "chime",
+      "name": "Garden chime",
+      "bytes": [4, 1, 2, 1, 2, 31, 31, 31, 31, 8, 7, 8, 7, 3, 3, 3, 3, 42, 42, 42, 42, 34, 8, 40, 8]
+    },
+    {
+      "id": "root",
+      "name": "Round root",
+      "bytes": [4, 1, 1, 1, 1, 31, 31, 31, 31, 10, 8, 10, 8, 3, 3, 3, 3, 26, 26, 26, 26, 32, 12, 40, 12]
+    },
+    {
+      "id": "tap",
+      "name": "Short tap",
+      "bytes": [7, 1, 5, 2, 9, 31, 31, 31, 31, 20, 23, 26, 22, 11, 15, 15, 14, 87, 91, 76, 92, 15, 32, 37, 38]
+    }
+  ],
+  "sequences": [
+    {
+      "id": "intro",
+      "name": "Pickup bells",
+      "type": "FM",
+      "lengthTicks": 24,
+      "voiceId": "chime",
+      "volume": 95,
+      "notes": [
+        { "id": "intro-1", "tick": 0, "duration": 4, "pitch": 60 },
+        { "id": "intro-2", "tick": 6, "duration": 4, "pitch": 65 },
+        { "id": "intro-3", "tick": 12, "duration": 8, "pitch": 69 },
+        { "id": "intro-4", "tick": 21, "duration": 3, "pitch": 72 }
+      ]
+    },
+    {
+      "id": "lead",
+      "name": "Signal melody",
+      "type": "FM",
+      "lengthTicks": 96,
+      "voiceId": "chime",
+      "volume": 111,
+      "notes": [
+        { "id": "lead-1", "tick": 0, "duration": 8, "pitch": 74 },
+        { "id": "lead-2", "tick": 12, "duration": 8, "pitch": 72 },
+        { "id": "lead-3", "tick": 24, "duration": 6, "pitch": 69 },
+        { "id": "lead-4", "tick": 32, "duration": 10, "pitch": 65 },
+        { "id": "lead-5", "tick": 48, "duration": 8, "pitch": 67 },
+        { "id": "lead-6", "tick": 60, "duration": 8, "pitch": 65 },
+        { "id": "lead-7", "tick": 72, "duration": 12, "pitch": 62 },
+        { "id": "lead-8", "tick": 90, "duration": 4, "pitch": 69 }
+      ]
+    },
+    {
+      "id": "bass",
+      "name": "Low roots",
+      "type": "FM",
+      "lengthTicks": 48,
+      "voiceId": "root",
+      "volume": 105,
+      "notes": [
+        { "id": "bass-1", "tick": 0, "duration": 8, "pitch": 38 },
+        { "id": "bass-2", "tick": 12, "duration": 6, "pitch": 45 },
+        { "id": "bass-3", "tick": 24, "duration": 8, "pitch": 41 },
+        { "id": "bass-4", "tick": 36, "duration": 6, "pitch": 48 }
+      ]
+    },
+    {
+      "id": "taps",
+      "name": "Taps and accents",
+      "type": "FM",
+      "lengthTicks": 48,
+      "voiceId": "tap",
+      "volume": 90,
+      "notes": [
+        { "id": "taps-1", "tick": 0, "duration": 3, "pitch": 34 },
+        { "id": "taps-2", "tick": 9, "duration": 2, "pitch": 56 },
+        { "id": "taps-3", "tick": 12, "duration": 3, "pitch": 34 },
+        { "id": "taps-4", "tick": 21, "duration": 2, "pitch": 57 },
+        { "id": "taps-5", "tick": 24, "duration": 2, "pitch": 60 },
+        { "id": "taps-6", "tick": 30, "duration": 3, "pitch": 34 },
+        { "id": "taps-7", "tick": 36, "duration": 2, "pitch": 49 },
+        { "id": "taps-8", "tick": 42, "duration": 2, "pitch": 57 }
+      ]
+    },
+    {
+      "id": "reply",
+      "name": "Canopy echoes",
+      "type": "PSG",
+      "lengthTicks": 48,
+      "voiceId": null,
+      "volume": 66,
+      "notes": [
+        { "id": "reply-1", "tick": 18, "duration": 4, "pitch": 81 },
+        { "id": "reply-2", "tick": 31, "duration": 4, "pitch": 77 },
+        { "id": "reply-3", "tick": 42, "duration": 4, "pitch": 74 }
+      ]
+    }
+  ],
+  "clips": [
+    { "id": "pickup", "sequenceId": "intro", "lane": "FM1", "startTick": 0, "lengthTicks": 24 },
+    { "id": "ending", "sequenceId": "intro", "lane": "FM1", "startTick": 252, "lengthTicks": 24 }
+  ],
+  "groupSequences": [
+    {
+      "id": "rhythm",
+      "name": "Rhythm bed",
+      "lengthTicks": 48,
+      "clips": [
+        { "id": "roots", "sequenceId": "bass", "lane": "FM2", "startTick": 0, "lengthTicks": 48 },
+        { "id": "percussion", "sequenceId": "taps", "lane": "FM3", "startTick": 0, "lengthTicks": 48 }
+      ],
+      "groupPlacements": []
+    },
+    {
+      "id": "chorus",
+      "name": "Chorus",
+      "lengthTicks": 96,
+      "clips": [
+        { "id": "main-lead", "sequenceId": "lead", "lane": "FM1", "startTick": 0, "lengthTicks": 96 },
+        { "id": "echoes", "sequenceId": "reply", "lane": "PSG1", "startTick": 0, "lengthTicks": 96 }
+      ],
+      "groupPlacements": [
+        { "id": "rhythm-loop", "groupId": "rhythm", "startTick": 0, "lengthTicks": 96 }
+      ]
+    }
+  ],
+  "groupPlacements": [
+    { "id": "chorus-first", "groupId": "chorus", "startTick": 24, "lengthTicks": 144 },
+    { "id": "chorus-second", "groupId": "chorus", "startTick": 180, "lengthTicks": 72 }
+  ]
+}

@@ -56,6 +56,41 @@ changes** to commit those fields. Duplicate creates another linked instance.
 Delete/Backspace with the arrangement focused removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
 for project undo/redo, outside text fields.
 
+## Group clips into a sequence
+
+Try the original [Signal garden example](../../examples/signal-garden.smps.json).
+It has two linked **Chorus** placements, each containing a nested **Rhythm bed**.
+
+1. Click one clip, then Ctrl-click (Cmd-click on macOS) or Shift-click others
+   across lanes. Choose **Groups → Group into sequence** or press Ctrl+G
+   (Cmd+G). You can include existing group placements.
+2. Drag a group's purple header to move all its children in time. Drag the
+   right edge to trim or repeat the group. Vertical marks show the start of
+   each repeat, and the last repeat can be partial. The inspector accepts
+   exact start and length values.
+3. Double-click a group header or choose **Edit inside**. Studio shows the
+   children in place at that instance's first repeat, with the surrounding
+   song dimmed. Edit child clips and nested groups with the usual controls.
+   Inspector start ticks are relative to the open group. Every linked
+   instance updates together. Press Esc to go out one level or click a
+   breadcrumb to return to that level.
+4. Drag a group from **Sequences** onto the timeline to reuse it. A group
+   always keeps its authored hardware lanes, regardless of the drop lane.
+   **Place on timeline** appends a selected group after the current arrangement.
+   Use **Apply group source** in the inspector to rename the group or change
+   the duration of one repeat. The length of each placement stays independent.
+5. **Groups → Ungroup** or Ctrl+Shift+G (Cmd+Shift+G) restores the children of
+   the selected instance at their expanded positions and lengths. Nested
+   group children stay linked. The reusable source stays in the library.
+   Grouping, ungrouping and placement changes use the usual undo/redo.
+
+With groups, a hardware lane is occupied only where an expanded child clip
+lies. Gaps remain usable. Studio refuses a move, extension or linked edit if
+it would overlap another clip on the same lane in any instance. A cycle or
+more than four group levels is also rejected. Clean external refreshes keep
+your breadcrumb path by ID while it still exists, and return to the closest
+surviving level if a placement disappears.
+
 ## Edit the source notes
 
 Selecting a clip opens its source in the piano roll below. Notes are bars:
@@ -196,6 +231,36 @@ separate working copy. Reload will not discard work if the disk file is invalid.
 New/Open/Close ask about unsaved changes. Undo history resets on adopting an
 external revision; undo never secretly crosses into another writer's version.
 
+## Review a reconstruction
+
+1. Open the shared project and choose **Review → Add reference…**. Pick a
+   16- or 24-bit PCM WAV with one or two channels and up to 256 MiB of PCM.
+   For several guides or stems,
+   use the reference picker to choose the visible and audible WAV. The
+   waveform shares the arrangement's horizontal scroll, zoom and playhead.
+   Drag it to align the guide, or focus it and use Left/Right to move it by
+   10 ms. Studio saves the alignment with the project.
+2. Click the ruler to position the playhead. Select **Render**, **Reference**
+   or **A/B**, then press Play. In A/B, press **R** to switch sources at
+   the current position. **R** also enters A/B from either source. On the
+   render lanes, click **S** to solo or **M** to mute. Multiple solos are
+   allowed and mute takes precedence. These controls affect Studio audition.
+3. Shift-drag the ruler to loop a range, or select a clip and click **Loop
+   selection**. Clear it with **Clear loop**.
+4. Press **N** or click **Add note**. The note takes its time from the
+   active range, selected clip, or playhead. Click an empty lane to attach
+   lane context, or click the ruler to place a note without a lane.
+   Enter the feedback and click **Add**, then **Save** to share it.
+5. Click an open note or its ruler/lane marker to jump and set a loop with
+   1.5 seconds of context on each side. Agent-authored notes use violet
+   markers and text. After reviewing a note, select it and click **Resolve
+   selected**, then save.
+
+Review edits use the same undo, save and conflict behavior as arrangement
+edits. A clean window picks up notes written by the CLI, and a draft in the
+composer stays available across a refresh. The
+[review protocol](../architecture/review-loop.md) covers the agent side.
+
 ## Listen and export
 
 Open the [native bank example](../../examples/native-evening-clock.smps.json)
@@ -206,7 +271,7 @@ Edits use the usual undo, save and external refresh. An unsupported
 instruction appears as a playback diagnostic. **Export package** still
 preserves the exact bank and asset bindings.
 
-**Play** previews from the beginning; Space toggles Play/Stop outside text fields.
+**Play** previews from the playhead. Space toggles Play/Stop outside text fields.
 Edits or adopted external changes stop the previous playback snapshot. Use **Song settings** to rename the project or change native tempo and ruler
 resolution. The inspector shows approximate BPM for context. The native
 S3K tempo byte controls delay frames: larger is slower, zero is valid. Tick ruler
@@ -224,6 +289,6 @@ manifest and source JSON into a new `.smps.zip`. This adapter package is documen
 for engine integration; OpenGGF does not yet load the ZIP directly. Bare binary
 export refuses to drop those dependencies. Preview and WAV export use them.
 
-Nested multi-channel sequences, make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
+Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records coverage for the retail importer and the remaining driver gaps.

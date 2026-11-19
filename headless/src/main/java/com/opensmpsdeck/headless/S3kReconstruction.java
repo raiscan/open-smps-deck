@@ -24,6 +24,7 @@ import java.util.stream.IntStream;
 import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 final class S3kReconstruction {
+    private static final String NOISE = "psg-noise";
     private static final int FM_LANES = 5;
     private static final int PSG_LANES = 3;
     private static final int CLIP_TICKS = 8 * PRESENTATIONS_PER_SECOND;
@@ -32,10 +33,13 @@ final class S3kReconstruction {
 
     enum Change {
         OCTAVE_DOUBLE, PITCH_OUT_OF_RANGE, NO_MATCH, FM_BUSY, PSG_BUSY, SHORTENED, CUT_AT_END,
-        DAC_SIMULTANEOUS, DAC_TAIL
+        DAC_SIMULTANEOUS, DAC_TAIL, HARMONY_THINNED, ROLE_OVERFLOW
     }
 
-    record Reduction(MidiScore.Note note, Change change) {}
+    record Reduction(MidiScore.Note note, Change change, @ReconstructionStages.Nullable String id,
+                     @ReconstructionStages.Nullable String reason) {
+        Reduction(MidiScore.Note note, Change change) { this(note, change, null, null); }
+    }
     record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                   List<Reduction> reductions) {}
@@ -45,6 +49,9 @@ final class S3kReconstruction {
     private static final class Placement {
         final Event event;
         int end;
+        int detune;
+        int volumeFloor;
+        ReconstructionVoicing.Vibrato vibrato;
         Placement(Event event) { this.event = event; end = event.end(); }
     }
 
@@ -176,7 +183,7 @@ final class S3kReconstruction {
         List<List<Placement>> psg = allocateTones(spill, PSG_LANES, reductions, unplacedPsg);
         unplacedPsg.forEach(event -> reductions.add(new Reduction(event.note(), Change.PSG_BUSY)));
         int fmNotes = fm.stream().mapToInt(List::size).sum();
-        int echoNotes = addEchoes(fm, echoes, frames);
+        int echoNotes = addEchoes(fm, echoes, frames, 0);
         List<Event> dac = allocateDac(drumHits, reductions);
         if (fm.stream().allMatch(List::isEmpty) && dac.isEmpty())
             throw new IllegalArgumentException("No MIDI notes had a playable catalogue match in the requested interval");
@@ -186,9 +193,10 @@ final class S3kReconstruction {
         for (var hit : dac) usedSamples.add(hit.assetId());
         List<Sequence> sequences = new ArrayList<>();
         List<Clip> clips = new ArrayList<>();
-        for (int i = 0; i < fm.size(); i++) writeToneLane("FM", "FM" + (i + 1), fm.get(i), parts, sequences, clips);
-        for (int i = 0; i < psg.size(); i++) writeToneLane("PSG", "PSG" + (i + 1), psg.get(i), parts, sequences, clips);
-        writeDacLane(dac, sequences, clips);
+        var repeats = ReconstructionClipLinks.from(null);
+        for (int i = 0; i < fm.size(); i++) writeToneLane("FM", "FM" + (i + 1), fm.get(i), parts, sequences, clips, repeats);
+        for (int i = 0; i < psg.size(); i++) writeToneLane("PSG", "PSG" + (i + 1), psg.get(i), parts, sequences, clips, repeats);
+        writeDacLane(dac, sequences, clips, repeats);
         StudioProject project = new StudioProject(4, name, "S3K", ticksPerBeat, 0,
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
@@ -197,8 +205,140 @@ final class S3kReconstruction {
                 dac.size(), echoNotes, List.copyOf(reductions));
     }
 
-    private static int addEchoes(List<List<Placement>> lanes, Map<Integer, ReconstructionEcho.Estimate> estimates,
-                                 int frames) {
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes) {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
+                matches, echoes, Map.of(), false);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies) {
+        var parts = indexParts(score.parts());
+        var reductions = new ArrayList<>(score.reductions());
+        var fm = ReconstructionAllocation.FM.stream().map(lane -> new ArrayList<Placement>()).toList();
+        var psg = ReconstructionAllocation.PSG.stream().map(lane -> new ArrayList<Placement>()).toList();
+        var dac = new ArrayList<Event>();
+        Map<String, Voice> voices = new LinkedHashMap<>();
+        Map<String, DacSample> samples = new LinkedHashMap<>();
+        Map<String, Envelope> envelopes = new LinkedHashMap<>();
+        for (var entry : allocation.notes()) {
+            var note = entry.note().midi();
+            var part = parts.get(note.partId());
+            String lane = entry.lane();
+            if (entry.outcome() != ReconstructionAllocation.Outcome.kept) {
+                reductions.add(new Reduction(note, allocationChange(entry), entry.note().id(), entry.reason()));
+            }
+            if (lane == null) continue;
+            var voice = voicing.get(lane);
+            int start = entry.startTick();
+            int end = entry.endTick();
+            if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
+                var pitched = new MidiScore.Note(note.partId(), 81, note.velocity(), note.startUs(), note.endUs());
+                psg.get(2).add(new Placement(new Event(pitched, start, end, 0, NOISE, volume(part, note))));
+                continue;
+            }
+            var choices = matches.getOrDefault(lane, Map.of());
+            var fallback = choices.get(new ReconstructionVoices.Key(part.id(), part.drums() ? note.pitch() : null));
+            var choice = part.drums() ? fallback : choices.getOrDefault(ReconstructionVoices.Key.section(note), fallback);
+            if (choice == null || choice.assetId() == null) {
+                reductions.add(new Reduction(note, Change.NO_MATCH, entry.note().id(), "no-playable-catalogue-match"));
+                continue;
+            }
+            var asset = catalogue.asset(choice.assetId());
+            if (lane.equals("DAC")) {
+                String id = asset.id() + "-" + choice.sampleRate();
+                samples.computeIfAbsent(id, key -> DacSample.of(key, choice.name(), choice.sampleRate(), asset.bytes()));
+                dac.add(new Event(note, start, end, drumPriority(note.pitch()), id, 0));
+            } else {
+                boolean isFm = lane.startsWith("FM");
+                var articulation = voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation();
+                String id = asset.id();
+                if (isFm) {
+                    byte[] patch = ReconstructionVoicing.patchBytes(asset, articulation);
+                    id = ReconstructionVoicing.patchId(asset, patch);
+                    voices.computeIfAbsent(id, key -> new Voice(key, part.name() + " / " + choice.name(), unsigned(patch)));
+                } else {
+                    envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, unsigned(asset.bytes())));
+                }
+                int duration = articulation.duration(end - start);
+                int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
+                int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
+                if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gain()));
+                var placed = new Placement(new Event(note, start, start + duration, tonePriority(part, note.pitch()), id, volume));
+                if (voice != null) {
+                    placed.volumeFloor = floor;
+                    placed.detune = voice.effects().detune();
+                    placed.vibrato = voice.effects().vibrato();
+                }
+                if (isFm) fm.get(ReconstructionAllocation.FM.indexOf(lane)).add(placed);
+                else psg.get(ReconstructionAllocation.PSG.indexOf(lane)).add(placed);
+            }
+        }
+        int fmNotes = fm.stream().mapToInt(List::size).sum();
+        int psgNotes = psg.stream().mapToInt(List::size).sum();
+        if (fmNotes + psgNotes + dac.size() == 0)
+            throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
+        int echoNotes = addEchoes(fm, echoes, frames, 2);
+        if (copies) echoNotes += addVoicingCopies(fm, voicing, frames);
+        List<Sequence> sequences = new ArrayList<>();
+        List<Clip> clips = new ArrayList<>();
+        var repeats = ReconstructionClipLinks.from(structure);
+        for (int i = 0; i < fm.size(); i++)
+            writeToneLane("FM", ReconstructionAllocation.FM.get(i), fm.get(i), parts, sequences, clips, repeats);
+        for (int i = 0; i < psg.size(); i++)
+            writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
+        writeDacLane(dac, sequences, clips, repeats);
+        var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
+                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
+        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions));
+    }
+
+    private static int addVoicingCopies(List<ArrayList<Placement>> fm,
+                                      Map<String, ReconstructionVoicing.Lane> voicing, int frames) {
+        int count = 0;
+        for (String lane : ReconstructionAllocation.FM) {
+            var voice = voicing.get(lane);
+            if (voice == null || voice.effects().copy() == null) continue;
+            var copy = voice.effects().copy();
+            var destination = fm.get(ReconstructionAllocation.FM.indexOf(copy.lane()));
+            var source = fm.get(ReconstructionAllocation.FM.indexOf(lane));
+            for (var note : source) {
+                int start = note.event.start() + copy.delay();
+                if (start >= frames) break;
+                int end = Math.min(frames, note.end + copy.delay());
+                var event = note.event;
+                var placed = new Placement(new Event(event.note(), start, end, event.priority(), event.assetId(),
+                        Math.max(note.volumeFloor, ReconstructionEcho.scaleVolume(event.volume(), copy.gain()))));
+                placed.detune = copy.detune();
+                placed.vibrato = copy.vibrato();
+                destination.add(placed);
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static Change allocationChange(ReconstructionAllocation.Entry entry) {
+        if (entry.outcome() == ReconstructionAllocation.Outcome.shortened) return Change.SHORTENED;
+        return switch (entry.reason()) {
+            case "rapid-inner-tone-reattack", "isolated-harmony-octave-double" -> Change.HARMONY_THINNED;
+            case "simultaneous-dac-hit" -> Change.DAC_SIMULTANEOUS;
+            case "protect-dac-tail" -> Change.DAC_TAIL;
+            case "fm-lanes-busy" -> Change.FM_BUSY;
+            case "fm-and-psg-lanes-busy", "psg-noise-lane-busy" -> Change.PSG_BUSY;
+            default -> Change.ROLE_OVERFLOW;
+        };
+    }
+
+    private static int addEchoes(List<? extends List<Placement>> lanes, Map<Integer, ReconstructionEcho.Estimate> estimates,
+                                 int frames, int firstEchoLane) {
         if (estimates.values().stream().noneMatch(e -> e.delayTicks() != null)) return 0;
         var dry = lanes.stream().flatMap(List::stream).sorted(Comparator.comparingInt(p -> p.event.start())).toList();
         int count = 0;
@@ -215,7 +355,7 @@ final class S3kReconstruction {
             int attenuation = (int) Math.round(-20 * Math.log10(estimate.amplitudeRatio()) / .75);
             var echo = new Event(event.note(), start, end, event.priority(), event.assetId(),
                     Math.max(1, event.volume() - attenuation));
-            for (var lane : lanes.reversed()) {
+            for (var lane : lanes.subList(firstEchoLane, lanes.size()).reversed()) {
                 int low = 0, high = lane.size();
                 while (low < high) {
                     int mid = (low + high) >>> 1;
@@ -290,21 +430,30 @@ final class S3kReconstruction {
     }
 
     private static void writeToneLane(String chip, String lane, List<Placement> notes,
-                                      Map<Integer, MidiScore.Part> parts, List<Sequence> sequences, List<Clip> clips) {
+                                      Map<Integer, MidiScore.Part> parts, List<Sequence> sequences, List<Clip> clips,
+                                      ReconstructionClipLinks links) {
         boolean fm = chip.equals("FM");
         NativeCommand selectAsset = fm ? NativeCommand.FM_VOICE : NativeCommand.PSG_ENVELOPE;
+        var spans = links.indexes(notes.size(), i -> notes.get(i).event.start(), i -> notes.get(i).end);
         int start = 0;
         while (start < notes.size()) {
             Event first = notes.get(start).event;
             int from = first.start();
             int end = start + 1;
-            while (end < notes.size() && notes.get(end).event.start() - from < CLIP_TICKS) end++;
+            var span = spans.get(start);
+            boolean noise = NOISE.equals(first.assetId());
+            while (end < notes.size() && spans.get(end) == span
+                    && (span != null || notes.get(end).event.start() - from < CLIP_TICKS)
+                    && noise == NOISE.equals(notes.get(end).event.assetId())) end++;
             int length = notes.get(end - 1).end - from;
             String id = lane + "-" + from;
             var events = new ArrayList<NoteEvent>();
             var commands = new ArrayList<CommandEvent>();
             String activeAsset = first.assetId();
             int volume = first.volume();
+            int detune = 0;
+            ReconstructionVoicing.Vibrato vibrato = null;
+            if (noise) commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(0xe7)));
             for (int i = start; i < end; i++) {
                 Placement placement = notes.get(i);
                 Event note = placement.event;
@@ -317,30 +466,44 @@ final class S3kReconstruction {
                     volume = note.volume();
                     commands.add(new CommandEvent("volume-" + offset, offset, NativeCommand.VOLUME, List.of(volume)));
                 }
+                if (detune != placement.detune) {
+                    detune = placement.detune;
+                    commands.add(new CommandEvent("detune-" + offset, offset, NativeCommand.DETUNE, List.of(detune & 255)));
+                }
+                if (!java.util.Objects.equals(vibrato, placement.vibrato)) {
+                    vibrato = placement.vibrato;
+                    commands.add(new CommandEvent("vibrato-" + offset, offset,
+                            vibrato == null ? NativeCommand.MODULATION_OFF : NativeCommand.MODULATION,
+                            vibrato == null ? List.of() : vibrato.bytes()));
+                }
                 events.add(new NoteEvent("note-" + offset, offset, placement.end - note.start(), note.note().pitch()));
             }
             var names = notes.subList(start, end).stream()
                     .map(p -> parts.get(p.event.note().partId()).name()).distinct().toList();
-            sequences.add(new Sequence(id, String.join(" / ", names), chip, length, fm ? first.assetId() : null,
-                    first.volume(), events, commands, "RESET", fm ? null : first.assetId(), null));
-            clips.add(new Clip("clip-" + id, id, lane, from, length));
+            var source = new Sequence(id, String.join(" / ", names), chip, length, fm ? first.assetId() : null,
+                    first.volume(), events, commands, "RESET", fm || noise ? null : first.assetId(), null);
+            links.add(source, lane, from, span, sequences, clips);
             start = end;
         }
     }
 
-    private static void writeDacLane(List<Event> hits, List<Sequence> sequences, List<Clip> clips) {
+    private static void writeDacLane(List<Event> hits, List<Sequence> sequences, List<Clip> clips,
+                                     ReconstructionClipLinks links) {
+        var spans = links.indexes(hits.size(), i -> hits.get(i).start(), i -> hits.get(i).end());
         int start = 0;
         while (start < hits.size()) {
             int from = hits.get(start).start();
             int end = start + 1;
-            while (end < hits.size() && hits.get(end).start() - from < CLIP_TICKS) end++;
+            var span = spans.get(start);
+            while (end < hits.size() && spans.get(end) == span
+                    && (span != null || hits.get(end).start() - from < CLIP_TICKS)) end++;
             int length = hits.get(end - 1).end() - from;
             String id = "DAC-" + from;
             var triggers = hits.subList(start, end).stream()
                     .map(hit -> new SampleTrigger("hit-" + (hit.start() - from), hit.start() - from, hit.assetId())).toList();
-            sequences.add(new Sequence(id, "Drums", "DAC", length, null, 127,
-                    List.of(), List.of(), "RESET", null, null, triggers));
-            clips.add(new Clip("clip-" + id, id, "DAC", from, length));
+            var source = new Sequence(id, "Drums", "DAC", length, null, 127,
+                    List.of(), List.of(), "RESET", null, null, triggers);
+            links.add(source, "DAC", from, span, sequences, clips);
             start = end;
         }
     }
@@ -349,7 +512,7 @@ final class S3kReconstruction {
         return IntStream.range(0, bytes.length).mapToObj(i -> Byte.toUnsignedInt(bytes[i])).toList();
     }
 
-    private static int toTicks(long micros) {
+    static int toTicks(long micros) {
         return (int) ((micros * PRESENTATIONS_PER_SECOND + 500_000) / 1_000_000);
     }
 
@@ -373,7 +536,7 @@ final class S3kReconstruction {
         return 200 + pitch;
     }
 
-    private static int drumPriority(int pitch) {
+    static int drumPriority(int pitch) {
         return switch (pitch) {
             case 35, 36 -> 3;
             case 38, 40 -> 2;

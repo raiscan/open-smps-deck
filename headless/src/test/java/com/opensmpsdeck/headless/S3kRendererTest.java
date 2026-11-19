@@ -47,6 +47,22 @@ class S3kRendererTest {
                 HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(pcm)));
     }
 
+    @Test void optionalMaskPreservesUnmaskedDemoAndPresentationCount() throws Exception {
+        byte[] song = S3kDemo.song();
+        var project = new com.opensmpsdeck.project.CompiledProject(song, java.util.List.of());
+        var unmasked = new ByteArrayOutputStream();
+        var masked = new ByteArrayOutputStream();
+        S3kRenderer.render(project, 120, new S3kRenderer.ChannelMask(0, 0), pcm -> {
+            for (short sample : pcm) { unmasked.write(sample); unmasked.write(sample >>> 8); }
+        });
+        S3kRenderer.render(project, 120, new S3kRenderer.ChannelMask(63, 15), pcm -> {
+            for (short sample : pcm) { masked.write(sample); masked.write(sample >>> 8); }
+        });
+        assertArrayEquals(render(song, 120), unmasked.toByteArray());
+        assertEquals(unmasked.size(), masked.size());
+        assertFalse(Arrays.equals(unmasked.toByteArray(), masked.toByteArray()));
+    }
+
     @Test void demoWritesBoundedStereoWave() throws Exception {
         Path output = directory.resolve("demo.wav");
         assertEquals(0, Main.run(new String[]{"demo", output.toString(), "--frames", "3"}, System.out, System.err));

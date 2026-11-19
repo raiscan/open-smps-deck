@@ -82,7 +82,7 @@ final class NativeArrangementPane extends VBox implements AutoCloseable {
         });
         var ruler = new HBox(10, new Label("Zoom"), zoom);
         ruler.getStyleClass().add("panelbar");
-        var arrangement = new VBox(ruler, timeline.scroll);
+        var arrangement = new VBox(ruler, timeline.scroll, timeline.referenceLane);
         VBox.setVgrow(timeline.scroll, Priority.ALWAYS);
         detail.getStyleClass().add("panelbar");
         hits.setId("native-dac-hits");

@@ -40,6 +40,28 @@ excerpt and returns the distances with stable IDs. Each successful operation wri
 [instrument catalogue guide](../docs/architecture/instrument-catalogue.md#first-pass-in-use)
 covers source formats, filters, and Studio deployment.
 
+## Reference audio and review notes
+
+Use these arguments after `java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar`.
+
+```text
+reference add PROJECT WAV [--offset S] [--label L] [--role R]
+notes list PROJECT [--open]
+notes add PROJECT --at S [--end S] [--lane L] [--clip C] --text T --author A
+notes resolve PROJECT ID [--reply T --author A]
+```
+
+Times are project seconds. Reference offsets may be negative. For example,
+`notes add song.smps.json --at 20.125 --lane FM1 --text "Check the attack" --author human`
+adds a point note and prints its generated ID. `notes list` prints a JSON
+array, and `--open` filters it to unresolved feedback. To resolve with a
+reply, supply both `--reply` and `--author`.
+
+Writes are atomic and revision-checked. An open Studio window refreshes a
+clean project automatically. See the
+[review protocol](../docs/architecture/review-loop.md) for the edit, render
+and reply sequence.
+
 ## Run
 
 Requires JDK 25 and Maven. From the repository root:
@@ -111,18 +133,25 @@ catalogue](../docs/architecture/instrument-catalogue.md) before you run:
 
 ```sh
 deck_jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
-java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json first-minute \
+java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json first-minute \
   --seconds 60 --name "Song"
-java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json full-song --name "Song"
+java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json full-song --name "Song"
 ```
 
-The command creates a new output directory with four files.
+The command creates a new work directory with five editable stage artifacts
+and four assembly outputs. Use `reconstruct run --from STAGE WORK_DIR` to
+regenerate downstream decisions after an edit. The
+[reconstruction stage guide](../docs/architecture/reconstruction-stages.md)
+documents the files, individual stage commands, and how to add external
+note candidates. Use `reconstruct voice WORK_DIR` to fit `voicing.json`.
+Edit that file to change lane patches, gains, note gates, or native effects,
+then use `reconstruct run --from assemble WORK_DIR` to render the changes.
 
 - `arrangement.smps.json` contains editable clips and local assets.
 - `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
 - `render.wav` contains the 48 kHz stereo output from the pinned OpenGGF chips.
 - `report.json` records input and output hashes, source part IDs, instrument
-  shortlists and probe windows, and each note dropped or shortened. Ten-second
+  shortlists, effect-copy lanes, and allocation drops and shortenings. Ten-second
   audio sections report mono RMS and pair volume rises within 100 ms. The
   audio statistics measure level and timing, with no estimate of timbre fidelity.
 
@@ -155,10 +184,12 @@ A tail alone can come from a synth release or reverb. The command records
 that case without adding a repeat. Time-aligned stems give both passes
 cleaner evidence than the mix.
 
-The arrangement quantizes MIDI timing to 60 Hz and uses five FM channels.
-Three PSG channels carry notes that miss an FM slot, within their supported
-pitch range. `--fm-only` disables the PSG overflow channels. A single DAC lane
-plays percussion, so simultaneous hits compete for one slot. The converter
+The arrangement quantizes timing to 60 Hz. FM1 carries melody and FM2 carries
+bass. Counter and harmony use the three remaining FM channels and can spill
+to PSG within its pitch range. Rapid inner chord re-attacks can be merged.
+`--harmony-max-hz 0` preserves those attacks for comparison. `--fm-only`
+disables PSG. DAC carries drums. A percussion part named `PSG3` or
+`PSG noise` can use PSG3 when PSG is enabled. The converter
 removes systematic bass octave doubles in synth lead parts. Use
 `--keep-octaves` to keep those events in the allocation. It translates note
 velocity to coarse tone volume. MIDI controllers, including sustain and
@@ -229,3 +260,43 @@ compiler/render integration, PCM equality with direct pinned-core rendering,
 bounded reads and file preservation. Upstream-source parity is checked separately
 by the repository's pin verification tooling; a passing demo alone is not a claim
 of broad ROM parity.
+
+## Reconstruction benchmark
+
+Use `bench build-corpus` with a local locked-on ROM and catalogue, then
+`bench run` to score reconstruction across MIDI profiles and audio variants.
+`--quick` selects four songs, `--holdout` excludes the song's own (non-library)
+assets from the catalogue, and `--gold` accepts private hand-labelled lead regions. Use
+`bench compare` to gate changes against a saved scorecard. Keep all inputs and
+generated datasets outside the repository. See the
+[benchmark guide](../docs/architecture/benchmark.md) for commands and metric
+definitions.
+
+
+## Build nested arrangements
+
+Use `group create` to turn existing placements in a shared project into
+one reusable group. The first instance ID is `GROUP_ID-placement` (with a
+numeric suffix if needed). `group place` adds a linked instance by ID at an
+explicit tick and length. `group ungroup` replaces the named placement with
+its immediate children, expanding full and partial repeats.
+
+```sh
+java -jar "$CLI" group create song.smps.json chorus "Chorus" lead-clip bass-clip drums-clip
+java -jar "$CLI" group create song.smps.json rhythm "Rhythm bed" bass-clip drums-clip --in chorus
+java -jar "$CLI" group place song.smps.json chorus chorus-second 384 144
+java -jar "$CLI" validate song.smps.json
+java -jar "$CLI" group ungroup song.smps.json chorus-second
+```
+
+Set `CLI` to the path of the packaged headless JAR. The example assumes the
+first three placements exist in the song and tick 384 is available. Append
+`--in GROUP_ID` to any group command to operate on a group's source timeline
+instead of the song. Each successful command saves the file using the loaded
+revision. A failed edit leaves the file intact. `validate` is an alias for
+`validate-project` and reports invalid links, cycles, depth and lane conflicts
+with a nonzero exit status.
+
+Agents can also author the [version 6 JSON fields](../project-core/README.md#version-6-group-sequences)
+directly. See [Signal garden](../examples/signal-garden.smps.json) for a nested
+arrangement with linked instances and partial repeats.
