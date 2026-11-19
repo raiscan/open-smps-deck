@@ -37,7 +37,7 @@ public final class BenchCli {
     public static void usage(PrintStream out) {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
-        out.println("           [--gold GOLD.json [--gold-only]]");
+        out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N]");
     }
 
@@ -103,6 +103,10 @@ public final class BenchCli {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick", "--holdout", "--audio-refine", "--gold-only" -> { }
+                case "--role-plan" -> {
+                    if (!value(args, ++i, flag).equals("oracle"))
+                        throw new IllegalArgumentException("--role-plan expects oracle");
+                }
                 case "--gold" -> gold = Path.of(value(args, ++i, flag));
                 case "--jobs" -> {
                     jobs = Integer.parseInt(value(args, ++i, flag));
@@ -115,9 +119,11 @@ public final class BenchCli {
             int limit = seen.contains("--quick") ? 16 : 8;
             jobs = Math.min(limit, Runtime.getRuntime().availableProcessors());
         }
+        if (seen.contains("--role-plan") && seen.contains("--gold-only"))
+            throw new IllegalArgumentException("--role-plan oracle requires native corpus cases");
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
-                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only")), out, hooks);
+                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), seen.contains("--role-plan")), out, hooks);
     }
 
     private static int compare(String[] args, PrintStream out) throws IOException {

@@ -200,6 +200,68 @@ limits still apply. Set `--ticks-per-beat` to fit the Studio ruler without
 changing playback timing. To check a render from an edited project, use
 `render-project` with the report's `presentations` as `--frames`.
 
+### Inspect the score and plan musical roles
+
+```sh
+java -jar "$deck_jar" reconstruct describe full-song
+java -jar "$deck_jar" reconstruct describe full-song --section S3 --parts 0,3 --bars 17-24 --json
+java -jar "$deck_jar" reconstruct plan-template full-song
+java -jar "$deck_jar" reconstruct run --from roles full-song
+```
+
+Run these commands after the structure stage. The score view uses the
+structure stage's notes, including applied corrections. Its header gives the
+selected tempo or an estimate from the MIDI bar lengths, and lists the
+prepared note count for each part. Each part summary gives pitch range,
+attacks per bar, peak simultaneous notes, any recurring one- or two-bar
+figure, and role counts when `roles.json` is available. A repeated section
+references an earlier section and prints the differing parts. Use `--section`
+or `--bars` to expand repeats. Output goes to stdout by default. Use
+`--out FILE` to create a new file.
+
+Each bar shows 16 equal subdivisions. `C4` is MIDI 60, `.` is a rest,
+and `-` is a sustain. A number after a rest or sustain is its run length,
+so `.16` is an empty bar. Brackets group attacks quantized to the same step,
+for example `[C4+F#4]`. When a step has both a new attack and a held note,
+it shows the new attack. Percussion lines show hits such as `K` for kick
+(GM 36), `S` for snare (38), `H` for closed hi-hat (42), and `D<n>` for
+other unmapped GM hit numbers. The grid is for inspection and does not
+change event times.
+
+`plan-template` creates a new `roleplan.json` with each active section and
+part's most frequent heuristic role. Edit those starting choices to express
+musical intent. The template leaves an existing plan intact. Example plan:
+
+```json
+{
+  "version": 1,
+  "rules": [
+    {"sections": ["S1", "S3"], "part": 3, "role": "melody", "voice": "top"},
+    {"sections": ["*"], "part": 0, "role": "harmony"},
+    {"bars": "17-24", "part": 0, "role": "melody", "voice": "top", "pitchMin": 72}
+  ]
+}
+```
+
+Rules refer to the displayed section IDs and one-based inclusive bar
+numbers. Use `sections`, `bars`, or both to match their intersection.
+Rules match the note's attack and optional inclusive MIDI pitch bounds.
+Use `startSeconds` (inclusive) or `endSeconds` (exclusive) to place a handoff
+inside a bar. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
+`harmony`, `drums`, and `drop`. For melody, counter and bass, `top` or
+`bottom` traces one line from eligible notes, with other eligible notes
+left in harmony. Melody and counter default to `top`, bass to `bottom`.
+Use `all` to assign every match directly. Harmony still goes through
+reattack thinning. An uncovered note uses its heuristic role unless that
+line is assigned to planned candidates in the same bar, in which case
+it becomes harmony. Affected decisions carry a zero-based `roleplan#N`
+in their reason. Without a plan file, reconstruction uses the heuristic.
+
+The MCP server exposes 16 tools, including `reconstruct_describe` with the
+same filters and `reconstruct_plan_template`. Use `artifact_read` and
+`artifact_write` with artifact `roleplan` to inspect or validate edits, then
+call `reconstruct_run` with `from` set to `roles`.
+
 ## Deliberately limited input contract
 
 The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.

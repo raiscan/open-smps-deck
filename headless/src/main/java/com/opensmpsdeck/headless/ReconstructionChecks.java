@@ -181,6 +181,38 @@ final class ReconstructionChecks {
         return repeated;
     }
 
+    static void rolePlan(ReconstructionRolePlan plan, ReconstructionStructure.Result structure,
+                         ReconstructionStages.Score score) {
+        var sections = structure.sections().stream().map(ReconstructionStructure.Section::id)
+                .collect(java.util.stream.Collectors.toSet());
+        var parts = partIndex(score);
+        for (int i = 0; i < plan.rules().size(); i++) {
+            var rule = plan.rules().get(i);
+            String at = "roleplan.json.rules[" + i + "]";
+            require(rule.sections() != null || rule.bars() != null, at, "expected sections or bars");
+            if (rule.sections() != null) {
+                require(!rule.sections().isEmpty(), at + ".sections", "expected at least one section");
+                for (String id : rule.sections())
+                    require(id.equals("*") || sections.contains(id), at + ".sections", "unknown section " + id);
+            }
+            if (rule.bars() != null)
+                ReconstructionRolePlan.BarRange.parse(rule.bars(), structure.bars().size(), at + ".bars");
+            var part = parts.get(rule.part());
+            require(part != null, at + ".part", "unknown MIDI part " + rule.part());
+            require(rule.role() == Role.drop || (rule.role() == Role.drums) == part.drums(), at + ".role",
+                    "drums role must match MIDI percussion part");
+            require(rule.line() == ReconstructionRolePlan.Voice.all || ReconstructionRolePlan.traced(rule.role()),
+                    at + ".voice", "top and bottom require melody, counter or bass");
+            int min = rule.pitchMin() == null ? 0 : rule.pitchMin();
+            int max = rule.pitchMax() == null ? 127 : rule.pitchMax();
+            require(min >= 0 && min <= max && max <= 127, at, "expected 0 <= pitchMin <= pitchMax <= 127");
+            double start = rule.startSeconds() == null ? 0 : rule.startSeconds();
+            double end = rule.endSeconds() == null ? duration(score) : rule.endSeconds();
+            require(start >= 0 && start < end && end <= duration(score), at,
+                    "expected 0 <= startSeconds < endSeconds <= score duration");
+        }
+    }
+
     static void roles(ReconstructionRoles.Result roles, ReconstructionStages.Score score) {
         String at = "roles.json";
         rate(roles.harmonyMaxHz());

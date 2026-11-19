@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -22,11 +23,25 @@ final class ReconstructionRoles {
 
     record Decision(Note note, Role role, @ReconstructionStages.Nullable String reason, @ReconstructionStages.Nullable String mergedInto) {}
     record Result(int version, double harmonyMaxHz, List<Decision> notes) {}
+    private record Scope(int index, ReconstructionRolePlan.Rule rule, ReconstructionRolePlan.BarRange bars) {
+        boolean applies(String section, int bar) {
+            return (bars == null || bar >= bars.first() && bar <= bars.last())
+                    && (rule.sections() == null || rule.sections().contains("*") || rule.sections().contains(section));
+        }
+
+        String reason() { return "roleplan#" + index; }
+    }
+
     private record PartPitch(int part, int pitch) {}
 
     private ReconstructionRoles() {}
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz) {
+        return assign(structure, parts, harmonyHz, null);
+    }
+
+    static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
+                         ReconstructionRolePlan plan) {
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
         var tones = new ArrayList<Note>();
@@ -51,9 +66,68 @@ final class ReconstructionRoles {
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
                 labelLine(notes, roles, programs, Role.counter);
         }
-        if (harmonyHz > 0)
-            for (String id : melody.octaveDoubles()) if (roles.get(id) == Role.harmony) roles.put(id, Role.drop);
-        return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz));
+        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan);
+        var octaveDrops = new HashSet<String>();
+        if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
+            if (roles.get(id) != Role.harmony) continue;
+            roles.put(id, Role.drop);
+            octaveDrops.add(id);
+        }
+        return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops));
+    }
+
+    private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,
+                                                  Map<Integer, Integer> programs, ReconstructionRolePlan plan) {
+        var byPart = new HashMap<Integer, List<Scope>>();
+        for (int i = 0; i < plan.rules().size(); i++) {
+            var rule = plan.rules().get(i);
+            var bars = rule.bars() == null ? null
+                    : ReconstructionRolePlan.BarRange.parse(rule.bars(), structure.bars().size(), "roleplan.json");
+            byPart.computeIfAbsent(rule.part(), ignored -> new ArrayList<>()).add(new Scope(i, rule, bars));
+        }
+        var byBar = byBar(structure.bars(), structure.notes());
+        var reasons = new HashMap<String, String>();
+        int barNumber = 0;
+        for (var section : structure.sections()) {
+            var candidates = new LinkedHashMap<Scope, List<Note>>();
+            for (String bar : section.bars()) {
+                barNumber++;
+                var notes = byBar.get(bar);
+                var plannedLines = new EnumMap<Role, Set<Scope>>(Role.class);
+                for (var note : notes) {
+                    for (var scope : byPart.getOrDefault(note.part(), List.of()).reversed()) {
+                        if (!scope.applies(section.id(), barNumber) || !scope.rule.includes(note)) continue;
+                        reasons.put(note.id(), scope.reason());
+                        Role role = scope.rule.role();
+                        if (ReconstructionRolePlan.traced(role))
+                            plannedLines.computeIfAbsent(role, ignored -> new HashSet<>()).add(scope);
+                        if (scope.rule.line() == ReconstructionRolePlan.Voice.all) {
+                            roles.put(note.id(), role);
+                        } else {
+                            roles.put(note.id(), Role.harmony);
+                            candidates.computeIfAbsent(scope, ignored -> new ArrayList<>()).add(note);
+                        }
+                        break;
+                    }
+                }
+                for (var note : notes) {
+                    if (reasons.containsKey(note.id())) continue;
+                    var active = plannedLines.get(roles.get(note.id()));
+                    if (active == null) continue;
+                    Scope winner = null;
+                    for (var scope : active)
+                        if (scope.rule.includesTime(note.start()) && (winner == null || scope.index > winner.index))
+                            winner = scope;
+                    if (winner != null) {
+                        roles.put(note.id(), Role.harmony);
+                        reasons.put(note.id(), winner.reason());
+                    }
+                }
+            }
+            candidates.forEach((scope, notes) -> traceLine(notes, roles, programs, scope.rule.role(),
+                    scope.rule.line() == ReconstructionRolePlan.Voice.bottom));
+        }
+        return reasons;
     }
 
     static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
@@ -109,6 +183,11 @@ final class ReconstructionRoles {
 
     private static void labelLine(List<Note> section, Map<String, Role> roles, Map<Integer, Integer> programs, Role role) {
         List<Note> notes = section.stream().filter(note -> roles.get(note.id()) == Role.harmony).toList();
+        traceLine(notes, roles, programs, role, role == Role.bass);
+    }
+
+    private static void traceLine(List<Note> notes, Map<String, Role> roles, Map<Integer, Integer> programs,
+                                  Role role, boolean low) {
         if (notes.isEmpty()) return;
         int[] previous = new int[notes.size()];
         double[] path = new double[notes.size()];
@@ -121,7 +200,7 @@ final class ReconstructionRoles {
                 if (bestDistant < 0 || path[distant] > path[bestDistant]) bestDistant = distant;
                 distant++;
             }
-            double weight = salience(current, role, programs.get(current.part()), notes, i);
+            double weight = salience(current, low, programs.get(current.part()), notes, i);
             path[i] = weight;
             previous[i] = -1;
             if (bestDistant >= 0 && notes.get(bestDistant).end() <= current.start() && path[bestDistant] > .18) {
@@ -145,8 +224,7 @@ final class ReconstructionRoles {
         for (int i = best; i >= 0; i = previous[i]) roles.put(notes.get(i).id(), role);
     }
 
-    private static double salience(Note note, Role role, int program, List<Note> notes, int index) {
-        boolean low = role == Role.bass;
+    private static double salience(Note note, boolean low, int program, List<Note> notes, int index) {
         double duration = note.end() - note.start();
         double upper = note.pitch(), lower = note.pitch();
         for (int i = index; i >= 0 && notes.get(i).start() >= note.start() - .40; i--) {
@@ -181,7 +259,8 @@ final class ReconstructionRoles {
                 + (prior.part() == current.part() ? 0 : .105)) + Math.min(.18, Math.abs(gap) * .20);
     }
 
-    private static List<Decision> thin(List<Note> notes, Map<String, Role> roles, double hz) {
+    private static List<Decision> thin(List<Note> notes, Map<String, Role> roles, double hz,
+                                       Map<String, String> reasons, Set<String> octaveDrops) {
         var decisions = new LinkedHashMap<String, Decision>();
         var latest = new HashMap<PartPitch, Note>();
         var chain = new HashMap<String, String>();
@@ -189,7 +268,8 @@ final class ReconstructionRoles {
         int future = 0;
         for (var note : notes) {
             Role role = roles.get(note.id());
-            decisions.put(note.id(), new Decision(note, role, role == Role.drop ? "isolated-harmony-octave-double" : null, null));
+            decisions.put(note.id(), new Decision(note, role, reason(reasons, note.id(),
+                    octaveDrops.contains(note.id()) ? "isolated-harmony-octave-double" : null), null));
             if (role == Role.drums || role == Role.drop || hz == 0) continue;
             while (future < notes.size() && notes.get(future).start() <= note.start() + .020) {
                 Note incoming = notes.get(future++);
@@ -208,10 +288,16 @@ final class ReconstructionRoles {
             Note kept = decisions.get(keptId).note();
             Note extended = new Note(kept.id(), kept.part(), kept.start(), Math.max(kept.end(), note.end()),
                     kept.pitch(), kept.velocity(), kept.source(), kept.confidence());
-            decisions.put(keptId, new Decision(extended, Role.harmony, "sustained-inner-tone", null));
-            decisions.put(note.id(), new Decision(note, Role.drop, "rapid-inner-tone-reattack", keptId));
+            decisions.put(keptId, new Decision(extended, Role.harmony, reason(reasons, keptId, "sustained-inner-tone"), null));
+            decisions.put(note.id(), new Decision(note, Role.drop, reason(reasons, note.id(), "rapid-inner-tone-reattack"), keptId));
             chain.put(note.id(), keptId);
         }
         return decisions.values().stream().sorted(Comparator.comparing(Decision::note, NOTE_ORDER)).toList();
+    }
+
+    private static String reason(Map<String, String> reasons, String id, String detail) {
+        String rule = reasons.get(id);
+        if (rule == null) return detail;
+        return detail == null ? rule : rule + " " + detail;
     }
 }

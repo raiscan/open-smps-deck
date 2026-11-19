@@ -74,6 +74,8 @@ final class ReconstructionCli {
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("       reconstruct structure|roles|allocate|voice|assemble WORK_DIR");
+        out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
+        out.println("       reconstruct plan-template WORK_DIR");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
@@ -82,6 +84,15 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("describe")) {
+            ReconstructionDescribe.run(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("plan-template")) {
+            if (args.length != 3) throw new IllegalArgumentException("reconstruct plan-template expects WORK_DIR");
+            out.println(ReconstructionStages.planTemplate(Path.of(args[2])));
             return;
         }
         if (args.length >= 2 && ReconstructionStages.isCommand(args[1])) {

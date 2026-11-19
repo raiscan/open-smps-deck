@@ -84,6 +84,29 @@ mode. Use `--jobs N`
 to adjust it. JSON rows and aggregate order are stable across worker counts.
 Runtime and scratch paths are omitted from successful scorecards.
 
+### Measure a ground-truth role plan
+
+```sh
+java -jar "$jar" bench run "$manifest" "$catalogue" "$bench/oracle" --role-plan oracle
+java -jar "$jar" bench run "$manifest" "$catalogue" "$bench/oracle-quick" --quick --role-plan oracle
+java -jar "$jar" bench run "$bench/corpus-sunolike/manifest.json" "$catalogue" "$bench/oracle-suno-like" --role-plan oracle
+```
+
+For each native case, the oracle runs transcription and structure, then
+writes a plan and resumes from roles. It takes melody from the same native
+timeline selection used in Melody F1. Within each structure section, the
+oracle takes bass from the lowest duration-weighted native lane among notes
+outside the truth melody. It pairs truth attacks with input attacks by pitch
+and onset, preferring a dedicated input track when its attacks match a
+native lane closely. It writes section rules, using pitch bands for shared
+tracks and time bounds where the truth melody changes inside a section.
+It checks the melody and bass plan, the melody-only plan, and the heuristic
+on the allocated note timeline before choosing which plan to voice and
+render. If neither plan improves that fit, the generated plan has no
+overrides. The scorecard still measures rendered playback. Gold cases use
+the heuristic. Compare Melody F1 with a default run on the same manifest
+and case selection.
+
 ## Read the scorecard
 
 Overall and slice values are case-level macro means. Profiles and WAV variants
