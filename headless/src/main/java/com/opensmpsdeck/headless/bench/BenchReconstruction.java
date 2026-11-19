@@ -18,13 +18,17 @@ final class BenchReconstruction {
     record Midi(List<Part> parts, List<Note> notes) {}
     record Part(int id, boolean drums) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
-    record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges) {}
+    record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
+                  List<Reduction> reductions) {}
+    record Reduction(String change, String reason) {}
     record Change(int partId, int pitch, long startUs, long endUs) {}
-    record Match(String kind, Key key, Choice choice) {}
+    record Match(String kind, String lane, Key key, Choice choice) {}
     record Key(int partId, Long sectionStartUs) {}
+    record LaneKind(String kind, String lane) {}
     record Choice(String assetId, List<Candidate> shortlist) {}
     record Candidate(String assetId) {}
-    record Result(List<BenchMetrics.Event> events, Attribution attribution, Path audio, long referenceUs) {}
+    record Result(List<BenchMetrics.Event> events, Attribution attribution, Path audio, long referenceUs,
+                  Map<String, Long> reductions) {}
 
     private static final long SECTION_US = 16_000_000L;
     private static final PrintStream QUIET = new PrintStream(OutputStream.nullOutputStream());
@@ -50,13 +54,18 @@ final class BenchReconstruction {
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
         var events = BenchMetrics.events(truth, drums, false);
         JsonElement source = hooks.midi().read(midi);
+        var reductions = new java.util.TreeMap<String, Long>();
+        if (report.reductions() != null) {
+            for (var change : report.reductions())
+                reductions.merge(change.reason() == null ? change.change() : change.reason(), 1L, Long::sum);
+        }
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
-                output.resolve("render.wav"), report.referenceUs());
+                output.resolve("render.wav"), report.referenceUs(), reductions);
     }
 
     static final class Attribution {
         private final Map<Integer, List<Note>> byPitch = new HashMap<>();
-        private final Map<String, Map<Key, Choice>> choices = new HashMap<>();
+        private final Map<LaneKind, Map<Key, Choice>> choices = new HashMap<>();
 
         Attribution(Midi midi, Report report) {
             var drums = midi.parts.stream().filter(Part::drums).map(Part::id).collect(java.util.stream.Collectors.toSet());
@@ -70,12 +79,13 @@ final class BenchReconstruction {
             }
             for (var match : report.matches) {
                 if (match.choice.assetId != null)
-                    choices.computeIfAbsent(match.kind, ignored -> new HashMap<>()).put(match.key, match.choice);
+                    choices.computeIfAbsent(new LaneKind(match.kind, match.lane), ignored -> new HashMap<>()).put(match.key, match.choice);
             }
         }
 
-        private Choice choice(Note note) {
-            var fm = choices.getOrDefault("FM_VOICE", Map.of());
+        private Choice choice(Note note, String lane) {
+            var fm = choices.getOrDefault(new LaneKind("FM_VOICE", lane),
+                    choices.getOrDefault(new LaneKind("FM_VOICE", null), Map.of()));
             return fm.getOrDefault(new Key(note.partId, note.startUs / SECTION_US * SECTION_US), fm.get(new Key(note.partId, null)));
         }
 
@@ -91,7 +101,7 @@ final class BenchReconstruction {
 
         List<Candidate> shortlist(BenchMetrics.Event note) {
             if (note.hash() == null) return List.of();
-            return candidates(note).stream().map(this::choice)
+            return candidates(note).stream().map(source -> choice(source, note.lane()))
                     .filter(choice -> choice != null && choice.assetId.equals("fm-voice-" + note.hash()))
                     .findFirst().map(Choice::shortlist).orElse(List.of());
         }
@@ -100,7 +110,7 @@ final class BenchReconstruction {
             var candidates = candidates(note);
             if (note.hash() != null) {
                 var matchingVoice = candidates.stream().filter(source -> {
-                    var choice = choice(source);
+                    var choice = choice(source, note.lane());
                     return choice != null && choice.assetId.equals("fm-voice-" + note.hash());
                 }).findFirst();
                 if (matchingVoice.isPresent()) return matchingVoice.get().partId == part;

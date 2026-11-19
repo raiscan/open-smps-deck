@@ -1,0 +1,214 @@
+# Staged reconstruction
+
+Reconstruction builds an S3K arrangement from aligned MIDI and audio. Each
+stage reads the preceding artifact from a work directory and writes its own
+versioned JSON. Edit the artifact that owns the decision, then resume at the
+first stage that consumes it.
+
+```sh
+jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
+java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json song-work \
+  --seconds 60 --stem 0=lead.wav --stem 1=bass.wav
+java -jar "$jar" reconstruct run --from allocate song-work
+```
+
+The first command runs all five stages in a new directory. The second
+rebuilds allocation and assembly from the existing `roles.json`. To run
+individual stages, use the following commands.
+
+```sh
+java -jar "$jar" reconstruct transcribe song.mid mix.wav catalogue.json stage-work \
+  --candidates candidate-notes.json
+java -jar "$jar" reconstruct structure stage-work
+java -jar "$jar" reconstruct roles stage-work --harmony-max-hz 7.5
+java -jar "$jar" reconstruct allocate stage-work
+java -jar "$jar" reconstruct assemble stage-work
+```
+
+| Artifact edited | First downstream stage |
+| --- | --- |
+| `score.json` | `structure` |
+| `structure.json` | `roles` |
+| `roles.json` | `allocate` |
+| `allocation.json` | `assemble` |
+
+Use `run --from transcribe WORK_DIR` to regenerate the score with the paths,
+duration, and transcription options stored in the existing score. An explicit
+stage writes only its own output. Resuming a chain replaces its downstream
+artifacts, so retain copies of any downstream edits you want to keep. The
+four assembly files are prepared before replacing the previous assembly.
+Invalid artifacts return exit code 2 with the artifact and failing field or
+decision. Input paths and artifacts may contain private material. Keep work
+directories outside public checkouts.
+
+## Artifact contract
+
+Each artifact is an object with `"version": 1`. Fields in this guide are
+required unless marked optional. Optional fields accept null or omission.
+Unknown fields, invalid references, unsupported versions, and artifacts over
+32 MiB are rejected. IDs are strings. Within each list of identified records,
+IDs must be distinct and nonblank. Preserve an ID when editing its note.
+
+The same note object is used in every stage. Times are seconds measured from
+the start of the input, confidence is in 0–1, and velocity is in 1–127.
+`part` refers to a MIDI part ID in `score.json`. Pitch is a MIDI number.
+S3K melodic notes span 12–106. Percussion and external candidates use MIDI
+0–127. The score can carry a coincident MIDI attack and release, which
+occupies one presentation when placed.
+
+```json
+{
+  "id": "n-0-1250000-72",
+  "part": 0,
+  "start": 1.25,
+  "end": 1.5,
+  "pitch": 72,
+  "velocity": 96,
+  "source": "midi",
+  "confidence": 1.0
+}
+```
+
+IDs generated from MIDI use the part, attack in microseconds, pitch, and an
+occurrence suffix when needed. Downstream files retain the IDs. A consensus
+replacement keeps the ID of the note it corrects. An addition takes its ID
+from the target bar and the first voting note.
+
+### Transcribe
+
+`score.json` contains the following fields alongside `version`.
+
+| Field | Contents |
+| --- | --- |
+| `durationUs`, `frames`, `ticksPerSecond` | Requested interval in microseconds, its ceiling in presentations, and the 60 Hz placement grid. |
+| `inputs` | Absolute `midi`, `wav` and `catalogue` paths. Also stores `name`, `ticksPerBeat`, `keepOctaves`, `fmOnly`, `wholePartVoices`, `audioRefine`, `stems` (part ID to absolute WAV path), optional `candidates`, and `harmonyMaxHz`. |
+| `bars` | Bar grid derived from PPQ tempo and meter events. Each bar has `id`, `start`, `end`, and `complete`. A meter change between nominal boundaries ends the current partial bar. MIDI without meter uses 4/4. |
+| `source` | Reference context for matching. `parts` has `id`, `name`, `program`, and `drums`. `notes` has `partId`, `pitch`, `velocity`, `startUs`, and `endUs`. `warnings` contains MIDI parser messages. |
+| `sourceCounts` | Original note count per MIDI part inside the interval. |
+| `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources are `midi`, `audio-refine`, or `external`. |
+| `reductions`, `pitchChanges` | Original preparation decisions and optional audio-refinement evidence, also exported in the report. |
+
+The score retains its measured seconds for bar comparisons and audio probes.
+Placement rounds those times to the nearest 60 Hz presentation, clamps a
+release to the interval, and gives each placed note at least one tick.
+Editing seconds upstream therefore changes the quantized result on the next
+allocation. The preparation audit fields have the following shapes.
+
+- `reductions` contains `{note, change}`. Here `note` uses the microsecond
+  shape from `source.notes`. Preparation codes are `OCTAVE_DOUBLE`,
+  `PITCH_OUT_OF_RANGE`, and `CUT_AT_END`.
+- `pitchChanges` contains `{partId, originalPitch, pitch, startUs, endUs,
+  reason, source, stem, supportingFrames, meanHarmonicEnergy}`. The
+  `stem` flag identifies audio evidence from a supplied stem.
+
+`--candidates` accepts a separate JSON file in the following format. The
+part must exist in the MIDI and be melodic. The optional analysis tool runs
+outside this pipeline. Candidate IDs are prefixed with `external-` in
+`score.json`. Candidates have confidence 0.35 and can corroborate a
+consensus suggestion for the same part, onset and pitch.
+
+```json
+{
+  "version": 1,
+  "notes": [
+    {"id": "candidate-1", "part": 0, "start": 5.25, "end": 5.44, "pitch": 72, "velocity": 90}
+  ]
+}
+```
+
+### Structure
+
+`structure.json` includes the bar grid under `bars`, contiguous
+`sections` with `{id, bars}`, and `repeats` with `{id, bars}`.
+Both `bars` arrays within identified entries contain bar IDs. Sections
+cover the grid in order. Complete bars can belong to one repeat group each.
+
+Repeat matching compares melodic attacks by part, exact pitch and onset
+within 1/64 of a bar in normalized bar time. Each pair in a group must
+share at least 80% of the larger bar's attack count. Section boundaries
+follow part entrances and exits, changes between repeated and unrepeated
+material, or the end of a four-bar block.
+
+`corrections` lists proposals with `id`, target `barId`, proposed
+`note` with source `consensus`, optional `replaces` note ID, `votes`
+with `{barId, noteId}` by independent supporting instance, optional
+`externalCandidate` note ID, and `applied`. Two other instances must
+vote before a correction can be proposed. Application requires votes
+from at least two thirds of the group and confidence of at least 0.78.
+Agreement on onset raises confidence. An aligned external candidate can
+corroborate an already supported proposal. Typical proposals restore a
+missing attack or replace a nearby, unsupported pitch in the same part.
+
+`notes` is the corrected score consumed by roles. It contains the
+accepted edits with source `consensus` and the surviving score notes.
+To accept or reject a proposal by hand, edit this list and update its
+audit entry if needed. `corrections` is the decision history. External
+candidates stay in `score.json` as evidence.
+
+### Roles
+
+`roles.json` contains `harmonyMaxHz` and a `notes` array with
+`{note, role, reason?, mergedInto?}` per corrected note. Valid roles
+are `melody`, `counter`, `bass`, `harmony`, `drums`, and `drop`.
+A drop requires a reason.
+
+Melody follows high, sustained or accented lines while retaining continuity
+with the preceding line in a section. Monophonic MIDI parts are kept intact
+as candidates. Polyphonic parts are split by nearby attack times, compatible
+releases, pitch intervals and durations. Melody labels transfer between
+matched notes in repeat instances. The lower and secondary contours supply
+bass and counter material.
+
+Rapid re-attacks on close, similarly accented notes of the same inner
+pitch can merge into the earlier note. The earlier note extends its
+release and records `sustained-inner-tone`. The dropped attack records
+`rapid-inner-tone-reattack` and the retained ID in `mergedInto`.
+Isolated same-velocity, same-onset octave doubles remaining in harmony
+can be dropped with reason `isolated-harmony-octave-double`. A continuing
+octave pattern is kept. The default maximum harmony re-attack rate is
+7.5 per second. Use `--harmony-max-hz 0` at the roles stage to disable
+both harmony reductions for comparison. A roles-only override is saved
+in that artifact and takes effect until roles is run again.
+
+### Allocate
+
+`allocation.json` contains a `notes` array with
+`{note, role, outcome, lane?, startTick?, endTick?, reason?, mergedInto?}`.
+`outcome` is `kept`, `shortened`, or `dropped`. Shortenings and drops
+require a reason. Kept and shortened entries have a lane and a nonoverlapping,
+half-open presentation interval. The interval in the placement is
+authoritative for assembly. Drops carry neither lane nor interval.
+
+| Role | Hardware |
+| --- | --- |
+| Melody | FM1 for the whole song |
+| Bass | FM2 for the whole song |
+| Counter and harmony | FM3–FM5 first, then PSG1–PSG3 for eligible pitches |
+| Drums | DAC, with explicitly labelled `PSG3` or `PSG noise` percussion parts on PSG3 when enabled |
+
+The shared project format exposes five FM tone lanes, three PSG lanes
+and DAC. The sixth FM channel and DAC share hardware. The arrangement
+compiler exposes that slot as DAC. `--fm-only` disables PSG placement
+while keeping DAC. Release collisions, unavailable lanes and simultaneous
+DAC hits appear in the allocation and the final report.
+
+### Assemble
+
+The existing instrument matcher runs against the parts played by each lane.
+Lanes of the same chip share the part's probe evidence and eligible section
+changes. The output is `arrangement.smps.json`, `arrangement.smps.zip`,
+`render.wav`, and `report.json`. The report includes stage totals,
+matcher evidence with lane IDs, and reductions with note IDs and reasons.
+Repeat clips for a lane share one sequence ID when the relative note timing,
+pitch, articulation and instrument commands agree. Releases crossing a
+bar edge keep their continuity. The package compiler bakes source reuse
+into the playback bank.
+
+## Benchmark
+
+`bench run` invokes the staged chain in process. Metric definitions and
+scorecard shape remain the same. The runner also retains
+`stage-reductions.json` with reason counts per case. Use the
+[benchmark guide](benchmark.md) for the corpus, holdout and gold commands.
+The legacy positional `reconstruct MIDI WAV INDEX OUTPUT_DIR` command
+continues to use the original allocation policy for comparisons.
