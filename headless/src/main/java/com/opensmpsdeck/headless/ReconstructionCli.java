@@ -29,7 +29,7 @@ final class ReconstructionCli {
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
-    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
+    record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
                            Map<Integer, Path> stems) {}
     private record FileEvidence(String file, String sha256) {}
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
@@ -53,6 +53,7 @@ final class ReconstructionCli {
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
+        out.println("       reconstruct run MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
@@ -62,36 +63,33 @@ final class ReconstructionCli {
             usage(out);
             return;
         }
+        if (args.length >= 2 && args[1].equals("run")) {
+            ReconstructionStages.run(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
         if (args.length < 5) throw new IllegalArgumentException("reconstruct expects MIDI WAV INDEX.json OUTPUT_DIR");
         Path midi = Path.of(args[1]), reference = Path.of(args[2]), index = Path.of(args[3]);
         Path target = Path.of(args[4]).toAbsolutePath().normalize();
         if (Files.exists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(target.toString());
         Options options = parseOptions(args, midi.getFileName().toString());
-        long sourceDurationUs = ReferenceAudio.durationMicros(reference);
-        long durationUs = options.durationUs() == null ? sourceDurationUs : options.durationUs();
-        if (durationUs > sourceDurationUs) throw new IllegalArgumentException("--seconds exceeds reference WAV duration");
-        long presentations = (durationUs * PRESENTATIONS_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
-        if (presentations < 1 || presentations > S3kRenderer.MAX_PRESENTATIONS)
-            throw new IllegalArgumentException("Reconstruction interval must fit in "
-                    + S3kRenderer.MAX_PRESENTATIONS + " presentations. Use --seconds for a shorter interval.");
-        int frames = (int) presentations;
-        MidiScore original = MidiScore.read(midi);
-        for (int part : options.stems().keySet()) {
-            if (original.parts().stream().noneMatch(p -> p.id() == part))
-                throw new IllegalArgumentException("Unknown MIDI part ID for --stem: " + part);
-            ReferenceAudio.durationMicros(options.stems().get(part));
-        }
-        var refinement = options.audioRefine()
-                ? ReconstructionPitchRefinement.refine(original, reference, options.stems(), durationUs)
-                : new ReconstructionPitchRefinement.Result(original, List.of());
-        MidiScore score = refinement.score();
+        var transcription = ReconstructionStages.transcribe(midi, reference, options);
+        assemble(midi, reference, index, target, target, options, transcription, transcription.notes(), out);
+    }
+
+    static void assemble(Path midi, Path reference, Path index, Path target, Path work,
+                         Options options, ReconstructionStages.Score transcription,
+                         List<ReconstructionStages.Note> notes, PrintStream out) throws IOException {
+        long durationUs = transcription.durationUs();
+        int frames = transcription.frames();
+        MidiScore score = transcription.source();
+        var prepared = new S3kReconstruction.Score(score.parts(),
+                notes.stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
         var echoes = options.audioRefine() ? ReconstructionEcho.detect(score, reference, options.stems(), durationUs)
                 : Map.<Integer, ReconstructionEcho.Estimate>of();
         var vibrato = options.audioRefine() ? ReconstructionVibrato.detect(score, reference, options.stems(), durationUs)
                 : Map.<Integer, ReconstructionVibrato.Estimate>of();
         var reverb = options.audioRefine() ? ReconstructionReverb.detect(score, reference, options.stems(), durationUs)
                 : Map.<Integer, ReconstructionReverb.Estimate>of();
-        var prepared = S3kReconstruction.prepare(score, durationUs, options.keepOctaves());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
         InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
         var choices = select(catalogue, reference, options, score, prepared, durationUs, Kind.FM_VOICE);
@@ -113,7 +111,7 @@ final class ReconstructionCli {
                     catalogue, sectionPlan.choices(), spill);
             compiled = ProjectCompiler.compileWithAssets(result.project());
         }
-        Files.createDirectory(target);
+        if (!target.equals(work) || !Files.isDirectory(target)) Files.createDirectory(target);
         boolean complete = false;
         try {
             Path source = target.resolve(OUTPUTS.get(0));
@@ -131,8 +129,7 @@ final class ReconstructionCli {
             outputEvidence.put("project", evidence(source));
             outputEvidence.put("package", evidence(packagePath));
             outputEvidence.put("wav", evidence(audio));
-            var noteCounts = new LinkedHashMap<Integer, Integer>();
-            for (var note : original.notes()) if (note.startUs() < durationUs) noteCounts.merge(note.partId(), 1, Integer::sum);
+            var noteCounts = transcription.sourceCounts();
             var partEvidence = score.parts().stream().map(p -> new PartEvidence(p.id(), p.name(), p.program(),
                     p.drums(), noteCounts.getOrDefault(p.id(), 0))).toList();
             var matches = new java.util.ArrayList<MatchEvidence>();
@@ -144,7 +141,7 @@ final class ReconstructionCli {
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
                     matches, score.warnings(), options.wholePartVoices(), sectionPlan.trials(),
                     options.audioRefine(), (int) score.notes().stream().filter(note -> note.startUs() < durationUs).count(),
-                    refinement.changes(), List.copyOf(echoes.values()), result.echoNotes(), echoBankLimit,
+                    transcription.pitchChanges(), List.copyOf(echoes.values()), result.echoNotes(), echoBankLimit,
                     vibrato, List.copyOf(reverb.values()), result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
@@ -152,7 +149,7 @@ final class ReconstructionCli {
         } finally {
             if (!complete) {
                 for (String name : OUTPUTS) Files.deleteIfExists(target.resolve(name));
-                Files.delete(target);
+                if (!Files.exists(target.resolve("score.json"))) Files.delete(target);
             }
         }
         out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
@@ -178,7 +175,7 @@ final class ReconstructionCli {
         }
     }
 
-    private static Options parseOptions(String[] args, String file) {
+    static Options parseOptions(String[] args, String file) {
         Long duration = null;
         String name = file.replaceFirst("(?i)\\.midi?$", "");
         int ticksPerBeat = 30;

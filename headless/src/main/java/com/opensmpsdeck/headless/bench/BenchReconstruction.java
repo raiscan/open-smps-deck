@@ -33,7 +33,7 @@ final class BenchReconstruction {
 
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
                       Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks) throws IOException {
-        var args = new ArrayList<>(List.of("reconstruct", midi.toString(), audio.toString(), catalogue.toString(),
+        var args = new ArrayList<>(List.of("reconstruct", "run", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
         if (refine) args.add("--audio-refine");
         if (seconds != null) {
