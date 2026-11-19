@@ -8,6 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BenchMetricsTest {
+    @Test void effectCopiesAreRemovedOnlyWhenFlaggedInTheReport() {
+        var lead = new BenchMetrics.Event("FM1", 0, .12, 60, null, null);
+        var copy = new BenchMetrics.Event("FM5", .16, .28, 60, null, null);
+        var events = List.of(lead, copy);
+        org.junit.jupiter.api.Assertions.assertSame(events, BenchReconstruction.excludeEffectCopies(events, null));
+        org.junit.jupiter.api.Assertions.assertSame(events, BenchReconstruction.excludeEffectCopies(events, List.of()));
+        assertEquals(List.of(lead), BenchReconstruction.excludeEffectCopies(events, List.of("FM5")));
+    }
+
     @Test void findsMaximumRatherThanGreedyMatching() {
         var truth = List.of(note(1.00, 1.2, 60), note(1.06, 1.2, 60), note(2.0, 2.2, 62));
         var estimate = List.of(note(1.02, 1.2, 60), note(.96, 1.2, 60), note(2.0, 2.2, 63), note(3, 3.1, 60));

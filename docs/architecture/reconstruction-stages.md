@@ -12,10 +12,10 @@ java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json song-work \
 java -jar "$jar" reconstruct run --from allocate song-work
 ```
 
-The first command runs all five stages in a new directory. Use
+The first command runs all six stages in a new directory. Use
 `--audio-repeats` to include reference chroma in phrase matching. The
 transcription options are saved for subsequent runs. The second
-rebuilds allocation and assembly from the existing `roles.json`. To run
+rebuilds allocation, voicing and assembly from the existing `roles.json`. To run
 individual stages, use the following commands.
 
 ```sh
@@ -24,6 +24,7 @@ java -jar "$jar" reconstruct transcribe song.mid mix.wav catalogue.json stage-wo
 java -jar "$jar" reconstruct structure stage-work
 java -jar "$jar" reconstruct roles stage-work --harmony-max-hz 7.5
 java -jar "$jar" reconstruct allocate stage-work
+java -jar "$jar" reconstruct voice stage-work
 java -jar "$jar" reconstruct assemble stage-work
 ```
 
@@ -32,7 +33,8 @@ java -jar "$jar" reconstruct assemble stage-work
 | `score.json` | `structure` |
 | `structure.json` | `roles` |
 | `roles.json` | `allocate` |
-| `allocation.json` | `assemble` |
+| `allocation.json` | `voice` |
+| `voicing.json` | `assemble` (or `run --from voice`) |
 
 Use `run --from transcribe WORK_DIR` to regenerate the score with the paths,
 duration, and transcription options stored in the existing score. An explicit
@@ -236,13 +238,53 @@ compiler exposes that slot as DAC. `--fm-only` disables PSG placement
 while keeping DAC. Release collisions, unavailable lanes and simultaneous
 DAC hits appear in the allocation and the final report.
 
+### Voice
+
+`voicing.json` maps hardware lane IDs to settings under `lanes`. FM lanes
+have one `variantId` for the allocated notes. The `shortlist` lists up to
+18 candidate IDs, their pitch-aligned attack match scores (higher is better),
+and their contextual fit and held-out errors (lower is better). DAC and PSG
+retain part-level matching under `instruments`. DAC entries also specify
+`drumPitch`. The PSG3 noise allocation supplies its native noise command.
+
+The fit renders the allocated phrases through the pinned S3K chips over up to
+eight excerpts spread across the song. It models the reference magnitude
+spectrum as a sum of lane spectra and uses constrained least squares to
+estimate the lane gains. The mix models all lanes. Where stems are supplied,
+the stem objective also compares the lane's notes from its most represented
+stem against that reference. Separate excerpts validate patch changes.
+Articulation and effect alternatives must also win on both partitions to
+replace the role default. Insufficient evidence records
+`default (inconclusive)`. Melody defaults to mild delayed vibrato and adds a
+quiet echo when an FM lane is free. Harmony defaults to light detune. Bass
+has a shorter gate and no default pitch effect.
+
+Edit `variantId` using a catalogue variant ID. `gain` is a linear amplitude
+multiplier converted to native volume (0–4, subject to chip headroom).
+`articulation.gate` is the fraction of the allocated duration held before
+key-off. FM `minimumReleaseRate` floors the four operator RR nibbles (0
+preserves the patch). `effects.detune` is a signed frequency offset.
+Optional `effects.vibrato` holds the four native F0 parameters `delay`,
+`rate`, `delta` and `steps`. Optional `effects.copy` gives an unused FM
+`lane`, `delay` in ticks, relative `gain`, signed `detune`, and optional
+`vibrato`. Preset names and decision reasons are descriptive. The numeric
+settings control assembly.
+
+Run `reconstruct run --from assemble WORK_DIR` after a hand edit.
+`run --from voice` also reuses an existing voicing, or generates one if the
+file is missing. Use `reconstruct voice WORK_DIR` to explicitly refit, for
+example after editing allocation. For work directories made before the
+voice stage, use `run --from voice` to add the artifact and reassemble.
+
 ### Assemble
 
-The existing instrument matcher runs against the parts played by each lane.
-Lanes of the same chip share the part's probe evidence and eligible section
-changes. The output is `arrangement.smps.json`, `arrangement.smps.zip`,
+Assembly reads the selected voices, gates, gains and native effect settings
+from `voicing.json`. The output is `arrangement.smps.json`, `arrangement.smps.zip`,
 `render.wav`, and `report.json`. The report includes stage totals,
 matcher evidence with lane IDs, and reductions with note IDs and reasons.
+`effectCopyLanes` identifies dedicated FM copy lanes that actually reached
+assembly. If copies would make the bank exceed the native size limit,
+assembly retries without them and records `echoBankLimit`.
 Repeat clips for a lane share one sequence ID when the relative note timing,
 pitch, articulation and instrument commands agree. Releases crossing a
 bar edge keep their continuity. The package compiler bakes source reuse
@@ -250,8 +292,10 @@ into the playback bank.
 
 ## Benchmark
 
-`bench run` invokes the staged chain in process. The established metrics retain their definitions. The separate
-`suno-like` profile adds musical-grid and repeat measurements. The runner also retains
+`bench run` invokes the staged chain in process. The benchmark excludes
+report-flagged effect copies from note events and measures the complete audio
+render. The `suno-like` profile adds musical-grid and repeat measurements.
+The runner also retains
 `stage-reductions.json` with reason counts per case. Use the
 [benchmark guide](benchmark.md) for the corpus, holdout and gold commands.
 The legacy positional `reconstruct MIDI WAV INDEX OUTPUT_DIR` command

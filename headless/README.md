@@ -138,18 +138,20 @@ java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json first-m
 java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json full-song --name "Song"
 ```
 
-The command creates a new work directory with four editable stage artifacts
+The command creates a new work directory with five editable stage artifacts
 and four assembly outputs. Use `reconstruct run --from STAGE WORK_DIR` to
 regenerate downstream decisions after an edit. The
 [reconstruction stage guide](../docs/architecture/reconstruction-stages.md)
 documents the files, individual stage commands, and how to add external
-note candidates.
+note candidates. Use `reconstruct voice WORK_DIR` to fit `voicing.json`.
+Edit that file to change lane patches, gains, note gates, or native effects,
+then use `reconstruct run --from assemble WORK_DIR` to render the changes.
 
 - `arrangement.smps.json` contains editable clips and local assets.
 - `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
 - `render.wav` contains the 48 kHz stereo output from the pinned OpenGGF chips.
 - `report.json` records input and output hashes, source part IDs, instrument
-  shortlists and probe windows, and each note dropped or shortened. Ten-second
+  shortlists, effect-copy lanes, and allocation drops and shortenings. Ten-second
   audio sections report mono RMS and pair volume rises within 100 ms. The
   audio statistics measure level and timing, with no estimate of timbre fidelity.
 

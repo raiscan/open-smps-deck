@@ -90,7 +90,10 @@ Overall and slice values are case-level macro means. Profiles and WAV variants
 are grouped independently. `measured` reports the denominator for each mean.
 Per-case counts expose differences in coverage and make the aggregate
 interpretable when a metric is undefined. Empty truth and estimate give F1
-of 1, with exactly one empty side giving 0.
+of 1, with exactly one empty side giving 0. Reconstructed attacks on FM copy
+lanes listed in `report.json` under `effectCopyLanes` are excluded from the
+note timeline. Reports with an empty or absent field use the original
+timeline unchanged. Audio metrics use the full render, including copies.
 
 | Metric | Measurement |
 |---|---|

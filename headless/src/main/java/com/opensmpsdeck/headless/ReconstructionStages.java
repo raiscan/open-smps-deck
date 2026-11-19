@@ -28,7 +28,7 @@ final class ReconstructionStages {
     @interface Nullable {}
 
     enum Stage {
-        TRANSCRIBE, STRUCTURE, ROLES, ALLOCATE, ASSEMBLE;
+        TRANSCRIBE, STRUCTURE, ROLES, ALLOCATE, VOICE, ASSEMBLE;
 
         static Stage parse(String name) {
             try {
@@ -102,6 +102,7 @@ final class ReconstructionStages {
         Path structureFile = work.resolve("structure.json");
         Path rolesFile = work.resolve("roles.json");
         Path allocationFile = work.resolve("allocation.json");
+        Path voicingFile = work.resolve("voicing.json");
 
         if (request.initial != null) Files.createDirectory(work);
         for (var stage : Stage.values()) {
@@ -124,11 +125,20 @@ final class ReconstructionStages {
                         ReconstructionArtifacts.write(allocationFile, ReconstructionAllocation.allocate(
                                 roles, score.source.parts(), score.frames, score.inputs.fmOnly));
                     }
+                    case VOICE -> {
+                        // Resuming an existing voicing uses the user's edits.
+                        // The standalone voice command always regenerates it.
+                        if (request.chain && request.from == Stage.VOICE && Files.exists(voicingFile)) break;
+                        var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
+                        ReconstructionChecks.allocation(allocation, score);
+                        ReconstructionArtifacts.write(voicingFile, ReconstructionCli.fitVoicing(score, allocation));
+                    }
                     case ASSEMBLE -> {
                         var structure = readStructure(structureFile, score);
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
-                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, out);
+                        var voicing = ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
+                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out);
                     }
                     default -> throw new AssertionError(stage);
                 }

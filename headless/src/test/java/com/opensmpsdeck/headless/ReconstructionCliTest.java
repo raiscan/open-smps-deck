@@ -173,6 +173,69 @@ class ReconstructionCliTest {
         assertEquals(goodReport, Files.readString(work.resolve("report.json")));
     }
 
+    @Test void emitsEditedVoicingOnBothResumePaths() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        bytes[1] ^= 1;
+        String other = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Edited", bytes);
+        String editVariant = builder.variant(other, "Edited", InstrumentCatalogue.Recipe.plain(), null);
+        var catalogue = builder.build();
+        Path index = directory.resolve("index.json");
+        catalogue.save(index);
+        Path wav = directory.resolve("input.wav");
+        WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, variant, 72, 24)), wav, 60);
+        Path midi = directory.resolve("lead.mid");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 72, 96), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 72, 0), 384));
+        MidiSystem.write(source, 0, midi.toFile());
+
+        Path work = directory.resolve("voice-work");
+        var errors = new ByteArrayOutputStream();
+        var err = new PrintStream(errors);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
+                index.toString(), work.toString()}, System.out, err), errors.toString());
+        Path file = work.resolve("voicing.json");
+        String original = Files.readString(file);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString()}, System.out, err), errors.toString());
+        assertEquals(original, Files.readString(file));
+        var artifact = JsonParser.parseString(original).getAsJsonObject();
+        var lane = artifact.getAsJsonObject("lanes").getAsJsonObject("FM1");
+        var art = lane.getAsJsonObject("articulation");
+        lane.addProperty("variantId", editVariant);
+        lane.addProperty("gain", .5);
+        art.addProperty("gate", .5);
+        art.addProperty("minimumReleaseRate", 15);
+        lane.add("effects", new com.google.gson.Gson().toJsonTree(ReconstructionVoicing.idiom(
+                ReconstructionRoles.Role.melody, "FM5")));
+        String edited = artifact.toString();
+        Files.writeString(file, edited);
+
+        for (String stage : List.of("voice", "assemble")) {
+            assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", stage, work.toString()},
+                    System.out, err), errors.toString());
+            assertEquals(edited, Files.readString(file));
+            var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+            var lead = project.sequences().stream().filter(s -> s.id().startsWith("FM1-")).findFirst().orElseThrow();
+            assertEquals(12, lead.notes().getFirst().duration());
+            var compiled = ProjectCompiler.compileWithAssets(project).song();
+            int voiceOffset = Byte.toUnsignedInt(compiled[0]) | Byte.toUnsignedInt(compiled[1]) << 8;
+            assertEquals(bytes[1], compiled[voiceOffset + 1]);
+            for (int offset = 17; offset < 21; offset++)
+                assertEquals((bytes[offset] & 0xf0) | 15, Byte.toUnsignedInt(compiled[voiceOffset + offset]));
+            var nativeBytes = java.util.HexFormat.of().formatHex(compiled);
+            assertTrue(nativeBytes.contains("f00a020204"), "native delayed vibrato");
+            var report = JsonParser.parseString(Files.readString(work.resolve("report.json"))).getAsJsonObject();
+            assertEquals("FM5", report.getAsJsonArray("effectCopyLanes").get(0).getAsString());
+            assertEquals(1, report.get("echoNotes").getAsInt());
+        }
+    }
+
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {
         var bass = new MidiScore.Part(1, "Bass", 34, false);
         var lead = new MidiScore.Part(2, "Lead", 81, false);
