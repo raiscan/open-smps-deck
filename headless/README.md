@@ -251,3 +251,14 @@ compiler/render integration, PCM equality with direct pinned-core rendering,
 bounded reads and file preservation. Upstream-source parity is checked separately
 by the repository's pin verification tooling; a passing demo alone is not a claim
 of broad ROM parity.
+
+## Reconstruction benchmark
+
+Use `bench build-corpus` with a local locked-on ROM and catalogue, then
+`bench run` to score reconstruction across MIDI profiles and audio variants.
+`--quick` selects four songs, `--holdout` excludes song provenance from the
+catalogue, and `--gold` accepts private hand-labelled lead regions. Use
+`bench compare` to gate changes against a saved scorecard. Keep all inputs and
+generated datasets outside the repository. See the
+[benchmark guide](../docs/architecture/benchmark.md) for commands and metric
+definitions.
