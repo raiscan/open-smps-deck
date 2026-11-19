@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonElement;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.annotation.ElementType;
@@ -19,7 +21,7 @@ import java.util.Map;
 
 import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
-final class ReconstructionStages {
+public final class ReconstructionStages {
     static final int VERSION = 1;
     static final long MICROS_PER_SECOND = 1_000_000;
 
@@ -96,7 +98,25 @@ final class ReconstructionStages {
     }
 
     static void run(String command, String[] args, PrintStream out) throws IOException {
-        Request request = request(command, args);
+        run(command, args, out, false, (completed, total, message) -> {});
+    }
+
+    @FunctionalInterface
+    public interface Progress {
+        void report(int completed, int total, String message);
+    }
+
+    /** MCP shares the CLI parser and stage loop while retaining project review metadata. */
+    public static void runForReview(String command, String[] args, Progress progress) throws IOException {
+        try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
+            run(command, args, out, true, progress);
+        }
+    }
+
+    private static void run(String command, String[] args, PrintStream out,
+                            boolean preserveReview, Progress progress) throws IOException {
+        Request request = request(command, args, progress);
+        int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
         Path structureFile = work.resolve("structure.json");
@@ -104,7 +124,12 @@ final class ReconstructionStages {
         Path allocationFile = work.resolve("allocation.json");
         Path voicingFile = work.resolve("voicing.json");
 
-        if (request.initial != null) Files.createDirectory(work);
+        if (request.initial != null) {
+            Files.createDirectory(work);
+        } else {
+            progress.report(0, total, "Starting " + stageName(request.from));
+            if (preserveReview) checkInputFiles(readScore(scoreFile).inputs);
+        }
         for (var stage : Stage.values()) {
             if (stage.ordinal() < request.from.ordinal()) continue;
             if (stage == Stage.TRANSCRIBE) {
@@ -138,16 +163,61 @@ final class ReconstructionStages {
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
                         var voicing = ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
-                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out);
+                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview);
                     }
                     default -> throw new AssertionError(stage);
                 }
             }
+            progress.report(stage.ordinal() - request.from.ordinal() + 1, total, "Finished " + stageName(stage));
             if (!request.chain) break;
         }
     }
 
-    private static Request request(String command, String[] args) throws IOException {
+    private static String stageName(Stage stage) {
+        return stage.name().toLowerCase(Locale.ROOT);
+    }
+
+    public static void writeArtifact(Path file, JsonElement value) throws IOException {
+        Path work = file.getParent();
+        if (file.getFileName().toString().equals("score.json")) {
+            var score = ReconstructionArtifacts.decode(file, Score.class, value);
+            ReconstructionChecks.score(score);
+            checkInputFiles(score.inputs);
+        } else {
+            var score = readScore(work.resolve("score.json"));
+            switch (file.getFileName().toString()) {
+                case "structure.json" -> ReconstructionChecks.structure(
+                        ReconstructionArtifacts.decode(file, ReconstructionStructure.Result.class, value), score);
+                case "roles.json" -> ReconstructionChecks.roles(
+                        ReconstructionArtifacts.decode(file, ReconstructionRoles.Result.class, value), score);
+                case "allocation.json" -> ReconstructionChecks.allocation(
+                        ReconstructionArtifacts.decode(file, ReconstructionAllocation.Result.class, value), score);
+                case "voicing.json" -> {
+                    var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"),
+                            ReconstructionAllocation.Result.class);
+                    ReconstructionChecks.allocation(allocation, score);
+                    ReconstructionVoicing.validate(
+                            ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value),
+                            allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)));
+                }
+                default -> throw new IllegalArgumentException("Unknown stage artifact: " + file.getFileName());
+            }
+        }
+        ReconstructionArtifacts.write(file, value);
+    }
+
+    private static void checkInputFiles(Inputs inputs) {
+        var paths = new ArrayList<>(List.of(inputs.midi, inputs.wav, inputs.catalogue));
+        paths.addAll(inputs.stems.values());
+        if (inputs.candidates != null) paths.add(inputs.candidates);
+        for (String value : paths) {
+            Path path = Path.of(value);
+            if (!path.isAbsolute() || !Files.isRegularFile(path))
+                throw new IllegalArgumentException("score.json.inputs: expected an existing absolute file path: " + value);
+        }
+    }
+
+    private static Request request(String command, String[] args, Progress progress) throws IOException {
         boolean chain = command.equals("run");
         Stage stage = chain ? Stage.TRANSCRIBE : Stage.parse(command);
         if (chain && args.length >= 1 && args[0].equals("--from")) {
@@ -176,6 +246,7 @@ final class ReconstructionStages {
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
                 extra.grid, extra.audioRepeats);
+        progress.report(0, chain ? Stage.values().length : 1, "Starting transcribe");
         var score = transcribe(midi, reference, options);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
     }
