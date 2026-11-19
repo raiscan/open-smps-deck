@@ -89,7 +89,7 @@ public final class BenchCli {
     private static int runCases(String[] args, PrintStream out, Hooks hooks) throws IOException {
         require(args, 5);
         Path gold = null;
-        int jobs = Math.min(8, Runtime.getRuntime().availableProcessors());
+        Integer jobs = null;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
@@ -102,6 +102,10 @@ public final class BenchCli {
                 }
                 default -> throw new IllegalArgumentException("Unknown bench run option: " + flag);
             }
+        }
+        if (jobs == null) {
+            int limit = seen.contains("--quick") ? 16 : 8;
+            jobs = Math.min(limit, Runtime.getRuntime().availableProcessors());
         }
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),

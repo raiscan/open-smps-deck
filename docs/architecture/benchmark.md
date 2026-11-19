@@ -64,7 +64,8 @@ leave no eligible DAC entries during holdout.
 
 `run` writes `scorecard.json` and `scorecard.md` to a fresh output
 directory. It reports case failures and returns a nonzero status if any fail.
-The bounded worker pool uses up to eight workers by default. Use `--jobs N`
+The bounded worker pool uses up to eight workers by default, or 16 in quick
+mode. Use `--jobs N`
 to adjust it. JSON rows and aggregate order are stable across worker counts.
 Runtime and scratch paths are omitted from successful scorecards.
 
