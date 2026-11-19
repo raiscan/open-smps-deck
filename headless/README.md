@@ -133,12 +133,17 @@ catalogue](../docs/architecture/instrument-catalogue.md) before you run:
 
 ```sh
 deck_jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
-java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json first-minute \
+java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json first-minute \
   --seconds 60 --name "Song"
-java -jar "$deck_jar" reconstruct song.mid song.wav instruments.json full-song --name "Song"
+java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json full-song --name "Song"
 ```
 
-The command creates a new output directory with four files.
+The command creates a new work directory with four editable stage artifacts
+and four assembly outputs. Use `reconstruct run --from STAGE WORK_DIR` to
+regenerate downstream decisions after an edit. The
+[reconstruction stage guide](../docs/architecture/reconstruction-stages.md)
+documents the files, individual stage commands, and how to add external
+note candidates.
 
 - `arrangement.smps.json` contains editable clips and local assets.
 - `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
@@ -177,10 +182,12 @@ A tail alone can come from a synth release or reverb. The command records
 that case without adding a repeat. Time-aligned stems give both passes
 cleaner evidence than the mix.
 
-The arrangement quantizes MIDI timing to 60 Hz and uses five FM channels.
-Three PSG channels carry notes that miss an FM slot, within their supported
-pitch range. `--fm-only` disables the PSG overflow channels. A single DAC lane
-plays percussion, so simultaneous hits compete for one slot. The converter
+The arrangement quantizes timing to 60 Hz. FM1 carries melody and FM2 carries
+bass. Counter and harmony use the three remaining FM channels and can spill
+to PSG within its pitch range. Rapid inner chord re-attacks can be merged.
+`--harmony-max-hz 0` preserves those attacks for comparison. `--fm-only`
+disables PSG. DAC carries drums. A percussion part named `PSG3` or
+`PSG noise` can use PSG3 when PSG is enabled. The converter
 removes systematic bass octave doubles in synth lead parts. Use
 `--keep-octaves` to keep those events in the allocation. It translates note
 velocity to coarse tone volume. MIDI controllers, including sustain and

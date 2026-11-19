@@ -62,8 +62,9 @@ final class BenchRun {
             var drums = new BenchDrums(catalogue, revision);
             var songs = new HashMap<Integer, Song>();
             var tasks = new ArrayList<Callable<BenchScorecard.Case>>();
+            var reductions = new java.util.concurrent.ConcurrentSkipListMap<String, Map<String, Long>>();
             if (gold != null) tasks.add(() -> capture(gold.id(), null, null, scratch, out,
-                    () -> scoreGold(gold, index, scratch.resolve("gold"), options, drums, hooks)));
+                    () -> scoreGold(gold, index, scratch.resolve("gold"), options, drums, hooks, reductions)));
             for (var c : cases) {
                 Song song = songs.get(c.song());
                 if (song == null) {
@@ -83,7 +84,7 @@ final class BenchRun {
                 Song prepared = song;
                 Path target = scratch.resolve(Integer.toString(tasks.size()));
                 tasks.add(() -> capture(c.id(), c.profile(), c.variant(), scratch, out,
-                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks)));
+                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks, reductions)));
             }
             var rows = new ArrayList<BenchScorecard.Case>();
             try (var workers = Executors.newFixedThreadPool(options.jobs)) {
@@ -98,6 +99,7 @@ final class BenchRun {
                     options.audioRefine, goldInputs, List.copyOf(rows));
             BenchFiles.write(output.resolve("scorecard.json"), card);
             Files.writeString(output.resolve("scorecard.md"), BenchScorecard.markdown(card));
+            BenchFiles.write(output.resolve("stage-reductions.json"), reductions);
             return rows.stream().anyMatch(row -> row.error() != null) ? 1 : 0;
         } finally {
             logger.setLevel(previousLevel);
@@ -123,10 +125,11 @@ final class BenchRun {
 
     private static BenchScorecard.Case scoreCase(BenchCorpus.Case c, Path root, Path output, Song song,
                                                  Options options, InstrumentCatalogue catalogue, BenchDrums drums,
-                                                 BenchCli.Hooks hooks) throws IOException {
+                                                 BenchCli.Hooks hooks, Map<String, Map<String, Long>> reductions) throws IOException {
         try {
             var reconstruction = BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
                     output, options.audioRefine, null, Map.of(), drums, hooks);
+            reductions.put(c.id(), reconstruction.reductions());
             var truth = song.truth.stream().filter(note -> note.drum() == null).toList();
             var estimate = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
             var truthDrums = song.truth.stream().filter(note -> note.drum() != null).toList();
@@ -182,10 +185,12 @@ final class BenchRun {
     }
 
     private static BenchScorecard.Case scoreGold(BenchGold.Input gold, Path index, Path output, Options options,
-                                                 BenchDrums drums, BenchCli.Hooks hooks) throws IOException {
+                                                 BenchDrums drums, BenchCli.Hooks hooks,
+                                                 Map<String, Map<String, Long>> reductions) throws IOException {
         try {
             var result = BenchReconstruction.run(gold.midi(), gold.reference(), index, output,
                     options.audioRefine, gold.seconds(), gold.stems(), drums, hooks);
+            reductions.put(gold.id(), result.reductions());
             if (gold.regions().getLast().end() > result.referenceUs() / 1_000_000.0)
                 throw new IllegalArgumentException("Gold reconstruction ends before the annotations");
             var tones = result.events().stream().filter(note -> note.drum() == null).toList();

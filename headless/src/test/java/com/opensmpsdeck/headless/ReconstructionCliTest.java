@@ -84,6 +84,67 @@ class ReconstructionCliTest {
                 assertTrue(window.get("startUs").getAsLong() + window.get("durationUs").getAsLong() <= 500_000);
             }
         }
+
+        Path work = directory.resolve("stages");
+        Path candidates = directory.resolve("candidates.json");
+        Files.writeString(candidates, """
+                {"version":1,"notes":[{"id":"external-1","part":0,"start":0.06,"end":0.2,"pitch":80,"velocity":90}]}
+                """);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), work.toString(), "--seconds", ".5", "--candidates", candidates.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        var score = JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
+        assertEquals(60, score.get("ticksPerSecond").getAsInt());
+        assertEquals(30, score.get("frames").getAsInt());
+        assertEquals("external", score.getAsJsonArray("notes").asList().stream()
+                .map(n -> n.getAsJsonObject()).filter(n -> n.get("pitch").getAsInt() == 80)
+                .findFirst().orElseThrow().get("source").getAsString());
+
+        for (String stage : List.of("structure", "roles"))
+            assertEquals(0, Main.run(new String[]{"reconstruct", stage, work.toString()},
+                    System.out, new PrintStream(errors)), errors.toString());
+        Path roleFile = work.resolve("roles.json");
+        var roles = JsonParser.parseString(Files.readString(roleFile)).getAsJsonObject();
+        var assignments = roles.getAsJsonArray("notes");
+        assertEquals(7, assignments.size());
+        var lead = assignments.asList().stream().map(element -> element.getAsJsonObject())
+                .filter(assignment -> assignment.get("role").getAsString().equals("melody")).findFirst().orElseThrow();
+        var note = lead.getAsJsonObject("note");
+        String editedId = note.get("id").getAsString();
+        note.addProperty("pitch", 73);
+        String edited = roles.toString();
+        Files.writeString(roleFile, edited);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "allocate", work.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(edited, Files.readString(roleFile));
+        var allocation = JsonParser.parseString(Files.readString(work.resolve("allocation.json"))).getAsJsonObject();
+        var placed = allocation.getAsJsonArray("notes").asList().stream().map(n -> n.getAsJsonObject())
+                .filter(entry -> entry.getAsJsonObject("note").get("id").getAsString().equals(editedId))
+                .findFirst().orElseThrow();
+        assertEquals("FM1", placed.get("lane").getAsString());
+        assertEquals(73, placed.getAsJsonObject("note").get("pitch").getAsInt());
+        var updated = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var fm1 = updated.clips().stream().filter(c -> c.lane().equals("FM1")).findFirst().orElseThrow();
+        assertEquals(73, updated.sequences().stream().filter(s -> s.id().equals(fm1.sequenceId()))
+                .findFirst().orElseThrow().notes().getFirst().pitch());
+
+        placed.addProperty("lane", "FM4");
+        Files.writeString(work.resolve("allocation.json"), allocation.toString());
+        errors.reset();
+        String goodReport = Files.readString(work.resolve("report.json"));
+        assertEquals(2, Main.run(new String[]{"reconstruct", "assemble", work.toString()}, System.out, new PrintStream(errors)));
+        assertTrue(errors.toString().contains("invalid lane for melody"), errors.toString());
+        assertEquals(goodReport, Files.readString(work.resolve("report.json")));
+
+        Files.writeString(work.resolve("allocation.json"), "{");
+        errors.reset();
+        assertEquals(2, Main.run(new String[]{"reconstruct", "assemble", work.toString()},
+                System.out, new PrintStream(errors)));
+        assertTrue(errors.toString().contains("allocation.json"), errors.toString());
+
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", work.toString(), "--from", "allocate"},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(goodReport, Files.readString(work.resolve("report.json")));
     }
 
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {

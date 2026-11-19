@@ -11,9 +11,12 @@ import java.io.PrintStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,11 +32,19 @@ final class ReconstructionCli {
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
-    private record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
+    record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
                            Map<Integer, Path> stems) {}
     private record FileEvidence(String file, String sha256) {}
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
-    private record MatchEvidence(Kind kind, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
+    private record MatchEvidence(Kind kind, String lane, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
+    private record StageEvidence(int repeatGroups, long consensusCorrections, long harmonyMerges, long harmonyDrops,
+                                 int linkedClips) {}
+    private record PartMatch(int id, Kind kind) {}
+    private record Effects(Map<Integer, ReconstructionEcho.Estimate> echoes,
+                           Map<Integer, ReconstructionVibrato.Estimate> vibrato,
+                           Map<Integer, ReconstructionReverb.Estimate> reverb) {}
+    private record Matched(Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> byLane,
+                           List<MatchEvidence> evidence, List<ReconstructionVoices.SectionTrial> sectionTrials) {}
     private record Report(int version, String matcher, long referenceUs, int presentations, int bankBytes,
                           int sourceNotes, int fmNotes, int psgNotes, int dacHits, boolean keepOctaves, boolean fmOnly,
                           Map<String, FileEvidence> inputs, Map<String, FileEvidence> outputs,
@@ -43,16 +54,26 @@ final class ReconstructionCli {
                           List<ReconstructionEcho.Estimate> echoEstimates, int echoNotes, boolean echoBankLimit,
                           Map<Integer, ReconstructionVibrato.Estimate> vibratoEstimates,
                           List<ReconstructionReverb.Estimate> reverbEstimates,
-                          List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio) {}
+                          List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio,
+                          StageEvidence stages) {}
 
     @FunctionalInterface
     private interface Matching<T> {
         T run() throws IOException;
     }
 
+    @FunctionalInterface
+    private interface Arrangement {
+        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes);
+    }
+
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
+        out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
+        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
+        out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
+        out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
@@ -62,36 +83,27 @@ final class ReconstructionCli {
             usage(out);
             return;
         }
+        if (args.length >= 2 && ReconstructionStages.isCommand(args[1])) {
+            ReconstructionStages.run(args[1], java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
         if (args.length < 5) throw new IllegalArgumentException("reconstruct expects MIDI WAV INDEX.json OUTPUT_DIR");
         Path midi = Path.of(args[1]), reference = Path.of(args[2]), index = Path.of(args[3]);
         Path target = Path.of(args[4]).toAbsolutePath().normalize();
         if (Files.exists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(target.toString());
         Options options = parseOptions(args, midi.getFileName().toString());
-        long sourceDurationUs = ReferenceAudio.durationMicros(reference);
-        long durationUs = options.durationUs() == null ? sourceDurationUs : options.durationUs();
-        if (durationUs > sourceDurationUs) throw new IllegalArgumentException("--seconds exceeds reference WAV duration");
-        long presentations = (durationUs * PRESENTATIONS_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
-        if (presentations < 1 || presentations > S3kRenderer.MAX_PRESENTATIONS)
-            throw new IllegalArgumentException("Reconstruction interval must fit in "
-                    + S3kRenderer.MAX_PRESENTATIONS + " presentations. Use --seconds for a shorter interval.");
-        int frames = (int) presentations;
-        MidiScore original = MidiScore.read(midi);
-        for (int part : options.stems().keySet()) {
-            if (original.parts().stream().noneMatch(p -> p.id() == part))
-                throw new IllegalArgumentException("Unknown MIDI part ID for --stem: " + part);
-            ReferenceAudio.durationMicros(options.stems().get(part));
-        }
-        var refinement = options.audioRefine()
-                ? ReconstructionPitchRefinement.refine(original, reference, options.stems(), durationUs)
-                : new ReconstructionPitchRefinement.Result(original, List.of());
-        MidiScore score = refinement.score();
-        var echoes = options.audioRefine() ? ReconstructionEcho.detect(score, reference, options.stems(), durationUs)
-                : Map.<Integer, ReconstructionEcho.Estimate>of();
-        var vibrato = options.audioRefine() ? ReconstructionVibrato.detect(score, reference, options.stems(), durationUs)
-                : Map.<Integer, ReconstructionVibrato.Estimate>of();
-        var reverb = options.audioRefine() ? ReconstructionReverb.detect(score, reference, options.stems(), durationUs)
-                : Map.<Integer, ReconstructionReverb.Estimate>of();
-        var prepared = S3kReconstruction.prepare(score, durationUs, options.keepOctaves());
+        var transcription = ReconstructionStages.transcribe(midi, reference, options);
+        assembleLegacy(midi, reference, index, target, options, transcription, out);
+    }
+
+    private static void assembleLegacy(Path midi, Path reference, Path index, Path target,
+                                       Options options, ReconstructionStages.Score transcription,
+                                       PrintStream out) throws IOException {
+        long durationUs = transcription.durationUs();
+        int frames = transcription.frames();
+        MidiScore score = transcription.source();
+        var prepared = new S3kReconstruction.Score(score.parts(),
+                transcription.notes().stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
         InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
         var choices = select(catalogue, reference, options, score, prepared, durationUs, Kind.FM_VOICE);
@@ -100,22 +112,127 @@ final class ReconstructionCli {
         var sectionPlan = options.wholePartVoices() ? new ReconstructionVoices.SectionPlan(choices, List.of())
                 : matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
                         score, prepared.notes(), durationUs, choices));
-        var result = S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                catalogue, sectionPlan.choices(), spill, echoes);
-        com.opensmpsdeck.project.CompiledProject compiled;
-        boolean echoBankLimit = false;
-        try {
-            compiled = ProjectCompiler.compileWithAssets(result.project());
-        } catch (IllegalArgumentException failure) {
-            if (result.echoNotes() == 0 || !failure.getMessage().contains("32 KiB S3K bank")) throw failure;
-            echoBankLimit = true;
-            result = S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                    catalogue, sectionPlan.choices(), spill);
-            compiled = ProjectCompiler.compileWithAssets(result.project());
-        }
+        var evidence = new ArrayList<MatchEvidence>();
+        recordMatches(evidence, null, Kind.FM_VOICE, sectionPlan.choices());
+        recordMatches(evidence, null, Kind.PSG_VOLUME, spill);
+        var matched = new Matched(Map.of(), evidence, sectionPlan.trials());
+        var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
+        render(midi, reference, index, target, target, options, transcription, matched, effects, null,
+                echoes -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
+                        catalogue, sectionPlan.choices(), spill, echoes), out);
+    }
+
+    static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
+                                  ReconstructionAllocation.Result allocation, PrintStream out) throws IOException {
+        var inputs = score.inputs();
+        Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
+        var options = inputs.options(score.durationUs());
+        var catalogue = InstrumentCatalogue.open(index);
+        var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
+                .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
+                        ? entry.note().startTick(score.frames()) : entry.startTick())).toList());
+        var matched = matchAllocated(catalogue, reference, options, score, ordered);
+        var effects = effects(score.source(), reference, options, score.durationUs());
+        var staging = Files.createTempDirectory(work, ".assemble-");
+        try {
+            render(midi, reference, index, staging, work, options, score, matched, effects, structure,
+                    echoes -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), score.frames(),
+                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
+                            structure, catalogue, matched.byLane(), echoes), out);
+            for (String name : OUTPUTS) Files.move(staging.resolve(name), work.resolve(name),
+                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
+            Files.deleteIfExists(staging);
+        }
+    }
+
+    private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
+        if (!options.audioRefine()) return new Effects(Map.of(), Map.of(), Map.of());
+        return new Effects(ReconstructionEcho.detect(score, reference, options.stems(), durationUs),
+                ReconstructionVibrato.detect(score, reference, options.stems(), durationUs),
+                ReconstructionReverb.detect(score, reference, options.stems(), durationUs));
+    }
+
+    private static Matched matchAllocated(InstrumentCatalogue catalogue, Path reference, Options options,
+                                          ReconstructionStages.Score score,
+                                          ReconstructionAllocation.Result allocation) throws IOException {
+        var byLane = new LinkedHashMap<String, java.util.Set<Integer>>();
+        var byPart = new LinkedHashMap<Integer, List<MidiScore.Note>>();
+        var mergedAnchors = allocation.notes().stream().map(ReconstructionAllocation.Entry::mergedInto)
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        var originalNotes = new java.util.HashMap<String, ReconstructionStages.Note>();
+        for (var note : score.notes()) originalNotes.put(note.id(), note);
+        for (var entry : allocation.notes()) {
+            String lane = entry.lane();
+            var note = entry.note();
+            // Probe the measured attack even when a separate role decision has extended its release.
+            var probe = mergedAnchors.contains(note.id()) ? originalNotes.getOrDefault(note.id(), note) : note;
+            byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(probe.midi());
+            if (lane != null && !(lane.equals("PSG3") && entry.role() == ReconstructionRoles.Role.drums))
+                byLane.computeIfAbsent(lane, ignored -> new java.util.LinkedHashSet<>()).add(note.part());
+        }
+        var parts = new java.util.HashMap<Integer, MidiScore.Part>();
+        for (var part : score.source().parts()) parts.put(part.id(), part);
+        var result = new LinkedHashMap<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>>();
+        var evidence = new ArrayList<MatchEvidence>();
+        var trials = new ArrayList<ReconstructionVoices.SectionTrial>();
+        var cache = new java.util.HashMap<PartMatch, ReconstructionVoices.SectionPlan>();
+        for (var lane : byLane.entrySet()) {
+            String id = lane.getKey();
+            var kind = id.startsWith("PSG") ? Kind.PSG_VOLUME : Kind.FM_VOICE;
+            var choices = new LinkedHashMap<ReconstructionVoices.Key, ReconstructionVoices.Choice>();
+            for (int part : lane.getValue()) {
+                // Match each source played by this lane with the current part-wide probe policy.
+                // A part sent to two lanes of the same chip uses the same instrument evidence.
+                var key = new PartMatch(part, kind);
+                var plan = cache.get(key);
+                if (plan == null) {
+                    var notes = byPart.get(part).stream().sorted(Comparator.comparingLong(MidiScore.Note::startUs)).toList();
+                    var selection = matchQuietly(() -> ReconstructionVoices.select(catalogue, reference, options.stems(),
+                            score.source(), notes, score.durationUs(), kind));
+                    plan = kind == Kind.FM_VOICE && !parts.get(part).drums() && !options.wholePartVoices()
+                            ? matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
+                                    score.source(), notes, score.durationUs(), selection))
+                            : new ReconstructionVoices.SectionPlan(selection, List.of());
+                    cache.put(key, plan);
+                    trials.addAll(plan.trials());
+                }
+                choices.putAll(plan.choices());
+            }
+            result.put(id, choices);
+            recordMatches(evidence, id, kind, choices);
+        }
+        return new Matched(result, evidence, trials);
+    }
+
+    private static void recordMatches(List<MatchEvidence> evidence, String lane, Kind kind,
+                                      Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices) {
+        choices.forEach((key, choice) -> evidence.add(new MatchEvidence(
+                key.drumPitch() == null ? kind : Kind.DAC_SAMPLE, lane, key, choice)));
+    }
+
+    private static void render(Path midi, Path reference, Path index, Path target, Path destination,
+                               Options options, ReconstructionStages.Score transcription, Matched matched,
+                               Effects effects, ReconstructionStructure.Result structure,
+                               Arrangement arrangement, PrintStream out) throws IOException {
+        long durationUs = transcription.durationUs();
+        int frames = transcription.frames();
+        MidiScore score = transcription.source();
         boolean complete = false;
         try {
+            var result = arrangement.arrange(effects.echoes());
+            com.opensmpsdeck.project.CompiledProject compiled;
+            boolean echoBankLimit = false;
+            try {
+                compiled = ProjectCompiler.compileWithAssets(result.project());
+            } catch (IllegalArgumentException failure) {
+                if (result.echoNotes() == 0 || !failure.getMessage().contains("32 KiB S3K bank")) throw failure;
+                echoBankLimit = true;
+                result = arrangement.arrange(Map.of());
+                compiled = ProjectCompiler.compileWithAssets(result.project());
+            }
             Path source = target.resolve(OUTPUTS.get(0));
             Path packagePath = target.resolve(OUTPUTS.get(1));
             Path audio = target.resolve(OUTPUTS.get(2));
@@ -131,32 +248,33 @@ final class ReconstructionCli {
             outputEvidence.put("project", evidence(source));
             outputEvidence.put("package", evidence(packagePath));
             outputEvidence.put("wav", evidence(audio));
-            var noteCounts = new LinkedHashMap<Integer, Integer>();
-            for (var note : original.notes()) if (note.startUs() < durationUs) noteCounts.merge(note.partId(), 1, Integer::sum);
+            var noteCounts = transcription.sourceCounts();
             var partEvidence = score.parts().stream().map(p -> new PartEvidence(p.id(), p.name(), p.program(),
                     p.drums(), noteCounts.getOrDefault(p.id(), 0))).toList();
-            var matches = new java.util.ArrayList<MatchEvidence>();
-            sectionPlan.choices().forEach((key, choice) -> matches.add(
-                    new MatchEvidence(key.drumPitch() == null ? Kind.FM_VOICE : Kind.DAC_SAMPLE, key, choice)));
-            spill.forEach((key, choice) -> matches.add(new MatchEvidence(Kind.PSG_VOLUME, key, choice)));
+            var stages = structure == null ? null : new StageEvidence(structure.repeats().size(),
+                    structure.corrections().stream().filter(ReconstructionStructure.Correction::applied).count(),
+                    result.reductions().stream().filter(r -> "rapid-inner-tone-reattack".equals(r.reason())).count(),
+                    result.reductions().stream().filter(r -> "isolated-harmony-octave-double".equals(r.reason())).count(),
+                    result.project().clips().size() - result.project().sequences().size());
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
-                    matches, score.warnings(), options.wholePartVoices(), sectionPlan.trials(),
+                    matched.evidence(), score.warnings(), options.wholePartVoices(), matched.sectionTrials(),
                     options.audioRefine(), (int) score.notes().stream().filter(note -> note.startUs() < durationUs).count(),
-                    refinement.changes(), List.copyOf(echoes.values()), result.echoNotes(), echoBankLimit,
-                    vibrato, List.copyOf(reverb.values()), result.reductions(), ReconstructionAudioCheck.compare(reference, audio, frames));
+                    transcription.pitchChanges(), List.copyOf(effects.echoes().values()), result.echoNotes(), echoBankLimit,
+                    effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
+                    ReconstructionAudioCheck.compare(reference, audio, frames), stages);
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
+            out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
+                    result.fmNotes(), result.psgNotes(), result.dacHits(), frames, destination);
         } finally {
             if (!complete) {
                 for (String name : OUTPUTS) Files.deleteIfExists(target.resolve(name));
                 Files.delete(target);
             }
         }
-        out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
-                result.fmNotes(), result.psgNotes(), result.dacHits(), frames, target);
     }
 
     private static Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> select(
@@ -178,7 +296,7 @@ final class ReconstructionCli {
         }
     }
 
-    private static Options parseOptions(String[] args, String file) {
+    static Options parseOptions(String[] args, String file) {
         Long duration = null;
         String name = file.replaceFirst("(?i)\\.midi?$", "");
         int ticksPerBeat = 30;
