@@ -100,9 +100,35 @@ class ReconstructionCliTest {
                 .map(n -> n.getAsJsonObject()).filter(n -> n.get("pitch").getAsInt() == 80)
                 .findFirst().orElseThrow().get("source").getAsString());
 
+        Path overrideWork = directory.resolve("override");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), overrideWork.toString(), "--seconds", ".5", "--candidates", candidates.toString(),
+                "--tempo", "150", "--bar-offset", ".15"}, System.out, new PrintStream(errors)), errors.toString());
+        var override = JsonParser.parseString(Files.readString(overrideWork.resolve("score.json"))).getAsJsonObject();
+        assertEquals(score.get("notes"), override.get("notes"));
+        var firstBar = override.getAsJsonArray("bars").get(0).getAsJsonObject();
+        assertEquals(.15, firstBar.get("end").getAsDouble(), 1e-9);
+        assertFalse(firstBar.get("complete").getAsBoolean());
+
         for (String stage : List.of("structure", "roles"))
             assertEquals(0, Main.run(new String[]{"reconstruct", stage, work.toString()},
                     System.out, new PrintStream(errors)), errors.toString());
+        Path structureFile = work.resolve("structure.json");
+        var structure = JsonParser.parseString(Files.readString(structureFile)).getAsJsonObject();
+        var structureNote = structure.getAsJsonArray("notes").get(0).getAsJsonObject();
+        String structureNoteId = structureNote.get("id").getAsString();
+        structureNote.addProperty("velocity", 77);
+        String editedStructure = structure.toString();
+        Files.writeString(structureFile, editedStructure);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "roles", work.toString()},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(editedStructure, Files.readString(structureFile));
+        var resumedAllocation = JsonParser.parseString(Files.readString(work.resolve("allocation.json"))).getAsJsonObject();
+        assertEquals(77, resumedAllocation.getAsJsonArray("notes").asList().stream()
+                .map(e -> e.getAsJsonObject().getAsJsonObject("note"))
+                .filter(n -> n.get("id").getAsString().equals(structureNoteId))
+                .findFirst().orElseThrow().get("velocity").getAsInt());
+
         Path roleFile = work.resolve("roles.json");
         var roles = JsonParser.parseString(Files.readString(roleFile)).getAsJsonObject();
         var assignments = roles.getAsJsonArray("notes");

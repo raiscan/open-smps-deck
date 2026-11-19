@@ -61,7 +61,8 @@ final class ReconstructionStages {
 
     record Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                   boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
-                  @Nullable String candidates, double harmonyMaxHz) {
+                  @Nullable String candidates, double harmonyMaxHz, @Nullable ReconstructionTempo.Options grid,
+                  @Nullable Boolean audioRepeats) {
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
@@ -73,16 +74,19 @@ final class ReconstructionStages {
     record Score(int version, long durationUs, int frames, int ticksPerSecond, @Nullable Inputs inputs,
                  List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
                  List<Note> notes, List<S3kReconstruction.Reduction> reductions,
-                 List<ReconstructionPitchRefinement.Change> pitchChanges) {
-        Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes) {
-            return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions, pitchChanges);
+                 List<ReconstructionPitchRefinement.Change> pitchChanges,
+                 @Nullable ReconstructionTempo.Estimate tempo, @Nullable List<ReconstructionStructure.Bar> midiBars) {
+        Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
+                         ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars) {
+            return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions, pitchChanges, tempo, midiBars);
         }
     }
 
     record Candidate(String id, int part, double start, double end, int pitch, int velocity) {}
     record Candidates(int version, List<Candidate> notes) {}
 
-    private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz) {}
+    private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
+                                ReconstructionTempo.Options grid, boolean audioRepeats) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz) {}
 
     private ReconstructionStages() {}
@@ -109,8 +113,7 @@ final class ReconstructionStages {
             } else {
                 var score = readScore(scoreFile);
                 switch (stage) {
-                    case STRUCTURE -> ReconstructionArtifacts.write(structureFile, ReconstructionStructure.analyze(
-                            score.bars, score.notes.stream().sorted(NOTE_ORDER).toList(), score.source.parts()));
+                    case STRUCTURE -> ReconstructionArtifacts.write(structureFile, structure(score));
                     case ROLES -> {
                         var structure = readStructure(structureFile, score);
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
@@ -171,7 +174,8 @@ final class ReconstructionStages {
         options.stems().forEach((id, file) -> stems.put(id, file.toAbsolutePath().normalize().toString()));
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
-                options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz);
+                options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
+                extra.grid, extra.audioRepeats);
         var score = transcribe(midi, reference, options);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
     }
@@ -179,7 +183,8 @@ final class ReconstructionStages {
     private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
-        if (extra.legacy.length != 0 || extra.candidates != null
+        if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
+                || extra.grid.bpm() != null || extra.audioRepeats
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
         return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz);
@@ -187,10 +192,21 @@ final class ReconstructionStages {
 
     private static StageOptions stageOptions(String[] args, int firstOption) {
         Path candidates = null;
-        Double hz = null;
+        Double hz = null, bpm = null, offset = null;
+        boolean estimate = false, audioRepeats = false;
         var legacy = new ArrayList<>(Arrays.asList(args).subList(0, firstOption));
         for (int i = firstOption; i < args.length; i++) {
             switch (args[i]) {
+                case "--estimate-tempo" -> estimate = true;
+                case "--audio-repeats" -> audioRepeats = true;
+                case "--tempo" -> {
+                    if (bpm != null || ++i == args.length) throw new IllegalArgumentException("Expected one --tempo BPM");
+                    bpm = Double.parseDouble(args[i]);
+                }
+                case "--bar-offset" -> {
+                    if (offset != null || ++i == args.length) throw new IllegalArgumentException("Expected one --bar-offset S");
+                    offset = Double.parseDouble(args[i]);
+                }
                 case "--candidates" -> {
                     if (candidates != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --candidates NOTES.json");
@@ -210,7 +226,7 @@ final class ReconstructionStages {
                 default -> legacy.add(args[i]);
             }
         }
-        return new StageOptions(legacy.toArray(String[]::new), candidates, hz);
+        return new StageOptions(legacy.toArray(String[]::new), candidates, hz, new ReconstructionTempo.Options(estimate, bpm, offset), audioRepeats);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -225,7 +241,18 @@ final class ReconstructionStages {
         var structure = ReconstructionArtifacts.read(file, ReconstructionStructure.Result.class);
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),
-                structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList());
+                structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList(),
+                structure.phrases(), structure.roleLayout());
+    }
+
+    private static ReconstructionStructure.Result structure(Score score) throws IOException {
+        boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
+        double seconds = score.durationUs / 1e6;
+        var audio = Boolean.TRUE.equals(score.inputs.audioRepeats)
+                ? ReconstructionRhythmAudio.read(Path.of(score.inputs.wav), seconds) : null;
+        return ReconstructionStructure.analyze(score.bars, score.notes.stream().sorted(NOTE_ORDER).toList(),
+                score.source.parts(), audio, inferred, inferred ? score.tempo.selected().beatsPerBar() : 4,
+                score.midiBars);
     }
 
     private static Score retranscribe(Score saved) throws IOException {
@@ -256,8 +283,26 @@ final class ReconstructionStages {
                 }
             }
         }
-        var bars = MidiScore.bars(Path.of(inputs.midi), score.durationUs);
-        var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList());
+        Path midi = Path.of(inputs.midi);
+        var metadata = MidiScore.gridMetadata(midi);
+        var grid = inputs.grid == null ? new ReconstructionTempo.Options(false, null, null) : inputs.grid;
+        ReconstructionTempo.Estimate tempo = null;
+        double seconds = score.durationUs / 1e6;
+        if (grid.bpm() != null) {
+            tempo = ReconstructionTempo.override(grid, metadata.meter());
+        } else if (grid.force() || metadata.defaultTempo()) {
+            var audio = seconds < .01 ? List.<ReconstructionRhythmAudio.Onset>of()
+                    : ReconstructionRhythmAudio.read(Path.of(inputs.wav), seconds, false).onsets();
+            tempo = ReconstructionTempo.estimate(score.source, seconds, audio, metadata.meter());
+            if (!grid.force() && (tempo.confidence() < .52 || tempo.midiEvidence() < .52)) {
+                tempo = new ReconstructionTempo.Estimate(tempo.selected(), tempo.confidence(), tempo.midiEvidence(),
+                        tempo.audioEvidence(), tempo.alternatives(), "midi");
+            }
+        }
+        boolean estimated = tempo != null && !tempo.source().equals("midi");
+        var bars = estimated ? ReconstructionTempo.bars(tempo.selected(), seconds) : MidiScore.bars(midi, score.durationUs);
+        var midiBars = estimated && !grid.force() && grid.bpm() == null ? MidiScore.bars(midi, score.durationUs) : null;
+        var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList(), tempo, midiBars);
         ReconstructionChecks.score(result);
         return result;
     }
@@ -303,6 +348,6 @@ final class ReconstructionStages {
                     note.pitch(), note.velocity(), remaining == 0 ? "audio-refine" : "midi", remaining == 0 ? .85 : 1));
         }
         return new Score(VERSION, durationUs, frames, PRESENTATIONS_PER_SECOND, null, List.of(), score, counts, notes,
-                prepared.reductions(), refinement.changes());
+                prepared.reductions(), refinement.changes(), null, null);
     }
 }

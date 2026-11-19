@@ -97,7 +97,7 @@ final class ReconstructionArtifacts {
             var scalar = value.getAsJsonPrimitive();
             if (type == String.class) {
                 require(scalar.isString(), at, "expected a string");
-            } else if (type == boolean.class) {
+            } else if (type == boolean.class || type == Boolean.class) {
                 require(scalar.isBoolean(), at, "expected a boolean");
             } else if (type instanceof Class<?> clazz && clazz.isEnum()) {
                 require(scalar.isString() && java.util.Arrays.stream(clazz.getEnumConstants())
