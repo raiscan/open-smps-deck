@@ -25,12 +25,15 @@ final class VoicePatchShortlist {
 
     record RankedPatch(String id, double score) {}
     private record Key(String asset, int pitch) {}
+    private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights) {}
-    private static final Map<Key, float[]> TEMPLATES = new ConcurrentHashMap<>();
+    private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile) {}
+    private static final Map<Key, Template> TEMPLATES = new ConcurrentHashMap<>();
 
     private final InstrumentCatalogue catalogue;
     private final List<InstrumentCatalogue.Variant> variants;
     private final VoiceSpectra spectra = new VoiceSpectra();
+    private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
 
     VoicePatchShortlist(InstrumentCatalogue catalogue) {
         this.catalogue = catalogue;
@@ -82,9 +85,54 @@ final class VoicePatchShortlist {
         return List.copyOf(shortlist);
     }
 
+    List<RankedPatch> lowCandidates(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
+                          Path stem, VoiceWindows windows)
+            throws IOException {
+        if (!LowRegisterSpectrum.lowRegister(notes)) return List.of();
+        long end = ReferenceAudio.durationMicros(stem);
+        double duration = ATTACK_TICKS / (double) PRESENTATIONS_PER_SECOND;
+        var occupied = coverage(context, Map.of(), "", windows.songFrames());
+        var candidates = notes.stream()
+                .filter(n -> n.note().pitch() <= LowRegisterSpectrum.MAX_PITCH
+                        && n.endTick() - n.startTick() >= ATTACK_TICKS - 2
+                        && n.note().start() + duration <= end / 1e6
+                        && windows.trainingAttack(n.startTick(), ATTACK_TICKS))
+                .sorted(Comparator.comparingInt((ReconstructionAllocation.Entry n) -> occupied[n.startTick()])
+                        .thenComparing(Comparator.comparingInt((ReconstructionAllocation.Entry n) ->
+                                Math.min(ATTACK_TICKS, n.endTick() - n.startTick())).reversed())).toList();
+        var probes = new ArrayList<LowProbe>();
+        var times = new ArrayList<Integer>();
+        for (var note : candidates) {
+            int pitch = note.note().pitch();
+            if (times.stream().anyMatch(t -> Math.abs(t - note.startTick()) < 25)
+                    || probes.stream().filter(p -> p.pitch() == pitch).count() >= 2) continue;
+            var audio = VoiceSpectra.resample(ReferenceAudio.read(stem, note.note().start(), duration),
+                    ATTACK_TICKS * SAMPLES_PER_TICK);
+            var profile = lowSpectrum.profile(audio, pitch);
+            if (profile == null) continue;
+            probes.add(new LowProbe(pitch, profile));
+            times.add(note.startTick());
+            if (probes.size() == PROBE_LIMIT) break;
+        }
+        if (probes.size() < 2) return List.of();
+        var ranked = new ArrayList<RankedPatch>();
+        for (var variant : variants) ranked.add(new RankedPatch(variant.id(), 1 / (1 + lowDistance(variant, probes) / 100)));
+        ranked.sort(Comparator.comparingDouble(RankedPatch::score).reversed().thenComparing(RankedPatch::id));
+        return List.copyOf(ranked.subList(0, Math.min(ranked.size(), 8)));
+    }
+
+    private double lowDistance(InstrumentCatalogue.Variant variant, List<LowProbe> probes) throws IOException {
+        double error = 0;
+        for (var probe : probes) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("patch shortlist cancelled");
+            error += LowRegisterSpectrum.distance(probe.profile(), template(variant, probe.pitch()).lowProfile());
+        }
+        return error / probes.size();
+    }
+
     private RankedPatch rank(InstrumentCatalogue.Variant variant, List<Probe> probes) throws IOException {
         double score = 0;
-        for (var probe : probes) score += similarity(probe, template(variant, probe.pitch()));
+        for (var probe : probes) score += similarity(probe, template(variant, probe.pitch()).spectrum());
         return new RankedPatch(variant.id(), probes.isEmpty() ? 0 : score / probes.size());
     }
 
@@ -125,13 +173,14 @@ final class VoicePatchShortlist {
         return new Probe(note.note().pitch(), target, weights);
     }
 
-    private float[] template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
+    private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
         var key = new Key(variant.assetId(), pitch);
         var cached = TEMPLATES.get(key);
         if (cached != null) return cached;
         var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true);
         var rendered = VoiceWindows.renderMono(ProjectCompiler.compileWithAssets(project), ATTACK_TICKS);
-        var features = spectra.average(rendered);
+        var features = new Template(spectra.average(rendered),
+                pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null);
         if (TEMPLATES.size() < CACHE_LIMIT) {
             var existing = TEMPLATES.putIfAbsent(key, features);
             if (existing != null) return existing;

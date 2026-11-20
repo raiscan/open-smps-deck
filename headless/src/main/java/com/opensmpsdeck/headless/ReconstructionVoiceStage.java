@@ -158,6 +158,32 @@ final class ReconstructionVoiceStage {
             result.put(model.id(), new Lane(role, patch, patchScores.get(i), gain, art, effects,
                     patchReason, artReason, effectReason, model.instruments()));
         }
+        // Refine low-register patches after the joint fit so this local timbre
+        // objective cannot shift the lead's patch or articulation.
+        for (int i = 0; i < models.size(); i++) {
+            var model = models.get(i);
+            var lane = result.get(model.id());
+            if (lane.variantId() == null || model.stem() == 0) continue;
+            var notes = byLane.get(model.id());
+            var stem = stemFor(notes, options.stems(), stems);
+            if (!LowRegisterSpectrum.lowRegister(notes)) continue;
+            var isolated = notes.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
+            var stemContext = context.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
+            var candidatesForBass = screening.lowCandidates(isolated, stemContext, stem, windows);
+            var selected = LowRegisterFit.refine(source, catalogue, stem, model.id(), lane,
+                    notes, isolated, candidatesForBass);
+            if (selected == null) continue;
+            var choice = selected.patch();
+            var evidence = new ArrayList<ScoredPatch>();
+            evidence.add(new ScoredPatch(choice.id(), choice.score(), selected.fit(), selected.check()));
+            lane.shortlist().stream().filter(patch -> !patch.variantId().equals(choice.id()))
+                    .limit(lane.shortlist().size() - 1L).forEach(evidence::add);
+            result.put(model.id(), new Lane(lane.role(), choice.id(), List.copyOf(evidence), lane.gain(),
+                    selected.articulation(), lane.effects(), "low-register stem harmonics",
+                    selected.changedArticulation() ? "low-register stem harmonics" : lane.articulationReason(),
+                    lane.effectReason(), lane.instruments()));
+        }
+        ReconstructionLevels.calibrate(score.frames(), source, catalogue, byLane, mix, options.stems(), result);
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
     }
 

@@ -477,14 +477,25 @@ spectrum as a sum of lane spectra and uses constrained least squares to
 estimate the lane gains. The mix models all lanes. Where stems are supplied,
 the stem objective also compares the lane's notes from its most represented
 stem against that reference. Separate excerpts validate patch changes.
+An FM lane that spends most of its sounding time in a low register can
+refine its patch using its mapped stem. This pass compares the first 16
+harmonics and the low-frequency energy of notes played with their preceding
+note context. A replacement must improve two sets of note excerpts.
 Articulation and effect alternatives must also win on both partitions to
 replace the role default. Insufficient evidence records
 `default (inconclusive)`. Melody defaults to mild delayed vibrato and adds a
 quiet echo when an FM lane is free. Harmony defaults to light detune. Bass
-has a shorter gate and no default pitch effect.
+has no default pitch effect.
 
 Edit `variantId` using a catalogue variant ID. `gain` is a linear amplitude
 multiplier converted to native volume (0–4, subject to chip headroom).
+The optional `partGains` object multiplies that gain for specified source
+part IDs. Level calibration measures stereo RMS with the selected patches
+and MIDI velocities. A mapped bass stem is compared with the aligned mix
+after subtracting that stem. Other independently mapped tonal groups can
+be compared against the drum stem when the drum group has a dedicated
+reference. DAC samples keep their fitted playback level. Peak checks gate
+volume boosts.
 `articulation.gate` is the fraction of the allocated duration held before
 key-off. FM `minimumReleaseRate` floors the four operator RR nibbles (0
 preserves the patch). `effects.detune` is a signed frequency offset.

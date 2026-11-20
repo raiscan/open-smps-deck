@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,23 @@ final class ReconstructionVoicing {
     record FitWindows(int frames, List<Integer> starts) {}
     record Lane(Role role, @Nullable String variantId, List<ScoredPatch> shortlist, double gain,
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
-                String effectReason, List<Instrument> instruments) {}
+                String effectReason, List<Instrument> instruments, @Nullable Map<Integer, Double> partGains) {
+        Lane(Role role, String variantId, List<ScoredPatch> shortlist, double gain, Articulation articulation,
+             Effects effects, String patchReason, String articulationReason, String effectReason,
+             List<Instrument> instruments) {
+            this(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
+                    effectReason, instruments, null);
+        }
+
+        Lane withPartGains(Map<Integer, Double> gains) {
+            return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
+                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)));
+        }
+
+        double gainFor(int part) {
+            return Math.min(4, gain * (partGains == null ? 1 : partGains.getOrDefault(part, 1.0)));
+        }
+    }
     record ScoredPatch(String variantId, double shortlistScore, double fit, double check) {}
     record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId,
                       @Nullable ReconstructionDrums.Selection drumSelection) {
@@ -92,6 +109,11 @@ final class ReconstructionVoicing {
             require(lane.gain() >= 0 && lane.gain() <= 4, at + ".gain", "expected 0–4");
             require(allocated.get(id).stream().anyMatch(entry -> entry.role() == lane.role()), at + ".role",
                     "role must appear on the allocated lane");
+            if (lane.partGains() != null) lane.partGains().forEach((part, gain) ->
+                    require(!dac && gain != null && gain >= .25 && gain <= 4
+                                    && allocated.get(id).stream().anyMatch(entry -> entry.note().part() == part
+                                            && entry.role() != Role.drums),
+                            at + ".partGains", "expected allocated tonal parts and gain in 0.25–4"));
             var articulation = lane.articulation();
             require(articulation.gate() > 0 && articulation.gate() <= 1, at + ".articulation.gate", "expected (0,1]");
             require(articulation.minimumReleaseRate() >= 0 && articulation.minimumReleaseRate() <= (fm ? 15 : 0),

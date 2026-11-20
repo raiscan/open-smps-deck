@@ -287,7 +287,7 @@ final class S3kReconstruction {
                 int duration = figure ? end - start : articulation.duration(end - start);
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
-                if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gain()));
+                if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gainFor(part.id())));
                 var placed = new Placement(new Event(note, start, start + duration, tonePriority(part, note.pitch()), id, volume));
                 if (voice != null) {
                     placed.volumeFloor = floor;
