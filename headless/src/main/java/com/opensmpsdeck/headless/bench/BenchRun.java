@@ -211,6 +211,8 @@ final class BenchRun {
             if (ladder) {
                 double seconds = c.ladder().frames() / 60.0;
                 var projectTones = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
+                if (c.ladder().leadLane() != null)
+                    metrics.put("leadFidelityF1", BenchLeadFidelity.score(truth, estimate, c.ladder().leadLane()).f1());
                 lead = BenchLadderTrace.leadScore(truth, estimate, c.ladder().leadLane(), seconds);
                 metrics.put("leadAttackF1", lead.attacks().f1());
                 if (lead.pitchAccuracy() != null) metrics.put("leadPitchAccuracy", lead.pitchAccuracy());

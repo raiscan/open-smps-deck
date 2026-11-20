@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 final class BenchLadderReport {
-    private static final List<String> METRICS = List.of("melodyF1", "noteF1", "onsetCorrelation", "leadAttackF1",
+    private static final List<String> METRICS = List.of("melodyF1", "leadFidelityF1", "noteF1", "onsetCorrelation", "leadAttackF1",
             "leadPitchAccuracy", "leadGap", "voiceSpectralDistance", "voiceSpectralCoverage");
 
     record Source(BenchLadderRun.Row row, Path directory) {}

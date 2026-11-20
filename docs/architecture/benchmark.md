@@ -151,12 +151,32 @@ timeline unchanged. Audio metrics use the full render, including copies.
 | Note precision, recall, F1 | Maximum-cardinality one-to-one association at exact MIDI pitch with onset error ≤50 ms. |
 | Offset F1 | Also requires end error ≤ the greater of 50 ms and 20% of truth duration. |
 | Melody F1 | Select one lane per four beats on the corpus MIDI's 120 BPM grid (two-second proxy bars). Prefer notes sustaining at least 100 ms in the bar, then choose the highest duration-weighted mean pitch. If none sustain, use all notes. Apply the same rule to the output, counting attacks in the selected lanes. |
+| Lead fidelity F1 | Compare the declared native lead with compiled FM1 on the native clock. Use one-to-one pitch and onset matching within 50 ms, with the supported lead-copy substitutions below. Measured on ladder cases with a declared lead. |
 | Drum F1 and class accuracy | Associate DAC triggers and PSG noise attacks by onset within 30 ms. Class accuracy is over matches. Catalogue labels take precedence, with native sample slots mapping recognized kick and snare/clap presets, PSG noise mapping to hat, and unclassified presets to other. |
 | Voice top-1 and top-3 | For matched truth FM notes, compare actual emitted patch content and the first three entries in the reported shortlist by hash. Match report choices to output by source pitch, nearest quantized onset within one presentation, and emitted patch, with part ID breaking ties. The scorecard also gives counts by truth FM channel. |
 | Holdout voice spectral distance | Compare the truth and emitted patch using `AudioFingerprint` spectral distance on raw same-pitch 200 ms FM probes. Coverage is the fraction of matched truth FM notes for which both patches could be probed. |
 | Log-mel distance | Mean absolute log-mel magnitude difference between mono dry truth and output, over 40 bands, 512/1024/2048-sample Hann windows and 10 ms hops at 24 kHz. |
 | Onset correlation | Pearson correlation of the positive differences of successive 10 ms RMS windows. |
 | Release energy | Mean-square energy projected onto each matched note's fundamental in the 100 ms following truth note-off, truncated at the next reconstructed attack of the same pitch. This mix-based estimate can include energy from other simultaneous sources. |
+
+At R0, the allocator routes the declared lead to FM1 and can split other
+native parts across several output lanes. Melody F1 chooses a predominant
+physical lane independently on each side every two seconds. The winners can
+therefore carry different source parts after allocation, including a doubled
+line or a delayed echo of the lead. The score can drop even when FM1 preserves
+the declared lead. Lead fidelity F1 uses the fixed declaration in the ladder
+manifest for the entire song and measures preservation of that route.
+
+The declared lead provides one target per attack. After direct matches, an
+unmatched FM1 attack can substitute for a remaining target when it matches a
+supported copy in native truth at that copy's pitch and onset. A copy pattern
+on another native lane needs at least five matched attacks and 80% coverage
+in each direction within a two-second window. The pattern allows unison or
+one octave of displacement and up to 20 frames of lag in either direction,
+with a one-frame tolerance. Delayed or octave-shifted patterns also need
+three distinct matched pitches. Copies add no lead targets, and each target
+and FM1 attack can match only once. Unrelated notes incur the ordinary F1
+penalty.
 
 ### Musical grid and repeats
 
@@ -188,9 +208,11 @@ and release energy. `compare` returns 1 if an overall headline or gold metric
 regresses by **more than** the default 0.01 absolute tolerance, disappears,
 or if a card has failed cases. Use `--tolerance N` to set a different absolute
 threshold. It requires the same manifest, case selection, gold inputs and
-holdout mode. A changed catalogue or refinement setting remains visible on
-the cards and can be compared. Inspect the profile and variant slices for
-regressions hidden by the overall mean.
+holdout mode. Lead fidelity F1 is additive when comparing with older
+scorecards. Its delta uses the same tolerance when both cards report it.
+A changed catalogue or refinement setting remains visible on the cards and
+can be compared. Inspect the profile and variant slices for regressions
+hidden by the overall mean.
 
 ## Private gold cases
 

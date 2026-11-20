@@ -54,8 +54,8 @@ final class BenchMetrics {
 
     // Maximum-cardinality bipartite matching. Onset proximity orders equal-cardinality
     // alternatives deterministically without a greedy assignment losing true positives.
-    private static List<Pair> match(List<Event> truth, List<Event> estimate, double tolerance,
-                                    BiPredicate<Event, Event> eligible) {
+    static List<Pair> match(List<Event> truth, List<Event> estimate, double tolerance,
+                            BiPredicate<Event, Event> eligible) {
         var edges = new ArrayList<List<Integer>>(truth.size());
         var sorted = java.util.stream.IntStream.range(0, estimate.size()).boxed()
                 .sorted(Comparator.comparingDouble(i -> estimate.get(i).start)).toList();

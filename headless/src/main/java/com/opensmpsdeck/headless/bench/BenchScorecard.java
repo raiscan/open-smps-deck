@@ -19,7 +19,7 @@ final class BenchScorecard {
 
     private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance", "leadGap");
     private static final List<String> HEADLINES = List.of("noteF1", "notePrecision", "noteRecall", "offsetF1",
-            "melodyF1", "drumF1", "drumClassAccuracy", "voiceTop1", "voiceTop3", "voiceSpectralDistance",
+            "melodyF1", "leadFidelityF1", "drumF1", "drumClassAccuracy", "voiceTop1", "voiceTop3", "voiceSpectralDistance",
             "voiceSpectralCoverage", "logMelDistance", "onsetCorrelation", "releaseEnergy",
             "leadAttackF1", "leadPitchAccuracy", "leadGap");
 
@@ -74,8 +74,17 @@ final class BenchScorecard {
     }
 
     private static void row(StringBuilder out, String label, Group group) {
-        group.mean.forEach((key, value) -> out.append(String.format(Locale.ROOT, "| %s | %d | %s | %.6f | %d |%n",
-                label, group.cases, key, value, group.measured.get(key))));
+        group.mean.forEach((key, value) -> {
+            if (key.equals("leadFidelityF1") && group.mean.containsKey("melodyF1")) return;
+            metricRow(out, label, group, key, value);
+            if (key.equals("melodyF1") && group.mean.containsKey("leadFidelityF1"))
+                metricRow(out, label, group, "leadFidelityF1", group.mean.get("leadFidelityF1"));
+        });
+    }
+
+    private static void metricRow(StringBuilder out, String label, Group group, String key, double value) {
+        out.append(String.format(Locale.ROOT, "| %s | %d | %s | %.6f | %d |%n",
+                label, group.cases, key, value, group.measured.get(key)));
     }
 
     record Delta(String metric, Double before, Double after, Double delta, String result) {}
@@ -102,7 +111,7 @@ final class BenchScorecard {
             if (before == null && after == null) continue;
             if (before == null || after == null) {
                 boolean lost = after == null;
-                failed |= lost;
+                failed |= lost && !metric.equals("leadFidelityF1");
                 deltas.add(new Delta(metric, before, after, null, lost ? "missing" : "new"));
                 continue;
             }
