@@ -48,6 +48,20 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 - [ ] Reply after verifying the change. Mention the specific change, lane
   and time range, and the clip filename. Keep unresolved issues open.
 
+## Compare an optional stem transcriber
+
+Keep Suno MIDI as the default. If `transcribers_list` reports a configured
+tool, make a second reconstruction in a fresh work directory using the same
+inputs and the aligned melodic stems. For example, pass
+`options: {transcriber: "muscriptor", transcribeParts: {"0": "lead"}}` and
+include part 0 in `inputs.stems`. The CLI equivalent is
+`--transcriber muscriptor --transcribe-part 0=lead --stem "0=$lead"`.
+Use `reconstruct_describe` for the same part and bars in both runs, then
+`render_clip` with `solo: ["FM1"]` and `render_compare` to audition each lead
+against the aligned stem. Use each run's source-to-project timing if it was
+warped. Compare pitch, attack, release and dropped phrases before choosing.
+The score and report identify the external note input and its provenance.
+
 ## Plan lead and backing
 
 The default role pass decides note by note. On merged Suno parts it can

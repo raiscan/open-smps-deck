@@ -13,7 +13,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
 final class ReconstructionChecks {
-    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "external", "consensus", "audio");
+    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "transcriber", "external", "consensus", "audio");
 
     private ReconstructionChecks() {}
 
@@ -41,6 +41,15 @@ final class ReconstructionChecks {
                     at + ".source.parts", "invalid MIDI program or name for part " + part.id());
         }
         require(parts.containsAll(inputs.stems().keySet()), at + ".inputs.stems", "unknown MIDI part ID");
+        if (inputs.externalNotes() != null) {
+            for (var entry : inputs.externalNotes().entrySet()) {
+                ExternalTranscribers.validatePart(entry.getKey(), value.source().parts());
+                var imported = entry.getValue();
+                require(imported.provenance().noteCount() == imported.notes().size(), at + ".inputs.externalNotes",
+                        "provenance noteCount does not match the snapshot");
+                for (var note : imported.notes()) ExternalTranscribers.validateNote(note, at + ".inputs.externalNotes");
+            }
+        }
         require(parts.containsAll(value.sourceCounts().keySet()) && value.sourceCounts().values().stream().allMatch(n -> n >= 0),
                 at + ".sourceCounts", "invalid source note counts");
         for (var note : value.source().notes()) {
@@ -78,7 +87,7 @@ final class ReconstructionChecks {
             for (var grid : tempo.alternatives()) validateGrid(grid, at + ".tempo.alternatives");
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
-        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "external"));
+        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external"));
     }
 
     private static void validateGrid(ReconstructionTempo.Grid grid, String at) {
@@ -179,7 +188,7 @@ final class ReconstructionChecks {
                 require(external != null && external.source().equals("external"), where, "unknown external candidate");
             }
         }
-        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "consensus"));
+        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "transcriber", "consensus"));
     }
 
     private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
@@ -247,7 +256,7 @@ final class ReconstructionChecks {
         checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus", "audio"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio"));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
@@ -275,7 +284,7 @@ final class ReconstructionChecks {
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus", "audio"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio"));
         var continuity = allocation.leadContinuity();
         if (continuity != null)
             require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0

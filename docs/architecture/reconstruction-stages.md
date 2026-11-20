@@ -99,8 +99,19 @@ the phrase ID.
 | `midiBars` (optional) | Original PPQ windows kept for role continuity when an automatic estimate supplies the musical grid. |
 | `source` | Reference context for matching. `parts` has `id`, `name`, `program`, and `drums`. `notes` has `partId`, `pitch`, `velocity`, `startUs`, and `endUs`. `warnings` contains MIDI parser messages. |
 | `sourceCounts` | Original note count per MIDI part inside the interval. |
-| `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources are `midi`, `audio-refine`, or `external`. |
+| `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources are `midi`, `audio-refine`, `transcriber`, or `external`. |
 | `reductions`, `pitchChanges` | Original preparation decisions and optional audio-refinement evidence, also exported in the report. |
+
+Opt-in external transcription supplies melodic note replacements or additions
+before the score is written. It preserves the original MIDI reference context
+in `source`, including drums and the evidence used for the tempo grid.
+`inputs.externalNotes` is an optional map from part ID to the imported note
+snapshot and its provenance. The assembly report carries the provenance
+under `externalTranscription`. A resume from `transcribe` reapplies the
+snapshot, and later starts use the saved stage artifacts. Notes marked
+`transcriber` enter structure as score notes. The existing `--candidates`
+interface still supplies `external` repeat-consensus evidence.
+See the [headless guide](../../headless/README.md#external-transcription).
 
 With no MIDI tempo event or one 120 BPM event, transcribe looks for gradual
 tempo changes in overlapping onset windows. A shared linear BPM trend seeks

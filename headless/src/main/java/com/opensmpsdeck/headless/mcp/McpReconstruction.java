@@ -40,7 +40,11 @@ final class McpReconstruction {
             field("tempo", "number", "Override grid BPM").optional(),
             field("barOffset", "number", "Override bar origin in seconds (with tempo)").optional(),
             field("steadyTempo", "string", "Steady output tempo: off, auto, or BPM").optional(),
-            field("audioRepeats", "boolean", "Include audio chroma in repeat matching").optional());
+            field("audioRepeats", "boolean", "Include audio chroma in repeat matching").optional(),
+            field("transcriber", "string", "Name returned by transcribers_list. Fresh runs only").optional(),
+            field("transcribeParts", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
+                    "Map of melodic MIDI part IDs to transcriber roles. Each part needs an aligned stem").optional(),
+            field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
             "voicing.json", "roleplan.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
@@ -81,7 +85,14 @@ final class McpReconstruction {
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
-                    "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats");
+                    "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
+                    "transcriber", "transcriberDevice");
+            if (options.has("transcribeParts")) {
+                for (var part : options.getAsJsonObject("transcribeParts").entrySet()) {
+                    cli.add("--transcribe-part");
+                    cli.add(Integer.parseInt(part.getKey()) + "=" + part.getValue().getAsString());
+                }
+            }
             if (options.has("candidates")) {
                 cli.add("--candidates");
                 cli.add(McpPaths.input(string(options, "candidates")).toString());
