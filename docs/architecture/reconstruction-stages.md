@@ -331,10 +331,23 @@ points in source seconds, bend direction or shape, initial delay, and
 confidence. Structure warps the points together with the gate. The describe
 grid marks upward and downward motion with ↗ and ↘.
 
-For an FM1 bend, assembly auditions an F0 ramp and E7 tied pitch steps on the
-S3K sequencer and chooses using the resulting chip frequency contour. It
-preserves the allocated gate and restores the lane effects at the next
-attack. The report records applied bends under `bends`, with the
+For an FM1 bend, assembly measures the chip frequency contour to choose
+between a compact F0 ramp and E7 tied pitch steps. A modulated bend uses E7.
+F0 at the attack loads the normal vibrato counters. FA pauses vibrato at the
+first moving pitch step while E7 changes pitch without keying on. When there
+is a stable landing, F0 on its tie re-enables the paused counters and phase.
+A slide through key-off leaves vibrato paused until the next affected attack.
+`Sonic3kCoordFlagHandler` writes pending F0 parameters on a tie, but only
+an attack initializes the live counters for a new vibrato shape.
+
+A single F0 ramp uses a signed 8-bit F-number delta and stays in one octave
+block without wrapping its counters. E7 can cross blocks with a chain of
+FM pitches from MIDI 12 to 106 plus signed 8-bit detune. The artifact accepts
+signed offsets up to 9,400 cents, the distance between those two endpoints.
+Actual headroom depends on the starting pitch and available ticks. The
+encoder skips contours outside its measured error budget or the native bank
+capacity. Automatic stem tracking still uses a narrower plausibility window.
+The report records applied bends under `bends`, with the
 `stem-backed-pitch-bend` reason, encoding, gate, and contour error in cents.
 A `bendSizeLimit` flag indicates a retry without the bend commands when they
 exceed the project or bank capacity.
@@ -505,15 +518,42 @@ Optional `effects.vibrato` holds the four native F0 parameters `delay`,
 `vibrato`. Preset names and decision reasons are descriptive. The numeric
 settings control assembly.
 
-Run `reconstruct run --from assemble WORK_DIR` after a hand edit.
-`run --from voice` also reuses an existing voicing, or generates one if the
-file is missing. Use `reconstruct voice WORK_DIR` to refit after editing
-allocation. A refit starts from each still-available FM variant in the
-existing artifact. A challenger must improve both fit and held-out error
-by more than 0.5% to replace the previous variant. A measured near-tie
-changed the fit by 0.18% while switching to a markedly different gain.
-The margin puts that change below the replacement threshold. Gain,
-articulation and effects are fitted again.
+Optional `overrides` entries change an allocated tonal lane within a passage.
+An entry may supply `startTick` and `endTick` or `startSeconds` and
+`endSeconds`. Project time uses 60 ticks per second, with seconds rounded to
+the nearest tick. Ranges include their start and exclude their end. An entry
+can also supply `noteIds` from `allocation.json`. IDs alone select whole
+notes. Combining IDs and a time range selects their intersection.
+
+```json
+{"startSeconds":45.3,"endSeconds":48.8,"variantId":"variant-…","gain":1.1}
+```
+
+Each entry must set at least one of `variantId`, `gain`, `gate`,
+`minimumReleaseRate`, `vibrato`, or `modulationOff: true`. Gain replaces the
+lane gain before applying per-part gains. FM selects a voice and can floor its
+operator release rates. Tonal PSG can select a PSG volume envelope.
+Vibrato takes the same F0 arguments as `effects.vibrato`. Overlapping entries
+on the same note, invalid variant kinds, and stale note IDs fail validation.
+The gate is selected at attack. Patch, level and modulation can switch while
+a note is held, then revert at the range end, including during a release
+that reaches that boundary. Note-only overrides give the selected note its
+release before restoring settings for the next attack. Loading a new vibrato
+shape mid-note requires a reattack.
+Bends keep priority over custom vibrato during the moving segment. Dedicated
+copy lanes keep their original settings. Assembly deduplicates FM patches by
+their native bytes, including changes to release rates, with up to 128 local
+voices and a 32 KiB total bank.
+
+Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
+`run --from voice` also reuses existing voicing unless refit options are given,
+or generates it if missing. Use `reconstruct voice WORK_DIR` to refit after
+editing allocation. A refit preserves overrides, lane gain and part gains by
+default. Pass `--lane LANE` repeatedly to restrict which lanes can change, and
+`--refit-levels` to recompute the targeted levels. With no lane filter, an
+explicit refit considers every lane. The CLI lists every changed lane and MCP
+returns them in `refitChanges`. The fit starts from still-available FM variants
+and favors incumbents on close scores.
 
 The optional `fitWindows` object stores the source length in 60 Hz frames
 and excerpt start ticks in time order. Refits reuse those excerpts when
@@ -551,6 +591,26 @@ Repeat clips for a lane share one sequence ID when the relative note timing,
 pitch, articulation and instrument commands agree. Releases crossing a
 bar edge keep their continuity. The package compiler bakes source reuse
 into the playback bank.
+
+### Audition a frozen phrase
+
+`reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID OUT.wav`
+changes only the specified lane in a temporary overlay of the assembled
+project. It keeps timing, other lanes, copy tracks and authored project edits.
+The overlay swaps FM patches on the exact rounded project interval and
+preserves a held note's envelope state. Use a range starting before a
+relevant attack to compare how each patch develops through the hold.
+The default is in-mix playback. Use `--solo` to hear just the target lane,
+or `--gain` to multiply its existing level within the phrase. Each candidate
+plays from song start, discarding the warm-up PCM before the requested range.
+
+Repeat `--variant` to write numbered files and compare the seven successive
+RMS bins. `--reference WAV` appends the aligned reference phrase after
+matching the two RMS levels by attenuation. If the report identifies the
+original reference for a warped run, the tool uses the saved steady WAV.
+Audition leaves the artifacts untouched. Add an override and assemble to
+publish the chosen patch. MCP `reconstruct_audition` takes a `variants` array
+and returns the candidate paths and pre-match RMS envelopes in linear units.
 
 ## Benchmark
 

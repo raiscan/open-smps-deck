@@ -11,7 +11,7 @@ import java.util.Map;
 public final class ProjectCompiler {
     public static final int MAX_BANK_BYTES=0x8000;
     // Native S3K dialect: transpose-set is biased by 0x40, absolute volume is E4.
-    private static final int REST=0x80, STOP=0xF2, HOLD=0xE7;
+    private static final int REST=0x80;
     private ProjectCompiler() {}
 
     public static CompiledProject compileWithAssets(StudioProject project) {
@@ -137,7 +137,7 @@ public final class ProjectCompiler {
             cursor=clip.startTick()+clip.lengthTicks();
         }
         rest(out,dacEndTick(project,sources,clips)-cursor);
-        out.put(STOP);
+        out.put(SmpsCoordFlags.STOP);
     }
 
     private static void lane(Bank out,StudioProject project,String lane,int pointer,
@@ -182,19 +182,19 @@ public final class ProjectCompiler {
             }
             cursor=clip.startTick()+clip.lengthTicks();
         }
-        out.put(STOP);
+        out.put(SmpsCoordFlags.STOP);
     }
 
     private static void reset(Bank out,Sequence source,Map<String,Integer> voices,int version,
                               Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes) {
-        if(source.type().equals("FM")) { out.put(0xEF); out.put(voices.get(source.voiceId())); }
-        out.put(0xE4); out.put(source.volume());
+        if(source.type().equals("FM")) { out.put(SmpsCoordFlags.SET_VOICE); out.put(voices.get(source.voiceId())); }
+        out.put(SmpsCoordFlags.ABSOLUTE_VOLUME); out.put(source.volume());
         if(source.type().equals("FM")) { out.put(0xE0); out.put(0xC0); }
         out.put(0xED); out.put(0x40);
-        if(version>=2) { out.put(0xE1); out.put(0); out.put(0xE8); out.put(0); out.put(0xFA); }
+        if(version>=2) { out.put(SmpsCoordFlags.DETUNE); out.put(0); out.put(0xE8); out.put(0); out.put(SmpsCoordFlags.MODULATION_OFF); }
         if(version>=3) {
-            if(source.type().equals("PSG")) { out.put(0xF5);out.put(source.psgEnvelopeId()==null?0:psgEnvelopes.get(source.psgEnvelopeId())); }
-            out.put(0xF4);out.put(source.modulationEnvelopeId()==null?0:modulationEnvelopes.get(source.modulationEnvelopeId()));
+            if(source.type().equals("PSG")) { out.put(SmpsCoordFlags.PSG_INSTRUMENT);out.put(source.psgEnvelopeId()==null?0:psgEnvelopes.get(source.psgEnvelopeId())); }
+            out.put(SmpsCoordFlags.MODULATION_ENVELOPE);out.put(source.modulationEnvelopeId()==null?0:modulationEnvelopes.get(source.modulationEnvelopeId()));
         }
     }
     private static Map<String,Integer> envelopeIndices(List<Envelope> envelopes,String type) {
@@ -242,7 +242,7 @@ public final class ProjectCompiler {
                 if(event.command()==NativeCommand.MODULATION_OFF && source.modulationEnvelopeId()!=null) {
                     // Retail FA clears custom modulation's bit. Clear the
                     // selected envelope too for the arrangement command.
-                    out.put(0xF4); out.put(0);
+                    out.put(SmpsCoordFlags.MODULATION_ENVELOPE); out.put(0);
                 }
             }
             int next=at+(int)Math.min(127L,(long)length-at);
@@ -250,7 +250,7 @@ public final class ProjectCompiler {
             if(commandIndex<commands.size()) next=Math.min(next,commands.get(commandIndex).tick());
             if(sounding) {
                 if(note.tick()==at) out.put(encodedPitch(source.type(),note.pitch()));
-                else out.put(HOLD);
+                else out.put(SmpsCoordFlags.HOLD);
             } else out.put(REST);
             out.put(next-at);
             at=next;
@@ -263,7 +263,7 @@ public final class ProjectCompiler {
         // FM byte 81 is C0 (MIDI12), but S3K's PSG table starts at C2
         // (MIDI36). Sharing the FM bias raises every PSG note two octaves.
         int encoded=encodedPitch(type,pitch); boolean continuation=false;
-        while(ticks>0) { int duration=Math.min(ticks,127); if(continuation) out.put(HOLD); out.put(encoded); out.put(duration); ticks-=duration; continuation=true; }
+        while(ticks>0) { int duration=Math.min(ticks,127); if(continuation) out.put(SmpsCoordFlags.HOLD); out.put(encoded); out.put(duration); ticks-=duration; continuation=true; }
     }
     private static int encodedPitch(String type,int pitch) { return 0x81+pitch-(type.equals("PSG")?36:12); }
 

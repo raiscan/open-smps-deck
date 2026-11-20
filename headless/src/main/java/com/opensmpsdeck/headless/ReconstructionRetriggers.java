@@ -61,15 +61,16 @@ final class ReconstructionRetriggers {
     }
 
     record Playback(List<ReconstructionAllocation.Entry> notes,
-                    List<ReconstructionAllocation.RunPlacement> placements) {}
+                    List<ReconstructionAllocation.RunPlacement> placements, java.util.Map<String, String> origins) {}
 
     static Playback articulate(List<ReconstructionAllocation.Entry> notes, List<Burst> bursts,
                                ReconstructionTimeMap timeline, ReconstructionVoicing.Articulation articulation) {
-        if (bursts == null || bursts.isEmpty()) return new Playback(notes, List.of());
+        if (bursts == null || bursts.isEmpty()) return new Playback(notes, List.of(), java.util.Map.of());
         var byAnchor = new HashMap<String, List<Note>>();
         for (var burst : bursts)
             byAnchor.computeIfAbsent(burst.anchor(), key -> new ArrayList<>()).add(timeline.projectNote(burst.figure()));
         var articulated = new ArrayList<ReconstructionAllocation.Entry>();
+        var origins = new HashMap<String, String>();
         var placements = new ArrayList<ReconstructionAllocation.RunPlacement>();
         for (var entry : notes) {
             var figures = byAnchor.get(entry.note().id());
@@ -112,11 +113,12 @@ final class ReconstructionRetriggers {
                 // The original logical onset selects the voice. The entry ticks supply the new attacks.
                 var note = new Note(attack.getValue(), anchor.part(), anchor.start(), anchor.end(),
                         anchor.pitch(), anchor.velocity(), REASON, anchor.confidence());
+                origins.put(note.id(), anchor.id());
                 articulated.add(new ReconstructionAllocation.Entry(note, entry.role(), entry.lane(), start, stop,
                         entry.outcome(), entry.reason(), null));
             }
         }
-        return new Playback(List.copyOf(articulated), List.copyOf(placements));
+        return new Playback(List.copyOf(articulated), List.copyOf(placements), java.util.Map.copyOf(origins));
     }
 
     static List<Figure> find(ReferenceAudio audio, int pitch, double start, double end) {

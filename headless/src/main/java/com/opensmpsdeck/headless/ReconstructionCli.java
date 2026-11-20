@@ -89,9 +89,12 @@ final class ReconstructionCli {
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
-        out.println("       reconstruct structure|roles|allocate|voice|assemble WORK_DIR");
+        out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
+        out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct plan-template WORK_DIR");
+        out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
+        out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
@@ -100,6 +103,10 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("audition")) {
+            ReconstructionAudition.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("describe")) {
@@ -165,10 +172,20 @@ final class ReconstructionCli {
     }
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
-            ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous) throws IOException {
+            ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
+            java.util.Set<String> targets, boolean refitLevels) throws IOException {
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
         var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
-        return matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous));
+        var allocated = ReconstructionVoicing.byLane(allocation);
+        for (String target : targets)
+            if (!allocated.containsKey(target)) throw new IllegalArgumentException("Refit lane is not allocated: " + target);
+        if (!targets.isEmpty() && previous == null && !targets.equals(allocated.keySet()))
+            throw new IllegalArgumentException("A lane-targeted refit needs existing voicing for the other lanes");
+        var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets));
+        if (previous == null) return fitted;
+        var result = ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels);
+        ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
+        return result;
     }
 
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
@@ -185,7 +202,7 @@ final class ReconstructionCli {
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
                         ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
-        ReconstructionVoicing.validate(voicing, ordered, catalogue);
+        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
         var copyLanes = voicing.lanes().values().stream().map(lane -> lane.effects().copy())
@@ -203,7 +220,7 @@ final class ReconstructionCli {
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends), out, existing);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {

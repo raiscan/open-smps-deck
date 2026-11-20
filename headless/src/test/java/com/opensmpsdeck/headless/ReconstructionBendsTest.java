@@ -73,6 +73,27 @@ class ReconstructionBendsTest {
         assertEquals(0, falsePositives);
     }
 
+    @Test void keepsVibratoAroundATiedSlideDeeperThanFourteenSemitones() throws IOException {
+        var bend = new ReconstructionBends.Bend(ReconstructionBends.Kind.DOWN, 6 / 60.0, 1, List.of(
+                new ReconstructionBends.Point(0, 0), new ReconstructionBends.Point(6 / 60.0, 0),
+                new ReconstructionBends.Point(27 / 60.0, -2300),
+                new ReconstructionBends.Point(FRAMES / 60.0, -2300)));
+        var vibrato = new ReconstructionVoicing.Vibrato(1, 1, 5, 4);
+        var fit = ReconstructionBendEncoding.fit(note().withBend(bend), 0, FRAMES, 0, VOICE, vibrato);
+        assertNotNull(fit);
+        assertEquals(ReconstructionBendEncoding.Mode.E7, fit.mode());
+        assertEquals(PITCH - 23, fit.notes().getLast().pitch());
+        var modulation = fit.commands().stream().filter(c -> c.command() == NativeCommand.MODULATION
+                || c.command() == NativeCommand.MODULATION_OFF).toList();
+        assertEquals(List.of(NativeCommand.MODULATION, NativeCommand.MODULATION_OFF, NativeCommand.MODULATION),
+                modulation.stream().map(CommandEvent::command).toList());
+        assertEquals(0, modulation.getFirst().tick());
+        assertTrue(modulation.get(1).tick() >= 6 && modulation.get(1).tick() <= 8);
+        assertTrue(modulation.getLast().tick() >= 26);
+        assertEquals(vibrato, fit.endingVibrato());
+        assertTrue(roundTrip(fit, bend) < 90);
+    }
+
     private static double roundTrip(ReconstructionBendEncoding.Fit fit, ReconstructionBends.Bend bend)
             throws IOException {
         var audio = render(fit.notes(), fit.commands());

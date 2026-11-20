@@ -133,7 +133,7 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            artifact_read artifact_write project_validate
+            reconstruct_audition artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
         """.split())
@@ -162,6 +162,8 @@ def smoke(jar, root):
         rpc.call("artifact_write", workDir=work, artifact="voicing", selection=gain, value=9, error="FM1.gain")
         rpc.call("artifact_write", workDir=work, artifact="voicing", selection=gain, value=1.25)
         assert rpc.call("artifact_read", workDir=work, artifact="voicing", selection=gain)["value"] == 1.25
+        release = ["lanes", "FM1", "articulation", "minimumReleaseRate"]
+        rpc.call("artifact_write", workDir=work, artifact="voicing", selection=release, value=0)
         rpc.call("reconstruct_run", workDir=work, **{"from": "voice"})
         assert rpc.call("project_validate", project=project)["valid"]
         full = work / "render.wav"
@@ -170,6 +172,12 @@ def smoke(jar, root):
         with wave.open(str(full), "rb") as reference, wave.open(str(plain), "rb") as wav:
             reference.setpos(12000)
             assert wav.readframes(24000) == reference.readframes(24000)
+        current = read["value"]["lanes"]["FM1"]["variantId"]
+        audition = rpc.call("reconstruct_audition", workDir=work, lane="FM1", start=0.25, end=0.75,
+                            variants=[current], output=work / "phrase.wav")
+        assert audition["startTick"] == 15 and audition["endTick"] == 45
+        assert len(audition["candidates"][0]["rms"]) == 7
+        assert (work / "phrase.wav").read_bytes() == plain.read_bytes()
         clip = work / "clip.wav"
         rpc.call("render_clip", project=project, output=clip, start=0.25, end=0.75, solo=["FM1"])
         with wave.open(str(clip), "rb") as wav:

@@ -320,6 +320,107 @@ class ReconstructionCliTest {
         }
     }
 
+    @Test void scopedVoicingRestoresInsideAHeldNoteAndSurvivesRefit() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        var bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String original = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Original", bytes);
+        String originalVariant = builder.variant(original, "Original", InstrumentCatalogue.Recipe.plain(), null);
+        bytes[1] ^= 1;
+        String replacement = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Replacement", bytes);
+        String candidate = builder.variant(replacement, "Replacement", InstrumentCatalogue.Recipe.plain(), null);
+        var catalogue = builder.build();
+        var index = directory.resolve("scoped-catalogue.json");
+        catalogue.save(index);
+        var wav = directory.resolve("scoped-reference.wav");
+        WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, candidate, 72, 24)), wav, 60);
+        var midi = directory.resolve("scoped.mid");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 72, 96), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 72, 0), 768));
+        MidiSystem.write(source, 0, midi.toFile());
+        var work = directory.resolve("scoped-work");
+        var errors = new ByteArrayOutputStream();
+        var err = new PrintStream(errors);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
+                index.toString(), work.toString()}, System.out, err), errors.toString());
+        var file = work.resolve("voicing.json");
+        String saved = Files.readString(file);
+        var artifact = JsonParser.parseString(saved).getAsJsonObject();
+        var current = artifact.getAsJsonObject("lanes").getAsJsonObject("FM1").get("variantId").getAsString();
+        var other = current.equals(candidate) ? originalVariant : candidate;
+        var auditionOut = work.resolve("audition.wav");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "audition", work.toString(), "--lane", "FM1",
+                "--start", "0.1", "--end", "0.5", "--variant", current, "--variant", other, auditionOut.toString()},
+                System.out, err), errors.toString());
+        byte[] full = Files.readAllBytes(work.resolve("render.wav"));
+        byte[] excerpt = Files.readAllBytes(work.resolve("audition-1.wav"));
+        assertEquals(44 + 24 * 3200, excerpt.length);
+        assertArrayEquals(java.util.Arrays.copyOfRange(full, 44 + 6 * 3200, 44 + 30 * 3200),
+                java.util.Arrays.copyOfRange(excerpt, 44, excerpt.length));
+        assertEquals(saved, Files.readString(file));
+        assertFalse(java.util.Arrays.equals(excerpt, Files.readAllBytes(work.resolve("audition-2.wav"))));
+        var lane = artifact.getAsJsonObject("lanes").getAsJsonObject("FM1");
+        lane.addProperty("variantId", original);
+        lane.addProperty("gain", .4);
+        var scopes = JsonParser.parseString("""
+                [{"startTick":10,"endTick":20,"variantId":"%s","gain":0.2,"minimumReleaseRate":15},
+                 {"startTick":25,"endTick":35,"vibrato":{"delay":1,"rate":2,"delta":3,"steps":4}},
+                 {"startTick":37,"endTick":54,"gain":0.8}]
+                """.formatted(candidate)).getAsJsonArray();
+        lane.add("overrides", scopes);
+        ReconstructionStages.writeArtifact(file, artifact);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "assemble", work.toString()},
+                System.out, err), errors.toString());
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var data = ProjectCompiler.compile(project);
+        String nativeBytes = java.util.HexFormat.of().formatHex(data);
+        assertTrue(nativeBytes.matches("(?s).*ef01e4..e70aef00e4..e7.*"), nativeBytes);
+        assertEquals(2, project.voices().size());
+        assertTrue(nativeBytes.contains("f001020304"), nativeBytes);
+        var commands = project.sequences().getFirst().commands();
+        assertTrue(commands.stream().anyMatch(command -> command.tick() == 54
+                && command.command() == com.opensmpsdeck.project.NativeCommand.VOLUME),
+                "Restore base volume on the time boundary even after key-off");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString(), "--lane", "FM1"},
+                System.out, err), errors.toString());
+        var refitted = JsonParser.parseString(Files.readString(file)).getAsJsonObject()
+                .getAsJsonObject("lanes").getAsJsonObject("FM1");
+        assertEquals(.4, refitted.get("gain").getAsDouble());
+        assertEquals(scopes, refitted.get("overrides"));
+
+        scopes.add(scopes.get(0).deepCopy());
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ReconstructionStages.writeArtifact(file, artifact))
+                .getMessage().contains("overlap"));
+        scopes.remove(scopes.size() - 1);
+        scopes.get(0).getAsJsonObject().add("noteIds", JsonParser.parseString("[\"missing\"]"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ReconstructionStages.writeArtifact(file, artifact))
+                .getMessage().contains("missing"));
+    }
+
+    @Test void onlyRefitsLevelsOnExplicitlyTargetedLanes() {
+        var dry = ReconstructionVoicing.DRY;
+        var art = ReconstructionVoicing.WRITTEN;
+        var melody = ReconstructionRoles.Role.melody;
+        var harmony = ReconstructionRoles.Role.harmony;
+        var lead = new ReconstructionVoicing.Lane(melody, "lead", List.of(), .5, art, dry, "", "", "", List.of())
+                .withPartGains(java.util.Map.of(0, .8));
+        var backing = new ReconstructionVoicing.Lane(harmony, null, List.of(), 1.5, art, dry, "", "", "", List.of());
+        var fit = new ReconstructionVoicing.Lane(melody, "next", List.of(), .8, art, dry, "", "", "", List.of());
+        var before = new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", lead, "PSG2", backing), null);
+        var proposed = new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", fit, "PSG2", fit), null);
+        var keep = ReconstructionVoicing.preserveRefit(proposed, before, java.util.Set.of("FM1"), false);
+        assertEquals(.5, keep.lanes().get("FM1").gain());
+        assertEquals(lead.partGains(), keep.lanes().get("FM1").partGains());
+        assertEquals("next", keep.lanes().get("FM1").variantId());
+        assertSame(backing, keep.lanes().get("PSG2"));
+        var levels = ReconstructionVoicing.preserveRefit(proposed, before, java.util.Set.of("FM1"), true);
+        assertEquals(.8, levels.lanes().get("FM1").gain());
+        assertSame(backing, levels.lanes().get("PSG2"));
+    }
+
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {
         var bass = new MidiScore.Part(1, "Bass", 34, false);
         var lead = new MidiScore.Part(2, "Lead", 81, false);
