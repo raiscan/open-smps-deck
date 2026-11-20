@@ -98,19 +98,20 @@ public final class ReconstructionStages {
                   boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                   @Nullable String candidates, double harmonyMaxHz, @Nullable ReconstructionTempo.Options grid,
                   @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes,
-                  @Nullable Integer leadPart, @Nullable Boolean fastRunsOff) {
+                  @Nullable Integer leadPart, @Nullable Boolean fastRunsOff,
+                  @Nullable ReconstructionDrums.Source drumSource) {
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
-                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null, null, null);
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null, null, null, null);
         }
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats,
                Map<Integer, ExternalTranscribers.PartNotes> externalNotes, Integer leadPart) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
-                    stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null);
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null, null);
         }
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
@@ -165,7 +166,8 @@ public final class ReconstructionStages {
     private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
-                                Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart, boolean fastRunsOff) {}
+                                Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart, boolean fastRunsOff,
+                                @Nullable ReconstructionDrums.Source drumSource) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz) {}
 
     private ReconstructionStages() {}
@@ -370,7 +372,7 @@ public final class ReconstructionStages {
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
-                extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null);
+                extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
     }
 
@@ -389,6 +391,7 @@ public final class ReconstructionStages {
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
         Integer leadPart = null;
+        ReconstructionDrums.Source drumSource = null;
         boolean estimate = false, audioRepeats = false, fastRunsOff = false;
         String steady = null, transcriber = null, device = null;
         Path transcriberConfig = null;
@@ -449,6 +452,15 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("Duplicate notes import for part " + part);
                     }
                 }
+                case "--drum-source" -> {
+                    if (drumSource != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --drum-source catalogue|sliced|auto");
+                    try {
+                        drumSource = ReconstructionDrums.Source.valueOf(args[i]);
+                    } catch (IllegalArgumentException invalid) {
+                        throw new IllegalArgumentException("--drum-source expects catalogue, sliced or auto");
+                    }
+                }
                 case "--lead-part" -> {
                     if (leadPart != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --lead-part PART");
@@ -474,7 +486,7 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff);
+                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }

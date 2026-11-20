@@ -43,9 +43,15 @@ public final class ReferenceStretch {
 
     public static Alignment writeAndCaptureAlignment(Path mix, Path output, int presentations,
                                                      DoubleUnaryOperator outputToSource) throws IOException {
+        return writeAndCaptureAlignment(mix, output, presentations,
+                ReferenceAudio.durationMicros(mix) / 1e6, outputToSource);
+    }
+
+    static Alignment writeAndCaptureAlignment(Path mix, Path output, int presentations,
+                                              double sourceDuration, DoubleUnaryOperator outputToSource) throws IOException {
         S3kRenderer.validatePresentations(presentations);
         var alignment = new Alignment(presentations);
-        write(mix, output, presentations, ReferenceAudio.durationMicros(mix) / 1e6, outputToSource,
+        write(mix, output, presentations, sourceDuration, outputToSource,
                 alignment.positions, false);
         return alignment;
     }

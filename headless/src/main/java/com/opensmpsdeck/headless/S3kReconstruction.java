@@ -176,7 +176,7 @@ final class S3kReconstruction {
             }
             String id = choice.assetId();
             envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME,
-                    unsigned(catalogue.asset(key).bytes())));
+                    psgAttenuation(catalogue.asset(key).bytes())));
             spill.add(new Event(event.note(), event.start(), event.end(), event.priority(), id,
                     Math.max(1, event.volume() - 24)));
         }
@@ -263,12 +263,15 @@ final class S3kReconstruction {
                 reductions.add(new Reduction(note, Change.NO_MATCH, entry.note().id(), "no-playable-catalogue-match"));
                 continue;
             }
-            var asset = catalogue.asset(choice.assetId());
             if (lane.equals("DAC")) {
-                String id = asset.id() + "-" + choice.sampleRate();
-                samples.computeIfAbsent(id, key -> DacSample.of(key, choice.name(), choice.sampleRate(), asset.bytes()));
+                var slice = choice.slice();
+                String id = slice == null ? choice.assetId() + "-" + choice.sampleRate() : slice.id();
+                samples.computeIfAbsent(id, key -> slice == null
+                        ? DacSample.of(key, choice.name(), choice.sampleRate(), catalogue.asset(choice.assetId()).bytes())
+                        : slice);
                 dac.add(new Event(note, start, end, drumPriority(note.pitch()), id, 0));
             } else {
+                var asset = catalogue.asset(choice.assetId());
                 boolean isFm = lane.startsWith("FM");
                 var articulation = voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation();
                 String id = asset.id();
@@ -277,7 +280,7 @@ final class S3kReconstruction {
                     id = ReconstructionVoicing.patchId(asset, patch);
                     voices.computeIfAbsent(id, key -> new Voice(key, part.name() + " / " + choice.name(), unsigned(patch)));
                 } else {
-                    envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, unsigned(asset.bytes())));
+                    envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, psgAttenuation(asset.bytes())));
                 }
                 boolean figure = entry.note().source().equals(ReconstructionFastRuns.REASON)
                         || entry.note().source().equals(ReconstructionRetriggers.REASON);
@@ -545,6 +548,21 @@ final class S3kReconstruction {
             links.add(source, "DAC", from, span, sequences, clips);
             start = end;
         }
+    }
+
+    static List<Integer> psgAttenuation(byte[] bytes) {
+        var values = new ArrayList<Integer>(bytes.length);
+        for (int i = 0; i < bytes.length; i++) {
+            int value = Byte.toUnsignedInt(bytes[i]);
+            // zUpdatePSGTrack adds the envelope to the lane attenuation and
+            // ORs that sum into VoiceControl. Offset plus envelope at most
+            // 30 can only address the intended channel, even before bit 4
+            // is checked for silence. Native banks keep their original bytes.
+            values.add(value < 0x80 ? Math.min(value, 15) : value);
+            if ((value == 0x82 || value == 0x84) && i + 1 < bytes.length)
+                values.add(Byte.toUnsignedInt(bytes[++i]));
+        }
+        return List.copyOf(values);
     }
 
     private static List<Integer> unsigned(byte[] bytes) {
