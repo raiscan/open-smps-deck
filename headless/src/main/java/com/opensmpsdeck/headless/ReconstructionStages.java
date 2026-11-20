@@ -183,11 +183,13 @@ public final class ReconstructionStages {
                     }
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.
-                        // The standalone voice command always regenerates it.
+                        // Refit when explicitly requested or when rebuilding from an upstream stage.
                         if (request.chain && request.from == Stage.VOICE && Files.exists(voicingFile)) break;
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
-                        ReconstructionArtifacts.write(voicingFile, ReconstructionCli.fitVoicing(score, allocation));
+                        var previous = Files.notExists(voicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
+                                : ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
+                        ReconstructionArtifacts.write(voicingFile, ReconstructionCli.fitVoicing(score, allocation, previous));
                     }
                     case ASSEMBLE -> {
                         var structure = readStructure(structureFile, score);

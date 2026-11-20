@@ -276,6 +276,10 @@ final class ReconstructionChecks {
         if (continuity != null)
             require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0,
                     at + ".leadContinuity", "counts must be nonnegative");
+        var gapFill = allocation.melodyGapFill();
+        if (gapFill != null)
+            require(gapFill.afterSeconds() >= 0 && gapFill.beforeSeconds() >= gapFill.afterSeconds(),
+                    at + ".melodyGapFill", "expected nonnegative, non-increasing durations");
         var parts = partIndex(score);
         var lanes = new HashMap<String, java.util.ArrayList<ReconstructionAllocation.Entry>>();
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();

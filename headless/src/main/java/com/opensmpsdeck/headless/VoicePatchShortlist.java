@@ -41,7 +41,8 @@ final class VoicePatchShortlist {
     }
 
     List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
-                           Path mix, Map<Integer, Path> stems, VoiceWindows windows) throws IOException {
+                           Path mix, Map<Integer, Path> stems, VoiceWindows windows,
+                           InstrumentCatalogue.Variant incumbent) throws IOException {
         var available = new ArrayList<>(notes.stream().filter(n -> windows.trainingAttack(n.startTick(), ATTACK_TICKS)).toList());
         var occupied = new java.util.HashMap<String, int[]>();
         available.sort(Comparator.comparingInt((ReconstructionAllocation.Entry note) -> {
@@ -69,17 +70,22 @@ final class VoicePatchShortlist {
             probes.add(probe);
             if (probes.size() == PROBE_LIMIT) break;
         }
-        if (probes.isEmpty())
-            return variants.stream().limit(1).map(v -> new RankedPatch(v.id(), 0)).toList();
-
         var ranked = new ArrayList<RankedPatch>();
-        for (var variant : variants) {
-            double score = 0;
-            for (var probe : probes) score += similarity(probe, template(variant, probe.pitch()));
-            ranked.add(new RankedPatch(variant.id(), score / probes.size()));
+        var availableVariants = probes.isEmpty() ? variants.stream().limit(1).toList() : variants;
+        for (var variant : availableVariants) ranked.add(rank(variant, probes));
+        ranked.sort(Comparator.comparingDouble(RankedPatch::score).reversed().thenComparing(RankedPatch::id));
+        var shortlist = new ArrayList<>(ranked.subList(0, Math.min(ranked.size(), SHORTLIST_LIMIT)));
+        if (incumbent != null && shortlist.stream().noneMatch(patch -> patch.id().equals(incumbent.id()))) {
+            if (shortlist.size() == SHORTLIST_LIMIT) shortlist.removeLast();
+            shortlist.add(rank(incumbent, probes));
         }
-        return ranked.stream().sorted(Comparator.comparingDouble(RankedPatch::score).reversed()
-                .thenComparing(RankedPatch::id)).limit(SHORTLIST_LIMIT).toList();
+        return List.copyOf(shortlist);
+    }
+
+    private RankedPatch rank(InstrumentCatalogue.Variant variant, List<Probe> probes) throws IOException {
+        double score = 0;
+        for (var probe : probes) score += similarity(probe, template(variant, probe.pitch()));
+        return new RankedPatch(variant.id(), probes.isEmpty() ? 0 : score / probes.size());
     }
 
     private static int[] coverage(List<ReconstructionAllocation.Entry> notes, Map<Integer, Path> stems,

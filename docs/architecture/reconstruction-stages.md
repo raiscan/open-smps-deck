@@ -291,6 +291,19 @@ adequate level and sustained pitch motion. Its reason includes
 periodic pitch evidence with `~` and summarizes the three edit counts.
 `report.json` records the same counts under `stages.leadContinuity`.
 
+After those repairs, a counter segment can fill a gap between melody notes
+from the same MIDI part. The whole segment must fit inside the gap. Its
+notes must sound for at least 150 ms in total and connect to each other
+and both melody notes under the line tracer's transition cost. With
+MIDI alone, the gap is limited to one second and the two handoffs may
+total at most 120 ms of silence. Measured stem pitch motion can support
+longer phrases. Explicit `roleplan#N` assignments are preserved. Promotions
+carry the reason `melody-gapfill`.
+`report.json` records `stages.melodyGapFill.beforeSeconds` and
+`afterSeconds`. These fields measure time with no melody sounding while
+a counter note plays in any part that carries melody, using the roles
+timeline before hardware allocation.
+
 Rapid re-attacks on close, similarly accented notes of the same inner
 pitch can merge into the earlier note. The earlier note extends its
 release and records `sustained-inner-tone`. The dropped attack records
@@ -358,9 +371,22 @@ settings control assembly.
 
 Run `reconstruct run --from assemble WORK_DIR` after a hand edit.
 `run --from voice` also reuses an existing voicing, or generates one if the
-file is missing. Use `reconstruct voice WORK_DIR` to explicitly refit, for
-example after editing allocation. For work directories made before the
-voice stage, use `run --from voice` to add the artifact and reassemble.
+file is missing. Use `reconstruct voice WORK_DIR` to refit after editing
+allocation. A refit starts from each still-available FM variant in the
+existing artifact. A challenger must improve both fit and held-out error
+by more than 0.5% to replace the previous variant. A measured near-tie
+changed the fit by 0.18% while switching to a markedly different gain.
+The margin puts that change below the replacement threshold. Gain,
+articulation and effects are fitted again.
+
+The optional `fitWindows` object stores the source length in 60 Hz frames
+and excerpt start ticks in time order. Refits reuse those excerpts when
+the source length is unchanged, and resolve equally scored challengers
+in variant ID order. Older files without excerpt data select and save
+excerpts on the first refit. To force a fresh fit, move `voicing.json` to a
+backup name, then run `reconstruct voice WORK_DIR` or the MCP tool
+`reconstruct_stage` with `stage: "voice"`. To refit and reassemble in one
+command after moving the file, use `reconstruct run --from voice WORK_DIR`.
 
 ### Assemble
 

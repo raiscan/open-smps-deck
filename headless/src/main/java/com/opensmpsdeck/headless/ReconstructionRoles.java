@@ -82,11 +82,11 @@ final class ReconstructionRoles {
             octaveDrops.add(id);
         }
         var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops);
-        if (continuity != null) {
-            var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
-            decisions = continuity.repair(decisions, (anchor, note) -> scopes.isEmpty()
-                    || permitsContinuation(structure, scopes, anchor, note));
-        }
+        var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
+        java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> scopes.isEmpty()
+                || permitsContinuation(structure, scopes, anchor, note);
+        if (continuity != null) decisions = continuity.repair(decisions, permitted);
+        decisions = ReconstructionMelodyGapFill.promote(decisions, permitted);
         return new Result(VERSION, harmonyHz, decisions, structure.timeBase());
     }
 

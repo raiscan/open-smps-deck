@@ -226,6 +226,21 @@ class ReconstructionCliTest {
                 bytes = json.replace(",\n  \"timeBase\": \"source\"", "")
                         .replace(",\"timeBase\":\"source\"", "").getBytes(java.nio.charset.StandardCharsets.UTF_8);
             }
+            String json = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            if (entry.getKey().equals("voicing.json")) {
+                assertEquals(30, JsonParser.parseString(json).getAsJsonObject()
+                        .getAsJsonObject("fitWindows").get("frames").getAsInt());
+                json = json.replaceFirst(",\n  \"fitWindows\": [{][^}]*}", "");
+            } else if (List.of("allocation.json", "report.json").contains(entry.getKey())) {
+                var root = JsonParser.parseString(json).getAsJsonObject();
+                var gapFill = (entry.getKey().equals("report.json") ? root.getAsJsonObject("stages") : root)
+                        .getAsJsonObject("melodyGapFill");
+                assertEquals(0, gapFill.get("beforeSeconds").getAsDouble());
+                assertEquals(0, gapFill.get("afterSeconds").getAsDouble());
+                json = json.replaceFirst(",\n +\"melodyGapFill\": [{][^}]*}", "");
+            }
+            if (List.of("voicing.json", "allocation.json", "report.json").contains(entry.getKey()))
+                bytes = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(bytes)), entry.getKey());
         }
     }
@@ -259,6 +274,9 @@ class ReconstructionCliTest {
                 index.toString(), work.toString()}, System.out, err), errors.toString());
         Path file = work.resolve("voicing.json");
         String original = Files.readString(file);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString()}, System.out, err), errors.toString());
+        assertEquals(original, Files.readString(file));
+        Files.move(file, work.resolve("previous-voicing.json"));
         assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString()}, System.out, err), errors.toString());
         assertEquals(original, Files.readString(file));
         var artifact = JsonParser.parseString(original).getAsJsonObject();

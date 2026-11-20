@@ -25,18 +25,23 @@ final class VoiceWindows {
     record Reference(float[][] features, float[][] weights) {}
 
     private final List<Window> windows;
+    private final ReconstructionVoicing.FitWindows fitWindows;
     private final int frames;
     private final int songFrames;
     private final VoiceSpectra spectra = new VoiceSpectra();
 
-    VoiceWindows(int songFrames, Map<String, List<ReconstructionAllocation.Entry>> lanes) {
+    VoiceWindows(int songFrames, Map<String, List<ReconstructionAllocation.Entry>> lanes,
+                 ReconstructionVoicing.FitWindows previous) {
         this.songFrames = songFrames;
         int count = Math.clamp(songFrames / 12, 1, MAX_WINDOWS);
         int length = Math.min(WINDOW_TICKS, songFrames / count);
-        var activity = new int[songFrames];
-        for (var lane : lanes.values()) {
-            for (var entry : lane) {
-                for (int tick = entry.startTick(); tick < entry.endTick(); tick++) activity[tick]++;
+        boolean reuse = canReuse(previous, songFrames, count, length);
+        var activity = new int[reuse ? 0 : songFrames];
+        if (!reuse) {
+            for (var lane : lanes.values()) {
+                for (var entry : lane) {
+                    for (int tick = entry.startTick(); tick < entry.endTick(); tick++) activity[tick]++;
+                }
             }
         }
         int packed = 0;
@@ -45,13 +50,17 @@ final class VoiceWindows {
             int low = i * songFrames / count, high = (i + 1) * songFrames / count - length;
             int start = low + (high - low) / 2;
             int best = -1;
-            // Prefer windows with audible material over sparsely occupied edges.
-            for (int candidate = low; candidate <= high; candidate += Math.max(1, length / 3)) {
-                int active = Arrays.stream(activity, candidate, candidate + length).sum();
-                if (active > best || active == best && Math.abs(candidate - (low + high) / 2)
-                        < Math.abs(start - (low + high) / 2)) {
-                    best = active;
-                    start = candidate;
+            if (reuse) {
+                start = previous.starts().get(i);
+            } else {
+                // Prefer windows with audible material over sparsely occupied edges.
+                for (int candidate = low; candidate <= high; candidate += Math.max(1, length / 3)) {
+                    int active = Arrays.stream(activity, candidate, candidate + length).sum();
+                    if (active > best || active == best && Math.abs(candidate - (low + high) / 2)
+                            < Math.abs(start - (low + high) / 2)) {
+                        best = active;
+                        start = candidate;
+                    }
                 }
             }
             int preroll = Math.min(start, HISTORY);
@@ -60,9 +69,21 @@ final class VoiceWindows {
             packed += length + SEPARATION;
         }
         frames = packed - SEPARATION;
+        fitWindows = new ReconstructionVoicing.FitWindows(songFrames, chosen.stream().map(Window::start).toList());
         // A single cut point keeps fit/check operations deterministic and cache-friendly.
         windows = chosen.stream().sorted(java.util.Comparator.comparing(Window::check)).toList();
     }
+
+    private static boolean canReuse(ReconstructionVoicing.FitWindows previous, int frames, int count, int length) {
+        if (previous == null || previous.frames() != frames || previous.starts().size() != count) return false;
+        for (int i = 0; i < count; i++) {
+            int start = previous.starts().get(i);
+            if (start < i * frames / count || start > (i + 1) * frames / count - length) return false;
+        }
+        return true;
+    }
+
+    ReconstructionVoicing.FitWindows fitWindows() { return fitWindows; }
 
     int songFrames() { return songFrames; }
 
