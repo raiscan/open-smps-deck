@@ -196,8 +196,8 @@ velocity to coarse tone volume. MIDI controllers, including sustain and
 pitch bend, are outside this pass.
 
 Without `--seconds`, reconstruction processes the full WAV. By default a
-confident gradual tempo change of 1.5% or more is corrected to the opening
-tempo. Use `--steady-tempo off` to keep source timing or supply a numeric target
+confident gradual tempo curve with at least 0.85% sustained deviation is
+corrected to the opening tempo. Use `--steady-tempo off` to keep source timing or supply a numeric target
 BPM. Warped runs include a pitch-preserving `reference-steady.wav` for A/B in
 Studio and MCP. Use `reconstruct time-map WORK_DIR --source S` or `--project S`
 to map times between the two timelines. Bank and source size limits still apply. Set `--ticks-per-beat` to fit the Studio ruler without
@@ -215,8 +215,9 @@ java -jar "$deck_jar" reconstruct run --from roles full-song
 
 Run these commands after the structure stage. The score view uses the
 structure stage's notes, including applied corrections. Its header gives the
-selected tempo or an estimate from the MIDI bar lengths, and lists the
-prepared note count for each part. Each part summary gives pitch range,
+selected tempo, time base and prepared note count for each part. Section
+ranges and the grid use project seconds when warped and source seconds
+otherwise. JSON output includes the full section start and end times. Each part summary gives pitch range,
 attacks per bar, peak simultaneous notes, any recurring one- or two-bar
 figure, and role counts when `roles.json` is available. A repeated section
 references an earlier section and prints the differing parts. Use `--section`
@@ -239,6 +240,7 @@ musical intent. The template leaves an existing plan intact. Example plan:
 ```json
 {
   "version": 1,
+  "timeBase": "source",
   "rules": [
     {"sections": ["S1", "S3"], "part": 3, "role": "melody", "voice": "top"},
     {"sections": ["*"], "part": 0, "role": "harmony"},
@@ -251,7 +253,8 @@ Rules refer to the displayed section IDs and one-based inclusive bar
 numbers. Use `sections`, `bars`, or both to match their intersection.
 Rules match the note's attack and optional inclusive MIDI pitch bounds.
 Use `startSeconds` (inclusive) or `endSeconds` (exclusive) to place a handoff
-inside a bar. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
+inside a bar. Use the same `timeBase` as `describe`, or omit the field to
+inherit it. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
 `harmony`, `drums`, and `drop`. For melody, counter and bass, `top` or
 `bottom` traces one line from eligible notes, with other eligible notes
 left in harmony. Melody and counter default to `top`, bass to `bottom`.

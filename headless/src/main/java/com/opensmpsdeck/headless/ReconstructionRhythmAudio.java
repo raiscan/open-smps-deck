@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.DoubleUnaryOperator;
 
 /** Bounded-memory onset and chroma features on a common 10 ms time axis. */
 final class ReconstructionRhythmAudio {
@@ -59,12 +60,13 @@ final class ReconstructionRhythmAudio {
     }
 
     /** Compare corresponding beats, pooling unit chroma frames over the interior of each beat. */
-    double similarity(double first, double second, double lengthA, double lengthB, int beats) {
+    double similarity(double first, double second, double lengthA, double lengthB, int beats,
+                      DoubleUnaryOperator toSource) {
         double similarity = 0;
         int measured = 0;
         for (int i = 0; i < beats; i++) {
-            double[] a = beat(first + i * lengthA / beats, lengthA / beats);
-            double[] b = beat(second + i * lengthB / beats, lengthB / beats);
+            double[] a = beat(first + i * lengthA / beats, lengthA / beats, toSource);
+            double[] b = beat(second + i * lengthB / beats, lengthB / beats, toSource);
             double dot = 0, normA = 0, normB = 0;
             for (int k = 0; k < 12; k++) {
                 dot += a[k] * b[k];
@@ -78,10 +80,10 @@ final class ReconstructionRhythmAudio {
         return measured == 0 ? 0 : Math.min(1, similarity / measured);
     }
 
-    private double[] beat(double start, double length) {
+    private double[] beat(double start, double length, DoubleUnaryOperator toSource) {
         double[] result = new double[12];
-        int first = Math.max(0, (int) Math.ceil((start + .15 * length) / HOP));
-        int end = Math.min(frames.size(), (int) Math.ceil((start + .85 * length) / HOP));
+        int first = Math.max(0, (int) Math.ceil(toSource.applyAsDouble(start + .15 * length) / HOP));
+        int end = Math.min(frames.size(), (int) Math.ceil(toSource.applyAsDouble(start + .85 * length) / HOP));
         for (int i = first; i < end; i++) {
             var chroma = frames.get(i).chroma;
             for (int k = 0; k < 12; k++) result[k] += chroma[k];

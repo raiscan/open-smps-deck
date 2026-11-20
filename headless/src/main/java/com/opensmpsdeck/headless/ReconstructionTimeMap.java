@@ -1,9 +1,13 @@
 package com.opensmpsdeck.headless;
 
+import java.util.List;
+
 /** Project zero is source zero, including when the first downbeat follows a pickup. */
 record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sourceDuration) {
-    static final double DRIFT_THRESHOLD = .015;
+    static final double DRIFT_THRESHOLD = .0085;
     static final double MIN_CONFIDENCE = .40;
+
+    enum TimeBase { source, project }
 
     static void validateOption(String option) {
         if (option == null || option.equals("auto") || option.equals("off")) return;
@@ -39,12 +43,31 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
         return warped() ? beats.seconds(beats.index(0) + project * (bpm / 60)) : project;
     }
 
+    TimeBase timeBase() { return warped() ? TimeBase.project : TimeBase.source; }
+
+    double projectDuration() { return project(sourceDuration); }
+
     int frames() {
-        return (int) Math.ceil(project(sourceDuration) * 60 - 1e-8);
+        return (int) Math.ceil(projectDuration() * 60 - 1e-8);
     }
 
-    int tick(double source) {
-        return S3kReconstruction.toTicks(Math.round(project(source) * 1e6));
+    ReconstructionStages.Note projectNote(ReconstructionStages.Note note) {
+        return warped() ? retime(note, project(note.start()), project(note.end())) : note;
+    }
+
+    ReconstructionStages.Note sourceNote(ReconstructionStages.Note note) {
+        return warped() ? retime(note, source(note.start()), source(note.end())) : note;
+    }
+
+    private static ReconstructionStages.Note retime(ReconstructionStages.Note note, double start, double end) {
+        return new ReconstructionStages.Note(note.id(), note.part(), start, end, note.pitch(), note.velocity(),
+                note.source(), note.confidence());
+    }
+
+    List<ReconstructionStructure.Bar> projectBars(List<ReconstructionStructure.Bar> bars) {
+        if (!warped() || bars == null) return bars;
+        return bars.stream().map(bar -> new ReconstructionStructure.Bar(bar.id(),
+                project(bar.start()), project(bar.end()), bar.complete())).toList();
     }
 
     ReconstructionBeatMap.Summary summary() {

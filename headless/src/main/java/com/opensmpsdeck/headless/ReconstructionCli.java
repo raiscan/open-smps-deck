@@ -169,18 +169,10 @@ final class ReconstructionCli {
         Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
-        var projectStructure = structure;
-        if (timeline.warped()) {
-            var bars = structure.bars().stream().map(bar -> new ReconstructionStructure.Bar(bar.id(),
-                    timeline.project(bar.start()), timeline.project(bar.end()), bar.complete())).toList();
-            projectStructure = new ReconstructionStructure.Result(structure.version(), bars, structure.sections(),
-                    structure.repeats(), structure.corrections(), structure.notes(), structure.phrases(), structure.roleLayout());
-        }
-        var clipStructure = projectStructure;
         var catalogue = InstrumentCatalogue.open(index);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
-                        ? entry.note().startTick(score.frames()) : entry.startTick())).toList());
+                        ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
         ReconstructionVoicing.validate(voicing, ordered, catalogue);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
@@ -191,7 +183,7 @@ final class ReconstructionCli {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
-                            clipStructure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {

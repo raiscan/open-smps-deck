@@ -172,6 +172,10 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
 
     /** Boundaries on the PPQ grid, integrating the same tempo map used for note times. */
     static List<ReconstructionStructure.Bar> bars(Path path, long durationUs) throws IOException {
+        return bars(path, durationUs / 1_000_000.0);
+    }
+
+    static List<ReconstructionStructure.Bar> bars(Path path, double durationSeconds) throws IOException {
         Sequence sequence;
         try {
             sequence = MidiSystem.getSequence(path.toFile());
@@ -194,7 +198,7 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
         var bars = new ArrayList<ReconstructionStructure.Bar>();
         long tick = 0;
         long time = 0;
-        while (time < durationUs) {
+        while (time / 1_000_000.0 < durationSeconds) {
             if (bars.size() >= S3kRenderer.MAX_PRESENTATIONS)
                 throw new IllegalArgumentException("MIDI meter and tempo produce too many bars for the requested interval");
             var meter = meters.floorEntry(tick);
@@ -208,8 +212,9 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
             long next = nextMeter == null ? natural : Math.min(natural, nextMeter);
             long end = micros(tempos, next, resolution);
             if (end <= time) throw new IllegalArgumentException("MIDI bar duration is below one microsecond");
+            double endSeconds = end / 1_000_000.0;
             bars.add(new ReconstructionStructure.Bar("b" + (bars.size() + 1), time / 1_000_000.0,
-                    Math.min(end, durationUs) / 1_000_000.0, end <= durationUs && next == natural));
+                    Math.min(endSeconds, durationSeconds), endSeconds <= durationSeconds && next == natural));
             tick = next;
             time = end;
         }

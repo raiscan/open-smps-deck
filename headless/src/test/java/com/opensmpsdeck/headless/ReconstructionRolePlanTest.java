@@ -103,6 +103,51 @@ class ReconstructionRolePlanTest {
         }
     }
 
+    @Test void describesAndAppliesRolePlanBoundsInProjectSeconds() throws Exception {
+        fixture();
+        var scoreFile = work.resolve("score.json");
+        var score = ReconstructionStages.readScore(scoreFile);
+        var input = score.inputs();
+        var inputs = new ReconstructionStages.Inputs(input.midi(), input.wav(), input.catalogue(), input.name(),
+                input.ticksPerBeat(), false, false, false, false, Map.of(), null, 7.5,
+                new ReconstructionTempo.Options(false, 120.0, null, "60"), false);
+        var grid = ReconstructionTempo.override(inputs.grid(), 4);
+        var beats = ReconstructionBeatMap.constant(grid.selected(), 8);
+        ReconstructionArtifacts.write(scoreFile, score.withInputs(inputs, score.bars(), score.notes(), grid, null, beats));
+
+        run("structure", work.toString());
+        var view = JsonParser.parseString(run("describe", work.toString(), "--json")).getAsJsonObject();
+        assertEquals("project", view.get("timeBase").getAsString());
+        assertEquals(60, view.get("bpm").getAsDouble());
+        assertEquals(4, view.get("barSeconds").getAsDouble());
+        var sections = view.getAsJsonArray("sections");
+        assertEquals(16, sections.get(sections.size() - 1).getAsJsonObject().get("endSeconds").getAsDouble());
+
+        var plan = work.resolve("roleplan.json");
+        run("plan-template", work.toString());
+        assertEquals(ReconstructionTimeMap.TimeBase.project,
+                ReconstructionArtifacts.read(plan, ReconstructionRolePlan.class).timeBase());
+        String override = """
+                {"version":1,"timeBase":"project","rules":[
+                  {"sections":["*"],"part":0,"role":"drop","startSeconds":12,"endSeconds":12.25}
+                ]}
+                """;
+        Files.writeString(plan, override);
+        run("roles", work.toString());
+        var roles = ReconstructionArtifacts.read(work.resolve("roles.json"), ReconstructionRoles.Result.class);
+        assertEquals(ReconstructionTimeMap.TimeBase.project, roles.timeBase());
+        assertDecision(roles, "lo3", "drop", "roleplan#0");
+        assertDecision(roles, "hi3", "drop", "roleplan#0");
+        assertFalse(roles.notes().stream().anyMatch(decision -> decision.note().start() < 12
+                && "roleplan#0".equals(decision.reason())));
+        run("allocate", work.toString());
+        var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+        assertEquals(ReconstructionTimeMap.TimeBase.project, allocation.timeBase());
+
+        Files.writeString(plan, override.replace("\"project\"", "\"source\""));
+        assertTrue(call("roles", work.toString()).contains("roleplan.json.timeBase"));
+    }
+
     private void fixture() throws Exception {
         List<MidiScore.Part> parts = List.of(new MidiScore.Part(0, "Keys", 0, false),
                 new MidiScore.Part(1, "Drums", 0, true), new MidiScore.Part(2, "Upper", 80, false));
