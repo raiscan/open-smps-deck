@@ -83,7 +83,7 @@ final class ReconstructionStructure {
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
         var candidates = score.stream().filter(note -> note.source().equals("external")).toList();
-        var tones = originals.stream().filter(note -> !drums.contains(note.part())).toList();
+        var tones = originals.stream().filter(note -> note.run() == null && !drums.contains(note.part())).toList();
         var patterns = patterns(bars, tones);
         var rolePatterns = midiBars == null ? patterns : patterns(midiBars, tones);
         var groups = inferred && midiBars == null ? List.<List<Pattern>>of() : group(rolePatterns);

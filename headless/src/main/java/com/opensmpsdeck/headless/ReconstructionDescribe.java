@@ -47,7 +47,10 @@ public final class ReconstructionDescribe {
     private record View(double bpm, double barSeconds, String tempoSource, String grid,
                         ReconstructionTimeMap.TimeBase timeBase, List<Part> parts,
                         List<Section> sections, ReconstructionBeatMap.Summary tempoCurve,
-                        ReconstructionLeadContinuity.Stats leadContinuity) {}
+                        ReconstructionLeadContinuity.Stats leadContinuity, List<Run> fastRuns) {}
+    private record Run(String kind, int part, double start, double end, Role role, double confidence,
+                       List<ReconstructionFastRuns.Step> steps, List<ReconstructionFigureVoices.Voice> voices) {}
+
     private record Span(int first, int last) {}
 
     private ReconstructionDescribe() {}
@@ -185,8 +188,19 @@ public final class ReconstructionDescribe {
         double bpm = timeline.warped() ? timeline.bpm()
                 : beatMap != null ? beatMap.openingBpm() : inferred ? tempo.selected().bpm()
                 : 60 * (tempo == null ? 4 : tempo.selected().beatsPerBar()) / barSeconds;
+        var figures = new LinkedHashMap<Note, String>();
+        for (var note : effectiveNotes)
+            if (note.run() != null) figures.put(note, note.id());
+        if (score.retriggers() != null)
+            for (var burst : score.retriggers()) figures.put(timeline.projectNote(burst.figure()), burst.anchor());
+        var runs = figures.keySet().stream().filter(note -> (filter.isEmpty() || filter.contains(note.part()))
+                        && sections.stream().anyMatch(section -> note.end() > section.startSeconds && note.start() < section.endSeconds))
+                .sorted(ReconstructionStages.NOTE_ORDER)
+                .map(note -> new Run(note.source(), note.part(), note.start(), note.end(),
+                        roles == null ? null : roles.get(figures.get(note)), note.confidence(), note.run(),
+                        score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
-                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity);
+                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs);
     }
 
     private static Section repeat(List<Section> earlier, Section current, List<ReconstructionStructure.Bar> bars,
@@ -305,6 +319,16 @@ public final class ReconstructionDescribe {
         if (view.sections.stream().flatMap(section -> section.parts.stream())
                 .flatMap(part -> part.bars.stream()).anyMatch(pattern -> pattern.contains("~")))
             out.append("~ periodic pitch modulation\n");
+        if (view.fastRuns != null) for (var run : view.fastRuns) {
+            var sequence = run.steps.stream().map(step -> pitch(step.pitch())).collect(java.util.stream.Collectors.joining(" "));
+            out.append(String.format(Locale.ROOT, "%s P%d %.3f–%.3f s %s (%.2f)%n",
+                    run.kind, run.part, run.start, run.end, sequence, run.confidence));
+            if (run.voices != null) for (var voice : run.voices) {
+                var pitches = voice.pitches().stream().map(ReconstructionDescribe::pitch)
+                        .collect(java.util.stream.Collectors.joining(" "));
+                out.append("  ").append(voice.role()).append(" evidence ").append(pitches).append('\n');
+            }
+        }
         for (var part : view.parts)
             out.append(String.format(Locale.ROOT, "P%d %s | program %d | drums %s | %d notes%n",
                     part.id, part.name.replaceAll("\\p{Cntrl}", " "), part.program, part.drums, part.notes));

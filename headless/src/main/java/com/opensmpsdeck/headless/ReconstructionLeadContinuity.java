@@ -70,12 +70,14 @@ final class ReconstructionLeadContinuity {
     private final Map<Integer, Stem> stems;
     private final ReconstructionTimeMap timeline;
     private final Map<String, ReconstructionLeadAudio.Evidence> evidence;
+    private final boolean fastRunsOff;
 
     private ReconstructionLeadContinuity(Map<Integer, Stem> stems, ReconstructionTimeMap timeline,
-                                         Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+                                         Map<String, ReconstructionLeadAudio.Evidence> evidence, boolean fastRunsOff) {
         this.stems = stems;
         this.timeline = timeline;
         this.evidence = evidence;
+        this.fastRunsOff = fastRunsOff;
     }
 
     static ReconstructionLeadContinuity analyze(ReconstructionStages.Score score, List<Note> notes) throws IOException {
@@ -91,16 +93,69 @@ final class ReconstructionLeadContinuity {
             var stem = new Stem(track, local);
             stems.put(part.id(), stem);
             for (var note : local) {
+                if (note.run() != null) continue;
                 double trim = Math.clamp((note.end() - note.start() - .150) / 2, 0, .020);
                 var motion = track.evidence(note.pitch(), note.start() + trim, note.end() - trim,
                         stem.overlapping(note.start(), note.end()));
                 if (motion.confidence() > 0) evidence.put(note.id(), motion);
             }
         }
-        return new ReconstructionLeadContinuity(stems, timeline, evidence);
+        return new ReconstructionLeadContinuity(stems, timeline, evidence, Boolean.TRUE.equals(score.inputs().fastRunsOff()));
     }
 
     Map<String, ReconstructionLeadAudio.Evidence> evidence() { return evidence; }
+
+    /**
+     * Resonant leaps can make the lead path skip two attacks of a single articulated phrase.
+     * Restore them when a monophonic group on the explicit lead stem supplies both pitch and
+     * rhythm evidence, and the existing path already retains the other attacks.
+     */
+    void restoreArticulatedPhrases(Integer part, List<Note> tones, Map<String, Role> roles, Map<String, String> reasons) {
+        if (fastRunsOff || part == null || !stems.containsKey(part)) return;
+        var stem = stems.get(part);
+        var phrase = new ArrayList<Note>();
+        var local = tones.stream().filter(note -> note.part() == part).toList();
+        for (int i = 0; i < local.size(); i++) {
+            var note = local.get(i);
+            var previous = i > 0 ? local.get(i - 1) : null;
+            var next = i + 1 < local.size() ? local.get(i + 1) : null;
+            if (previous != null && (note.start() - previous.start() > .22 || previous.end() > note.start() + .010)) {
+                restore(phrase, tones, roles, reasons);
+                phrase.clear();
+            }
+            if (note.run() != null || (next != null && next.start() - note.start() < .030)
+                    || (previous != null && note.start() - previous.start() < .030)
+                    || !stem.track.clearAttack(timeline.sourceNote(note))) {
+                restore(phrase, tones, roles, reasons);
+                phrase.clear();
+                continue;
+            }
+            phrase.add(note);
+        }
+        restore(phrase, tones, roles, reasons);
+    }
+
+    private static void restore(List<Note> phrase, List<Note> tones, Map<String, Role> roles, Map<String, String> reasons) {
+        if (phrase.size() < 5) return;
+        double pulse = Double.POSITIVE_INFINITY;
+        for (int i = 1; i < phrase.size(); i++)
+            pulse = Math.min(pulse, phrase.get(i).start() - phrase.get(i - 1).start());
+        if (pulse < .058 || pulse > .110) return;
+        boolean longInterval = false;
+        for (int i = 1; i < phrase.size(); i++) {
+            double distance = (phrase.get(i).start() - phrase.get(i - 1).start()) / pulse;
+            if (Math.min(Math.abs(distance - 1), Math.abs(distance - 2)) > .18) return;
+            longInterval |= distance > 1.5;
+        }
+        if (!longInterval || phrase.stream().filter(note -> roles.get(note.id()) == Role.melody).count() < 3) return;
+        for (var note : phrase) {
+            if (roles.get(note.id()) == Role.melody || tones.stream().anyMatch(other ->
+                    roles.get(other.id()) == Role.melody && other.start() < note.end() - .010
+                            && other.end() > note.start() + .010)) continue;
+            roles.put(note.id(), Role.melody);
+            reasons.put(note.id(), "stem-phrase-attack");
+        }
+    }
 
     List<Decision> legato(List<Decision> decisions, BiPredicate<Decision, Note> permitted) {
         if (stems.isEmpty()) return decisions;
@@ -116,7 +171,7 @@ final class ReconstructionLeadContinuity {
                 var stem = stems.get(prior.part());
                 // Motion-based releases and inferred attacks get first claim on the gap.
                 // Apply legato only to the remaining consecutive attacks after role promotion.
-                if (stem != null && prior.part() == following.part()
+                if (stem != null && prior.run() == null && following.run() == null && prior.part() == following.part()
                         && prior.endTick(timeline.frames()) < following.startTick(timeline.frames())
                         && !hasReason(anchor, EXTENDED)) {
                     var sourcePrior = timeline.sourceNote(prior);
@@ -153,7 +208,7 @@ final class ReconstructionLeadContinuity {
             Note note = decision.note();
             ids.add(note.id());
             if (decision.role() == Role.melody) lead.add(decision);
-            else if ((decision.role() == Role.counter || decision.role() == Role.harmony)
+            else if (note.run() == null && (decision.role() == Role.counter || decision.role() == Role.harmony)
                     && note.end() - note.start() >= MIN_HEAD + ReconstructionLeadAudio.MIN_TONE)
                 held.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(decision);
         }
@@ -165,7 +220,7 @@ final class ReconstructionLeadContinuity {
             double end = next == null ? timeline.projectDuration() : next.start();
             double at = Math.max(occupied, prior.end());
             occupied = at;
-            if (at - prior.end() > 1e-7 || end - at < .049) continue;
+            if (prior.run() != null || at - prior.end() > 1e-7 || end - at < .049) continue;
             Stem stem = stems.get(prior.part());
             if (stem != null) {
                 double start = timeline.source(prior.start()), release = timeline.source(prior.end());

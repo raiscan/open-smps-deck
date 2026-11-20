@@ -260,6 +260,68 @@ To accept or reject a proposal by hand, edit this list and update its
 audit entry if needed. `corrections` is the decision history. External
 candidates stay in `score.json` as evidence.
 
+### Stem-backed fast figures
+
+The staged transcriber reads aligned, mapped tonal stems before writing
+`score.json`. The run detector samples pitch every 2.5 ms using two
+short periodicity windows. On mapped lead audio it also considers an
+interpolated spectral ridge supported by a fundamental and its octave.
+It requires stable centers, adjacent moves of one or two semitones,
+and at least four notes near one to six 60 Hz frames each. It accepts
+one passing reversal in a longer figure. A stable core must occupy
+nearly half of each rounded pitch span. This rejects quantized pitch
+crossings in a continuous glide. Dense backing and very short, low
+notes can still mask the lead.
+
+On an explicitly declared lead part, a second detector measures the
+combined short-window envelope of a held note's first four partials.
+It searches for a sequence of at least six strong rises, roughly two
+to six frames apart, with consistent spacing. That provides evidence
+of separate attacks even when the pitch stays constant. Eligibility
+uses the held note's pitch and favors the stronger attack among
+simultaneous overlapping pitches.
+
+Pitch-changing figures require an overlapping held note at the first
+pitch. Each changed pitch also needs a transcribed attack in the same
+register within 35 ms that covers at least 60% of the detected step.
+Already aligned transcribed attacks take precedence. The score stores
+accepted scales as one `fast-run` note with confidence and ordered
+source-time `run` steps. Structure projects the complete figure to the
+project clock and excludes it from note-level repeat voting. Roles and
+allocation keep it atomic. Allocation reserves one presentation per
+step on the assigned lane, merging the shortest steps when necessary.
+
+Same-pitch candidates are stored separately in `score.json` as
+`retriggers` keyed by anchor note ID. Competing explicit attacks can
+veto the burst. The original note goes through structure, role
+selection, legato, allocation and voicing. During assembly a burst
+adds key-ons only when its original note still owns the entire burst
+on FM1 at the same MIDI pitch. It preserves the fitted patch, the
+note's initial key-on and its voiced release. The next allocated
+note and other lanes keep their existing placements. An onset within
+one presentation of the original key-on can reuse that attack.
+
+`reconstruct describe --json` gives figure evidence on the current
+project clock. The report records source evidence and the allocated
+lane, span and retained step indexes for figures used in the render.
+
+For figure evidence, `figureVoices` keeps separate spectral pitches
+whose changes follow the ordered steps. For retriggers, it requires a
+transcribed companion pitch and independent partial-envelope rises
+within one presentation of the anchor. Voice evidence shares the
+figure's boundaries. The highest supported voice is tagged `lead`
+and the others `harmony`. The original placement remains the playback
+anchor. Evidence for extra voices is available in the score, describe
+and report artifacts. Octave partials alone leave independent doubling
+ambiguous.
+
+For a mapped explicit lead, the roles stage can also restore already
+transcribed attacks in a locally monophonic phrase. It requires a
+consistent mixture of short and long attack intervals, audible onsets
+in the matching pitch band, and no competing selected lead. Restored
+attacks carry `stem-phrase-attack`. Use `--no-fast-runs` on initial
+staged transcription to disable all three checks for an A/B comparison.
+
 ### Roles
 
 `roles.json` contains `harmonyMaxHz` and a `notes` array with

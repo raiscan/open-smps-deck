@@ -61,7 +61,10 @@ final class ReconstructionCli {
                           List<ReconstructionReverb.Estimate> reverbEstimates,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio,
                           StageEvidence stages, List<String> effectCopyLanes, ReconstructionBeatMap.Summary tempoCurve,
-                          Map<Integer, ExternalTranscribers.Evidence> externalTranscription) {}
+                          Map<Integer, ExternalTranscribers.Evidence> externalTranscription,
+                          List<ReconstructionStages.Note> fastRunEvidence,
+                          List<ReconstructionAllocation.RunPlacement> fastRuns,
+                          Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -77,7 +80,7 @@ final class ReconstructionCli {
 
     static void usage(PrintStream out) {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
-        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART]");
+        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
         out.println("           [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
@@ -154,7 +157,7 @@ final class ReconstructionCli {
         var matched = new Matched(Map.of(), evidence, sectionPlan.trials());
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
-        render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, List.of(),
+        render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
                 (echoes, copies) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null);
     }
@@ -185,12 +188,19 @@ final class ReconstructionCli {
         var effects = new Effects(Map.of(), Map.of(), Map.of());
         var copyLanes = voicing.lanes().values().stream().map(lane -> lane.effects().copy())
                 .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).sorted().toList();
+        var leadVoice = voicing.lanes().get("FM1");
+        var articulation = leadVoice == null ? ReconstructionVoicing.WRITTEN : leadVoice.articulation();
+        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, articulation);
+        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes());
+        var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
+        if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
+        placements.addAll(playback.placements());
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
-                    allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), copyLanes,
+                    allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
-                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
+                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -249,7 +259,7 @@ final class ReconstructionCli {
                                Options options, ReconstructionStages.Score transcription, Matched matched,
                                Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
                                ReconstructionMelodyGapFill.Stats melodyGapFill, ReconstructionAllocation.Fm1Gaps fm1InterNoteGaps,
-                               List<String> copyLanes,
+                               List<ReconstructionAllocation.RunPlacement> fastRuns, List<String> copyLanes,
                                Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
         long durationUs = transcription.durationUs();
         var timeline = ReconstructionTimeMap.of(transcription);
@@ -315,6 +325,9 @@ final class ReconstructionCli {
                 for (var entry : transcription.inputs().externalNotes().entrySet())
                     external.put(entry.getKey(), entry.getValue().provenance());
             }
+            var runEvidence = new java.util.ArrayList<>(transcription.notes().stream().filter(note -> note.run() != null).toList());
+            if (transcription.retriggers() != null)
+                for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
@@ -323,7 +336,8 @@ final class ReconstructionCli {
                     transcription.pitchChanges(), List.copyOf(effects.echoes().values()), result.echoNotes(), echoBankLimit,
                     effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
                     ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
-                    result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external);
+                    result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
+                    runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
