@@ -53,8 +53,14 @@ Unknown fields, invalid references, unsupported versions, and artifacts over
 32 MiB are rejected. IDs are strings. Within each list of identified records,
 IDs must be distinct and nonblank. Preserve an ID when editing its note.
 
-The same note object is used in every stage. Times are seconds measured from
-the start of the input, confidence is in 0–1, and velocity is in 1–127.
+The same note shape is used in every stage. Times are measured in seconds
+from the start. Confidence is in 0–1, and velocity is in 1–127.
+`score.json` always uses source seconds. `structure.json`, `roles.json` and
+`allocation.json` label their note and bar times with `timeBase`, either
+`source` or `project`. `roleplan.json` uses that same time base for
+`startSeconds` (inclusive) and `endSeconds` (exclusive), as displayed by
+`reconstruct describe`. A generated plan includes `timeBase`. A hand-written
+plan can omit it to inherit the structure time base.
 `part` refers to a MIDI part ID in `score.json`. Pitch is a MIDI number.
 S3K melodic notes span 12–106. Percussion and external candidates use MIDI
 0–127. The score can carry a coincident MIDI attack and release, which
@@ -134,21 +140,31 @@ setting.
 
 Use `--steady-tempo off|auto|BPM` on transcribe or a fresh run. The default
 `auto` uses the first stable opening tempo when a confident curve shows at least
-1.5% sustained deviation. For a ramp that starts immediately it uses the
-initial rate of the smoothed beat path. The threshold leaves roughly 1% changes in source
-time and corrects larger accelerandi such as a 7% rise. `off` keeps source
-time. A number sets the project BPM. With `--tempo BPM`, auto and off keep
+0.85% sustained deviation. For a ramp that starts immediately it uses the
+initial rate of the smoothed beat path. The sustained measurement averages
+over beat windows, so a 1.2% linear rise can register below 1.0%. `off` keeps
+source time. A number sets the project BPM. With `--tempo BPM`, auto and off keep
 the manual constant source grid and source playback times. A numeric steady
 tempo with an explicit source tempo scales the entire timeline by their
 ratio. The setting is saved at `inputs.grid.steady`.
 
-The score retains source seconds for bar comparisons and voice probes.
-Allocation uses the fractional beat index for each attack and release.
-Project seconds are `(beatIndex(source) - beatIndex(0)) * 60 / steadyBpm`.
-This keeps the original time origin, including pickups. Placement rounds
-to the nearest 60 Hz presentation, clamps releases, and gives each note at
-least one tick. `score.json` still stores the source duration and frame count.
-Use either direction of the same mapping from the CLI.
+When warping applies, structure maps the score's notes, candidates and bar
+boundaries into project seconds using
+`(beatIndex(source) - beatIndex(0)) * 60 / steadyBpm`. The origin stays at
+zero, including for pieces with pickups. Structure, roles and allocation
+then share the project clock. Allocation rounds to the nearest 60 Hz
+presentation, clamps releases, and gives each note at least one tick.
+Stable IDs tie downstream decisions to the source score. Structure maps audio
+comparison windows back to source seconds, and the voice stage maps the
+allocated notes back before fitting the original mix and stems. The inverse
+also works for notes created or retimed downstream. `score.json` stores the
+source duration and frame count.
+
+Earlier source-time stage files without a label still work in unwarped runs.
+For old warped work or after changing the tempo map, rebuild starting from
+structure. Convert any old role plan time bounds with `time-map` and set its
+`timeBase` to the value shown by `describe` before resuming. Use either
+direction of the mapping from the CLI.
 
 ```sh
 java -jar "$jar" reconstruct time-map WORK_DIR --source 42.5
@@ -193,7 +209,9 @@ same melody extractor used by roles runs provisionally inside structure.
 Roles runs once more on the corrected notes. For automatic estimates,
 `roleLayout` preserves the original contour windows, their sections, and
 their high-agreement bar matches. This keeps instrument-role boundaries
-stable as the musical grid changes. Edits to the corrected notes and the
+stable as the musical grid changes. When auto-tracking a placeholder MIDI
+tempo and warping the score, the original PPQ contour windows are laid out
+at their fixed spacing in project time. Edits to the corrected notes and the
 saved role layout are used when resuming at roles. Manual grids and older
 artifacts without a role layout use their main bars and sections directly.
 

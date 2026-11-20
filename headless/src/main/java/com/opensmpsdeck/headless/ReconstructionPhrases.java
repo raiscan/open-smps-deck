@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.DoubleUnaryOperator;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 
@@ -33,7 +34,8 @@ final class ReconstructionPhrases {
     private ReconstructionPhrases() {}
 
     static List<Match> find(List<ReconstructionStructure.Bar> bars, Map<String, List<Note>> byBar,
-                            java.util.Set<String> lead, ReconstructionRhythmAudio audio, int meter) {
+                            java.util.Set<String> lead, ReconstructionRhythmAudio audio, int meter,
+                            DoubleUnaryOperator toSource) {
         var result = new ArrayList<Match>();
         for (int length : new int[]{4, 2, 1}) {
             var windows = new ArrayList<Window>();
@@ -63,7 +65,7 @@ final class ReconstructionPhrases {
                     boolean accepted = true;
                     Double audioScore = null;
                     for (var member : group) {
-                        var evidence = compare(member, target, audio, meter * length);
+                        var evidence = compare(member, target, audio, meter * length, toSource);
                         if (!evidence.accepted) {
                             accepted = false;
                             break;
@@ -92,7 +94,8 @@ final class ReconstructionPhrases {
         return result;
     }
 
-    private static Evidence compare(Window a, Window b, ReconstructionRhythmAudio audio, int beats) {
+    private static Evidence compare(Window a, Window b, ReconstructionRhythmAudio audio, int beats,
+                                    DoubleUnaryOperator toSource) {
         double melody = similarity(a, b, a.melody, b.melody);
         double part = 0;
         for (var entry : a.parts.entrySet()) {
@@ -102,7 +105,7 @@ final class ReconstructionPhrases {
         double best = Math.max(melody, part);
         double minimum = a.bars.size() > 1 ? .70 : .75;
         if (best < (audio == null ? minimum : .42)) return new Evidence(false, melody, part, null);
-        Double acoustic = audio == null ? null : audio.similarity(a.start(), b.start(), a.length(), b.length(), beats);
+        Double acoustic = audio == null ? null : audio.similarity(a.start(), b.start(), a.length(), b.length(), beats, toSource);
         boolean accepted = best >= minimum;
         if (acoustic != null) {
             accepted = (accepted && acoustic >= .52) || (acoustic >= .86 && best >= (a.bars.size() > 1 ? .42 : .51));

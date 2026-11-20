@@ -79,6 +79,8 @@ and part, in `roleplan.json`. The code still traces individual notes.
      "role": "melody", "voice": "all"}`.
    - Demote a part while another carries the tune: `{"sections": ["section-b90"],
      "part": 3, "role": "harmony", "voice": "all"}`.
+   - Use the time base from `reconstruct_describe` for plan time bounds
+     (project seconds when warped, source seconds otherwise).
    - Use `bars` or `startSeconds`/`endSeconds` only for a mid-section
      handoff.
 4. Validate with `artifact_write` (artifact `roleplan`), then run from
