@@ -9,9 +9,16 @@ See [the example](../examples/lantern-walk.smps.json) and the
 ## Version 1 contract
 
 Every field shown below is required; unknown/duplicate fields, invalid UTF-8,
-non-integral native fields and unresolved synthesis references are errors. Files are capped at
-1 MiB and compiled output at one 32 KiB bank. IDs are stable strings, independent
-of list positions. Names are for display; references always use IDs.
+non-integral native fields and unresolved synthesis references are errors.
+IDs are stable strings, independent of list positions. Names are for display;
+references always use IDs.
+
+Project source is capped at 16 MiB (16,777,216 UTF-8 bytes) by default across
+Studio, the CLI, MCP and packaged project source. Set the JVM option
+`-Dopensmpsdeck.project.maxSourceBytes=BYTES` before `-jar` to select a limit
+from 1 to 33,554,432 bytes (32 MiB). Saves use compact JSON if the indented
+representation exceeds 1 MiB. Both forms use the same schema. Compiled output
+remains capped at one 32 KiB bank.
 
 ```json
 {
@@ -236,7 +243,7 @@ for existing FM and PSG clips.
 PCM is unsigned 8-bit mono. Byte `80` hex is the midpoint, and the sample ends
 at the end of its byte array. Use standard padded base64. Each sample holds
 1–65,535 bytes, with up to 95 samples and 512 KiB of decoded PCM per project.
-The project file retains its 1 MiB UTF-8 limit. Rates are raw bytes in decimal
+Rates are raw bytes in decimal
 0–255. Rate 1 is fastest, larger values slow playback, and 0 means 256 loops
 and is slowest. Rate 12 gives approximately 12.28 kHz on NTSC hardware.
 

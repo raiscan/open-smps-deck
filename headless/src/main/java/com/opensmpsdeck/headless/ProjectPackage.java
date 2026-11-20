@@ -7,7 +7,6 @@ import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
-import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.StudioProject;
 
 import java.io.BufferedOutputStream;
@@ -39,9 +38,7 @@ public final class ProjectPackage {
         // Native packages preserve structurally valid source and dependencies
         // even when the pinned renderer cannot execute a reachable instruction.
         byte[] song = nativeBank ? compiled.song() : S3kBinary.validateAndCopy(compiled);
-        byte[] source = ProjectFormat.write(project).getBytes(StandardCharsets.UTF_8);
-        if (source.length > ProjectFiles.MAX_FILE_BYTES)
-            throw new IllegalArgumentException("Project exceeds the " + ProjectFiles.MAX_FILE_BYTES + " byte source limit");
+        byte[] source = ProjectFiles.encodeSource(project);
 
         JsonObject manifest = new JsonObject();
         manifest.addProperty("schemaVersion", nativeBank ? 3 : compiled.samples().isEmpty() ? 1 : 2);

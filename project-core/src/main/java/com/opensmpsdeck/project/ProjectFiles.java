@@ -1,6 +1,7 @@
 package com.opensmpsdeck.project;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.CharacterCodingException;
@@ -22,9 +23,27 @@ import java.util.Set;
 
 /** Bounded, revision-aware persistence for the shared project source. */
 public final class ProjectFiles {
-    public static final int MAX_FILE_BYTES = 1_048_576;
+    public static final String SOURCE_LIMIT_PROPERTY = "opensmpsdeck.project.maxSourceBytes";
+    private static final int DEFAULT_SOURCE_BYTES = 16 * 1024 * 1024;
+    private static final int MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 
     private ProjectFiles() {}
+
+    public static int maxSourceBytes() {
+        String value = System.getProperty(SOURCE_LIMIT_PROPERTY);
+        if (value == null) return DEFAULT_SOURCE_BYTES;
+        try {
+            int limit = Integer.parseInt(value);
+            if (limit > 0 && limit <= MAX_SOURCE_BYTES) return limit;
+        } catch (NumberFormatException ignored) {
+            // Report the same configuration error for malformed and out-of-range values.
+        }
+        throw new IllegalArgumentException(SOURCE_LIMIT_PROPERTY + " must be an integer in 1.." + MAX_SOURCE_BYTES);
+    }
+
+    static String sourceLimitMessage(int limit) {
+        return "Project exceeds the " + limit + " byte UTF-8 source limit (set -D" + SOURCE_LIMIT_PROPERTY + "=BYTES)";
+    }
 
     public static LoadedProject load(Path path) throws IOException {
         Path file = normalized(path);
@@ -61,12 +80,9 @@ public final class ProjectFiles {
         final byte[] bytes;
         try {
             ProjectCompiler.compile(project);
-            bytes = ProjectFormat.write(project).getBytes(StandardCharsets.UTF_8);
+            bytes = encodeSource(project);
         } catch (IllegalArgumentException exception) {
             throw new IOException("Invalid project: " + exception.getMessage(), exception);
-        }
-        if (bytes.length > MAX_FILE_BYTES) {
-            throw new IOException("Project exceeds the " + MAX_FILE_BYTES + " byte source limit");
         }
         if (expectedRevision != null) requireRevision(file, expectedRevision);
         Path staged = Files.createTempFile(file.getParent(), "." + file.getFileName() + "-", ".tmp");
@@ -112,25 +128,70 @@ public final class ProjectFiles {
     }
 
     private static void requireRevision(Path file, String expectedRevision) throws IOException {
-        if (!expectedRevision.equals(revision(readBytes(file)))) {
+        if (!expectedRevision.equals(fileRevision(file))) {
             throw new IOException("Project changed on disk; reload with recovery before saving: " + file);
         }
     }
 
-    static byte[] readBytes(Path file) throws IOException {
-        BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isRegularFile()) throw new IOException("Project must be a regular file, not a link or directory: " + file);
-        if (attributes.size() > MAX_FILE_BYTES) throw new IOException("Project exceeds the " + MAX_FILE_BYTES + " byte source limit: " + file);
+    private static byte[] readBytes(Path file) throws IOException {
+        int limit = maxSourceBytes();
+        checkFile(file, limit);
         try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-            byte[] bytes = input.readNBytes(MAX_FILE_BYTES + 1);
-            if (bytes.length > MAX_FILE_BYTES) throw new IOException("Project exceeds the " + MAX_FILE_BYTES + " byte source limit: " + file);
-            return bytes;
+            return readSource(input, limit);
         }
     }
 
-    static String revision(byte[] bytes) {
+    /** Read a source entry with a bound on actual bytes, including decompressed zip entries. */
+    public static byte[] readSource(InputStream input) throws IOException {
+        return readSource(input, maxSourceBytes());
+    }
+
+    private static byte[] readSource(InputStream input, int limit) throws IOException {
+        byte[] bytes = input.readNBytes(limit + 1);
+        if (bytes.length > limit) throw new IOException(sourceLimitMessage(limit));
+        return bytes;
+    }
+
+    /** Serialize project source using the same limit as the file and package readers. */
+    public static byte[] encodeSource(StudioProject project) throws IOException {
+        int limit = maxSourceBytes();
+        String source = ProjectFormat.write(project);
+        if (source.length() > limit) throw new IOException(sourceLimitMessage(limit));
+        byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > limit) throw new IOException(sourceLimitMessage(limit));
+        return bytes;
+    }
+
+    private static void checkFile(Path file, int limit) throws IOException {
+        BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile()) throw new IOException("Project must be a regular file, not a link or directory: " + file);
+        if (attributes.size() > limit) throw new IOException(sourceLimitMessage(limit) + ": " + file);
+    }
+
+    static String fileRevision(Path file) throws IOException {
+        int limit = maxSourceBytes();
+        checkFile(file, limit);
+        MessageDigest digest = sha256();
+        try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            byte[] buffer = new byte[8192];
+            int remaining = limit + 1;
+            while (remaining > 0) {
+                int count = input.read(buffer, 0, Math.min(buffer.length, remaining));
+                if (count < 0) return HexFormat.of().formatHex(digest.digest());
+                digest.update(buffer, 0, count);
+                remaining -= count;
+            }
+        }
+        throw new IOException(sourceLimitMessage(limit) + ": " + file);
+    }
+
+    private static String revision(byte[] bytes) {
+        return HexFormat.of().formatHex(sha256().digest(bytes));
+    }
+
+    private static MessageDigest sha256() {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException exception) {
             throw new AssertionError("SHA-256 is required by the Java runtime", exception);
         }

@@ -27,6 +27,32 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProjectPackageTest {
     @TempDir Path directory;
 
+    @Test void projectAboveOneMiBSavesLoadsPackagesAndRendersIdentically() throws Exception {
+        StudioProject small = fixture();
+        var large = new StudioProject(3, "x".repeat(1_048_576), small.mode(), small.ticksPerBeat(),
+                small.tempo(), small.voices(), small.sequences(), small.clips(), small.envelopes());
+        Path smallSource = directory.resolve("small.json"), largeSource = directory.resolve("large.json");
+        ProjectFiles.save(smallSource, small, null);
+        ProjectFiles.save(largeSource, large, null);
+        assertTrue(Files.size(largeSource) > 1_048_576);
+        var loaded = ProjectFiles.load(largeSource);
+        assertEquals(large, loaded.project());
+        byte[] source = Files.readAllBytes(largeSource);
+        assertTrue(source.length < 1_050_000, "large projects should omit indentation");
+        assertEquals(loaded.revision(), ProjectFiles.save(largeSource, loaded.project(), loaded.revision()).revision());
+
+        Path archive = directory.resolve("large.smps.zip");
+        ProjectPackage.write(loaded.project(), archive);
+        assertArrayEquals(source, read(archive).get("source.smps.json"));
+
+        Path smallWav = directory.resolve("small.wav"), largeWav = directory.resolve("large.wav");
+        for (var pair : List.of(Map.entry(smallSource, smallWav), Map.entry(largeSource, largeWav))) {
+            var result = run("render-project", pair.getKey().toString(), pair.getValue().toString(), "--frames", "12");
+            assertEquals(0, result.exit(), result.err());
+        }
+        assertArrayEquals(Files.readAllBytes(smallWav), Files.readAllBytes(largeWav));
+    }
+
     @Test void exportContainsReproducibleNativeBytesSourceEveryAssetAndVerifiedManifest() throws Exception {
         StudioProject project = fixture();
         Path first = directory.resolve("first.smps.zip"), second = directory.resolve("second.smps.zip");

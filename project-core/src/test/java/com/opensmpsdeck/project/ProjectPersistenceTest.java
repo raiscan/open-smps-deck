@@ -3,6 +3,7 @@ package com.opensmpsdeck.project;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -103,12 +104,47 @@ class ProjectPersistenceTest {
 
     @Test void boundedAndMalformedInputCannotLoad() throws Exception {
         Path file = directory.resolve("song.json");
-        Files.write(file, new byte[ProjectFiles.MAX_FILE_BYTES + 1]);
-        assertThrows(IOException.class, () -> ProjectFiles.load(file));
+        int limit = ProjectFiles.maxSourceBytes();
+        Files.write(file, new byte[limit + 1]);
+        var failure = assertThrows(IOException.class, () -> ProjectFiles.load(file));
+        assertTrue(failure.getMessage().contains(limit + " byte"));
+        assertTrue(failure.getMessage().contains(ProjectFiles.SOURCE_LIMIT_PROPERTY));
+        assertThrows(IllegalArgumentException.class, () -> ProjectFormat.read(" ".repeat(limit + 1)));
         Files.write(file, new byte[] {(byte) 0xc3, 0x28});
         assertThrows(IOException.class, () -> ProjectFiles.load(file));
         Files.writeString(file, "{\"formatVersion\":1}");
         assertThrows(IOException.class, () -> ProjectFiles.load(file));
+    }
+
+    @Test void configuredLimitCountsUtf8BytesAcrossSourceBoundaries() throws Exception {
+        var project = project("é".repeat(256));
+        String source = ProjectFormat.write(project);
+        byte[] bytes = source.getBytes(StandardCharsets.UTF_8);
+        Path input = Files.write(directory.resolve("input.json"), bytes);
+        Path output = directory.resolve("output.json");
+        String key = ProjectFiles.SOURCE_LIMIT_PROPERTY;
+        String previous = System.getProperty(key);
+        try {
+            System.setProperty(key, Integer.toString(bytes.length));
+            assertEquals(project, ProjectFiles.load(input).project());
+            assertArrayEquals(bytes, ProjectFiles.readSource(new ByteArrayInputStream(bytes)));
+
+            int limit = bytes.length - 1;
+            System.setProperty(key, Integer.toString(limit));
+            assertTrue(source.length() < limit);
+            assertThrows(IllegalArgumentException.class, () -> ProjectFormat.read(source));
+            assertThrows(IOException.class, () -> ProjectFiles.load(input));
+            assertThrows(IOException.class, () -> ProjectFiles.readSource(new ByteArrayInputStream(bytes)));
+            assertThrows(IOException.class, () -> ProjectFiles.save(output, project, null));
+            assertFalse(Files.exists(output));
+
+            System.setProperty(key, Integer.toString(Integer.MAX_VALUE));
+            assertTrue(assertThrows(IllegalArgumentException.class, ProjectFiles::maxSourceBytes)
+                    .getMessage().contains(key));
+        } finally {
+            if (previous == null) System.clearProperty(key);
+            else System.setProperty(key, previous);
+        }
     }
 
     @Test void cleanDocumentAdoptsAtomicReplacementAndIgnoresIdenticalBytes() throws Exception {

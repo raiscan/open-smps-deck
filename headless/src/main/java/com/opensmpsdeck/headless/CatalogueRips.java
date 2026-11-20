@@ -84,9 +84,7 @@ final class CatalogueRips {
             var source = zip.getEntry("source.smps.json");
             if (source == null) throw new MissingCompanion("Package has no source.smps.json");
             try (var in = zip.getInputStream(source)) {
-                byte[] data = in.readNBytes(ProjectFiles.MAX_FILE_BYTES + 1);
-                if (data.length > ProjectFiles.MAX_FILE_BYTES)
-                    throw new IOException("Package project exceeds the source size limit");
+                byte[] data = ProjectFiles.readSource(in);
                 String json = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(data)).toString();
                 return new Source(ProjectFormat.read(json), InstrumentCatalogue.digest(data));
             }
