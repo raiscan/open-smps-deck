@@ -100,6 +100,21 @@ class ReconstructionFastRunsTest {
         assertEquals("harmony", voices.getLast().role());
     }
 
+    @Test void preservesExplicitOctaveAttacksOverAHeldPartial() {
+        var steps = new java.util.ArrayList<ReconstructionFastRuns.Step>();
+        var notes = new java.util.ArrayList<ReconstructionStages.Note>();
+        notes.add(new ReconstructionStages.Note("held", 0, .10, .61, 56, 90, "transcriber", 1));
+        for (int i = 0; i < 6; i++) {
+            double start = .10 + .08 * i;
+            steps.add(new ReconstructionFastRuns.Step(56, start, start + .08));
+            notes.add(new ReconstructionStages.Note("attack-" + i, 0, start, start + .064, 68, 90, "transcriber", 1));
+        }
+        var original = List.copyOf(notes);
+        ReconstructionFastRuns.reconcile(notes, 0, List.of(new ReconstructionFastRuns.Figure(
+                steps, .95, ReconstructionRetriggers.REASON)));
+        assertEquals(original, notes);
+    }
+
     private static ReferenceAudio tone(double duration, DoubleUnaryOperator pitch) {
         int rate = 12_000;
         var samples = new float[(int) (rate * duration)];

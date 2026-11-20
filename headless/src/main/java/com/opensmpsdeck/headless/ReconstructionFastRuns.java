@@ -52,9 +52,12 @@ final class ReconstructionFastRuns {
                     .max(Comparator.comparingDouble(note -> Math.min(note.end(), figure.end())
                             - Math.max(note.start(), figure.start()))).orElse(null);
             if (held == null) continue;
-            // Do not replace a line already transcribed as separate, correctly timed attacks.
+            // Retrigger envelopes can also pulse in a held octave's partial bands. Prefer a
+            // line with explicit, independently timed attacks over a split of that held layer.
+            boolean repeated = figure.reason.equals(ReconstructionRetriggers.REASON);
             long separate = figure.steps.stream().skip(1).filter(step -> overlapping.stream().anyMatch(note ->
-                    note != held && note.pitch() == step.pitch && Math.abs(note.start() - step.start) <= .020)).count();
+                    note != held && (note.pitch() == step.pitch || repeated && Math.abs(note.pitch() - step.pitch) == 12)
+                            && Math.abs(note.start() - step.start) <= .020)).count();
             if (separate >= 2) continue;
             notes.remove(held);
             if (figure.start() - held.start() >= 1.0 / 60)
