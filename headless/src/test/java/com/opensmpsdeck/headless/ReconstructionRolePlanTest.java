@@ -113,6 +113,45 @@ class ReconstructionRolePlanTest {
         assertDecision(roles, "drum0", "drums", null);
     }
 
+    @Test void plannedLineClaimsTheTailOfAChordTone() throws Exception {
+        var notes = List.of(new Note("low", 0, .1, .7, 60, 85, "midi", 1),
+                new Note("held", 0, .1, .99, 68, 85, "midi", 1),
+                new Note("before", 0, .48, .60, 70, 90, "midi", 1),
+                new Note("after", 0, 1.0, 1.30, 72, 90, "midi", 1));
+        var bars = List.of(new ReconstructionStructure.Bar("b0", 0, 2, true));
+        var sections = List.of(new ReconstructionStructure.Section("S1", List.of("b0")));
+        var parts = List.of(new MidiScore.Part(0, "Keys", 0, false));
+        var inputs = new ReconstructionStages.Inputs("test.mid", "test.wav", "catalogue.json", "Synthetic", 30,
+                false, false, false, false, Map.of(), null, 0, null, false);
+        var score = new ReconstructionStages.Score(1, 2_000_000, 120, 60, inputs, bars,
+                new MidiScore(parts, List.of(), List.of()), Map.of(0, 4), notes, List.of(), List.of(), null, null);
+        ReconstructionArtifacts.write(work.resolve("score.json"), score);
+        ReconstructionArtifacts.write(work.resolve("structure.json"),
+                new ReconstructionStructure.Result(1, bars, sections, List.of(), List.of(), notes));
+        Path plan = work.resolve("roleplan.json");
+        String rules = """
+                {"version":1,"rules":[
+                  {"sections":["*"],"part":0,"role":"harmony"},
+                  {"sections":["*"],"part":0,"role":"melody","texture":"single"}
+                ]}
+                """;
+        Files.writeString(plan, rules);
+        run("roles", work.toString());
+        Path rolesFile = work.resolve("roles.json");
+        var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+        assertDecision(roles, "held-lead", "melody", "roleplan#1 lead-continuation");
+        assertEquals(.6, roles.notes().stream().filter(d -> d.note().id().equals("held"))
+                .findFirst().orElseThrow().note().end(), 1e-9);
+        run("allocate", work.toString());
+        var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+        assertTrue(allocation.notes().stream().anyMatch(entry -> entry.note().id().equals("held-lead")
+                && "FM1".equals(entry.lane()) && entry.startTick() == 36));
+        Files.writeString(plan, rules.replace("\"texture\":\"single\"", "\"texture\":\"single\",\"pitchMin\":69"));
+        run("roles", work.toString());
+        assertTrue(ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class).notes().stream()
+                .noneMatch(decision -> decision.note().id().equals("held-lead")));
+    }
+
     @Test void omittedTextureProducesTheSameRolesAsExplicitAny() throws Exception {
         fixture(true);
         var plan = work.resolve("roleplan.json");

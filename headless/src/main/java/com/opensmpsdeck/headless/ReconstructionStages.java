@@ -45,7 +45,19 @@ public final class ReconstructionStages {
             .thenComparingInt(Note::part).thenComparingInt(Note::pitch);
 
     record Note(String id, int part, double start, double end, int pitch, int velocity,
-                String source, double confidence) {
+                String source, double confidence, @Nullable ReconstructionLeadAudio.Evidence motion) {
+        Note(String id, int part, double start, double end, int pitch, int velocity, String source, double confidence) {
+            this(id, part, start, end, pitch, velocity, source, confidence, null);
+        }
+
+        Note withTiming(double from, double to) {
+            return new Note(id, part, from, to, pitch, velocity, source, confidence, motion);
+        }
+
+        Note withMotion(ReconstructionLeadAudio.Evidence evidence) {
+            return new Note(id, part, start, end, pitch, velocity, source, confidence, evidence);
+        }
+
         MidiScore.Note midi() {
             return new MidiScore.Note(part, pitch, velocity, Math.round(start * MICROS_PER_SECOND),
                     Math.round(end * MICROS_PER_SECOND));
@@ -153,15 +165,14 @@ public final class ReconstructionStages {
                         var structure = readStructure(structureFile, score);
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
                         Path planFile = work.resolve("roleplan.json");
-                        ReconstructionRoles.Result roles;
-                        if (Files.notExists(planFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate);
-                        } else {
-                            var plan = ReconstructionArtifacts.read(planFile, ReconstructionRolePlan.class);
+                        ReconstructionRolePlan plan = null;
+                        if (!Files.notExists(planFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                            plan = ReconstructionArtifacts.read(planFile, ReconstructionRolePlan.class);
                             ReconstructionChecks.rolePlan(plan, structure, score);
-                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan,
-                                    score.usesBeatGrid() ? score.beatMap() : null);
                         }
+                        var continuity = ReconstructionLeadContinuity.analyze(score, structure.notes());
+                        var roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan,
+                                score.usesBeatGrid() ? score.beatMap() : null, continuity);
                         ReconstructionArtifacts.write(rolesFile, roles);
                     }
                     case ALLOCATE -> {

@@ -346,7 +346,9 @@ Use `bench build-corpus` with a local locked-on ROM and catalogue, then
 `bench run` to score reconstruction across MIDI profiles and audio variants.
 `--quick` selects four songs, `--holdout` excludes the song's own (non-library)
 assets from the catalogue, and `--gold` accepts private hand-labelled lead regions. Use
-`bench compare` to gate changes against a saved scorecard. Keep all inputs and
+`bench compare` to gate changes against a saved scorecard. Use
+`bench lead-gap WORK_DIR --stem LEAD.wav` to measure missed FM1 coverage
+against an aligned modulated lead stem. Keep all inputs and
 generated datasets outside the repository. See the
 [benchmark guide](../docs/architecture/benchmark.md) for commands and metric
 definitions.

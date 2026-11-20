@@ -24,7 +24,7 @@ final class ReconstructionMelody {
     private ReconstructionMelody() {}
 
     static Selection extract(ReconstructionStructure.Layout structure, List<Note> tones,
-                               Map<Integer, Integer> programs) {
+                               Map<Integer, Integer> programs, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
         var byPart = new LinkedHashMap<Integer, List<Note>>();
         for (var note : tones) byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
         var lines = new ArrayList<Line>();
@@ -59,6 +59,7 @@ final class ReconstructionMelody {
                     double score = register.pitch + (index == previous ? 1.0 : 0)
                             + (program >= 80 && program <= 87 ? 2 : 0)
                             - (program >= 32 && program <= 39 ? 5 : 0);
+                    if (!evidence.isEmpty()) score += 2.5 * motion(bar, entry.getValue(), evidence);
                     if (bestSustained && !register.sustained) continue;
                     if (best < 0 || register.sustained && !bestSustained || score > bestScore) {
                         best = index;
@@ -89,6 +90,17 @@ final class ReconstructionMelody {
             }
         }
         return result;
+    }
+
+    private static double motion(ReconstructionStructure.Bar bar, List<Note> notes,
+                                 Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        double total = 0, weighted = 0;
+        for (var note : notes) {
+            double duration = Math.max(.001, Math.min(bar.end(), note.end()) - Math.max(bar.start(), note.start()));
+            total += duration;
+            weighted += duration * evidence.getOrDefault(note.id(), ReconstructionLeadAudio.Evidence.NONE).confidence();
+        }
+        return weighted / total;
     }
 
     private static Register register(ReconstructionStructure.Bar bar, List<Note> notes) {

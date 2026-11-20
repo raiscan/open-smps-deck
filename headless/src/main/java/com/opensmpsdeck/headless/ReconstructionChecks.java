@@ -13,7 +13,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
 final class ReconstructionChecks {
-    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "external", "consensus");
+    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "external", "consensus", "audio");
 
     private ReconstructionChecks() {}
 
@@ -247,7 +247,7 @@ final class ReconstructionChecks {
         checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus", "audio"));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
@@ -271,7 +271,11 @@ final class ReconstructionChecks {
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus", "audio"));
+        var continuity = allocation.leadContinuity();
+        if (continuity != null)
+            require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0,
+                    at + ".leadContinuity", "counts must be nonnegative");
         var parts = partIndex(score);
         var lanes = new HashMap<String, java.util.ArrayList<ReconstructionAllocation.Entry>>();
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
@@ -362,6 +366,11 @@ final class ReconstructionChecks {
                 at, "MIDI pitch must be in 0..127 and velocity in 1..127");
         require(SOURCES.contains(note.source()) && note.confidence() >= 0 && note.confidence() <= 1,
                 at, "unknown source or confidence outside 0..1");
+        if (note.motion() != null) {
+            var motion = note.motion();
+            require(motion.vibrato() >= 0 && motion.vibrato() <= 1 && motion.glide() >= 0 && motion.glide() <= 1,
+                    at + ".motion", "motion scores must be within 0..1");
+        }
     }
 
     private static Set<Integer> partIds(ReconstructionStages.Score score) {

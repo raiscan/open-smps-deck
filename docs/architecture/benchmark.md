@@ -223,3 +223,30 @@ The labels file has a `regions` array. Each region includes `id`, `start_s`,
 50 ms, with precision penalized for unmatched predictions in the labelled
 regions. Pitch accuracy is measured over matched attacks with a resolved
 pitch. Gold metrics are reported separately from native-corpus means.
+
+
+### Lead gaps
+
+`leadGap` is seconds of reference lead activity without a compiled FM1
+gate, per minute evaluated. Lower is better. The metric samples at 10 ms
+intervals in source time and maps the compiled gates back from project time
+when steady tempo is active. Gold cases use the union of annotated lead
+notes with resolved attacks and releases, clipped to the labelled regions.
+The denominator is the total evaluated length of those regions.
+
+Score a retained reconstruction with the same gold annotations or with its
+aligned lead stem.
+
+```sh
+java -jar "$jar" bench lead-gap WORK_DIR --gold GOLD.json
+java -jar "$jar" bench lead-gap WORK_DIR --stem LEAD.wav
+```
+
+The stem estimate counts 200 ms windows where a pitched tone between MIDI
+55 and 84 has a measurable fundamental relative to the stem RMS and a
+partial with strong 4–8 Hz pitch modulation. It uses the union of those
+windows across the common stem and score duration. This criterion targets
+modulated lead sounds and may miss straight tones or brief attacks. The
+command also prints the active, missed and evaluated seconds so the
+reference coverage is visible. Compare before and after using the same
+reference and duration.

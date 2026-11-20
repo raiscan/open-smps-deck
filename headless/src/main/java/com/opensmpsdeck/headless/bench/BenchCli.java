@@ -5,6 +5,9 @@ import com.openggf.audio.MusicRestoreSink;
 import com.openggf.audio.smps.SmpsSequencer;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.headless.LeadGap;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -38,6 +41,7 @@ public final class BenchCli {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like [--drift N]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
+        out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
         out.println("       bench compare OLD.json NEW.json [--tolerance N]");
     }
 
@@ -46,10 +50,11 @@ public final class BenchCli {
             usage(out);
             return 0;
         }
-        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run or compare");
+        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, lead-gap or compare");
         return switch (args[1]) {
             case "build-corpus" -> build(args, out, hooks);
             case "run" -> runCases(args, out, hooks);
+            case "lead-gap" -> leadGap(args, out, hooks);
             case "compare" -> compare(args, out);
             default -> throw new IllegalArgumentException("Unknown bench command: " + args[1]);
         };
@@ -139,6 +144,24 @@ public final class BenchCli {
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
                         seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo), out, hooks);
+    }
+
+    private static int leadGap(String[] args, PrintStream out, Hooks hooks) throws IOException {
+        if (args.length != 5 || !List.of("--gold", "--stem").contains(args[3]))
+            throw new IllegalArgumentException("Expected bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
+        Path work = Path.of(args[2]);
+        var report = BenchFiles.read(work.resolve("report.json"), BenchReconstruction.Report.class);
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var notes = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
+        var gates = notes.channels().stream().filter(channel -> channel.kind().equals("FM1"))
+                .flatMap(channel -> channel.notes().stream()).map(note -> new LeadGap.Interval(note.start(), note.end()))
+                .sorted(java.util.Comparator.comparingDouble(LeadGap.Interval::start)).toList();
+        Path reference = Path.of(args[4]);
+        var measurement = args[3].equals("--gold")
+                ? BenchGold.leadGap(work, BenchGold.read(reference), gates)
+                : LeadGap.measure(work, gates, List.of(), List.of(), reference);
+        out.println(BenchFiles.JSON.toJson(measurement));
+        return 0;
     }
 
     private static int compare(String[] args, PrintStream out) throws IOException {

@@ -19,7 +19,8 @@ final class BenchReconstruction {
     record Part(int id, boolean drums) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
-                  List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve) {}
+                  List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages) {}
+    record Stages(Map<String, Long> leadContinuity) {}
     record TempoCurve(boolean warped) {}
     record Reduction(String change, String reason) {}
     record Change(int partId, int pitch, long startUs, long endUs) {}
@@ -70,6 +71,10 @@ final class BenchReconstruction {
             for (var change : report.reductions())
                 reductions.merge(change.reason() == null ? change.change() : change.reason(), 1L, Long::sum);
         }
+        if (report.stages() != null && report.stages().leadContinuity() != null)
+            report.stages().leadContinuity().forEach((key, count) -> {
+                if (count > 0) reductions.put("lead-" + key, count);
+            });
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
                 output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped());
     }
