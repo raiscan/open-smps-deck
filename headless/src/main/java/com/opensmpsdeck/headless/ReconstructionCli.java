@@ -30,6 +30,8 @@ import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 final class ReconstructionCli {
     private static final long MICROS_PER_SECOND = 1_000_000;
     private static final int REPORT_VERSION = 4;
+    static final String STEADY_REFERENCE = "reference-steady.wav";
+    private static final String REFERENCE_ID = "reconstruction-steady";
     private static final List<String> OUTPUTS = List.of("arrangement.smps.json", "arrangement.smps.zip",
             "render.wav", "report.json");
 
@@ -39,7 +41,7 @@ final class ReconstructionCli {
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
     private record MatchEvidence(Kind kind, String lane, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
     private record StageEvidence(int repeatGroups, long consensusCorrections, long harmonyMerges, long harmonyDrops,
-                                 int linkedClips) {}
+                                 int linkedClips, int phraseGroups, int sections) {}
     private record Effects(Map<Integer, ReconstructionEcho.Estimate> echoes,
                            Map<Integer, ReconstructionVibrato.Estimate> vibrato,
                            Map<Integer, ReconstructionReverb.Estimate> reverb) {}
@@ -55,7 +57,7 @@ final class ReconstructionCli {
                           Map<Integer, ReconstructionVibrato.Estimate> vibratoEstimates,
                           List<ReconstructionReverb.Estimate> reverbEstimates,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio,
-                          StageEvidence stages, List<String> effectCopyLanes) {}
+                          StageEvidence stages, List<String> effectCopyLanes, ReconstructionBeatMap.Summary tempoCurve) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -73,6 +75,8 @@ final class ReconstructionCli {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
+        out.println("           [--steady-tempo off|auto|BPM]");
+        out.println("       reconstruct time-map WORK_DIR --source S | --project S");
         out.println("       reconstruct structure|roles|allocate|voice|assemble WORK_DIR");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct plan-template WORK_DIR");
@@ -88,6 +92,19 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("describe")) {
             ReconstructionDescribe.run(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("time-map")) {
+            if (args.length != 5 || !List.of("--source", "--project").contains(args[3]))
+                throw new IllegalArgumentException("reconstruct time-map expects WORK_DIR --source S | --project S");
+            var score = ReconstructionStages.readScore(Path.of(args[2]).resolve("score.json"));
+            var timeline = ReconstructionTimeMap.of(score);
+            double input = Double.parseDouble(args[4]);
+            boolean source = args[3].equals("--source");
+            double limit = source ? timeline.sourceDuration() : timeline.project(timeline.sourceDuration());
+            if (!(input >= 0 && input <= limit))
+                throw new IllegalArgumentException("Time must be within the requested score interval");
+            out.println(source ? timeline.project(input) : timeline.source(input));
             return;
         }
         if (args.length >= 2 && args[1].equals("plan-template")) {
@@ -138,7 +155,8 @@ final class ReconstructionCli {
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
             ReconstructionAllocation.Result allocation) throws IOException {
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
-        return matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, allocation));
+        var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
+        return matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement));
     }
 
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
@@ -150,6 +168,15 @@ final class ReconstructionCli {
         var inputs = score.inputs();
         Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
+        var timeline = ReconstructionTimeMap.of(score);
+        var projectStructure = structure;
+        if (timeline.warped()) {
+            var bars = structure.bars().stream().map(bar -> new ReconstructionStructure.Bar(bar.id(),
+                    timeline.project(bar.start()), timeline.project(bar.end()), bar.complete())).toList();
+            projectStructure = new ReconstructionStructure.Result(structure.version(), bars, structure.sections(),
+                    structure.repeats(), structure.corrections(), structure.notes(), structure.phrases(), structure.roleLayout());
+        }
+        var clipStructure = projectStructure;
         var catalogue = InstrumentCatalogue.open(index);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
@@ -162,9 +189,11 @@ final class ReconstructionCli {
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, copyLanes,
-                    (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), score.frames(),
+                    (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
+                            clipStructure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
+            if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
+                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {
                 ProjectFiles.save(destination, ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project(),
                         existing == null ? null : existing.revision());
@@ -175,6 +204,7 @@ final class ReconstructionCli {
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             }
         } finally {
+            Files.deleteIfExists(staging.resolve(STEADY_REFERENCE));
             for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
             Files.deleteIfExists(staging);
         }
@@ -220,7 +250,8 @@ final class ReconstructionCli {
                                Effects effects, ReconstructionStructure.Result structure, List<String> copyLanes,
                                Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
         long durationUs = transcription.durationUs();
-        int frames = transcription.frames();
+        var timeline = ReconstructionTimeMap.of(transcription);
+        int frames = timeline.frames();
         MidiScore score = transcription.source();
         boolean complete = false;
         try {
@@ -240,6 +271,18 @@ final class ReconstructionCli {
             Path audio = target.resolve(OUTPUTS.get(2));
             var project = result.project();
             if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
+            Path aligned = reference;
+            if (timeline.warped()) {
+                aligned = target.resolve(STEADY_REFERENCE);
+                ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
+                var references = new ArrayList<>(project.references().stream().filter(r -> !r.id().equals(REFERENCE_ID)).toList());
+                references.add(new com.opensmpsdeck.project.AudioReference(REFERENCE_ID, "Steady reference",
+                        STEADY_REFERENCE, 0, 0, "reference"));
+                project = project.withReview(references, project.notes());
+            } else if (existing != null) {
+                project = project.withReview(project.references().stream().filter(r -> !r.id().equals(REFERENCE_ID)).toList(),
+                        project.notes());
+            }
             ProjectFiles.save(source, project, null);
             ProjectPackage.write(result.project(), packagePath);
             WaveFile.render(compiled, audio, frames);
@@ -252,6 +295,7 @@ final class ReconstructionCli {
             outputEvidence.put("project", evidence(source));
             outputEvidence.put("package", evidence(packagePath));
             outputEvidence.put("wav", evidence(audio));
+            if (timeline.warped()) outputEvidence.put("referenceSteady", evidence(aligned));
             var noteCounts = transcription.sourceCounts();
             var partEvidence = score.parts().stream().map(p -> new PartEvidence(p.id(), p.name(), p.program(),
                     p.drums(), noteCounts.getOrDefault(p.id(), 0))).toList();
@@ -259,7 +303,8 @@ final class ReconstructionCli {
                     structure.corrections().stream().filter(ReconstructionStructure.Correction::applied).count(),
                     result.reductions().stream().filter(r -> "rapid-inner-tone-reattack".equals(r.reason())).count(),
                     result.reductions().stream().filter(r -> "isolated-harmony-octave-double".equals(r.reason())).count(),
-                    result.project().clips().size() - result.project().sequences().size());
+                    result.project().clips().size() - result.project().sequences().size(),
+                    structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size());
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
@@ -267,8 +312,8 @@ final class ReconstructionCli {
                     options.audioRefine(), (int) score.notes().stream().filter(note -> note.startUs() < durationUs).count(),
                     transcription.pitchChanges(), List.copyOf(effects.echoes().values()), result.echoNotes(), echoBankLimit,
                     effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
-                    ReconstructionAudioCheck.compare(reference, audio, frames), stages,
-                    result.echoNotes() == 0 ? List.of() : copyLanes);
+                    ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
+                    result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
@@ -276,6 +321,7 @@ final class ReconstructionCli {
                     result.fmNotes(), result.psgNotes(), result.dacHits(), frames, destination);
         } finally {
             if (!complete) {
+                Files.deleteIfExists(target.resolve(STEADY_REFERENCE));
                 for (String name : OUTPUTS) Files.deleteIfExists(target.resolve(name));
                 Files.delete(target);
             }
@@ -358,6 +404,8 @@ final class ReconstructionCli {
         if (name.isBlank()) throw new IllegalArgumentException("Project name must not be blank");
         return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems);
     }
+
+    static String audioHash(Path path) throws IOException { return evidence(path).sha256(); }
 
     private static FileEvidence evidence(Path path) throws IOException {
         MessageDigest digest;

@@ -71,6 +71,12 @@ final class ReconstructionStructure {
 
     static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
                           ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars) {
+        return analyze(bars, score, parts, audio, inferred, meter, midiBars, null);
+    }
+
+    static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
+                          ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars,
+                          ReconstructionTimeMap timeline) {
         var drums = new HashSet<Integer>();
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
@@ -102,7 +108,7 @@ final class ReconstructionStructure {
         var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter);
         phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end());
         var notes = corrected.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
-        var linked = inferred ? identicalBars(bars, notes, phrases) : repeats;
+        var linked = inferred ? identicalBars(bars, notes, phrases, timeline) : repeats;
         return new Result(VERSION, bars, sections, linked, corrections, notes,
                 phrases.stream().map(ReconstructionPhrases.Match::evidence).toList(), roleLayout);
     }
@@ -229,17 +235,20 @@ final class ReconstructionStructure {
     private record RelativeNote(int part, int pitch, int velocity, long start, long end) {}
     private record BarContent(long length, List<RelativeNote> notes) {}
 
-    private static List<Repeat> identicalBars(List<Bar> bars, List<Note> notes, List<ReconstructionPhrases.Match> phrases) {
+    private static List<Repeat> identicalBars(List<Bar> bars, List<Note> notes, List<ReconstructionPhrases.Match> phrases,
+                                             ReconstructionTimeMap timeline) {
+        java.util.function.DoubleToLongFunction toFrame = timeline != null && timeline.warped()
+                ? timeline::tick : time -> Math.round(time * 60);
         var eligible = new HashSet<String>();
         for (var match : phrases) for (var window : match.windows()) for (var bar : window.bars()) eligible.add(bar.id());
         var groups = new LinkedHashMap<BarContent, List<String>>();
         for (var pattern : patterns(bars, notes)) {
             Bar bar = pattern.bar;
             if (!eligible.contains(bar.id) || pattern.notes.isEmpty()) continue;
-            long start = Math.round(bar.start * 60), end = Math.round(bar.end * 60);
-            if (pattern.notes.stream().anyMatch(n -> Math.round(n.end() * 60) > end)) continue;
+            long start = toFrame.applyAsLong(bar.start), end = toFrame.applyAsLong(bar.end);
+            if (pattern.notes.stream().anyMatch(n -> toFrame.applyAsLong(n.end()) > end)) continue;
             var signature = pattern.notes.stream().map(n -> new RelativeNote(n.part(), n.pitch(), n.velocity(),
-                    Math.round(n.start() * 60) - start, Math.round(n.end() * 60) - start)).toList();
+                    toFrame.applyAsLong(n.start()) - start, toFrame.applyAsLong(n.end()) - start)).toList();
             groups.computeIfAbsent(new BarContent(end - start, signature), ignored -> new ArrayList<>()).add(bar.id);
         }
         return groups.values().stream().filter(group -> group.size() >= 2)

@@ -150,6 +150,26 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
         }
     }
 
+    /** Quarter-note anchors for an explicitly requested warp of a trusted MIDI grid. */
+    static ReconstructionBeatMap beatMap(Path path, long durationUs, int meter) throws IOException {
+        try {
+            var sequence = MidiSystem.getSequence(path.toFile());
+            int resolution = sequence.getResolution();
+            var tempos = tempoMap(sequence.getTracks(), resolution);
+            var beats = new ArrayList<Double>();
+            long time = 0;
+            for (long tick = 0; time < durationUs; tick += resolution) {
+                time = micros(tempos, tick, resolution);
+                beats.add(time / 1e6);
+                if (beats.size() > 4100)
+                    throw new IllegalArgumentException("MIDI tempo produces too many beats for a steady grid");
+            }
+            return new ReconstructionBeatMap(List.copyOf(beats), 0, meter == 0 ? 4 : meter, 1);
+        } catch (InvalidMidiDataException e) {
+            throw new IOException("Invalid MIDI file: " + path, e);
+        }
+    }
+
     /** Boundaries on the PPQ grid, integrating the same tempo map used for note times. */
     static List<ReconstructionStructure.Bar> bars(Path path, long durationUs) throws IOException {
         Sequence sequence;

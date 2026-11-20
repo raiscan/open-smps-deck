@@ -35,9 +35,9 @@ public final class BenchCli {
     private BenchCli() {}
 
     public static void usage(PrintStream out) {
-        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like]");
+        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like [--drift N]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
-        out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle]");
+        out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle] [--steady-tempo off|auto]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N]");
     }
 
@@ -60,6 +60,7 @@ public final class BenchCli {
         List<Integer> songs = BenchCorpus.DEFAULT;
         int frames = 30 * 60;
         boolean sunoLike = false;
+        double drift = 0;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
@@ -69,6 +70,11 @@ public final class BenchCli {
                     if (!value(args, ++i, flag).equals("suno-like"))
                         throw new IllegalArgumentException("The separate corpus profile is suno-like");
                     sunoLike = true;
+                }
+                case "--drift" -> {
+                    drift = Double.parseDouble(value(args, ++i, flag));
+                    if (!(drift > 0 && drift <= .18))
+                        throw new IllegalArgumentException("--drift must be greater than 0 and at most 0.18");
                 }
                 case "--seconds" -> {
                     double seconds = Double.parseDouble(value(args, ++i, flag));
@@ -89,8 +95,9 @@ public final class BenchCli {
             throw new IllegalArgumentException("Choose either --quick or --songs");
         if (sunoLike && frames < 2)
             throw new IllegalArgumentException("A shifted corpus needs at least two presentations");
+        if (drift != 0 && !sunoLike) throw new IllegalArgumentException("--drift requires --profile suno-like");
         BenchCorpus.build(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]).toAbsolutePath().normalize(),
-                songs, frames, out, hooks.sequencer(), sunoLike);
+                songs, frames, out, hooks.sequencer(), sunoLike, drift);
         return 0;
     }
 
@@ -98,11 +105,17 @@ public final class BenchCli {
         require(args, 5);
         Path gold = null;
         Integer jobs = null;
+        String steadyTempo = "auto";
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick", "--holdout", "--audio-refine", "--gold-only" -> { }
+                case "--steady-tempo" -> {
+                    steadyTempo = value(args, ++i, flag);
+                    if (!List.of("off", "auto").contains(steadyTempo))
+                        throw new IllegalArgumentException("bench run --steady-tempo expects off or auto");
+                }
                 case "--role-plan" -> {
                     if (!value(args, ++i, flag).equals("oracle"))
                         throw new IllegalArgumentException("--role-plan expects oracle");
@@ -123,7 +136,7 @@ public final class BenchCli {
             throw new IllegalArgumentException("--role-plan oracle requires native corpus cases");
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
-                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), seen.contains("--role-plan")), out, hooks);
+                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), seen.contains("--role-plan"), steadyTempo), out, hooks);
     }
 
     private static int compare(String[] args, PrintStream out) throws IOException {

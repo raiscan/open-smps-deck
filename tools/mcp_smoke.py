@@ -212,6 +212,17 @@ def smoke(jar, root):
         notes = rpc.call("notes_list", project=project)
         assert notes["notes"][0]["reply"]["text"] == "Raised the melody gain."
         assert len(json.loads(project.read_text())["references"]) == 1
+        steady = root / "steady"
+        files = rpc.call("reconstruct_run", workDir=steady, inputs=inputs,
+                         options={"seconds": 2, "tempo": 120, "steadyTempo": "80"})["files"]
+        steady_wav = steady / "reference-steady.wav"
+        assert Path(files["reference-steady.wav"]) == steady_wav
+        assert json.loads(Path(files["arrangement.smps.json"]).read_text())["references"][0]["path"] == steady_wav.name
+        for reference, name in [(inputs["wav"], "auto-ab.wav"), (steady_wav, "explicit-ab.wav")]:
+            rpc.call("render_compare", render=steady / "render.wav", reference=reference, workDir=steady,
+                     output=steady / name, start=2.1, end=2.5)
+        assert (steady / "auto-ab.wav").read_bytes() == (steady / "explicit-ab.wav").read_bytes()
+
     with Client(jar, modern=True) as rpc:
         assert rpc.request("tools/list")["tools"] == tools
         assert rpc.call("notes_list", project=project) == notes

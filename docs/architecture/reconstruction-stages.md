@@ -88,16 +88,28 @@ the phrase ID.
 | `durationUs`, `frames`, `ticksPerSecond` | Requested interval in microseconds, its ceiling in presentations, and the 60 Hz placement grid. |
 | `inputs` | Absolute `midi`, `wav` and `catalogue` paths. Also stores `name`, `ticksPerBeat`, `keepOctaves`, `fmOnly`, `wholePartVoices`, `audioRefine`, `stems` (part ID to absolute WAV path), optional `candidates`, and `harmonyMaxHz`. |
 | `bars` | Musical grid in elapsed seconds. Each bar has `id`, `start`, `end`, and `complete`. A pickup, meter change between nominal boundaries, or cut at the requested end can produce a partial bar. |
-| `tempo` (optional) | Estimated or overridden grid with BPM, beat phase, bar offset, beats per bar, and evidence. Includes confidence, separate MIDI and audio evidence, and competing estimates. The `source` field is `estimated`, `override`, or `midi` when the estimate was measured but the PPQ grid retained. |
+| `tempo` (optional) | Grid summary with BPM, beat phase, bar offset, beats per bar, and evidence. `source` is `tracked`, `estimated`, `override`, or `midi` when the PPQ grid is retained. |
+| `beatMap` (optional) | Editable `beats` in source seconds, zero-based `downbeat` phase modulo `beatsPerBar`, and `confidence` from 0 to 1. The first or last anchor may extend past the requested interval. |
 | `midiBars` (optional) | Original PPQ windows kept for role continuity when an automatic estimate supplies the musical grid. |
 | `source` | Reference context for matching. `parts` has `id`, `name`, `program`, and `drums`. `notes` has `partId`, `pitch`, `velocity`, `startUs`, and `endUs`. `warnings` contains MIDI parser messages. |
 | `sourceCounts` | Original note count per MIDI part inside the interval. |
 | `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources are `midi`, `audio-refine`, or `external`. |
 | `reductions`, `pitchChanges` | Original preparation decisions and optional audio-refinement evidence, also exported in the report. |
 
-With no MIDI tempo event or one 120 BPM event, transcribe estimates a constant
-tempo from periodicity at beat, eighth-note, sixteenth-note, and triplet
-intervals.
+With no MIDI tempo event or one 120 BPM event, transcribe looks for gradual
+tempo changes in overlapping onset windows. A shared linear BPM trend seeks
+maximum agreement across the windows and penalizes steep changes. The search
+covers up to about 18% total drift. Phase measurements correct the trend locally
+when the rate of change varies. Drum onsets carry the most weight. When the
+onsets independently reveal a frame clock across the entire interval, that
+clock refines an already detected ramp to sub-frame precision. Kick, snare
+and cymbal accents help choose the beat and downbeat. Melody, bass and the
+mix onset envelope support those decisions. An explicit quarter-note MIDI
+meter takes precedence, with 4/4 as the default for a tracked grid.
+
+The existing constant-grid estimate covers pieces with a steady pulse and
+provides a fallback when the tracker lacks a coherent path. It uses periodicity
+at beat, eighth-note, sixteenth-note, and triplet intervals.
 Coincident MIDI attacks count once. Reference RMS onset peaks add evidence
 when the same tempo explains both signals. MIDI percussion accents and
 low-note changes distinguish beats and downbeats. An opening shared by
@@ -108,14 +120,42 @@ retains the PPQ grid. `--estimate-tempo` searches even when the MIDI provides
 a tempo map and uses the best estimate. `--tempo BPM --bar-offset S` sets
 a constant grid manually. The offset is the downbeat in seconds, wrapped
 into the first bar, and defaults to zero. These options leave note attack
-and release times intact. The estimator assumes a stable tempo between 65
-and 200 BPM. Supply a valid MIDI tempo map for music with tempo changes.
+and release times intact. Use a valid MIDI tempo map for deliberate abrupt
+tempo changes.
 
-The score retains its measured seconds for bar comparisons and audio probes.
-Placement rounds those times to the nearest 60 Hz presentation, clamps a
-release to the interval, and gives each placed note at least one tick.
-Editing seconds upstream therefore changes the quantized result on the next
-allocation. The preparation audit fields have the following shapes.
+Variable-length bars follow the selected beat map. A confident curve that
+deviates at least 0.6% from the opening rate can supply structure bars even
+when playback stays in source time. The tempo summary uses `tracked` in
+that case. To correct a tracked grid, edit `score.json` at `beatMap.beats` or
+`beatMap.downbeat` and run `reconstruct run --from structure WORK_DIR`.
+The structure stage rebuilds its bars from the edited curve. Corrections to
+a beat map can also change project timing under the saved steady-tempo
+setting.
+
+Use `--steady-tempo off|auto|BPM` on transcribe or a fresh run. The default
+`auto` uses the first stable opening tempo when a confident curve shows at least
+1.5% sustained deviation. For a ramp that starts immediately it uses the
+initial rate of the smoothed beat path. The threshold leaves roughly 1% changes in source
+time and corrects larger accelerandi such as a 7% rise. `off` keeps source
+time. A number sets the project BPM. With `--tempo BPM`, auto and off keep
+the manual constant source grid and source playback times. A numeric steady
+tempo with an explicit source tempo scales the entire timeline by their
+ratio. The setting is saved at `inputs.grid.steady`.
+
+The score retains source seconds for bar comparisons and voice probes.
+Allocation uses the fractional beat index for each attack and release.
+Project seconds are `(beatIndex(source) - beatIndex(0)) * 60 / steadyBpm`.
+This keeps the original time origin, including pickups. Placement rounds
+to the nearest 60 Hz presentation, clamps releases, and gives each note at
+least one tick. `score.json` still stores the source duration and frame count.
+Use either direction of the same mapping from the CLI.
+
+```sh
+java -jar "$jar" reconstruct time-map WORK_DIR --source 42.5
+java -jar "$jar" reconstruct time-map WORK_DIR --project 43.1
+```
+
+The preparation audit fields have the following shapes.
 
 - `reductions` contains `{note, change}`. Here `note` uses the microsecond
   shape from `source.notes`. Preparation codes are `OCTAVE_DOUBLE`,
@@ -282,6 +322,20 @@ Assembly reads the selected voices, gates, gains and native effect settings
 from `voicing.json`. The output is `arrangement.smps.json`, `arrangement.smps.zip`,
 `render.wav`, and `report.json`. The report includes stage totals,
 matcher evidence with lane IDs, and reductions with note IDs and reasons.
+`tempoCurve` includes the start and end BPM when known, the maximum sustained
+fractional deviation from the opening tempo, confidence, whether a warp
+was applied, the steady BPM when applicable, and the presentation-rounded
+duration in project seconds. `stages.phraseGroups` counts tolerant repeated
+phrases and `stages.repeatGroups` counts exact bar candidates for clip reuse.
+
+Warped runs also write `reference-steady.wav` and attach it at offset zero
+in the Studio arrangement. The stereo stretch uses cross-correlated
+overlap-add to preserve pitch and applies the inverse project-to-source map.
+With `render_compare`, provide the work directory, its `render.wav`, and the
+original mix or the steady reference. MCP substitutes the steady file when
+the original mix matches the assembly report. A/B excerpt ranges use project
+seconds. Source mix and stem excerpts for voice fitting always use source
+seconds.
 `effectCopyLanes` identifies dedicated FM copy lanes that actually reached
 assembly. If copies would make the bank exceed the native size limit,
 assembly retries without them and records `echoBankLimit`.

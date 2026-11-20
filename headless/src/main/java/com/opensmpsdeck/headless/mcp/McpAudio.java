@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.mcp;
 
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReferenceAudio;
+import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.project.ProjectCompiler;
@@ -55,6 +56,10 @@ final class McpAudio {
         var reference = McpPaths.input(string(args, "reference"));
         var work = McpPaths.directory(string(args, "workDir"));
         var output = McpPaths.output(work, string(args, "output"));
+        if (render.equals(work.resolve("render.wav")) && ReconstructionStages.usesSteadyReference(
+                McpPaths.managed(work, "report.json"), reference)) {
+            reference = McpPaths.input(McpPaths.managed(work, ReconstructionStages.STEADY_REFERENCE).toString());
+        }
         int frames = range.count() * STEREO_FRAMES_PER_PRESENTATION;
         long start = (long) range.start * STEREO_FRAMES_PER_PRESENTATION;
         double offset = args.has("referenceOffset") ? args.get("referenceOffset").getAsDouble() : 0;
