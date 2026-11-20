@@ -38,11 +38,11 @@ final class ReconstructionRoles {
     private ReconstructionRoles() {}
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz) {
-        return assign(structure, parts, harmonyHz, null);
+        return assign(structure, parts, harmonyHz, null, null);
     }
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
-                         ReconstructionRolePlan plan) {
+                         ReconstructionRolePlan plan, ReconstructionBeatMap beatMap) {
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
         var tones = new ArrayList<Note>();
@@ -67,7 +67,7 @@ final class ReconstructionRoles {
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
                 labelLine(notes, roles, programs, Role.counter);
         }
-        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan);
+        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan, beatMap);
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
             if (roles.get(id) != Role.harmony) continue;
@@ -79,7 +79,8 @@ final class ReconstructionRoles {
     }
 
     private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,
-                                                  Map<Integer, Integer> programs, ReconstructionRolePlan plan) {
+                                                  Map<Integer, Integer> programs, ReconstructionRolePlan plan,
+                                                  ReconstructionBeatMap beatMap) {
         var byPart = new HashMap<Integer, List<Scope>>();
         for (int i = 0; i < plan.rules().size(); i++) {
             var rule = plan.rules().get(i);
@@ -88,6 +89,8 @@ final class ReconstructionRoles {
             byPart.computeIfAbsent(rule.part(), ignored -> new ArrayList<>()).add(new Scope(i, rule, bars));
         }
         var byBar = byBar(structure.bars(), structure.notes());
+        var chords = plan.rules().stream().anyMatch(ReconstructionRolePlan.Rule::filtersTexture)
+                ? ReconstructionAttackGrid.chordNotes(structure.bars(), byBar, beatMap) : Set.<String>of();
         var reasons = new HashMap<String, String>();
         int barNumber = 0;
         for (var section : structure.sections()) {
@@ -98,7 +101,8 @@ final class ReconstructionRoles {
                 var plannedLines = new EnumMap<Role, Set<Scope>>(Role.class);
                 for (var note : notes) {
                     for (var scope : byPart.getOrDefault(note.part(), List.of()).reversed()) {
-                        if (!scope.applies(section.id(), barNumber) || !scope.rule.includes(note)) continue;
+                        if (!scope.applies(section.id(), barNumber) || !scope.rule.includes(note, chords.contains(note.id())))
+                            continue;
                         reasons.put(note.id(), scope.reason());
                         Role role = scope.rule.role();
                         if (ReconstructionRolePlan.traced(role))

@@ -217,9 +217,12 @@ Run these commands after the structure stage. The score view uses the
 structure stage's notes, including applied corrections. Its header gives the
 selected tempo, time base and prepared note count for each part. Section
 ranges and the grid use project seconds when warped and source seconds
-otherwise. JSON output includes the full section start and end times. Each part summary gives pitch range,
-attacks per bar, peak simultaneous notes, any recurring one- or two-bar
-figure, and role counts when `roles.json` is available. A repeated section
+otherwise. JSON output includes the full section start and end times. Each
+part summary gives pitch range, notes per bar, peak simultaneous notes, any
+recurring one- or two-bar figure, and single/chord attack counts. Each
+occupied grid step counts once. Each JSON section's flat `attacks` array
+gives two numbers per listed part, single then chord, in part order. Role
+counts appear when `roles.json` is available. A repeated section
 references an earlier section and prints the differing parts. Use `--section`
 or `--bars` to expand repeats. Output goes to stdout by default. Use
 `--out FILE` to create a new file.
@@ -244,14 +247,21 @@ musical intent. The template leaves an existing plan intact. Example plan:
   "rules": [
     {"sections": ["S1", "S3"], "part": 3, "role": "melody", "voice": "top"},
     {"sections": ["*"], "part": 0, "role": "harmony"},
-    {"bars": "17-24", "part": 0, "role": "melody", "voice": "top", "pitchMin": 72}
+    {"sections": ["S3"], "part": 0, "role": "melody", "voice": "top", "texture": "single"}
   ]
 }
 ```
 
 Rules refer to the displayed section IDs and one-based inclusive bar
 numbers. Use `sections`, `bars`, or both to match their intersection.
-Rules match the note's attack and optional inclusive MIDI pitch bounds.
+Rules match the note's attack and optional inclusive MIDI pitch bounds
+and `texture`. Each attack belongs to the nearest displayed 16th step in
+its bar, with rounding kept within that bar. An attack is `chord` if at
+least one other note in the same part attacks in the same cell (the
+bracketed groups in the score). Otherwise it is `single`. Simultaneous
+attacks in other parts and notes already sounding do not count. All roles
+accept the filter. Use `any` or omit it to allow both textures. Texture
+and pitch filter candidates before `top` or `bottom` traces a line.
 Use `startSeconds` (inclusive) or `endSeconds` (exclusive) to place a handoff
 inside a bar. Use the same `timeBase` as `describe`, or omit the field to
 inherit it. The last matching rule wins. Roles are `melody`, `counter`, `bass`,

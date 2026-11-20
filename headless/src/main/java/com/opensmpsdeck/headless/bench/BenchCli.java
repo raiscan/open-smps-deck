@@ -37,7 +37,7 @@ public final class BenchCli {
     public static void usage(PrintStream out) {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like [--drift N]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
-        out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle] [--steady-tempo off|auto]");
+        out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N]");
     }
 
@@ -106,6 +106,7 @@ public final class BenchCli {
         Path gold = null;
         Integer jobs = null;
         String steadyTempo = "auto";
+        BenchRolePlan.Mode rolePlan = null;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
@@ -116,10 +117,11 @@ public final class BenchCli {
                     if (!List.of("off", "auto").contains(steadyTempo))
                         throw new IllegalArgumentException("bench run --steady-tempo expects off or auto");
                 }
-                case "--role-plan" -> {
-                    if (!value(args, ++i, flag).equals("oracle"))
-                        throw new IllegalArgumentException("--role-plan expects oracle");
-                }
+                case "--role-plan" -> rolePlan = switch (value(args, ++i, flag)) {
+                    case "oracle" -> BenchRolePlan.Mode.ORACLE;
+                    case "oracle-section" -> BenchRolePlan.Mode.ORACLE_SECTION;
+                    default -> throw new IllegalArgumentException("--role-plan expects oracle or oracle-section");
+                };
                 case "--gold" -> gold = Path.of(value(args, ++i, flag));
                 case "--jobs" -> {
                     jobs = Integer.parseInt(value(args, ++i, flag));
@@ -132,11 +134,11 @@ public final class BenchCli {
             int limit = seen.contains("--quick") ? 16 : 8;
             jobs = Math.min(limit, Runtime.getRuntime().availableProcessors());
         }
-        if (seen.contains("--role-plan") && seen.contains("--gold-only"))
-            throw new IllegalArgumentException("--role-plan oracle requires native corpus cases");
+        if (rolePlan != null && seen.contains("--gold-only"))
+            throw new IllegalArgumentException("--role-plan requires native corpus cases");
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
-                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), seen.contains("--role-plan"), steadyTempo), out, hooks);
+                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo), out, hooks);
     }
 
     private static int compare(String[] args, PrintStream out) throws IOException {

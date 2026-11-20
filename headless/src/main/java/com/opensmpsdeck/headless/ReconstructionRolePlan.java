@@ -16,7 +16,7 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
 
     record Rule(@Nullable List<String> sections, @Nullable String bars, int part, Role role,
                 @Nullable Voice voice, @Nullable Integer pitchMin, @Nullable Integer pitchMax,
-                @Nullable Double startSeconds, @Nullable Double endSeconds) {
+                @Nullable Double startSeconds, @Nullable Double endSeconds, @Nullable String texture) {
         Voice line() {
             return voice == null ? defaultVoice(role) : voice;
         }
@@ -25,9 +25,14 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
             return (startSeconds == null || start >= startSeconds) && (endSeconds == null || start < endSeconds);
         }
 
-        boolean includes(Note note) {
+        boolean filtersTexture() {
+            return texture != null && !texture.equals("any");
+        }
+
+        boolean includes(Note note, boolean chord) {
             return note.part() == part && includesTime(note.start()) && (pitchMin == null || pitchMin <= note.pitch())
-                    && (pitchMax == null || pitchMax >= note.pitch());
+                    && (pitchMax == null || pitchMax >= note.pitch())
+                    && (!filtersTexture() || texture.equals(chord ? "chord" : "single"));
         }
     }
 
@@ -82,7 +87,7 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
                         role = candidate;
                     }
                 }
-                rules.add(new Rule(List.of(section.id()), null, part, role, defaultVoice(role), null, null, null, null));
+                rules.add(new Rule(List.of(section.id()), null, part, role, defaultVoice(role), null, null, null, null, null));
             });
         }
         var timeBase = structure.timeBase() == null ? ReconstructionTimeMap.TimeBase.source : structure.timeBase();

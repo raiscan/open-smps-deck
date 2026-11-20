@@ -108,6 +108,7 @@ Runtime and scratch paths are omitted from successful scorecards.
 java -jar "$jar" bench run "$manifest" "$catalogue" "$bench/oracle" --role-plan oracle
 java -jar "$jar" bench run "$manifest" "$catalogue" "$bench/oracle-quick" --quick --role-plan oracle
 java -jar "$jar" bench run "$bench/corpus-sunolike/manifest.json" "$catalogue" "$bench/oracle-suno-like" --role-plan oracle
+java -jar "$jar" bench run "$manifest" "$catalogue" "$bench/oracle-section" --role-plan oracle-section
 ```
 
 For each native case, the oracle runs transcription and structure, then
@@ -124,6 +125,15 @@ render. If neither plan improves that fit, the generated plan has no
 overrides. The scorecard still measures rendered playback. Gold cases use
 the heuristic. Compare Melody F1 with a default run on the same manifest
 and case selection.
+
+`oracle-section` uses the same truth-to-input pairing and writes at most one
+bass and one melody rule per section and part. It uses a texture filter when
+all the mapped attacks for the role have the same texture and the filter
+removes other attacks. It can apply one register bound, a minimum for melody
+or a maximum for bass, when it removes other attacks without losing mapped
+attacks. It traces the top or bottom line if other eligible attacks remain.
+It uses no sub-section time windows and runs the resulting plan once, with
+no candidate comparison on the allocated or rendered timeline.
 
 ## Read the scorecard
 

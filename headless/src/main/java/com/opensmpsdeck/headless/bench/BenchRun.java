@@ -20,7 +20,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 final class BenchRun {
-    record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly, boolean oracle, String steadyTempo) {}
+    record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly,
+                   BenchRolePlan.Mode rolePlan, String steadyTempo) {}
     private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
                         BenchTimeline.Truth nativeTruth) {}
 
@@ -133,7 +134,7 @@ final class BenchRun {
         try {
             var truth = song.truth.stream().filter(note -> note.drum() == null).toList();
             var reconstruction = BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
-                    output, options.audioRefine, null, Map.of(), drums, hooks, options.oracle ? truth : null, options.steadyTempo);
+                    output, options.audioRefine, null, Map.of(), drums, hooks, options.rolePlan, truth, options.steadyTempo);
             warps.put(c.id(), reconstruction.warped());
             reductions.put(c.id(), reconstruction.reductions());
             var estimate = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
@@ -201,7 +202,7 @@ final class BenchRun {
                                                  Map<String, Map<String, Long>> reductions) throws IOException {
         try {
             var result = BenchReconstruction.run(gold.midi(), gold.reference(), index, output,
-                    options.audioRefine, gold.seconds(), gold.stems(), drums, hooks, null, options.steadyTempo);
+                    options.audioRefine, gold.seconds(), gold.stems(), drums, hooks, null, List.of(), options.steadyTempo);
             reductions.put(gold.id(), result.reductions());
             if (gold.regions().getLast().end() > result.referenceUs() / 1_000_000.0)
                 throw new IllegalArgumentException("Gold reconstruction ends before the annotations");

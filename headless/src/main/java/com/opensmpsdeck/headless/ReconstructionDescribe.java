@@ -19,12 +19,12 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
+import static com.opensmpsdeck.headless.ReconstructionAttackGrid.STEPS;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 
 public final class ReconstructionDescribe {
-    private static final int STEPS = 16;
-    private static final String GRID = "16 steps/bar; . rest, - sustain, .N/-N runs, [A+B] simultaneous attacks; drums use GM hit IDs";
+    private static final String GRID = "16 steps/bar; . rest, - sustain, .N/-N runs, [A+B] chord; attack counts single/chord";
     private static final String[] PITCH = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
     private static final Map<Integer, String> DRUM = Map.ofEntries(Map.entry(35, "K35"), Map.entry(36, "K"),
             Map.entry(38, "S"), Map.entry(40, "S40"), Map.entry(42, "H"), Map.entry(44, "H44"), Map.entry(46, "O"),
@@ -33,8 +33,16 @@ public final class ReconstructionDescribe {
     private record Part(int id, String name, int program, boolean drums, int notes) {}
     private record Line(int part, String range, double notesPerBar, int polyphony, int figureBars,
                         Map<Role, Integer> roles, List<String> bars) {}
+    private record LineSummary(Line line, List<Integer> attacks) {}
+    private record Grid(String pattern, int singles, int chords) {}
     private record Section(String id, int firstBar, int lastBar, double startSeconds, double endSeconds,
-                           String sameAs, List<Line> parts) {}
+                           String sameAs, List<Line> parts, List<Integer> attacks) {
+        static Section of(String id, int first, int last, double start, double end, String sameAs,
+                          List<LineSummary> summaries) {
+            return new Section(id, first, last, start, end, sameAs, summaries.stream().map(LineSummary::line).toList(),
+                    summaries.stream().flatMap(summary -> summary.attacks.stream()).toList());
+        }
+    }
     private record View(double bpm, double barSeconds, String tempoSource, String grid,
                         ReconstructionTimeMap.TimeBase timeBase, List<Part> parts,
                         List<Section> sections, ReconstructionBeatMap.Summary tempoCurve) {}
@@ -129,20 +137,20 @@ public final class ReconstructionDescribe {
             int first = Math.max(range.first(), barNumbers.get(section.bars().getFirst()));
             int last = Math.min(range.last(), barNumbers.get(section.bars().getLast()));
             if (first > last) continue;
-            var lines = new ArrayList<Line>();
+            var lines = new ArrayList<LineSummary>();
             for (var part : parts)
                 lines.add(line(part, notes.getOrDefault(part.id, List.of()), bars.subList(first - 1, last), roles, beatMap));
             double start = bars.get(first - 1).start(), end = bars.get(last - 1).end();
-            var current = new Section(section.id(), first, last, start, end, null, List.copyOf(lines));
+            var current = Section.of(section.id(), first, last, start, end, null, lines);
             Section prior = collapse ? repeat(original, current, bars, repeatKeys, phraseKeys) : null;
             if (prior == null) {
                 original.add(current);
                 sections.add(current);
             } else {
-                var differences = new ArrayList<Line>();
+                var differences = new ArrayList<LineSummary>();
                 for (int i = 0; i < lines.size(); i++)
-                    if (!lines.get(i).equals(prior.parts.get(i))) differences.add(lines.get(i));
-                sections.add(new Section(section.id(), first, last, start, end, prior.id, List.copyOf(differences)));
+                    if (!lines.get(i).line.equals(prior.parts.get(i))) differences.add(lines.get(i));
+                sections.add(Section.of(section.id(), first, last, start, end, prior.id, differences));
             }
         }
         var lengths = bars.stream().filter(ReconstructionStructure.Bar::complete)
@@ -176,8 +184,8 @@ public final class ReconstructionDescribe {
         return null;
     }
 
-    private static Line line(Part part, List<Note> notes, List<ReconstructionStructure.Bar> bars,
-                             Map<String, Role> roles, ReconstructionBeatMap beatMap) {
+    private static LineSummary line(Part part, List<Note> notes, List<ReconstructionStructure.Bar> bars,
+                                    Map<String, Role> roles, ReconstructionBeatMap beatMap) {
         double start = bars.getFirst().start(), end = bars.getLast().end();
         var sounding = notes.stream().filter(n -> n.start() < end && (n.start() >= start || n.end() > start)).toList();
         var counts = roles == null ? null : new EnumMap<Role, Integer>(Role.class);
@@ -195,32 +203,38 @@ public final class ReconstructionDescribe {
             min = Math.min(min, note.pitch());
             max = Math.max(max, note.pitch());
         }
-        var patterns = bars.stream().map(bar -> grid(bar, sounding, part.drums, beatMap)).toList();
+        var grids = bars.stream().map(bar -> grid(bar, sounding, part.drums, beatMap)).toList();
+        var patterns = grids.stream().map(Grid::pattern).toList();
+        var textures = List.of(grids.stream().mapToInt(Grid::singles).sum(), grids.stream().mapToInt(Grid::chords).sum());
         String range = part.drums || sounding.isEmpty() ? null : pitch(min) + ".." + pitch(max);
         int figure = attacks == 0 ? 0 : figure(patterns);
-        return new Line(part.id, range, round((double) attacks / bars.size()), polyphony, figure, counts, patterns);
+        var line = new Line(part.id, range, round((double) attacks / bars.size()), polyphony, figure, counts, patterns);
+        return new LineSummary(line, textures);
     }
 
-    private static String grid(ReconstructionStructure.Bar bar, List<Note> notes, boolean drums, ReconstructionBeatMap beatMap) {
+    private static Grid grid(ReconstructionStructure.Bar bar, List<Note> notes, boolean drums, ReconstructionBeatMap beatMap) {
         var cells = new ArrayList<List<String>>(STEPS);
         var held = new boolean[STEPS];
         for (int i = 0; i < STEPS; i++) cells.add(new ArrayList<>());
         for (var note : notes) {
             if (note.start() >= bar.end()) break;
             if (note.start() < bar.start() && (drums || note.end() <= bar.start())) continue;
-            int step = Math.clamp(Math.round(fraction(bar, note.start(), beatMap) * STEPS), 0, STEPS - 1);
+            int step = ReconstructionAttackGrid.attackStep(bar, note.start(), beatMap);
             if (note.start() >= bar.start())
                 cells.get(step).add(drums ? DRUM.getOrDefault(note.pitch(), "D" + note.pitch()) : pitch(note.pitch()));
             if (!drums) {
-                int release = Math.clamp(Math.round(fraction(bar, note.end(), beatMap) * STEPS), 0, STEPS);
+                int release = Math.clamp(ReconstructionAttackGrid.roundedStep(bar, note.end(), beatMap), 0, STEPS);
                 for (int i = note.start() >= bar.start() ? step + 1 : 0; i < release; i++) held[i] = true;
             }
         }
         var tokens = new ArrayList<String>();
+        int singles = 0, chords = 0;
         for (int i = 0; i < STEPS;) {
             var cell = cells.get(i);
             if (!cell.isEmpty()) {
                 tokens.add(cell.size() == 1 ? cell.getFirst() : "[" + String.join("+", cell) + "]");
+                if (cell.size() == 1) singles++;
+                else chords++;
                 i++;
             } else {
                 int next = i + 1;
@@ -230,7 +244,7 @@ public final class ReconstructionDescribe {
                 i = next;
             }
         }
-        return String.join(" ", tokens);
+        return new Grid(String.join(" ", tokens), singles, chords);
     }
 
     private static int figure(List<String> patterns) {
@@ -242,12 +256,6 @@ public final class ReconstructionDescribe {
             }
         }
         return 0;
-    }
-
-    private static double fraction(ReconstructionStructure.Bar bar, double time, ReconstructionBeatMap beatMap) {
-        if (beatMap == null) return bar.fraction(time);
-        double start = beatMap.index(bar.start());
-        return (beatMap.index(time) - start) / (beatMap.index(bar.end()) - start);
     }
 
     private static String pitch(int pitch) {
@@ -273,10 +281,12 @@ public final class ReconstructionDescribe {
                 out.append(String.format(Locale.ROOT, " (%.3f–%.3f s)", section.startSeconds, section.endSeconds));
             if (section.sameAs != null) out.append(" same as ").append(section.sameAs);
             out.append('\n');
-            for (var part : section.parts) {
+            for (int index = 0; index < section.parts.size(); index++) {
+                var part = section.parts.get(index);
                 out.append(String.format(Locale.ROOT, "P%d %s %.2f notes/bar poly %d figure %s",
                         part.part, part.range == null ? "" : part.range, part.notesPerBar, part.polyphony,
                         part.figureBars == 0 ? "-" : part.figureBars + "b"));
+                out.append(' ').append(section.attacks.get(2 * index)).append('/').append(section.attacks.get(2 * index + 1));
                 if (part.roles != null) part.roles.forEach((role, count) ->
                         out.append(' ').append(role).append('=').append(count));
                 out.append('\n');

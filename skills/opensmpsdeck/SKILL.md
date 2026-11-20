@@ -70,11 +70,19 @@ and part, in `roleplan.json`. The code still traces individual notes.
    - **Backing.** Everything else is harmony.
 3. Create a starting plan with `reconstruct_plan_template` (CLI
    `reconstruct plan-template "$work"`). It mirrors the default choices.
-   Edit it with a few broad rules followed by narrow overrides, since the
-   last matching rule wins. Typical rules:
-   - Lead on top of a merged part: `{"sections": ["*"], "part": 0, "role":
-     "melody", "voice": "top", "pitchMin": 70}`. Pick `pitchMin` from the
-     grid, just under the lowest lead note and above the chord stabs.
+   Change only the sections where the score view shows the default is
+   wrong, and keep each rule as narrow as the evidence allows. On the
+   benchmark, blanket per-section rules helped merged Suno-like parts but
+   lowered melody accuracy where the default was already right. The last
+   matching rule wins. Typical rules:
+   - Lead among chord stabs in the same register: `{"sections":
+     ["section-b14"], "part": 0, "role": "melody", "voice": "top",
+     "texture": "single"}`. A note is `chord` when another note of the
+     same part attacks on the same 16th step (a bracketed group in the
+     grid), otherwise `single`. The summary line counts both per part.
+   - Lead above the chord register: `{"sections": ["section-b22"], "part": 0,
+     "role": "melody", "voice": "top", "pitchMin": 70}`. Pick `pitchMin`
+     from the grid, just under the lowest lead note and above the chord tops.
    - A clean monophonic lead section: `{"sections": ["section-b57"], "part": 0,
      "role": "melody", "voice": "all"}`.
    - Demote a part while another carries the tune: `{"sections": ["section-b90"],
@@ -93,9 +101,12 @@ and part, in `roleplan.json`. The code still traces individual notes.
 Limits:
 - Leave a section with no rule when the lead is not clearly separable.
   The default pass still applies there.
-- Pitch bounds cannot separate a mid-register fill from the chord stabs
-  around it. Leave those sections to the default pass, or use short time
-  windows.
+- Suno MIDI often starts a held lead note together with a chord, or
+  merges it with a chord tone of the same pitch. Such notes count as
+  `chord`, and a `pitchMin` above them drops them from the lead, so the
+  melody seems to vanish into the backing. Check a lead solo against the
+  stem before raising `pitchMin` past a held note. In the stem, the lead
+  often has vibrato and the chords do not.
 - Suno MIDI may have no vocal part. When a vocal carries the tune, either
   write no lead for that section or ask the user which instrument should
   take the vocal line.
