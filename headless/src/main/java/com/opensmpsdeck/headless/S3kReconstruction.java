@@ -42,7 +42,9 @@ final class S3kReconstruction {
     }
     record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
-                  List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends) {}
+                  List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends,
+                  List<VoicedGate> voicedGates) {}
+    record VoicedGate(String id, String lane, int pitch, int startTick, int endTick) {}
 
     private record Event(MidiScore.Note note, int start, int end, int priority, String assetId, int volume) {}
 
@@ -210,7 +212,7 @@ final class S3kReconstruction {
                 sequences, clips, List.copyOf(envelopes.values()),
                 samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList());
         return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
-                dac.size(), echoNotes, List.copyOf(reductions), List.of());
+                dac.size(), echoNotes, List.copyOf(reductions), List.of(), List.of());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
@@ -241,6 +243,7 @@ final class S3kReconstruction {
                                    Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins)
             throws java.io.IOException {
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
+        var gates = new ArrayList<VoicedGate>();
         var parts = indexParts(score.parts());
         var reductions = new ArrayList<>(score.reductions());
         var fm = ReconstructionAllocation.FM.stream().map(lane -> new ArrayList<Placement>()).toList();
@@ -263,6 +266,7 @@ final class S3kReconstruction {
             if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
                 var pitched = new MidiScore.Note(note.partId(), 81, note.velocity(), note.startUs(), note.endUs());
                 psg.get(2).add(new Placement(new Event(pitched, start, end, 0, NOISE, volume(part, note))));
+                gates.add(new VoicedGate(entry.note().id(), lane, pitched.pitch(), start, end));
                 continue;
             }
             var choices = matches.getOrDefault(lane, Map.of());
@@ -279,6 +283,7 @@ final class S3kReconstruction {
                         ? DacSample.of(key, choice.name(), choice.sampleRate(), catalogue.asset(choice.assetId()).bytes())
                         : slice);
                 dac.add(new Event(note, start, end, drumPriority(note.pitch()), id, 0));
+                gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, end));
             } else {
                 var asset = catalogue.asset(choice.assetId());
                 boolean isFm = lane.startsWith("FM");
@@ -291,9 +296,7 @@ final class S3kReconstruction {
                 } else {
                     envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, psgAttenuation(asset.bytes())));
                 }
-                boolean figure = entry.note().source().equals(ReconstructionFastRuns.REASON)
-                        || entry.note().source().equals(ReconstructionRetriggers.REASON);
-                int duration = figure ? end - start : articulation.duration(end - start);
+                int duration = voicedDuration(entry, articulation);
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
                 if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gainFor(part.id())));
@@ -358,6 +361,8 @@ final class S3kReconstruction {
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
                             ReconstructionBends.REASON));
                 }
+                // Record after scoped gate overrides so the trace reports the voiced length.
+                gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, placed.end));
                 if (isFm) fm.get(ReconstructionAllocation.FM.indexOf(lane)).add(placed);
                 else psg.get(ReconstructionAllocation.PSG.indexOf(lane)).add(placed);
             }
@@ -391,7 +396,15 @@ final class S3kReconstruction {
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
-        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied));
+        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates));
+    }
+
+    static int voicedDuration(ReconstructionAllocation.Entry entry, ReconstructionVoicing.Articulation articulation) {
+        int ticks = entry.endTick() - entry.startTick();
+        if ("DAC".equals(entry.lane()) || ("PSG3".equals(entry.lane()) && entry.role() == ReconstructionRoles.Role.drums)
+                || entry.note().source().equals(ReconstructionFastRuns.REASON)
+                || entry.note().source().equals(ReconstructionRetriggers.REASON)) return ticks;
+        return articulation.duration(ticks);
     }
 
     private static int addVoicingCopies(List<ArrayList<Placement>> fm,

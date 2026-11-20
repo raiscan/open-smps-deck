@@ -33,10 +33,11 @@ final class ReconstructionStructure {
                   List<Correction> corrections, List<Note> notes,
                   @ReconstructionStages.Nullable List<ReconstructionPhrases.Group> phrases,
                   @ReconstructionStages.Nullable Layout roleLayout,
-                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase) {
+                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase,
+                  @ReconstructionStages.Nullable Map<String, String> scoreNoteHashes) {
         Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
                List<Correction> corrections, List<Note> notes) {
-            this(version, bars, sections, repeats, corrections, notes, null, null, null);
+            this(version, bars, sections, repeats, corrections, notes, null, null, null, null);
         }
     }
 
@@ -114,7 +115,8 @@ final class ReconstructionStructure {
         var linked = inferred ? identicalBars(bars, notes, phrases, timeline) : repeats;
         return new Result(VERSION, bars, sections, linked, corrections, notes,
                 phrases.stream().map(ReconstructionPhrases.Match::evidence).toList(), roleLayout,
-                timeline == null ? ReconstructionTimeMap.TimeBase.source : timeline.timeBase());
+                timeline == null ? ReconstructionTimeMap.TimeBase.source : timeline.timeBase(),
+                ReconstructionArtifacts.noteHashes(score));
     }
 
     private static List<Pattern> patterns(List<Bar> bars, List<Note> notes) {

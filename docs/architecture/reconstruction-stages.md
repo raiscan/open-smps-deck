@@ -45,6 +45,47 @@ Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
 
+## Trace and reproducible inputs
+
+`reconstruct trace WORK_DIR` joins source, score, structure, roles,
+allocation, and voicing evidence by stable note ID. Source and project
+seconds accompany 60 Hz ticks. Ticks on allocation and voiced gates
+are the actual intervals. Earlier ticks are rounded views of unquantized
+notes. Repeat corrections retain their vote evidence, and a thinned
+attack links to the retained note whose gate it extended. Hardware
+conflicts carry `competitorNoteId` for a single blocker and
+`blockingNoteIds` when several lanes are occupied. A shortening
+links to the incoming attack that cut the release.
+
+A summary chooses one fate per note. Removal takes priority, with
+`merged` used when another note absorbed the attack. A shortened gate
+takes priority over a move. Counter and harmony notes placed on PSG
+count as moved from their primary FM lanes. The individual stage entries
+remain visible when several decisions apply. New structure and roles
+artifacts record input note hashes so an edited note can be distinguished
+from the older version that reached allocation. Assembly records voiced
+gates and the articulation and bend choice can be inspected independently
+of the allocated gate. Older artifacts remain readable using the timing,
+reductions, and bends they recorded.
+
+`reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR --span START,END`
+compares the chains by ID. The optional span uses source seconds and
+flags changes outside the interval. A change in a gate, role, lane,
+merge partner, or applied bend can appear even if the summary category
+stays the same.
+
+A fresh staged run writes `manifest.json` with the build identity,
+resolved options, input paths and hashes, and references to content-addressed
+note copies in `snapshots/`. A resumed run records its start stage and
+override while keeping the original input recipe. When first resuming a
+pre-manifest run, the saved score can supply a parsed external-note
+snapshot and its provenance. Original bytes are retained for new runs.
+`reconstruct rerun WORK_DIR NEW_WORK_DIR` verifies input hashes at the
+stored path or snapshot and checks any repeated `--search DIR` roots for
+missing bytes. The replay starts from transcription using the saved options
+and original external notes. Later role plans and stage edits remain in
+the original work directory.
+
 ## Artifact contract
 
 Each artifact is an object with `"version": 1`. Fields in this guide are
@@ -355,7 +396,7 @@ exceed the project or bank capacity.
 ### Roles
 
 `roles.json` contains `harmonyMaxHz` and a `notes` array with
-`{note, role, reason?, mergedInto?}` per corrected note. Valid roles
+`{note, role, reason?, assignmentReason?, mergedInto?}` per corrected note. Valid roles
 are `melody`, `counter`, `bass`, `harmony`, `drums`, and `drop`.
 A drop requires a reason.
 
@@ -453,7 +494,8 @@ in that artifact and takes effect until roles is run again.
 ### Allocate
 
 `allocation.json` contains a `notes` array with
-`{note, role, outcome, lane?, startTick?, endTick?, reason?, mergedInto?}`.
+`{note, role, outcome, lane?, startTick?, endTick?, reason?, mergedInto?,
+competitorNoteId?, blockingNoteIds?, relocatedFrom?}`.
 `outcome` is `kept`, `shortened`, or `dropped`. Shortenings and drops
 require a reason. Kept and shortened entries have a lane and a nonoverlapping,
 half-open presentation interval. The interval in the placement is

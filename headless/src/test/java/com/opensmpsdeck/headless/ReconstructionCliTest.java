@@ -218,13 +218,19 @@ class ReconstructionCliTest {
                 "structure.json", "b1de076dad1f84fac16e556f9364dada60e0c8001374243d6ee806ad9022cbd1",
                 "voicing.json", "12a1d154a475a39f676a0348a6099a3b5654e47a68a3c6a3b03d3957feea431c");
         try (var paths = Files.list(work)) {
-            assertEquals(expected.keySet(), paths.map(path -> path.getFileName().toString())
+            var files = new java.util.HashSet<>(expected.keySet());
+            files.addAll(List.of("manifest.json", "snapshots"));
+            assertEquals(files, paths.map(path -> path.getFileName().toString())
                     .collect(java.util.stream.Collectors.toSet()));
         }
         var digest = java.security.MessageDigest.getInstance("SHA-256");
         for (var entry : expected.entrySet()) {
             Path path = work.resolve(entry.getKey());
             byte[] bytes = Files.readAllBytes(path);
+            if (entry.getKey().endsWith(".zip") || entry.getKey().endsWith(".wav")) {
+                assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(bytes)), entry.getKey());
+                continue;
+            }
             if (entry.getKey().equals("score.json")) {
                 bytes = Files.readString(path).replace(directory.toString(), "@INPUT@")
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -236,6 +242,17 @@ class ReconstructionCliTest {
                         .replace(",\"timeBase\":\"source\"", "").getBytes(java.nio.charset.StandardCharsets.UTF_8);
             }
             String json = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            // The old payloads and all musical outputs still have their original hashes.
+            json = switch (entry.getKey()) {
+                case "structure.json" -> json.replaceFirst(",\\s*\"scoreNoteHashes\"\\s*:\\s*[{][^}]*}", "");
+                case "roles.json" -> json.replaceFirst(",\n  \"structureNoteHashes\": [{][^}]*}", "")
+                        .replaceAll(",\n +\"assignmentReason\": \"[^\"]+\"", "");
+                case "allocation.json" -> json.replaceAll(",\n +\"(competitorNoteId|relocatedFrom)\": \"[^\"]+\"", "")
+                        .replaceAll(",\n +\"blockingNoteIds\": \\x5B[^\\x5D]*\\x5D", "")
+                        .replaceAll(",\n +\"reason\": \"psg-spill\"", "");
+                case "report.json" -> json.replaceFirst("(?s),\n  \"voicedGates\": .*?(?=\n}\n$)", "");
+                default -> json;
+            };
             if (entry.getKey().equals("voicing.json")) {
                 assertEquals(30, JsonParser.parseString(json).getAsJsonObject()
                         .getAsJsonObject("fitWindows").get("frames").getAsInt());
@@ -248,9 +265,8 @@ class ReconstructionCliTest {
                 assertEquals(0, gapFill.get("afterSeconds").getAsDouble());
                 json = json.replaceFirst(",\n +\"melodyGapFill\": [{][^}]*}", "");
             }
-            if (List.of("voicing.json", "allocation.json", "report.json").contains(entry.getKey()))
-                bytes = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(bytes)), entry.getKey());
+            var compared = json.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(compared)), entry.getKey());
         }
     }
 

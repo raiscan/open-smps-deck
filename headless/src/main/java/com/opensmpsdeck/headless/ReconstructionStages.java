@@ -121,20 +121,23 @@ public final class ReconstructionStages {
         }
     }
 
+    record ScoreDecision(Note note, String reason, String successorId) {}
+
     record Score(int version, long durationUs, int frames, int ticksPerSecond, @Nullable Inputs inputs,
                  List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
                  List<Note> notes, List<S3kReconstruction.Reduction> reductions,
                  List<ReconstructionPitchRefinement.Change> pitchChanges,
                  @Nullable ReconstructionTempo.Estimate tempo, @Nullable List<ReconstructionStructure.Bar> midiBars, @Nullable ReconstructionBeatMap beatMap,
                  @Nullable Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
-                 @Nullable List<ReconstructionRetriggers.Burst> retriggers) {
+                 @Nullable List<ReconstructionRetriggers.Burst> retriggers,
+                 @Nullable List<ScoreDecision> scoreDecisions) {
         Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
               List<Note> notes, List<S3kReconstruction.Reduction> reductions,
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
               List<ReconstructionStructure.Bar> midiBars) {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
-                    pitchChanges, tempo, midiBars, null, null, null);
+                    pitchChanges, tempo, midiBars, null, null, null, null);
         }
         Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
@@ -142,21 +145,21 @@ public final class ReconstructionStages {
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
               List<ReconstructionStructure.Bar> midiBars, ReconstructionBeatMap beatMap) {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
-                    pitchChanges, tempo, midiBars, beatMap, null, null);
+                    pitchChanges, tempo, midiBars, beatMap, null, null, null);
         }
         boolean usesBeatGrid() { return beatMap != null && tempo != null && tempo.source().equals("tracked"); }
 
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
                          ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars, ReconstructionBeatMap beatMap) {
-            return withInputs(inputs, bars, notes, tempo, midiBars, beatMap, figureVoices, retriggers);
+            return withInputs(inputs, bars, notes, tempo, midiBars, beatMap, figureVoices, retriggers, scoreDecisions);
         }
 
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
                          ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars,
                          ReconstructionBeatMap beatMap, Map<String, List<ReconstructionFigureVoices.Voice>> voices,
-                         List<ReconstructionRetriggers.Burst> bursts) {
+                         List<ReconstructionRetriggers.Burst> bursts, List<ScoreDecision> decisions) {
             return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts,
-                    notes, reductions, pitchChanges, tempo, midiBars, beatMap, voices, bursts);
+                    notes, reductions, pitchChanges, tempo, midiBars, beatMap, voices, bursts, decisions);
         }
     }
 
@@ -198,7 +201,37 @@ public final class ReconstructionStages {
     private static void run(String command, String[] args, PrintStream out,
                             boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange)
             throws IOException {
-        Request request = request(command, args, progress);
+        try (var capture = new ReconstructionManifest.Capture()) {
+            Request request = request(command, args, progress, capture);
+            var run = new ReconstructionManifest.Run(stageName(request.from), request.harmonyHz);
+            if (request.initial != null) {
+                Files.createDirectory(request.work);
+                capture.write(request.work, request.initial, List.of(args).subList(4, args.length), run);
+            } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
+                ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
+            }
+            execute(request, out, preserveReview, progress, refitChange);
+            if (request.chain && request.initial == null) {
+                ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
+            }
+        }
+    }
+
+    static void rerun(Path oldWork, Path work, List<Path> search, PrintStream out) throws IOException {
+        if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new java.nio.file.FileAlreadyExistsException(work.toString());
+        var replay = ReconstructionManifest.resolve(oldWork, work, search);
+        var inputs = replay.inputs();
+        Files.createDirectory(work);
+        ReconstructionManifest.writeReplay(work, replay);
+        var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
+                inputs.options(replay.manifest().durationUs())), inputs);
+        execute(new Request(work, Stage.TRANSCRIBE, true, score, null, java.util.Set.of(), false), out, false,
+                (completed, total, message) -> {}, ignored -> {});
+    }
+
+    private static void execute(Request request, PrintStream out, boolean preserveReview, Progress progress,
+                                java.util.function.Consumer<String> refitChange) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
@@ -207,9 +240,7 @@ public final class ReconstructionStages {
         Path allocationFile = work.resolve("allocation.json");
         Path voicingFile = work.resolve("voicing.json");
 
-        if (request.initial != null) {
-            Files.createDirectory(work);
-        } else {
+        if (request.initial == null) {
             progress.report(0, total, "Starting " + stageName(request.from));
             if (preserveReview) checkInputFiles(readScore(scoreFile).inputs);
         }
@@ -363,7 +394,8 @@ public final class ReconstructionStages {
         }
     }
 
-    private static Request request(String command, String[] args, Progress progress) throws IOException {
+    private static Request request(String command, String[] args, Progress progress,
+                                   ReconstructionManifest.Capture capture) throws IOException {
         boolean chain = command.equals("run");
         Stage stage = chain ? Stage.TRANSCRIBE : Stage.parse(command);
         if (chain && args.length >= 1 && args[0].equals("--from")) {
@@ -393,7 +425,7 @@ public final class ReconstructionStages {
         progress.report(0, chain ? Stage.values().length : 1, "Starting transcribe");
         var score = transcribe(midi, reference, options);
         var external = ExternalTranscribers.collect(score.source, stems, extra.transcriber, extra.transcriberConfig,
-                extra.transcribeParts, extra.device == null ? "auto" : extra.device, extra.imports);
+                extra.transcribeParts, extra.device == null ? "auto" : extra.device, extra.imports, capture);
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
@@ -535,7 +567,7 @@ public final class ReconstructionStages {
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),
                 structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList(),
-                structure.phrases(), structure.roleLayout(), structure.timeBase());
+                structure.phrases(), structure.roleLayout(), structure.timeBase(), structure.scoreNoteHashes());
     }
 
     static ReconstructionStructure.Result structure(Score score) throws IOException {
@@ -612,6 +644,7 @@ public final class ReconstructionStages {
         }
         var voices = new java.util.TreeMap<String, List<ReconstructionFigureVoices.Voice>>();
         var bursts = new ArrayList<ReconstructionRetriggers.Burst>();
+        var decisions = new ArrayList<ScoreDecision>();
         boolean fastRuns = !Boolean.TRUE.equals(inputs.fastRunsOff);
         for (var part : score.source.parts()) {
             String stem = inputs.stems.get(part.id());
@@ -623,7 +656,7 @@ public final class ReconstructionStages {
             if (fastRuns) {
                 var local = notes.stream().filter(note -> note.part == part.id()).toList();
                 ReconstructionFastRuns.reconcile(notes, part.id(), ReconstructionFastRuns.detect(audio,
-                        inputs.leadPart == null || inputs.leadPart == part.id()));
+                        inputs.leadPart == null || inputs.leadPart == part.id()), decisions);
                 if (inputs.leadPart != null && inputs.leadPart == part.id()) {
                     var current = notes.stream().filter(note -> note.part == part.id()).toList();
                     for (var burst : ReconstructionRetriggers.detect(audio, current)) {
@@ -686,9 +719,18 @@ public final class ReconstructionStages {
             else beats = MidiScore.beatMap(midi, score.durationUs, metadata.meter());
         }
         var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList(), tempo, midiBars, beats,
-                voices.isEmpty() ? null : voices, bursts.isEmpty() ? null : List.copyOf(bursts));
+                voices.isEmpty() ? null : voices, bursts.isEmpty() ? null : List.copyOf(bursts),
+                decisions.isEmpty() ? null : List.copyOf(decisions));
         ReconstructionChecks.score(result);
         return result;
+    }
+
+    static String midiNoteKey(MidiScore.Note note) {
+        return "n-" + note.partId() + "-" + note.startUs() + "-" + note.pitch();
+    }
+
+    static String noteInstance(String key, int instance) {
+        return instance == 1 ? key : key + "-" + instance;
     }
 
     static Score transcribe(Path midi, Path reference, ReconstructionCli.Options options) throws IOException {
@@ -725,9 +767,9 @@ public final class ReconstructionStages {
         for (var note : prepared.notes()) {
             int remaining = originalEnds.getOrDefault(note, 0);
             if (remaining != 0) originalEnds.put(note, remaining - 1);
-            String key = "n-" + note.partId() + "-" + note.startUs() + "-" + note.pitch();
+            String key = midiNoteKey(note);
             int instance = ids.merge(key, 1, Integer::sum);
-            notes.add(new Note(instance == 1 ? key : key + "-" + instance, note.partId(),
+            notes.add(new Note(noteInstance(key, instance), note.partId(),
                     note.startUs() / (double) MICROS_PER_SECOND, note.endUs() / (double) MICROS_PER_SECOND,
                     note.pitch(), note.velocity(), remaining == 0 ? "audio-refine" : "midi", remaining == 0 ? .85 : 1));
         }

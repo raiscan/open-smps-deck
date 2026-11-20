@@ -81,6 +81,12 @@ public final class ExternalTranscribers {
     static Map<Integer, PartNotes> collect(MidiScore score, Map<Integer, String> stems,
                                            String name, Path config, Map<Integer, String> roles, String device,
                                            Map<Integer, Import> imports) throws IOException {
+        return collect(score, stems, name, config, roles, device, imports, null);
+    }
+
+    static Map<Integer, PartNotes> collect(MidiScore score, Map<Integer, String> stems,
+                                           String name, Path config, Map<Integer, String> roles, String device,
+                                           Map<Integer, Import> imports, ReconstructionManifest.Capture capture) throws IOException {
         if (name == null && imports.isEmpty()) return null;
         for (int id : imports.keySet()) validatePart(id, score.parts());
         for (var entry : roles.entrySet()) {
@@ -93,9 +99,10 @@ public final class ExternalTranscribers {
         var result = new TreeMap<Integer, PartNotes>();
         for (var entry : imports.entrySet()) {
             var source = entry.getValue();
-            var notes = readNotes(source.file);
+            Path recorded = capture == null ? source.file : capture.external(entry.getKey(), source.file, true);
+            var notes = readNotes(recorded);
             result.put(entry.getKey(), new PartNotes(new Evidence("import", null, null, null,
-                    ReconstructionCli.audioHash(source.file), null, metadata(source.file), notes.size(), source.replace), notes));
+                    ReconstructionCli.audioHash(recorded), null, metadata(source.file), notes.size(), source.replace), notes));
         }
         if (name != null) {
             Path file = config == null ? defaultConfig() : config;
@@ -104,9 +111,10 @@ public final class ExternalTranscribers {
                 var template = commands(file).get(name);
                 require(template != null, name, "transcriber is not configured in " + file);
                 String configHash = ReconstructionCli.audioHash(file);
+                if (capture != null) capture.config(file);
                 for (var entry : roles.entrySet()) {
                     int part = entry.getKey();
-                    result.put(part, run(template, name, configHash, Path.of(stems.get(part)), entry.getValue(), device));
+                    result.put(part, run(template, name, configHash, Path.of(stems.get(part)), entry.getValue(), device, part, capture));
                 }
             } catch (IllegalArgumentException | IOException error) {
                 throw new IOException("Transcriber " + name + ": " + error.getMessage(), error);
@@ -116,7 +124,8 @@ public final class ExternalTranscribers {
     }
 
     private static PartNotes run(List<String> template, String name, String configHash,
-                                 Path input, String role, String device) throws IOException {
+                                 Path input, String role, String device, int part,
+                                 ReconstructionManifest.Capture capture) throws IOException {
         String inputHash = ReconstructionCli.audioHash(input);
         Path scratch = Files.createTempDirectory("opensmpsdeck-transcriber-");
         Path output = scratch.resolve("notes.json");
@@ -143,8 +152,9 @@ public final class ExternalTranscribers {
                 }
             }
             require(Files.isRegularFile(output, LinkOption.NOFOLLOW_LINKS), name, "command did not produce notes.json");
-            var notes = readNotes(output);
-            return new PartNotes(new Evidence(name, role, device, inputHash, ReconstructionCli.audioHash(output),
+            Path recorded = capture == null ? output : capture.external(part, output, false);
+            var notes = readNotes(recorded);
+            return new PartNotes(new Evidence(name, role, device, inputHash, ReconstructionCli.audioHash(recorded),
                     configHash, metadata(output), notes.size(), true), notes);
         } finally {
             // The private directory also lets adapters use temporary output files.
@@ -169,8 +179,12 @@ public final class ExternalTranscribers {
 
     private static List<RawNote> readNotes(Path file) throws IOException {
         String filename = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return readNotes(file, filename.endsWith(".mid") || filename.endsWith(".midi"));
+    }
+
+    static List<RawNote> readNotes(Path file, boolean midiFile) throws IOException {
         var notes = new ArrayList<RawNote>();
-        if (filename.endsWith(".mid") || filename.endsWith(".midi")) {
+        if (midiFile) {
             var midi = MidiScore.read(file);
             var melodic = midi.parts().stream().filter(part -> !part.drums()).map(MidiScore.Part::id).toList();
             require(melodic.size() <= 1, file.toString(), "expected a MIDI file with at most one melodic part");

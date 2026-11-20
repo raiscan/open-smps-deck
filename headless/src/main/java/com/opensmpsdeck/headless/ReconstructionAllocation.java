@@ -21,9 +21,19 @@ final class ReconstructionAllocation {
 
     enum Outcome { kept, shortened, dropped }
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
-                 Outcome outcome, @Nullable String reason, @Nullable String mergedInto) {
+                 Outcome outcome, @Nullable String reason, @Nullable String mergedInto,
+                 @Nullable String competitorNoteId, @Nullable List<String> blockingNoteIds,
+                 @Nullable String relocatedFrom) {
+        Entry(Note note, Role role, String lane, Integer startTick, Integer endTick,
+              Outcome outcome, String reason, String mergedInto) {
+            this(note, role, lane, startTick, endTick, outcome, reason, mergedInto, null, null, null);
+        }
         Entry shorten(int end, String why) {
-            return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null);
+            return shorten(end, why, null);
+        }
+
+        Entry shorten(int end, String why, String competitor) {
+            return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null, competitor, null, relocatedFrom);
         }
     }
     record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase,
@@ -177,27 +187,22 @@ final class ReconstructionAllocation {
         if (attack.role() == Role.drums && !attack.noise) {
             Entry last = tail.get("DAC");
             if (last != null && last.startTick == attack.start) {
-                drop(attack, "simultaneous-dac-hit");
+                drop(attack, "simultaneous-dac-hit", List.of(last.note.id()));
             } else if (last != null && attack.start - last.startTick < 5
                     && S3kReconstruction.drumPriority(last.note.pitch()) >= 2
                     && S3kReconstruction.drumPriority(last.note.pitch()) > S3kReconstruction.drumPriority(attack.note().pitch())) {
-                drop(attack, "protect-dac-tail");
+                drop(attack, "protect-dac-tail", List.of(last.note.id()));
             } else {
-                keep(attack, "DAC");
+                keep(attack, "DAC", null);
             }
             return;
         }
-        List<String> primary = switch (attack.role()) {
-            case melody -> List.of("FM1");
-            case bass -> List.of("FM2");
-            case drums -> List.of("PSG3");
-            default -> INNER_FM;
-        };
+        List<String> primary = expectedLanes(attack.role(), attack.noise);
         List<String> secondary = primary == INNER_FM && !fmOnly && attack.note().pitch() >= 45 && attack.note().run() == null ? PSG : List.of();
         String lane = free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && primary == INNER_FM && secondary.isEmpty() && !fmOnly)
-            lane = freeFmForLowAttack();
+            lane = freeFmForLowAttack(attack);
         if (lane == null) lane = shorten(primary, attack);
         if (lane == null) lane = shorten(secondary, attack);
         if (lane == null) {
@@ -206,10 +211,21 @@ final class ReconstructionAllocation {
                 case bass -> "bass-lane-busy";
                 case drums -> "psg-noise-lane-busy";
                 default -> secondary.isEmpty() ? "fm-lanes-busy" : "fm-and-psg-lanes-busy";
-            });
+            }, java.util.stream.Stream.concat(primary.stream(), secondary.stream())
+                    .map(tail::get).map(entry -> entry.note.id()).toList());
         } else {
-            keep(attack, lane);
+            keep(attack, lane, secondary.contains(lane) ? "psg-spill" : null);
         }
+    }
+
+    static List<String> expectedLanes(Role role, boolean noise) {
+        return switch (role) {
+            case melody -> List.of("FM1");
+            case bass -> List.of("FM2");
+            case drums -> List.of(noise ? "PSG3" : "DAC");
+            case harmony, counter -> INNER_FM;
+            case drop -> List.of();
+        };
     }
 
     private String free(List<String> lanes, Attack attack) {
@@ -225,7 +241,7 @@ final class ReconstructionAllocation {
         return (last.note.part() == attack.note().part() ? 0 : 64) + distance + Math.min(24, gap);
     }
 
-    private String freeFmForLowAttack() {
+    private String freeFmForLowAttack(Attack attack) {
         for (String lane : INNER_FM.reversed()) {
             Entry prior = tail.get(lane);
             if (prior == null || prior.note.pitch() < 45 || prior.note.run() != null) continue;
@@ -233,7 +249,8 @@ final class ReconstructionAllocation {
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;
                 var moved = new Entry(prior.note, prior.role, destination, prior.startTick, prior.endTick,
-                        prior.outcome, prior.reason == null ? "relocated-for-low-fm-note" : prior.reason, null);
+                        prior.outcome, prior.reason == null ? "relocated-for-low-fm-note" : prior.reason, null,
+                        prior.competitorNoteId == null ? attack.note().id() : prior.competitorNoteId, null, lane);
                 tail.put(destination, moved);
                 entries.put(prior.note.id(), moved);
                 return lane;
@@ -248,7 +265,8 @@ final class ReconstructionAllocation {
         if (lane != null) {
             Entry earlier = tail.get(lane);
             entries.put(earlier.note.id(), earlier.shorten(attack.start,
-                    earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack"));
+                    earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack",
+                    attack.note().id()));
         }
         return lane;
     }
@@ -259,14 +277,19 @@ final class ReconstructionAllocation {
                 || next.role() == Role.drums || next.role() == Role.counter && last.role == Role.harmony;
     }
 
-    private void keep(Attack attack, String lane) {
-        var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, null, null);
+    private void keep(Attack attack, String lane, String reason) {
+        var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, reason, null);
         entries.put(attack.note().id(), entry);
         tail.put(lane, entry);
     }
 
     private void drop(Attack attack, String reason) {
+        drop(attack, reason, List.of());
+    }
+
+    private void drop(Attack attack, String reason, List<String> blockers) {
         entries.put(attack.note().id(), new Entry(attack.note(), attack.role(), null, null, null,
-                Outcome.dropped, reason, attack.decision.mergedInto()));
+                Outcome.dropped, reason, attack.decision.mergedInto(),
+                blockers.size() == 1 ? blockers.getFirst() : null, blockers.size() > 1 ? blockers : null, null));
     }
 }

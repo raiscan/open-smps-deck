@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the packaged stdio server with an original MIDI phrase and demo audio."""
 import argparse
+import hashlib
 from array import array
 import math
 import json
@@ -133,7 +134,8 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition artifact_read artifact_write project_validate
+            reconstruct_audition reconstruct_trace reconstruct_trace_diff
+            artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
         """.split())
@@ -150,7 +152,13 @@ def smoke(jar, root):
         variant = results["items"][0]["variantId"]
         rpc.call("catalog_audition", catalogue=inputs["catalogue"], variant=variant,
                  workDir=root, output=root / "audition.wav")
-        rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)
+        files = rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)["files"]
+        assert Path(files["manifest.json"]) == work / "manifest.json"
+        manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]
+        assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
+        trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
+        assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)
+        assert not rpc.call("reconstruct_trace_diff", oldWorkDir=work, newWorkDir=work, span="0,2")["changes"]
         rpc.call("reconstruct_stage", workDir=work, stage="voice")
         rpc.call("reference_add", project=project, wav=inputs["wav"], role="mix")
         note = rpc.call("notes_add", project=project, at=0.25, end=0.75,

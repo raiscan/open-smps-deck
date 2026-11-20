@@ -48,6 +48,29 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 - [ ] Reply after verifying the change. Mention the specific change, lane
   and time range, and the clip filename. Keep unresolved issues open.
 
+## Trace a missing attack or changed gate
+
+- Use `reconstruct_trace {workDir, start, end, part, pitch}` before editing a
+  missing, misplaced, or clipped note. Times filter in source seconds.
+  Add `lane` or `status` to narrow the result. The trace carries source and
+  project seconds, placement ticks, role decisions, merge partners,
+  allocation competitors, and the final voiced gate and bend.
+- After a focused repair, compare separate baseline and candidate work
+  directories with `reconstruct_trace_diff {oldWorkDir, newWorkDir, span}`.
+  Use `span: "START,END"` in source seconds to flag changes outside the
+  edited passage. Check those notes before accepting the repair.
+- Use `reconstruct rerun "$work" "$fresh" --search "$input_dir"` to replay
+  the inputs and options of a historical fresh run. The private
+  `manifest.json` pins input hashes and retains imported note snapshots.
+  Use `run --from` in the current work directory to apply stage edits.
+
+CLI examples:
+
+```sh
+java -jar "$jar" reconstruct trace "$work" --start 45.5 --end 46 --part 0 --pitch 68
+java -jar "$jar" reconstruct trace-diff "$baseline" "$candidate" --span 45.5,46 --json
+```
+
 ## Compare an optional stem transcriber
 
 Keep Suno MIDI as the default. If `transcribers_list` reports a configured

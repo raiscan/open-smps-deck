@@ -51,6 +51,26 @@ final class ReconstructionArtifacts {
         return JSON.fromJson(tree, type);
     }
 
+    static Map<String, String> noteHashes(List<ReconstructionStages.Note> notes) {
+        var hashes = new java.util.TreeMap<String, String>();
+        for (var note : notes) hashes.put(note.id(), fingerprint(note));
+        return hashes;
+    }
+
+    static String fingerprint(Object value) {
+        try {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            try (var writer = new java.io.OutputStreamWriter(
+                    new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest),
+                    java.nio.charset.StandardCharsets.UTF_8)) {
+                JSON.toJson(value, writer);
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException | IOException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
     static void write(Path file, Object value) throws IOException {
         Path pending = Files.createTempFile(file.getParent(), "." + file.getFileName(), ".tmp");
         try {
