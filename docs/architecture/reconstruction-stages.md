@@ -284,7 +284,7 @@ simultaneous overlapping pitches.
 Reconciliation requires an overlapping held note in the same register
 and preserves its material outside the figure. Separate transcribed
 attacks near the detected times take precedence. For retriggers, that
-includes an octave-doubled line with its own attacks. The score stores accepted
+includes a nearby line that already has its own aligned attacks. The score stores accepted
 figures as one note with `source: "fast-run"` or `"fast-retrigger"`,
 a confidence, and ordered `run` steps with source-second boundaries.
 When a tempo warp applies, structure maps each boundary to project time.

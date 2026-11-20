@@ -52,13 +52,11 @@ final class ReconstructionFastRuns {
                     .max(Comparator.comparingDouble(note -> Math.min(note.end(), figure.end())
                             - Math.max(note.start(), figure.start()))).orElse(null);
             if (held == null) continue;
-            // Retrigger envelopes can also pulse in a held octave's partial bands. Prefer a
-            // line with explicit, independently timed attacks over a split of that held layer.
-            boolean repeated = figure.reason.equals(ReconstructionRetriggers.REASON);
+            // Explicit independently timed attacks take precedence over a held layer.
             long separate = figure.steps.stream().skip(1).filter(step -> overlapping.stream().anyMatch(note ->
-                    note != held && (note.pitch() == step.pitch || repeated && Math.abs(note.pitch() - step.pitch) == 12)
-                            && Math.abs(note.start() - step.start) <= .020)).count();
-            if (separate >= 2) continue;
+                    note != held && note.pitch() == step.pitch && Math.abs(note.start() - step.start) <= .020)).count();
+            if (separate >= 2 || figure.reason.equals(ReconstructionRetriggers.REASON)
+                    && competingRetriggers(figure, held, overlapping)) continue;
             notes.remove(held);
             if (figure.start() - held.start() >= 1.0 / 60)
                 notes.add(held.withTiming(held.start(), figure.start()));
@@ -69,6 +67,20 @@ final class ReconstructionFastRuns {
             notes.add(new Note(unique(ids, held.id() + "-run"), part, figure.start(), figure.end(), first.pitch,
                     held.velocity(), figure.reason, figure.confidence, null, figure.steps));
         }
+    }
+
+    private static boolean competingRetriggers(Figure figure, Note held, List<Note> notes) {
+        // A pad or octave can pulse with the lead. Require multiple aligned attacks at
+        // one competing pitch before vetoing the split of a transcribed hold.
+        var aligned = new java.util.HashMap<Integer, Integer>();
+        for (var note : notes) {
+            int interval = Math.abs(note.pitch() - held.pitch());
+            if (interval == 0 || interval > 12) continue;
+            if (figure.steps.stream().anyMatch(step -> Math.abs(step.start - note.start()) <= .020)
+                    && aligned.merge(note.pitch(), 1, Integer::sum)
+                    >= (interval == 12 ? 2 : Math.max(3, (figure.steps.size() + 1) / 2))) return true;
+        }
+        return false;
     }
 
     private static String unique(HashSet<String> ids, String prefix) {
