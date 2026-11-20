@@ -68,9 +68,10 @@ class ReconstructionStagesTest {
         assertEquals(9, result.notes().size());
     }
 
-    @Test void keepsTheMelodyThroughABriefCrossingAndMergesInnerReattacks() {
+    @Test void keepsTheMelodyThroughABriefCrossingAndMergesInnerReattacksInChordParts() {
         var notes = List.of(note("m1", 0, 0, .36, 74), note("m2", 0, .36, .72, 76),
                 note("m3", 0, .72, 1.08, 77), note("cross", 1, .34, .43, 83),
+                note("held-chord-tone", 1, .06, .33, 66),
                 note("bass", 2, 0, 1.08, 42), note("counter", 3, 0, 1.08, 68),
                 note("h1", 1, .10, .21, 61), note("h2", 1, .21, .32, 61));
         var parts = List.of(part(0), part(1), part(2), part(3));
@@ -86,6 +87,20 @@ class ReconstructionStagesTest {
         var allocation = ReconstructionAllocation.allocate(roles, parts, 120, false);
         assertTrue(allocation.notes().stream().filter(n -> n.role() == Role.melody).allMatch(n -> "FM1".equals(n.lane())));
         assertTrue(allocation.notes().stream().filter(n -> n.role() == Role.bass).allMatch(n -> "FM2".equals(n.lane())));
+    }
+
+    @Test void preservesInnerReattacksOnAnIndependentPart() {
+        var notes = List.of(note("lead", 0, 0, 1.08, 77), note("bass", 1, 0, 1.08, 42),
+                note("counter", 2, 0, 1.08, 68),
+                note("first", 3, .10, .21, 61), note("second", 3, .21, .32, 61));
+        var parts = List.of(part(0), part(1), part(2), part(3));
+        var structure = ReconstructionStructure.analyze(bars(1),
+                notes.stream().sorted(ReconstructionStages.NOTE_ORDER).toList(), parts);
+        var roles = ReconstructionRoles.assign(structure, parts, 7.5);
+        var inner = roles.notes().stream().filter(n -> n.note().part() == 3).toList();
+        assertEquals(List.of(Role.harmony, Role.harmony), inner.stream().map(ReconstructionRoles.Decision::role).toList());
+        assertEquals(.21, inner.getFirst().note().end());
+        assertNull(inner.getLast().mergedInto());
     }
 
     @Test void tracksSequentialReattacksThroughSamePartSustainAndReservesFm1() {

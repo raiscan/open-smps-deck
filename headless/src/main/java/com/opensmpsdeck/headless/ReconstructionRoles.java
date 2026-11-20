@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStages.NOTE_ORDER;
@@ -98,7 +99,15 @@ final class ReconstructionRoles {
             roles.put(id, Role.drop);
             octaveDrops.add(id);
         }
-        var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops);
+        // Surrounding tracks can make an independent line sound like an inner chord tone.
+        // Only apply fragment thinning where the source part itself carries overlapping voices.
+        var chordParts = new HashSet<Integer>();
+        if (harmonyHz > 0) {
+            tones.stream().collect(Collectors.groupingBy(Note::part)).forEach((part, notes) -> {
+                if (!ReconstructionMelody.isMonophonic(notes)) chordParts.add(part);
+            });
+        }
+        var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts);
         var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
         java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> scopes.isEmpty()
                 || permitsContinuation(structure, scopes, anchor, note);
@@ -354,7 +363,7 @@ final class ReconstructionRoles {
     }
 
     private static List<Decision> thin(List<Note> notes, Map<String, Role> roles, double hz,
-                                       Map<String, String> reasons, Set<String> octaveDrops) {
+                                       Map<String, String> reasons, Set<String> octaveDrops, Set<Integer> chordParts) {
         var decisions = new LinkedHashMap<String, Decision>();
         var latest = new HashMap<PartPitch, Note>();
         var chain = new HashMap<String, String>();
@@ -365,7 +374,7 @@ final class ReconstructionRoles {
             decisions.put(note.id(), new Decision(note, role, reason(reasons, note.id(),
                     octaveDrops.contains(note.id()) ? "isolated-harmony-octave-double"
                             : note.run() == null ? null : note.source()), null));
-            if (note.run() != null || role == Role.drums || role == Role.drop || hz == 0) continue;
+            if (note.run() != null || role == Role.drums || role == Role.drop || chordParts.isEmpty()) continue;
             while (future < notes.size() && notes.get(future).start() <= note.start() + .020) {
                 Note incoming = notes.get(future++);
                 if (roles.get(incoming.id()) != Role.drums && roles.get(incoming.id()) != Role.drop) sounding.add(incoming);
@@ -373,7 +382,8 @@ final class ReconstructionRoles {
             sounding.removeIf(n -> n.end() < note.start() - .020);
             var key = new PartPitch(note.part(), note.pitch());
             var previous = latest.put(key, note);
-            if (role != Role.harmony || previous == null || roles.get(previous.id()) != Role.harmony) continue;
+            if (role != Role.harmony || !chordParts.contains(note.part())
+                    || previous == null || roles.get(previous.id()) != Role.harmony) continue;
             double delta = note.start() - previous.start();
             if (delta < .030 || delta >= 1 / hz || Math.abs(note.start() - previous.end()) > .035
                     || Math.abs(note.velocity() - previous.velocity()) > 14) continue;
