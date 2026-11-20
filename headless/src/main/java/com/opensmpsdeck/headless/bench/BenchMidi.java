@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 final class BenchMidi {
@@ -30,21 +31,27 @@ final class BenchMidi {
     private BenchMidi() {}
 
     static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, Profile profile, double seconds, int song) {
+        return events(truth, drums, profile, seconds, song, Map.of());
+    }
+
+    static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, Profile profile, double seconds, int song,
+                              Map<String, String> stemByLane) {
         var target = new ArrayList<Event>();
         var melodic = new ArrayList<Event>();
         for (var lane : truth.channels()) {
             String hardware = lane.kind().equals("noise") ? "PSG3" : lane.kind();
             String track = profile == Profile.clean ? hardware : hardware.startsWith("FM") ? "FM" : "PSG";
+            track = stemByLane.getOrDefault(lane.kind(), track);
             for (var note : lane.notes()) {
                 if (lane.kind().equals("noise")) {
-                    String drumTrack = profile == Profile.clean ? hardware : "Drums";
+                    String drumTrack = stemByLane.getOrDefault(lane.kind(), profile == Profile.clean ? hardware : "Drums");
                     target.add(new Event(drumTrack, true, note.start(), note.end(), BenchDrums.Drum.HAT.gm));
                 } else {
                     melodic.add(new Event(track, false, note.start(), note.end(), note.pitch()));
                 }
             }
             for (var hit : lane.hits()) {
-                String drumTrack = profile == Profile.clean ? hardware : "Drums";
+                String drumTrack = stemByLane.getOrDefault(lane.kind(), profile == Profile.clean ? hardware : "Drums");
                 target.add(new Event(drumTrack, true, hit.time(), Math.min(seconds, hit.time() + .045),
                         drums.classify(hit.sampleHash(), hit.slot()).gm));
             }
@@ -85,6 +92,14 @@ final class BenchMidi {
     }
 
     static void write(List<Event> events, Profile profile, Path target) throws IOException {
+        var expectedTracks = profile == Profile.clean
+                ? List.of("FM1", "FM2", "FM3", "FM4", "FM5", "FM6-DAC", "PSG1", "PSG2", "PSG3")
+                : List.of("FM", "PSG", "Drums");
+        write(events, profile, target, expectedTracks, false);
+    }
+
+    static void write(List<Event> events, Profile profile, Path target, List<String> expectedTracks,
+                      boolean fixedOrder) throws IOException {
         try {
             var midi = new Sequence(Sequence.PPQ, PPQ);
             if (profile == Profile.sunoLike) {
@@ -92,6 +107,7 @@ final class BenchMidi {
                 midi.createTrack().add(new MidiEvent(new MetaMessage(0x51, tempo, tempo.length), 0));
             }
             var tracks = new LinkedHashMap<String, List<Message>>();
+            if (fixedOrder) expectedTracks.forEach(track -> tracks.put(track, new ArrayList<>()));
             for (var event : events) {
                 int channel = event.drum() ? 9 : 0;
                 var messages = tracks.computeIfAbsent(event.track(), ignored -> new ArrayList<>());
@@ -100,9 +116,6 @@ final class BenchMidi {
                 messages.add(new Message(start, 1, event.pitch(), channel));
                 messages.add(new Message(end, 0, event.pitch(), channel));
             }
-            var expectedTracks = profile == Profile.clean
-                    ? List.of("FM1", "FM2", "FM3", "FM4", "FM5", "FM6-DAC", "PSG1", "PSG2", "PSG3")
-                    : List.of("FM", "PSG", "Drums");
             for (String track : expectedTracks) tracks.computeIfAbsent(track, ignored -> new ArrayList<>());
             for (var entry : tracks.entrySet()) {
                 var track = midi.createTrack();

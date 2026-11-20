@@ -38,11 +38,11 @@ public final class BenchCli {
     private BenchCli() {}
 
     public static void usage(PrintStream out) {
-        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--profile suno-like [--drift N]]");
+        out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--stems] [--profile suno-like [--drift N]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
-        out.println("       bench compare OLD.json NEW.json [--tolerance N]");
+        out.println("       bench compare OLD.json NEW.json [--tolerance N] [--alternate-midi OLD_MANIFEST NEW_MANIFEST]");
     }
 
     public static int run(String[] args, PrintStream out, Hooks hooks) throws IOException {
@@ -65,12 +65,14 @@ public final class BenchCli {
         List<Integer> songs = BenchCorpus.DEFAULT;
         int frames = 30 * 60;
         boolean sunoLike = false;
+        boolean stems = false;
         double drift = 0;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick" -> songs = BenchCorpus.QUICK;
+                case "--stems" -> stems = true;
                 case "--profile" -> {
                     if (!value(args, ++i, flag).equals("suno-like"))
                         throw new IllegalArgumentException("The separate corpus profile is suno-like");
@@ -102,7 +104,7 @@ public final class BenchCli {
             throw new IllegalArgumentException("A shifted corpus needs at least two presentations");
         if (drift != 0 && !sunoLike) throw new IllegalArgumentException("--drift requires --profile suno-like");
         BenchCorpus.build(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]).toAbsolutePath().normalize(),
-                songs, frames, out, hooks.sequencer(), sunoLike, drift);
+                songs, frames, out, hooks.sequencer(), sunoLike, drift, stems);
         return 0;
     }
 
@@ -167,12 +169,38 @@ public final class BenchCli {
     private static int compare(String[] args, PrintStream out) throws IOException {
         require(args, 4);
         double tolerance = .01;
-        if (args.length != 4) {
-            if (args.length != 6 || !args[4].equals("--tolerance"))
-                throw new IllegalArgumentException("Expected bench compare OLD.json NEW.json [--tolerance N]");
-            tolerance = Double.parseDouble(args[5]);
+        Path oldManifest = null, newManifest = null;
+        var seen = new HashSet<String>();
+        for (int i = 4; i < args.length; i++) {
+            String flag = unique(seen, args[i]);
+            switch (flag) {
+                case "--tolerance" -> tolerance = Double.parseDouble(value(args, ++i, flag));
+                case "--alternate-midi" -> {
+                    oldManifest = Path.of(value(args, ++i, flag));
+                    newManifest = Path.of(value(args, ++i, flag));
+                }
+                default -> throw new IllegalArgumentException("Unknown compare option: " + flag);
+            }
         }
-        return BenchScorecard.print(compareCards(Path.of(args[2]), Path.of(args[3]), tolerance), out);
+        Path old = Path.of(args[2]), current = Path.of(args[3]);
+        if (oldManifest == null) return BenchScorecard.print(compareCards(old, current, tolerance), out);
+        validateTolerance(tolerance);
+        var before = BenchFiles.read(old, BenchScorecard.Card.class);
+        var after = BenchFiles.read(current, BenchScorecard.Card.class);
+        if (!before.manifestSha256().equals(BenchFiles.hash(oldManifest))
+                || !after.manifestSha256().equals(BenchFiles.hash(newManifest))
+                || !before.catalogueSha256().equals(after.catalogueSha256())
+                || before.audioRefine() != after.audioRefine()
+                || !withoutMidi(oldManifest).equals(withoutMidi(newManifest))) {
+            throw new IllegalArgumentException("Alternate MIDI comparison requires verified manifests differing only in MIDI");
+        }
+        return BenchScorecard.print(BenchScorecard.compare(before, after, tolerance, true), out);
+    }
+
+    private static com.google.gson.JsonObject withoutMidi(Path path) throws IOException {
+        var manifest = BenchFiles.read(path, com.google.gson.JsonObject.class);
+        for (var row : manifest.getAsJsonArray("cases")) row.getAsJsonObject().remove("midi");
+        return manifest;
     }
 
     public static com.google.gson.JsonObject compareJson(Path old, Path current, double tolerance) throws IOException {
@@ -181,10 +209,14 @@ public final class BenchCli {
     }
 
     private static BenchScorecard.Comparison compareCards(Path old, Path current, double tolerance) throws IOException {
-        if (!Double.isFinite(tolerance) || tolerance < 0)
-            throw new IllegalArgumentException("--tolerance must be finite and nonnegative");
+        validateTolerance(tolerance);
         return BenchScorecard.compare(BenchFiles.read(old, BenchScorecard.Card.class),
                 BenchFiles.read(current, BenchScorecard.Card.class), tolerance);
+    }
+
+    private static void validateTolerance(double tolerance) {
+        if (!Double.isFinite(tolerance) || tolerance < 0)
+            throw new IllegalArgumentException("--tolerance must be finite and nonnegative");
     }
 
     private static int songId(String text) {

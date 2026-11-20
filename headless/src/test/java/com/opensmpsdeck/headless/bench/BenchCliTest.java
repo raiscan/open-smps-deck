@@ -3,6 +3,8 @@ package com.opensmpsdeck.headless.bench;
 import com.opensmpsdeck.headless.CataloguePlayback;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.Main;
+import com.opensmpsdeck.headless.ReferenceStretch;
+import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
@@ -22,6 +24,91 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class BenchCliTest {
     @TempDir Path directory;
+
+    @Test void stemsSeparateTonalPsg3FromNoiseAndDac() {
+        var groups = BenchStems.groups(new BenchTimeline.Truth(List.of(
+                new BenchTimeline.Channel("FM1", List.of(new BenchTimeline.Note(0, 1, 84, null, null)), List.of()),
+                new BenchTimeline.Channel("FM2", List.of(new BenchTimeline.Note(0, 1, 36, null, null)), List.of()),
+                new BenchTimeline.Channel("PSG3", List.of(new BenchTimeline.Note(0, 1, 60, null, null)), List.of()),
+                new BenchTimeline.Channel("noise", List.of(new BenchTimeline.Note(0, 1, 60, null, null)), List.of()))));
+        assertEquals(List.of("FM1"), groups.get("lead"));
+        assertEquals(List.of("FM2"), groups.get("bass"));
+        assertTrue(groups.get("backing").contains("PSG3"));
+        assertEquals(List.of("FM6-DAC", "noise"), groups.get("drums"));
+        assertEquals(0b1000, BenchStems.mask(groups.get("backing")).psg());
+        assertEquals(0b1011, BenchStems.mask(List.of("PSG3")).psg());
+        assertEquals(0b0111, BenchStems.mask(groups.get("drums")).psg());
+        assertEquals(0b011111, BenchStems.mask(groups.get("drums")).fm());
+    }
+
+    @Test void stemWavsShareTheMixShiftDegradationAndDrift() throws Exception {
+        var project = ProjectCompiler.compileWithAssets(DemoProject.create());
+        var truth = new BenchTimeline.Truth(List.of(new BenchTimeline.Channel("FM1",
+                List.of(new BenchTimeline.Note(0, 1, 72, null, null)), List.of())));
+        var drums = new BenchDrums(new InstrumentCatalogue.Builder().build(), "fixture");
+        int frames = 60;
+        var grid = new BenchStructure.Grid(120, 5, 24);
+        var clock = new BenchCorpus.Accelerando(1, .07);
+        var alignments = new java.util.EnumMap<BenchAudio.Variant, ReferenceStretch.Alignment>(BenchAudio.Variant.class);
+        Path nativeMix = directory.resolve("mix.wav");
+        WaveFile.render(project, nativeMix, frames);
+        var mix = BenchAudio.shift(BenchAudio.read(nativeMix), grid.offsetFrames());
+        for (var variant : BenchAudio.Variant.values()) {
+            Path variantMix = directory.resolve("mix-" + variant + ".wav");
+            Path ordinary = directory.resolve("ordinary-" + variant + ".wav");
+            Path captured = directory.resolve("captured-" + variant + ".wav");
+            BenchAudio.write(BenchAudio.degrade(mix, variant), variantMix);
+            int presentations = (int) Math.ceil(clock.inputDuration() * 60);
+            ReferenceStretch.write(variantMix, ordinary, presentations, clock::truthTime);
+            alignments.put(variant, ReferenceStretch.writeAndCaptureAlignment(variantMix, captured,
+                    presentations, clock::truthTime));
+            assertEquals(-1, Files.mismatch(ordinary, captured));
+        }
+        BenchStems.build(project, truth, drums, directory, 1, frames, grid, clock, alignments);
+
+        Path nativeLead = directory.resolve("native.wav");
+        var mask = BenchStems.mask(List.of("FM1"));
+        WaveFile.write(nativeLead, frames, sink ->
+                S3kRenderer.render(project, frames, mask, sink));
+        var shifted = BenchAudio.shift(BenchAudio.read(nativeLead), grid.offsetFrames());
+        assertFalse(java.util.Arrays.equals(shifted.stereo(), new short[shifted.stereo().length]));
+        for (var variant : BenchAudio.Variant.values()) {
+            Path expected = directory.resolve("expected-" + variant + ".wav");
+            BenchAudio.write(BenchAudio.degrade(shifted, variant), expected);
+            Path warped = BenchCorpus.driftPath(expected);
+            alignments.get(variant).writeStem(expected, warped);
+            assertEquals(-1, Files.mismatch(warped, directory.resolve("lead-" + variant + "-drift.wav")));
+        }
+    }
+
+    @Test void alternateMidiComparisonVerifiesManifestIdentityAndNonMidiInputs() throws Exception {
+        Path beforeManifest = directory.resolve("before-manifest.json");
+        Path afterManifest = directory.resolve("after-manifest.json");
+        Files.writeString(beforeManifest, """
+                {"frames":60,"cases":[{"id":"fixture","audio":{"path":"mix.wav"},"midi":{"path":"a.mid"}}]}
+                """);
+        Files.writeString(afterManifest, """
+                {"frames":60,"cases":[{"id":"fixture","audio":{"path":"mix.wav"},"midi":{"path":"b.mid"}}]}
+                """);
+        Path before = directory.resolve("before.json");
+        Path after = directory.resolve("after.json");
+        var sample = card(.90, .4).cases();
+        BenchFiles.write(before, BenchScorecard.create(BenchFiles.hash(beforeManifest), "catalogue",
+                false, false, Map.of(), sample));
+        BenchFiles.write(after, BenchScorecard.create(BenchFiles.hash(afterManifest), "catalogue",
+                false, false, Map.of(), sample));
+        var command = new String[]{"bench", "compare", before.toString(), after.toString(), "--alternate-midi",
+                beforeManifest.toString(), afterManifest.toString()};
+        var captured = new ByteArrayOutputStream();
+        try (var output = new PrintStream(captured)) {
+            assertEquals(0, Main.run(command, output, output));
+            Files.writeString(afterManifest, Files.readString(afterManifest).replace("mix.wav", "other.wav"));
+            assertEquals(2, Main.run(command, output, output));
+            BenchFiles.write(after, BenchScorecard.create(BenchFiles.hash(afterManifest), "catalogue",
+                    false, false, Map.of(), sample));
+            assertEquals(2, Main.run(command, output, output));
+        }
+    }
 
     @Test void holdoutRemovesSharedContentAndRecipesDependingOnRemovedAssets() throws Exception {
         var builder = new InstrumentCatalogue.Builder();

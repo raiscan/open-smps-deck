@@ -82,8 +82,13 @@ final class BenchScorecard {
     record Comparison(boolean passed, boolean failedCases, List<Delta> deltas) {}
 
     static Comparison compare(Card old, Card current, double tolerance) {
+        return compare(old, current, tolerance, false);
+    }
+
+    static Comparison compare(Card old, Card current, double tolerance, boolean alternateMidi) {
         if (old.version != 1 || current.version != 1 || old.holdout != current.holdout
-                || !old.manifestSha256.equals(current.manifestSha256) || !old.goldInputs.equals(current.goldInputs)
+                || (!alternateMidi && !old.manifestSha256.equals(current.manifestSha256))
+                || !old.goldInputs.equals(current.goldInputs)
                 || !caseIds(old).equals(caseIds(current))) {
             throw new IllegalArgumentException("Comparison requires the same corpus, case selection, gold inputs and holdout mode");
         }

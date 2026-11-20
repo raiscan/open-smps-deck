@@ -22,16 +22,55 @@ public final class ReferenceStretch {
 
     static void write(Path input, Path output, int presentations, double sourceDuration,
                       DoubleUnaryOperator outputToSource) throws IOException {
+        write(input, output, presentations, sourceDuration, outputToSource, null, false);
+    }
+
+    /** Replays the mix's analysis-window positions on another input on the same clock. */
+    public static final class Alignment {
+        private final int presentations;
+        private final int[] positions;
+
+        private Alignment(int presentations) {
+            this.presentations = presentations;
+            int frames = presentations * STEREO_FRAMES_PER_PRESENTATION;
+            positions = new int[Math.ceilDiv(frames, HOP)];
+        }
+
+        public void writeStem(Path input, Path output) throws IOException {
+            write(input, output, presentations, ReferenceAudio.durationMicros(input) / 1e6, null, positions, true);
+        }
+    }
+
+    public static Alignment writeAndCaptureAlignment(Path mix, Path output, int presentations,
+                                                     DoubleUnaryOperator outputToSource) throws IOException {
+        S3kRenderer.validatePresentations(presentations);
+        var alignment = new Alignment(presentations);
+        write(mix, output, presentations, ReferenceAudio.durationMicros(mix) / 1e6, outputToSource,
+                alignment.positions, false);
+        return alignment;
+    }
+
+    private static void write(Path input, Path output, int presentations, double sourceDuration,
+                              DoubleUnaryOperator outputToSource, int[] positions, boolean reuse) throws IOException {
         var samples = new Source(input, sourceDuration);
         WaveFile.write(output, presentations, sink -> {
             int frames = presentations * STEREO_FRAMES_PER_PRESENTATION;
             var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
             int previous = 0;
             for (int first = 0; first < frames; first += HOP) {
-                int target = (int) Math.round(outputToSource.applyAsDouble(first / (double) SAMPLE_RATE) * SAMPLE_RATE);
-                samples.load(Math.min(previous + HOP, target - SEARCH),
-                        Math.max(previous + 2 * HOP, target + SEARCH + HOP));
-                int selected = first == 0 ? target : align(samples, previous + HOP, target);
+                int step = first / HOP;
+                int selected;
+                if (reuse) {
+                    selected = positions[step];
+                    samples.load(Math.min(previous + HOP, selected),
+                            Math.max(previous + 2 * HOP, selected + HOP));
+                } else {
+                    int target = (int) Math.round(outputToSource.applyAsDouble(first / (double) SAMPLE_RATE) * SAMPLE_RATE);
+                    samples.load(Math.min(previous + HOP, target - SEARCH),
+                            Math.max(previous + 2 * HOP, target + SEARCH + HOP));
+                    selected = first == 0 ? target : align(samples, previous + HOP, target);
+                    if (positions != null) positions[step] = selected;
+                }
                 for (int i = 0; i < HOP && first + i < frames; i++) {
                     int slot = (first + i) % STEREO_FRAMES_PER_PRESENTATION;
                     double blend = first == 0 ? 1 : i / (double) HOP;
