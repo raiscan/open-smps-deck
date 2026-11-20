@@ -70,8 +70,8 @@ class ReconstructionPhraseTest {
             samples[i] = (float) Math.sin(2 * Math.PI * frequency * i / rate);
         }
         var audio = ReconstructionRhythmAudio.extract(new ReferenceAudio(samples, rate));
-        assertTrue(audio.similarity(0, 2, 2, 2, 4) > .98);
-        assertTrue(audio.similarity(0, 4, 2, 2, 4) < .4);
+        assertTrue(audio.similarity(0, 2, 2, 2, 4, java.util.function.DoubleUnaryOperator.identity()) > .98);
+        assertTrue(audio.similarity(0, 4, 2, 2, 4, java.util.function.DoubleUnaryOperator.identity()) < .4);
         var bars = List.of(new ReconstructionStructure.Bar("a", 0, 2, true),
                 new ReconstructionStructure.Bar("b", 2, 4, true),
                 new ReconstructionStructure.Bar("c", 4, 6, true));

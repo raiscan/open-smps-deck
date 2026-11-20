@@ -49,14 +49,15 @@ class ReconstructionBeatTrackerTest {
             notes.add(new ReconstructionStages.Note("n" + i, melody, start, time(i + .5, duration, change),
                     72, 96, "midi", 1));
         }
-        var roles = new ReconstructionRoles.Result(1, 0, notes.stream().map(note ->
-                new ReconstructionRoles.Decision(note, ReconstructionRoles.Role.melody, null, null)).toList());
-        var result = ReconstructionAllocation.allocate(roles, midi.parts(), score.frames(), false, timeline);
+        var roles = new ReconstructionRoles.Result(1, 0, notes.stream().map(timeline::projectNote).map(note ->
+                new ReconstructionRoles.Decision(note, ReconstructionRoles.Role.melody, null, null)).toList(),
+                timeline.timeBase());
+        var result = ReconstructionAllocation.allocate(roles, midi.parts(), timeline.frames(), false);
         double origin = timeline.project(expected.getFirst());
         double period = 60 / timeline.bpm();
         for (int i = 0; i < notes.size(); i++) {
             var placement = result.notes().get(i);
-            assertEquals(notes.get(i), placement.note());
+            assertEquals(timeline.projectNote(notes.get(i)), placement.note());
             assertEquals(Math.round((origin + i * period) * 60), placement.startTick(), 1);
             assertEquals(Math.round((origin + (i + .5) * period) * 60), placement.endTick(), 1);
         }
@@ -106,6 +107,73 @@ class ReconstructionBeatTrackerTest {
         var timeline = ReconstructionTimeMap.of(score(midi, 30, map, BPM, "86"));
         assertTrue(timeline.warped());
         assertEquals(40, timeline.project(20), .025);
+    }
+
+    @Test void autoWarpDistinguishesSmallAndCorrectableAccelerandi() throws Exception {
+        for (double drift : new double[]{.009, .012}) {
+            double duration = 30;
+            var midi = writeMidi(duration, BPM * drift, new ArrayList<>());
+            var beats = ReconstructionBeatTracker.track(midi, duration, List.of(), 4);
+            assertNotNull(beats);
+            var timeline = ReconstructionTimeMap.of(score(midi, duration, beats, null, "auto"));
+            assertEquals(drift == .012, timeline.warped(), "tracked deviation=" + beats.deviation());
+        }
+    }
+
+    @Test void steadyStructureAndRolesMatchTheUndriftedScore() throws Exception {
+        double duration = 24.1;
+        double slope = .07 / (2 * duration);
+        double sourceDuration = inverseRamp(duration, slope);
+        var original = new ArrayList<ReconstructionStages.Note>();
+        for (int bar = 0; bar < 12; bar++) {
+            double start = bar * 2;
+            for (int beat = 0; beat < 4; beat++)
+                original.add(new ReconstructionStages.Note("lead-" + bar + "-" + beat, 0, start + beat * .5,
+                        start + beat * .5 + .3, 72 + beat, 96, "midi", 1));
+            original.add(new ReconstructionStages.Note("bass-" + bar, 1, start, start + 1.5, 42, 96, "midi", 1));
+            original.add(new ReconstructionStages.Note("inner-a-" + bar, 2, start + .1, start + .2, 61, 96, "midi", 1));
+            original.add(new ReconstructionStages.Note("inner-b-" + bar, 2, start + .236, start + .336, 61, 96, "midi", 1));
+        }
+        var parts = List.of(new MidiScore.Part(0, "Lead", 0, false), new MidiScore.Part(1, "Bass", 0, false),
+                new MidiScore.Part(2, "Inner", 0, false), new MidiScore.Part(3, "Counter", 0, false));
+        for (int bar = 0; bar < 12; bar++)
+            original.add(new ReconstructionStages.Note("counter-" + bar, 3, bar * 2, bar * 2 + 1.7, 68, 96, "midi", 1));
+        var grid = new ReconstructionTempo.Grid(120, 0, 0, 4, 1);
+        var estimate = new ReconstructionTempo.Estimate(grid, 1, 1, 0, List.of(), "tracked");
+        var constant = ReconstructionBeatMap.constant(grid, duration);
+        var ramp = new ReconstructionBeatMap(constant.beats().stream().map(t -> inverseRamp(t, slope)).toList(),
+                0, 4, 1);
+        var midi = new MidiScore(parts, List.of(), List.of());
+        var dry = score(midi, duration, constant, null, "off");
+        var drifted = score(midi, sourceDuration, ramp, null, "120");
+        var dryScore = dry.withInputs(dry.inputs(), constant.bars(duration), original, estimate, null, constant);
+        var driftedScore = drifted.withInputs(drifted.inputs(), ramp.bars(sourceDuration),
+                original.stream().map(n -> new ReconstructionStages.Note(n.id(), n.part(),
+                        inverseRamp(n.start(), slope), inverseRamp(n.end(), slope), n.pitch(), n.velocity(),
+                        n.source(), n.confidence())).toList(), estimate, null, ramp);
+        var expected = ReconstructionStages.structure(dryScore);
+        var actual = ReconstructionStages.structure(driftedScore);
+        assertEquals(expected.sections(), actual.sections());
+        assertEquals(expected.repeats(), actual.repeats());
+        assertEquals(expected.phrases().stream().map(ReconstructionPhrases.Group::instances).toList(),
+                actual.phrases().stream().map(ReconstructionPhrases.Group::instances).toList());
+        assertEquals(expected.notes().size(), actual.notes().size());
+        var expectedRoles = ReconstructionRoles.assign(expected, parts, 7.5);
+        var actualRoles = ReconstructionRoles.assign(actual, parts, 7.5);
+        var byId = actualRoles.notes().stream().collect(java.util.stream.Collectors.toMap(
+                decision -> decision.note().id(), decision -> decision));
+        assertEquals(expectedRoles.notes().size(), byId.size());
+        for (var decision : expectedRoles.notes()) {
+            var match = byId.get(decision.note().id());
+            assertNotNull(match);
+            assertEquals(decision.role(), match.role(), decision.note().id());
+            assertEquals(decision.reason(), match.reason(), decision.note().id());
+            assertEquals(decision.note().start(), match.note().start(), .0002);
+        }
+    }
+
+    private static double inverseRamp(double time, double slope) {
+        return 2 * time / (1 + Math.sqrt(1 + 4 * slope * time));
     }
 
     private static ReconstructionStages.Score score(MidiScore midi, double duration, ReconstructionBeatMap map,

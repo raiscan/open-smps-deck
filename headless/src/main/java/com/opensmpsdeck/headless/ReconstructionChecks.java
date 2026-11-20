@@ -78,7 +78,7 @@ final class ReconstructionChecks {
             for (var grid : tempo.alternatives()) validateGrid(grid, at + ".tempo.alternatives");
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
-        checkNotes(at, value.notes(), value, Set.of("midi", "audio-refine", "external"));
+        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "external"));
     }
 
     private static void validateGrid(ReconstructionTempo.Grid grid, String at) {
@@ -94,13 +94,16 @@ final class ReconstructionChecks {
 
     static void structure(ReconstructionStructure.Result result, ReconstructionStages.Score score) {
         String at = "structure.json";
-        var bars = checkBars(at, result.bars(), duration(score));
+        var timeline = ReconstructionTimeMap.of(score);
+        checkTimeBase(at, result.timeBase(), timeline, "structure");
+        double duration = timeline.projectDuration();
+        var bars = checkBars(at, result.bars(), duration);
         var order = result.bars().stream().map(ReconstructionStructure.Bar::id).toList();
         var repeated = validateLayout(at, result.sections(), result.repeats(), order, bars);
         var votingBars = bars;
         if (result.roleLayout() != null) {
             var layout = result.roleLayout();
-            votingBars = checkBars(at + ".roleLayout", layout.bars(), duration(score));
+            votingBars = checkBars(at + ".roleLayout", layout.bars(), duration);
             repeated = validateLayout(at + ".roleLayout", layout.sections(), layout.repeats(),
                     layout.bars().stream().map(ReconstructionStructure.Bar::id).toList(), votingBars);
         }
@@ -135,7 +138,7 @@ final class ReconstructionChecks {
         }
         unique(at + ".corrections", result.corrections(), ReconstructionStructure.Correction::id);
         var original = new HashMap<String, Note>();
-        for (var note : score.notes()) original.put(note.id(), note);
+        for (var note : score.notes()) original.put(note.id(), timeline.projectNote(note));
         for (var correction : result.corrections()) {
             String where = at + ".corrections." + correction.id();
             var group = repeated.get(correction.barId());
@@ -146,7 +149,7 @@ final class ReconstructionChecks {
             var correctionBars = phrase == null ? votingBars : bars;
             var target = correctionBars.get(correction.barId());
             var candidate = correction.note();
-            note(candidate, partIds(score), duration(score), where);
+            note(candidate, partIds(score), duration, where);
             require(candidate.source().equals("consensus") && candidate.start() >= target.start() && candidate.start() < target.end(),
                     where, "consensus note must attack in the target bar");
             var voterBars = new HashSet<String>();
@@ -176,7 +179,7 @@ final class ReconstructionChecks {
                 require(external != null && external.source().equals("external"), where, "unknown external candidate");
             }
         }
-        checkNotes(at, result.notes(), score, Set.of("midi", "audio-refine", "consensus"));
+        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "consensus"));
     }
 
     private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
@@ -202,6 +205,10 @@ final class ReconstructionChecks {
 
     static void rolePlan(ReconstructionRolePlan plan, ReconstructionStructure.Result structure,
                          ReconstructionStages.Score score) {
+        var timeline = ReconstructionTimeMap.of(score);
+        require(plan.timeBase() == null || plan.timeBase() == timeline.timeBase(), "roleplan.json.timeBase",
+                "must match the structure and describe timeline (" + timeline.timeBase() + ")");
+        double duration = timeline.projectDuration();
         var sections = structure.sections().stream().map(ReconstructionStructure.Section::id)
                 .collect(java.util.stream.Collectors.toSet());
         var parts = partIndex(score);
@@ -228,17 +235,19 @@ final class ReconstructionChecks {
             int max = rule.pitchMax() == null ? 127 : rule.pitchMax();
             require(min >= 0 && min <= max && max <= 127, at, "expected 0 <= pitchMin <= pitchMax <= 127");
             double start = rule.startSeconds() == null ? 0 : rule.startSeconds();
-            double end = rule.endSeconds() == null ? duration(score) : rule.endSeconds();
-            require(start >= 0 && start < end && end <= duration(score), at,
+            double end = rule.endSeconds() == null ? duration : rule.endSeconds();
+            require(start >= 0 && start < end && end <= duration, at,
                     "expected 0 <= startSeconds < endSeconds <= score duration");
         }
     }
 
     static void roles(ReconstructionRoles.Result roles, ReconstructionStages.Score score) {
         String at = "roles.json";
+        var timeline = ReconstructionTimeMap.of(score);
+        checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, Set.of("midi", "audio-refine", "consensus"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus"));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
@@ -257,10 +266,12 @@ final class ReconstructionChecks {
     }
 
     static void allocation(ReconstructionAllocation.Result allocation, ReconstructionStages.Score score) {
-        int projectFrames = ReconstructionTimeMap.of(score).frames();
+        var timeline = ReconstructionTimeMap.of(score);
+        int projectFrames = timeline.frames();
         String at = "allocation.json";
+        checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, Set.of("midi", "audio-refine", "consensus"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus"));
         var parts = partIndex(score);
         var lanes = new HashMap<String, java.util.ArrayList<ReconstructionAllocation.Entry>>();
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
@@ -308,6 +319,14 @@ final class ReconstructionChecks {
         }
     }
 
+    private static void checkTimeBase(String at, ReconstructionTimeMap.TimeBase timeBase,
+                                      ReconstructionTimeMap timeline, String stage) {
+        var actual = timeBase == null ? ReconstructionTimeMap.TimeBase.source : timeBase;
+        require(actual == timeline.timeBase(), at + ".timeBase",
+                "expected " + timeline.timeBase() + "; regenerate from structure after changing tempo "
+                        + "or rerun " + stage + " with current upstream artifacts");
+    }
+
     private static Map<String, ReconstructionStructure.Bar> checkBars(String at, List<ReconstructionStructure.Bar> bars, double duration) {
         var map = new HashMap<String, ReconstructionStructure.Bar>();
         double cursor = 0;
@@ -321,12 +340,13 @@ final class ReconstructionChecks {
         return map;
     }
 
-    private static void checkNotes(String at, List<Note> notes, ReconstructionStages.Score score, Set<String> sources) {
+    private static void checkNotes(String at, List<Note> notes, ReconstructionStages.Score score,
+                                   double duration, Set<String> sources) {
         unique(at + ".notes", notes, Note::id);
         var parts = partIndex(score);
         for (var note : notes) {
             String where = at + ".notes." + note.id();
-            note(note, parts.keySet(), duration(score), where);
+            note(note, parts.keySet(), duration, where);
             require(sources.contains(note.source()), where + ".source", "source not valid in this artifact");
             if (!parts.get(note.part()).drums() && !note.source().equals("external")) {
                 require(note.pitch() >= 12 && note.pitch() <= 106, where + ".pitch", "S3K tone pitch must be in 12..106");

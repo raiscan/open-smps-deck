@@ -22,7 +22,8 @@ final class ReconstructionRoles {
     enum Role { melody, counter, bass, harmony, drums, drop }
 
     record Decision(Note note, Role role, @ReconstructionStages.Nullable String reason, @ReconstructionStages.Nullable String mergedInto) {}
-    record Result(int version, double harmonyMaxHz, List<Decision> notes) {}
+    record Result(int version, double harmonyMaxHz, List<Decision> notes,
+                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase) {}
     private record Scope(int index, ReconstructionRolePlan.Rule rule, ReconstructionRolePlan.BarRange bars) {
         boolean applies(String section, int bar) {
             return (bars == null || bar >= bars.first() && bar <= bars.last())
@@ -73,7 +74,8 @@ final class ReconstructionRoles {
             roles.put(id, Role.drop);
             octaveDrops.add(id);
         }
-        return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops));
+        return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops),
+                structure.timeBase());
     }
 
     private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,

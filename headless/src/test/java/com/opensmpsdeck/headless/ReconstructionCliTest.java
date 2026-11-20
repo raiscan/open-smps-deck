@@ -215,10 +215,17 @@ class ReconstructionCliTest {
         var digest = java.security.MessageDigest.getInstance("SHA-256");
         for (var entry : expected.entrySet()) {
             Path path = work.resolve(entry.getKey());
-            byte[] bytes = entry.getKey().equals("score.json")
-                    ? Files.readString(path).replace(directory.toString(), "@INPUT@")
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8)
-                    : Files.readAllBytes(path);
+            byte[] bytes = Files.readAllBytes(path);
+            if (entry.getKey().equals("score.json")) {
+                bytes = Files.readString(path).replace(directory.toString(), "@INPUT@")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            } else if (List.of("structure.json", "roles.json", "allocation.json").contains(entry.getKey())) {
+                // Compare the original payload byte for byte apart from the new time-base label.
+                String json = Files.readString(path);
+                assertEquals("source", JsonParser.parseString(json).getAsJsonObject().get("timeBase").getAsString());
+                bytes = json.replace(",\n  \"timeBase\": \"source\"", "")
+                        .replace(",\"timeBase\":\"source\"", "").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            }
             assertEquals(entry.getValue(), java.util.HexFormat.of().formatHex(digest.digest(bytes)), entry.getKey());
         }
     }

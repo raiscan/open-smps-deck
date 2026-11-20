@@ -10,7 +10,8 @@ import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 
-record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rules) {
+record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rules,
+                              @Nullable ReconstructionTimeMap.TimeBase timeBase) {
     enum Voice { top, bottom, all }
 
     record Rule(@Nullable List<String> sections, @Nullable String bars, int part, Role role,
@@ -89,6 +90,7 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
                 rules.add(new Rule(List.of(section.id()), null, part, role, defaultVoice(role), null, null, null, null, null));
             });
         }
-        return new ReconstructionRolePlan(ReconstructionStages.VERSION, rules);
+        var timeBase = structure.timeBase() == null ? ReconstructionTimeMap.TimeBase.source : structure.timeBase();
+        return new ReconstructionRolePlan(ReconstructionStages.VERSION, rules, timeBase);
     }
 }

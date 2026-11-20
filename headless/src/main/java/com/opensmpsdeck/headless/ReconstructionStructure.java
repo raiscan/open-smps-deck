@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.DoubleUnaryOperator;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.VERSION;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
@@ -31,10 +32,11 @@ final class ReconstructionStructure {
     record Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
                   List<Correction> corrections, List<Note> notes,
                   @ReconstructionStages.Nullable List<ReconstructionPhrases.Group> phrases,
-                  @ReconstructionStages.Nullable Layout roleLayout) {
+                  @ReconstructionStages.Nullable Layout roleLayout,
+                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase) {
         Result(int version, List<Bar> bars, List<Section> sections, List<Repeat> repeats,
                List<Correction> corrections, List<Note> notes) {
-            this(version, bars, sections, repeats, corrections, notes, null, null);
+            this(version, bars, sections, repeats, corrections, notes, null, null, null);
         }
     }
 
@@ -105,12 +107,14 @@ final class ReconstructionStructure {
                 .sorted(ReconstructionStages.NOTE_ORDER).toList();
         var melody = ReconstructionRoles.melody(roleLayout == null ? new Layout(bars, sections, repeats) : roleLayout,
                 prepared, programs);
-        var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter);
+        var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter,
+                timeline == null ? DoubleUnaryOperator.identity() : timeline::source);
         phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end());
         var notes = corrected.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
         var linked = inferred ? identicalBars(bars, notes, phrases, timeline) : repeats;
         return new Result(VERSION, bars, sections, linked, corrections, notes,
-                phrases.stream().map(ReconstructionPhrases.Match::evidence).toList(), roleLayout);
+                phrases.stream().map(ReconstructionPhrases.Match::evidence).toList(), roleLayout,
+                timeline == null ? ReconstructionTimeMap.TimeBase.source : timeline.timeBase());
     }
 
     private static List<Pattern> patterns(List<Bar> bars, List<Note> notes) {
@@ -238,7 +242,7 @@ final class ReconstructionStructure {
     private static List<Repeat> identicalBars(List<Bar> bars, List<Note> notes, List<ReconstructionPhrases.Match> phrases,
                                              ReconstructionTimeMap timeline) {
         java.util.function.DoubleToLongFunction toFrame = timeline != null && timeline.warped()
-                ? timeline::tick : time -> Math.round(time * 60);
+                ? time -> S3kReconstruction.toTicks(Math.round(time * 1e6)) : time -> Math.round(time * 60);
         var eligible = new HashSet<String>();
         for (var match : phrases) for (var window : match.windows()) for (var bar : window.bars()) eligible.add(bar.id());
         var groups = new LinkedHashMap<BarContent, List<String>>();

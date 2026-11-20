@@ -25,7 +25,11 @@ final class ReconstructionAllocation {
             return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null);
         }
     }
-    record Result(int version, List<Entry> notes) {}
+    record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase) {
+        Result(int version, List<Entry> notes) {
+            this(version, notes, null);
+        }
+    }
     private record Attack(ReconstructionRoles.Decision decision, int start, int end, boolean noise) {
         Note note() { return decision.note(); }
         Role role() { return decision.role(); }
@@ -38,28 +42,22 @@ final class ReconstructionAllocation {
     private ReconstructionAllocation(boolean fmOnly) { this.fmOnly = fmOnly; }
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly) {
-        return allocate(roles, parts, frames, fmOnly, new ReconstructionTimeMap(null, null, frames / 60.0));
-    }
-
-    static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
-                           ReconstructionTimeMap timeline) {
-        int projectFrames = timeline.warped() ? timeline.frames() : frames;
         var allocator = new ReconstructionAllocation(fmOnly);
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
             Note note = decision.note();
-            int start = Math.min(projectFrames - 1, timeline.tick(note.start()));
+            int start = note.startTick(frames);
             boolean drum = decision.role() == Role.drums;
             boolean noise = drum && !fmOnly && isNoise(names.get(note.part()));
-            return new Attack(decision, start, drum && !noise ? start + 1 : Math.min(projectFrames, Math.max(start + 1, timeline.tick(note.end()))), noise);
+            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise);
         }).sorted(Comparator.comparingInt(Attack::start)
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
         for (var attack : attacks) allocator.place(attack);
-        return new Result(VERSION, List.copyOf(allocator.entries.values()));
+        return new Result(VERSION, List.copyOf(allocator.entries.values()), roles.timeBase());
     }
 
     /** Project a kept lane layout back into source time for the existing voice probes. */
@@ -70,15 +68,16 @@ final class ReconstructionAllocation {
         var placement = allocation.notes().stream().filter(entry -> entry.lane != null)
                 .sorted(Comparator.comparingInt(Entry::startTick).reversed()).toList();
         for (var entry : placement) {
-            int start = entry.note.startTick(frames);
+            var note = timeline.sourceNote(entry.note);
+            int start = note.startTick(frames);
             int next = nextAttack.getOrDefault(entry.lane, frames);
             if (start >= next) continue;
-            int end = entry.lane.equals("DAC") ? start + 1 : entry.note.endTick(frames);
+            int end = entry.lane.equals("DAC") ? start + 1 : note.endTick(frames);
             if (entry.outcome == Outcome.shortened) {
                 int shortened = (int) Math.round(timeline.source(entry.endTick / 60.0) * 60);
                 end = Math.min(end, Math.max(start + 1, shortened));
             }
-            entries.add(new Entry(entry.note, entry.role, entry.lane, start, Math.min(end, next),
+            entries.add(new Entry(note, entry.role, entry.lane, start, Math.min(end, next),
                     entry.outcome, entry.reason, entry.mergedInto));
             nextAttack.put(entry.lane, start);
         }

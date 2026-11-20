@@ -168,7 +168,7 @@ public final class ReconstructionStages {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
                         ReconstructionArtifacts.write(allocationFile, ReconstructionAllocation.allocate(
-                                roles, score.source.parts(), score.frames, score.inputs.fmOnly, ReconstructionTimeMap.of(score)));
+                                roles, score.source.parts(), ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly));
                     }
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.
@@ -370,20 +370,29 @@ public final class ReconstructionStages {
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),
                 structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList(),
-                structure.phrases(), structure.roleLayout());
+                structure.phrases(), structure.roleLayout(), structure.timeBase());
     }
 
-    private static ReconstructionStructure.Result structure(Score score) throws IOException {
+    static ReconstructionStructure.Result structure(Score score) throws IOException {
         boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
         boolean tracker = score.usesBeatGrid();
         double seconds = score.durationUs / 1e6;
         var bars = tracker ? score.beatMap.bars(seconds) : score.bars;
         var audio = Boolean.TRUE.equals(score.inputs.audioRepeats)
                 ? ReconstructionRhythmAudio.read(Path.of(score.inputs.wav), seconds) : null;
-        return ReconstructionStructure.analyze(bars, score.notes.stream().sorted(NOTE_ORDER).toList(),
-                score.source.parts(), audio, inferred, tracker ? score.beatMap.beatsPerBar()
-                        : inferred ? score.tempo.selected().beatsPerBar() : 4, score.midiBars,
-                ReconstructionTimeMap.of(score));
+        var timeline = ReconstructionTimeMap.of(score);
+        var notes = score.notes.stream().map(timeline::projectNote).sorted(NOTE_ORDER).toList();
+        var roleBars = timeline.projectBars(score.midiBars);
+        if (timeline.warped() && tracker && score.midiBars != null
+                && (score.inputs.grid == null || !score.inputs.grid.force())) {
+            // The placeholder MIDI clock supplies fixed contour windows. Lay
+            // out those windows on the new clock, independently of the tracked
+            // musical bar boundaries.
+            roleBars = MidiScore.bars(Path.of(score.inputs.midi), timeline.projectDuration());
+        }
+        return ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
+                inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,
+                roleBars, timeline);
     }
 
     private static boolean trackedGrid(ReconstructionBeatMap beats, ReconstructionTempo.Options grid) {
