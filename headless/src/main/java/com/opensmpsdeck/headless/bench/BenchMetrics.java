@@ -44,6 +44,10 @@ final class BenchMetrics {
                 || Math.abs(a.end - b.end) <= Math.max(.050, .2 * (a.end - a.start)) + EPSILON));
     }
 
+    static List<Pair> laneNotes(List<Event> truth, List<Event> estimate, double tolerance) {
+        return match(truth, estimate, tolerance, (a, b) -> a.pitch == b.pitch && a.lane.equals(b.lane));
+    }
+
     static List<Pair> attacks(List<Event> truth, List<Event> estimate, double tolerance) {
         return match(truth, estimate, tolerance, (a, b) -> true);
     }

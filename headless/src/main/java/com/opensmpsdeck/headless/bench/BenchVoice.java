@@ -62,15 +62,58 @@ final class BenchVoice {
         return probe(a.hash(), a.pitch()).distance(probe(b.hash(), a.pitch())).spectral();
     }
 
+    static Score ladder(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,
+                        List<BenchMetrics.Pair> pairs, Map<String, byte[]> originals, Map<String, byte[]> emitted)
+            throws IOException {
+        var counts = new TreeMap<String, Count>();
+        var total = new Count();
+        var probes = new HashMap<Probe, AudioFingerprint>();
+        for (var pair : pairs) {
+            var a = truth.get(pair.truth());
+            var b = estimate.get(pair.estimate());
+            if (a.hash() == null || !originals.containsKey(a.hash())) continue;
+            Double spectral = null;
+            if (b.hash() != null && emitted.containsKey(b.hash()) && a.pitch() >= 12 && a.pitch() <= 106) {
+                // Keep the original and emitted caches separate when a dialect
+                // interprets the same voice bytes in a different operator order.
+                var first = ladderProbe(probes, "original:" + a.hash(), originals.get(a.hash()), a.pitch());
+                var second = ladderProbe(probes, "emitted:" + b.hash(), emitted.get(b.hash()), a.pitch());
+                spectral = first.distance(second).spectral();
+            }
+            total.add(false, false, spectral);
+            counts.computeIfAbsent(a.lane(), ignored -> new Count()).add(false, false, spectral);
+        }
+        var output = new TreeMap<String, Channel>();
+        counts.forEach((lane, count) -> output.put(lane,
+                new Channel(count.matched, null, null, count.compared, count.mean())));
+        return new Score(output, total.matched, null, null, total.compared, total.mean());
+    }
+
+    private static AudioFingerprint ladderProbe(Map<Probe, AudioFingerprint> probes, String key, byte[] bytes,
+                                                int pitch) throws IOException {
+        var probe = new Probe(key, pitch);
+        var cached = probes.get(probe);
+        if (cached != null) return cached;
+        var result = renderProbe("Voice", bytes, pitch);
+        probes.put(probe, result);
+        return result;
+    }
+
     private AudioFingerprint probe(String hash, int pitch) throws IOException {
         var key = new Probe(hash, pitch);
         var fingerprint = probes.get(key);
         if (fingerprint != null) return fingerprint;
         // A clean recipe removes provenance-dependent audition effects from this same-note comparison.
         var original = catalogue.asset("fm-voice-" + hash);
+        fingerprint = renderProbe(original.name(), original.bytes(), pitch);
+        probes.put(key, fingerprint);
+        return fingerprint;
+    }
+
+    private static AudioFingerprint renderProbe(String name, byte[] bytes, int pitch) throws IOException {
         var builder = new InstrumentCatalogue.Builder();
-        String asset = builder.asset(original.kind(), original.name(), original.bytes());
-        String variant = builder.variant(asset, original.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, name, bytes);
+        String variant = builder.variant(asset, name, InstrumentCatalogue.Recipe.plain(), null);
         var project = CataloguePlayback.matchProbe(builder.build(), variant, pitch, GATE);
         int width = S3kRenderer.STEREO_FRAMES_PER_PRESENTATION;
         float[] audio = new float[GATE * width];
@@ -78,9 +121,7 @@ final class BenchVoice {
         S3kRenderer.render(ProjectCompiler.compileWithAssets(project), GATE, pcm -> {
             for (int i = 0; i < width; i++) audio[start[0]++] = (pcm[2 * i] + pcm[2 * i + 1]) / 65536.0f;
         });
-        fingerprint = AudioFingerprint.extract(audio, S3kRenderer.SAMPLE_RATE);
-        probes.put(key, fingerprint);
-        return fingerprint;
+        return AudioFingerprint.extract(audio, S3kRenderer.SAMPLE_RATE);
     }
 
     private static final class Count {

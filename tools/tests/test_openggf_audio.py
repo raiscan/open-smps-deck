@@ -121,6 +121,23 @@ class SnapshotTest(unittest.TestCase):
             snapshot.sync(self.root, self.source)
         self.assertFalse(self.target().exists())
 
+    def test_patch_can_bound_a_replacement_by_unique_markers(self):
+        patch = self.manifest["patches"][0]
+        patch["removeExact"] = "import "
+        patch["endBefore"] = "class SmpsSequencer"
+        patch["replaceWith"] = "// audio-only extraction\n"
+        expected = self.patched.replace(b"class SmpsSequencer", b"// audio-only extraction\nclass SmpsSequencer")
+        self.manifest["files"][0]["vendoredSha256"] = digest(expected)
+        self.write_manifest()
+        snapshot.sync(self.root, self.source)
+        self.assertEqual(expected, self.target().read_bytes())
+
+        patch["endBefore"] = "package "
+        self.write_manifest()
+        with self.assertRaisesRegex(snapshot.SnapshotError, "end marker after start"):
+            snapshot.sync(self.root, self.source)
+        self.assertEqual(expected, self.target().read_bytes())
+
     def test_source_digest_mismatch_is_rejected_before_writing(self):
         self.manifest["files"][0]["sourceSha256"] = "0" * 64
         self.write_manifest()

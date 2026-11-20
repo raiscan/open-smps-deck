@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.headless.BenchCartridge.Game;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 
@@ -24,7 +25,14 @@ final class BenchDrums {
 
     private final Map<String, Drum> byHash = new HashMap<>();
 
+    private final Game game;
+
     BenchDrums(InstrumentCatalogue catalogue, String revision) {
+        this(catalogue, revision, Game.s3k);
+    }
+
+    BenchDrums(InstrumentCatalogue catalogue, String revision, Game game) {
+        this.game = game;
         var tagged = new HashMap<String, Drum>();
         var conflict = new java.util.HashSet<String>();
         for (var variant : catalogue.variants()) {
@@ -49,7 +57,9 @@ final class BenchDrums {
         return byHash.getOrDefault(hash, slot(slot));
     }
 
-    private static Drum slot(int slot) {
+    private Drum slot(int slot) {
+        if (game != Game.s3k)
+            return slot == 0x81 ? Drum.KICK : slot == 0x82 ? Drum.SNARE : Drum.OTHER;
         if (KICKS.contains(slot)) return Drum.KICK;
         if (SNARES.contains(slot)) return Drum.SNARE;
         return Drum.OTHER;

@@ -3,8 +3,8 @@
 
 Requires JDK 25, a local upstream Git clone containing the locked commit, and an
 explicit disposable scratch directory. No game build, ROM, audio device or network
-is used. The only reference-only stub resolves an unused AudioManager import;
-the original upstream sources themselves are not patched.
+is used. Reference-only stubs resolve non-audio types; the original upstream
+sources themselves are not patched.
 """
 
 import argparse
@@ -41,6 +41,15 @@ def verify(root, source, scratch):
         stub = workspace / "original/com/openggf/audio/AudioManager.java"
         stub.parent.mkdir(parents=True, exist_ok=True)
         stub.write_text("package com.openggf.audio; public final class AudioManager {}\n")
+        services = workspace / "original/com/openggf/level/objects/ObjectServices.java"
+        services.parent.mkdir(parents=True)
+        services.write_text("package com.openggf.level.objects; public interface ObjectServices { "
+                            "com.openggf.data.RomByteReader romReader() throws java.io.IOException; }\n")
+        # The upstream PSG fallback is needed only to compile the independent
+        # sources. The vendored loader reads envelopes from the user's ROM.
+        fallback_source = "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2PsgEnvelopes.java"
+        fallback = workspace / "original" / fallback_source
+        fallback.write_bytes(upstream_bytes(source, lock["revision"], fallback_source))
         # Compile the same authored adapter against each independent core as well.
         adapter = root / "headless/src/main/java/com/opensmpsdeck/headless"
         adapters = [adapter / f"{name}.java" for name in ("S3kBinary", "S3kDemo", "S3kRenderer", "NativeBankAnalysis")]
@@ -48,7 +57,7 @@ def verify(root, source, scratch):
         # the JDK. Keep this independent bridge free of Gson/project persistence.
         project = root / "project-core/src/main/java/com/opensmpsdeck/project"
         adapters += [project / f"{name}.java" for name in ("CompiledProject", "Envelope", "EnvelopeProgram", "DacSample", "NativeProgram", "Voice")]
-        reference = run_probe(originals + [stub] + adapters, workspace / "reference-classes", probe)
+        reference = run_probe(originals + [stub, services, fallback] + adapters, workspace / "reference-classes", probe)
         actual = run_probe(vendored + adapters, workspace / "vendored-classes", probe)
         if actual != reference:
             raise SnapshotError(f"playback parity mismatch\noriginal:\n{reference}\nvendored:\n{actual}")

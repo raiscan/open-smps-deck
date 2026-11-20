@@ -40,7 +40,9 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
     }
 
     double source(double project) {
-        return warped() ? beats.seconds(beats.index(0) + project * (bpm / 60)) : project;
+        // Avoid roundoff below the WAV boundary when inverting the anchor itself.
+        if (!warped() || project == 0) return project;
+        return beats.seconds(beats.index(0) + project * (bpm / 60));
     }
 
     TimeBase timeBase() { return warped() ? TimeBase.project : TimeBase.source; }
