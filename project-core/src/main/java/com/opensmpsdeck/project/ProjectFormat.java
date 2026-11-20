@@ -11,6 +11,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -22,14 +23,16 @@ import java.util.function.Function;
 
 /** Strict versioned source boundary. Unknown native features are rejected, never discarded. */
 public final class ProjectFormat {
-    public static final int MAX_SOURCE_CHARS = 1_048_576;
-    private static final Gson GSON = new GsonBuilder().serializeNulls().setPrettyPrinting().disableHtmlEscaping().create();
+    private static final int PRETTY_SOURCE_BYTES = 1_048_576;
+    private static final Gson COMPACT_GSON = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
+    private static final Gson GSON = COMPACT_GSON.newBuilder().setPrettyPrinting().create();
     private static final Gson REVIEW_GSON = new GsonBuilder().disableHtmlEscaping().create();
     private ProjectFormat() {}
 
     public static StudioProject read(String json) {
         if (json == null) throw invalid("project", "JSON text is required");
-        if (json.length() > MAX_SOURCE_CHARS) throw invalid("project", "source exceeds 1 MiB character limit");
+        int limit = ProjectFiles.maxSourceBytes();
+        if (exceedsUtf8Limit(json, limit)) throw invalid("project", ProjectFiles.sourceLimitMessage(limit));
         try (JsonReader reader = new JsonReader(new StringReader(json))) {
             reader.setLenient(false);
             JsonElement tree = readValue(reader, 0, false);
@@ -205,7 +208,16 @@ public final class ProjectFormat {
         }
         if (!project.references().isEmpty()) o.add("references", REVIEW_GSON.toJsonTree(project.references()));
         if (!project.notes().isEmpty()) o.add("notes", REVIEW_GSON.toJsonTree(project.notes()));
-        return GSON.toJson(o) + "\n";
+        String pretty = GSON.toJson(o) + "\n";
+        // Keep existing canonical bytes for ordinary projects. Large documents
+        // use the same schema and field order with insignificant whitespace removed.
+        return exceedsUtf8Limit(pretty, PRETTY_SOURCE_BYTES) ? COMPACT_GSON.toJson(o) + "\n" : pretty;
+    }
+
+    private static boolean exceedsUtf8Limit(String source, int limit) {
+        // Each UTF-16 code unit accounts for at most three UTF-8 bytes.
+        return source.length() > limit || (source.length() > limit / 3
+                && source.getBytes(StandardCharsets.UTF_8).length > limit);
     }
 
     public static void validate(StudioProject project) {

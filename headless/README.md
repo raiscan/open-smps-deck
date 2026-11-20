@@ -120,9 +120,9 @@ adjusts its internal synthesis rate to preserve chip time per presentation.
 
 Output files must not already exist. Validation happens before creating output;
 input and output cannot be the same file. Errors go to stderr with exit code 2.
-Rendering streams one presentation at a time and uses bounded memory. JSON input
-is limited to 1 MiB; compiled output and CLI binary input are limited to one
-32 KiB bank. Source reads use `ProjectFiles` so CLI and studio share validation.
+Rendering streams one presentation at a time and uses bounded memory. Project
+source uses the [shared 16 MiB UTF-8 limit and JVM setting](../project-core/README.md#version-1-contract).
+Compiled output and CLI binary input are limited to one 32 KiB bank.
 The binary demo is an original finite FM/PSG phrase
 with a synthetic, deliberately asymmetric FM patch; it contains no ROM assets.
 

@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
@@ -154,14 +155,19 @@ class ProjectCliTest {
     }
 
     @Test void oversizedSourceAndInvalidFrameArgumentsFailWithoutCreatingOutput() throws Exception {
-        Path oversized = source("oversized.json", " ".repeat(1_048_577));
+        int limit = ProjectFiles.maxSourceBytes();
+        Path oversized = directory.resolve("oversized.json");
+        try (var file = new java.io.RandomAccessFile(oversized.toFile(), "rw")) {
+            file.setLength(limit + 1L);
+        }
         Path source = source("phrase.json", validSource());
         for (String command : List.of("validate-project", "compile-project", "render-project")) {
             Path output = directory.resolve(command + ".output");
             Result result = command.equals("validate-project") ? run(command, oversized.toString())
                     : run(command, oversized.toString(), output.toString());
             assertEquals(2, result.exit());
-            assertTrue(result.err().toLowerCase().contains("exceed"), result.err());
+            assertTrue(result.err().contains(limit + " byte UTF-8 source limit"), result.err());
+            assertTrue(result.err().contains(ProjectFiles.SOURCE_LIMIT_PROPERTY), result.err());
             assertFalse(Files.exists(output));
         }
         for (String frames : List.of("0", "36001", "many")) {

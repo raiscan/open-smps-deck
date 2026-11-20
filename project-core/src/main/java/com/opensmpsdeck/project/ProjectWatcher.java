@@ -99,9 +99,9 @@ public final class ProjectWatcher implements AutoCloseable {
     private String fingerprint() {
         try {
             BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (attributes.isRegularFile() && attributes.size() <= ProjectFiles.MAX_FILE_BYTES) {
+            if (attributes.isRegularFile() && attributes.size() <= ProjectFiles.maxSourceBytes()) {
                 // Content identity suppresses same-byte touches, including atomic replacement.
-                return "content:" + ProjectFiles.revision(ProjectFiles.readBytes(file));
+                return "content:" + ProjectFiles.fileRevision(file);
             }
             return "unsupported:" + attributes.size() + ":" + attributes.lastModifiedTime() + ":" + attributes.fileKey();
         } catch (IOException exception) {
