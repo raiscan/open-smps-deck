@@ -73,7 +73,7 @@ final class McpTools {
                     choice("time", "Time base for the range (default source)", "source", "project").optional(),
                     field("stem", "integer", "Zero-based part ID of a mapped stem").optional(),
                     path("wav", "an aligned source-time WAV").optional(),
-                    field("render", "boolean", "Include a warmed full-mix chip render").optional(),
+                    field("render", "boolean", "Include a warmed chip render (solos `lanes` when given, else the full mix)").optional(),
                     field("pitchMin", "integer", "Lowest displayed MIDI pitch (inclusive)").optional(),
                     field("pitchMax", "integer", "Highest displayed MIDI pitch (inclusive)").optional(),
                     lanes("lanes", "Filter note overlays and lane rows").optional(),

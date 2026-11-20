@@ -97,4 +97,12 @@ class ReconstructionViewTest {
         int harmonic = image.getRGB(attack + 2, harmonicY);
         assertTrue(((harmonic >> 16) & 255) > (harmonic & 255) + 40);
     }
+
+    @org.junit.jupiter.api.Test void soloMaskMutesEveryOtherLane() {
+        assertEquals(S3kRenderer.ChannelMask.NONE, ReconstructionView.soloMask(List.of()));
+        var mask = ReconstructionView.soloMask(List.of("FM1", "PSG1"));
+        assertEquals(0b111110, mask.fm());
+        assertEquals(0b1110, mask.psg());
+        assertEquals(0b011111, ReconstructionView.soloMask(List.of("DAC")).fm());
+    }
 }

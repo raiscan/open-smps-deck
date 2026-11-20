@@ -141,7 +141,7 @@ public final class ReconstructionView {
         double audioStart = span.seconds(span.start, source.base), audioEnd = span.seconds(span.end, source.base);
         var audio = ReferenceAudio.evidenceRange(source.path, audioStart - EvidenceSpectrum.CONTEXT,
                 audioEnd + EvidenceSpectrum.CONTEXT);
-        var rendered = options.render ? render(project, span) : null;
+        var rendered = options.render ? render(project, span, options.lanes) : null;
 
         int minPitch = notes.stream().mapToInt(DrawnNote::pitch).min().orElse(51) - 3;
         int maxPitch = notes.stream().mapToInt(DrawnNote::pitch).max().orElse(81) + 3;
@@ -164,6 +164,7 @@ public final class ReconstructionView {
                 && ("voicing-projection".equals(note.evidence) || "allocated".equals(note.evidence)
                 || "legacy-report-and-voicing".equals(note.evidence)));
         var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes);
+        if (!options.lanes.isEmpty()) picture.renderLabel = "Solo " + String.join(", ", options.lanes);
         var sounding = lanes.stream().filter(lane -> visible.stream()
                 .anyMatch(note -> note.layer == Layer.lane && lane.equals(note.lane))).toList();
         var patchChanges = EvidenceNotes.patchChanges(project, span, sounding);
@@ -215,7 +216,21 @@ public final class ReconstructionView {
         throw new IllegalArgumentException("No recorded source WAV. Supply --wav FILE");
     }
 
-    private static EvidenceSpectrum.Audio render(StudioProject project, Span span) throws IOException {
+    /** Mutes every lane outside {@code solo}; an empty list renders the full mix. */
+    static ChannelMask soloMask(List<String> solo) {
+        if (solo.isEmpty()) return ChannelMask.NONE;
+        int fm = 0, psg = 0;
+        for (int i = 0; i < 6; i++) {
+            String lane = i == 5 ? "DAC" : "FM" + (i + 1);
+            if (!solo.contains(lane)) fm |= 1 << i;
+        }
+        for (int i = 0; i < 3; i++) if (!solo.contains("PSG" + (i + 1))) psg |= 1 << i;
+        // PSG3 owns both tone 3 and the noise output.
+        if ((psg & 0b100) != 0) psg |= 0b1000;
+        return new ChannelMask(fm, psg);
+    }
+
+    private static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo) throws IOException {
         if (project.nativeProgram() != null || project.tempo() != 0)
             throw new IllegalArgumentException("Render view requires an editable arrangement at 60 project ticks per second");
         int first = Math.max(0, (int) Math.floor((span.seconds(span.start, TimeBase.project) - EvidenceSpectrum.CONTEXT) * 60));
@@ -224,7 +239,7 @@ public final class ReconstructionView {
         if (end <= first) return new EvidenceSpectrum.Audio(new float[0], SAMPLE_RATE, 0, limit / 60.0);
         var mono = new float[(end - first) * STEREO_FRAMES_PER_PRESENTATION];
         int[] tick = {0};
-        S3kRenderer.render(ProjectCompiler.compileWithAssets(project), end, samples -> {
+        S3kRenderer.render(ProjectCompiler.compileWithAssets(project), end, soloMask(solo), samples -> {
             int frame = tick[0]++ - first;
             if (frame < 0) return;
             int offset = frame * STEREO_FRAMES_PER_PRESENTATION;

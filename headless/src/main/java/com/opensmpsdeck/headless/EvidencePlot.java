@@ -33,6 +33,9 @@ final class EvidencePlot {
     private final BufferedImage image;
     private final Graphics2D g;
 
+    /** Which lanes the chip panel plays: the full mix, or the solo set from --lanes. */
+    String renderLabel = "Full mix";
+
     EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes) {
         this.span = span;
         this.lanes = lanes;
@@ -77,7 +80,7 @@ final class EvidencePlot {
             drawOverlays(notes);
             if (render != null) {
                 int top = geometry.renderTop();
-                text("Chip render  ·  Full mix  ·  Top 30 dB", LEFT, top - 10, INK, Font.BOLD, 14);
+                text("Chip render  ·  " + renderLabel + "  ·  Top 30 dB", LEFT, top - 10, INK, Font.BOLD, 14);
                 spectrogram(render, TimeBase.project, top, ticks, false);
                 if (target != null) harmonics(top, target, harmonics);
             }

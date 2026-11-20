@@ -347,7 +347,9 @@ The legend also records the lane patch changes.
   multiples when visible below Nyquist. `--harmonic-sum` optionally emphasizes
   supported fundamentals in the source.
 - `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
-  spectrum still shows the selected audio. `--width PX` defaults to 1440
+  source spectrum still shows the selected audio. With `--render`, `--lanes`
+  also solos those lanes in the chip panel, so it compares against a stem
+  rather than the full mix. `--width PX` defaults to 1440
   (640–2400). A view can span up to 60 seconds in either clock. Use a short
   span to resolve closely spaced attacks.
 

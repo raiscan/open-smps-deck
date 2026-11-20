@@ -101,6 +101,10 @@ java -jar "$jar" reconstruct view "$work" --start 45.3 --end 48.8 \
   --stem 0 --parts 0 --harmonics "$note_id" --render "$work/evidence.png"
 ```
 
+When comparing a stem with the render, pass the lanes that carry that part
+(for example `--lanes FM1,FM3`). The chip panel then solos them instead of
+playing the full mix, where bass and drums blur the comparison.
+
 ## Compare an optional stem transcriber
 
 Keep Suno MIDI as the default. If `transcribers_list` reports a configured
