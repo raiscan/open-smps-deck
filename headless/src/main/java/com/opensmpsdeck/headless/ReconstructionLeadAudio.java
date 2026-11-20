@@ -33,6 +33,18 @@ final class ReconstructionLeadAudio {
 
     static double hz(int pitch) { return 440 * Math.pow(2, (pitch - 69) / 12.0); }
 
+    static ReferenceAudio readMono(Path wave, double duration) throws IOException {
+        int rate = 24_000;
+        int frames = (int) Math.floor(rate * Math.min(duration, ReferenceAudio.durationMicros(wave) / 1e6));
+        var mono = new float[frames];
+        for (int start = 0; start < frames; start += rate) {
+            int length = Math.min(rate, frames - start);
+            var stereo = ReferenceAudio.stereoRange(wave, rate, start, length);
+            for (int i = 0; i < length; i++) mono[start + i] = (stereo[2 * i] + stereo[2 * i + 1]) / 2;
+        }
+        return new ReferenceAudio(mono, rate);
+    }
+
     static final class Track {
         private final float[][] peaks = new float[(HIGH - LOW + 1) * HARMONICS][];
         private final float[][] cents = new float[peaks.length][];
@@ -42,15 +54,7 @@ final class ReconstructionLeadAudio {
         private final double duration;
 
         static Track read(Path wave, double duration) throws IOException {
-            int rate = 24_000;
-            int frames = (int) Math.floor(rate * Math.min(duration, ReferenceAudio.durationMicros(wave) / 1e6));
-            var mono = new float[frames];
-            for (int start = 0; start < frames; start += rate) {
-                int length = Math.min(rate, frames - start);
-                var stereo = ReferenceAudio.stereoRange(wave, rate, start, length);
-                for (int i = 0; i < length; i++) mono[start + i] = (stereo[2 * i] + stereo[2 * i + 1]) / 2;
-            }
-            return new Track(new ReferenceAudio(mono, rate));
+            return new Track(readMono(wave, duration));
         }
 
         Track(ReferenceAudio audio) {
@@ -111,6 +115,15 @@ final class ReconstructionLeadAudio {
                 peaks[index][frame] = amplitude;
                 cents[index][frame] = (float) (100 * (fundamental - pitch));
             }
+        }
+
+        boolean clearAttack(Note note) {
+            if (note.pitch() < LOW || note.pitch() > HIGH || note.end() - note.start() < .048
+                    || note.start() + .040 >= duration) return false;
+            var band = peaks[index(note.pitch(), 1)];
+            double before = note.start() < .030 ? 0 : at(band, note.start() - .030);
+            double after = Math.min(at(band, note.start() + .020), at(band, note.start() + .040));
+            return after >= Math.max(.006, Math.max(2 * before, .19 * at(rms, note.start() + .025)));
         }
 
         Evidence evidence(int pitch, double start, double end, List<Note> competitors) {

@@ -74,6 +74,17 @@ rule takes precedence within its section, bar and time bounds. Backing
 parts stay available for allocation. A `--stem PART=WAV` mapping supplies
 audio evidence without declaring the lead.
 
+Check `fast-run` and `fast-retrigger` entries in `reconstruct describe`.
+Listen to the mapped stem and the same span in the FM1 solo. A scale run
+has short, separate pitch centers and a retrigger burst has repeated
+attacks at one pitch. A bend has a moving harmonic ridge within one
+attack. Check upper partials together when a pad dominates the stem,
+and listen for genuine gaps between same-pitch attacks. Check source
+timing in `score.json` and project ticks, retained step indexes and
+lane in `report.json`. Use `--no-fast-runs` on a fresh staged run for
+a comparison. Use nearby occurrences as extra evidence when the local
+line is masked, and preserve variations supported by the local audio.
+
 1. Read the score: `reconstruct_describe {workDir}` (CLI
    `reconstruct describe "$work" --out "$work/describe.txt"`). A full song
    is about 30 KB. Start with the header and the per-part summary lines,

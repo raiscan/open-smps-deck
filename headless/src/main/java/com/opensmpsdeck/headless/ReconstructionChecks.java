@@ -13,7 +13,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
 final class ReconstructionChecks {
-    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "transcriber", "external", "consensus", "audio");
+    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "transcriber", "external", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON);
 
     private ReconstructionChecks() {}
 
@@ -90,7 +90,7 @@ final class ReconstructionChecks {
             for (var grid : tempo.alternatives()) validateGrid(grid, at + ".tempo.alternatives");
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
-        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external"));
+        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
     }
 
     private static void validateGrid(ReconstructionTempo.Grid grid, String at) {
@@ -191,7 +191,7 @@ final class ReconstructionChecks {
                 require(external != null && external.source().equals("external"), where, "unknown external candidate");
             }
         }
-        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "transcriber", "consensus"));
+        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "transcriber", "consensus", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
     }
 
     private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
@@ -259,7 +259,7 @@ final class ReconstructionChecks {
         checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
@@ -287,7 +287,7 @@ final class ReconstructionChecks {
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio"));
+                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var continuity = allocation.leadContinuity();
         if (continuity != null)
             require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0
@@ -387,6 +387,18 @@ final class ReconstructionChecks {
                 at, "MIDI pitch must be in 0..127 and velocity in 1..127");
         require(SOURCES.contains(note.source()) && note.confidence() >= 0 && note.confidence() <= 1,
                 at, "unknown source or confidence outside 0..1");
+        if (note.run() != null) {
+            require((note.source().equals(ReconstructionFastRuns.REASON)
+                            || note.source().equals(ReconstructionRetriggers.REASON)) && note.run().size() >= 4
+                            && note.pitch() == note.run().getFirst().pitch(), at + ".run", "invalid figure");
+            double start = note.start();
+            for (var step : note.run()) {
+                require(step.start() == start && step.end() > start && step.pitch() >= 12 && step.pitch() <= 106,
+                        at + ".run", "expected contiguous positive-duration steps in S3K range");
+                start = step.end();
+            }
+            require(start == note.end(), at + ".run", "last step must end with the figure");
+        }
         if (note.motion() != null) {
             var motion = note.motion();
             require(motion.vibrato() >= 0 && motion.vibrato() <= 1 && motion.glide() >= 0 && motion.glide() <= 1,

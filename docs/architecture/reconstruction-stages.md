@@ -260,6 +260,55 @@ To accept or reject a proposal by hand, edit this list and update its
 audit entry if needed. `corrections` is the decision history. External
 candidates stay in `score.json` as evidence.
 
+### Stem-backed fast figures
+
+The staged transcriber reads aligned, mapped tonal stems before writing
+`score.json`. The run detector samples pitch every 2.5 ms using two
+short periodicity windows. On mapped lead audio it also considers an
+interpolated spectral ridge supported by a fundamental and its octave.
+It requires stable centers, adjacent moves of one or two semitones,
+and at least four notes near one to six 60 Hz frames each. It accepts
+one passing reversal in a longer figure. A stable core must occupy
+nearly half of each rounded pitch span. This rejects quantized pitch
+crossings in a continuous glide. Dense backing and very short, low
+notes can still mask the lead.
+
+On an explicitly declared lead part, a second detector measures the
+combined short-window envelope of a held note's first four partials.
+It searches for a sequence of at least six strong rises, roughly two
+to six frames apart, with consistent spacing. That provides evidence
+of separate attacks even when the pitch stays constant. Eligibility
+uses the held note's pitch and favors the stronger attack among
+simultaneous overlapping pitches.
+
+Reconciliation requires an overlapping held note in the same register
+and preserves its material outside the figure. Separate transcribed
+attacks near the detected times take precedence. The score stores accepted
+figures as one note with `source: "fast-run"` or `"fast-retrigger"`,
+a confidence, and ordered `run` steps with source-second boundaries.
+When a tempo warp applies, structure maps each boundary to project time.
+Figures are excluded from note-level repeat voting. The roles stage
+uses the first and last pitches in lead transitions and keeps the figure
+atomic. A scoped role plan can still route or drop it. Gap fill treats it
+as one candidate, and lead repair and legato leave its boundaries intact.
+
+Allocation reserves the full figure on a single lane, then expands to
+explicit attacks. It reserves one presentation per step whenever the
+rounded span fits them all. Otherwise it merges the shortest steps into
+neighbors and retains the surviving sequence in order. Assembly uses
+the allocated gate for these steps and compiles every repeated pitch
+as a fresh key-on. The report records both source evidence and the
+allocated lane, span, and retained step indexes. A dropped figure
+has no lane. `reconstruct describe --json` gives ordered step boundaries
+on the current project clock.
+
+For a mapped explicit lead, the roles stage can also restore already
+transcribed attacks in a locally monophonic phrase. It requires a
+consistent mixture of short and long attack intervals, audible onsets
+in the matching pitch band, and no competing selected lead. Restored
+attacks carry `stem-phrase-attack`. Use `--no-fast-runs` on initial
+staged transcription to disable all three checks for an A/B comparison.
+
 ### Roles
 
 `roles.json` contains `harmonyMaxHz` and a `notes` array with

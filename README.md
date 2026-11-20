@@ -24,6 +24,12 @@ java -jar studio/target/opensmpsdeck-studio-0.1.0-SNAPSHOT.jar examples/lantern-
 - [Headless CLI guide](headless/README.md) covers commands and examples for
   validation, compilation, rendering and import.
 
+Staged reconstruction can recover fast scale passages and same-pitch
+retriggers from mapped stems. Read the ordered pitches and timing with
+`reconstruct describe` and check the allocated lane in `report.json`.
+See [reconstruction stages](docs/architecture/reconstruction-stages.md#stem-backed-fast-figures)
+for evidence and frame placement.
+
 The previous tracker is preserved at the `legacy-final` Git tag.
 
 ## License

@@ -52,11 +52,11 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
     }
 
     ReconstructionStages.Note projectNote(ReconstructionStages.Note note) {
-        return warped() ? note.withTiming(project(note.start()), project(note.end())) : note;
+        return warped() ? note.mapTime(this::project) : note;
     }
 
     ReconstructionStages.Note sourceNote(ReconstructionStages.Note note) {
-        return warped() ? note.withTiming(source(note.start()), source(note.end())) : note;
+        return warped() ? note.mapTime(this::source) : note;
     }
 
     List<ReconstructionStructure.Bar> projectBars(List<ReconstructionStructure.Bar> bars) {

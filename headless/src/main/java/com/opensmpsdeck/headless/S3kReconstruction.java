@@ -267,7 +267,9 @@ final class S3kReconstruction {
                 } else {
                     envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, unsigned(asset.bytes())));
                 }
-                int duration = articulation.duration(end - start);
+                boolean figure = entry.note().source().equals(ReconstructionFastRuns.REASON)
+                        || entry.note().source().equals(ReconstructionRetriggers.REASON);
+                int duration = figure ? end - start : articulation.duration(end - start);
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
                 if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gain()));

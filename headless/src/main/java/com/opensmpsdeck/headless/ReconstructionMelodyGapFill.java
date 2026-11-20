@@ -75,7 +75,7 @@ final class ReconstructionMelodyGapFill {
 
     private static boolean connects(Note left, Note right) {
         double rest = right.start() - left.end();
-        return rest >= 0 && rest <= MAX_REST_SECONDS && Math.abs(left.pitch() - right.pitch()) <= MAX_LEAP
+        return rest >= 0 && rest <= MAX_REST_SECONDS && Math.abs(left.exitPitch() - right.pitch()) <= MAX_LEAP
                 && ReconstructionRoles.transition(left, right, rest) <= MAX_TRANSITION_COST;
     }
 

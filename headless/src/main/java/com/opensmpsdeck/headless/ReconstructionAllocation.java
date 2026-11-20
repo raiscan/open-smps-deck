@@ -29,15 +29,19 @@ final class ReconstructionAllocation {
     record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase,
                   @Nullable ReconstructionLeadContinuity.Stats leadContinuity,
                   @Nullable ReconstructionMelodyGapFill.Stats melodyGapFill,
-                  @Nullable Fm1Gaps fm1InterNoteGaps) {
+                  @Nullable Fm1Gaps fm1InterNoteGaps,
+                  @Nullable List<RunPlacement> fastRuns) {
         Result(int version, List<Entry> notes, ReconstructionTimeMap.TimeBase timeBase) {
-            this(version, notes, timeBase, null, null, null);
+            this(version, notes, timeBase, null, null, null, null);
         }
 
         Result(int version, List<Entry> notes) {
             this(version, notes, null);
         }
     }
+
+    record RunPlacement(String id, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
+                        List<Integer> retainedSteps, String reason) {}
 
     record Fm1Gaps(Map<Integer, Integer> before, Map<Integer, Integer> after) {
         static Fm1Gaps of(List<Entry> allocated, List<ReconstructionRoles.Decision> decisions, int frames) {
@@ -96,10 +100,35 @@ final class ReconstructionAllocation {
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
         for (var attack : attacks) allocator.place(attack);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
-        var placed = List.copyOf(allocator.entries.values());
-        return new Result(VERSION, placed, roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
+        var placed = new ArrayList<Entry>();
+        var runs = new ArrayList<RunPlacement>();
+        for (var entry : allocator.entries.values()) {
+            var figure = entry.note().run();
+            if (figure == null) {
+                placed.add(entry);
+                continue;
+            }
+            if (entry.lane() == null) {
+                placed.add(entry);
+                runs.add(new RunPlacement(entry.note().id(), null, null, null, List.of(), entry.reason()));
+                continue;
+            }
+            var steps = ReconstructionFastRuns.quantize(figure, entry.startTick(), entry.endTick());
+            boolean merged = steps.size() < figure.size();
+            String reason = merged ? entry.note().source() + "-subframe-merge" : entry.note().source();
+            runs.add(new RunPlacement(entry.note().id(), entry.lane(), entry.startTick(), entry.endTick(),
+                    steps.stream().map(ReconstructionFastRuns.Frames::firstStep).toList(), reason));
+            for (var step : steps) {
+                var evidence = figure.get(step.firstStep());
+                var note = new Note(entry.note().id() + "-step-" + step.firstStep(), entry.note().part(),
+                        evidence.start(), evidence.end(), step.pitch(), entry.note().velocity(),
+                        entry.note().source(), entry.note().confidence());
+                placed.add(new Entry(note, entry.role(), entry.lane(), step.start(), step.end(), Outcome.kept, reason, null));
+            }
+        }
+        return new Result(VERSION, List.copyOf(placed), roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
                 ReconstructionMelodyGapFill.Stats.of(roles.notes()),
-                hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null);
+                hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null, runs.isEmpty() ? null : List.copyOf(runs));
     }
 
     /** Project a kept lane layout back into source time for the existing voice probes. */
@@ -132,7 +161,7 @@ final class ReconstructionAllocation {
 
     private static int priority(Attack attack) {
         return switch (attack.role()) {
-            case melody, bass -> 12;
+            case melody, bass -> attack.note().run() == null ? 12 : 13;
             case drums -> 8 + S3kReconstruction.drumPriority(attack.note().pitch());
             case counter -> 5;
             case harmony -> 3;
@@ -164,7 +193,7 @@ final class ReconstructionAllocation {
             case drums -> List.of("PSG3");
             default -> INNER_FM;
         };
-        List<String> secondary = primary == INNER_FM && !fmOnly && attack.note().pitch() >= 45 ? PSG : List.of();
+        List<String> secondary = primary == INNER_FM && !fmOnly && attack.note().pitch() >= 45 && attack.note().run() == null ? PSG : List.of();
         String lane = free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && primary == INNER_FM && secondary.isEmpty() && !fmOnly)
@@ -199,7 +228,7 @@ final class ReconstructionAllocation {
     private String freeFmForLowAttack() {
         for (String lane : INNER_FM.reversed()) {
             Entry prior = tail.get(lane);
-            if (prior.note.pitch() < 45) continue;
+            if (prior == null || prior.note.pitch() < 45 || prior.note.run() != null) continue;
             for (String destination : PSG) {
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;
@@ -225,7 +254,7 @@ final class ReconstructionAllocation {
     }
 
     private static boolean canShorten(Entry last, Attack next) {
-        if (last == null || last.startTick >= next.start || last.endTick <= next.start || last.role == Role.drums) return false;
+        if (last == null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start || last.role == Role.drums) return false;
         return last.endTick - next.start <= RELEASE_TICKS || next.role() == Role.melody || next.role() == Role.bass
                 || next.role() == Role.drums || next.role() == Role.counter && last.role == Role.harmony;
     }

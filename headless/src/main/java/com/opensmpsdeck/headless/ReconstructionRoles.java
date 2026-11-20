@@ -79,13 +79,19 @@ final class ReconstructionRoles {
         var byBar = byBar(layout.bars(), tones);
         var melody = melody(layout, tones, programs, evidence, leadPart);
         for (String id : melody.lead()) roles.put(id, Role.melody);
+        if (leadPart != null) for (var note : tones) {
+            if (note.part() == leadPart && note.run() != null) roles.put(note.id(), Role.melody);
+        }
+        var phraseReasons = new HashMap<String, String>();
+        if (continuity != null) continuity.restoreArticulatedPhrases(leadPart, tones, roles, phraseReasons);
         for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
             labelLine(notes, roles, programs, Role.bass);
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
                 labelLine(notes, roles, programs, Role.counter);
         }
-        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan, beatMap, evidence);
+        Map<String, String> reasons = phraseReasons;
+        if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence));
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
             if (roles.get(id) != Role.harmony) continue;
@@ -341,7 +347,7 @@ final class ReconstructionRoles {
     }
 
     static double transition(Note prior, Note current, double gap) {
-        int leap = Math.abs(prior.pitch() - current.pitch());
+        int leap = Math.abs(prior.exitPitch() - current.pitch());
         double continuity = Math.max(0, 1 - Math.max(0, gap) / .40);
         return continuity * (.011 * leap + .021 * Math.max(0, leap - 5)
                 + (prior.part() == current.part() ? 0 : .105)) + Math.min(.18, Math.abs(gap) * .20);
@@ -357,8 +363,9 @@ final class ReconstructionRoles {
         for (var note : notes) {
             Role role = roles.get(note.id());
             decisions.put(note.id(), new Decision(note, role, reason(reasons, note.id(),
-                    octaveDrops.contains(note.id()) ? "isolated-harmony-octave-double" : null), null));
-            if (role == Role.drums || role == Role.drop || hz == 0) continue;
+                    octaveDrops.contains(note.id()) ? "isolated-harmony-octave-double"
+                            : note.run() == null ? null : note.source()), null));
+            if (note.run() != null || role == Role.drums || role == Role.drop || hz == 0) continue;
             while (future < notes.size() && notes.get(future).start() <= note.start() + .020) {
                 Note incoming = notes.get(future++);
                 if (roles.get(incoming.id()) != Role.drums && roles.get(incoming.id()) != Role.drop) sounding.add(incoming);
