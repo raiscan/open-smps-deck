@@ -8,8 +8,10 @@ import com.openggf.audio.driver.SmpsDriver;
 import com.openggf.audio.rewind.SmpsDriverSnapshot;
 import com.openggf.audio.rewind.SmpsSourceDescriptor;
 import com.openggf.audio.session.*;
+import com.openggf.audio.smps.AbstractSmpsData;
 import com.openggf.audio.smps.DacData;
 import com.openggf.audio.smps.SmpsSequencer;
+import com.openggf.audio.smps.SmpsSequencerConfig;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.openggf.audio.synth.FmCoreSelection;
 import com.openggf.game.sonic3k.audio.Sonic3kSmpsPhysicalPolicy;
@@ -84,7 +86,21 @@ public final class S3kRenderer {
             throw new IllegalStateException("music restoration requires a previous project");
         };
         var prepared = prepare(project, 0, false, unexpectedRestore);
-        try (var session = newSession(observer)) {
+        renderPrepared(prepared, Sonic3kSmpsPhysicalPolicy.INSTANCE, presentations, mask, sink, observer);
+    }
+
+    static void renderMusic(AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
+                            SmpsPhysicalPolicy policy, int presentations, ChannelMask mask, PcmSink sink) throws IOException {
+        var activation = prepare(data, dac, config, () -> {
+            throw new IllegalStateException("music restoration requires a previous project");
+        });
+        renderPrepared(activation, policy, presentations, mask, sink, ChipWriteObserver.NONE);
+    }
+
+    private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
+                                       int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer)
+            throws IOException {
+        try (var session = newSession(observer, policy)) {
             session.install();
             session.queueActivation(prepared);
             if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
@@ -119,7 +135,7 @@ public final class S3kRenderer {
         boolean[] restoreRequested = {false};
         // Distinct IDs ensure PushOverride saves the previous slot even when the banks match.
         var cueActivation = prepare(cue, 1, true, () -> restoreRequested[0] = true);
-        try (var session = newSession(ChipWriteObserver.NONE)) {
+        try (var session = newSession(ChipWriteObserver.NONE, Sonic3kSmpsPhysicalPolicy.INSTANCE)) {
             session.install();
             session.queueActivation(previousActivation);
             var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
@@ -160,6 +176,11 @@ public final class S3kRenderer {
         data.setId(id);
         var dac = nativeDac(project.samples(), project.nativeProgram());
         var config = Sonic3kSmpsSequencerConfig.create(new com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler());
+        return prepare(data, dac, config, restore);
+    }
+
+    private static PreparedSmpsMusicActivation prepare(AbstractSmpsData data, DacData dac,
+                                                        SmpsSequencerConfig config, MusicRestoreSink restore) {
         var source = SmpsSourceDescriptor.from(data);
         var detached = new SmpsDriver();
         var sequencer = new SmpsSequencer(data, dac, detached, detached, restore, config, source,
@@ -191,10 +212,9 @@ public final class S3kRenderer {
         return data;
     }
 
-    private static SmpsDriverSession newSession(ChipWriteObserver observer) {
+    private static SmpsDriverSession newSession(ChipWriteObserver observer, SmpsPhysicalPolicy policy) {
         var settings = SmpsHardwareFrameBudget.presentationSettings(SAMPLE_RATE, PRESENTATIONS_PER_SECOND,
                 false, false, FmCoreSelection.ACCURATE, null);
-        var policy = Sonic3kSmpsPhysicalPolicy.INSTANCE;
         return new SmpsDriverSession(settings, policy, observer,
                 new SmpsSessionProfileFingerprint("s3k", 0, policy.identity(), settings),
                 SmpsDriverSessionConfiguration.DEFAULT);
@@ -210,7 +230,7 @@ public final class S3kRenderer {
         return Map.copyOf(owned);
     }
 
-    private static DacData nativeDac(List<DacSample> declarations, NativeProgram nativeProgram) {
+    static DacData nativeDac(List<DacSample> declarations, NativeProgram nativeProgram) {
         Map<Integer, byte[]> samples = new HashMap<>();
         Map<Integer, DacData.DacEntry> mapping = new HashMap<>();
         Map<String, Integer> sampleIndices = new HashMap<>();

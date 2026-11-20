@@ -57,7 +57,11 @@ final class BenchStems {
 
     static S3kRenderer.ChannelMask mask(List<String> lanes) {
         int solo = 0;
-        for (String lane : lanes) solo |= 1 << OUTPUTS.indexOf(lane);
+        for (String lane : lanes) {
+            int output = lane.equals("FM6") ? 5 : OUTPUTS.indexOf(lane);
+            if (output < 0) throw new IllegalArgumentException("Unknown hardware lane " + lane);
+            solo |= 1 << output;
+        }
         // Like render_clip, mute the complement of the solo set. Noise has its own hardware bit.
         return new S3kRenderer.ChannelMask(~solo & 0b111111, (~solo >> 6) & 0b1111);
     }

@@ -7,6 +7,35 @@
       "path": "src/main/java/com/openggf/audio/smps/SmpsSequencer.java",
       "removeExact": "import com.openggf.audio.AudioManager;\n",
       "reason": "Remove the unused AudioManager import only; sequencer behavior is unchanged and the game composition root is not required."
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/Sonic1RomProfile.java",
+      "removeExact": "    private static RetailRomRevision revision(com.openggf.level.objects.ObjectServices services) {\n        try {\n            RomByteReader reader = services == null ? null : services.romReader();\n            return reader == null ? RetailRomRevision.UNKNOWN : RetailRomRevision.detect(reader);\n        } catch (IOException | IllegalStateException error) {\n            // ROM-free object probes retain the historical compatible behavior.\n            return RetailRomRevision.UNKNOWN;\n        }\n    }\n\n    public static boolean isRev00(com.openggf.level.objects.ObjectServices services) {\n        return revision(services) == RetailRomRevision.S1_REV00;\n    }\n\n    public static boolean isKnownRetail(com.openggf.level.objects.ObjectServices services) {\n        return revision(services).belongsTo(com.openggf.data.RomIdentity.S1);\n    }\n\n",
+      "reason": "Omit object-service overloads outside the audio dependency closure. ROM address resolution is unchanged."
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SfxData.java",
+      "removeExact": "        return Sonic2PsgEnvelopes.getEnvelope(id);\n",
+      "replaceWith": "        return null;\n",
+      "reason": "Exclude the hardcoded retail envelope bytes. The music loader reads the envelopes from the supplied ROM."
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SmpsData.java",
+      "removeExact": "        return Sonic2PsgEnvelopes.getEnvelope(id);\n",
+      "replaceWith": "        return null;\n",
+      "reason": "Exclude the hardcoded retail envelope bytes. The music loader reads the envelopes from the supplied ROM."
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1SmpsConstants.java",
+      "removeExact": "    // -----------------------------------------------------------------------\n    // Sound priority table\n",
+      "endBefore": "    private Sonic1SmpsConstants()",
+      "reason": "Exclude the unused retail SFX priority table and accessor. The benchmark uses music only."
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2SmpsConstants.java",
+      "removeExact": "    /**\n     * SFX priority table from Sonic 2 Z80 driver (zSFXPriority).\n",
+      "endBefore": "    // -----------------------------------------------------------------------\n    // System commands (sound queue IDs)\n",
+      "reason": "Exclude the unused retail SFX priority table and accessor. The benchmark uses music only."
     }
   ],
   "files": [
@@ -244,6 +273,11 @@
       "path": "src/main/java/com/openggf/audio/smps/DacData.java",
       "sourceSha256": "415f270c0403cf6487c9894d128cfed751347d5d2f5300a8856e8c44fa7dcd0a",
       "vendoredSha256": "415f270c0403cf6487c9894d128cfed751347d5d2f5300a8856e8c44fa7dcd0a"
+    },
+    {
+      "path": "src/main/java/com/openggf/audio/smps/FmVoiceOperatorOrder.java",
+      "sourceSha256": "23909d883c83ba3b71bfd87fb24a32439e68e8a75c85a7c3a906c673933fa4e3",
+      "vendoredSha256": "23909d883c83ba3b71bfd87fb24a32439e68e8a75c85a7c3a906c673933fa4e3"
     },
     {
       "path": "src/main/java/com/openggf/audio/smps/LoadedSmpsMusic.java",
@@ -491,9 +525,104 @@
       "vendoredSha256": "901b27395573c11a11eb52f05fc9301ddb3dddf2067000fc65212353805d80f8"
     },
     {
+      "path": "src/main/java/com/openggf/data/compression/SaxmanDecompressor.java",
+      "sourceSha256": "5f0f9fcb645ef28ef6cd446d9f8fa1d5884066079abf424d13c0f3e0245a9928",
+      "vendoredSha256": "5f0f9fcb645ef28ef6cd446d9f8fa1d5884066079abf424d13c0f3e0245a9928"
+    },
+    {
       "path": "src/main/java/com/openggf/game/ModApi.java",
       "sourceSha256": "08b08321100cc33e92638d4303df26176e7a4bc565c11bc0a441e36d5c15c17d",
       "vendoredSha256": "08b08321100cc33e92638d4303df26176e7a4bc565c11bc0a441e36d5c15c17d"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/Sonic1RomProfile.java",
+      "sourceSha256": "0fe1d91048b97363316932a8396d6fd552fafab3cb9bf1739f8b5ccd03380e38",
+      "vendoredSha256": "4cb64b55ede3355341bcc9945809aadc098783df2fba672a93e4acaeffcf87c4"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1Music.java",
+      "sourceSha256": "d377b1f81fc117b17a3e28d86189e3c824948244f5a9293e4e29ee9800d497af",
+      "vendoredSha256": "d377b1f81fc117b17a3e28d86189e3c824948244f5a9293e4e29ee9800d497af"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1Sfx.java",
+      "sourceSha256": "04f06890a9091f861a8592e203df9490da397f98ec77333d22eafe2d23c868d2",
+      "vendoredSha256": "04f06890a9091f861a8592e203df9490da397f98ec77333d22eafe2d23c868d2"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1SmpsCompatibilityPolicy.java",
+      "sourceSha256": "c289758235e4023f038ae2a11d110794c0ea0b00cf8f1173e6c11e4013ad993c",
+      "vendoredSha256": "c289758235e4023f038ae2a11d110794c0ea0b00cf8f1173e6c11e4013ad993c"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1SmpsConstants.java",
+      "sourceSha256": "f31c3a0b064b71af5701e059774b76088baed99b218e42bc5d024e253f4c52af",
+      "vendoredSha256": "099804590fa55f1a25faa76e181ecd00a31086f45084d40c89f7449aafb2725d"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/Sonic1SmpsSequencerConfig.java",
+      "sourceSha256": "58324272b3e6b5a15cde256f38ddd9823a258a2a6cbb311e4fa37b68dce2aafb",
+      "vendoredSha256": "58324272b3e6b5a15cde256f38ddd9823a258a2a6cbb311e4fa37b68dce2aafb"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SfxData.java",
+      "sourceSha256": "ad46627a0fe8fe99e5f945fe676e7b89e997878ce992ef43d32aa6dfea9d9afc",
+      "vendoredSha256": "ad46627a0fe8fe99e5f945fe676e7b89e997878ce992ef43d32aa6dfea9d9afc"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsData.java",
+      "sourceSha256": "04cf31b17f407938cd4c2a440a8eae36740b8d04c25d67c6c194a7124eab9a41",
+      "vendoredSha256": "04cf31b17f407938cd4c2a440a8eae36740b8d04c25d67c6c194a7124eab9a41"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsLoader.java",
+      "sourceSha256": "4149f5233e640a1ac03ed9bf1793d2d8ae800d95f11abe9f6fb0c7abf86bbb58",
+      "vendoredSha256": "4149f5233e640a1ac03ed9bf1793d2d8ae800d95f11abe9f6fb0c7abf86bbb58"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2Music.java",
+      "sourceSha256": "acbd687723f55da84f149f64e5cea867934c55319b2b9753c3c7cb1e81776f9a",
+      "vendoredSha256": "acbd687723f55da84f149f64e5cea867934c55319b2b9753c3c7cb1e81776f9a"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2Sfx.java",
+      "sourceSha256": "1ba1f93514295a58ce68c56f3051c762c1b3af1883b6ce2fd29b75cc2bc2e78e",
+      "vendoredSha256": "1ba1f93514295a58ce68c56f3051c762c1b3af1883b6ce2fd29b75cc2bc2e78e"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2SmpsCompatibilityPolicy.java",
+      "sourceSha256": "2209721cf2b43a3a3b74bdc32b81ab8efbc4486a120ae42195d91a5c6e0720e8",
+      "vendoredSha256": "2209721cf2b43a3a3b74bdc32b81ab8efbc4486a120ae42195d91a5c6e0720e8"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2SmpsConstants.java",
+      "sourceSha256": "eea0d7766ad0f3440a90849c1a0b60160a70753a0f6f32032eb976b36a0f2528",
+      "vendoredSha256": "77d7257bda60fa767947e9a2ec2f3575b38bd822e52ac2f95e4b1f8fedb784e5"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/Sonic2SmpsSequencerConfig.java",
+      "sourceSha256": "025df6c5e3a05eddf60c0007c3dd07cf63975325191e4560fde4254d66929b00",
+      "vendoredSha256": "025df6c5e3a05eddf60c0007c3dd07cf63975325191e4560fde4254d66929b00"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SaxmanLoadReadiness.java",
+      "sourceSha256": "e45b5f312925741a8922b36955fab139c07b48e0bc5ae1b75bd2f14e19ba31c4",
+      "vendoredSha256": "e45b5f312925741a8922b36955fab139c07b48e0bc5ae1b75bd2f14e19ba31c4"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SfxData.java",
+      "sourceSha256": "dfbb86def340b4505aa008605175a7ef63fc27a513428c7626538d533d645c59",
+      "vendoredSha256": "b5ad471a9dbdddbd2085c5cdb5b07b28d68f5a60796348c1b0ef6472f7da3bc1"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SmpsData.java",
+      "sourceSha256": "5db23cf9c813e13bd06b54e67e96e74d80fd6a7315d7fcdf6482b174031ed547",
+      "vendoredSha256": "4d5154f6ae8332d6531643d0a019d7c5b5df03871f97a9f13fabecbcf91fe931"
+    },
+    {
+      "path": "src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SmpsLoader.java",
+      "sourceSha256": "c7b256a8c0ac46a720a3d852281b142f5239b0f17e5578cef414977a686fd2a2",
+      "vendoredSha256": "c7b256a8c0ac46a720a3d852281b142f5239b0f17e5578cef414977a686fd2a2"
     },
     {
       "path": "src/main/java/com/openggf/game/sonic3k/audio/Sonic3kAudioResourceProfile.java",

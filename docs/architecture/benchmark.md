@@ -250,3 +250,117 @@ modulated lead sounds and may miss straight tones or brief attacks. The
 command also prints the active, missed and evaluated seconds so the
 reference coverage is visible. Compare before and after using the same
 reference and duration.
+
+
+## Native reconstruction ladder
+
+The ladder uses a local Sonic 1 REV01, Sonic 2 REV01, or 4 MiB locked-on
+Sonic 3 & Knuckles cartridge. It renders through the pinned driver and
+records native note gates, FM voice hashes and probe bytes, PSG envelope
+slots, and DAC hit slots in shared truth. Sonic 2's PSG envelopes come from
+the decompressed sound driver in the supplied ROM. The diagnostic clock is
+NTSC at 60 presentations per second.
+
+```sh
+java -jar "$jar" bench build-corpus "$rom" "$catalogue" "$bench/ladder-s3k" \
+  --game s3k --ladder --seconds 60
+java -jar "$jar" bench run "$bench/ladder-s3k/manifest.json" "$catalogue" "$bench/run-s3k"
+java -jar "$jar" bench build-corpus "$rom" "$catalogue" "$bench/credits-s3k" --game s3k --torture
+java -jar "$jar" bench run "$bench/credits-s3k/manifest.json" "$catalogue" "$bench/run-credits-s3k"
+java -jar "$jar" bench ladder-report "$bench/run-s3k" "$bench/run-credits-s3k" --out "$bench/report"
+```
+
+Run the same commands with `--game s1` or `--game s2` and the corresponding
+ROM and output directories. Each manifest uses one cartridge revision.
+`--songs` overrides the four default zone themes. Sonic 2 takes the engine
+music IDs in `Sonic2Music`, including those whose music IDs differ from the
+sound-test labels. Sonic 3 & Knuckles uses the combined music table IDs.
+Default lists span different registers, densities, and rhythmic textures.
+S3K includes Angel Island Act 1 (`0x01`) with its short FM2/FM3 alternating attacks.
+
+| Rung | MIDI | Reference and stems |
+| --- | --- | --- |
+| R0 exact | Native tonal attacks and gates, split by hardware channel | Dry mix and isolated hardware outputs |
+| R1 grouped | The same tonal attacks and gates in lead, bass, and backing parts, plus drums | Dry mix and grouped stems |
+| R2 mix-effects | R1 | Existing room effect on mix and stems. Select lofi with `--effects lofi` |
+| R3 transcribed | External notes on the melodic stems and existing Suno-like drums | R2 |
+| R4 suno-like | Existing Suno-like perturbation and grouped parts on the native start clock | R2 |
+| R5 suno-like+drift | R4 with 7% accelerando | R2 mix and stems warped with the same WSOLA alignment |
+
+The lead reference is the native channel with the most time in the existing
+predominant-melody heuristic. Bass is the lowest weighted register among the
+remaining tonal channels. Hardware assignments are saved in `groups.json`.
+Grouped MIDI reserves extra wire channels for overlapping same-pitch gates
+and labels each such track as one logical part. The physical source channel
+cannot be inferred from those temporary wire channels. Drums use the existing
+GM projection. Truth retains native DAC identity and PSG noise gates.
+
+The grouped lead is passed as `--lead-part` using its parsed MIDI part ID.
+The exact rung passes the relevant native lead part. Standard reconstruction
+stages still interpret the supplied notes, infer the arrangement, and fit
+voices to the stem audio. R3 and R4 are alternative MIDI inputs to the same
+audio. Their differences can be measured against R2 on paired songs.
+When a local `muscriptor` entry is configured, the builder uses the same
+external transcriber hook as `reconstruct`. To select an entry explicitly,
+pass `--transcriber NAME --transcriber-config FILE --transcriber-device DEVICE`.
+The R3 manifest hashes the generated MIDI and transcriber provenance.
+If there is no configured MuScriptor, the builder prints a skip message
+and omits R3 cases.
+
+The ladder retains the 30-second default and accepts `--seconds N`.
+`--full-length` follows playback to completion or a detected loop, with a
+120-second default cap that `--seconds` can override. `--loops 2` includes
+an additional pass. The loop detector checks per-track control flow,
+including return addresses and counted loops, and stops after all active
+tracks complete the requested passes. A case that reaches the limit records
+the duration cap explicitly. The native clock is independent of the structure
+and tempo inferred by reconstruction.
+
+### Credits stress cases
+
+`--torture` builds R0 and R1 to the native end or first loop, using the
+existing 36,000-presentation guard only if neither is found. Add
+`--ladder` to run all rungs on the credits. The cases use these entries
+from the pinned OpenGGF music tables.
+
+| Game | Table entry | Bench ID |
+| --- | --- | --- |
+| Sonic 1 | `Sonic1Music.CREDITS` | `0x91` |
+| Sonic 2 | `Sonic2Music.CREDITS`, native request `0x9E` | `0xBD` |
+| Sonic 3 | `Sonic3kMusic.CREDITS_S3`, same locked-on song as the standalone-table alias `0x126` | `0x26` |
+| Sonic & Knuckles | `Sonic3kMusic.CREDITS_SK` | `0x33` |
+
+The torture table records wall time per case before MP3 export, playback
+duration, last completed reconstruction stage, saved project size, inferred
+structure counts, exact failures, and per-section scores for completed
+renders. Section boundaries come from each run's inferred structure. The
+usual project byte, bank, frame and group-depth limits apply.
+
+### Ladder reporting clocks and attribution
+
+`ladder-report` combines any set of ladder run directories. It writes
+`ladder-report.md`, `ladder-report.json`, and `listening.html` under
+`--out` or the first run directory. It groups metrics by rung and game and
+calculates single-step changes over songs with both measurements. The
+listening page embeds original and R0, R3, and R4 MP3s, with credits R0 and R1
+where a render exists. The page works from one private file. `ffmpeg` with
+`libmp3lame` must be on the path to encode listening assets during `bench run`.
+
+Note metrics use the native timeline, inverting the fitted project time
+map and the known R5 input warp. `onsetCorrelation` compares the actual
+playback audio to the dry mix with the same interval length. `leadAttackF1`
+pairs native lead and FM1 attacks within 50 ms. `leadPitchAccuracy` counts
+pitch matches among those pairs. `leadGap` is missed FM1 gate activity per
+evaluation minute using the existing source-clock measurement. FM voice
+distance compares clean, same-pitch probes of the captured original and
+emitted voices. Coverage gives the fraction of matched original FM notes
+with a comparable emitted voice. The score measures patch fit independent
+of changes in note duration, pan, and playback effects.
+
+The attribution waterfall pairs truth attacks by pitch and onset, requiring
+the original MIDI part in R0, then follows prepared IDs through structure,
+roles, allocation, and native playback. It counts the first missing stage
+and records existing reason codes and examples. The separate lead waterfall
+also counts a lead routed to a different role or lane. Metrics use
+independent output pairing, so their recall and the lineage counts may
+differ when attacks are restored or a neighboring part survives.

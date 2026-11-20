@@ -33,7 +33,12 @@ final class BenchCorpus {
     }
 
     record Case(String id, int song, String songName, BenchMidi.Profile profile, BenchAudio.Variant variant,
-                File truth, File midi, File audio, File reference, BenchStructure.Grid grid, Double drift) {
+                File truth, File midi, File audio, File reference, BenchStructure.Grid grid, Double drift,
+                BenchLadder.Input ladder) {
+        Case(String id, int song, String songName, BenchMidi.Profile profile, BenchAudio.Variant variant,
+             File truth, File midi, File audio, File reference, BenchStructure.Grid grid, Double drift) {
+            this(id, song, songName, profile, variant, truth, midi, audio, reference, grid, drift, null);
+        }
         Case(String id, int song, String songName, BenchMidi.Profile profile, BenchAudio.Variant variant,
              File truth, File midi, File audio, File reference) {
             this(id, song, songName, profile, variant, truth, midi, audio, reference, null, null);

@@ -253,6 +253,7 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
     private static void readTrack(Track track, int index, int resolution, TreeMap<Long, TempoPoint> tempos,
                                   List<Part> parts, List<Note> notes, List<String> warnings) {
         String trackName = trackName(track);
+        boolean grouped = BenchMidiParts.grouped(track);
         var programs = new int[16];
         var instruments = new HashMap<Instrument, Integer>();
         var active = new LinkedHashMap<Key, ArrayDeque<ActiveNote>>();
@@ -268,7 +269,7 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
             if (command == ShortMessage.PROGRAM_CHANGE) {
                 programs[channel] = message.getData1();
             } else if (command == ShortMessage.NOTE_ON && velocity > 0) {
-                var instrument = new Instrument(channel, programs[channel]);
+                var instrument = new Instrument(grouped && channel != DRUM_CHANNEL ? 0 : channel, programs[channel]);
                 int partId = instruments.computeIfAbsent(instrument, key -> {
                     int id = parts.size();
                     boolean drums = channel == DRUM_CHANNEL;
