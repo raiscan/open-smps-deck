@@ -135,7 +135,7 @@ final class ReconstructionMelody {
         return new Register((sustained > 0 ? weightedSustained / sustained : weighted / total) - isolated, sustained > 0);
     }
 
-    private static boolean isMonophonic(List<Note> notes) {
+    static boolean isMonophonic(List<Note> notes) {
         int clashes = 0;
         double release = 0;
         double onset = -1;

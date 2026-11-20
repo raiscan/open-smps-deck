@@ -408,7 +408,9 @@ FM1 gap length in 60 Hz project frames, including zero-length gaps,
 before and after legato on the allocated lane.
 
 Rapid re-attacks on close, similarly accented notes of the same inner
-pitch can merge into the earlier note. The earlier note extends its
+pitch can merge into the earlier note when the source part carries
+overlapping voices. Independent MIDI lines keep their repeated attacks,
+even when notes from other parts surround their pitch. The earlier note extends its
 release and records `sustained-inner-tone`. The dropped attack records
 `rapid-inner-tone-reattack` and the retained ID in `mergedInto`.
 Isolated same-velocity, same-onset octave doubles remaining in harmony
