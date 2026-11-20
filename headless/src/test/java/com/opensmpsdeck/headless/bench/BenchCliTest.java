@@ -163,6 +163,19 @@ class BenchCliTest {
         assertEquals(0, cli("compare", old.toString(), changed.toString(), "--tolerance", ".03"));
     }
 
+    @Test void comparesLeadFidelityAdditivelyWithLegacyCards() {
+        var legacy = scorecard(Map.of("melodyF1", .9));
+        var measured = scorecard(Map.of("melodyF1", .9, "leadFidelityF1", .98));
+        var lower = scorecard(Map.of("melodyF1", .9, "leadFidelityF1", .96));
+        var added = BenchScorecard.compare(legacy, measured, .01);
+        assertTrue(added.passed());
+        assertEquals(List.of("melodyF1", "leadFidelityF1"),
+                added.deltas().stream().map(BenchScorecard.Delta::metric).toList());
+        assertEquals("new", added.deltas().getLast().result());
+        assertTrue(BenchScorecard.compare(measured, legacy, .01).passed());
+        assertEquals("regression", BenchScorecard.compare(measured, lower, .01).deltas().getLast().result());
+    }
+
     @Test void goldParsesRegionSchemaAndScoresOnlyAnnotatedLeadWindows() throws Exception {
         Path annotations = directory.resolve("labels.json");
         Files.writeString(annotations, """
@@ -224,8 +237,12 @@ class BenchCliTest {
     }
 
     private static BenchScorecard.Card card(double f1, double distance) {
+        return scorecard(Map.of("noteF1", f1, "logMelDistance", distance));
+    }
+
+    private static BenchScorecard.Card scorecard(Map<String, Double> metrics) {
         var sample = new BenchScorecard.Case("fixture", BenchMidi.Profile.clean, BenchAudio.Variant.dry,
-                Map.of("noteF1", f1, "logMelDistance", distance), null, null, null, null, null, null, null);
+                metrics, null, null, null, null, null, null, null);
         return BenchScorecard.create("manifest", "catalogue", false, false, Map.of(), List.of(sample));
     }
 

@@ -48,6 +48,43 @@ class BenchMetricsTest {
         assertEquals(List.of(sustainedHigh, secondBar), BenchMetrics.melody(List.of(low, sustainedHigh, quickHigh, secondBar)));
     }
 
+    @Test void scoresOnlyFm1AgainstTheDeclaredLead() {
+        var truth = List.of(event("PSG1", 0, 60), event("PSG1", .4, 62), event("FM4", 0, 84));
+        var estimate = List.of(event("FM1", .05, 60), event("FM1", .4, 65), event("FM2", .4, 62));
+        assertEquals(new BenchMetrics.F1(2, 2, 1), BenchLeadFidelity.score(truth, estimate, "PSG1"));
+    }
+
+    @Test void creditsSupportedLeadCopiesOnceAndLeavesIndependentNotesInTheDenominator() {
+        var truth = new java.util.ArrayList<BenchMetrics.Event>();
+        var estimate = new java.util.ArrayList<BenchMetrics.Event>();
+        for (int i = 0; i < 5; i++) {
+            double onset = i * .3;
+            truth.add(event("PSG1", onset, 60 + i));
+            truth.add(event("FM3", onset + 8 / 60.0, 72 + i));
+            truth.add(event("FM4", onset, 60 + i));
+            estimate.add(event("FM1", onset + 8 / 60.0, 72 + i));
+        }
+        truth.add(event("PSG1", 1.6, 57));
+        estimate.add(event("FM1", 0, 60));
+        estimate.add(event("FM1", 1.6, 69));
+        assertEquals(new BenchMetrics.F1(6, 7, 5), BenchLeadFidelity.score(truth, estimate, "PSG1"));
+    }
+
+    @Test void rejectsCoincidentalSinglePitchEchoes() {
+        var truth = new java.util.ArrayList<BenchMetrics.Event>();
+        var estimate = new java.util.ArrayList<BenchMetrics.Event>();
+        for (int i = 0; i < 5; i++) {
+            truth.add(event("PSG1", i * .3, 60));
+            truth.add(event("FM3", i * .3 + .15, 60));
+            estimate.add(event("FM1", i * .3 + .15, 60));
+        }
+        assertEquals(new BenchMetrics.F1(5, 5, 0), BenchLeadFidelity.score(truth, estimate, "PSG1"));
+    }
+
+    private static BenchMetrics.Event event(String lane, double start, int pitch) {
+        return new BenchMetrics.Event(lane, start, start + .1, pitch, null, null);
+    }
+
     static BenchMetrics.Event note(double start, double end, int pitch) {
         return new BenchMetrics.Event("FM1", start, end, pitch, null, null);
     }
