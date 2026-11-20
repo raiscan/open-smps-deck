@@ -288,7 +288,7 @@ up to the next selected attack when the stem continues the pitch with
 adequate level and sustained pitch motion. Its reason includes
 `lead-audio-extended`. These edits leave `score.json` and
 `structure.json` intact. `reconstruct describe` marks notes with strong
-periodic pitch evidence with `~` and summarizes the three edit counts.
+periodic pitch evidence with `~` and summarizes the edit counts.
 `report.json` records the same counts under `stages.leadContinuity`.
 
 After those repairs, a counter segment can fill a gap between melody notes
@@ -302,7 +302,22 @@ carry the reason `melody-gapfill`.
 `report.json` records `stages.melodyGapFill.beforeSeconds` and
 `afterSeconds`. These fields measure time with no melody sounding while
 a counter note plays in any part that carries melody, using the roles
-timeline before hardware allocation.
+timeline before legato and hardware allocation.
+
+After promotion, stem-backed legato can close a gap of up to 350 ms in
+source time between consecutive melody attacks from the same MIDI part.
+It requires the earlier or following pitch's fundamental throughout the
+gap at a substantial fraction of its level inside the corresponding
+note. The evidence can pass from the earlier pitch to the following
+pitch once. It excludes evidence
+that could be supplied by an overlapping MIDI tone or its harmonics.
+For gaps shorter than the spectrum window, it also checks samples
+strictly inside the gap so a same-pitch reattack cannot supply all the
+evidence. Motion-based releases retain priority. Legato only changes the
+earlier note's end and records `lead-legato` in the roles and continuity
+counts. With stems, `stages.fm1InterNoteGaps` reports the counts of each
+FM1 gap length in 60 Hz project frames, including zero-length gaps,
+before and after legato on the allocated lane.
 
 Rapid re-attacks on close, similarly accented notes of the same inner
 pitch can merge into the earlier note. The earlier note extends its

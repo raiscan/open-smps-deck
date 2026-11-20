@@ -255,6 +255,10 @@ final class ReconstructionChecks {
             String where = at + ".notes." + choice.note().id();
             checkRole(parts, choice.note(), choice.role(), where);
             require(choice.role() != Role.drop || nonblank(choice.reason()), where, "a dropped note needs a reason");
+            if (choice.preLegatoEnd() != null)
+                require(choice.role() == Role.melody && choice.preLegatoEnd() > choice.note().start()
+                                && choice.preLegatoEnd() < choice.note().end(),
+                        where + ".preLegatoEnd", "expected the original end inside an extended melody note");
             if (choice.mergedInto() != null) {
                 var kept = notes.get(choice.mergedInto());
                 require(choice.role() == Role.drop && kept != null && kept.role() != Role.drop
@@ -274,7 +278,8 @@ final class ReconstructionChecks {
                 score, timeline.projectDuration(), Set.of("midi", "audio-refine", "consensus", "audio"));
         var continuity = allocation.leadContinuity();
         if (continuity != null)
-            require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0,
+            require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0
+                            && continuity.legatoCount() >= 0,
                     at + ".leadContinuity", "counts must be nonnegative");
         var gapFill = allocation.melodyGapFill();
         if (gapFill != null)

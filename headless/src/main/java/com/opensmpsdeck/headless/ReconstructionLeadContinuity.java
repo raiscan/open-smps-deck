@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
@@ -20,14 +21,18 @@ final class ReconstructionLeadContinuity {
     static final String SPLIT = "lead-continuation";
     static final String ADDED = "lead-audio-added";
     static final String EXTENDED = "lead-audio-extended";
+    static final String LEGATO = "lead-legato";
     private static final double MIN_HEAD = .034;
     private static final double MAX_LOOKAHEAD = .85;
+    private static final double MAX_LEGATO_GAP = .350;
 
-    record Stats(long split, long added, long extended) {
-        boolean isEmpty() { return split == 0 && added == 0 && extended == 0; }
+    record Stats(long split, long added, long extended, @ReconstructionStages.Nullable Long legato) {
+        long legatoCount() { return legato == null ? 0 : legato; }
+
+        boolean isEmpty() { return split == 0 && added == 0 && extended == 0 && legatoCount() == 0; }
 
         static Stats of(List<Decision> notes) {
-            long split = 0, added = 0, extended = 0;
+            long split = 0, added = 0, extended = 0, legato = 0;
             for (var decision : notes) {
                 if (decision.role() != Role.melody || decision.reason() == null) continue;
                 for (String reason : decision.reason().split(" ")) {
@@ -35,11 +40,21 @@ final class ReconstructionLeadContinuity {
                         case SPLIT -> split++;
                         case ADDED -> added++;
                         case EXTENDED -> extended++;
+                        case LEGATO -> legato++;
                         default -> { }
                     }
                 }
             }
-            return new Stats(split, added, extended);
+            return new Stats(split, added, extended, legato == 0 ? null : legato);
+        }
+
+        Map<String, Long> reportCounts(boolean withLegato) {
+            var counts = new LinkedHashMap<String, Long>();
+            counts.put("split", split);
+            counts.put("added", added);
+            counts.put("extended", extended);
+            if (withLegato) counts.put(LEGATO, legatoCount());
+            return counts;
         }
     }
 
@@ -86,6 +101,47 @@ final class ReconstructionLeadContinuity {
     }
 
     Map<String, ReconstructionLeadAudio.Evidence> evidence() { return evidence; }
+
+    List<Decision> legato(List<Decision> decisions, BiPredicate<Decision, Note> permitted) {
+        if (stems.isEmpty()) return decisions;
+        var result = new ArrayList<>(decisions);
+        int previous = -1;
+        for (int i = 0; i < decisions.size(); i++) {
+            var next = decisions.get(i);
+            if (next.role() != Role.melody) continue;
+            if (previous >= 0) {
+                var anchor = decisions.get(previous);
+                Note prior = anchor.note();
+                Note following = next.note();
+                var stem = stems.get(prior.part());
+                // Motion-based releases and inferred attacks get first claim on the gap.
+                // Apply legato only to the remaining consecutive attacks after role promotion.
+                if (stem != null && prior.part() == following.part()
+                        && prior.endTick(timeline.frames()) < following.startTick(timeline.frames())
+                        && !hasReason(anchor, EXTENDED)) {
+                    var sourcePrior = timeline.sourceNote(prior);
+                    var sourceFollowing = timeline.sourceNote(following);
+                    if (sourceFollowing.start() - sourcePrior.end() <= MAX_LEGATO_GAP
+                            && stem.track.bridges(sourcePrior, sourceFollowing,
+                            stem.overlapping(sourcePrior.end(), sourceFollowing.start()).stream()
+                                    .filter(note -> !note.id().equals(prior.id()) && !note.id().equals(following.id()))
+                                    .toList())) {
+                        Note longer = prior.withTiming(prior.start(), following.start());
+                        if (permitted.test(anchor, longer)) result.set(previous, new Decision(longer, Role.melody,
+                                append(anchor.reason(), LEGATO), null, prior.end()));
+                    }
+                }
+            }
+            previous = i;
+        }
+        return List.copyOf(result);
+    }
+
+    static boolean hasReason(Decision decision, String reason) {
+        if (decision.reason() == null) return false;
+        for (String token : decision.reason().split(" ")) if (token.equals(reason)) return true;
+        return false;
+    }
 
     List<Decision> repair(List<Decision> decisions, BiPredicate<Decision, Note> permitted) {
         var edited = new HashMap<String, Decision>();

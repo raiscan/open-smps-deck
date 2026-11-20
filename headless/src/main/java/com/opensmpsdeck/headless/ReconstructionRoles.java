@@ -21,7 +21,12 @@ final class ReconstructionRoles {
 
     enum Role { melody, counter, bass, harmony, drums, drop }
 
-    record Decision(Note note, Role role, @ReconstructionStages.Nullable String reason, @ReconstructionStages.Nullable String mergedInto) {}
+    record Decision(Note note, Role role, @ReconstructionStages.Nullable String reason,
+                    @ReconstructionStages.Nullable String mergedInto, @ReconstructionStages.Nullable Double preLegatoEnd) {
+        Decision(Note note, Role role, String reason, String mergedInto) {
+            this(note, role, reason, mergedInto, null);
+        }
+    }
     record Result(int version, double harmonyMaxHz, List<Decision> notes,
                   @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase) {}
     private record Scope(int index, ReconstructionRolePlan.Rule rule, ReconstructionRolePlan.BarRange bars) {
@@ -87,6 +92,7 @@ final class ReconstructionRoles {
                 || permitsContinuation(structure, scopes, anchor, note);
         if (continuity != null) decisions = continuity.repair(decisions, permitted);
         decisions = ReconstructionMelodyGapFill.promote(decisions, permitted);
+        if (continuity != null) decisions = continuity.legato(decisions, permitted);
         return new Result(VERSION, harmonyHz, decisions, structure.timeBase());
     }
 

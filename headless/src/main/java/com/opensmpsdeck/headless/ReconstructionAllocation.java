@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
@@ -27,13 +28,39 @@ final class ReconstructionAllocation {
     }
     record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase,
                   @Nullable ReconstructionLeadContinuity.Stats leadContinuity,
-                  @Nullable ReconstructionMelodyGapFill.Stats melodyGapFill) {
+                  @Nullable ReconstructionMelodyGapFill.Stats melodyGapFill,
+                  @Nullable Fm1Gaps fm1InterNoteGaps) {
         Result(int version, List<Entry> notes, ReconstructionTimeMap.TimeBase timeBase) {
-            this(version, notes, timeBase, null, null);
+            this(version, notes, timeBase, null, null, null);
         }
 
         Result(int version, List<Entry> notes) {
             this(version, notes, null);
+        }
+    }
+
+    record Fm1Gaps(Map<Integer, Integer> before, Map<Integer, Integer> after) {
+        static Fm1Gaps of(List<Entry> allocated, List<ReconstructionRoles.Decision> decisions, int frames) {
+            var originalEnds = new HashMap<String, Double>();
+            for (var decision : decisions) {
+                if (decision.preLegatoEnd() != null)
+                    originalEnds.put(decision.note().id(), decision.preLegatoEnd());
+            }
+            var before = new TreeMap<Integer, Integer>();
+            var after = new TreeMap<Integer, Integer>();
+            var lead = allocated.stream().filter(entry -> "FM1".equals(entry.lane))
+                    .sorted(Comparator.comparingInt(Entry::startTick)).toList();
+            for (int i = 1; i < lead.size(); i++) {
+                var prior = lead.get(i - 1);
+                int onset = lead.get(i).startTick;
+                int end = prior.endTick;
+                var original = originalEnds.get(prior.note.id());
+                int beforeEnd = original == null ? end : Math.min(end,
+                        prior.note.withTiming(prior.note.start(), original).endTick(frames));
+                before.merge(onset - beforeEnd, 1, Integer::sum);
+                after.merge(onset - end, 1, Integer::sum);
+            }
+            return new Fm1Gaps(before, after);
         }
     }
     private record Attack(ReconstructionRoles.Decision decision, int start, int end, boolean noise) {
@@ -48,6 +75,11 @@ final class ReconstructionAllocation {
     private ReconstructionAllocation(boolean fmOnly) { this.fmOnly = fmOnly; }
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly) {
+        return allocate(roles, parts, frames, fmOnly, false);
+    }
+
+    static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
+                           boolean hasStems) {
         var allocator = new ReconstructionAllocation(fmOnly);
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
@@ -64,8 +96,10 @@ final class ReconstructionAllocation {
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
         for (var attack : attacks) allocator.place(attack);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
-        return new Result(VERSION, List.copyOf(allocator.entries.values()), roles.timeBase(),
-                continuity.isEmpty() ? null : continuity, ReconstructionMelodyGapFill.Stats.of(roles.notes()));
+        var placed = List.copyOf(allocator.entries.values());
+        return new Result(VERSION, placed, roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
+                ReconstructionMelodyGapFill.Stats.of(roles.notes()),
+                hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null);
     }
 
     /** Project a kept lane layout back into source time for the existing voice probes. */

@@ -14,6 +14,9 @@ final class ReconstructionLeadAudio {
     static final double MODULATED = .72;
     private static final int LOW = 36, HIGH = 93, HARMONICS = 4;
     private static final int MAX_FIT = 45, MIN_FIT = 15;
+    private static final double WINDOW = .052;
+    private static final double LEGATO_MIN_LEVEL = .003;
+    private static final double LEGATO_RELATIVE_LEVEL = .35;
     private static final double CENTS = 1200 / Math.log(2);
     private static final double[] HARMONIC_OFFSETS = {0, 0, 12, 12 * Math.log(3) / Math.log(2), 24};
     private static final Model[][] MODELS = models();
@@ -33,6 +36,8 @@ final class ReconstructionLeadAudio {
         private final float[][] peaks = new float[(HIGH - LOW + 1) * HARMONICS][];
         private final float[][] cents = new float[peaks.length][];
         private final float[] rms;
+        private final float[] mono;
+        private final double rate;
         private final double duration;
 
         static Track read(Path wave, double duration) throws IOException {
@@ -49,20 +54,20 @@ final class ReconstructionLeadAudio {
 
         Track(ReferenceAudio audio) {
             int stride = Math.max(1, audio.sampleRate() / 12_000);
-            double rate = audio.sampleRate() / (double) stride;
+            rate = audio.sampleRate() / (double) stride;
             duration = audio.samples().length / (double) audio.sampleRate();
             rms = new float[(int) Math.ceil(duration / HOP)];
             for (int i = 0; i < peaks.length; i++) {
                 peaks[i] = new float[rms.length];
                 cents[i] = new float[rms.length];
             }
-            float[] mono = new float[audio.samples().length / stride];
+            mono = new float[audio.samples().length / stride];
             for (int i = 0; i < mono.length; i++) {
                 for (int j = 0; j < stride; j++) mono[i] += audio.samples()[i * stride + j];
                 mono[i] /= stride;
             }
             // The window resolves neighboring partials while retaining most 4–8 Hz motion.
-            double[] window = new double[(int) Math.clamp(Math.round(.052 * rate), 3, 4096)];
+            double[] window = new double[(int) Math.clamp(Math.round(WINDOW * rate), 3, 4096)];
             for (int i = 0; i < window.length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (window.length - 1));
             var spectrum = new LeadEffectMatcher.Spectrum();
             double binHz = rate / spectrum.real.length;
@@ -177,6 +182,78 @@ final class ReconstructionLeadAudio {
                     || to - end >= .17 && evidence(pitch, end, to, competitors).vibrato < MODULATED)
                 return end;
             return to;
+        }
+
+        private record Band(float[] peaks, double frequency, double floor) {}
+
+        boolean bridges(Note prior, Note following, List<Note> competitors) {
+            double end = prior.end(), next = following.start();
+            if (next > duration || next <= end) return false;
+            var outgoing = legatoBand(prior.pitch(), Math.max(prior.start(), end - .060), end, end, next, competitors);
+            var incoming = prior.pitch() == following.pitch() ? null : legatoBand(following.pitch(), next,
+                    Math.min(following.end(), next + .060), end, next, competitors);
+            if (outgoing == null && incoming == null) return false;
+            // A centered spectrum can see attacks on either side of a short real rest.
+            // Corroborate short gaps with samples taken entirely between the two MIDI edges.
+            if (next - end < WINDOW) {
+                if (outgoing != null && gapAmplitude(outgoing.frequency, end, next) < outgoing.floor) outgoing = null;
+                if (incoming != null && gapAmplitude(incoming.frequency, end, next) < incoming.floor) incoming = null;
+            }
+            int samples = Math.max(1, (int) Math.ceil((next - end) / HOP));
+            for (int i = 0; i < samples; i++) {
+                double center = end + (i + .5) * (next - end) / samples;
+                double audible = .10 * at(rms, center);
+                if (supports(outgoing, center, audible)) continue;
+                outgoing = null; // Support can pass from the earlier pitch to the next pitch once.
+                if (!supports(incoming, center, audible)) return false;
+            }
+            return true;
+        }
+
+        private static boolean supports(Band band, double center, double audible) {
+            return band != null && at(band.peaks, center) >= Math.max(band.floor, audible);
+        }
+
+        private Band legatoBand(int pitch, double from, double to, double cut, double next, List<Note> competitors) {
+            if (pitch < LOW || pitch > HIGH) return null;
+            for (var other : competitors) {
+                if (other.start() >= next || other.end() <= cut) continue;
+                double ratio = hz(pitch) / hz(other.pitch());
+                if (ratio >= .98 && ratio <= 4.02 && Math.abs(ratio - Math.rint(ratio)) < .02)
+                    return null;
+            }
+            int index = index(pitch, 1);
+            var fundamental = peaks[index];
+            double anchor = 0;
+            int strongest = 0;
+            for (int i = first(from); i < first(to); i++) {
+                if (fundamental[i] <= anchor) continue;
+                anchor = fundamental[i];
+                strongest = i;
+            }
+            if (anchor < LEGATO_MIN_LEVEL) return null;
+            double frequency = hz(pitch) * Math.pow(2, cents[index][strongest] / 1200);
+            return new Band(fundamental, frequency, Math.max(LEGATO_MIN_LEVEL, LEGATO_RELATIVE_LEVEL * anchor));
+        }
+
+        private double gapAmplitude(double frequency, double start, double end) {
+            int first = (int) Math.ceil(start * rate), stop = Math.min(mono.length, (int) Math.ceil(end * rate));
+            int samples = stop - first;
+            if (samples * frequency < 2 * rate) return 0; // Fewer than two cycles cannot resolve the tone.
+            double real = 0, imag = 0;
+            for (int i = 0; i < samples; i++) {
+                double phase = Math.TAU * frequency * i / rate;
+                real += mono[first + i] * Math.cos(phase);
+                imag += mono[first + i] * Math.sin(phase);
+            }
+            return 2 * Math.hypot(real, imag) / samples;
+        }
+
+        private static double at(float[] values, double seconds) {
+            double position = seconds / HOP;
+            int left = (int) position;
+            if (left + 1 >= values.length) return 0;
+            return values[left] + (values[left + 1] - values[left]) * (position - left);
         }
 
         boolean[] referenceActivity() {

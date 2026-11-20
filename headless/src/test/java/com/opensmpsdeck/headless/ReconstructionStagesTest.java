@@ -1,7 +1,10 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +17,28 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionStagesTest {
+    @Test void roundTripsLegatoCountsAndGapHistograms(@TempDir Path dir) throws Exception {
+        var prior = note("prior", 0, .1, .4, 72);
+        var next = note("next", 0, .4, .6, 74);
+        var roles = new ReconstructionRoles.Result(ReconstructionStages.VERSION, 0, List.of(
+                new ReconstructionRoles.Decision(prior, Role.melody, ReconstructionLeadContinuity.LEGATO, null, .3),
+                new ReconstructionRoles.Decision(next, Role.melody, null, null)), null);
+        var allocation = ReconstructionAllocation.allocate(roles, List.of(part(0)), 60, false, true);
+        var file = dir.resolve("allocation.json");
+        ReconstructionArtifacts.write(file, allocation);
+        var restored = ReconstructionArtifacts.read(file, ReconstructionAllocation.Result.class);
+        assertEquals(Map.of(6, 1), restored.fm1InterNoteGaps().before());
+        assertEquals(Map.of(0, 1), restored.fm1InterNoteGaps().after());
+        assertEquals(1L, restored.leadContinuity().reportCounts(true).get("lead-legato"));
+
+        var legacy = JsonParser.parseString("""
+                {"version":%d,"notes":[],"leadContinuity":{"split":1,"added":0,"extended":0}}
+                """.formatted(ReconstructionStages.VERSION));
+        var old = ReconstructionArtifacts.decode(file, ReconstructionAllocation.Result.class, legacy);
+        assertEquals(0, old.leadContinuity().legatoCount());
+        assertNull(old.fm1InterNoteGaps());
+    }
+
     @Test void repeatConsensusUsesTwoOtherInstancesAndKeepsTheIdOfAReplacedNote() {
         var bars = bars(3);
         var notes = phrases(3);

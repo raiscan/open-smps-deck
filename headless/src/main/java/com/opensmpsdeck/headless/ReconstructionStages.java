@@ -179,7 +179,8 @@ public final class ReconstructionStages {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
                         ReconstructionArtifacts.write(allocationFile, ReconstructionAllocation.allocate(
-                                roles, score.source.parts(), ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly));
+                                roles, score.source.parts(), ReconstructionTimeMap.of(score).frames(),
+                                score.inputs.fmOnly, !score.inputs.stems.isEmpty()));
                     }
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.

@@ -42,8 +42,9 @@ final class ReconstructionCli {
     private record MatchEvidence(Kind kind, String lane, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
     private record StageEvidence(int repeatGroups, long consensusCorrections, long harmonyMerges, long harmonyDrops,
                                  int linkedClips, int phraseGroups, int sections,
-                                 ReconstructionLeadContinuity.Stats leadContinuity,
-                                 ReconstructionMelodyGapFill.Stats melodyGapFill) {}
+                                 Map<String, Long> leadContinuity,
+                                 ReconstructionMelodyGapFill.Stats melodyGapFill,
+                                 ReconstructionAllocation.Fm1Gaps fm1InterNoteGaps) {}
     private record Effects(Map<Integer, ReconstructionEcho.Estimate> echoes,
                            Map<Integer, ReconstructionVibrato.Estimate> vibrato,
                            Map<Integer, ReconstructionReverb.Estimate> reverb) {}
@@ -149,7 +150,7 @@ final class ReconstructionCli {
         var matched = new Matched(Map.of(), evidence, sectionPlan.trials());
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
-        render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, List.of(),
+        render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, List.of(),
                 (echoes, copies) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null);
     }
@@ -183,7 +184,7 @@ final class ReconstructionCli {
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
-                    allocation.melodyGapFill(), copyLanes,
+                    allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
@@ -243,7 +244,7 @@ final class ReconstructionCli {
     private static void render(Path midi, Path reference, Path index, Path target, Path destination,
                                Options options, ReconstructionStages.Score transcription, Matched matched,
                                Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
-                               ReconstructionMelodyGapFill.Stats melodyGapFill,
+                               ReconstructionMelodyGapFill.Stats melodyGapFill, ReconstructionAllocation.Fm1Gaps fm1InterNoteGaps,
                                List<String> copyLanes,
                                Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
         long durationUs = transcription.durationUs();
@@ -301,7 +302,9 @@ final class ReconstructionCli {
                     result.reductions().stream().filter(r -> "rapid-inner-tone-reattack".equals(r.reason())).count(),
                     result.reductions().stream().filter(r -> "isolated-harmony-octave-double".equals(r.reason())).count(),
                     result.project().clips().size() - result.project().sequences().size(),
-                    structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size(), leadContinuity, melodyGapFill);
+                    structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size(),
+                    leadContinuity == null ? null : leadContinuity.reportCounts(fm1InterNoteGaps != null),
+                    melodyGapFill, fm1InterNoteGaps);
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,

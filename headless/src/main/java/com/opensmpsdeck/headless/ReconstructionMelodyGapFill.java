@@ -83,7 +83,7 @@ final class ReconstructionMelodyGapFill {
         static Stats of(List<Decision> notes) {
             var leadParts = new HashSet<Integer>();
             for (var decision : notes)
-                if (decision.role() == Role.melody && !REASON.equals(decision.reason()))
+                if (decision.role() == Role.melody && !ReconstructionLeadContinuity.hasReason(decision, REASON))
                     leadParts.add(decision.note().part());
 
             // Sweep both role timelines together, counting concurrent counter notes only once.
@@ -92,9 +92,10 @@ final class ReconstructionMelodyGapFill {
                 var note = decision.note();
                 boolean lead = decision.role() == Role.melody;
                 if (!lead && (decision.role() != Role.counter || !leadParts.contains(note.part()))) continue;
-                boolean promoted = lead && REASON.equals(decision.reason());
+                boolean promoted = lead && ReconstructionLeadContinuity.hasReason(decision, REASON);
+                double end = decision.preLegatoEnd() == null ? note.end() : decision.preLegatoEnd();
                 events.computeIfAbsent(note.start(), ignored -> new Coverage()).add(lead, promoted, 1);
-                events.computeIfAbsent(note.end(), ignored -> new Coverage()).add(lead, promoted, -1);
+                events.computeIfAbsent(end, ignored -> new Coverage()).add(lead, promoted, -1);
             }
             var active = new Coverage();
             double previous = 0, before = 0, after = 0;

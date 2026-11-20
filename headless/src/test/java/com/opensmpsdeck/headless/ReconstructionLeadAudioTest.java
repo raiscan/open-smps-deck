@@ -68,6 +68,69 @@ class ReconstructionLeadAudioTest {
         assertEquals(0, motion.vibrato());
     }
 
+    @Test void supportsStraightLeadOverBackingAcrossShortGaps() {
+        var track = legatoTrack(.72, .20);
+        var backing = List.of(chord(64), chord(72));
+        assertTrue(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), backing));
+        assertTrue(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .397, .7), backing));
+    }
+
+    @Test void rejectsRestsAndQuietTailsOverBacking() {
+        var ended = legatoTrack(.38, 0);
+        var quietTail = legatoTrack(.38, .015);
+        var backing = List.of(chord(64), chord(72));
+        assertFalse(ended.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), backing));
+        assertFalse(quietTail.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), backing));
+        assertFalse(ended.bridges(lead("prior", 69, .20, .38), lead("next", 69, .397, .7), backing));
+    }
+
+    @Test void rejectsShortRestBeforeSamePitchReattack() {
+        var track = legatoTrack(.38, 0, .395);
+        assertFalse(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .395, .7), List.of(chord(64), chord(72))));
+    }
+
+    @Test void rejectsPitchEvidenceFromANotatedBackingTone() {
+        var track = legatoTrack(.72, .20);
+        var backing = new ReconstructionStages.Note("backing", 0, .30, .6, 57, 90, "midi", 1);
+        assertFalse(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), List.of(backing)));
+    }
+
+    @Test void acceptsOnePitchHandoffOnlyWhenTheGapStaysSounding() {
+        int rate = 12_000;
+        for (double rest : new double[]{0, .08}) {
+            var samples = new float[rate];
+            for (int i = 0; i < samples.length; i++) {
+                double t = i / (double) rate;
+                double old = t < .45 ? .20 * Math.sin(Math.TAU * 440 * t) : 0;
+                double next = t >= .45 + rest ? .20 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(72) * t) : 0;
+                samples[i] = (float) (old + next);
+            }
+            var track = new ReconstructionLeadAudio.Track(new ReferenceAudio(samples, rate));
+            assertEquals(rest == 0, track.bridges(lead("prior", 69, .20, .36), lead("next", 72, .58, .7), List.of()));
+        }
+    }
+
+    private static ReconstructionStages.Note lead(String id, int pitch, double start, double end) {
+        return new ReconstructionStages.Note(id, 0, start, end, pitch, 90, "midi", 1);
+    }
+
+    private static ReconstructionLeadAudio.Track legatoTrack(double release, double tailLevel) {
+        return legatoTrack(release, tailLevel, 1);
+    }
+
+    private static ReconstructionLeadAudio.Track legatoTrack(double release, double tailLevel, double reattack) {
+        int rate = 12_000;
+        var samples = new float[rate];
+        for (int i = 0; i < samples.length; i++) {
+            double time = i / (double) rate;
+            double level = time < .20 ? 0 : time < release || time >= reattack ? .20 : tailLevel;
+            samples[i] = (float) (level * Math.sin(Math.TAU * 440 * time)
+                    + .07 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(64) * time)
+                    + .07 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(72) * time));
+        }
+        return new ReconstructionLeadAudio.Track(new ReferenceAudio(samples, rate));
+    }
+
     private static double score(int pitch, double rate, double phase, boolean vibrato, boolean beating) {
         int sampleRate = 12_000;
         float[] samples = new float[sampleRate];
