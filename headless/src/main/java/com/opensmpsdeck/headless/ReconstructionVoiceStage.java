@@ -30,7 +30,9 @@ final class ReconstructionVoiceStage {
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
-        var instrumentsByKind = matchFixedInstruments(score, catalogue, byLane, mix, options.stems());
+        var tonalInstruments = matchPsg(score, catalogue, byLane, mix, options.stems());
+        var drumInstruments = ReconstructionDrums.match(score, catalogue, byLane.getOrDefault("DAC", List.of()),
+                mix, options.stems());
         var windows = new VoiceWindows(score.frames(), byLane, previous == null ? null : previous.fitWindows());
         var screening = new VoicePatchShortlist(catalogue);
         var context = byLane.values().stream().flatMap(List::stream).toList();
@@ -52,7 +54,7 @@ final class ReconstructionVoiceStage {
             var patches = lane.startsWith("FM")
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent) : List.<RankedPatch>of();
             incumbents.add(incumbent == null ? null : incumbent.id());
-            var instruments = lane.startsWith("FM") ? List.<Instrument>of() : fixedInstruments(lane, notes, instrumentsByKind);
+            var instruments = lane.startsWith("FM") ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
             Role role = dominantRole(notes);
             var packed = windows.pack(notes);
             // A lane can carry more than one MIDI part. Use its most represented
@@ -236,31 +238,30 @@ final class ReconstructionVoiceStage {
         return counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
     }
 
-    private static Map<Kind, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matchFixedInstruments(
+    private static Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> matchPsg(
             ReconstructionStages.Score score, InstrumentCatalogue catalogue,
             Map<String, List<ReconstructionAllocation.Entry>> lanes, Path mix, Map<Integer, Path> stems) throws IOException {
-        var kinds = new EnumMap<Kind, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>>(Kind.class);
-        var allocated = lanes.entrySet().stream().filter(e -> e.getKey().equals("DAC"))
-                .flatMap(e -> e.getValue().stream()).map(e -> e.note().part()).collect(java.util.stream.Collectors.toSet());
-        var notes = score.notes().stream().filter(note -> allocated.contains(note.part())).map(ReconstructionStages.Note::midi).toList();
-        kinds.put(Kind.FM_VOICE, ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
-                score.durationUs(), Kind.FM_VOICE));
         var psg = lanes.entrySet().stream().filter(e -> e.getKey().startsWith("PSG")).flatMap(e -> e.getValue().stream())
                 .filter(e -> e.role() != Role.drums).map(e -> e.note().part()).collect(java.util.stream.Collectors.toSet());
-        notes = score.notes().stream().filter(note -> psg.contains(note.part())).map(ReconstructionStages.Note::midi).toList();
-        kinds.put(Kind.PSG_VOLUME, ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
-                score.durationUs(), Kind.PSG_VOLUME));
-        return kinds;
+        var notes = score.notes().stream().filter(note -> psg.contains(note.part())).map(ReconstructionStages.Note::midi).toList();
+        return ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
+                score.durationUs(), Kind.PSG_VOLUME);
     }
 
     private static List<Instrument> fixedInstruments(String lane, List<ReconstructionAllocation.Entry> notes,
-             Map<Kind, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> shortlist) {
+            Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> tonal,
+            Map<ReconstructionVoices.Key, ReconstructionDrums.Selection> drums) {
         boolean dac = lane.equals("DAC");
-        var choices = shortlist.get(dac ? Kind.FM_VOICE : Kind.PSG_VOLUME);
         return notes.stream().filter(note -> dac || note.role() != Role.drums)
                 .map(note -> new ReconstructionVoices.Key(note.note().part(), dac ? note.note().pitch() : null))
-                .distinct().map(key -> new Instrument(key.partId(), key.drumPitch(),
-                        choices.containsKey(key) ? choices.get(key).variantId() : null)).toList();
+                .distinct().map(key -> {
+                    if (dac) {
+                        var selection = drums.get(key);
+                        return new Instrument(key.partId(), key.drumPitch(), selection.variantId(), selection);
+                    }
+                    var choice = tonal.get(key);
+                    return new Instrument(key.partId(), null, choice == null ? null : choice.variantId());
+                }).toList();
     }
 
     static Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices(
@@ -273,8 +274,19 @@ final class ReconstructionVoiceStage {
         }
         for (var instrument : lane.instruments())
             choices.put(new ReconstructionVoices.Key(instrument.part(), instrument.drumPitch()),
-                    choice(catalogue, instrument.variantId(), instrument.drumPitch(), lane.patchReason(), List.of()));
+                    instrument.drumSelection() == null
+                            ? choice(catalogue, instrument.variantId(), instrument.drumPitch(), lane.patchReason(), List.of())
+                            : drumChoice(instrument.drumSelection()));
         return choices;
+    }
+
+    private static ReconstructionVoices.Choice drumChoice(ReconstructionDrums.Selection selection) {
+        var candidate = selection.evidence().catalogue();
+        var slice = selection.slice();
+        String asset = slice != null ? slice.id() : candidate == null ? null : candidate.assetId();
+        String name = slice != null ? slice.name() : candidate == null ? null : candidate.name();
+        return new ReconstructionVoices.Choice(asset, selection.variantId(), name, selection.rate(),
+                selection.evidence().reason(), List.of(), List.of(), "perceptual-drum", slice, selection.evidence());
     }
 
     private static ReconstructionVoices.Choice choice(InstrumentCatalogue catalogue, String variant, Integer drumPitch,

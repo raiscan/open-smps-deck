@@ -50,7 +50,18 @@ final class ReconstructionVoices {
                      double score, double meanDistance) {}
 
     record Choice(String assetId, String variantId, String name, Integer sampleRate, String status,
-                  List<Probe> probes, List<Candidate> shortlist, String rankingPolicy) {
+                  List<Probe> probes, List<Candidate> shortlist, String rankingPolicy,
+                  com.opensmpsdeck.project.DacSample slice, ReconstructionDrums.Evidence drums) {
+        Choice(String assetId, String variantId, String name, Integer sampleRate, String status,
+               List<Probe> probes, List<Candidate> shortlist, String rankingPolicy) {
+            this(assetId, variantId, name, sampleRate, status, probes, shortlist, rankingPolicy, null, null);
+        }
+
+        Choice report() {
+            return slice == null ? this : new Choice(assetId, variantId, name, sampleRate, status, probes,
+                    shortlist, rankingPolicy, null, drums);
+        }
+
         Choice(String assetId, String variantId, String name, Integer sampleRate, String status,
                List<Probe> probes, List<Candidate> shortlist) {
             this(assetId, variantId, name, sampleRate, status, probes, shortlist, null);

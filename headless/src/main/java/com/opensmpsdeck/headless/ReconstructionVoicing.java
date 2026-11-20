@@ -21,7 +21,12 @@ final class ReconstructionVoicing {
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
                 String effectReason, List<Instrument> instruments) {}
     record ScoredPatch(String variantId, double shortlistScore, double fit, double check) {}
-    record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId) {}
+    record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId,
+                      @Nullable ReconstructionDrums.Selection drumSelection) {
+        Instrument(int part, Integer drumPitch, String variantId) {
+            this(part, drumPitch, variantId, null);
+        }
+    }
     record Articulation(String preset, double gate, int minimumReleaseRate) {
         int duration(int ticks) { return Math.max(1, (int) Math.round(ticks * gate)); }
     }
@@ -103,6 +108,16 @@ final class ReconstructionVoicing {
                                 && allocated.get(id).stream().anyMatch(entry -> entry.note().part() == instrument.part()
                                 && (!dac || entry.note().pitch() == pitch)), at + ".instruments",
                         "expected unique allocated parts and DAC pitches");
+                var drum = instrument.drumSelection();
+                if (drum != null) {
+                    require(dac && drum.rate() >= 0 && drum.rate() <= 255
+                                    && java.util.Objects.equals(instrument.variantId(), drum.variantId()),
+                            at + ".instruments", "invalid DAC sample selection");
+                    if (drum.slice() != null) {
+                        com.opensmpsdeck.project.DacSample.validateAll(List.of(drum.slice()));
+                        require(drum.rate() == drum.slice().rate(), at + ".instruments", "invalid stem slice rate");
+                    }
+                }
                 if (instrument.variantId() != null)
                     kind(catalogue, instrument.variantId(), dac ? Kind.DAC_SAMPLE : Kind.PSG_VOLUME, at + ".instruments");
             }

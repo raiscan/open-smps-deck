@@ -3,11 +3,11 @@ package com.opensmpsdeck.headless.bench;
 import com.opensmpsdeck.headless.BenchCartridge.Game;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
+import com.opensmpsdeck.headless.S3kDacFamily;
 
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 final class BenchDrums {
     enum Drum {
@@ -15,13 +15,6 @@ final class BenchDrums {
         final int gm;
         Drum(int gm) { this.gm = gm; }
     }
-
-    // S3K named DAC presets. Where a sample has several aliases, prefer a
-    // specific class to "other"; conflicting specific classes remain ambiguous.
-    private static final Set<Integer> KICKS = Set.of(0x86, 0x9d, 0xa1, 0xa4, 0xa7, 0xa8,
-            0xb4, 0xb5, 0xb7, 0xb8, 0xb9, 0xbd, 0xc0, 0xc1, 0xc2, 0xc3, 0xc4);
-    private static final Set<Integer> SNARES = Set.of(0x81, 0x87, 0x8f, 0x94, 0x95, 0x96, 0x97,
-            0x9b, 0x9f, 0xa6, 0xab, 0xb2, 0xb3, 0xbc);
 
     private final Map<String, Drum> byHash = new HashMap<>();
 
@@ -60,9 +53,11 @@ final class BenchDrums {
     private Drum slot(int slot) {
         if (game != Game.s3k)
             return slot == 0x81 ? Drum.KICK : slot == 0x82 ? Drum.SNARE : Drum.OTHER;
-        if (KICKS.contains(slot)) return Drum.KICK;
-        if (SNARES.contains(slot)) return Drum.SNARE;
-        return Drum.OTHER;
+        return switch (S3kDacFamily.slot(slot)) {
+            case KICK -> Drum.KICK;
+            case SNARE -> Drum.SNARE;
+            case OTHER -> Drum.OTHER;
+        };
     }
 
     private static Drum named(String description) {

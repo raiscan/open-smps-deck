@@ -65,7 +65,8 @@ final class ReconstructionCli {
                           List<ReconstructionStages.Note> fastRunEvidence,
                           List<ReconstructionAllocation.RunPlacement> fastRuns,
                           Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
-                          List<ReconstructionBendEncoding.Applied> bends, Boolean bendSizeLimit) {}
+                          List<ReconstructionBendEncoding.Applied> bends, Boolean bendSizeLimit,
+                          ReconstructionDrums.Source drumSource) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -86,7 +87,7 @@ final class ReconstructionCli {
         out.println("           [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
-        out.println("           [--steady-tempo off|auto|BPM]");
+        out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
         out.println("       reconstruct structure|roles|allocate|voice|assemble WORK_DIR");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
@@ -253,7 +254,7 @@ final class ReconstructionCli {
     private static void recordMatches(List<MatchEvidence> evidence, String lane, Kind kind,
                                       Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices) {
         choices.forEach((key, choice) -> evidence.add(new MatchEvidence(
-                key.drumPitch() == null ? kind : Kind.DAC_SAMPLE, lane, key, choice)));
+                key.drumPitch() == null ? kind : Kind.DAC_SAMPLE, lane, key, choice.report())));
     }
 
     private static void render(Path midi, Path reference, Path index, Path target, Path destination,
@@ -347,7 +348,8 @@ final class ReconstructionCli {
                     ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
                     result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
                     runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices(),
-                    result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null);
+                    result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null,
+                    drumSource(transcription, result.dacHits()));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
@@ -360,6 +362,12 @@ final class ReconstructionCli {
                 Files.delete(target);
             }
         }
+    }
+
+    private static ReconstructionDrums.Source drumSource(ReconstructionStages.Score score, int hits) {
+        if (score.inputs() == null) return null;
+        var requested = score.inputs().drumSource();
+        return requested == null && hits > 0 ? ReconstructionDrums.Source.catalogue : requested;
     }
 
     private static Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> select(

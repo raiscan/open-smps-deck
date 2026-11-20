@@ -466,7 +466,10 @@ have one `variantId` for the allocated notes. The `shortlist` lists up to
 18 candidate IDs, their pitch-aligned attack match scores (higher is better),
 and their contextual fit and held-out errors (lower is better). DAC and PSG
 retain part-level matching under `instruments`. DAC entries also specify
-`drumPitch`. The PSG3 noise allocation supplies its native noise command.
+`drumPitch`. A fitted DAC entry also has a `drumSelection` with the chosen
+rate, optional stem slice and match evidence. To use a different catalogue
+variant at its native rate, change `variantId` and remove `drumSelection`.
+The PSG3 noise allocation supplies its native noise command.
 
 The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude
