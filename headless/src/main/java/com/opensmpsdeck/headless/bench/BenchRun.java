@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue;
+import com.opensmpsdeck.headless.LeadGap;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -212,12 +213,20 @@ final class BenchRun {
             var score = BenchGold.score(gold.regions(), lead);
             var metrics = new TreeMap<String, Double>();
             metrics.put("leadAttackF1", score.attacks().f1());
+            if (BenchGold.hasLeadReleases(gold))
+                metrics.put("leadGap", BenchGold.leadGap(output, gold, melodyGates(tones)).leadGap());
             if (score.pitchAccuracy() != null) metrics.put("leadPitchAccuracy", score.pitchAccuracy());
             return new BenchScorecard.Case(gold.id(), null, null, metrics, null, null, null, null,
                     null, score, null);
         } finally {
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
         }
+    }
+
+    static List<LeadGap.Interval> melodyGates(List<BenchMetrics.Event> events) {
+        return events.stream().filter(note -> note.lane().equals("FM1"))
+                .map(note -> new LeadGap.Interval(note.start(), note.end()))
+                .sorted(java.util.Comparator.comparingDouble(LeadGap.Interval::start)).toList();
     }
 
     private static Map<String, String> goldInputs(BenchGold.Input input) throws IOException {

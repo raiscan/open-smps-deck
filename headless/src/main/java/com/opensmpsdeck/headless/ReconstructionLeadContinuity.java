@@ -1,0 +1,268 @@
+package com.opensmpsdeck.headless;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.function.BiPredicate;
+
+import static com.opensmpsdeck.headless.ReconstructionRoles.Decision;
+import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
+import static com.opensmpsdeck.headless.ReconstructionStages.NOTE_ORDER;
+import static com.opensmpsdeck.headless.ReconstructionStages.Note;
+
+/** Repairs gaps between selected lead notes without moving existing lead attacks. */
+final class ReconstructionLeadContinuity {
+    static final String SPLIT = "lead-continuation";
+    static final String ADDED = "lead-audio-added";
+    static final String EXTENDED = "lead-audio-extended";
+    private static final double MIN_HEAD = .034;
+    private static final double MAX_LOOKAHEAD = .85;
+
+    record Stats(long split, long added, long extended) {
+        boolean isEmpty() { return split == 0 && added == 0 && extended == 0; }
+
+        static Stats of(List<Decision> notes) {
+            long split = 0, added = 0, extended = 0;
+            for (var decision : notes) {
+                if (decision.role() != Role.melody || decision.reason() == null) continue;
+                for (String reason : decision.reason().split(" ")) {
+                    switch (reason) {
+                        case SPLIT -> split++;
+                        case ADDED -> added++;
+                        case EXTENDED -> extended++;
+                        default -> { }
+                    }
+                }
+            }
+            return new Stats(split, added, extended);
+        }
+    }
+
+    private record Stem(ReconstructionLeadAudio.Track track, List<Note> notes) {
+        List<Note> overlapping(double start, double end) {
+            return notes.stream().takeWhile(note -> note.start() < end)
+                    .filter(note -> note.end() > start).toList();
+        }
+    }
+
+    private record Candidate(Note note, Decision held, double cost) {}
+
+    private final Map<Integer, Stem> stems;
+    private final ReconstructionTimeMap timeline;
+    private final Map<String, ReconstructionLeadAudio.Evidence> evidence;
+
+    private ReconstructionLeadContinuity(Map<Integer, Stem> stems, ReconstructionTimeMap timeline,
+                                         Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        this.stems = stems;
+        this.timeline = timeline;
+        this.evidence = evidence;
+    }
+
+    static ReconstructionLeadContinuity analyze(ReconstructionStages.Score score, List<Note> notes) throws IOException {
+        var timeline = ReconstructionTimeMap.of(score);
+        var evidence = new HashMap<String, ReconstructionLeadAudio.Evidence>();
+        var stems = new HashMap<Integer, Stem>();
+        for (var part : score.source().parts()) {
+            String path = score.inputs().stems().get(part.id());
+            if (part.drums() || path == null) continue;
+            var local = notes.stream().filter(note -> note.part() == part.id()).map(timeline::sourceNote).toList();
+            if (local.isEmpty()) continue;
+            var track = ReconstructionLeadAudio.Track.read(Path.of(path), timeline.sourceDuration());
+            var stem = new Stem(track, local);
+            stems.put(part.id(), stem);
+            for (var note : local) {
+                double trim = Math.clamp((note.end() - note.start() - .150) / 2, 0, .020);
+                var motion = track.evidence(note.pitch(), note.start() + trim, note.end() - trim,
+                        stem.overlapping(note.start(), note.end()));
+                if (motion.confidence() > 0) evidence.put(note.id(), motion);
+            }
+        }
+        return new ReconstructionLeadContinuity(stems, timeline, evidence);
+    }
+
+    Map<String, ReconstructionLeadAudio.Evidence> evidence() { return evidence; }
+
+    List<Decision> repair(List<Decision> decisions, BiPredicate<Decision, Note> permitted) {
+        var edited = new HashMap<String, Decision>();
+        var extra = new ArrayList<Decision>();
+        var ids = new HashSet<String>();
+        var lead = new ArrayList<Decision>();
+        var held = new HashMap<Integer, List<Decision>>();
+        for (var decision : decisions) {
+            Note note = decision.note();
+            ids.add(note.id());
+            if (decision.role() == Role.melody) lead.add(decision);
+            else if ((decision.role() == Role.counter || decision.role() == Role.harmony)
+                    && note.end() - note.start() >= MIN_HEAD + ReconstructionLeadAudio.MIN_TONE)
+                held.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(decision);
+        }
+        double occupied = 0;
+        for (int i = 0; i < lead.size(); i++) {
+            Decision anchor = lead.get(i);
+            Note prior = anchor.note();
+            Note next = i + 1 < lead.size() ? lead.get(i + 1).note() : null;
+            double end = next == null ? timeline.projectDuration() : next.start();
+            double at = Math.max(occupied, prior.end());
+            occupied = at;
+            if (at - prior.end() > 1e-7 || end - at < .049) continue;
+            Stem stem = stems.get(prior.part());
+            if (stem != null) {
+                double start = timeline.source(prior.start()), release = timeline.source(prior.end());
+                double bound = Math.min(timeline.source(end), release + MAX_LOOKAHEAD);
+                double extended = stem.track.release(prior.pitch(), start, release, bound,
+                        stem.overlapping(start, bound));
+                if (extended > release) {
+                    Note longer = prior.withTiming(prior.start(), Math.min(end, timeline.project(extended)))
+                            .withMotion(stem.track.evidence(prior.pitch(), start, extended,
+                                    stem.overlapping(start, extended)));
+                    if (permitted.test(anchor, longer)) {
+                        edited.put(prior.id(), new Decision(longer, Role.melody, append(anchor.reason(), EXTENDED), null));
+                        prior = longer;
+                        at = prior.end();
+                    }
+                }
+            }
+            if (end - at < .149) continue;
+            Candidate best = heldTail(anchor, prior, next, end, held.getOrDefault(prior.part(), List.of()),
+                    edited, stem, permitted);
+            if (best == null && stem != null) best = missing(anchor, prior, next, end, stem, permitted);
+            if (best == null) continue;
+            Note tail = best.note();
+            if (best.held() != null) {
+                var original = best.held();
+                Note head = original.note();
+                edited.put(head.id(), new Decision(head.withTiming(head.start(), tail.start()),
+                        original.role(), append(original.reason(), SPLIT + "-head"), null));
+                if (head.end() - tail.end() >= MIN_HEAD) {
+                    var remainder = copy(head, unique(ids, head.id() + "-remainder"), tail.end(), head.end());
+                    extra.add(new Decision(remainder, original.role(), original.reason(), null));
+                }
+            }
+            String id = unique(ids, tail.id());
+            extra.add(new Decision(copy(tail, id, tail.start(), tail.end()), Role.melody,
+                    append(anchor.reason(), best.held() == null ? ADDED : SPLIT), null));
+            occupied = tail.end();
+        }
+        var result = new ArrayList<Decision>(decisions.size() + extra.size());
+        for (var decision : decisions) {
+            var revised = edited.getOrDefault(decision.note().id(), decision);
+            var motion = evidence.get(revised.note().id());
+            if (revised.note().motion() == null && motion != null && !isSplitHead(revised))
+                revised = new Decision(revised.note().withMotion(motion), revised.role(), revised.reason(), revised.mergedInto());
+            result.add(revised);
+        }
+        result.addAll(extra);
+        result.sort(Comparator.comparing(Decision::note, NOTE_ORDER));
+        return List.copyOf(result);
+    }
+
+    private static boolean isSplitHead(Decision decision) {
+        return decision.reason() != null && decision.reason().endsWith(SPLIT + "-head");
+    }
+
+    private Candidate heldTail(Decision anchor, Note prior, Note next, double end, List<Decision> backing,
+                               Map<String, Decision> edited, Stem stem, BiPredicate<Decision, Note> permitted) {
+        Candidate best = null;
+        double runnerUp = Double.POSITIVE_INFINITY;
+        for (var decision : backing) {
+            Note held = decision.note();
+            if (held.start() > prior.end() - MIN_HEAD) break;
+            if (edited.containsKey(held.id()) || held.end() < prior.end() + .145
+                    || Math.abs(held.pitch() - prior.pitch()) > 7 || held.pitch() == prior.pitch()) continue;
+            double start = prior.end();
+            double stop = Math.min(end, held.end());
+            ReconstructionLeadAudio.Evidence motion = null;
+            double bonus = 0;
+            if (stem != null) {
+                double from = timeline.source(start), to = timeline.source(stop);
+                var tone = stem.track.tone(held.pitch(), from, to, stem.overlapping(from, to));
+                if (tone == null || tone.start() - from > .150) continue;
+                start = Math.max(start, timeline.project(tone.start()));
+                motion = tone.evidence();
+                bonus = .12 * motion.vibrato();
+            } else if (!midiHandoff(anchor, prior, next, held, backing)) continue;
+            var tail = new Note(held.id() + "-lead", held.part(), start, stop, held.pitch(), held.velocity(),
+                    held.source(), held.confidence(), motion);
+            double cost = contourCost(prior, tail, next) - bonus;
+            if (cost > .18 || !permitted.test(anchor, tail)) continue;
+            if (best == null || cost < best.cost()) {
+                if (best != null) runnerUp = best.cost();
+                best = new Candidate(tail, decision, cost);
+            } else {
+                runnerUp = Math.min(runnerUp, cost);
+            }
+        }
+        return best != null && (stem != null || runnerUp - best.cost() >= .030) ? best : null;
+    }
+
+    private static boolean midiHandoff(Decision anchor, Note prior, Note next, Note held, List<Decision> backing) {
+        boolean planned = anchor.reason() != null && anchor.reason().startsWith("roleplan#");
+        if (held.start() >= prior.start() + .024 || Math.abs(held.pitch() - prior.pitch()) > (planned ? 5 : 3))
+            return false;
+        if (next == null || next.part() != prior.part() || next.start() - held.end() > (planned ? .25 : .075)
+                || (!planned && held.end() - next.start() > .075) || Math.abs(next.pitch() - held.pitch()) > 5)
+            return false;
+        if (!planned && (prior.end() - prior.start() > .16 || held.end() - held.start() < .45
+                || held.start() > prior.start() - .07 || held.pitch() >= prior.pitch())) return false;
+        return backing.stream().anyMatch(other -> other.note().pitch() < held.pitch()
+                && Math.abs(other.note().start() - held.start()) <= .024);
+    }
+
+    private Candidate missing(Decision anchor, Note prior, Note next, double end, Stem stem,
+                              BiPredicate<Decision, Note> permitted) {
+        double start = timeline.source(prior.end()), stop = Math.min(timeline.source(end), start + MAX_LOOKAHEAD);
+        var around = stem.overlapping(start, stop);
+        Candidate best = null;
+        for (int pitch = prior.pitch() - 5; pitch <= prior.pitch() + 5; pitch++) {
+            if (pitch == prior.pitch()) continue;
+            var tone = stem.track.tone(pitch, start, stop, around);
+            if (tone == null || tone.start() - start > .120 || tone.evidence().vibrato() < .82
+                    || represented(pitch, tone, around)) continue;
+            String id = "lead-audio-" + prior.part() + "-" + Math.round(tone.start() * 1e6) + "-" + pitch;
+            var note = new Note(id, prior.part(), Math.max(prior.end(), timeline.project(tone.start())),
+                    Math.min(end, timeline.project(tone.end())), pitch, prior.velocity(), "audio",
+                    tone.evidence().vibrato(), tone.evidence());
+            double cost = contourCost(prior, note, next) - .12 * tone.evidence().vibrato();
+            if (cost <= .12 && permitted.test(anchor, note) && (best == null || cost < best.cost()))
+                best = new Candidate(note, null, cost);
+        }
+        return best;
+    }
+
+    private static boolean represented(int pitch, ReconstructionLeadAudio.Tone tone, List<Note> notes) {
+        return notes.stream().anyMatch(note -> note.start() < tone.end() && note.end() > tone.start()
+                && (note.pitch() == pitch || note.pitch() <= pitch - 12 && aliases(pitch, note.pitch())));
+    }
+
+    private static boolean aliases(int pitch, int lower) {
+        double ratio = ReconstructionLeadAudio.hz(pitch) / ReconstructionLeadAudio.hz(lower);
+        return ratio <= 4.05 && Math.abs(ratio - Math.round(ratio)) < .045;
+    }
+
+    private static double contourCost(Note prior, Note tail, Note next) {
+        double cost = ReconstructionRoles.transition(prior, tail, tail.start() - prior.end());
+        if (next != null && next.part() == tail.part() && next.start() - tail.end() < .4)
+            cost += .6 * ReconstructionRoles.transition(tail, next, next.start() - tail.end());
+        return cost;
+    }
+
+    private static Note copy(Note note, String id, double start, double end) {
+        return new Note(id, note.part(), start, end, note.pitch(), note.velocity(), note.source(), note.confidence(),
+                note.motion());
+    }
+
+    private static String unique(HashSet<String> ids, String base) {
+        String id = base;
+        for (int i = 2; !ids.add(id); i++) id = base + "-" + i;
+        return id;
+    }
+
+    private static String append(String prior, String reason) {
+        return prior == null ? reason : prior + " " + reason;
+    }
+}

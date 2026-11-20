@@ -263,6 +263,34 @@ releases, pitch intervals and durations. Melody labels transfer between
 matched notes in repeat instances. The lower and secondary contours supply
 bass and counter material.
 
+A gap in the selected line can receive the tail of an already sounding
+note in the same MIDI part. The chord keeps its original attack. The tail
+follows the lead's release and is scored using the line tracer's leap and
+gap costs. Explicit role plans can take the same handoff within their scope.
+Without a part stem, a handoff requires close, unambiguous MIDI motion into
+and out of the tail. Split tails carry the reason `lead-continuation`.
+
+A supplied `--stem PART=WAV` enables lead evidence for that part at the
+roles stage, independently of `--audio-refine`. Analysis reads the original
+stem in source time, including when the arrangement uses the steady
+project clock. A short Fourier window tracks harmonic peaks. A detrended
+4–8 Hz fit estimates periodic frequency motion, favoring partials that
+simultaneous MIDI notes do not share. Strong periodic amplitude motion
+rejects likely beating. A separate trend score estimates short glides.
+Notes with measured evidence carry optional `motion: {vibrato, glide}`
+with scores from 0 to 1. This evidence gives melody selection a bounded
+bonus.
+
+The roles stage can add a nearby, modulated tone that stays present for
+at least 150 ms and has no corresponding MIDI note. It records
+`source: "audio"` and `lead-audio-added`. A melody release can also extend
+up to the next selected attack when the stem continues the pitch with
+adequate level and sustained pitch motion. Its reason includes
+`lead-audio-extended`. These edits leave `score.json` and
+`structure.json` intact. `reconstruct describe` marks notes with strong
+periodic pitch evidence with `~` and summarizes the three edit counts.
+`report.json` records the same counts under `stages.leadContinuity`.
+
 Rapid re-attacks on close, similarly accented notes of the same inner
 pitch can merge into the earlier note. The earlier note extends its
 release and records `sustained-inner-tone`. The dropped attack records

@@ -17,11 +17,11 @@ final class BenchScorecard {
                 Map<String, String> goldInputs, List<Case> cases, Group overall, Map<String, Group> profiles,
                 Map<String, Group> variants, Group gold) {}
 
-    private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance");
+    private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance", "leadGap");
     private static final List<String> HEADLINES = List.of("noteF1", "notePrecision", "noteRecall", "offsetF1",
             "melodyF1", "drumF1", "drumClassAccuracy", "voiceTop1", "voiceTop3", "voiceSpectralDistance",
             "voiceSpectralCoverage", "logMelDistance", "onsetCorrelation", "releaseEnergy",
-            "leadAttackF1", "leadPitchAccuracy");
+            "leadAttackF1", "leadPitchAccuracy", "leadGap");
 
     private BenchScorecard() {}
 

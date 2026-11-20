@@ -41,7 +41,8 @@ final class ReconstructionCli {
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
     private record MatchEvidence(Kind kind, String lane, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
     private record StageEvidence(int repeatGroups, long consensusCorrections, long harmonyMerges, long harmonyDrops,
-                                 int linkedClips, int phraseGroups, int sections) {}
+                                 int linkedClips, int phraseGroups, int sections,
+                                 ReconstructionLeadContinuity.Stats leadContinuity) {}
     private record Effects(Map<Integer, ReconstructionEcho.Estimate> echoes,
                            Map<Integer, ReconstructionVibrato.Estimate> vibrato,
                            Map<Integer, ReconstructionReverb.Estimate> reverb) {}
@@ -147,7 +148,7 @@ final class ReconstructionCli {
         var matched = new Matched(Map.of(), evidence, sectionPlan.trials());
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
-        render(midi, reference, index, target, target, options, transcription, matched, effects, null, List.of(),
+        render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, List.of(),
                 (echoes, copies) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null);
     }
@@ -180,7 +181,7 @@ final class ReconstructionCli {
                 .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).sorted().toList();
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
-            render(midi, reference, index, staging, work, options, score, matched, effects, structure, copyLanes,
+            render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(), copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
@@ -239,7 +240,8 @@ final class ReconstructionCli {
 
     private static void render(Path midi, Path reference, Path index, Path target, Path destination,
                                Options options, ReconstructionStages.Score transcription, Matched matched,
-                               Effects effects, ReconstructionStructure.Result structure, List<String> copyLanes,
+                               Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
+                               List<String> copyLanes,
                                Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
         long durationUs = transcription.durationUs();
         var timeline = ReconstructionTimeMap.of(transcription);
@@ -296,7 +298,7 @@ final class ReconstructionCli {
                     result.reductions().stream().filter(r -> "rapid-inner-tone-reattack".equals(r.reason())).count(),
                     result.reductions().stream().filter(r -> "isolated-harmony-octave-double".equals(r.reason())).count(),
                     result.project().clips().size() - result.project().sequences().size(),
-                    structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size());
+                    structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size(), leadContinuity);
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,

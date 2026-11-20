@@ -52,16 +52,11 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
     }
 
     ReconstructionStages.Note projectNote(ReconstructionStages.Note note) {
-        return warped() ? retime(note, project(note.start()), project(note.end())) : note;
+        return warped() ? note.withTiming(project(note.start()), project(note.end())) : note;
     }
 
     ReconstructionStages.Note sourceNote(ReconstructionStages.Note note) {
-        return warped() ? retime(note, source(note.start()), source(note.end())) : note;
-    }
-
-    private static ReconstructionStages.Note retime(ReconstructionStages.Note note, double start, double end) {
-        return new ReconstructionStages.Note(note.id(), note.part(), start, end, note.pitch(), note.velocity(),
-                note.source(), note.confidence());
+        return warped() ? note.withTiming(source(note.start()), source(note.end())) : note;
     }
 
     List<ReconstructionStructure.Bar> projectBars(List<ReconstructionStructure.Bar> bars) {

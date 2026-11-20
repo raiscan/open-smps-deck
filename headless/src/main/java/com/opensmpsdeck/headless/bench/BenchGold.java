@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
 import com.google.gson.annotations.SerializedName;
+import com.opensmpsdeck.headless.LeadGap;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -47,6 +48,24 @@ final class BenchGold {
         if (spec.stems != null) spec.stems.forEach((part, stem) -> stems.put(part, root.resolve(stem)));
         return new Input(spec.id == null ? "gold" : spec.id, root.resolve(spec.reference), root.resolve(spec.midi),
                 annotationPath, stems, spec.leadPart, spec.seconds, regions);
+    }
+
+    static boolean hasLeadReleases(Input gold) {
+        return gold.regions.stream().anyMatch(region -> region.notes.stream().anyMatch(note ->
+                "lead".equalsIgnoreCase(note.voice) && note.attack != null && note.release != null
+                        && Math.min(region.end, note.release) > Math.max(region.start, note.attack)));
+    }
+
+    static LeadGap.Measurement leadGap(Path work, Input gold, List<LeadGap.Interval> gates) throws IOException {
+        var regions = gold.regions.stream().map(region -> new LeadGap.Interval(region.start, region.end)).toList();
+        var lead = new ArrayList<LeadGap.Interval>();
+        for (var region : gold.regions) for (var note : region.notes) {
+            if (!"lead".equalsIgnoreCase(note.voice) || note.attack == null || note.release == null) continue;
+            double start = Math.max(region.start, note.attack), end = Math.min(region.end, note.release);
+            if (end > start) lead.add(new LeadGap.Interval(start, end));
+        }
+        if (lead.isEmpty()) throw new IllegalArgumentException("Lead gap needs annotated lead releases");
+        return LeadGap.measure(work, gates, regions, lead, null);
     }
 
     static Score score(List<Region> regions, List<BenchMetrics.Event> melody) {

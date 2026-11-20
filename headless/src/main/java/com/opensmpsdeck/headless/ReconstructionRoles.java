@@ -43,6 +43,13 @@ final class ReconstructionRoles {
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap) {
+        return assign(structure, parts, harmonyHz, plan, beatMap, null);
+    }
+
+    static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
+                         ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
+                         ReconstructionLeadContinuity continuity) {
+        var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
         var tones = new ArrayList<Note>();
@@ -59,7 +66,7 @@ final class ReconstructionRoles {
                 ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
                 : structure.roleLayout();
         var byBar = byBar(layout.bars(), tones);
-        var melody = melody(layout, tones, programs);
+        var melody = melody(layout, tones, programs, evidence);
         for (String id : melody.lead()) roles.put(id, Role.melody);
         for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
@@ -67,27 +74,67 @@ final class ReconstructionRoles {
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
                 labelLine(notes, roles, programs, Role.counter);
         }
-        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan, beatMap);
+        Map<String, String> reasons = plan == null ? Map.of() : applyPlan(structure, roles, programs, plan, beatMap, evidence);
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
             if (roles.get(id) != Role.harmony) continue;
             roles.put(id, Role.drop);
             octaveDrops.add(id);
         }
-        return new Result(VERSION, harmonyHz, thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops),
-                structure.timeBase());
+        var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops);
+        if (continuity != null) {
+            var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
+            decisions = continuity.repair(decisions, (anchor, note) -> scopes.isEmpty()
+                    || permitsContinuation(structure, scopes, anchor, note));
+        }
+        return new Result(VERSION, harmonyHz, decisions, structure.timeBase());
     }
 
-    private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,
-                                                  Map<Integer, Integer> programs, ReconstructionRolePlan plan,
-                                                  ReconstructionBeatMap beatMap) {
-        var byPart = new HashMap<Integer, List<Scope>>();
+    private static List<Scope> scopes(ReconstructionStructure.Result structure, ReconstructionRolePlan plan) {
+        var result = new ArrayList<Scope>();
         for (int i = 0; i < plan.rules().size(); i++) {
             var rule = plan.rules().get(i);
             var bars = rule.bars() == null ? null
                     : ReconstructionRolePlan.BarRange.parse(rule.bars(), structure.bars().size(), "roleplan.json");
-            byPart.computeIfAbsent(rule.part(), ignored -> new ArrayList<>()).add(new Scope(i, rule, bars));
+            result.add(new Scope(i, rule, bars));
         }
+        return result;
+    }
+
+    private static boolean permitsContinuation(ReconstructionStructure.Result structure, List<Scope> scopes,
+                                                Decision anchor, Note note) {
+        boolean extension = note.id().equals(anchor.note().id());
+        Scope owner = scopes.stream().filter(scope -> scope.reason().equals(anchor.reason())
+                && scope.rule.role() == Role.melody).findFirst().orElse(null);
+        boolean chord = extension && owner != null && "chord".equals(owner.rule.texture());
+        double start = extension ? anchor.note().end() : note.start();
+        return permitsAt(structure, scopes, owner, note, start, chord)
+                && permitsAt(structure, scopes, owner, note, Math.nextDown(note.end()), chord);
+    }
+
+    private static boolean permitsAt(ReconstructionStructure.Result structure, List<Scope> scopes, Scope owner,
+                                     Note note, double time, boolean chord) {
+        int bar = 0;
+        for (var section : structure.sections()) for (String ignored : section.bars()) {
+            if (structure.bars().get(bar++).end() <= time) continue;
+            var at = note.withTiming(time, note.end());
+            for (var scope : scopes.reversed()) {
+                if (scope.applies(section.id(), bar) && scope.rule.includes(at, chord))
+                    return scope.rule.role() == Role.melody;
+            }
+            // A time-, pitch- or section-bounded planned line must keep its scope.
+            return owner == null || owner.applies(section.id(), bar) && owner.rule.includes(at, chord);
+        }
+        return false;
+    }
+
+    private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,
+                                                  Map<Integer, Integer> programs, ReconstructionRolePlan plan,
+                                                  ReconstructionBeatMap beatMap,
+                                                  Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        var byPart = new HashMap<Integer, List<Scope>>();
+        for (var scope : scopes(structure, plan))
+            byPart.computeIfAbsent(scope.rule.part(), ignored -> new ArrayList<>()).add(scope);
         var byBar = byBar(structure.bars(), structure.notes());
         var chords = plan.rules().stream().anyMatch(ReconstructionRolePlan.Rule::filtersTexture)
                 ? ReconstructionAttackGrid.chordNotes(structure.bars(), byBar, beatMap) : Set.<String>of();
@@ -131,14 +178,20 @@ final class ReconstructionRoles {
                 }
             }
             candidates.forEach((scope, notes) -> traceLine(notes, roles, programs, scope.rule.role(),
-                    scope.rule.line() == ReconstructionRolePlan.Voice.bottom));
+                    scope.rule.line() == ReconstructionRolePlan.Voice.bottom, evidence));
         }
         return reasons;
     }
 
     static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
                                                   Map<Integer, Integer> programs) {
-        var melody = ReconstructionMelody.extract(layout, tones, programs);
+        return melody(layout, tones, programs, Map.of());
+    }
+
+    private static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
+                                                          Map<Integer, Integer> programs,
+                                                          Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        var melody = ReconstructionMelody.extract(layout, tones, programs, evidence);
         var roles = new HashMap<String, Role>();
         for (var note : tones) roles.put(note.id(), melody.lead().contains(note.id()) ? Role.melody : Role.harmony);
         alignRepeatedMelody(layout, byBar(layout.bars(), tones), roles);
@@ -189,11 +242,11 @@ final class ReconstructionRoles {
 
     private static void labelLine(List<Note> section, Map<String, Role> roles, Map<Integer, Integer> programs, Role role) {
         List<Note> notes = section.stream().filter(note -> roles.get(note.id()) == Role.harmony).toList();
-        traceLine(notes, roles, programs, role, role == Role.bass);
+        traceLine(notes, roles, programs, role, role == Role.bass, Map.of());
     }
 
     private static void traceLine(List<Note> notes, Map<String, Role> roles, Map<Integer, Integer> programs,
-                                  Role role, boolean low) {
+                                  Role role, boolean low, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
         if (notes.isEmpty()) return;
         int[] previous = new int[notes.size()];
         double[] path = new double[notes.size()];
@@ -207,6 +260,8 @@ final class ReconstructionRoles {
                 distant++;
             }
             double weight = salience(current, low, programs.get(current.part()), notes, i);
+            if (role == Role.melody) weight *= 1 + .28 * evidence
+                    .getOrDefault(current.id(), ReconstructionLeadAudio.Evidence.NONE).confidence();
             path[i] = weight;
             previous[i] = -1;
             if (bestDistant >= 0 && notes.get(bestDistant).end() <= current.start() && path[bestDistant] > .18) {
@@ -258,7 +313,7 @@ final class ReconstructionRoles {
                 && (neighbor.end() - neighbor.start() >= .075 || Math.abs(note.start() - neighbor.start()) < .025);
     }
 
-    private static double transition(Note prior, Note current, double gap) {
+    static double transition(Note prior, Note current, double gap) {
         int leap = Math.abs(prior.pitch() - current.pitch());
         double continuity = Math.max(0, 1 - Math.max(0, gap) / .40);
         return continuity * (.011 * leap + .021 * Math.max(0, leap - 5)

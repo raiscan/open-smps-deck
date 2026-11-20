@@ -25,7 +25,12 @@ final class ReconstructionAllocation {
             return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null);
         }
     }
-    record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase) {
+    record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase,
+                  @Nullable ReconstructionLeadContinuity.Stats leadContinuity) {
+        Result(int version, List<Entry> notes, ReconstructionTimeMap.TimeBase timeBase) {
+            this(version, notes, timeBase, null);
+        }
+
         Result(int version, List<Entry> notes) {
             this(version, notes, null);
         }
@@ -57,7 +62,9 @@ final class ReconstructionAllocation {
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
         for (var attack : attacks) allocator.place(attack);
-        return new Result(VERSION, List.copyOf(allocator.entries.values()), roles.timeBase());
+        var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
+        return new Result(VERSION, List.copyOf(allocator.entries.values()), roles.timeBase(),
+                continuity.isEmpty() ? null : continuity);
     }
 
     /** Project a kept lane layout back into source time for the existing voice probes. */

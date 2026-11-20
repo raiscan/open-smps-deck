@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -45,7 +46,8 @@ public final class ReconstructionDescribe {
     }
     private record View(double bpm, double barSeconds, String tempoSource, String grid,
                         ReconstructionTimeMap.TimeBase timeBase, List<Part> parts,
-                        List<Section> sections, ReconstructionBeatMap.Summary tempoCurve) {}
+                        List<Section> sections, ReconstructionBeatMap.Summary tempoCurve,
+                        ReconstructionLeadContinuity.Stats leadContinuity) {}
     private record Span(int first, int last) {}
 
     private ReconstructionDescribe() {}
@@ -83,10 +85,15 @@ public final class ReconstructionDescribe {
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
         var rolesFile = work.resolve("roles.json");
         Map<String, Role> roles = null;
+        List<Note> effectiveNotes = structure.notes();
+        ReconstructionLeadContinuity.Stats continuity = null;
         if (!Files.notExists(rolesFile, LinkOption.NOFOLLOW_LINKS)) {
             var current = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
             ReconstructionChecks.roles(current, score);
             roles = new HashMap<>();
+            var stats = ReconstructionLeadContinuity.Stats.of(current.notes());
+            if (!stats.isEmpty()) continuity = stats;
+            effectiveNotes = describeNotes(structure.notes(), current.notes());
             for (var decision : current.notes()) roles.put(decision.note().id(), decision.role());
         }
         var filter = new HashSet<Integer>();
@@ -102,15 +109,30 @@ public final class ReconstructionDescribe {
                 : ReconstructionRolePlan.BarRange.parse(bars, structure.bars().size(), "--bars");
         if (section != null && structure.sections().stream().noneMatch(s -> s.id().equals(section)))
             throw new IllegalArgumentException("Unknown section " + section);
-        var view = build(score, structure, roles, section, filter, span, section == null && bars == null);
+        var view = build(score, structure, effectiveNotes, roles, section, filter, span,
+                section == null && bars == null, continuity);
         return json ? new GsonBuilder().disableHtmlEscaping().create().toJson(view) + "\n" : text(view);
     }
 
+    private static List<Note> describeNotes(List<Note> structural, List<ReconstructionRoles.Decision> decisions) {
+        var notes = new LinkedHashMap<String, Note>();
+        for (var note : structural) notes.put(note.id(), note);
+        for (var decision : decisions) {
+            var note = decision.note();
+            var original = notes.get(note.id());
+            if (original == null || decision.reason() != null
+                    && !decision.reason().contains("sustained-inner-tone")) notes.put(note.id(), note);
+            else if (note.motion() != null) notes.put(note.id(), original.withMotion(note.motion()));
+        }
+        return notes.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
+    }
+
     private static View build(ReconstructionStages.Score score, ReconstructionStructure.Result structure,
-                              Map<String, Role> roles, String onlySection, Set<Integer> filter,
-                              ReconstructionRolePlan.BarRange range, boolean collapse) {
+                              List<Note> effectiveNotes, Map<String, Role> roles, String onlySection, Set<Integer> filter,
+                              ReconstructionRolePlan.BarRange range, boolean collapse,
+                              ReconstructionLeadContinuity.Stats continuity) {
         var notes = new HashMap<Integer, List<Note>>();
-        for (var note : structure.notes())
+        for (var note : effectiveNotes)
             notes.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
         var parts = score.source().parts().stream().filter(p -> filter.isEmpty() || filter.contains(p.id()))
                 .map(p -> new Part(p.id(), p.name(), p.program(), p.drums(), notes.getOrDefault(p.id(), List.of()).size()))
@@ -164,7 +186,7 @@ public final class ReconstructionDescribe {
                 : beatMap != null ? beatMap.openingBpm() : inferred ? tempo.selected().bpm()
                 : 60 * (tempo == null ? 4 : tempo.selected().beatsPerBar()) / barSeconds;
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
-                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null);
+                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity);
     }
 
     private static Section repeat(List<Section> earlier, Section current, List<ReconstructionStructure.Bar> bars,
@@ -221,7 +243,8 @@ public final class ReconstructionDescribe {
             if (note.start() < bar.start() && (drums || note.end() <= bar.start())) continue;
             int step = ReconstructionAttackGrid.attackStep(bar, note.start(), beatMap);
             if (note.start() >= bar.start())
-                cells.get(step).add(drums ? DRUM.getOrDefault(note.pitch(), "D" + note.pitch()) : pitch(note.pitch()));
+                cells.get(step).add(drums ? DRUM.getOrDefault(note.pitch(), "D" + note.pitch()) : pitch(note.pitch())
+                        + (note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED ? "~" : ""));
             if (!drums) {
                 int release = Math.clamp(ReconstructionAttackGrid.roundedStep(bar, note.end(), beatMap), 0, STEPS);
                 for (int i = note.start() >= bar.start() ? step + 1 : 0; i < release; i++) held[i] = true;
@@ -272,6 +295,13 @@ public final class ReconstructionDescribe {
         if (view.tempoCurve != null) out.append(String.format(Locale.ROOT, "Source tempo %.3f–%.3f BPM%s%n",
                 view.tempoCurve.startBpm(), view.tempoCurve.endBpm(), view.tempoCurve.warped()
                         ? String.format(Locale.ROOT, ", steady playback at %.3f BPM", view.tempoCurve.steadyBpm()) : ""));
+        var continuity = view.leadContinuity;
+        if (continuity != null)
+            out.append(String.format(Locale.ROOT, "Lead continuity: %d split, %d added, %d extended%n",
+                    continuity.split(), continuity.added(), continuity.extended()));
+        if (view.sections.stream().flatMap(section -> section.parts.stream())
+                .flatMap(part -> part.bars.stream()).anyMatch(pattern -> pattern.contains("~")))
+            out.append("~ periodic pitch modulation\n");
         for (var part : view.parts)
             out.append(String.format(Locale.ROOT, "P%d %s | program %d | drums %s | %d notes%n",
                     part.id, part.name.replaceAll("\\p{Cntrl}", " "), part.program, part.drums, part.notes));
