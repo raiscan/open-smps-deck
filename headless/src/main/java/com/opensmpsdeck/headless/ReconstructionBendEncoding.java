@@ -63,7 +63,7 @@ final class ReconstructionBendEncoding {
             baseline += cents * cents;
             excursion = Math.max(excursion, Math.abs(cents - desired[0]));
         }
-        if (excursion < 60) return null;
+        if (bend.editReason() == null && excursion < 60) return null;
         double flatError = Math.sqrt(baseline / duration);
 
         int limit = Math.max(14, (int) Math.ceil(excursion / 80) + 2);

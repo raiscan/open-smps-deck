@@ -38,13 +38,15 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   `render_compare` with the full `render.wav`, reference WAV, `workDir`,
   and the same range to write a level-matched render-then-reference WAV.
   Apply the reference's offset if its time zero is shifted.
-- [ ] Edit the owning artifact using `artifact_write`. Send a complete
-  versioned object or a replacement at an existing `selection`. Fix any
-  reported validation errors before rerunning.
-- [ ] Run from the first consumer shown below using `reconstruct_run` with
-  `from` and `workDir` (CLI `reconstruct run --from STAGE "$work"`).
-  Validate the rebuilt project, render the review range again, and compare
-  it with the previous clip and the source.
+- [ ] Save note repairs with `reconstruct_edit`. Give each intent a stable
+  `id` and a `reason` describing the evidence. For plans and sound choices,
+  use `artifact_write` on the owning artifact. Fix validation errors before
+  listening to the revision.
+- [ ] Pass `rerun: true` to `reconstruct_edit` to rebuild and inspect its
+  `traceDiff`. For other artifact changes, resume with `reconstruct_run`
+  using `from` and `workDir` (CLI `reconstruct run --from STAGE "$work"`).
+  Validate the rebuilt project, then compare the revised render with the
+  previous clip and the source.
 - [ ] Reply after verifying the change. Mention the specific change, lane
   and time range, and the clip filename. Keep unresolved issues open.
 
@@ -62,7 +64,8 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 - Use `reconstruct rerun "$work" "$fresh" --search "$input_dir"` to replay
   the inputs and options of a historical fresh run. The private
   `manifest.json` pins input hashes and retains imported note snapshots.
-  Use `run --from` in the current work directory to apply stage edits.
+  Replay carries `edits.json` into the fresh directory. Use `run --from`
+  in the current work directory to retain its role plan and voicing.
 
 CLI examples:
 
@@ -207,13 +210,22 @@ Limits:
 
 | Problem | Edit | Resume |
 | --- | --- | --- |
-| Wrong, missing or mistimed notes | `score.json` note events, or `structure.json` effective notes and their associated repeat corrections | `structure` for score, `roles` for structure |
+| Wrong, missing or mistimed source notes | `edits.json` via `insertNote`, `deleteNote` or `setNote` | `transcribe` |
+| Absorbed chord attacks or extended merge anchors | `edits.json` via `unmerge` | `roles` |
+| A note needs an explicit pitch curve | `edits.json` via `bend` | `transcribe` |
 | Lead swaps parts, chord tones in the lead, or backing taken as melody | `roleplan.json` section and part rules. See **Plan lead and backing**. | `roles` |
-| A few individual notes have the wrong role | `roles.json` note roles. Check the resulting allocation. Use voicing gain for a correctly assigned lead that is simply too quiet. | `allocate` |
+| A few individual notes have the wrong role or lane | `edits.json` via `setRole` or `pinLane`. Check the trace for competing notes. | `roles` |
 | Channel overflow, audible drops or clipped note lengths | `allocation.json` lane, timing and drop decisions | Run standalone `voice` to refit, then resume at `assemble` |
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
 | A patch fades during a held phrase, or a few notes need different gain, gate, release or vibrato | Add `overrides` to the affected lane in `voicing.json`. Use **Audition a phrase** below. | `assemble` |
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
+
+For example, call `reconstruct_edit` with
+`{workDir, action: "add", edit: {id: "answer", reason: "separate attack in the stem", op: "insertNote", part: 0, start: 12.5, end: 12.8, pitch: 68, role: "melody", lane: "FM1"}, rerun: true}`.
+Use the trace note ID for an existing attack. Check `lastRun` for orphaned
+targets and inspect both the edited passage and any `outsideSpan` changes.
+The [reconstruction stages guide](../../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
+lists the fields for every operation.
 
 Standalone `voice` refits lane-wide choices and preserves scoped overrides,
 lane gain and per-part gains (a lane whose role changed is releveled). Pass `--lane FM1` to leave the other lanes

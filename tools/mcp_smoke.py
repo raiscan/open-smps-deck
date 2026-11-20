@@ -135,7 +135,7 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view
+            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
@@ -247,6 +247,17 @@ def smoke(jar, root):
         notes = rpc.call("notes_list", project=project)
         assert notes["notes"][0]["reply"]["text"] == "Raised the melody gain."
         assert len(json.loads(project.read_text())["references"]) == 1
+        edit = {"id": "answer", "reason": "synthetic missing attack", "op": "insertNote", "part": 0,
+                "start": 1.7, "end": 1.9, "pitch": 67, "role": "melody", "lane": "FM1"}
+        added = rpc.call("reconstruct_edit", workDir=work, action="add", edit=edit, rerun=True)
+        assert added["from"] == "transcribe" and added["traceDiff"]["span"] == [1.7, 1.9]
+        assert any(change["id"] == "edit-answer" for change in added["traceDiff"]["changes"])
+        assert rpc.call("reconstruct_edit", workDir=work, action="list")["edits"] == [edit]
+        rpc.call("reconstruct_edit", workDir=work, action="add", edit=edit, error="duplicate edit ID")
+        removed = rpc.call("reconstruct_edit", workDir=work, action="remove", id="answer", rerun=True)
+        assert not removed["edits"]
+        assert any(change["id"] == "edit-answer" for change in removed["traceDiff"]["changes"])
+        assert rpc.call("notes_list", project=project) == notes
         steady = root / "steady"
         files = rpc.call("reconstruct_run", workDir=steady, inputs=inputs,
                          options={"seconds": 2, "tempo": 120, "steadyTempo": "80"})["files"]

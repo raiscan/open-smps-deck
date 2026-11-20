@@ -347,7 +347,8 @@ final class S3kReconstruction {
                         else placed.restoreTick = span.restoreTick();
                     }
                 }
-                if (bends && lane.equals("FM1") && entry.note().bend() != null) {
+                var curve = entry.note().bend();
+                if (bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
                     var changes = new java.util.TreeMap<Integer, ReconstructionVoicing.Vibrato>();
                     var current = placed.attackTone().vibrato();
                     for (var change : placed.scopedTones.tailMap(start, false).entrySet()) {
@@ -359,7 +360,7 @@ final class S3kReconstruction {
                             voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes);
                     if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
-                            ReconstructionBends.REASON));
+                            curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
                 }
                 // Record after scoped gate overrides so the trace reports the voiced length.
                 gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, placed.end));

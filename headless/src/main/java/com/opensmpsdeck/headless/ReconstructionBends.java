@@ -20,7 +20,11 @@ final class ReconstructionBends {
 
     record Point(double time, int cents) {}
 
-    record Bend(Kind kind, double delay, double confidence, List<Point> points) {
+    record Bend(Kind kind, double delay, double confidence, List<Point> points,
+                @ReconstructionStages.Nullable String editReason) {
+        Bend(Kind kind, double delay, double confidence, List<Point> points) {
+            this(kind, delay, confidence, points, null);
+        }
         Bend {
             points = List.copyOf(points);
         }
@@ -28,7 +32,7 @@ final class ReconstructionBends {
         Bend map(DoubleUnaryOperator clock) {
             double start = points.getFirst().time();
             return new Bend(kind, clock.applyAsDouble(start + delay) - clock.applyAsDouble(start), confidence,
-                    points.stream().map(p -> new Point(clock.applyAsDouble(p.time()), p.cents())).toList());
+                    points.stream().map(p -> new Point(clock.applyAsDouble(p.time()), p.cents())).toList(), editReason);
         }
 
         String marker() {

@@ -224,6 +224,8 @@ public final class ReconstructionStages {
         var inputs = replay.inputs();
         Files.createDirectory(work);
         ReconstructionManifest.writeReplay(work, replay);
+        var edits = ReconstructionEdits.read(oldWork);
+        if (!edits.isEmpty()) edits.write(work);
         var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
                 inputs.options(replay.manifest().durationUs())), inputs);
         execute(new Request(work, Stage.TRANSCRIBE, true, score, null, java.util.Set.of(), false), out, false,
@@ -239,6 +241,10 @@ public final class ReconstructionStages {
         Path rolesFile = work.resolve("roles.json");
         Path allocationFile = work.resolve("allocation.json");
         Path voicingFile = work.resolve("voicing.json");
+        var edits = ReconstructionEdits.read(work);
+        var previousEdits = ReconstructionEdits.Journal.read(work);
+        var editJournal = previousEdits.through(request.from);
+        boolean trackEdits = !edits.isEmpty() || !previousEdits.stages().isEmpty();
 
         if (request.initial == null) {
             progress.report(0, total, "Starting " + stageName(request.from));
@@ -246,13 +252,16 @@ public final class ReconstructionStages {
         }
         for (var stage : Stage.values()) {
             if (stage.ordinal() < request.from.ordinal()) continue;
+            var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
             if (stage == Stage.TRANSCRIBE) {
                 Score score = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
+                score = edits.applyScore(score, outcomes);
                 ReconstructionArtifacts.write(scoreFile, score);
             } else {
                 var score = readScore(scoreFile);
                 switch (stage) {
-                    case STRUCTURE -> ReconstructionArtifacts.write(structureFile, structure(score));
+                    case STRUCTURE -> ReconstructionArtifacts.write(structureFile, structure(score,
+                            editJournal.stages().getOrDefault("transcribe", List.of())));
                     case ROLES -> {
                         var structure = readStructure(structureFile, score);
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
@@ -263,16 +272,17 @@ public final class ReconstructionStages {
                             ReconstructionChecks.rolePlan(plan, structure, score);
                         }
                         var continuity = ReconstructionLeadContinuity.analyze(score, structure.notes());
-                        var roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan,
-                                score.usesBeatGrid() ? score.beatMap() : null, continuity, score.inputs.leadPart);
+                        var scoreEdits = editJournal.stages().getOrDefault("transcribe", List.of());
+                        var roles = edits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes);
                         ReconstructionArtifacts.write(rolesFile, roles);
                     }
                     case ALLOCATE -> {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
-                        ReconstructionArtifacts.write(allocationFile, ReconstructionAllocation.allocate(
-                                roles, score.source.parts(), ReconstructionTimeMap.of(score).frames(),
-                                score.inputs.fmOnly, !score.inputs.stems.isEmpty()));
+                        var allocation = ReconstructionAllocation.allocate(roles, score.source.parts(),
+                                ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly, !score.inputs.stems.isEmpty());
+                        ReconstructionArtifacts.write(allocationFile, allocation);
+                        outcomes.addAll(edits.allocationOutcomes(allocation, roles.lanePins()));
                     }
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.
@@ -312,6 +322,13 @@ public final class ReconstructionStages {
                     }
                     default -> throw new AssertionError(stage);
                 }
+            }
+            if (trackEdits) editJournal = editJournal.record(work, stage, outcomes, edits);
+            for (var outcome : outcomes) {
+                if (outcome.status() != ReconstructionEdits.Status.applied)
+                    out.println(outcome.tag() + " " + outcome.status() + " " + outcome.detail()
+                            + (outcome.missingNoteIds() == null || outcome.missingNoteIds().isEmpty()
+                                ? "" : " " + outcome.missingNoteIds()));
             }
             progress.report(stage.ordinal() - request.from.ordinal() + 1, total, "Finished " + stageName(stage));
             if (!request.chain) break;
@@ -571,6 +588,11 @@ public final class ReconstructionStages {
     }
 
     static ReconstructionStructure.Result structure(Score score) throws IOException {
+        return structure(score, List.of());
+    }
+
+    private static ReconstructionStructure.Result structure(Score score, List<ReconstructionEdits.Outcome> edits)
+            throws IOException {
         boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
         boolean tracker = score.usesBeatGrid();
         double seconds = score.durationUs / 1e6;
@@ -587,9 +609,16 @@ public final class ReconstructionStages {
             // musical bar boundaries.
             roleBars = MidiScore.bars(Path.of(score.inputs.midi), timeline.projectDuration());
         }
+        var authoredIds = new java.util.HashSet<String>();
+        var suppressed = new ArrayList<Note>();
+        for (var edit : edits) {
+            if (edit.status() != ReconstructionEdits.Status.applied) continue;
+            authoredIds.addAll(edit.noteIds());
+            if (edit.original() != null) suppressed.add(timeline.projectNote(edit.original()));
+        }
         return ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
                 inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,
-                roleBars, timeline);
+                roleBars, timeline, authoredIds, suppressed);
     }
 
     private static boolean trackedGrid(ReconstructionBeatMap beats, ReconstructionTempo.Options grid) {

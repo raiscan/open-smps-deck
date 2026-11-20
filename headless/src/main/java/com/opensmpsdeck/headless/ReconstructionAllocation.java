@@ -23,7 +23,13 @@ final class ReconstructionAllocation {
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
                  Outcome outcome, @Nullable String reason, @Nullable String mergedInto,
                  @Nullable String competitorNoteId, @Nullable List<String> blockingNoteIds,
-                 @Nullable String relocatedFrom) {
+                 @Nullable String relocatedFrom, @Nullable String pinnedLane) {
+        Entry(Note note, Role role, String lane, Integer startTick, Integer endTick, Outcome outcome,
+              String reason, String mergedInto, String competitorNoteId, List<String> blockingNoteIds,
+              String relocatedFrom) {
+            this(note, role, lane, startTick, endTick, outcome, reason, mergedInto, competitorNoteId,
+                    blockingNoteIds, relocatedFrom, null);
+        }
         Entry(Note note, Role role, String lane, Integer startTick, Integer endTick,
               Outcome outcome, String reason, String mergedInto) {
             this(note, role, lane, startTick, endTick, outcome, reason, mergedInto, null, null, null);
@@ -77,7 +83,8 @@ final class ReconstructionAllocation {
             return new Fm1Gaps(before, after);
         }
     }
-    private record Attack(ReconstructionRoles.Decision decision, int start, int end, boolean noise) {
+    private record Attack(ReconstructionRoles.Decision decision, int start, int end, boolean noise,
+                          ReconstructionEdits.Pin pin) {
         Note note() { return decision.note(); }
         Role role() { return decision.role(); }
     }
@@ -101,9 +108,11 @@ final class ReconstructionAllocation {
             Note note = decision.note();
             int start = note.startTick(frames);
             boolean drum = decision.role() == Role.drums;
-            boolean noise = drum && !fmOnly && isNoise(names.get(note.part()));
-            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise);
+            var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
+            boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part())) : pin.lane().equals("PSG3"));
+            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise, pin);
         }).sorted(Comparator.comparingInt(Attack::start)
+                .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
@@ -133,7 +142,8 @@ final class ReconstructionAllocation {
                 var note = new Note(entry.note().id() + "-step-" + step.firstStep(), entry.note().part(),
                         evidence.start(), evidence.end(), step.pitch(), entry.note().velocity(),
                         entry.note().source(), entry.note().confidence());
-                placed.add(new Entry(note, entry.role(), entry.lane(), step.start(), step.end(), Outcome.kept, reason, null));
+                placed.add(new Entry(note, entry.role(), entry.lane(), step.start(), step.end(), Outcome.kept,
+                        entry.pinnedLane() == null ? reason : entry.reason(), null, null, null, null, entry.pinnedLane()));
             }
         }
         return new Result(VERSION, List.copyOf(placed), roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
@@ -184,6 +194,10 @@ final class ReconstructionAllocation {
             drop(attack, attack.decision.reason());
             return;
         }
+        if (attack.pin != null) {
+            placePinned(attack);
+            return;
+        }
         if (attack.role() == Role.drums && !attack.noise) {
             Entry last = tail.get("DAC");
             if (last != null && last.startTick == attack.start) {
@@ -218,6 +232,19 @@ final class ReconstructionAllocation {
         }
     }
 
+    private void placePinned(Attack attack) {
+        String lane = attack.pin.lane();
+        Entry last = tail.get(lane);
+        if (last != null && last.endTick > attack.start) {
+            if (last.pinnedLane != null || last.startTick >= attack.start) {
+                drop(attack, attack.pin.tag() + " pinned-lane-busy", List.of(last.note.id()));
+                return;
+            }
+            entries.put(last.note.id(), last.shorten(attack.start, attack.pin.tag() + " pinned-attack", attack.note().id()));
+        }
+        keep(attack, lane, attack.pin.tag());
+    }
+
     static List<String> expectedLanes(Role role, boolean noise) {
         return switch (role) {
             case melody -> List.of("FM1");
@@ -244,7 +271,7 @@ final class ReconstructionAllocation {
     private String freeFmForLowAttack(Attack attack) {
         for (String lane : INNER_FM.reversed()) {
             Entry prior = tail.get(lane);
-            if (prior == null || prior.note.pitch() < 45 || prior.note.run() != null) continue;
+            if (prior == null || prior.pinnedLane != null || prior.note.pitch() < 45 || prior.note.run() != null) continue;
             for (String destination : PSG) {
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;
@@ -272,13 +299,14 @@ final class ReconstructionAllocation {
     }
 
     private static boolean canShorten(Entry last, Attack next) {
-        if (last == null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start || last.role == Role.drums) return false;
+        if (last == null || last.pinnedLane != null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start || last.role == Role.drums) return false;
         return last.endTick - next.start <= RELEASE_TICKS || next.role() == Role.melody || next.role() == Role.bass
                 || next.role() == Role.drums || next.role() == Role.counter && last.role == Role.harmony;
     }
 
     private void keep(Attack attack, String lane, String reason) {
-        var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, reason, null);
+        var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, reason, null,
+                null, null, null, attack.pin == null ? null : attack.pin.lane());
         entries.put(attack.note().id(), entry);
         tail.put(lane, entry);
     }

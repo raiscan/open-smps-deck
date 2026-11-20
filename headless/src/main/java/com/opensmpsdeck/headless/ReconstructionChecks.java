@@ -13,7 +13,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
 final class ReconstructionChecks {
-    private static final Set<String> SOURCES = Set.of("midi", "audio-refine", "transcriber", "external", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON);
+    private static final Set<String> SOURCES = Set.of("edit", "midi", "audio-refine", "transcriber", "external", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON);
 
     private ReconstructionChecks() {}
 
@@ -90,7 +90,7 @@ final class ReconstructionChecks {
             for (var grid : tempo.alternatives()) validateGrid(grid, at + ".tempo.alternatives");
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
-        checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+        checkNotes(at, value.notes(), value, duration(value), Set.of("edit", "midi", "audio-refine", "transcriber", "external", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var figures = new HashMap<String, Note>();
         for (var note : value.notes()) if (note.run() != null) figures.put(note.id(), note);
         if (value.retriggers() != null) {
@@ -241,7 +241,7 @@ final class ReconstructionChecks {
                 require(external != null && external.source().equals("external"), where, "unknown external candidate");
             }
         }
-        checkNotes(at, result.notes(), score, duration, Set.of("midi", "audio-refine", "transcriber", "consensus", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+        checkNotes(at, result.notes(), score, duration, Set.of("edit", "midi", "audio-refine", "transcriber", "consensus", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
     }
 
     private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
@@ -309,10 +309,18 @@ final class ReconstructionChecks {
         checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
+        if (roles.lanePins() != null) for (var target : roles.lanePins().entrySet()) {
+            var decision = notes.get(target.getKey());
+            var pin = target.getValue();
+            require(decision != null && pin.order() > 0 && nonblank(pin.editId())
+                            && ReconstructionEdits.pinCompatible(decision.note(), decision.role() == Role.drums,
+                                    pin.lane(), score.inputs().fmOnly()),
+                    at + ".lanePins." + target.getKey(), "invalid pin for the assigned note");
+        }
         for (var choice : roles.notes()) {
             String where = at + ".notes." + choice.note().id();
             checkRole(parts, choice.note(), choice.role(), where);
@@ -337,7 +345,7 @@ final class ReconstructionChecks {
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, timeline.projectDuration(), Set.of("midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var continuity = allocation.leadContinuity();
         if (continuity != null)
             require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0
@@ -367,14 +375,16 @@ final class ReconstructionChecks {
                 continue;
             }
             String lane = entry.lane();
-            require(lane != null && switch (entry.role()) {
+            boolean pinned = entry.pinnedLane() != null && entry.pinnedLane().equals(lane) && entry.role() != Role.drop
+                    && ReconstructionEdits.pinCompatible(entry.note(), entry.role() == Role.drums, lane, score.inputs().fmOnly());
+            require(lane != null && (entry.pinnedLane() != null ? pinned : switch (entry.role()) {
                 case melody -> lane.equals("FM1");
                 case bass -> lane.equals("FM2");
                 case drums -> lane.equals("DAC") || lane.equals("PSG3") && !score.inputs().fmOnly();
                 case harmony, counter -> ReconstructionAllocation.INNER_FM.contains(lane)
                         || ReconstructionAllocation.PSG.contains(lane) && !score.inputs().fmOnly() && entry.note().pitch() >= 45;
                 case drop -> false;
-            }, where, "invalid lane for " + entry.role());
+            }), where, "invalid lane for " + entry.role());
             require(entry.startTick() != null && entry.endTick() != null && entry.startTick() >= 0
                             && entry.startTick() < entry.endTick() && entry.endTick() <= projectFrames
                             && (!lane.equals("DAC") || entry.endTick() == entry.startTick() + 1),

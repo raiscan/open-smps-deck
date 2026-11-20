@@ -42,7 +42,7 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest", "edits", "edit-results"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
@@ -82,6 +82,12 @@ final class McpTools {
                     field("harmonics", "string", "Trace note ID whose expected harmonic series is drawn").optional(),
                     field("harmonicSum", "boolean", "Emphasize fundamentals on the source spectrogram").optional(),
                     field("width", "integer", "PNG width in pixels (640–2400, default 1440)").optional()),
+            tool("reconstruct_edit", "Add, list or remove persistent musical intents. Optionally rebuild and compare note fates.",
+                    McpReconstruction::edit, WORK,
+                    choice("action", "Edit command", "add", "list", "remove"),
+                    field("edit", object(Map.of("type", "object")), "Intent object with id, reason, op and op fields").optional(),
+                    field("id", "string", "Edit ID to remove").optional(),
+                    field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional()),
             tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
                     field("start", "number", "Inclusive start in source seconds").optional(),
