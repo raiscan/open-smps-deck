@@ -34,7 +34,12 @@ final class ReconstructionRoles {
     }
     record Result(int version, double harmonyMaxHz, List<Decision> notes,
                   @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase,
-                  @ReconstructionStages.Nullable Map<String, String> structureNoteHashes) {
+                  @ReconstructionStages.Nullable Map<String, String> structureNoteHashes,
+                  @ReconstructionStages.Nullable Map<String, ReconstructionEdits.Pin> lanePins) {
+        Result(int version, double harmonyMaxHz, List<Decision> notes, ReconstructionTimeMap.TimeBase timeBase,
+               Map<String, String> structureNoteHashes) {
+            this(version, harmonyMaxHz, notes, timeBase, structureNoteHashes, null);
+        }
         Result(int version, double harmonyMaxHz, List<Decision> notes, ReconstructionTimeMap.TimeBase timeBase) {
             this(version, harmonyMaxHz, notes, timeBase, null);
         }
@@ -70,6 +75,13 @@ final class ReconstructionRoles {
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity, Integer leadPart) {
+        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, leadPart, Set.of(), note -> false);
+    }
+
+    static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
+                         ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
+                         ReconstructionLeadContinuity continuity, Integer leadPart, Set<String> fixedGates,
+                         java.util.function.Predicate<Note> suppressed) {
         var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
@@ -119,9 +131,10 @@ final class ReconstructionRoles {
         }
         var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts);
         var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
-        java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> scopes.isEmpty()
-                || permitsContinuation(structure, scopes, anchor, note);
-        if (continuity != null) decisions = continuity.repair(decisions, permitted);
+        java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> !suppressed.test(note)
+                && (!fixedGates.contains(anchor.note().id()) || !anchor.note().id().equals(note.id()))
+                && (scopes.isEmpty() || permitsContinuation(structure, scopes, anchor, note));
+        if (continuity != null) decisions = continuity.repair(decisions, permitted, fixedGates);
         decisions = ReconstructionMelodyGapFill.promote(decisions, permitted);
         if (continuity != null) decisions = continuity.legato(decisions, permitted);
         var explained = decisions.stream().map(decision -> decision.reason() != null ? decision :

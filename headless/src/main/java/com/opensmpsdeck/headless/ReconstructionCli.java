@@ -94,6 +94,7 @@ final class ReconstructionCli {
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
+        out.println("       reconstruct edit WORK_DIR add JSON | list | remove ID");
         out.println("       reconstruct trace WORK_DIR [--start S] [--end S] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
@@ -114,6 +115,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("view")) {
             ReconstructionView.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("edit")) {
+            ReconstructionEditCommand.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("audition")) {
@@ -241,6 +246,13 @@ final class ReconstructionCli {
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing, assemblyInputs);
+            var edits = ReconstructionEdits.Journal.read(work).all();
+            if (!edits.isEmpty()) {
+                Path reportFile = staging.resolve("report.json");
+                var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
+                report.add("editResults", new com.google.gson.Gson().toJsonTree(edits));
+                ReconstructionArtifacts.write(reportFile, report);
+            }
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {

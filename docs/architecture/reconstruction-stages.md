@@ -83,8 +83,50 @@ snapshot and its provenance. Original bytes are retained for new runs.
 `reconstruct rerun WORK_DIR NEW_WORK_DIR` verifies input hashes at the
 stored path or snapshot and checks any repeated `--search DIR` roots for
 missing bytes. The replay starts from transcription using the saved options
-and original external notes. Later role plans and stage edits remain in
-the original work directory.
+and original external notes. `edits.json` is copied into the replay. Later role plans and direct stage
+artifact changes remain in the original work directory.
+
+## Persistent musical edits
+
+`edits.json` is a versioned object with an ordered `edits` array. Each intent
+has a unique `id`, a free-text evidence `reason`, and an `op` with the fields
+below. Order applies within each stage, with later role or lane settings
+taking precedence. All times in this file use source seconds, including
+when reconstruction warps project time. Pitch is a MIDI integer.
+
+| Op | Fields | First stage |
+| --- | --- | --- |
+| `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |
+| `deleteNote` | `noteId` from the transcription score. | `transcribe` |
+| `setNote` | `noteId` from the transcription score and one or more of `pitch`, `start`, `end`. Clears inferred motion, bends and retriggers tied to the old note. | `transcribe` |
+| `setRole` | A selector and `role`. Optional `lane` also pins the note. | `roles` |
+| `pinLane` | `noteIds` and `lane`. | `roles` |
+| `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
+| `bend` | `noteId` from the transcription score and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after any `setNote` for the same note. The FM encoder fits the curve to the playable gate and records the applied result. | `transcribe` |
+
+A selector is either a nonempty `noteIds` array or `span: [start, end]` and
+`part`, with optional inclusive `pitchMin` and `pitchMax`. Spans match attacks
+in the half-open interval. Roles are `melody`, `bass`, `counter`, `harmony`,
+`drums` and `drop`. An explicit lane can route a pitched role to any FM lane
+or to an eligible PSG lane. Percussion can use DAC or PSG3. Hardware pitch
+limits and FM-only mode still apply. An overlapping unpinned gate can be
+shortened for a pin. Earlier pinned attacks win overlapping gates, and the
+earlier intent wins ties at the same tick. The trace records the winning
+competitor when the other note is shortened or dropped.
+
+Add, list and remove with `reconstruct edit WORK_DIR add JSON | list | remove ID`
+or MCP `reconstruct_edit`. Resume from the command's returned `from` stage.
+MCP add and remove accept `rerun: true` to run from that stage and return
+a trace diff. The diff flags other fates outside the requested span or the
+target notes' original and revised gates.
+
+`edit-results.json` records outcomes by stage, and assembly includes them in
+`report.json` as `editResults`. An absent target reports `orphaned`, including
+any missing IDs in a partially matched list. A target that exists but is
+incompatible with the intent reports `invalid` with a field-specific detail.
+An unplaceable pin reports `conflict`, with competitor IDs in the allocation
+trace. The trace includes `edit:<id>` reasons alongside the underlying fate
+detail.
 
 ## Artifact contract
 
@@ -140,7 +182,7 @@ the phrase ID.
 | `midiBars` (optional) | Original PPQ windows kept for role continuity when an automatic estimate supplies the musical grid. |
 | `source` | Reference context for matching. `parts` has `id`, `name`, `program`, and `drums`. `notes` has `partId`, `pitch`, `velocity`, `startUs`, and `endUs`. `warnings` contains MIDI parser messages. |
 | `sourceCounts` | Original note count per MIDI part inside the interval. |
-| `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources are `midi`, `audio-refine`, `transcriber`, or `external`. |
+| `notes` | Editable notes after clipping to the interval and the existing pitch-range and systematic octave-double cleanup. Sources include `midi`, `audio-refine`, `transcriber`, `external` and `edit`. |
 | `reductions`, `pitchChanges` | Original preparation decisions and optional audio-refinement evidence, also exported in the report. |
 
 Opt-in external transcription supplies melodic note replacements or additions

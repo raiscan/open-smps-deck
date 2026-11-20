@@ -357,6 +357,26 @@ MCP uses corresponding fields `time`, `stem`, `wav`, `render`, `pitchMin`,
 `pitchMax`, `lanes` (array), `parts` (array), `harmonics`, `harmonicSum`,
 and `width`.
 
+### Persistent musical edits
+
+```sh
+java -jar "$jar" reconstruct edit "$work" add   '{"id":"answer","reason":"second attack audible in stem","op":"insertNote","part":0,"start":12.5,"end":12.8,"pitch":68,"lane":"FM1","role":"melody"}'
+java -jar "$jar" reconstruct run --from transcribe "$work"
+java -jar "$jar" reconstruct edit "$work" list
+java -jar "$jar" reconstruct edit "$work" remove answer
+```
+
+The CLI prints the first affected stage as `from` after an add or remove.
+MCP `reconstruct_edit` takes `workDir`, `action: "add" | "list" | "remove"`,
+an `edit` object for add or an `id` for remove. Set `rerun: true` on add or
+remove to rebuild in place and get a `traceDiff` with the changes in and
+outside the edit's source-time span. Check the `lastRun` outcomes for
+orphaned targets and blocked pins. An upstream rerun reapplies the intents,
+and manifest replay copies them into the new work directory.
+
+See the [operation fields](../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
+for note deletion, retiming, role changes, pins, unmerging, and bends.
+
 ### Per-note trace and replay
 
 ```sh

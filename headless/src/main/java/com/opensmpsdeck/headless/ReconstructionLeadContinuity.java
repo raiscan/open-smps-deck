@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiPredicate;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Decision;
@@ -198,7 +199,7 @@ final class ReconstructionLeadContinuity {
         return false;
     }
 
-    List<Decision> repair(List<Decision> decisions, BiPredicate<Decision, Note> permitted) {
+    List<Decision> repair(List<Decision> decisions, BiPredicate<Decision, Note> permitted, Set<String> fixedGates) {
         var edited = new HashMap<String, Decision>();
         var extra = new ArrayList<Decision>();
         var ids = new HashSet<String>();
@@ -208,7 +209,8 @@ final class ReconstructionLeadContinuity {
             Note note = decision.note();
             ids.add(note.id());
             if (decision.role() == Role.melody) lead.add(decision);
-            else if (note.run() == null && (decision.role() == Role.counter || decision.role() == Role.harmony)
+            else if (note.run() == null && !fixedGates.contains(note.id())
+                    && (decision.role() == Role.counter || decision.role() == Role.harmony)
                     && note.end() - note.start() >= MIN_HEAD + ReconstructionLeadAudio.MIN_TONE)
                 held.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(decision);
         }

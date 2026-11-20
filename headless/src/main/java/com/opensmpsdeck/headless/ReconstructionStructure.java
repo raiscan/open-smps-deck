@@ -80,6 +80,12 @@ final class ReconstructionStructure {
     static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
                           ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars,
                           ReconstructionTimeMap timeline) {
+        return analyze(bars, score, parts, audio, inferred, meter, midiBars, timeline, Set.of(), List.of());
+    }
+
+    static Result analyze(List<Bar> bars, List<Note> score, List<MidiScore.Part> parts,
+                          ReconstructionRhythmAudio audio, boolean inferred, int meter, List<Bar> midiBars,
+                          ReconstructionTimeMap timeline, Set<String> authoredIds, List<Note> suppressed) {
         var drums = new HashSet<Integer>();
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
@@ -96,7 +102,7 @@ final class ReconstructionStructure {
             if (group.size() < 2) continue;
             String id = "repeat-" + group.getFirst().bar.id;
             repeats.add(new Repeat(id, group.stream().map(pattern -> pattern.bar.id).toList()));
-            consensus(group, candidates, corrected, corrections, bars.getLast().end());
+            consensus(group, candidates, corrected, corrections, bars.getLast().end(), authoredIds, suppressed);
         }
         var sections = sections(patterns, midiBars == null ? repeats : List.of());
         var roleLayout = midiBars == null ? null : new Layout(midiBars, sections(rolePatterns, repeats), repeats);
@@ -110,7 +116,7 @@ final class ReconstructionStructure {
                 prepared, programs);
         var phrases = ReconstructionPhrases.find(bars, byBar, melody.lead(), audio, meter,
                 timeline == null ? DoubleUnaryOperator.identity() : timeline::source);
-        phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end());
+        phraseConsensus(phrases, candidates, corrected, corrections, bars.getLast().end(), suppressed);
         var notes = corrected.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
         var linked = inferred ? identicalBars(bars, notes, phrases, timeline) : repeats;
         return new Result(VERSION, bars, sections, linked, corrections, notes,
@@ -188,7 +194,8 @@ final class ReconstructionStructure {
     }
 
     private static void consensus(List<Pattern> group, List<Note> candidates, Map<String, Note> corrected,
-                                  List<Correction> changes, double scoreEnd) {
+                                  List<Correction> changes, double scoreEnd,
+                                  Set<String> authoredIds, List<Note> suppressed) {
         if (group.size() < 3) return;
         var slots = new ArrayList<Slot>();
         for (var pattern : group) {
@@ -202,7 +209,7 @@ final class ReconstructionStructure {
                 else slots.add(new Slot(attack));
             }
         }
-        var protectedNotes = new HashSet<String>();
+        var protectedNotes = new HashSet<>(authoredIds);
         for (var slot : slots) if (slot.attacks.size() >= 2)
             slot.attacks.values().forEach(attack -> protectedNotes.add(attack.note.id()));
         for (var slot : slots) {
@@ -218,7 +225,7 @@ final class ReconstructionStructure {
                 if (slot.attacks.containsKey(target.bar.id)) continue;
                 double start = target.bar.at(onset);
                 double end = Math.min(target.bar.at(onset + duration), scoreEnd);
-                if (end <= start) continue;
+                if (end <= start || suppressed(suppressed, slot.first, start, ONSET_WINDOW * (target.bar.end() - target.bar.start()))) continue;
                 Note wrong = nearest(target, slot.first, onset, protectedNotes, true);
                 if (wrong != null && Math.abs(target.duration(wrong) - duration) > ONSET_WINDOW * 2) wrong = null;
                 Note external = nearest(new Pattern(target.bar, candidates), slot.first, onset, Set.of(), false);
@@ -262,7 +269,7 @@ final class ReconstructionStructure {
     }
 
     private static void phraseConsensus(List<ReconstructionPhrases.Match> phrases, List<Note> candidates,
-                                        Map<String, Note> corrected, List<Correction> changes, double scoreEnd) {
+                                        Map<String, Note> corrected, List<Correction> changes, double scoreEnd, List<Note> suppressed) {
         for (var phrase : phrases) {
             var windows = phrase.windows();
             if (windows.size() < 3) continue;
@@ -287,7 +294,7 @@ final class ReconstructionStructure {
                     if (voters.size() < 2) continue;
                     for (var target : windows) {
                         if (voters.containsKey(target)) continue;
-                        propose(phrase, target, anchor, voters, candidates, corrected, changes, scoreEnd);
+                        propose(phrase, target, anchor, voters, candidates, corrected, changes, scoreEnd, suppressed);
                     }
                 }
             }
@@ -296,7 +303,7 @@ final class ReconstructionStructure {
 
     private static void propose(ReconstructionPhrases.Match match, ReconstructionPhrases.Window target, Note anchor,
                                 Map<ReconstructionPhrases.Window, Note> voters, List<Note> candidates,
-                                Map<String, Note> corrected, List<Correction> changes, double scoreEnd) {
+                                Map<String, Note> corrected, List<Correction> changes, double scoreEnd, List<Note> suppressed) {
         double similarity = voters.keySet().stream().mapToDouble(w ->
                 ReconstructionPhrases.partSimilarity(w, target, anchor.part())).min().orElse(0);
         if (similarity < .76) return;
@@ -306,6 +313,7 @@ final class ReconstructionStructure {
         double end = Math.min(start + duration, scoreEnd);
         if (end <= start) return;
         double tolerance = target.tolerance() * target.length();
+        if (suppressed(suppressed, anchor, start, tolerance)) return;
         // A nearby octave-equivalent attack already supplies this slot.
         if (corrected.values().stream().anyMatch(n -> n.part() == anchor.part()
                 && Math.floorMod(n.pitch() - anchor.pitch(), 12) == 0 && Math.abs(n.start() - start) <= tolerance)) return;
@@ -332,6 +340,11 @@ final class ReconstructionStructure {
         changes.add(new Correction(id, targetBar, note, null, votes, external == null ? null : external.id(),
                 apply, match.evidence().id()));
         if (apply) corrected.put(id, note);
+    }
+
+    static boolean suppressed(List<Note> suppressed, Note slot, double start, double tolerance) {
+        return suppressed.stream().anyMatch(note -> note.part() == slot.part() && note.pitch() == slot.pitch()
+                && Math.abs(note.start() - start) <= tolerance);
     }
 
     private static double median(double[] values) {

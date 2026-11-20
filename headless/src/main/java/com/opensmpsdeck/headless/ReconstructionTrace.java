@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
@@ -23,7 +24,7 @@ import static com.opensmpsdeck.headless.ReconstructionTimeMap.TimeBase;
 
 public final class ReconstructionTrace {
     public static final List<String> FILES = List.of("score.json", "structure.json", "roles.json",
-            "allocation.json", "voicing.json", "report.json");
+            "allocation.json", "voicing.json", "report.json", ReconstructionEdits.RESULTS);
 
     enum Status { kept, moved, shortened, merged, dropped }
 
@@ -59,7 +60,7 @@ public final class ReconstructionTrace {
     record Row(String id, int part, String partName, int pitch, Timing timing, Origin source, NoteAt score,
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
-               Status status, String stage, String reason) {}
+               Status status, String stage, String reason, List<String> editReasons, String fateDetail) {}
     record Summary(int part, int pitch, Timing sourceTiming, Status status, String stage, String reason,
                    ReconstructionRoles.Role role, String roleReason, String lane, Timing placement,
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced) {}
@@ -139,8 +140,10 @@ public final class ReconstructionTrace {
             if (bounds.length != 2) throw new IllegalArgumentException("--span expects START,END in source seconds");
             span = new Span(Double.parseDouble(bounds[0]), Double.parseDouble(bounds[1]));
         }
-        var old = read(oldWork);
-        var updated = read(newWork);
+        return diff(read(oldWork), read(newWork), span);
+    }
+
+    static JsonObject diff(Map<String, Row> old, Map<String, Row> updated, Span span) {
         var ids = new LinkedHashSet<>(old.keySet());
         ids.addAll(updated.keySet());
         var changes = new ArrayList<Change>();
@@ -207,7 +210,7 @@ public final class ReconstructionTrace {
         return row != null && (span.overlaps(row.timing) || row.score != null && span.overlaps(row.score.timing));
     }
 
-    private static Map<String, Row> read(Path work) throws IOException {
+    static Map<String, Row> read(Path work) throws IOException {
         return read(work, ReconstructionStages.readScore(work.resolve("score.json")));
     }
 
@@ -231,6 +234,14 @@ public final class ReconstructionTrace {
         var parts = index(score.source().parts(), MidiScore.Part::id);
         var corrections = group(structure == null ? List.of() : structure.corrections(), entry -> entry.note().id());
         var source = origins(score, scored);
+        var editReasons = new LinkedHashMap<String, LinkedHashSet<String>>();
+        for (var result : ReconstructionEdits.Journal.read(work).all()) {
+            if (result.status() == ReconstructionEdits.Status.applied || result.status() == ReconstructionEdits.Status.conflict)
+                for (String id : result.noteIds())
+                    editReasons.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(result.tag());
+            if (result.op() == ReconstructionEdits.Kind.deleteNote && result.original() != null)
+                source.putIfAbsent(result.original().id(), new Raw(result.original(), null, result.tag()));
+        }
         var scoreDecisions = index(score.scoreDecisions() == null ? List.of() : score.scoreDecisions(),
                 entry -> entry.note().id());
         var refinements = refinements(score.pitchChanges());
@@ -274,14 +285,34 @@ public final class ReconstructionTrace {
             var fate = fate(raw, origin, written, effective, roleTrace, placement, voiced, played.unmatched.containsKey(id),
                     fixes, scoreDecision, structure != null, roles != null, allocation != null,
                     structureInputs == null, staleScore, staleStructure);
+            var edits = new LinkedHashSet<>(editReasons.getOrDefault(id, new LinkedHashSet<>()));
+            addEditReason(edits, fate.reason);
+            if (placement != null) {
+                addEditReason(edits, placement.reason);
+                var blockers = new ArrayList<String>();
+                if (placement.competitorNoteId != null) blockers.add(placement.competitorNoteId);
+                if (placement.blockingNoteIds != null) blockers.addAll(placement.blockingNoteIds);
+                if (placement.outcome != ReconstructionAllocation.Outcome.kept)
+                    for (String blocker : blockers) {
+                        var pin = roles == null || roles.lanePins() == null ? null : roles.lanePins().get(blocker);
+                        if (pin != null) edits.add(pin.tag());
+                    }
+            }
+            String reason = edits.isEmpty() ? fate.reason : String.join(" ", edits);
             rows.add(new Row(id, anchor.note.part(), part == null ? "" : part.name(), anchor.note.pitch(), anchor.timing,
                     origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
-                    roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, fate.reason));
+                    roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
+                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason));
         }
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
         return index(rows, Row::id);
+    }
+
+    private static void addEditReason(Set<String> edits, String reason) {
+        if (reason == null) return;
+        for (String token : reason.split(" ")) if (token.startsWith("edit:")) edits.add(token);
     }
 
     private static Fate fate(Raw raw, Origin origin, NoteAt score, NoteAt structure, Roles roles, Allocation allocation,
@@ -432,7 +463,7 @@ public final class ReconstructionTrace {
                         note.velocity(), "transcriber", 1), external.provenance(), decision));
             }
         }
-        for (var note : score.notes()) if ("external".equals(note.source()))
+        for (var note : score.notes()) if ("external".equals(note.source()) || "edit".equals(note.source()))
             raw.putIfAbsent(note.id(), new Raw(note, null, null));
         if (score.scoreDecisions() != null) for (var record : score.scoreDecisions())
             raw.putIfAbsent(record.note().id(), new Raw(record.note(), null, record.reason()));
@@ -461,7 +492,7 @@ public final class ReconstructionTrace {
 
     private static Origin origin(Raw raw, Map<PartOnset, Refinement> refinements, ReconstructionTimeMap timeline) {
         Note note = raw.note;
-        var refinement = raw.external != null ? null : refinements.get(new PartOnset(note.part(), note.midi().startUs()));
+        var refinement = raw.external != null || "edit".equals(note.source()) ? null : refinements.get(new PartOnset(note.part(), note.midi().startUs()));
         if (refinement == null) return new Origin(at(note, TimeBase.source, timeline), note.source(), raw.external, null, List.of());
         var original = refinement.original;
         String provenance = note.source();
@@ -623,6 +654,7 @@ public final class ReconstructionTrace {
     private static void print(PrintStream out, String indent, Row row) {
         out.printf(Locale.ROOT, "%s%s part %d (%s) MIDI %d %s  %s @ %s (%s)%n",
                 indent, row.id, row.part, row.partName, row.pitch, format(row.timing), row.status, row.stage, row.reason);
+        if (row.fateDetail != null) out.printf("%s  %s%n", indent, row.fateDetail);
         if (row.source != null) {
             out.printf("%s  source %s%n", indent, row.source.transcriber == null
                     ? row.source.provenance : row.source.transcriber.tool() + " " + row.source.transcriber.outputSha256());

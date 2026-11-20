@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionAudition;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
+import com.opensmpsdeck.headless.ReconstructionEditCommand;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.ReconstructionTrace;
 
@@ -52,7 +53,7 @@ final class McpReconstruction {
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "manifest.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
+            "voicing.json", "roleplan.json", "manifest.json", ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -113,7 +114,10 @@ final class McpReconstruction {
             Path path = work.resolve(file);
             if (Files.isRegularFile(path)) files.put(file, path.toString());
         }
-        return object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
+        var result = object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
+        Path edits = work.resolve(ReconstructionEditCommand.RESULTS);
+        if (Files.isRegularFile(edits)) result.add("editResults", read(edits).getAsJsonObject().get("stages"));
+        return result;
     }
 
     static JsonObject audition(JsonObject args) throws IOException {
@@ -133,6 +137,14 @@ final class McpReconstruction {
                 args.has("solo") && args.get("solo").getAsBoolean(),
                 args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output);
         return object(result);
+    }
+
+    static JsonObject edit(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : FILES) McpPaths.managed(work, file);
+        McpPaths.managed(work, ReconstructionEditCommand.LOCK);
+        return ReconstructionEditCommand.run(work, string(args, "action"), args.getAsJsonObject("edit"),
+                optional(args, "id"), args.has("rerun") && args.get("rerun").getAsBoolean(), progress);
     }
 
     static JsonObject trace(JsonObject args) throws IOException {
