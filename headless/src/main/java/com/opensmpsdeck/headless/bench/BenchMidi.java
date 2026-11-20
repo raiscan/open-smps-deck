@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.headless.BenchMidiParts;
+
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
@@ -22,8 +24,12 @@ final class BenchMidi {
 
         @Override public String toString() { return this == sunoLike ? "suno-like" : name(); }
     }
-    record Event(String track, boolean drum, double start, double end, int pitch) {}
-    private record Message(long tick, int order, int pitch, int channel) {}
+    record Event(String track, boolean drum, double start, double end, int pitch, int velocity) {
+        Event(String track, boolean drum, double start, double end, int pitch) {
+            this(track, drum, start, end, pitch, 96);
+        }
+    }
+    private record Message(long tick, int order, int pitch, int channel, int velocity) {}
 
     private static final long SEED = 0x53334bL;
     private static final int PPQ = 5_000; // At the MIDI default 120 BPM, one tick is 100 µs.
@@ -100,6 +106,15 @@ final class BenchMidi {
 
     static void write(List<Event> events, Profile profile, Path target, List<String> expectedTracks,
                       boolean fixedOrder) throws IOException {
+        write(events, profile, target, expectedTracks, fixedOrder, false);
+    }
+
+    static void writeGrouped(List<Event> events, Profile profile, Path target) throws IOException {
+        write(events, profile, target, BenchStems.STEMS, true, true);
+    }
+
+    private static void write(List<Event> events, Profile profile, Path target, List<String> expectedTracks,
+                              boolean fixedOrder, boolean grouped) throws IOException {
         try {
             var midi = new Sequence(Sequence.PPQ, PPQ);
             if (profile == Profile.sunoLike) {
@@ -108,30 +123,49 @@ final class BenchMidi {
             }
             var tracks = new LinkedHashMap<String, List<Message>>();
             if (fixedOrder) expectedTracks.forEach(track -> tracks.put(track, new ArrayList<>()));
-            for (var event : events) {
-                int channel = event.drum() ? 9 : 0;
+            var gateEnds = new java.util.HashMap<String, long[]>();
+            var ordered = grouped ? events.stream().sorted(Comparator.comparingDouble(Event::start)).toList() : events;
+            for (var event : ordered) {
                 var messages = tracks.computeIfAbsent(event.track(), ignored -> new ArrayList<>());
                 long start = Math.round(event.start() * 2 * PPQ);
                 long end = Math.max(start + 1, Math.round(event.end() * 2 * PPQ));
-                messages.add(new Message(start, 1, event.pitch(), channel));
-                messages.add(new Message(end, 0, event.pitch(), channel));
+                int channel = event.drum() ? 9 : 0;
+                if (grouped && !event.drum()) {
+                    var occupied = gateEnds.computeIfAbsent(event.track() + "/" + event.pitch(),
+                            ignored -> new long[16]);
+                    channel = freeChannel(occupied, start);
+                    occupied[channel] = end;
+                }
+                messages.add(new Message(start, 1, event.pitch(), channel, event.velocity()));
+                messages.add(new Message(end, 0, event.pitch(), channel, 0));
             }
             for (String track : expectedTracks) tracks.computeIfAbsent(track, ignored -> new ArrayList<>());
             for (var entry : tracks.entrySet()) {
                 var track = midi.createTrack();
                 byte[] name = entry.getKey().getBytes(StandardCharsets.UTF_8);
                 track.add(new MidiEvent(new MetaMessage(3, name, name.length), 0));
+                if (grouped) {
+                    byte[] tag = BenchMidiParts.tag();
+                    track.add(new MidiEvent(new MetaMessage(BenchMidiParts.META_TYPE, tag, tag.length), 0));
+                }
                 entry.getValue().sort(Comparator.comparingLong(Message::tick).thenComparingInt(Message::order)
                         .thenComparingInt(Message::channel).thenComparingInt(Message::pitch));
                 for (var event : entry.getValue()) {
                     int command = event.order() == 1 ? ShortMessage.NOTE_ON : ShortMessage.NOTE_OFF;
                     track.add(new MidiEvent(new ShortMessage(command, event.channel(), event.pitch(),
-                            event.order() == 1 ? 96 : 0), event.tick()));
+                            event.velocity()), event.tick()));
                 }
             }
             if (MidiSystem.write(midi, 1, target.toFile()) == 0) throw new IOException("Cannot write MIDI: " + target);
         } catch (InvalidMidiDataException failure) {
             throw new IOException("Invalid benchmark MIDI: " + target, failure);
         }
+    }
+
+    private static int freeChannel(long[] occupied, long start) {
+        for (int channel = 0; channel < occupied.length; channel++) {
+            if (channel != 9 && occupied[channel] <= start) return channel;
+        }
+        throw new IllegalArgumentException("More than 15 overlapping same-pitch notes in a grouped MIDI part");
     }
 }

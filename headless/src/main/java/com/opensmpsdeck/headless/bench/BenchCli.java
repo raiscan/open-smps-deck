@@ -8,6 +8,7 @@ import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.headless.LeadGap;
+import com.opensmpsdeck.headless.BenchCartridge;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -39,9 +40,12 @@ public final class BenchCli {
 
     public static void usage(PrintStream out) {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--stems] [--profile suno-like [--drift N]]");
+        out.println("           --ladder [--game s1|s2|s3k] [--effects room|lofi] [--full-length [--loops N]]");
+        out.println("           [--torture] [--transcriber NAME [--transcriber-config FILE] [--transcriber-device DEVICE]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
+        out.println("       bench ladder-report OUT_DIRS... [--out REPORT_DIR]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N] [--alternate-midi OLD_MANIFEST NEW_MANIFEST]");
     }
 
@@ -50,12 +54,13 @@ public final class BenchCli {
             usage(out);
             return 0;
         }
-        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, lead-gap or compare");
+        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, lead-gap, compare or ladder-report");
         return switch (args[1]) {
             case "build-corpus" -> build(args, out, hooks);
             case "run" -> runCases(args, out, hooks);
             case "lead-gap" -> leadGap(args, out, hooks);
             case "compare" -> compare(args, out);
+            case "ladder-report" -> ladderReport(args, out);
             default -> throw new IllegalArgumentException("Unknown bench command: " + args[1]);
         };
     }
@@ -67,12 +72,31 @@ public final class BenchCli {
         boolean sunoLike = false;
         boolean stems = false;
         double drift = 0;
+        BenchCartridge.Game game = BenchCartridge.Game.s3k;
+        BenchAudio.Variant effects = BenchAudio.Variant.room;
+        String transcriber = null;
+        Path config = null;
+        String device = "auto";
+        int loops = 1;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick" -> songs = BenchCorpus.QUICK;
                 case "--stems" -> stems = true;
+                case "--ladder", "--full-length", "--torture" -> { }
+                case "--game" -> game = BenchCartridge.Game.valueOf(value(args, ++i, flag));
+                case "--effects" -> {
+                    effects = BenchAudio.Variant.valueOf(value(args, ++i, flag));
+                    if (effects == BenchAudio.Variant.dry) throw new IllegalArgumentException("--effects expects room or lofi");
+                }
+                case "--loops" -> {
+                    loops = Integer.parseInt(value(args, ++i, flag));
+                    if (loops < 1 || loops > 8) throw new IllegalArgumentException("--loops must be in 1..8");
+                }
+                case "--transcriber" -> transcriber = value(args, ++i, flag);
+                case "--transcriber-config" -> config = Path.of(value(args, ++i, flag));
+                case "--transcriber-device" -> device = value(args, ++i, flag);
                 case "--profile" -> {
                     if (!value(args, ++i, flag).equals("suno-like"))
                         throw new IllegalArgumentException("The separate corpus profile is suno-like");
@@ -91,7 +115,7 @@ public final class BenchCli {
                 }
                 case "--songs" -> {
                     songs = Arrays.stream(value(args, ++i, flag).split(",", -1)).map(String::strip)
-                            .map(BenchCli::songId).toList();
+                            .map(BenchCli::byteId).toList();
                     if (new HashSet<>(songs).size() != songs.size())
                         throw new IllegalArgumentException("Duplicate music ID");
                 }
@@ -100,6 +124,40 @@ public final class BenchCli {
         }
         if (seen.contains("--quick") && seen.contains("--songs"))
             throw new IllegalArgumentException("Choose either --quick or --songs");
+        boolean torture = seen.contains("--torture");
+        boolean allRungs = seen.contains("--ladder");
+        boolean ladder = allRungs || torture;
+        boolean full = seen.contains("--full-length") || torture;
+        if (ladder) {
+            if (sunoLike || drift != 0) throw new IllegalArgumentException("--ladder provides its own profiles and drift");
+            if (transcriber == null && (config != null || seen.contains("--transcriber-device")))
+                throw new IllegalArgumentException("Transcriber configuration and device require --transcriber");
+            if (seen.contains("--loops") && !full) throw new IllegalArgumentException("--loops requires --full-length");
+            if (torture && (seen.contains("--seconds") || seen.contains("--loops")))
+                throw new IllegalArgumentException("--torture runs to completion or the first loop");
+            if (!allRungs && transcriber != null)
+                throw new IllegalArgumentException("Add --ladder to --torture to enable transcription");
+            if (!seen.contains("--songs")) {
+                if (torture) songs = switch (game) {
+                    case s1 -> List.of(0x91);
+                    case s2 -> List.of(0xbd);
+                    case s3k -> List.of(0x26, 0x33);
+                };
+                else songs = game.ladderSongs();
+            }
+            if (game == BenchCartridge.Game.s3k) songs.forEach(id -> songId(Integer.toString(id)));
+            if (full && !seen.contains("--seconds")) frames = torture ? 36_000 : 7_200;
+            if (frames < 2) throw new IllegalArgumentException("A ladder requires at least two presentations");
+            BenchLadder.build(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]).toAbsolutePath().normalize(),
+                    songs, frames, out, new BenchLadder.Options(game, effects, torture, allRungs, full ? loops : 0,
+                            transcriber, config, device));
+            return 0;
+        }
+        for (String flag : List.of("--game", "--full-length", "--loops", "--effects", "--transcriber",
+                "--transcriber-config", "--transcriber-device")) {
+            if (seen.contains(flag)) throw new IllegalArgumentException(flag + " requires --ladder");
+        }
+        songs.forEach(id -> songId(Integer.toString(id)));
         if (sunoLike && frames < 2)
             throw new IllegalArgumentException("A shifted corpus needs at least two presentations");
         if (drift != 0 && !sunoLike) throw new IllegalArgumentException("--drift requires --profile suno-like");
@@ -146,6 +204,21 @@ public final class BenchCli {
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
                         seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo), out, hooks);
+    }
+
+    private static int ladderReport(String[] args, PrintStream out) throws IOException {
+        var dirs = new java.util.ArrayList<Path>();
+        Path target = null;
+        for (int i = 2; i < args.length; i++) {
+            if (args[i].equals("--out")) {
+                if (target != null) throw new IllegalArgumentException("Duplicate --out");
+                target = Path.of(value(args, ++i, "--out"));
+            } else {
+                dirs.add(Path.of(args[i]));
+            }
+        }
+        if (dirs.isEmpty()) throw new IllegalArgumentException("ladder-report requires at least one run directory");
+        return BenchLadderReport.write(dirs, target == null ? dirs.getFirst() : target, out);
     }
 
     private static int leadGap(String[] args, PrintStream out, Hooks hooks) throws IOException {
@@ -220,9 +293,15 @@ public final class BenchCli {
     }
 
     private static int songId(String text) {
+        int value = byteId(text);
+        if (value < 1 || value > 0x33) throw new IllegalArgumentException("Music ID must be in 0x01–0x33");
+        return value;
+    }
+
+    private static int byteId(String text) {
         String id = text.toLowerCase(Locale.ROOT);
         int value = id.startsWith("0x") ? Integer.parseInt(id.substring(2), 16) : Integer.parseInt(id);
-        if (value < 1 || value > 0x33) throw new IllegalArgumentException("Music ID must be in 0x01–0x33");
+        if (value < 1 || value > 255) throw new IllegalArgumentException("Music ID must be in 0x01–0xff");
         return value;
     }
 

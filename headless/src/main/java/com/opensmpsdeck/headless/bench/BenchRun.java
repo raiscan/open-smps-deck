@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.headless.BenchClock;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.LeadGap;
 
@@ -34,7 +35,8 @@ final class BenchRun {
         if (manifest.version() != 1 || manifest.cases() == null || manifest.frames() < 1 || manifest.frames() > 36_000)
             throw new IllegalArgumentException("Unsupported or invalid benchmark manifest");
         var cases = manifest.cases().stream().filter(c -> !options.goldOnly)
-                .filter(c -> !options.quick || BenchCorpus.QUICK.contains(c.song())).toList();
+                .filter(c -> !options.quick || (c.ladder() == null ? BenchCorpus.QUICK.contains(c.song())
+                        : c.ladder().torture() || c.ladder().game().ladderSongs().contains(c.song()))).toList();
         if (cases.isEmpty() && !options.goldOnly) throw new IllegalArgumentException("No corpus cases selected");
         var gold = options.gold == null ? null : BenchGold.read(options.gold);
         if (options.goldOnly && gold == null) throw new IllegalArgumentException("--gold-only requires --gold");
@@ -45,7 +47,17 @@ final class BenchRun {
         for (var c : cases) {
             if (!seen.add(c.id()) || c.profile() == null || c.variant() == null)
                 throw new IllegalArgumentException("Duplicate or invalid case: " + c.id());
-            for (var file : List.of(c.truth(), c.reference(), c.audio(), c.midi())) {
+            var files = new ArrayList<>(List.of(c.truth(), c.reference(), c.audio(), c.midi()));
+            if (c.ladder() != null) {
+                var input = c.ladder();
+                if (input.game() == null || input.rung() == null || input.frames() < 1 || input.frames() > manifest.frames()
+                        || !c.id().equals(input.game() + "/%02x/".formatted(c.song()) + input.rung().label)
+                        || c.song() < 1 || c.song() > 255)
+                    throw new IllegalArgumentException("Invalid ladder case: " + c.id());
+                files.addAll(input.stems().values());
+                if (input.transcription() != null) files.add(input.transcription());
+            }
+            for (var file : files) {
                 var path = file.resolve(corpus);
                 if (!verified.containsKey(path)) verified.put(path, BenchFiles.hash(path));
                 if (!verified.get(path).equals(file.sha256())) throw new IOException("Corpus SHA-256 mismatch: " + path);
@@ -55,14 +67,21 @@ final class BenchRun {
         Files.createDirectories(output);
         if (Files.exists(output.resolve("scorecard.json")) || Files.exists(output.resolve("scorecard.md")))
             throw new IOException("Benchmark scorecard already exists: " + output);
-        var scratch = Files.createTempDirectory(output, ".bench-");
+        boolean ladder = cases.stream().anyMatch(c -> c.ladder() != null);
+        if (ladder) Files.createDirectory(output.resolve("cases"));
+        var scratch = ladder
+                ? Files.createTempDirectory("opensmpsdeck-bench-") : Files.createTempDirectory(output, ".bench-");
         var logger = Logger.getLogger("com.openggf.audio.session.SmpsPhysicalDevice");
         Level previousLevel = logger.getLevel();
         try {
             logger.setLevel(Level.WARNING);
             var catalogue = InstrumentCatalogue.open(index);
             String revision = "sha256:" + manifest.romSha256();
-            var drums = new BenchDrums(catalogue, revision);
+            var game = cases.stream().filter(c -> c.ladder() != null).findFirst().map(c -> c.ladder().game())
+                    .orElse(com.opensmpsdeck.headless.BenchCartridge.Game.s3k);
+            var drums = new BenchDrums(catalogue, revision, game);
+            if (cases.stream().anyMatch(c -> c.ladder() != null && c.ladder().game() != game))
+                throw new IllegalArgumentException("Each ladder manifest must contain a single game");
             var songs = new HashMap<Integer, Song>();
             var tasks = new ArrayList<Callable<BenchScorecard.Case>>();
             var warps = new java.util.concurrent.ConcurrentSkipListMap<String, Boolean>();
@@ -88,7 +107,7 @@ final class BenchRun {
                 Song prepared = song;
                 Path target = scratch.resolve(Integer.toString(tasks.size()));
                 tasks.add(() -> capture(c.id(), c.profile(), c.variant(), scratch, out,
-                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks, reductions, warps)));
+                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks, reductions, warps, output)));
             }
             var rows = new ArrayList<BenchScorecard.Case>();
             try (var workers = Executors.newFixedThreadPool(options.jobs)) {
@@ -131,16 +150,24 @@ final class BenchRun {
     private static BenchScorecard.Case scoreCase(BenchCorpus.Case c, Path root, Path output, Song song,
                                                  Options options, InstrumentCatalogue catalogue, BenchDrums drums,
                                                  BenchCli.Hooks hooks, Map<String, Map<String, Long>> reductions,
-                                                 Map<String, Boolean> warps) throws IOException {
+                                                 Map<String, Boolean> warps, Path results) throws IOException {
+        long started = System.nanoTime();
+        boolean ladder = c.ladder() != null;
         try {
             var truth = song.truth.stream().filter(note -> note.drum() == null).toList();
+            var input = ladder ? BenchLadderRun.inputs(c, root, hooks) : null;
             var reconstruction = BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
-                    output, options.audioRefine, null, Map.of(), drums, hooks, options.rolePlan, truth, options.steadyTempo);
+                    output, options.audioRefine, null, ladder ? input.stems() : Map.of(),
+                    drums, hooks, options.rolePlan, truth, options.steadyTempo, ladder ? input.leadPart() : null, ladder);
             warps.put(c.id(), reconstruction.warped());
             reductions.put(c.id(), reconstruction.reductions());
-            var estimate = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
+            var clock = ladder ? BenchClock.read(output) : null;
+            var projectToTruth = ladder ? input.projectToTruth(clock) : null;
+            var events = ladder ? reconstruction.events().stream().map(n -> BenchLadderTrace.map(n, projectToTruth))
+                    .filter(n -> n.start() < c.ladder().frames() / 60.0).toList() : reconstruction.events();
+            var estimate = events.stream().filter(note -> note.drum() == null).toList();
             var truthDrums = song.truth.stream().filter(note -> note.drum() != null).toList();
-            var estimateDrums = reconstruction.events().stream().filter(note -> note.drum() != null).toList();
+            var estimateDrums = events.stream().filter(note -> note.drum() != null).toList();
             var pairs = BenchMetrics.notes(truth, estimate, false);
             var notes = counts(truth, estimate, pairs);
             var offsets = counts(truth, estimate, BenchMetrics.notes(truth, estimate, true));
@@ -151,9 +178,10 @@ final class BenchRun {
             var drum = counts(truthDrums, estimateDrums, drumPairs);
             long drumCorrect = drumPairs.stream().filter(p -> truthDrums.get(p.truth()).drum()
                     == estimateDrums.get(p.estimate()).drum()).count();
-            var voices = new BenchVoice(catalogue).score(truth, estimate, pairs, reconstruction.attribution(), options.holdout);
+            var voices = ladder ? BenchVoice.ladder(truth, estimate, pairs, song.nativeTruth.voices(), reconstruction.voices())
+                    : new BenchVoice(catalogue).score(truth, estimate, pairs, reconstruction.attribution(), options.holdout);
             float[] audio = BenchAudio.mono(BenchAudio.read(reconstruction.audio()));
-            if (c.drift() != null) {
+            if (c.drift() != null || ladder && audio.length != song.reference.length) {
                 // Score the same undrifted interval in both modes, including
                 // silence when playback ends early.
                 audio = java.util.Arrays.copyOf(audio, song.reference.length);
@@ -169,7 +197,7 @@ final class BenchRun {
             metrics.put("melodyF1", melody.f1());
             metrics.put("drumF1", drum.f1());
             if (drum.matched() > 0) metrics.put("drumClassAccuracy", (double) drumCorrect / drum.matched());
-            if (options.holdout) {
+            if (options.holdout || ladder) {
                 if (voices.distance() != null) metrics.put("voiceSpectralDistance", voices.distance());
                 if (voices.matched() > 0) metrics.put("voiceSpectralCoverage", (double) voices.compared() / voices.matched());
             } else if (voices.matched() > 0) {
@@ -179,8 +207,27 @@ final class BenchRun {
             metrics.put("logMelDistance", distance.logMel());
             metrics.put("onsetCorrelation", distance.onsetCorrelation());
             release(truth, estimate, pairs, audio).ifPresent(value -> metrics.put("releaseEnergy", value));
+            BenchGold.Score lead = null;
+            if (ladder) {
+                double seconds = c.ladder().frames() / 60.0;
+                var projectTones = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
+                lead = BenchLadderTrace.leadScore(truth, estimate, c.ladder().leadLane(), seconds);
+                metrics.put("leadAttackF1", lead.attacks().f1());
+                if (lead.pitchAccuracy() != null) metrics.put("leadPitchAccuracy", lead.pitchAccuracy());
+                var gap = BenchLadderTrace.leadGap(output, truth, projectTones, c.ladder().leadLane(), clock, input.toInput());
+                if (gap != null) metrics.put("leadGap", gap);
+                var trace = BenchLadderTrace.read(output, truth, projectTones, c.ladder(), input.leadPart(),
+                        projectToTruth, input.toTruth());
+                BenchLadderRun.save(c, root, output, results, started, metrics, trace, reconstruction.reductions(), null);
+            }
             return new BenchScorecard.Case(c.id(), c.profile(), c.variant(), metrics, notes, offsets, melody, drum,
-                    voices, null, null);
+                    voices, lead, null);
+        } catch (IOException | IllegalArgumentException failure) {
+            if (ladder && !(failure instanceof InterruptedIOException)) {
+                String diagnostic = failure.toString().replace(output.toString(), "<work>");
+                BenchLadderRun.save(c, root, output, results, started, null, null, null, diagnostic);
+            }
+            throw failure;
         } finally {
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
         }

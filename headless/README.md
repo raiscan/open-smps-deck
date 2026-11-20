@@ -400,6 +400,17 @@ generated datasets outside the repository. See the
 [benchmark guide](../docs/architecture/benchmark.md) for commands and metric
 definitions.
 
+Use `bench build-corpus ... --ladder --game s1|s2|s3k` to compare native
+channel MIDI and stems, grouped inputs, mix effects, external transcription,
+and the Suno-like profile with and without tempo drift. The ladder defaults
+to 30 seconds. Pass `--seconds 120` for a longer window, `--full-length` to
+stop at the native end or first completed loop, or `--torture` to run the
+credits medleys through the exact and grouped rungs. Run the resulting
+manifests with `bench run`, then use
+`bench ladder-report OUT_DIRS... --out REPORT_DIR` for Markdown, JSON, and a
+private listening index with embedded MP3s. Ladder listening export uses
+`ffmpeg` with `libmp3lame`.
+
 
 ## Build nested arrangements
 

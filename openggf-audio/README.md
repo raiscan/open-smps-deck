@@ -1,12 +1,14 @@
 # Pinned OpenGGF audio
 
 This module contains a reviewed dependency closure from OpenGGF, preserving its
-Java packages. It is the project's sole playback foundation. It also includes the cartridge reader and S3K loader
+Java packages. It is the project's sole playback foundation. It also includes the cartridge reader and Sonic 1, Sonic 2, and S3K loaders
 used for local music import. Build the new modules with **JDK 25**.
 
-The authoritative pin, source SHA-256 values, licenses and exact local patch
-are in [the lock](../upstream/openggf-audio.lock.json). The only source patch
-removes an unused `AudioManager` import; no synthesis or driver logic is changed.
+The authoritative pin, source SHA-256 values, licenses and exact local patches
+are in [the lock](../upstream/openggf-audio.lock.json). The patches remove an
+unused `AudioManager` import, two non-audio S1 profile overloads, and the
+S2 envelope fallback and unused S1/S2 priority tables. The benchmark reads
+S2 envelope data from the local ROM.
 Do not hand-edit generated Java. Project-specific orchestration belongs outside
 this module.
 
@@ -40,9 +42,9 @@ python3 tools/verify_openggf_audio_parity.py \
 
 The probe compiles the locked **original** source objects independently from
 the vendored files and compares PCM and logical chip-write hashes for finite FM,
-PSG and S3K CALL/RETURN/LOOP fixtures. The original source retains its unused
-import; an empty compile-only `AudioManager` type resolves that import without
-loading the game. No reference source is patched.
+PSG and S3K CALL/RETURN/LOOP fixtures. The original source retains its dependencies. The probe adds compile-only
+stubs for the non-audio types and reads the upstream S2 envelope fallback
+from the pinned Git source during the independent build. No reference source is patched.
 
 Both runs use the accurate FM core, the S3K physical policy, NTSC hardware-frame
 settings, 48 kHz WAV-equivalent output and 120 presentations at 60 Hz. The probe

@@ -62,6 +62,10 @@ def load_manifest(root):
                 raise SnapshotError("patch references an absent or duplicate source")
             if not patch["removeExact"] or not patch["reason"]:
                 raise SnapshotError("patch requires exact content and a reason")
+            if "replaceWith" in patch and not isinstance(patch["replaceWith"], str):
+                raise SnapshotError("patch replacement must be text")
+            if "endBefore" in patch and (not isinstance(patch["endBefore"], str) or not patch["endBefore"]):
+                raise SnapshotError("patch end marker must be nonempty text")
             patched.add(patch["path"])
         return lock
     except (OSError, KeyError, TypeError, ValueError) as error:
@@ -94,10 +98,19 @@ def materialize(lock, source):
             raise SnapshotError(f"upstream hash mismatch: {entry['path']}")
         vendored = original
         if entry["path"] in patches:
-            remove = patches[entry["path"]]["removeExact"].encode("utf-8")
-            if original.count(remove) != 1:
+            patch = patches[entry["path"]]
+            marker = patch["removeExact"].encode("utf-8")
+            if original.count(marker) != 1:
                 raise SnapshotError(f"patch precondition requires exactly one occurrence: {entry['path']}")
-            vendored = original.replace(remove, b"", 1)
+            start = original.index(marker)
+            end = start + len(marker)
+            if "endBefore" in patch:
+                limit = patch["endBefore"].encode("utf-8")
+                if original.count(limit) != 1 or original.index(limit) < end:
+                    raise SnapshotError(f"patch precondition requires one end marker after start: {entry['path']}")
+                end = original.index(limit)
+            replacement = patch.get("replaceWith", "").encode("utf-8")
+            vendored = original[:start] + replacement + original[end:]
         if sha256(vendored) != entry["vendoredSha256"]:
             raise SnapshotError(f"patched hash mismatch: {entry['path']}")
         result.append((destination, vendored))

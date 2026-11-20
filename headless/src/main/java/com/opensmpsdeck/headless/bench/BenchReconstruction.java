@@ -16,7 +16,7 @@ import java.util.Map;
 
 final class BenchReconstruction {
     record Midi(List<Part> parts, List<Note> notes) {}
-    record Part(int id, boolean drums) {}
+    record Part(int id, boolean drums, String name) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
                   List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages) {}
@@ -30,7 +30,7 @@ final class BenchReconstruction {
     record Choice(String assetId, List<Candidate> shortlist) {}
     record Candidate(String assetId) {}
     record Result(List<BenchMetrics.Event> events, Attribution attribution, Path audio, long referenceUs,
-                  Map<String, Long> reductions, boolean warped) {}
+                  Map<String, Long> reductions, boolean warped, Map<String, byte[]> voices) {}
 
     private static final long SECTION_US = 16_000_000L;
     private static final PrintStream QUIET = new PrintStream(OutputStream.nullOutputStream());
@@ -40,11 +40,23 @@ final class BenchReconstruction {
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
                       Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
                       BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes, String steadyTempo) throws IOException {
+        return run(midi, audio, catalogue, output, refine, seconds, stems, drums, hooks,
+                rolePlan, truthNotes, steadyTempo, null, false);
+    }
+
+    static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
+                      Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
+                      BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes, String steadyTempo,
+                      Integer leadPart, boolean captureVoices) throws IOException {
         var args = new ArrayList<>(List.of("reconstruct", rolePlan == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
         if (steadyTempo.equals("off")) {
             args.add("--steady-tempo");
             args.add("off");
+        }
+        if (leadPart != null) {
+            args.add("--lead-part");
+            args.add(leadPart.toString());
         }
         if (refine) args.add("--audio-refine");
         if (seconds != null) {
@@ -63,7 +75,7 @@ final class BenchReconstruction {
         }
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
-        var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
+        var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer(), captureVoices);
         var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
         var reductions = new java.util.TreeMap<String, Long>();
@@ -76,7 +88,7 @@ final class BenchReconstruction {
                 if (count > 0) reductions.put(key.startsWith("lead-") ? key : "lead-" + key, count);
             });
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
-                output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped());
+                output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices());
     }
 
     static List<BenchMetrics.Event> excludeEffectCopies(List<BenchMetrics.Event> events, List<String> lanes) {
