@@ -91,9 +91,32 @@ final class ReconstructionChecks {
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
         checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+        var figures = new HashMap<String, Note>();
+        for (var note : value.notes()) if (note.run() != null) figures.put(note.id(), note);
+        if (value.retriggers() != null) {
+            var figureParts = partIds(value);
+            var anchors = new HashMap<String, Note>();
+            for (var note : value.notes()) anchors.put(note.id(), note);
+            var releases = new HashMap<String, Double>();
+            for (var burst : value.retriggers()) {
+                var anchor = anchors.get(burst.anchor());
+                var figure = burst.figure();
+                String where = at + ".retriggers." + figure.id();
+                require(anchor != null && anchor.run() == null && anchors.get(figure.id()) == null
+                                && value.inputs().leadPart() != null && anchor.part() == value.inputs().leadPart(),
+                        where, "expected a distinct figure on an existing explicit lead note");
+                note(figure, figureParts, duration(value), where);
+                require(figure.source().equals(ReconstructionRetriggers.REASON) && figure.run() != null
+                                && figure.part() == anchor.part() && figure.pitch() == anchor.pitch()
+                                && figure.start() >= Math.max(anchor.start(), releases.getOrDefault(anchor.id(), 0.0))
+                                && figure.end() <= anchor.end()
+                                && figure.run().stream().allMatch(step -> step.pitch() == anchor.pitch()),
+                        where, "retriggers must preserve anchor pitch and fit its gate without overlapping");
+                require(figures.putIfAbsent(figure.id(), figure) == null, where, "duplicate figure ID");
+                releases.put(anchor.id(), figure.end());
+            }
+        }
         if (value.figureVoices() != null) {
-            var figures = new HashMap<String, Note>();
-            for (var note : value.notes()) if (note.run() != null) figures.put(note.id(), note);
             for (var entry : value.figureVoices().entrySet()) {
                 var figure = figures.get(entry.getKey());
                 var voices = entry.getValue();

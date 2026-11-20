@@ -188,10 +188,17 @@ public final class ReconstructionDescribe {
         double bpm = timeline.warped() ? timeline.bpm()
                 : beatMap != null ? beatMap.openingBpm() : inferred ? tempo.selected().bpm()
                 : 60 * (tempo == null ? 4 : tempo.selected().beatsPerBar()) / barSeconds;
-        var runs = effectiveNotes.stream().filter(note -> note.run() != null && (filter.isEmpty() || filter.contains(note.part()))
+        var figures = new LinkedHashMap<Note, String>();
+        for (var note : effectiveNotes)
+            if (note.run() != null) figures.put(note, note.id());
+        if (score.retriggers() != null)
+            for (var burst : score.retriggers()) figures.put(timeline.projectNote(burst.figure()), burst.anchor());
+        var runs = figures.keySet().stream().filter(note -> (filter.isEmpty() || filter.contains(note.part()))
                         && sections.stream().anyMatch(section -> note.end() > section.startSeconds && note.start() < section.endSeconds))
-                .map(note -> new Run(note.source(), note.part(), note.start(), note.end(), roles == null ? null : roles.get(note.id()),
-                        note.confidence(), note.run(), score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
+                .sorted(ReconstructionStages.NOTE_ORDER)
+                .map(note -> new Run(note.source(), note.part(), note.start(), note.end(),
+                        roles == null ? null : roles.get(figures.get(note)), note.confidence(), note.run(),
+                        score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
                 List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs);
     }

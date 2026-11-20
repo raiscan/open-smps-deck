@@ -188,12 +188,19 @@ final class ReconstructionCli {
         var effects = new Effects(Map.of(), Map.of(), Map.of());
         var copyLanes = voicing.lanes().values().stream().map(lane -> lane.effects().copy())
                 .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).sorted().toList();
+        var leadVoice = voicing.lanes().get("FM1");
+        var articulation = leadVoice == null ? ReconstructionVoicing.WRITTEN : leadVoice.articulation();
+        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, articulation);
+        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes());
+        var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
+        if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
+        placements.addAll(playback.placements());
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
-                    allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), allocation.fastRuns(), copyLanes,
+                    allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
-                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), ordered,
+                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -318,7 +325,9 @@ final class ReconstructionCli {
                 for (var entry : transcription.inputs().externalNotes().entrySet())
                     external.put(entry.getKey(), entry.getValue().provenance());
             }
-            var runEvidence = transcription.notes().stream().filter(note -> note.run() != null).toList();
+            var runEvidence = new java.util.ArrayList<>(transcription.notes().stream().filter(note -> note.run() != null).toList());
+            if (transcription.retriggers() != null)
+                for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,

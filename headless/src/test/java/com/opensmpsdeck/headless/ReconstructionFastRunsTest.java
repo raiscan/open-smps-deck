@@ -37,7 +37,9 @@ class ReconstructionFastRunsTest {
         var held = new ReconstructionStages.Note("held", 0, .08, .20, 72, 90, "midi", 1);
         var notes = new java.util.ArrayList<>(List.of(held));
         ReconstructionFastRuns.reconcile(notes, 0, List.of(new ReconstructionFastRuns.Figure(steps, .95)));
-        var figure = notes.stream().filter(note -> note.run() != null).findFirst().orElseThrow();
+        assertEquals(List.of(held), notes);
+        var figure = new ReconstructionStages.Note("figure", 0, .10, .15, 72, 90,
+                ReconstructionFastRuns.REASON, .95, null, steps);
         assertEquals(steps, figure.run());
         var decisions = List.of(new ReconstructionRoles.Decision(figure, ReconstructionRoles.Role.melody,
                         ReconstructionFastRuns.REASON, null),
@@ -113,10 +115,40 @@ class ReconstructionFastRunsTest {
             steps.add(new ReconstructionFastRuns.Step(56, start, start + .08));
             notes.add(new ReconstructionStages.Note("attack-" + i, 0, start, start + .064, lead, 90, "transcriber", 1));
         }
-        var original = List.copyOf(notes);
-        ReconstructionFastRuns.reconcile(notes, 0, List.of(new ReconstructionFastRuns.Figure(
-                steps, .95, ReconstructionRetriggers.REASON)));
-        assertEquals(original, notes);
+        assertTrue(ReconstructionRetriggers.competingAttacks(new ReconstructionFastRuns.Figure(
+                steps, .95, ReconstructionRetriggers.REASON), notes.getFirst(), notes));
+    }
+
+    @Test void retriggersOnlySplitTheRetainedFm1Gate() {
+        var timeline = new ReconstructionTimeMap(null, null, 1);
+        var anchor = new ReconstructionStages.Note("held", 0, .08, .50, 68, 90, "midi", 1);
+        var steps = List.of(new ReconstructionFastRuns.Step(68, .10, .15),
+                new ReconstructionFastRuns.Step(68, .15, .20),
+                new ReconstructionFastRuns.Step(68, .20, .25),
+                new ReconstructionFastRuns.Step(68, .25, .30));
+        var figure = new ReconstructionStages.Note("burst", 0, .10, .30, 68, 90,
+                ReconstructionRetriggers.REASON, .95, null, steps);
+        var bursts = List.of(new ReconstructionRetriggers.Burst("held", figure));
+        var fm1 = new ReconstructionAllocation.Entry(anchor, ReconstructionRoles.Role.melody,
+                "FM1", 5, 30, ReconstructionAllocation.Outcome.kept, null, null);
+        var fm3 = new ReconstructionAllocation.Entry(anchor, ReconstructionRoles.Role.harmony,
+                "FM3", 5, 30, ReconstructionAllocation.Outcome.kept, null, null);
+        var shortened = fm1.shorten(17, "next-attack");
+        for (var rejected : List.of(fm3, shortened)) {
+            var playback = ReconstructionRetriggers.articulate(List.of(rejected), bursts,
+                    timeline, ReconstructionVoicing.WRITTEN);
+            assertEquals(List.of(rejected), playback.notes());
+            assertTrue(playback.placements().isEmpty());
+        }
+        var articulation = new ReconstructionVoicing.Articulation("test", .8, 0);
+        var playback = ReconstructionRetriggers.articulate(List.of(fm1), bursts, timeline, articulation);
+        assertEquals(List.of(5, 9, 12, 15), playback.notes().stream()
+                .map(ReconstructionAllocation.Entry::startTick).toList());
+        assertEquals(List.of(9, 12, 15, 25), playback.notes().stream()
+                .map(ReconstructionAllocation.Entry::endTick).toList());
+        assertTrue(playback.notes().stream().allMatch(entry ->
+                entry.note().pitch() == anchor.pitch() && entry.note().start() == anchor.start()));
+        assertEquals(List.of(0, 1, 2, 3), playback.placements().getFirst().retainedSteps());
     }
 
     private static ReferenceAudio tone(double duration, DoubleUnaryOperator pitch) {

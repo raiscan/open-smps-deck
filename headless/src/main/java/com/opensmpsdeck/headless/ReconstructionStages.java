@@ -116,14 +116,15 @@ public final class ReconstructionStages {
                  List<Note> notes, List<S3kReconstruction.Reduction> reductions,
                  List<ReconstructionPitchRefinement.Change> pitchChanges,
                  @Nullable ReconstructionTempo.Estimate tempo, @Nullable List<ReconstructionStructure.Bar> midiBars, @Nullable ReconstructionBeatMap beatMap,
-                 @Nullable Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices) {
+                 @Nullable Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
+                 @Nullable List<ReconstructionRetriggers.Burst> retriggers) {
         Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
               List<Note> notes, List<S3kReconstruction.Reduction> reductions,
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
               List<ReconstructionStructure.Bar> midiBars) {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
-                    pitchChanges, tempo, midiBars, null, null);
+                    pitchChanges, tempo, midiBars, null, null, null);
         }
         Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
@@ -131,20 +132,21 @@ public final class ReconstructionStages {
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
               List<ReconstructionStructure.Bar> midiBars, ReconstructionBeatMap beatMap) {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
-                    pitchChanges, tempo, midiBars, beatMap, null);
+                    pitchChanges, tempo, midiBars, beatMap, null, null);
         }
         boolean usesBeatGrid() { return beatMap != null && tempo != null && tempo.source().equals("tracked"); }
 
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
                          ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars, ReconstructionBeatMap beatMap) {
-            return withInputs(inputs, bars, notes, tempo, midiBars, beatMap, figureVoices);
+            return withInputs(inputs, bars, notes, tempo, midiBars, beatMap, figureVoices, retriggers);
         }
 
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
                          ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars,
-                         ReconstructionBeatMap beatMap, Map<String, List<ReconstructionFigureVoices.Voice>> voices) {
+                         ReconstructionBeatMap beatMap, Map<String, List<ReconstructionFigureVoices.Voice>> voices,
+                         List<ReconstructionRetriggers.Burst> bursts) {
             return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts,
-                    notes, reductions, pitchChanges, tempo, midiBars, beatMap, voices);
+                    notes, reductions, pitchChanges, tempo, midiBars, beatMap, voices, bursts);
         }
     }
 
@@ -555,6 +557,7 @@ public final class ReconstructionStages {
             }
         }
         var voices = new java.util.TreeMap<String, List<ReconstructionFigureVoices.Voice>>();
+        var bursts = new ArrayList<ReconstructionRetriggers.Burst>();
         if (!Boolean.TRUE.equals(inputs.fastRunsOff)) {
             for (var part : score.source.parts()) {
                 String stem = inputs.stems.get(part.id());
@@ -565,7 +568,11 @@ public final class ReconstructionStages {
                         inputs.leadPart == null || inputs.leadPart == part.id()));
                 if (inputs.leadPart != null && inputs.leadPart == part.id()) {
                     var current = notes.stream().filter(note -> note.part == part.id()).toList();
-                    ReconstructionFastRuns.reconcile(notes, part.id(), ReconstructionRetriggers.detect(audio, current));
+                    for (var burst : ReconstructionRetriggers.detect(audio, current)) {
+                        bursts.add(burst);
+                        var companions = ReconstructionFigureVoices.find(audio, burst.figure(), local);
+                        if (!companions.isEmpty()) voices.put(burst.figure().id(), companions);
+                    }
                 }
                 for (var figure : notes) {
                     if (figure.part != part.id() || figure.run == null) continue;
@@ -612,7 +619,7 @@ public final class ReconstructionStages {
             else beats = MidiScore.beatMap(midi, score.durationUs, metadata.meter());
         }
         var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList(), tempo, midiBars, beats,
-                voices.isEmpty() ? null : voices);
+                voices.isEmpty() ? null : voices, bursts.isEmpty() ? null : List.copyOf(bursts));
         ReconstructionChecks.score(result);
         return result;
     }
