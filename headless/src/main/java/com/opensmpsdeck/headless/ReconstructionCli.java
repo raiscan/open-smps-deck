@@ -77,7 +77,7 @@ final class ReconstructionCli {
 
     static void usage(PrintStream out) {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
-        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
+        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
         out.println("           [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");

@@ -54,6 +54,12 @@ final class ReconstructionRoles {
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity) {
+        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, null);
+    }
+
+    static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
+                         ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
+                         ReconstructionLeadContinuity continuity, Integer leadPart) {
         var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
@@ -71,7 +77,7 @@ final class ReconstructionRoles {
                 ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
                 : structure.roleLayout();
         var byBar = byBar(layout.bars(), tones);
-        var melody = melody(layout, tones, programs, evidence);
+        var melody = melody(layout, tones, programs, evidence, leadPart);
         for (String id : melody.lead()) roles.put(id, Role.melody);
         for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
@@ -129,7 +135,8 @@ final class ReconstructionRoles {
                     return scope.rule.role() == Role.melody;
             }
             // A time-, pitch- or section-bounded planned line must keep its scope.
-            return owner == null || owner.applies(section.id(), bar) && owner.rule.includes(at, chord);
+            if (owner != null) return owner.applies(section.id(), bar) && owner.rule.includes(at, chord);
+            return melodyScope(scopes, section.id(), bar, time) == null;
         }
         return false;
     }
@@ -138,8 +145,9 @@ final class ReconstructionRoles {
                                                   Map<Integer, Integer> programs, ReconstructionRolePlan plan,
                                                   ReconstructionBeatMap beatMap,
                                                   Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        var scopes = scopes(structure, plan);
         var byPart = new HashMap<Integer, List<Scope>>();
-        for (var scope : scopes(structure, plan))
+        for (var scope : scopes)
             byPart.computeIfAbsent(scope.rule.part(), ignored -> new ArrayList<>()).add(scope);
         var byBar = byBar(structure.bars(), structure.notes());
         var chords = plan.rules().stream().anyMatch(ReconstructionRolePlan.Rule::filtersTexture)
@@ -158,7 +166,7 @@ final class ReconstructionRoles {
                             continue;
                         reasons.put(note.id(), scope.reason());
                         Role role = scope.rule.role();
-                        if (ReconstructionRolePlan.traced(role))
+                        if (ReconstructionRolePlan.traced(role) && role != Role.melody)
                             plannedLines.computeIfAbsent(role, ignored -> new HashSet<>()).add(scope);
                         if (scope.rule.line() == ReconstructionRolePlan.Voice.all) {
                             roles.put(note.id(), role);
@@ -171,10 +179,9 @@ final class ReconstructionRoles {
                 }
                 for (var note : notes) {
                     if (reasons.containsKey(note.id())) continue;
-                    var active = plannedLines.get(roles.get(note.id()));
-                    if (active == null) continue;
-                    Scope winner = null;
-                    for (var scope : active)
+                    Role role = roles.get(note.id());
+                    Scope winner = role == Role.melody ? melodyScope(scopes, section.id(), barNumber, note.start()) : null;
+                    for (var scope : plannedLines.getOrDefault(role, Set.of()))
                         if (scope.rule.includesTime(note.start()) && (winner == null || scope.index > winner.index))
                             winner = scope;
                     if (winner != null) {
@@ -183,21 +190,37 @@ final class ReconstructionRoles {
                     }
                 }
             }
-            candidates.forEach((scope, notes) -> traceLine(notes, roles, programs, scope.rule.role(),
-                    scope.rule.line() == ReconstructionRolePlan.Voice.bottom, evidence));
+            candidates.forEach((scope, notes) -> {
+                boolean low = scope.rule.line() == ReconstructionRolePlan.Voice.bottom;
+                if (scope.rule.role() == Role.melody) {
+                    for (var note : ReconstructionMelody.track(notes, low, evidence)) roles.put(note.id(), Role.melody);
+                } else {
+                    traceLine(notes, roles, programs, scope.rule.role(), low);
+                }
+            });
         }
         return reasons;
     }
 
+    private static Scope melodyScope(List<Scope> scopes, String section, int bar, double time) {
+        for (var scope : scopes.reversed()) {
+            if (scope.rule.role() == Role.melody && scope.applies(section, bar) && scope.rule.includesTime(time))
+                return scope;
+        }
+        return null;
+    }
+
     static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
                                                   Map<Integer, Integer> programs) {
-        return melody(layout, tones, programs, Map.of());
+        return melody(layout, tones, programs, Map.of(), null);
     }
 
     private static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
                                                           Map<Integer, Integer> programs,
-                                                          Map<String, ReconstructionLeadAudio.Evidence> evidence) {
-        var melody = ReconstructionMelody.extract(layout, tones, programs, evidence);
+                                                          Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                                                          Integer leadPart) {
+        var melody = ReconstructionMelody.extract(layout, tones, programs, evidence, leadPart);
+        if (leadPart != null) return melody;
         var roles = new HashMap<String, Role>();
         for (var note : tones) roles.put(note.id(), melody.lead().contains(note.id()) ? Role.melody : Role.harmony);
         alignRepeatedMelody(layout, byBar(layout.bars(), tones), roles);
@@ -248,11 +271,11 @@ final class ReconstructionRoles {
 
     private static void labelLine(List<Note> section, Map<String, Role> roles, Map<Integer, Integer> programs, Role role) {
         List<Note> notes = section.stream().filter(note -> roles.get(note.id()) == Role.harmony).toList();
-        traceLine(notes, roles, programs, role, role == Role.bass, Map.of());
+        traceLine(notes, roles, programs, role, role == Role.bass);
     }
 
     private static void traceLine(List<Note> notes, Map<String, Role> roles, Map<Integer, Integer> programs,
-                                  Role role, boolean low, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+                                  Role role, boolean low) {
         if (notes.isEmpty()) return;
         int[] previous = new int[notes.size()];
         double[] path = new double[notes.size()];
@@ -266,8 +289,6 @@ final class ReconstructionRoles {
                 distant++;
             }
             double weight = salience(current, low, programs.get(current.part()), notes, i);
-            if (role == Role.melody) weight *= 1 + .28 * evidence
-                    .getOrDefault(current.id(), ReconstructionLeadAudio.Evidence.NONE).confidence();
             path[i] = weight;
             previous[i] = -1;
             if (bestDistant >= 0 && notes.get(bestDistant).end() <= current.start() && path[bestDistant] > .18) {

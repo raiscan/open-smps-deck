@@ -89,6 +89,20 @@ class ReconstructionRolePlanTest {
         assertDecision(roles, "other2", "melody", null);
     }
 
+    @Test void protectsPlannedLeadRestsAndLetsBackingPlayOutsideTheScope() throws Exception {
+        fixture();
+        Files.writeString(work.resolve("roleplan.json"), """
+                {"version":1,"rules":[
+                  {"sections":["S1"],"bars":"2-2","part":0,"role":"melody","pitchMin":100}
+                ]}
+                """);
+        run("roles", work.toString());
+        var roles = ReconstructionArtifacts.read(work.resolve("roles.json"), ReconstructionRoles.Result.class);
+        assertDecision(roles, "other0", "melody", null);
+        assertDecision(roles, "other1", "harmony", "roleplan#0");
+        assertDecision(roles, "other2", "melody", null);
+    }
+
     @Test void textureMatchesTheScoreGridAndFiltersBeforeTracing() throws Exception {
         fixture(true);
         String text = run("describe", work.toString(), "--section", "S1");

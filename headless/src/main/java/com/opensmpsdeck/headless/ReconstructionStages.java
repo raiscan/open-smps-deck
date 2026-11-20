@@ -76,12 +76,13 @@ public final class ReconstructionStages {
     record Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                   boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                   @Nullable String candidates, double harmonyMaxHz, @Nullable ReconstructionTempo.Options grid,
-                  @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes) {
+                  @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes,
+                  @Nullable Integer leadPart) {
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
-                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null);
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null, null);
         }
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
@@ -118,7 +119,7 @@ public final class ReconstructionStages {
     private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
-                                Map<Integer, ExternalTranscribers.Import> imports) {}
+                                Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz) {}
 
     private ReconstructionStages() {}
@@ -180,7 +181,7 @@ public final class ReconstructionStages {
                         }
                         var continuity = ReconstructionLeadContinuity.analyze(score, structure.notes());
                         var roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan,
-                                score.usesBeatGrid() ? score.beatMap() : null, continuity);
+                                score.usesBeatGrid() ? score.beatMap() : null, continuity, score.inputs.leadPart);
                         ReconstructionArtifacts.write(rolesFile, roles);
                     }
                     case ALLOCATE -> {
@@ -235,7 +236,8 @@ public final class ReconstructionStages {
         Path path = work.resolve("roleplan.json");
         if (Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(path.toString());
-        var heuristic = ReconstructionRoles.assign(structure, score.source.parts(), score.inputs.harmonyMaxHz);
+        var heuristic = ReconstructionRoles.assign(structure, score.source.parts(), score.inputs.harmonyMaxHz,
+                null, null, null, score.inputs.leadPart);
         var plan = ReconstructionRolePlan.template(structure, heuristic);
         // CREATE_NEW also protects edits made concurrently after the existence check.
         Files.writeString(path, new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(plan) + "\n",
@@ -322,7 +324,7 @@ public final class ReconstructionStages {
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
-                extra.grid, extra.audioRepeats, external);
+                extra.grid, extra.audioRepeats, external, extra.leadPart);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
     }
 
@@ -330,7 +332,7 @@ public final class ReconstructionStages {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
-                || extra.transcriber != null || !extra.imports.isEmpty()
+                || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
@@ -340,6 +342,7 @@ public final class ReconstructionStages {
     private static StageOptions stageOptions(String[] args, int firstOption) {
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
+        Integer leadPart = null;
         boolean estimate = false, audioRepeats = false;
         String steady = null, transcriber = null, device = null;
         Path transcriberConfig = null;
@@ -399,6 +402,11 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("Duplicate notes import for part " + part);
                     }
                 }
+                case "--lead-part" -> {
+                    if (leadPart != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --lead-part PART");
+                    leadPart = Integer.parseInt(args[i]);
+                }
                 case "--harmony-max-hz" -> {
                     if (hz != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --harmony-max-hz RATE");
@@ -419,7 +427,7 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports);
+                transcriber, transcriberConfig, device, parts, imports, leadPart);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }

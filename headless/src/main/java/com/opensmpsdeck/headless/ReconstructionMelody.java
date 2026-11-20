@@ -1,9 +1,11 @@
 package com.opensmpsdeck.headless;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -16,7 +18,11 @@ final class ReconstructionMelody {
     private static final double RELEASE_OVERLAP = .035;
     private static final double ATTACK_WINDOW = .024;
 
-    private record Link(int voice, int attack, double cost) {}
+    private static final double PATH_CONTEXT = 1.25;
+    private static final double REGISTER_CONTEXT = .35;
+    private static final double GATE_CAP = .24;
+    private static final double PHRASE_RESTART = .08;
+
     private record Line(int part, List<Note> notes) {}
     private record Register(double pitch, boolean sustained) {}
     record Selection(Set<String> lead, Set<String> octaveDoubles) {}
@@ -24,9 +30,13 @@ final class ReconstructionMelody {
     private ReconstructionMelody() {}
 
     static Selection extract(ReconstructionStructure.Layout structure, List<Note> tones,
-                               Map<Integer, Integer> programs, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+                               Map<Integer, Integer> programs, Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                               Integer leadPart) {
         var byPart = new LinkedHashMap<Integer, List<Note>>();
-        for (var note : tones) byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
+        for (var note : tones) {
+            if (leadPart == null || note.part() == leadPart)
+                byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
+        }
         var lines = new ArrayList<Line>();
         var octaveCopies = new HashSet<String>();
         byPart.forEach((part, notes) -> {
@@ -36,10 +46,14 @@ final class ReconstructionMelody {
                 findOctaveCopies(notes, octaveCopies);
                 var distinct = notes.stream().filter(note -> !octaveCopies.contains(note.id())).toList();
                 if (isMonophonic(distinct)) lines.add(new Line(part, distinct));
-                else for (var line : split(distinct)) lines.add(new Line(part, line));
+                else lines.add(new Line(part, track(distinct, false, evidence)));
             }
         });
         var result = new HashSet<String>();
+        if (leadPart != null) {
+            for (var line : lines) for (var note : line.notes) result.add(note.id());
+            return new Selection(result, octaveCopies);
+        }
         var bars = new LinkedHashMap<String, ReconstructionStructure.Bar>();
         for (var bar : structure.bars()) bars.put(bar.id(), bar);
         var activeByBar = liveNotesByBar(structure.bars(), lines);
@@ -133,45 +147,79 @@ final class ReconstructionMelody {
         return clashes * 30 <= notes.size();
     }
 
-    private static List<List<Note>> split(List<Note> notes) {
-        var voices = new ArrayList<List<Note>>();
-        for (int start = 0; start < notes.size();) {
-            int end = start + 1;
-            while (end < notes.size() && notes.get(end).start() - notes.get(start).start() <= ATTACK_WINDOW) end++;
-            var group = notes.subList(start, end);
-            var links = new ArrayList<Link>();
-            for (int i = 0; i < voices.size(); i++) {
-                Note previous = voices.get(i).getLast();
-                if (group.getFirst().start() - previous.end() > .75) continue;
-                for (int j = 0; j < group.size(); j++) {
-                    var note = group.get(j);
-                    double gap = note.start() - previous.end();
-                    double releaseTolerance = Math.clamp(.20 * (previous.end() - previous.start()), .045, .075);
-                    if (gap < -releaseTolerance) continue;
-                    int leap = Math.abs(previous.pitch() - note.pitch());
-                    double oldLength = .06 + previous.end() - previous.start();
-                    double newLength = .06 + note.end() - note.start();
-                    double cost = .065 * leap + 1.4 * Math.abs(gap) + .19 * Math.abs(Math.log(newLength / oldLength));
-                    if (cost <= 1.05) links.add(new Link(i, j, cost));
+    /**
+     * Best monophonic path through the sorted attacks. A path can skip a note or
+     * leave silence. When it cuts a release, only the played gate earns credit.
+     */
+    static List<Note> track(List<Note> notes, boolean low, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        if (notes.isEmpty() || isMonophonic(notes)) return notes;
+        int size = notes.size();
+        var releaseOrder = java.util.stream.IntStream.range(0, size).boxed()
+                .sorted(Comparator.comparingDouble(i -> notes.get(i).end())).toList();
+        double[] scores = new double[size];
+        double[] weights = new double[size];
+        int[] previous = new int[size];
+        Arrays.fill(previous, -1);
+        var recent = new LinkedHashSet<Integer>();
+        int expired = 0, restart = -1, best = 0;
+        int firstNeighbor = 0;
+        for (int i = 0; i < size; i++) {
+            Note current = notes.get(i);
+            double onset = current.start();
+            while (expired < size && notes.get(releaseOrder.get(expired)).end() <= onset - PATH_CONTEXT) {
+                int candidate = releaseOrder.get(expired++);
+                recent.remove(candidate);
+                if (restart < 0 || scores[candidate] > scores[restart]) restart = candidate;
+            }
+            while (notes.get(firstNeighbor).start() < onset - REGISTER_CONTEXT) firstNeighbor++;
+            weights[i] = weight(current, notes, firstNeighbor, low, evidence);
+            double reward = reward(current.end() - onset, weights[i]);
+            scores[i] = reward;
+            if (restart >= 0 && scores[restart] > PHRASE_RESTART) {
+                scores[i] += scores[restart] - PHRASE_RESTART;
+                previous[i] = restart;
+            }
+            for (int j : recent) {
+                Note prior = notes.get(j);
+                double interval = onset - prior.start();
+                if (interval <= ATTACK_WINDOW || prior.startTick(Integer.MAX_VALUE) == current.startTick(Integer.MAX_VALUE))
+                    continue;
+                double gate = prior.end() - prior.start();
+                double gap = onset - prior.end();
+                if (gap < -RELEASE_OVERLAP && interval < .060) continue;
+                double cut = reward(gate, weights[j]) - reward(Math.min(interval, gate), weights[j]);
+                double cost = ReconstructionRoles.transition(prior, current, Math.clamp(gap, 0, .40))
+                        + cut + Math.min(.08, .20 * Math.max(0, -gap));
+                double score = scores[j] + reward - cost;
+                if (score > scores[i]) {
+                    scores[i] = score;
+                    previous[i] = j;
                 }
             }
-            links.sort(Comparator.comparingDouble(Link::cost));
-            var used = new boolean[voices.size()];
-            var assigned = new boolean[group.size()];
-            for (var link : links) {
-                if (used[link.voice] || assigned[link.attack]) continue;
-                voices.get(link.voice).add(group.get(link.attack));
-                used[link.voice] = true;
-                assigned[link.attack] = true;
-            }
-            for (int i = 0; i < group.size(); i++) if (!assigned[i]) {
-                var voice = new ArrayList<Note>();
-                voice.add(group.get(i));
-                voices.add(voice);
-            }
-            start = end;
+            if (scores[i] > scores[best]) best = i;
+            recent.add(i);
         }
-        return voices;
+        var line = new ArrayList<Note>();
+        for (int i = best; i >= 0; i = previous[i]) line.add(notes.get(i));
+        return line.reversed();
+    }
+
+    private static double reward(double gate, double weight) {
+        return (.045 + Math.min(GATE_CAP, gate)) * weight;
+    }
+
+    private static double weight(Note note, List<Note> notes, int first, boolean low,
+                                 Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+        int edge = note.pitch();
+        for (int j = first; j < notes.size() && notes.get(j).start() <= note.start() + REGISTER_CONTEXT; j++) {
+            Note other = notes.get(j);
+            if (other.end() < note.start() - .10) continue;
+            edge = low ? Math.min(edge, other.pitch()) : Math.max(edge, other.pitch());
+        }
+        double register = 1 - .018 * Math.min(24, Math.abs(note.pitch() - edge));
+        double motion = evidence.getOrDefault(note.id(), ReconstructionLeadAudio.Evidence.NONE).confidence();
+        return register * (.80 + .20 * note.velocity() / 127.0) * (.70 + .30 * note.confidence())
+                * (1 + .55 * motion);
     }
 
     private static void findOctaveCopies(List<Note> notes, Set<String> copies) {

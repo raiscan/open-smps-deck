@@ -267,12 +267,23 @@ candidates stay in `score.json` as evidence.
 are `melody`, `counter`, `bass`, `harmony`, `drums`, and `drop`.
 A drop requires a reason.
 
-Melody follows high, sustained or accented lines while retaining continuity
-with the preceding line in a section. Monophonic MIDI parts are kept intact
-as candidates. Polyphonic parts are split by nearby attack times, compatible
-releases, pitch intervals and durations. Melody labels transfer between
-matched notes in repeat instances. The lower and secondary contours supply
-bass and counter material.
+Monophonic MIDI parts stay intact as melody candidates. For each polyphonic
+part, a dynamic program selects an attack path across bars. It rewards
+played gate duration up to 240 ms and adds 45 ms of equivalent weight for
+each attack. Attacks within 24 ms compete for one place in the path.
+Local register, velocity, note confidence and stem motion weight each note.
+Transitions charge for pitch leaps, gaps and overlapping releases. A handoff
+can cut a sustained note, with credit limited to its played gate, so a
+sequence of reattacks can outrank a long competing tone.
+
+With no explicit lead, the heuristic compares part contours by bar and can
+transfer melody labels between matched repeat instances. On staged
+`reconstruct run` or `transcribe`, `--lead-part PART` reserves FM1 for the
+chosen non-drum MIDI part, including through its rests. Scoped `melody` rules
+in `roleplan.json` override the heuristic or CLI lead within their section,
+bar and time bounds. Pitch and texture filters constrain the notes available
+to the rule's tracker. The remaining parts are still available for backing;
+a stem mapping supplies audio evidence only.
 
 A gap in the selected line can receive the tail of an already sounding
 note in the same MIDI part. The chord keeps its original attack. The tail

@@ -41,6 +41,9 @@ final class ReconstructionChecks {
                     at + ".source.parts", "invalid MIDI program or name for part " + part.id());
         }
         require(parts.containsAll(inputs.stems().keySet()), at + ".inputs.stems", "unknown MIDI part ID");
+        require(inputs.leadPart() == null || value.source().parts().stream()
+                        .anyMatch(part -> part.id() == inputs.leadPart() && !part.drums()),
+                at + ".inputs.leadPart", "--lead-part must name an existing non-drum MIDI part ID");
         if (inputs.externalNotes() != null) {
             for (var entry : inputs.externalNotes().entrySet()) {
                 ExternalTranscribers.validatePart(entry.getKey(), value.source().parts());

@@ -269,10 +269,18 @@ inherit it. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
 `bottom` traces one line from eligible notes, with other eligible notes
 left in harmony. Melody and counter default to `top`, bass to `bottom`.
 Use `all` to assign every match directly. Harmony still goes through
-reattack thinning. An uncovered note uses its heuristic role unless that
-line is assigned to planned candidates in the same bar, in which case
-it becomes harmony. Affected decisions carry a zero-based `roleplan#N`
-in their reason. Without a plan file, reconstruction uses the heuristic.
+reattack thinning. A `melody` rule takes precedence over automatic FM1
+selection across its section, bar and time scope, including during rests.
+Pitch and texture filters limit the rule's melody candidates. Unmatched
+automatic melody notes in scope become harmony. Other traced roles keep
+their existing bar-local precedence. Affected decisions carry a zero-based
+`roleplan#N` in their reason.
+
+For a song-wide lead, pass `--lead-part PART` to staged `reconstruct run` or
+`reconstruct transcribe`. Use the non-drum MIDI part ID shown by `describe`.
+The choice persists in `score.json` for resumed stages. Backing parts remain
+available to allocation. A scoped roleplan can hand FM1 to another part.
+`--stem PART=WAV` supplies audio evidence without reserving FM1.
 
 The MCP server exposes 17 tools, including `reconstruct_describe` with the
 same filters and `reconstruct_plan_template`. Use `artifact_read` and

@@ -96,6 +96,15 @@ class ReconstructionCliTest {
         var score = JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
         assertEquals(60, score.get("ticksPerSecond").getAsInt());
         assertEquals(30, score.get("frames").getAsInt());
+        Path explicitLead = directory.resolve("explicit-lead");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), explicitLead.toString(), "--seconds", ".5", "--lead-part", "0"},
+                System.out, new PrintStream(errors)), errors.toString());
+        assertEquals(0, ReconstructionStages.readScore(explicitLead.resolve("score.json")).inputs().leadPart());
+        assertEquals(2, Main.run(new String[]{"reconstruct", "transcribe", midi.toString(), wav.toString(),
+                index.toString(), directory.resolve("unknown-lead").toString(), "--lead-part", "9"},
+                System.out, new PrintStream(errors)));
+        assertTrue(errors.toString().contains("--lead-part must name an existing non-drum MIDI part ID"));
         assertEquals("external", score.getAsJsonArray("notes").asList().stream()
                 .map(n -> n.getAsJsonObject()).filter(n -> n.get("pitch").getAsInt() == 80)
                 .findFirst().orElseThrow().get("source").getAsString());
