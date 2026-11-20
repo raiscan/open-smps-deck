@@ -31,6 +31,11 @@ class ReconstructionRolePlanTest {
         assertTrue(text.contains("3 S .15"), text);
         assertFalse(text.contains("D2"), text);
 
+        var fullView = JsonParser.parseString(run("describe", work.toString(), "--json")).getAsJsonObject();
+        var sections = fullView.getAsJsonArray("sections");
+        assertEquals("[0,2,2,0,2,0]", sections.get(0).getAsJsonObject().get("attacks").toString());
+        assertEquals("[2,0]", sections.get(1).getAsJsonObject().get("attacks").toString());
+
         Path output = work.resolve("view.json");
         assertEquals("", run("describe", work.toString(), "--json", "--section", "S2", "--parts", "0",
                 "--bars", "4-4", "--out", output.toString()));
@@ -42,6 +47,7 @@ class ReconstructionRolePlanTest {
         assertEquals(4, section.get("firstBar").getAsInt());
         var part = section.getAsJsonArray("parts").get(0).getAsJsonObject();
         assertEquals(1, part.getAsJsonArray("bars").size());
+        assertEquals("[0,1]", section.getAsJsonArray("attacks").toString());
         assertEquals(2, part.getAsJsonObject("roles").entrySet().stream().mapToInt(e -> e.getValue().getAsInt()).sum());
     }
 
@@ -83,6 +89,63 @@ class ReconstructionRolePlanTest {
         assertDecision(roles, "other2", "melody", null);
     }
 
+    @Test void textureMatchesTheScoreGridAndFiltersBeforeTracing() throws Exception {
+        fixture(true);
+        String text = run("describe", work.toString(), "--section", "S1");
+        assertTrue(text.contains("[C4+G4] G4"), text);
+        assertTrue(text.contains("3.00 notes/bar poly 3 figure 1b 2/2"), text);
+        assertTrue(text.contains("1.00 notes/bar poly 1 figure 1b 2/0"), text);
+
+        Files.writeString(work.resolve("roleplan.json"), """
+                {"version":1,"rules":[
+                  {"sections":["S1"],"part":0,"role":"harmony"},
+                  {"sections":["S1"],"part":0,"role":"melody","voice":"top","texture":"single","pitchMin":67},
+                  {"sections":["S1"],"part":0,"role":"drop","texture":"chord","pitchMax":60},
+                  {"sections":["S1"],"part":1,"role":"drop","texture":"chord"}
+                ]}
+                """);
+        run("roles", work.toString());
+        var roles = ReconstructionArtifacts.read(work.resolve("roles.json"), ReconstructionRoles.Result.class);
+        assertDecision(roles, "single0", "melody", "roleplan#1");
+        assertDecision(roles, "single1", "melody", "roleplan#1");
+        assertDecision(roles, "hi0", "harmony", "roleplan#0");
+        assertDecision(roles, "lo0", "drop", "roleplan#2");
+        assertDecision(roles, "drum0", "drums", null);
+    }
+
+    @Test void omittedTextureProducesTheSameRolesAsExplicitAny() throws Exception {
+        fixture(true);
+        var plan = work.resolve("roleplan.json");
+        var roles = work.resolve("roles.json");
+        String legacy = """
+                {"version":1,"rules":[
+                  {"sections":["S1"],"part":0,"role":"melody","voice":"bottom"},
+                  {"bars":"2-2","part":0,"role":"drop","pitchMin":67}
+                ]}
+                """;
+        Files.writeString(plan, legacy);
+        run("roles", work.toString());
+        byte[] original = Files.readAllBytes(roles);
+        Files.writeString(plan, legacy.replace("\"part\":0", "\"part\":0,\"texture\":\"any\""));
+        run("roles", work.toString());
+        assertArrayEquals(original, Files.readAllBytes(roles));
+    }
+
+    @Test void rejectsInvalidTextureWithItsRuleIndex() throws Exception {
+        fixture();
+        for (String invalid : List.of("\"stacked\"", "\"Chord\"", "2", "true", "[]")) {
+            Files.writeString(work.resolve("roleplan.json"), """
+                    {"version":1,"rules":[
+                      {"sections":["S1"],"part":0,"role":"harmony"},
+                      {"sections":["S1"],"part":0,"role":"melody","texture":%s}
+                    ]}
+                    """.formatted(invalid));
+            String result = call("roles", work.toString());
+            assertTrue(result.contains("roleplan.json.rules[1].texture"), result);
+            if (invalid.startsWith("\"")) assertTrue(result.contains("expected any, single or chord"), result);
+        }
+    }
+
     @Test void templateIsValidatedAndAnInvalidRuleLeavesRolesIntact() throws Exception {
         fixture();
         run("roles", work.toString());
@@ -104,6 +167,10 @@ class ReconstructionRolePlanTest {
     }
 
     private void fixture() throws Exception {
+        fixture(false);
+    }
+
+    private void fixture(boolean mixedTexture) throws Exception {
         List<MidiScore.Part> parts = List.of(new MidiScore.Part(0, "Keys", 0, false),
                 new MidiScore.Part(1, "Drums", 0, true), new MidiScore.Part(2, "Upper", 80, false));
         var notes = new ArrayList<Note>();
@@ -112,14 +179,17 @@ class ReconstructionRolePlanTest {
             double start = i * 2;
             bars.add(new ReconstructionStructure.Bar("b" + i, start, start + 2, true));
             notes.add(new Note("lo" + i, 0, start, start + .375, 60, 90, "midi", 1));
-            notes.add(new Note("hi" + i, 0, start, start + .375, 67, 90, "midi", 1));
+            notes.add(new Note("hi" + i, 0, start + (mixedTexture ? .04 : 0), start + .375, 67, 90, "midi", 1));
             notes.add(new Note("drum" + i, 1, start, start + .08, i < 2 ? 36 : 38, 90, "midi", 1));
             notes.add(new Note("other" + i, 2, start, start + .375, 77, 90, "midi", 1));
+            if (mixedTexture) notes.add(new Note("single" + i, 0, start + .125, start + .375, 67, 90, "midi", 1));
         }
+        notes.sort(java.util.Comparator.comparingDouble(Note::start));
         var inputs = new ReconstructionStages.Inputs("test.mid", "test.wav", "catalogue.json", "Synthetic", 30,
                 false, false, false, false, Map.of(), null, 7.5, null, false);
         var score = new ReconstructionStages.Score(1, 8_000_000, 480, 60, inputs, bars,
-                new MidiScore(parts, List.of(), List.of()), Map.of(0, 8, 1, 4, 2, 4), notes, List.of(), List.of(), null, null);
+                new MidiScore(parts, List.of(), List.of()), Map.of(0, mixedTexture ? 12 : 8, 1, 4, 2, 4),
+                notes, List.of(), List.of(), null, null);
         var sections = List.of(new ReconstructionStructure.Section("S1", List.of("b0", "b1")),
                 new ReconstructionStructure.Section("S2", List.of("b2", "b3")));
         var repeats = List.of(new ReconstructionStructure.Repeat("R1", List.of("b0", "b2")),

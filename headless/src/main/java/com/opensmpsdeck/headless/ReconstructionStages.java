@@ -159,7 +159,8 @@ public final class ReconstructionStages {
                         } else {
                             var plan = ReconstructionArtifacts.read(planFile, ReconstructionRolePlan.class);
                             ReconstructionChecks.rolePlan(plan, structure, score);
-                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan);
+                            roles = ReconstructionRoles.assign(structure, score.source.parts(), rate, plan,
+                                    score.usesBeatGrid() ? score.beatMap() : null);
                         }
                         ReconstructionArtifacts.write(rolesFile, roles);
                     }

@@ -38,8 +38,8 @@ final class BenchReconstruction {
 
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
                       Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
-                      List<BenchMetrics.Event> oracleTruth, String steadyTempo) throws IOException {
-        var args = new ArrayList<>(List.of("reconstruct", oracleTruth == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
+                      BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes, String steadyTempo) throws IOException {
+        var args = new ArrayList<>(List.of("reconstruct", rolePlan == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
         if (steadyTempo.equals("off")) {
             args.add("--steady-tempo");
@@ -55,9 +55,9 @@ final class BenchReconstruction {
             args.add(part + "=" + file);
         });
         hooks.reconstruction().run(args.toArray(String[]::new), QUIET);
-        if (oracleTruth != null) {
+        if (rolePlan != null) {
             hooks.reconstruction().run(new String[]{"reconstruct", "structure", output.toString()}, QUIET);
-            BenchRolePlan.write(output, oracleTruth, hooks.reconstruction(), QUIET);
+            BenchRolePlan.write(output, truthNotes, rolePlan, hooks.reconstruction(), QUIET);
             hooks.reconstruction().run(new String[]{"reconstruct", "run", "--from", "roles", output.toString()}, QUIET);
         }
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);

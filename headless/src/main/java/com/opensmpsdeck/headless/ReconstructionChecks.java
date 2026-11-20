@@ -222,6 +222,8 @@ final class ReconstructionChecks {
                     "drums role must match MIDI percussion part");
             require(rule.line() == ReconstructionRolePlan.Voice.all || ReconstructionRolePlan.traced(rule.role()),
                     at + ".voice", "top and bottom require melody, counter or bass");
+            require(rule.texture() == null || Set.of("any", "single", "chord").contains(rule.texture()),
+                    at + ".texture", "expected any, single or chord");
             int min = rule.pitchMin() == null ? 0 : rule.pitchMin();
             int max = rule.pitchMax() == null ? 127 : rule.pitchMax();
             require(min >= 0 && min <= max && max <= 127, at, "expected 0 <= pitchMin <= pitchMax <= 127");
