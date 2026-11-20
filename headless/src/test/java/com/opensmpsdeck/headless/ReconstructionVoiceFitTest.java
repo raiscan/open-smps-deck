@@ -72,6 +72,41 @@ class ReconstructionVoiceFitTest {
         assertEquals("normal", selection.getFirst().candidate().id());
     }
 
+    @Test void retainsAnIncumbentThroughSmallFitChanges() {
+        var prior = probe("prior", 1, .045f, 0);
+        var challenger = probe("challenger", 1, 0, 0);
+        var target = probe("target", 1, 0, 1).spectrum();
+        var choices = List.of(List.of(challenger, prior));
+        var fit = new VoiceFit(target, 3, List.of(prior), java.util.Set.of());
+        fit.patches(choices, List.of("prior"));
+        assertEquals("prior", fit.selection(0).candidate().id());
+        assertEquals("challenger", VoiceFit.solve(target, 3, choices).getFirst().candidate().id());
+    }
+
+    @Test void replacesTheIncumbentOnlyForClearImprovementOnBothPartitions() {
+        var prior = probe("prior", 1, .2f, 0);
+        var challenger = probe("challenger", 1, 0, 0);
+        var choices = List.of(List.of(prior, challenger));
+        var fit = new VoiceFit(probe("target", 1, 0, 1).spectrum(), 3, List.of(prior), java.util.Set.of());
+        fit.patches(choices, List.of("prior"));
+        assertEquals("challenger", fit.selection(0).candidate().id());
+
+        var overfit = new VoiceFit(new float[]{1, 0, 1, 1, .2f, 1}, 3, List.of(prior), java.util.Set.of());
+        overfit.patches(choices, List.of("prior"));
+        assertEquals("prior", overfit.selection(0).candidate().id());
+    }
+
+    @Test void reusesFitAndCheckWindowsWhenNotesMove() {
+        var revised = java.util.Map.of("FM1", List.of(new ReconstructionAllocation.Entry(
+                new ReconstructionStages.Note("note", 0, .8, 1.1, 72, 90, "midi", 1),
+                ReconstructionRoles.Role.melody, "FM1", 48, 66,
+                ReconstructionAllocation.Outcome.kept, null, null)));
+        var original = new VoiceWindows(480, java.util.Map.of(), null);
+        assertNotEquals(original.fitWindows(), new VoiceWindows(480, revised, null).fitWindows());
+        assertEquals(original.fitWindows(), new VoiceWindows(480, revised, original.fitWindows()).fitWindows());
+        assertNotEquals(original.fitWindows(), new VoiceWindows(360, revised, original.fitWindows()).fitWindows());
+    }
+
     @Test void defaultsToDelayedLeadVibratoAndQuietEchoWhenTheLaneIsFree() {
         var effects = ReconstructionVoicing.idiom(ReconstructionRoles.Role.melody, "FM5");
         assertTrue(effects.vibrato().delay() > 0);

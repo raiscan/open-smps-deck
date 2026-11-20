@@ -124,7 +124,9 @@ Limits:
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
 
-Standalone `voice` refits and replaces existing voicing. A chained run
+Standalone `voice` refits and replaces existing voicing, giving each FM
+lane's previous variant preference on close scores. For a fresh fit, move
+`voicing.json` to a backup name before running `voice`. A chained run
 starting at `voice` reuses an existing hand-edited voicing. Starting at an
 earlier stage refits later artifacts. Save any downstream edits you intend
 to carry forward. Assembly regenerates the arrangement. Apply direct

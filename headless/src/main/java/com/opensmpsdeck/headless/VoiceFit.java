@@ -8,6 +8,9 @@ final class VoiceFit {
     private static final int PATCH_PASSES = 3;
     private static final int GAIN_PASSES = 12;
     private static final double MAX_GAIN = 4;
+    private static final double NEW_PATCH_MARGIN = .0001;
+    // A near-tie that flipped the selected voice moved the fit error by about 0.18%.
+    private static final double INCUMBENT_MARGIN = .005;
 
     record Candidate(String id, float[] spectrum) {}
     record Selection(Candidate candidate, double gain) {}
@@ -50,10 +53,17 @@ final class VoiceFit {
     }
 
     void patches(List<List<Candidate>> candidates) {
+        patches(candidates, java.util.Collections.nCopies(candidates.size(), null));
+    }
+
+    void patches(List<List<Candidate>> candidates, List<String> incumbents) {
         for (int pass = 0; pass < PATCH_PASSES; pass++) {
             boolean changed = false;
-            for (int lane = 0; lane < candidates.size(); lane++)
-                changed |= select(lane, candidates.get(lane), .0001);
+            for (int lane = 0; lane < candidates.size(); lane++) {
+                double margin = selection(lane).candidate().id().equals(incumbents.get(lane))
+                        ? INCUMBENT_MARGIN : NEW_PATCH_MARGIN;
+                changed |= select(lane, candidates.get(lane), margin);
+            }
             if (!changed) break;
             polishGains();
         }
