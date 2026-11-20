@@ -66,7 +66,9 @@ final class ReconstructionCli {
                           List<ReconstructionAllocation.RunPlacement> fastRuns,
                           Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
                           List<ReconstructionBendEncoding.Applied> bends, Boolean bendSizeLimit,
-                          ReconstructionDrums.Source drumSource) {}
+                          ReconstructionDrums.Source drumSource,
+                          List<S3kReconstruction.VoicedGate> voicedGates,
+                          Map<String, String> assemblyInputs) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -92,6 +94,10 @@ final class ReconstructionCli {
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
+        out.println("       reconstruct trace WORK_DIR [--start S] [--end S] [--part N] [--lane LANE]");
+        out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
+        out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
+        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...]");
         out.println("       reconstruct plan-template WORK_DIR");
         out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] OUT.wav");
@@ -107,6 +113,14 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("audition")) {
             ReconstructionAudition.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && List.of("trace", "trace-diff").contains(args[1])) {
+            ReconstructionTrace.run(args[1], java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("rerun")) {
+            ReconstructionManifest.run(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("describe")) {
@@ -168,7 +182,7 @@ final class ReconstructionCli {
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
                 (echoes, copies, bends) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                        catalogue, sectionPlan.choices(), spill, echoes), out, null);
+                        catalogue, sectionPlan.choices(), spill, echoes), out, null, null);
     }
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
@@ -214,13 +228,14 @@ final class ReconstructionCli {
         var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
         if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
         placements.addAll(playback.placements());
+        var assemblyInputs = assemblyInputs(score, allocation, voicing);
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing, assemblyInputs);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {
@@ -237,6 +252,14 @@ final class ReconstructionCli {
             for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
             Files.deleteIfExists(staging);
         }
+    }
+
+    static Map<String, String> assemblyInputs(ReconstructionStages.Score score,
+                                              ReconstructionAllocation.Result allocation,
+                                              ReconstructionVoicing.Result voicing) {
+        return Map.of("score", ReconstructionArtifacts.fingerprint(score),
+                "allocation", ReconstructionArtifacts.fingerprint(allocation),
+                "voicing", ReconstructionArtifacts.fingerprint(voicing));
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
@@ -279,7 +302,7 @@ final class ReconstructionCli {
                                Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
                                ReconstructionMelodyGapFill.Stats melodyGapFill, ReconstructionAllocation.Fm1Gaps fm1InterNoteGaps,
                                List<ReconstructionAllocation.RunPlacement> fastRuns, List<String> copyLanes,
-                               Arrangement arrangement, PrintStream out, LoadedProject existing) throws IOException {
+                               Arrangement arrangement, PrintStream out, LoadedProject existing, Map<String, String> assemblyInputs) throws IOException {
         long durationUs = transcription.durationUs();
         var timeline = ReconstructionTimeMap.of(transcription);
         int frames = timeline.frames();
@@ -366,7 +389,8 @@ final class ReconstructionCli {
                     result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
                     runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices(),
                     result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null,
-                    drumSource(transcription, result.dacHits()));
+                    drumSource(transcription, result.dacHits()),
+                    assemblyInputs == null ? null : result.voicedGates(), assemblyInputs);
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

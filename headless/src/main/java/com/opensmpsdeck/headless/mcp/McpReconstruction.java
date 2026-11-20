@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionAudition;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionStages;
+import com.opensmpsdeck.headless.ReconstructionTrace;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -51,7 +52,7 @@ final class McpReconstruction {
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
+            "voicing.json", "roleplan.json", "manifest.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -132,6 +133,23 @@ final class McpReconstruction {
                 args.has("solo") && args.get("solo").getAsBoolean(),
                 args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output);
         return object(result);
+    }
+
+    static JsonObject trace(JsonObject args) throws IOException {
+        var cli = new ArrayList<String>();
+        options(cli, args, "start", "end", "part", "pitch", "pitchMin", "pitchMax", "lane", "status");
+        return ReconstructionTrace.trace(traceDirectory(args, "workDir"), cli.toArray(String[]::new));
+    }
+
+    static JsonObject traceDiff(JsonObject args) throws IOException {
+        return ReconstructionTrace.diff(traceDirectory(args, "oldWorkDir"), traceDirectory(args, "newWorkDir"),
+                optional(args, "span"));
+    }
+
+    private static Path traceDirectory(JsonObject args, String key) throws IOException {
+        Path work = McpPaths.directory(string(args, key));
+        for (String file : ReconstructionTrace.FILES) McpPaths.managed(work, file);
+        return work;
     }
 
     static JsonObject describe(JsonObject args) throws IOException {

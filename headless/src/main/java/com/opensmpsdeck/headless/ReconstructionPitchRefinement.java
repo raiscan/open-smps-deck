@@ -55,7 +55,8 @@ final class ReconstructionPitchRefinement {
     private ReconstructionPitchRefinement() {}
 
     record Change(int partId, int originalPitch, int pitch, long startUs, long endUs, String reason,
-                  String source, boolean stem, int supportingFrames, double meanHarmonicEnergy) {}
+                  String source, boolean stem, int supportingFrames, double meanHarmonicEnergy,
+                  @ReconstructionStages.Nullable MidiScore.Note originalNote) {}
 
     record Result(MidiScore score, List<Change> changes) {
         Result {
@@ -201,7 +202,7 @@ final class ReconstructionPitchRefinement {
             notes.add(new MidiScore.Note(note.partId(), note.pitch(), note.velocity(), cursor, start));
             notes.add(new MidiScore.Note(note.partId(), candidate.pitch(), note.velocity(), start, end));
             changes.add(change(note.partId(), note.pitch(), start, end, "held-note-pitch-change", analysis, stem,
-                    candidate));
+                    candidate, note));
             cursor = end;
         }
         if (cursor == note.startUs()) {
@@ -245,7 +246,7 @@ final class ReconstructionPitchRefinement {
         }
         notes.add(new MidiScore.Note(previous.partId(), candidate.pitch(), (previous.velocity() + next.velocity()) / 2,
                 start, end));
-        changes.add(change(previous.partId(), -1, start, end, "short-gap-pitch", analysis, stem, candidate));
+        changes.add(change(previous.partId(), -1, start, end, "short-gap-pitch", analysis, stem, candidate, null));
         return true;
     }
 
@@ -262,9 +263,9 @@ final class ReconstructionPitchRefinement {
     }
 
     private static Change change(int part, int original, long start, long end, String reason,
-                                 Analysis analysis, boolean stem, Run run) {
+                                 Analysis analysis, boolean stem, Run run, MidiScore.Note originalNote) {
         return new Change(part, original, run.pitch(), start, end, reason, analysis.source.getFileName().toString(), stem, run.frames(),
-                run.harmonicEnergy() / run.frames());
+                run.harmonicEnergy() / run.frames(), originalNote);
     }
 
     private record Frame(int pitch, double harmonicEnergy) {

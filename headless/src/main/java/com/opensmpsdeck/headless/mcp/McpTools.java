@@ -37,7 +37,7 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
@@ -60,6 +60,21 @@ final class McpTools {
                     field("parts", "string", "Comma-separated MIDI part IDs").optional(),
                     field("bars", "string", "Inclusive one-based bar range such as 17-24").optional(),
                     field("output", "string", "Save inside the work directory instead of returning inline").optional()),
+            tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
+                    (args, progress) -> McpReconstruction.trace(args), WORK,
+                    field("start", "number", "Inclusive start in source seconds").optional(),
+                    field("end", "number", "Exclusive end in source seconds").optional(),
+                    field("part", "integer", "Zero-based MIDI part ID").optional(),
+                    field("pitch", "integer", "Exact source MIDI pitch").optional(),
+                    field("pitchMin", "integer", "Inclusive minimum source MIDI pitch").optional(),
+                    field("pitchMax", "integer", "Inclusive maximum source MIDI pitch").optional(),
+                    field("lane", "string", "Allocated lane, e.g. FM1").optional(),
+                    choice("status", "Summary fate", "kept", "moved", "shortened", "merged", "dropped").optional()),
+            tool("reconstruct_trace_diff", "Compare note fates and flag changes outside the edited span.",
+                    (args, progress) -> McpReconstruction.traceDiff(args),
+                    field("oldWorkDir", "string", "Absolute baseline work directory"),
+                    field("newWorkDir", "string", "Absolute candidate work directory"),
+                    field("span", "string", "Edited START,END in source seconds").optional()),
             tool("reconstruct_plan_template", "Create roleplan.json from the heuristic's dominant roles per section and part.",
                     (args, progress) -> McpReconstruction.planTemplate(args), WORK),
             tool("reconstruct_audition", "Compare FM variants on a frozen phrase from the assembled arrangement.",
@@ -70,7 +85,7 @@ final class McpTools {
                     field("gain", "number", "Multiplier for the existing note levels (0–4)").optional(),
                     field("solo", "boolean", "Mute all other lanes (default false)").optional(),
                     path("reference", "Aligned reference WAV to append").optional()),
-            tool("artifact_read", "Read a stage artifact or the assembly report as JSON.",
+            tool("artifact_read", "Read a stage artifact, assembly report or run manifest as JSON.",
                     (args, progress) -> McpReconstruction.artifact(args, false), WORK,
                     choice("artifact", "Artifact name without .json", READABLE_ARTIFACTS), SELECTION),
             tool("artifact_write", "Validate the entire artifact after applying an edit, then replace it atomically.",

@@ -38,6 +38,11 @@ final class ReconstructionFastRuns {
     private ReconstructionFastRuns() {}
 
     static void reconcile(List<Note> notes, int part, List<Figure> figures) {
+        reconcile(notes, part, figures, new ArrayList<>());
+    }
+
+    static void reconcile(List<Note> notes, int part, List<Figure> figures,
+                          List<ReconstructionStages.ScoreDecision> decisions) {
         var ids = new HashSet<String>();
         for (var note : notes) ids.add(note.id());
         for (var figure : figures) {
@@ -69,8 +74,10 @@ final class ReconstructionFastRuns {
                 notes.add(new Note(unique(ids, held.id() + "-after-run"), part, figure.end(), held.end(),
                         held.pitch(), held.velocity(), held.source(), held.confidence()));
             }
-            notes.add(new Note(unique(ids, held.id() + "-run"), part, figure.start(), figure.end(), first.pitch,
+            String figureId = unique(ids, held.id() + "-run");
+            notes.add(new Note(figureId, part, figure.start(), figure.end(), first.pitch,
                     held.velocity(), figure.reason, figure.confidence, null, figure.steps));
+            decisions.add(new ReconstructionStages.ScoreDecision(held, figure.reason, figureId));
         }
     }
 

@@ -48,9 +48,10 @@ class McpServerTest {
         assertEquals(2, old.size());
         assertEquals("2025-06-18", old.getFirst().getAsJsonObject("result").get("protocolVersion").getAsString());
         var tools = old.getLast().getAsJsonObject("result").getAsJsonArray("tools");
-        assertEquals(18, tools.size());
+        assertEquals(20, tools.size());
         var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
-        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_plan_template", "transcribers_list")));
+        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_trace", "reconstruct_trace_diff",
+                "reconstruct_plan_template", "transcribers_list")));
 
         var modern = exchange("""
                 {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}
@@ -96,6 +97,9 @@ class McpServerTest {
                 "value", Map.of("version", 1)), "regular file");
         assertToolError("artifact_read", Map.of("workDir", work.toString(), "artifact", "../outside"), "one of");
         assertToolError("reconstruct_describe", Map.of("workDir", work.toString()), "regular file");
+        assertToolError("reconstruct_trace", Map.of("workDir", work.toString()), "regular file");
+        assertToolError("reconstruct_trace_diff", Map.of("oldWorkDir", work.toString(),
+                "newWorkDir", work.toString()), "regular file");
         assertToolError("reconstruct_plan_template", Map.of("workDir", work.toString()), "regular file");
         assertToolError("project_validate", Map.of("project", directory.resolve("missing").toString()), "existing project");
         assertToolError("render_clip", Map.of("project", score.toString(), "output", "clip.wav",

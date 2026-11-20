@@ -314,6 +314,41 @@ same filters and `reconstruct_plan_template`. Use `artifact_read` and
 `artifact_write` with artifact `roleplan` to inspect or validate edits, then
 call `reconstruct_run` with `from` set to `roles`.
 
+### Per-note trace and replay
+
+```sh
+java -jar "$deck_jar" reconstruct trace full-song --start 45.5 --end 46 --part 0 --pitch 68
+java -jar "$deck_jar" reconstruct trace full-song --lane FM1 --status shortened --json
+java -jar "$deck_jar" reconstruct trace-diff before after --span 45.5,46 --json
+java -jar "$deck_jar" reconstruct rerun full-song replay --search relocated-inputs
+```
+
+Trace selects notes by source interval, zero-based part and MIDI pitch.
+Use either `--pitch` or an inclusive range with `--pitch-min` and
+`--pitch-max`. `--lane` selects the allocated lane. Valid values for
+`--status` are `kept`, `moved`, `shortened`, `merged`, and `dropped`.
+The trace shows each stage's version of the note, including handwritten
+score edits awaiting a rebuild, and the reason and competing note IDs.
+The diff compares stable IDs and sets `outsideSpan` when neither version
+of the note touches the specified source-time interval.
+
+MCP `reconstruct_trace` returns JSON and accepts `workDir`, `start`,
+`end`, `part`, `pitch`, `pitchMin`, `pitchMax`, `lane`, and `status`.
+`reconstruct_trace_diff` accepts `oldWorkDir`, `newWorkDir`, and optional
+`span` as a comma-separated source-time interval.
+
+A staged run writes a private `manifest.json` containing the build version
+and commit, reconstruction options, part-to-stem mapping, and input
+basenames, paths, and SHA-256 hashes. The work directory retains copies of
+external transcriber outputs, imported MIDI/JSON notes, and candidate JSON
+under `snapshots/`. Rerun checks the original path and retained copy
+against the hash, then searches any supplied directories recursively for
+matching bytes. It reports all unresolved inputs together and starts in
+a new directory using the current build. It replays the original inputs
+and options, including the saved external notes, without invoking the
+transcriber or applying later artifact edits. Keep manifests and
+snapshots with the private work directory.
+
 ## Deliberately limited input contract
 
 The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.

@@ -23,13 +23,22 @@ final class ReconstructionRoles {
     enum Role { melody, counter, bass, harmony, drums, drop }
 
     record Decision(Note note, Role role, @ReconstructionStages.Nullable String reason,
-                    @ReconstructionStages.Nullable String mergedInto, @ReconstructionStages.Nullable Double preLegatoEnd) {
+                    @ReconstructionStages.Nullable String mergedInto, @ReconstructionStages.Nullable Double preLegatoEnd,
+                    @ReconstructionStages.Nullable String assignmentReason) {
+        Decision(Note note, Role role, String reason, String mergedInto, Double preLegatoEnd) {
+            this(note, role, reason, mergedInto, preLegatoEnd, null);
+        }
         Decision(Note note, Role role, String reason, String mergedInto) {
             this(note, role, reason, mergedInto, null);
         }
     }
     record Result(int version, double harmonyMaxHz, List<Decision> notes,
-                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase) {}
+                  @ReconstructionStages.Nullable ReconstructionTimeMap.TimeBase timeBase,
+                  @ReconstructionStages.Nullable Map<String, String> structureNoteHashes) {
+        Result(int version, double harmonyMaxHz, List<Decision> notes, ReconstructionTimeMap.TimeBase timeBase) {
+            this(version, harmonyMaxHz, notes, timeBase, null);
+        }
+    }
     private record Scope(int index, ReconstructionRolePlan.Rule rule, ReconstructionRolePlan.BarRange bars) {
         boolean applies(String section, int bar) {
             return (bars == null || bar >= bars.first() && bar <= bars.last())
@@ -115,7 +124,22 @@ final class ReconstructionRoles {
         if (continuity != null) decisions = continuity.repair(decisions, permitted);
         decisions = ReconstructionMelodyGapFill.promote(decisions, permitted);
         if (continuity != null) decisions = continuity.legato(decisions, permitted);
-        return new Result(VERSION, harmonyHz, decisions, structure.timeBase());
+        var explained = decisions.stream().map(decision -> decision.reason() != null ? decision :
+                new Decision(decision.note(), decision.role(), null, decision.mergedInto(), decision.preLegatoEnd(),
+                        assignmentReason(decision.role(), leadPart != null && leadPart == decision.note().part()))).toList();
+        return new Result(VERSION, harmonyHz, explained, structure.timeBase(),
+                ReconstructionArtifacts.noteHashes(structure.notes()));
+    }
+
+    static String assignmentReason(Role role, boolean explicitLead) {
+        return switch (role) {
+            case melody -> explicitLead ? "explicit-lead-part" : "melody-contour";
+            case bass -> "section-bass-line";
+            case counter -> "section-counter-line";
+            case harmony -> "remaining-tonal-note";
+            case drums -> "midi-drum-part";
+            case drop -> "role-drop";
+        };
     }
 
     /** A transcriber can write the landing pitch as a simultaneous attack. */

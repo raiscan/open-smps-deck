@@ -62,6 +62,10 @@ class ExternalTranscribersTest {
         assertEquals(ReconstructionCli.audioHash(wav), evidence.inputSha256());
         assertEquals("example", evidence.metadata().get("model"));
         assertEquals(2, evidence.noteCount());
+        var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+        var file = manifest.externalNotes().get(0).file();
+        assertEquals("[[0.2, 1.1, 78], [1.1, 1.2, 80]]", Files.readString(work.resolve(file.snapshot())));
+        assertEquals(evidence.outputSha256(), file.sha256());
 
         run(0, List.of("reconstruct", "structure", work.toString()));
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
@@ -92,6 +96,47 @@ class ExternalTranscribersTest {
         Path rejected = directory.resolve("rejected");
         assertTrue(run(2, fresh(rejected, "--replace-notes", "2=" + addition)).contains("melodic MIDI part"));
         assertFalse(Files.exists(rejected));
+    }
+
+    @Test void rerunFindsRelocatedInputsByHashAndUsesOriginalNoteBytes() throws Exception {
+        var catalogue = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        Path index = directory.resolve("index.json");
+        catalogue.build().save(index);
+
+        Path notes = directory.resolve("import.json");
+        byte[] external = "[ [0.2, 0.6, 78] ]\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(notes, external);
+        Path work = directory.resolve("original");
+        var args = fresh(work, "--seconds", ".8", "--replace-notes", "0=" + notes, "--fm-only");
+        args.set(1, "run");
+        run(0, args);
+        var manifest = ReconstructionArtifacts.readTree(work.resolve("manifest.json")).getAsJsonObject();
+        assertTrue(manifest.getAsJsonObject("tool").get("commit").getAsString().matches("[a-f0-9]{40}"));
+        String snapshot = manifest.getAsJsonObject("externalNotes").getAsJsonObject("0")
+                .getAsJsonObject("file").get("snapshot").getAsString();
+        assertArrayEquals(external, Files.readAllBytes(work.resolve(snapshot)));
+        Files.delete(notes);
+
+        Path inputs = Files.createDirectory(directory.resolve("relocated"));
+        Files.move(midi, inputs.resolve("renamed.midi"));
+        Files.writeString(midi, "changed file");
+        Files.move(wav, inputs.resolve("renamed.wav"));
+        var rerun = directory.resolve("rerun");
+        var replay = new ArrayList<>(List.of("reconstruct", "rerun", work.toString(), rerun.toString()));
+        String missing = run(2, replay);
+        assertTrue(missing.contains("source.mid") && missing.contains("mix with spaces.wav"), missing);
+        assertFalse(Files.exists(rerun));
+        replay.addAll(List.of("--search", inputs.toString()));
+        run(0, replay);
+        assertEquals(-1, Files.mismatch(work.resolve("render.wav"), rerun.resolve("render.wav")));
+        var score = ReconstructionStages.readScore(rerun.resolve("score.json"));
+        assertEquals(List.of(78), pitches(score, 0));
+        assertEquals("import", score.inputs().externalNotes().get(0).provenance().tool());
     }
 
     @Test void missingExecutableAbortsAndNamesTheTranscriber() throws Exception {
