@@ -20,22 +20,33 @@ final class ReconstructionVoicing {
     record FitWindows(int frames, List<Integer> starts) {}
     record Lane(Role role, @Nullable String variantId, List<ScoredPatch> shortlist, double gain,
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
-                String effectReason, List<Instrument> instruments, @Nullable Map<Integer, Double> partGains) {
+                String effectReason, List<Instrument> instruments, @Nullable Map<Integer, Double> partGains,
+                @Nullable List<ReconstructionOverrides.Settings> overrides) {
         Lane(Role role, String variantId, List<ScoredPatch> shortlist, double gain, Articulation articulation,
              Effects effects, String patchReason, String articulationReason, String effectReason,
              List<Instrument> instruments) {
             this(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, null);
+                    effectReason, instruments, null, null);
         }
 
         Lane withPartGains(Map<Integer, Double> gains) {
             return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)));
+                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides);
         }
 
-        double gainFor(int part) {
-            return Math.min(4, gain * (partGains == null ? 1 : partGains.getOrDefault(part, 1.0)));
+        Lane withPreviousEdits(Lane previous, boolean refitLevels) {
+            // A lane whose role changed upstream carries different material, so its old level is stale.
+            boolean keepLevels = !refitLevels && previous.role == role;
+            return new Lane(role, variantId, shortlist, keepLevels ? previous.gain : gain, articulation, effects,
+                    patchReason, articulationReason, effectReason, instruments,
+                    keepLevels ? previous.partGains : partGains, previous.overrides);
         }
+
+        double gainFor(int part, double level) {
+            return Math.min(4, level * (partGains == null ? 1 : partGains.getOrDefault(part, 1.0)));
+        }
+
+        double gainFor(int part) { return gainFor(part, gain); }
     }
     record ScoredPatch(String variantId, double shortlistScore, double fit, double check) {}
     record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId,
@@ -98,10 +109,32 @@ final class ReconstructionVoicing {
         return lanes;
     }
 
-    static void validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue) {
+    static Result preserveRefit(Result fitted, Result previous, java.util.Set<String> targets, boolean refitLevels) {
+        var lanes = new java.util.LinkedHashMap<>(fitted.lanes());
+        for (var entry : previous.lanes().entrySet()) {
+            String id = entry.getKey();
+            var before = entry.getValue();
+            var after = lanes.get(id);
+            boolean targeted = targets.isEmpty() || targets.contains(id);
+            if (after == null) {
+                require(targeted, "voicing.json.lanes." + id, "untargeted lane is missing from the new allocation");
+                require(before.overrides() == null || before.overrides().isEmpty(), "voicing.json.lanes." + id,
+                        "cannot refit a removed lane with scoped overrides");
+            } else {
+                lanes.put(id, targeted ? after.withPreviousEdits(before, refitLevels) : before);
+            }
+        }
+        if (!targets.isEmpty()) for (String id : lanes.keySet())
+            require(targets.contains(id) || previous.lanes().containsKey(id), "voicing.json.lanes." + id,
+                    "new lane must be explicitly targeted");
+        return new Result(fitted.version(), lanes, fitted.fitWindows());
+    }
+
+    static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue, int frames) {
         var allocated = byLane(allocation);
         require(result.lanes().keySet().equals(allocated.keySet()), "voicing.json.lanes", "must cover every allocated lane");
         var copies = new HashSet<String>();
+        var scopes = new java.util.HashMap<String, List<ReconstructionOverrides.Span>>();
         result.lanes().forEach((id, lane) -> {
             String at = "voicing.json.lanes." + id;
             boolean fm = id.startsWith("FM");
@@ -143,11 +176,12 @@ final class ReconstructionVoicing {
                 if (instrument.variantId() != null)
                     kind(catalogue, instrument.variantId(), dac ? Kind.DAC_SAMPLE : Kind.PSG_VOLUME, at + ".instruments");
             }
+            scopes.putAll(ReconstructionOverrides.resolve(id, lane.overrides(), allocated.get(id), frames, catalogue));
             var effects = lane.effects();
             require(!dac || effects.detune() == 0 && effects.vibrato() == null, at + ".effects",
                     "DAC does not support pitch effects");
             detune(effects.detune(), at);
-            vibrato(effects.vibrato(), at);
+            vibrato(effects.vibrato(), at + ".effects.vibrato");
             var copy = effects.copy();
             if (copy != null) {
                 require(fm && ReconstructionAllocation.FM.contains(copy.lane())
@@ -156,12 +190,13 @@ final class ReconstructionVoicing {
                 require(copy.delay() >= 0 && copy.delay() <= 60 && copy.gain() > 0 && copy.gain() <= 1,
                         at + ".effects.copy", "expected a 0–60 tick delay and gain in (0,1]");
                 detune(copy.detune(), at);
-                vibrato(copy.vibrato(), at);
+                vibrato(copy.vibrato(), at + ".effects.copy.vibrato");
             }
         });
+        return scopes;
     }
 
-    private static void kind(InstrumentCatalogue catalogue, String id, Kind kind, String at) {
+    static void kind(InstrumentCatalogue catalogue, String id, Kind kind, String at) {
         try {
             require(catalogue.match(id).asset().kind() == kind, at, "expected " + kind);
         } catch (IllegalArgumentException invalid) {
@@ -173,11 +208,11 @@ final class ReconstructionVoicing {
         require(amount >= -128 && amount <= 127, at + ".effects.detune", "expected a signed byte");
     }
 
-    private static void vibrato(Vibrato vibrato, String at) {
+    static void vibrato(Vibrato vibrato, String at) {
         if (vibrato != null) require(vibrato.delay() >= 1 && vibrato.delay() <= 255
                         && vibrato.rate() >= 1 && vibrato.rate() <= 255
                         && vibrato.delta() >= -128 && vibrato.delta() <= 127
                         && vibrato.steps() >= 2 && vibrato.steps() <= 255,
-                at + ".effects.vibrato", "invalid native modulation arguments");
+                at, "invalid native modulation arguments");
     }
 }

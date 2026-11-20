@@ -46,6 +46,8 @@ final class S3kReconstruction {
 
     private record Event(MidiScore.Note note, int start, int end, int priority, String assetId, int volume) {}
 
+    private record Tone(String asset, int volume, ReconstructionVoicing.Vibrato vibrato) {}
+
     private static final class Placement {
         final Event event;
         int end;
@@ -53,6 +55,11 @@ final class S3kReconstruction {
         int volumeFloor;
         ReconstructionVoicing.Vibrato vibrato;
         ReconstructionBendEncoding.Fit bend;
+        int restoreTick = -1;
+        java.util.NavigableMap<Integer, Tone> scopedTones = java.util.Collections.emptyNavigableMap();
+
+        Tone baseTone() { return new Tone(event.assetId(), event.volume(), vibrato); }
+        Tone attackTone() { return scopedTones.getOrDefault(event.start(), baseTone()); }
         Placement(Event event) { this.event = event; end = event.end(); }
     }
 
@@ -222,7 +229,7 @@ final class S3kReconstruction {
                                    Map<Integer, ReconstructionEcho.Estimate> echoes,
                                    Map<String, ReconstructionVoicing.Lane> voicing, boolean copies) throws java.io.IOException {
         return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
-                matches, echoes, voicing, copies, false);
+                matches, echoes, voicing, copies, false, Map.of(), Map.of());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
@@ -230,7 +237,9 @@ final class S3kReconstruction {
                                    InstrumentCatalogue catalogue,
                                    Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
                                    Map<Integer, ReconstructionEcho.Estimate> echoes,
-                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends) throws java.io.IOException {
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins)
+            throws java.io.IOException {
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var parts = indexParts(score.parts());
         var reductions = new ArrayList<>(score.reductions());
@@ -294,9 +303,57 @@ final class S3kReconstruction {
                     placed.detune = voice.effects().detune();
                     placed.vibrato = voice.effects().vibrato();
                 }
+                String noteId = entry.note().id();
+                var spans = scopes.get(origins.getOrDefault(noteId, noteId));
+                if (spans != null) {
+                    var attack = spans.stream().filter(span -> span.start() <= start && span.end() > start)
+                            .findFirst().orElse(null);
+                    if (attack != null && attack.settings().gate() != null) {
+                        duration = new ReconstructionVoicing.Articulation("scoped", attack.settings().gate(), 0)
+                                .duration(end - start);
+                        placed.end = start + duration;
+                    }
+                    placed.scopedTones = new java.util.TreeMap<>();
+                    for (var span : spans) {
+                        if (span.end() <= start) continue;
+                        int boundary = Math.max(span.start(), start);
+                        if (boundary >= placed.end) break;
+                        var scoped = span.settings();
+                        var selected = scoped.variantId() == null ? asset : catalogue.match(scoped.variantId()).asset();
+                        String selectedId = selected.id();
+                        if (isFm) {
+                            var activeArt = scoped.minimumReleaseRate() == null ? articulation
+                                    : new ReconstructionVoicing.Articulation("scoped", articulation.gate(), scoped.minimumReleaseRate());
+                            var patch = ReconstructionVoicing.patchBytes(selected, activeArt);
+                            selectedId = ReconstructionVoicing.patchId(selected, patch);
+                            voices.putIfAbsent(selectedId, new Voice(selectedId, selected.name(), unsigned(patch)));
+                        } else {
+                            envelopes.putIfAbsent(selectedId, new Envelope(selectedId, selected.name(),
+                                    Envelope.PSG_VOLUME, psgAttenuation(selected.bytes())));
+                        }
+                        int scopedVolume = volume;
+                        if (scoped.gain() != null || !selected.id().equals(asset.id())) {
+                            int selectedFloor = isFm ? ReconstructionEcho.fmVolumeFloor(selected.bytes()) : 0;
+                            double gain = scoped.gain() == null ? voice.gain() : scoped.gain();
+                            int raw = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
+                            scopedVolume = Math.max(selectedFloor, ReconstructionEcho.scaleVolume(raw, voice.gainFor(part.id(), gain)));
+                        }
+                        var vibrato = scoped.changesModulation() ? scoped.vibrato() : placed.vibrato;
+                        placed.scopedTones.put(boundary, new Tone(selectedId, scopedVolume, vibrato));
+                        if (span.end() < placed.end) placed.scopedTones.put(span.end(), placed.baseTone());
+                        else placed.restoreTick = span.restoreTick();
+                    }
+                }
                 if (bends && lane.equals("FM1") && entry.note().bend() != null) {
-                    placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration,
-                            placed.detune, voices.get(id));
+                    var changes = new java.util.TreeMap<Integer, ReconstructionVoicing.Vibrato>();
+                    var current = placed.attackTone().vibrato();
+                    for (var change : placed.scopedTones.tailMap(start, false).entrySet()) {
+                        var next = change.getValue().vibrato();
+                        if (!java.util.Objects.equals(current, next)) changes.put(change.getKey() - start, next);
+                        current = next;
+                    }
+                    placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration, placed.detune,
+                            voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes);
                     if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
                             ReconstructionBends.REASON));
@@ -319,6 +376,19 @@ final class S3kReconstruction {
         for (int i = 0; i < psg.size(); i++)
             writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
         writeDacLane(dac, sequences, clips, repeats);
+        if (!scopes.isEmpty()) {
+            var used = new HashSet<String>();
+            for (var sequence : sequences) {
+                used.add(sequence.voiceId());
+                sequence.commands().stream().filter(command -> command.command() == NativeCommand.FM_VOICE)
+                        .forEach(command -> used.add(command.assetId()));
+            }
+            voices.keySet().retainAll(used);
+            if (voices.size() > 128) {
+                throw new IllegalArgumentException("voicing.json: scoped voicing requires " + voices.size()
+                        + " distinct FM voices (S3K local bank limit is 128)");
+            }
+        }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied));
@@ -336,7 +406,7 @@ final class S3kReconstruction {
             for (var note : source) {
                 int start = note.event.start() + copy.delay();
                 if (start >= frames) break;
-                int end = Math.min(frames, note.end + copy.delay());
+                int end = Math.min(frames, (note.scopedTones.isEmpty() ? note.end : note.event.end()) + copy.delay());
                 var event = note.event;
                 var placed = new Placement(new Event(event.note(), start, end, event.priority(), event.assetId(),
                         Math.max(note.volumeFloor, ReconstructionEcho.scaleVolume(event.volume(), copy.gain()))));
@@ -458,7 +528,7 @@ final class S3kReconstruction {
                                       ReconstructionClipLinks links) {
         boolean fm = chip.equals("FM");
         NativeCommand selectAsset = fm ? NativeCommand.FM_VOICE : NativeCommand.PSG_ENVELOPE;
-        var spans = links.indexes(notes.size(), i -> notes.get(i).event.start(), i -> notes.get(i).end);
+        var spans = links.indexes(notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i));
         int start = 0;
         while (start < notes.size()) {
             Event first = notes.get(start).event;
@@ -469,12 +539,13 @@ final class S3kReconstruction {
             while (end < notes.size() && spans.get(end) == span
                     && (span != null || notes.get(end).event.start() - from < CLIP_TICKS)
                     && noise == NOISE.equals(notes.get(end).event.assetId())) end++;
-            int length = notes.get(end - 1).end - from;
+            int length = clipEnd(notes, end - 1) - from;
             String id = lane + "-" + from;
             var events = new ArrayList<NoteEvent>();
             var commands = new ArrayList<CommandEvent>();
-            String activeAsset = first.assetId();
-            int volume = first.volume();
+            var initial = notes.get(start).attackTone();
+            String activeAsset = initial.asset();
+            int volume = initial.volume();
             int detune = 0;
             ReconstructionVoicing.Vibrato vibrato = null;
             boolean bendModulation = false;
@@ -483,19 +554,16 @@ final class S3kReconstruction {
                 Placement placement = notes.get(i);
                 Event note = placement.event;
                 int offset = note.start() - from;
-                if (!activeAsset.equals(note.assetId())) {
-                    activeAsset = note.assetId();
-                    commands.add(new CommandEvent("asset-" + offset, offset, selectAsset, List.of(), activeAsset));
-                }
-                if (volume != note.volume()) {
-                    volume = note.volume();
-                    commands.add(new CommandEvent("volume-" + offset, offset, NativeCommand.VOLUME, List.of(volume)));
-                }
+                Tone attack = placement.attackTone();
+                emitTone(commands, offset, selectAsset, activeAsset, volume, attack);
+                activeAsset = attack.asset();
+                volume = attack.volume();
                 if (placement.bend != null) {
-                    if (placement.bend.mode() == ReconstructionBendEncoding.Mode.E7 && (vibrato != null || bendModulation)) {
+                    if (placement.bend.mode() == ReconstructionBendEncoding.Mode.E7
+                            && attack.vibrato() == null && (vibrato != null || bendModulation)) {
                         commands.add(new CommandEvent("bend-reset-" + offset, offset, NativeCommand.MODULATION_OFF, List.of()));
                     }
-                    vibrato = null;
+                    vibrato = placement.bend.endingVibrato();
                     bendModulation = placement.bend.modulatingAtEnd();
                     for (var command : placement.bend.commands()) {
                         commands.add(new CommandEvent(command.id() + "-" + offset, offset + command.tick(),
@@ -505,28 +573,86 @@ final class S3kReconstruction {
                     for (var step : placement.bend.notes()) {
                         events.add(new NoteEvent(step.id() + "-" + offset, offset + step.tick(), step.duration(), step.pitch()));
                     }
-                    continue;
+                } else {
+                    if (detune != placement.detune) {
+                        detune = placement.detune;
+                        commands.add(new CommandEvent("detune-" + offset, offset, NativeCommand.DETUNE, List.of(detune & 255)));
+                    }
+                    if (bendModulation || !java.util.Objects.equals(vibrato, attack.vibrato())) {
+                        bendModulation = false;
+                        vibrato = attack.vibrato();
+                        emitVibrato(commands, offset, vibrato);
+                    }
                 }
-                if (detune != placement.detune) {
-                    detune = placement.detune;
-                    commands.add(new CommandEvent("detune-" + offset, offset, NativeCommand.DETUNE, List.of(detune & 255)));
+                int noteStart = note.start();
+                Tone current = attack;
+                for (var change : placement.scopedTones.tailMap(note.start(), false).entrySet()) {
+                    int boundary = change.getKey();
+                    Tone next = change.getValue();
+                    emitTone(commands, boundary - from, selectAsset, activeAsset, volume, next);
+                    activeAsset = next.asset();
+                    volume = next.volume();
+                    if (placement.bend == null && !java.util.Objects.equals(current.vibrato(), next.vibrato())) {
+                        if (next.vibrato() != null) {
+                            // A fresh setup needs an attack to load live S3K counters.
+                            events.add(new NoteEvent("note-" + (noteStart - from), noteStart - from,
+                                    boundary - noteStart, note.note().pitch()));
+                            noteStart = boundary;
+                        }
+                        emitVibrato(commands, boundary - from, next.vibrato());
+                        vibrato = next.vibrato();
+                        bendModulation = false;
+                    }
+                    current = next;
                 }
-                if (bendModulation || !java.util.Objects.equals(vibrato, placement.vibrato)) {
-                    bendModulation = false;
-                    vibrato = placement.vibrato;
-                    commands.add(new CommandEvent("vibrato-" + offset, offset,
-                            vibrato == null ? NativeCommand.MODULATION_OFF : NativeCommand.MODULATION,
-                            vibrato == null ? List.of() : vibrato.bytes()));
+                if (placement.bend == null)
+                    events.add(new NoteEvent("note-" + (noteStart - from), noteStart - from,
+                            placement.end - noteStart, note.note().pitch()));
+                if (restoreInRest(notes, i)) {
+                    int tick = placement.restoreTick - from;
+                    var base = placement.baseTone();
+                    emitTone(commands, tick, selectAsset, activeAsset, volume, base);
+                    activeAsset = base.asset();
+                    volume = base.volume();
+                    if (bendModulation || !java.util.Objects.equals(vibrato, base.vibrato())) {
+                        bendModulation = false;
+                        vibrato = base.vibrato();
+                        emitVibrato(commands, tick, vibrato);
+                    }
                 }
-                events.add(new NoteEvent("note-" + offset, offset, placement.end - note.start(), note.note().pitch()));
             }
             var names = notes.subList(start, end).stream()
                     .map(p -> parts.get(p.event.note().partId()).name()).distinct().toList();
-            var source = new Sequence(id, String.join(" / ", names), chip, length, fm ? first.assetId() : null,
-                    first.volume(), events, commands, "RESET", fm || noise ? null : first.assetId(), null);
+            var source = new Sequence(id, String.join(" / ", names), chip, length, fm ? initial.asset() : null,
+                    initial.volume(), events, commands, "RESET", fm || noise ? null : initial.asset(), null);
             links.add(source, lane, from, span, sequences, clips);
             start = end;
         }
+    }
+
+    private static boolean restoreInRest(List<Placement> notes, int index) {
+        var note = notes.get(index);
+        return note.restoreTick >= note.end
+                && (index + 1 == notes.size() || note.restoreTick < notes.get(index + 1).event.start());
+    }
+
+    private static int clipEnd(List<Placement> notes, int index) {
+        var note = notes.get(index);
+        return restoreInRest(notes, index) ? note.restoreTick + 1 : note.end;
+    }
+
+    private static void emitTone(List<CommandEvent> commands, int tick, NativeCommand selectAsset,
+                                 String activeAsset, int volume, Tone next) {
+        if (!activeAsset.equals(next.asset()))
+            commands.add(new CommandEvent("asset-" + tick, tick, selectAsset, List.of(), next.asset()));
+        if (volume != next.volume())
+            commands.add(new CommandEvent("volume-" + tick, tick, NativeCommand.VOLUME, List.of(next.volume())));
+    }
+
+    private static void emitVibrato(List<CommandEvent> commands, int tick, ReconstructionVoicing.Vibrato vibrato) {
+        commands.add(new CommandEvent("vibrato-" + tick, tick,
+                vibrato == null ? NativeCommand.MODULATION_OFF : NativeCommand.MODULATION,
+                vibrato == null ? List.of() : vibrato.bytes()));
     }
 
     private static void writeDacLane(List<Event> hits, List<Sequence> sequences, List<Clip> clips,

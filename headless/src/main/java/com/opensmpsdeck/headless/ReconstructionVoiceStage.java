@@ -25,7 +25,7 @@ final class ReconstructionVoiceStage {
     private ReconstructionVoiceStage() {}
 
     static Result fit(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
-                      ReconstructionAllocation.Result allocation, Result previous) throws IOException {
+                      ReconstructionAllocation.Result allocation, Result previous, java.util.Set<String> targets) throws IOException {
         var byLane = byLane(allocation);
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
@@ -112,8 +112,12 @@ final class ReconstructionVoiceStage {
             patchScores.add(List.copyOf(scores));
         }
 
-        String free = ReconstructionAllocation.FM.reversed().stream().filter(lane -> !byLane.containsKey(lane))
-                .findFirst().orElse(null);
+        var reservedCopies = new java.util.HashSet<String>();
+        if (previous != null && !targets.isEmpty()) previous.lanes().forEach((id, lane) -> {
+            if (!targets.contains(id) && lane.effects().copy() != null) reservedCopies.add(lane.effects().copy().lane());
+        });
+        String free = ReconstructionAllocation.FM.reversed().stream()
+                .filter(lane -> !byLane.containsKey(lane) && !reservedCopies.contains(lane)).findFirst().orElse(null);
         var result = new LinkedHashMap<String, Lane>();
         for (int i = 0; i < models.size(); i++) {
             var model = models.get(i);
@@ -143,7 +147,7 @@ final class ReconstructionVoiceStage {
                     effects = idioms.get(fit.selection(i).candidate().id());
                     if (changed) effectReason = EVIDENCE;
                 }
-                if (effects.copy() != null) free = null;
+                if (effects.copy() != null && (targets.isEmpty() || targets.contains(model.id()))) free = null;
             }
             double gain = role == Role.drums ? 1 : fit.selection(i).gain();
             String incumbent = incumbents.get(i);

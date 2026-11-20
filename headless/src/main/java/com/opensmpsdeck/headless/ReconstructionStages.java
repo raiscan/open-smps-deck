@@ -167,8 +167,9 @@ public final class ReconstructionStages {
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
                                 Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart, boolean fastRunsOff,
-                                @Nullable ReconstructionDrums.Source drumSource) {}
-    private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz) {}
+                                @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes, boolean refitLevels) {}
+    private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz,
+                           java.util.Set<String> lanes, boolean refitLevels) {}
 
     private ReconstructionStages() {}
 
@@ -177,7 +178,7 @@ public final class ReconstructionStages {
     }
 
     static void run(String command, String[] args, PrintStream out) throws IOException {
-        run(command, args, out, false, (completed, total, message) -> {});
+        run(command, args, out, false, (completed, total, message) -> {}, ignored -> {});
     }
 
     @FunctionalInterface
@@ -186,14 +187,17 @@ public final class ReconstructionStages {
     }
 
     /** MCP shares the CLI parser and stage loop while retaining project review metadata. */
-    public static void runForReview(String command, String[] args, Progress progress) throws IOException {
+    public static List<String> runForReview(String command, String[] args, Progress progress) throws IOException {
+        var changes = new java.util.ArrayList<String>();
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run(command, args, out, true, progress);
+            run(command, args, out, true, progress, changes::add);
         }
+        return List.copyOf(changes);
     }
 
     private static void run(String command, String[] args, PrintStream out,
-                            boolean preserveReview, Progress progress) throws IOException {
+                            boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange)
+            throws IOException {
         Request request = request(command, args, progress);
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
@@ -242,12 +246,31 @@ public final class ReconstructionStages {
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.
                         // Refit when explicitly requested or when rebuilding from an upstream stage.
-                        if (request.chain && request.from == Stage.VOICE && Files.exists(voicingFile)) break;
+                        if (request.chain && request.from == Stage.VOICE && request.lanes.isEmpty()
+                                && !request.refitLevels && Files.exists(voicingFile)) break;
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
                         var previous = Files.notExists(voicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
                                 : ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
-                        ReconstructionArtifacts.write(voicingFile, ReconstructionCli.fitVoicing(score, allocation, previous));
+                        var fitted = ReconstructionCli.fitVoicing(score, allocation, previous, request.lanes, request.refitLevels);
+                        ReconstructionArtifacts.write(voicingFile, fitted);
+                        if (previous != null) {
+                            var lanes = new java.util.TreeSet<>(previous.lanes().keySet());
+                            lanes.addAll(fitted.lanes().keySet());
+                            for (String lane : lanes) {
+                                var before = previous.lanes().get(lane);
+                                var after = fitted.lanes().get(lane);
+                                if (java.util.Objects.equals(before, after)) continue;
+                                String change = "Refit changed " + lane;
+                                if (before == null) change += " (added)";
+                                else if (after == null) change += " (removed)";
+                                else if (before.gain() != after.gain() || !java.util.Objects.equals(before.partGains(), after.partGains()))
+                                    change += " (gain " + before.gain() + " → " + after.gain() + ", part gains "
+                                            + before.partGains() + " → " + after.partGains() + ")";
+                                out.println(change);
+                                refitChange.accept(change);
+                            }
+                        }
                     }
                     case ASSEMBLE -> {
                         var structure = readStructure(structureFile, score);
@@ -321,7 +344,7 @@ public final class ReconstructionStages {
                     ReconstructionChecks.allocation(allocation, score);
                     ReconstructionVoicing.validate(
                             ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value),
-                            allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)));
+                            allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)), ReconstructionTimeMap.of(score).frames());
                 }
                 default -> throw new IllegalArgumentException("Unknown stage artifact: " + file.getFileName());
             }
@@ -359,6 +382,8 @@ public final class ReconstructionStages {
         Path midi = absolute(args[0]), reference = absolute(args[1]), index = absolute(args[2]), work = absolute(args[3]);
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var extra = stageOptions(args, 4);
+        if (!extra.lanes.isEmpty() || extra.refitLevels)
+            throw new IllegalArgumentException("--lane and --refit-levels require an existing work directory");
         String[] legacy = java.util.stream.Stream.concat(java.util.stream.Stream.of("reconstruct"),
                 Arrays.stream(extra.legacy)).toArray(String[]::new);
         var options = ReconstructionCli.parseOptions(legacy, midi.getFileName().toString());
@@ -373,7 +398,7 @@ public final class ReconstructionStages {
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
                 extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource);
-        return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
+        return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz, extra.lanes, extra.refitLevels);
     }
 
     private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) {
@@ -382,12 +407,15 @@ public final class ReconstructionStages {
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
                 || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
+                || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
-        return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz);
+        return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz, extra.lanes, extra.refitLevels);
     }
 
     private static StageOptions stageOptions(String[] args, int firstOption) {
+        var lanes = new java.util.LinkedHashSet<String>();
+        boolean refitLevels = false;
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
         Integer leadPart = null;
@@ -466,6 +494,11 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("Expected one --lead-part PART");
                     leadPart = Integer.parseInt(args[i]);
                 }
+                case "--lane" -> {
+                    if (++i == args.length || !args[i].matches("FM[1-5]|PSG[1-3]|DAC") || !lanes.add(args[i]))
+                        throw new IllegalArgumentException("--lane expects a distinct reconstruction lane");
+                }
+                case "--refit-levels" -> refitLevels = true;
                 case "--harmony-max-hz" -> {
                     if (hz != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --harmony-max-hz RATE");
@@ -486,7 +519,7 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource);
+                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }

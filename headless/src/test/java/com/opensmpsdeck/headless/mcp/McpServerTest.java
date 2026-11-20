@@ -48,7 +48,7 @@ class McpServerTest {
         assertEquals(2, old.size());
         assertEquals("2025-06-18", old.getFirst().getAsJsonObject("result").get("protocolVersion").getAsString());
         var tools = old.getLast().getAsJsonObject("result").getAsJsonArray("tools");
-        assertEquals(17, tools.size());
+        assertEquals(18, tools.size());
         var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
         assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_plan_template", "transcribers_list")));
 

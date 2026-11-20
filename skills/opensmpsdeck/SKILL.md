@@ -155,15 +155,41 @@ Limits:
 | A few individual notes have the wrong role | `roles.json` note roles. Check the resulting allocation. Use voicing gain for a correctly assigned lead that is simply too quiet. | `allocate` |
 | Channel overflow, audible drops or clipped note lengths | `allocation.json` lane, timing and drop decisions | Run standalone `voice` to refit, then resume at `assemble` |
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
+| A patch fades during a held phrase, or a few notes need different gain, gate, release or vibrato | Add `overrides` to the affected lane in `voicing.json`. Use **Audition a phrase** below. | `assemble` |
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
 
-Standalone `voice` refits and replaces existing voicing, giving each FM
-lane's previous variant preference on close scores. For a fresh fit, move
-`voicing.json` to a backup name before running `voice`. A chained run
-starting at `voice` reuses an existing hand-edited voicing. Starting at an
-earlier stage refits later artifacts. Save any downstream edits you intend
-to carry forward. Assembly regenerates the arrangement. Apply direct
-project and group edits after the final assembly, or work on a separate copy.
+Standalone `voice` refits lane-wide choices and preserves scoped overrides,
+lane gain and per-part gains (a lane whose role changed is releveled). Pass `--lane FM1` to leave the other lanes
+untouched. Use `--refit-levels` only when changing levels is part of the review.
+MCP exposes the same choices as `options.refitLanes` and `options.refitLevels`.
+Read the changed-lane list in the result. For a fresh fit, back up and move
+`voicing.json` before running `voice`. A chained run starting at `voice` reuses
+existing voicing unless refit options are supplied. Assembly regenerates the
+arrangement. Apply direct project and group edits after the final assembly,
+or work on a separate copy.
+
+## Audition a phrase
+
+1. Use `catalog_search` to find FM variant IDs. Compare the current variant
+   and challengers with `reconstruct_audition {workDir, lane, start, end,
+   variants, solo, reference, output}`. Use the phrase's project seconds and
+   include the start of the long hold so each patch gets its own attack.
+   Omit `solo` to retain the frozen arrangement in the mix. An optional aligned
+   reference is appended after the chip phrase at a matched RMS level.
+
+   ```sh
+   java -jar "$jar" reconstruct audition "$work" --lane FM1 --start 45.3 --end 48.8 \
+     --variant "$current" --variant "$candidate" --solo --reference "$mix" "$work/lead.wav"
+   ```
+
+2. Listen to the numbered WAVs and check the successive RMS bins for a
+   mid-hold dip. The bins describe the chip output before reference matching.
+   Compare candidates in the mix before editing the artifact.
+3. Add an entry such as `{"startSeconds":45.3,"endSeconds":48.8,"variantId":"…"}`
+   to `lanes.FM1.overrides`. For an existing lane without an `overrides` member,
+   use `artifact_write` to replace the lane object with the updated one.
+   To target a specific attack, take its ID from `allocation.json` and use
+   `noteIds`. Assemble and check the passage again.
 
 ## Studio review
 

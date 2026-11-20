@@ -458,7 +458,7 @@ final class ReconstructionChecks {
             double prior = -1;
             for (var point : bend.points()) {
                 require(point.time() > prior && point.time() >= 0 && point.time() <= duration
-                                && Math.abs((long) point.cents()) <= 1400,
+                                && Math.abs((long) point.cents()) <= ReconstructionBendEncoding.MAX_CENTS,
                         at + ".bend", "expected ordered finite pitch points in the score interval");
                 prior = point.time();
             }

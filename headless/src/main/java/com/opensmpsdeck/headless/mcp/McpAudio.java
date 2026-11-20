@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless.mcp;
 
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.PhraseAudio;
 import com.opensmpsdeck.headless.ReferenceAudio;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.S3kRenderer;
@@ -68,44 +69,10 @@ final class McpAudio {
         if (referenceStart < 0) throw new IllegalArgumentException("Range starts before the aligned reference");
         float[] a = ReferenceAudio.stereoRange(render, SAMPLE_RATE, start, frames);
         float[] b = ReferenceAudio.stereoRange(reference, SAMPLE_RATE, referenceStart, frames);
-        var levelA = measure(a);
-        var levelB = measure(b);
-        double gainA = 1, gainB = 1;
-        boolean matched = levelA.rms > 0 && levelB.rms > 0;
-        if (matched) {
-            double target = Math.min(levelA.rms, levelB.rms);
-            gainA = target / levelA.rms;
-            gainB = target / levelB.rms;
-        }
-        double headroom = Math.max(1, Math.max(levelA.peak * gainA, levelB.peak * gainB));
-        double scaleA = gainA / headroom, scaleB = gainB / headroom;
-        WaveFile.write(output, range.count() * 2, sink -> {
-            emit(a, scaleA, sink);
-            emit(b, scaleB, sink);
-        });
+        var match = PhraseAudio.write(output, range.count(), a, b);
         return object(Map.of("output", output.toString(), "order", new String[]{"render", "reference"},
-                "splitSeconds", frames / (double) SAMPLE_RATE, "renderGain", scaleA, "referenceGain", scaleB,
-                "levelMatched", matched));
-    }
-
-    private record Level(double rms, double peak) {}
-
-    private static Level measure(float[] samples) {
-        double squares = 0, peak = 0;
-        for (double sample : samples) {
-            squares += sample * sample;
-            peak = Math.max(peak, Math.abs(sample));
-        }
-        return new Level(Math.sqrt(squares / samples.length), peak);
-    }
-
-    private static void emit(float[] samples, double gain, PcmSink sink) throws IOException {
-        var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
-        for (int offset = 0; offset < samples.length; offset += pcm.length) {
-            for (int i = 0; i < pcm.length; i++)
-                pcm[i] = (short) Math.round(samples[offset + i] * gain * Short.MAX_VALUE);
-            sink.accept(pcm);
-        }
+                "splitSeconds", frames / (double) SAMPLE_RATE, "renderGain", match.renderGain(),
+                "referenceGain", match.referenceGain(), "levelMatched", match.matched()));
     }
 
     private static Range range(JsonObject args) {

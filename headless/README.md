@@ -204,6 +204,33 @@ to map times between the two timelines. Bank and source size limits still apply.
 changing playback timing. To check a render from an edited project, use
 `render-project` with the report's `presentations` as `--frames`.
 
+### Refine and audition voicing
+
+Use `reconstruct voice WORK_DIR --lane FM1` to refit only FM1. Refits preserve
+existing lane and part gains and all scoped overrides. Use `--refit-levels`
+to recalculate levels for the lanes being refitted. The command reports every
+lane it changed.
+
+```sh
+java -jar "$CLI" reconstruct audition "$work" --lane FM1 --start 45.3 --end 48.8 \
+  --variant "$current" --variant "$candidate" --solo --reference "$mix" "$work/phrase.wav"
+```
+
+Audition uses the last assembled arrangement and applies each candidate to
+one FM lane for the selected phrase. Playback warms up from the song start.
+In-mix playback is the default. `--gain` multiplies the lane's existing level
+within the phrase. With multiple variants the command writes `phrase-1.wav`,
+`phrase-2.wav`, and so on. The table shows successive RMS bins in dBFS before
+optional reference level matching. Warped projects can take the original mix
+or the saved steady reference. The MCP equivalent is `reconstruct_audition`
+with a `variants` array.
+
+To apply a candidate, add an entry in the target lane's `overrides` array in
+`voicing.json`, then run `reconstruct assemble WORK_DIR`. Scope entries use
+project seconds, project ticks, and/or allocated note IDs, and can set a
+variant, gain, gate, release floor or vibrato. See the artifact contract for
+field names and boundary behavior. [Staged reconstruction](../docs/architecture/reconstruction-stages.md#voice)
+
 ### Inspect the score and plan musical roles
 
 ```sh
@@ -282,7 +309,7 @@ The choice persists in `score.json` for resumed stages. Backing parts remain
 available to allocation. A scoped roleplan can hand FM1 to another part.
 `--stem PART=WAV` supplies audio evidence without reserving FM1.
 
-The MCP server exposes 17 tools, including `reconstruct_describe` with the
+The MCP server exposes 18 tools, including `reconstruct_describe` with the
 same filters and `reconstruct_plan_template`. Use `artifact_read` and
 `artifact_write` with artifact `roleplan` to inspect or validate edits, then
 call `reconstruct_run` with `from` set to `roles`.

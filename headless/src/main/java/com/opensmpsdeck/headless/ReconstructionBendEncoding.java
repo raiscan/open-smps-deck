@@ -17,14 +17,18 @@ import java.util.List;
 /** Fits and checks native pitch changes on an existing FM gate. */
 final class ReconstructionBendEncoding {
     private static final double CENTS_PER_LOG = 1200 / Math.log(2);
-    private static final int MAX_TIED_STEPS = 14;
+    static final int MAX_CENTS = (106 - 12) * 100;
 
     private ReconstructionBendEncoding() {}
 
     enum Mode { F0, E7 }
 
     record Applied(String id, String lane, int startTick, int endTick, Mode mode, double rmseCents, String reason) {}
-    record Fit(Mode mode, List<NoteEvent> notes, List<CommandEvent> commands, double rmseCents) {
+    record Fit(Mode mode, List<NoteEvent> notes, List<CommandEvent> commands, double rmseCents,
+               ReconstructionVoicing.Vibrato endingVibrato) {
+        Fit(Mode mode, List<NoteEvent> notes, List<CommandEvent> commands, double rmseCents) {
+            this(mode, notes, commands, rmseCents, null);
+        }
         boolean modulatingAtEnd() {
             return mode == Mode.F0 && commands.stream().noneMatch(c -> c.command() == NativeCommand.MODULATION_OFF);
         }
@@ -34,6 +38,17 @@ final class ReconstructionBendEncoding {
     private record Ramp(int start, int stop, int rate, int delta, double error) {}
 
     static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice)
+            throws IOException {
+        return fit(note, startTick, duration, detune, voice, null);
+    }
+
+    static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
+                   ReconstructionVoicing.Vibrato vibrato) throws IOException {
+        return fit(note, startTick, duration, detune, voice, vibrato, java.util.Map.of());
+    }
+
+    static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
+                   ReconstructionVoicing.Vibrato vibrato, java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes)
             throws IOException {
         var bend = note.bend();
         if (bend == null || duration < 4
@@ -51,21 +66,24 @@ final class ReconstructionBendEncoding {
         if (excursion < 60) return null;
         double flatError = Math.sqrt(baseline / duration);
 
-        Fit steps = measure(steps(pitch, detune, base, desired), voice, base, desired);
-        Fit ramp = measure(ramp(pitch, detune, base, desired), voice, base, desired);
+        int limit = Math.max(14, (int) Math.ceil(excursion / 80) + 2);
+        Fit steps = measure(steps(pitch, detune, base, desired, limit), voice, base, desired);
+        boolean modulated = vibrato != null || !changes.isEmpty();
+        Fit ramp = !modulated ? measure(ramp(pitch, detune, base, desired), voice, base, desired) : null;
         // Prefer the more compact ramp when the scores differ by less than 10 cents.
         Fit best = ramp != null && (steps == null || ramp.rmseCents() <= steps.rmseCents() + 10) ? ramp : steps;
-        return best != null && best.rmseCents() <= Math.min(90, flatError * .66) ? best : null;
+        if (best == null || best.rmseCents() > Math.min(90, flatError * .66)) return null;
+        return modulated ? withVibrato(best, desired, vibrato, changes) : best;
     }
 
-    private static Fit steps(int pitch, int detune, double base, double[] desired) {
+    private static Fit steps(int pitch, int detune, double base, double[] desired, int limit) {
         // Keep the gate intact, using detuned equal-tempered notes as staircase steps.
         // Increasing the tolerance first keeps the byte cost bounded on long bends.
         for (int tolerance = 26; tolerance <= 96; tolerance += 10) {
             var notes = new ArrayList<NoteEvent>();
             var commands = new ArrayList<CommandEvent>();
             int start = 0;
-            while (start < desired.length && notes.size() < MAX_TIED_STEPS) {
+            while (start < desired.length && notes.size() < limit) {
                 int end = start + 1;
                 while (end < desired.length && Math.abs(desired[end] - desired[start]) <= tolerance) end++;
                 double center = start == 0 ? desired[0] : (desired[start] + desired[end - 1]) / 2;
@@ -76,6 +94,53 @@ final class ReconstructionBendEncoding {
             if (start == desired.length) return new Fit(Mode.E7, notes, commands, 0);
         }
         return null;
+    }
+
+    private static Fit withVibrato(Fit steps, double[] desired, ReconstructionVoicing.Vibrato vibrato,
+                                  java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes) {
+        var commands = new ArrayList<>(steps.commands());
+        var notes = new ArrayList<>(steps.notes());
+        // F0 on the attack prepares vibrato. FA pauses it without discarding the live
+        // counters. Loading F0 on a tied plateau resumes them, including the old phase.
+        int moving = notes.size() > 1 ? notes.get(1).tick() : desired.length;
+        int plateau = desired.length - 1;
+        while (plateau > moving && Math.abs(desired[plateau - 1] - desired[desired.length - 1]) < 16) plateau--;
+        if (plateau == desired.length - 1) plateau = desired.length;
+        var boundaries = new java.util.TreeSet<>(changes.keySet());
+        boundaries.add(0);
+        boundaries.add(moving);
+        boundaries.add(plateau);
+        ReconstructionVoicing.Vibrato active = null, prepared = null;
+        for (int tick : boundaries.headSet(desired.length)) {
+            if (changes.containsKey(tick)) vibrato = changes.get(tick);
+            var next = tick >= moving && tick < plateau ? null : vibrato;
+            if (java.util.Objects.equals(active, next)) continue;
+            if (next == null) {
+                commands.add(new CommandEvent("bend-pause-" + tick, tick, NativeCommand.MODULATION_OFF, List.of()));
+            } else {
+                if (tick != 0 && !next.equals(prepared)) reattack(notes, commands, tick);
+                commands.add(new CommandEvent("bend-vibrato-" + tick, tick, NativeCommand.MODULATION, next.bytes()));
+                prepared = next;
+            }
+            active = next;
+        }
+        return new Fit(Mode.E7, notes, commands, steps.rmseCents(), active);
+    }
+
+    private static void reattack(List<NoteEvent> notes, List<CommandEvent> commands, int tick) {
+        for (int i = 0; i < notes.size(); i++) {
+            var step = notes.get(i);
+            if (tick == step.tick()) {
+                commands.removeIf(c -> c.tick() == tick && c.command() == NativeCommand.HOLD);
+                break;
+            }
+            if (tick > step.tick() && tick < step.tick() + step.duration()) {
+                notes.set(i, new NoteEvent(step.id(), step.tick(), tick - step.tick(), step.pitch()));
+                notes.add(i + 1, new NoteEvent("bend-reattack-" + tick, tick,
+                        step.tick() + step.duration() - tick, step.pitch()));
+                break;
+            }
+        }
     }
 
     private static Fit ramp(int pitch, int detune, double base, double[] desired) {

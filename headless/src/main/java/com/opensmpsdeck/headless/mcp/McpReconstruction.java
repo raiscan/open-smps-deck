@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.ReconstructionAudition;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionStages;
 
@@ -35,7 +36,10 @@ final class McpReconstruction {
             field("wholePartVoices", "boolean", "Use one FM patch per part").optional(),
             field("audioRefine", "boolean", "Use audio pitch refinement").optional(),
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
-            field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable. Only option accepted on resume").optional(),
+            field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
+            field("refitLanes", object(Map.of("type", "array", "items", Map.of("type", "string"))),
+                    "Limit a resumed voice fit to specific lanes").optional(),
             field("estimateTempo", "boolean", "Infer a musical grid").optional(),
             field("tempo", "number", "Override grid BPM").optional(),
             field("barOffset", "number", "Override bar origin in seconds (with tempo)").optional(),
@@ -86,7 +90,11 @@ final class McpReconstruction {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
-                    "transcriber", "transcriberDevice");
+                    "transcriber", "transcriberDevice", "refitLevels");
+            if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
+                cli.add("--lane");
+                cli.add(lane.getAsString());
+            }
             if (options.has("transcribeParts")) {
                 for (var part : options.getAsJsonObject("transcribeParts").entrySet()) {
                     cli.add("--transcribe-part");
@@ -98,13 +106,32 @@ final class McpReconstruction {
                 cli.add(McpPaths.input(string(options, "candidates")).toString());
             }
         }
-        ReconstructionStages.runForReview(command, cli.toArray(String[]::new), progress);
+        var changed = ReconstructionStages.runForReview(command, cli.toArray(String[]::new), progress);
         var files = new LinkedHashMap<String, String>();
         for (String file : FILES) {
             Path path = work.resolve(file);
             if (Files.isRegularFile(path)) files.put(file, path.toString());
         }
-        return object(Map.of("workDir", work.toString(), "files", files));
+        return object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
+    }
+
+    static JsonObject audition(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "report.json", "arrangement.smps.json", ReconstructionStages.STEADY_REFERENCE))
+            McpPaths.managed(work, file);
+        var variants = new ArrayList<String>();
+        for (var variant : args.getAsJsonArray("variants")) variants.add(variant.getAsString());
+        Path requested = Path.of(string(args, "output"));
+        Path output = work.resolve(requested);
+        for (int i = 0; i < variants.size(); i++) {
+            var file = McpPaths.output(work, ReconstructionAudition.outputPath(requested, i, variants.size()).toString());
+            output = file.resolveSibling(requested.getFileName());
+        }
+        var result = ReconstructionAudition.run(work, string(args, "lane"), args.get("start").getAsDouble(),
+                args.get("end").getAsDouble(), variants, args.has("gain") ? args.get("gain").getAsDouble() : null,
+                args.has("solo") && args.get("solo").getAsBoolean(),
+                args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output);
+        return object(result);
     }
 
     static JsonObject describe(JsonObject args) throws IOException {
