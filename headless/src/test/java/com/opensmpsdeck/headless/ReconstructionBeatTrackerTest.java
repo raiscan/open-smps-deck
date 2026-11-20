@@ -66,6 +66,12 @@ class ReconstructionBeatTrackerTest {
         assertFalse(ReconstructionTimeMap.of(score(midi, duration, map, null, "off")).warped());
     }
 
+    @Test void warpedAudioProbesStartAtExactlyZero() {
+        var beats = new ReconstructionBeatMap(List.of(-.003, .38, .77), 0, 4, 1);
+        var map = new ReconstructionTimeMap(beats, 150.0, 1);
+        assertEquals(0.0, map.source(0.0));
+    }
+
     @Test void followsMoreThanTenPercentDrift() throws Exception {
         double duration = 90, change = -20;
         var expected = new ArrayList<Double>();
