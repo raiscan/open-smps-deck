@@ -46,7 +46,11 @@ public final class ReconstructionStages {
 
     record Note(String id, int part, double start, double end, int pitch, int velocity,
                 String source, double confidence, @Nullable ReconstructionLeadAudio.Evidence motion,
-                @Nullable List<ReconstructionFastRuns.Step> run) {
+                @Nullable List<ReconstructionFastRuns.Step> run, @Nullable ReconstructionBends.Bend bend) {
+        Note(String id, int part, double start, double end, int pitch, int velocity, String source, double confidence,
+             ReconstructionLeadAudio.Evidence motion, List<ReconstructionFastRuns.Step> run) {
+            this(id, part, start, end, pitch, velocity, source, confidence, motion, run, null);
+        }
         Note(String id, int part, double start, double end, int pitch, int velocity, String source, double confidence,
              ReconstructionLeadAudio.Evidence motion) {
             this(id, part, start, end, pitch, velocity, source, confidence, motion, null);
@@ -56,16 +60,21 @@ public final class ReconstructionStages {
         }
 
         Note withTiming(double from, double to) {
-            return new Note(id, part, from, to, pitch, velocity, source, confidence, motion, run);
+            return new Note(id, part, from, to, pitch, velocity, source, confidence, motion, run, bend);
         }
 
         Note withMotion(ReconstructionLeadAudio.Evidence evidence) {
-            return new Note(id, part, start, end, pitch, velocity, source, confidence, evidence, run);
+            return new Note(id, part, start, end, pitch, velocity, source, confidence, evidence, run, bend);
+        }
+
+        Note withBend(ReconstructionBends.Bend evidence) {
+            return new Note(id, part, start, end, pitch, velocity, source, confidence, motion, run, evidence);
         }
 
         Note mapTime(java.util.function.DoubleUnaryOperator clock) {
             return new Note(id, part, clock.applyAsDouble(start), clock.applyAsDouble(end), pitch, velocity,
-                    source, confidence, motion, run == null ? null : run.stream().map(step -> step.map(clock)).toList());
+                    source, confidence, motion, run == null ? null : run.stream().map(step -> step.map(clock)).toList(),
+                    bend == null ? null : bend.map(clock));
         }
 
         int exitPitch() { return run == null ? pitch : run.getLast().pitch(); }
@@ -558,12 +567,16 @@ public final class ReconstructionStages {
         }
         var voices = new java.util.TreeMap<String, List<ReconstructionFigureVoices.Voice>>();
         var bursts = new ArrayList<ReconstructionRetriggers.Burst>();
-        if (!Boolean.TRUE.equals(inputs.fastRunsOff)) {
-            for (var part : score.source.parts()) {
-                String stem = inputs.stems.get(part.id());
-                if (part.drums() || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
+        boolean fastRuns = !Boolean.TRUE.equals(inputs.fastRunsOff);
+        for (var part : score.source.parts()) {
+            String stem = inputs.stems.get(part.id());
+            if (part.drums() || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
+            boolean leadCandidate = inputs.leadPart != null && inputs.leadPart == part.id()
+                    || part.program() < 32 || part.program() > 39;
+            if (!fastRuns && !leadCandidate) continue;
+            var audio = ReconstructionLeadAudio.readMono(Path.of(stem), score.durationUs / 1e6);
+            if (fastRuns) {
                 var local = notes.stream().filter(note -> note.part == part.id()).toList();
-                var audio = ReconstructionLeadAudio.readMono(Path.of(stem), score.durationUs / 1e6);
                 ReconstructionFastRuns.reconcile(notes, part.id(), ReconstructionFastRuns.detect(audio,
                         inputs.leadPart == null || inputs.leadPart == part.id()));
                 if (inputs.leadPart != null && inputs.leadPart == part.id()) {
@@ -578,6 +591,15 @@ public final class ReconstructionStages {
                     if (figure.part != part.id() || figure.run == null) continue;
                     var companions = ReconstructionFigureVoices.find(audio, figure, local);
                     if (!companions.isEmpty()) voices.put(figure.id, companions);
+                }
+            }
+            if (leadCandidate) {
+                var tracker = new ReconstructionBends.Tracker(audio);
+                for (int i = 0; i < notes.size(); i++) {
+                    var note = notes.get(i);
+                    if (note.part != part.id()) continue;
+                    var bend = tracker.detect(note);
+                    if (bend != null) notes.set(i, note.withBend(bend));
                 }
             }
         }

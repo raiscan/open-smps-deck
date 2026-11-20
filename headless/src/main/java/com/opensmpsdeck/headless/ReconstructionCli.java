@@ -64,7 +64,8 @@ final class ReconstructionCli {
                           Map<Integer, ExternalTranscribers.Evidence> externalTranscription,
                           List<ReconstructionStages.Note> fastRunEvidence,
                           List<ReconstructionAllocation.RunPlacement> fastRuns,
-                          Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices) {}
+                          Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
+                          List<ReconstructionBendEncoding.Applied> bends, Boolean bendSizeLimit) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -73,7 +74,7 @@ final class ReconstructionCli {
 
     @FunctionalInterface
     private interface Arrangement {
-        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies);
+        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends) throws IOException;
     }
 
     private ReconstructionCli() {}
@@ -158,7 +159,7 @@ final class ReconstructionCli {
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
-                (echoes, copies) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
+                (echoes, copies, bends) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null);
     }
 
@@ -199,9 +200,9 @@ final class ReconstructionCli {
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
-                    (echoes, copies) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
+                    (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies), out, existing);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends), out, existing);
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {
@@ -267,35 +268,43 @@ final class ReconstructionCli {
         MidiScore score = transcription.source();
         boolean complete = false;
         try {
-            var result = arrangement.arrange(effects.echoes(), true);
+            boolean echoBankLimit = false, bendSizeLimit = false;
+            S3kReconstruction.Result result;
             com.opensmpsdeck.project.CompiledProject compiled;
-            boolean echoBankLimit = false;
-            try {
-                compiled = ProjectCompiler.compileWithAssets(result.project());
-            } catch (IllegalArgumentException failure) {
-                if (result.echoNotes() == 0 || !failure.getMessage().contains("32 KiB S3K bank")) throw failure;
-                echoBankLimit = true;
-                result = arrangement.arrange(Map.of(), false);
-                compiled = ProjectCompiler.compileWithAssets(result.project());
-            }
             Path source = target.resolve(OUTPUTS.get(0));
             Path packagePath = target.resolve(OUTPUTS.get(1));
             Path audio = target.resolve(OUTPUTS.get(2));
-            var project = result.project();
-            if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
-            Path aligned = reference;
-            if (timeline.warped()) {
-                aligned = target.resolve(STEADY_REFERENCE);
-                ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
-                var references = new ArrayList<>(project.references().stream().filter(r -> !r.id().equals(REFERENCE_ID)).toList());
-                references.add(new com.opensmpsdeck.project.AudioReference(REFERENCE_ID, "Steady reference",
-                        STEADY_REFERENCE, 0, 0, "reference"));
-                project = project.withReview(references, project.notes());
-            } else if (existing != null) {
-                project = project.withReview(project.references().stream().filter(r -> !r.id().equals(REFERENCE_ID)).toList(),
-                        project.notes());
+            Path aligned = timeline.warped() ? target.resolve(STEADY_REFERENCE) : reference;
+            while (true) {
+                result = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(), !echoBankLimit, !bendSizeLimit);
+                var project = result.project();
+                if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
+                if (timeline.warped() || existing != null) {
+                    var references = new ArrayList<>(project.references().stream()
+                            .filter(r -> !r.id().equals(REFERENCE_ID)).toList());
+                    if (timeline.warped()) references.add(new com.opensmpsdeck.project.AudioReference(
+                            REFERENCE_ID, "Steady reference", STEADY_REFERENCE, 0, 0, "reference"));
+                    project = project.withReview(references, project.notes());
+                }
+                try {
+                    compiled = ProjectCompiler.compileWithAssets(result.project());
+                } catch (IllegalArgumentException failure) {
+                    if (!failure.getMessage().contains("32 KiB S3K bank")) throw failure;
+                    if (!result.bends().isEmpty()) bendSizeLimit = true;
+                    else if (result.echoNotes() > 0) echoBankLimit = true;
+                    else throw failure;
+                    continue;
+                }
+                try {
+                    ProjectFiles.save(source, project, null);
+                } catch (IOException failure) {
+                    if (result.bends().isEmpty() || !failure.getMessage().endsWith("byte source limit")) throw failure;
+                    bendSizeLimit = true;
+                    continue;
+                }
+                break;
             }
-            ProjectFiles.save(source, project, null);
+            if (timeline.warped()) ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
             ProjectPackage.write(result.project(), packagePath);
             WaveFile.render(compiled, audio, frames);
             var inputEvidence = new LinkedHashMap<String, FileEvidence>();
@@ -337,7 +346,8 @@ final class ReconstructionCli {
                     effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
                     ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
                     result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
-                    runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices());
+                    runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices(),
+                    result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null);
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

@@ -322,6 +322,23 @@ in the matching pitch band, and no competing selected lead. Restored
 attacks carry `stem-phrase-attack`. Use `--no-fast-runs` on initial
 staged transcription to disable all three checks for an A/B comparison.
 
+### Stem-backed pitch bends
+
+A mapped tonal stem can supply a `bend` on a prepared note. The detector
+tracks the attack's spectral ridge inside the written gate and uses agreeing
+harmonics to reject unrelated pitches. The score stores signed-cents control
+points in source seconds, bend direction or shape, initial delay, and
+confidence. Structure warps the points together with the gate. The describe
+grid marks upward and downward motion with ↗ and ↘.
+
+For an FM1 bend, assembly auditions an F0 ramp and E7 tied pitch steps on the
+S3K sequencer and chooses using the resulting chip frequency contour. It
+preserves the allocated gate and restores the lane effects at the next
+attack. The report records applied bends under `bends`, with the
+`stem-backed-pitch-bend` reason, encoding, gate, and contour error in cents.
+A `bendSizeLimit` flag indicates a retry without the bend commands when they
+exceed the project or bank capacity.
+
 ### Roles
 
 `roles.json` contains `harmonyMaxHz` and a `notes` array with
