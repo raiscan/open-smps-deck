@@ -19,7 +19,8 @@ final class BenchReconstruction {
     record Part(int id, boolean drums) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
-                  List<Reduction> reductions, List<String> effectCopyLanes) {}
+                  List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve) {}
+    record TempoCurve(boolean warped) {}
     record Reduction(String change, String reason) {}
     record Change(int partId, int pitch, long startUs, long endUs) {}
     record Match(String kind, String lane, Key key, Choice choice) {}
@@ -28,7 +29,7 @@ final class BenchReconstruction {
     record Choice(String assetId, List<Candidate> shortlist) {}
     record Candidate(String assetId) {}
     record Result(List<BenchMetrics.Event> events, Attribution attribution, Path audio, long referenceUs,
-                  Map<String, Long> reductions) {}
+                  Map<String, Long> reductions, boolean warped) {}
 
     private static final long SECTION_US = 16_000_000L;
     private static final PrintStream QUIET = new PrintStream(OutputStream.nullOutputStream());
@@ -37,9 +38,13 @@ final class BenchReconstruction {
 
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
                       Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
-                      List<BenchMetrics.Event> oracleTruth) throws IOException {
+                      List<BenchMetrics.Event> oracleTruth, String steadyTempo) throws IOException {
         var args = new ArrayList<>(List.of("reconstruct", oracleTruth == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
+        if (steadyTempo.equals("off")) {
+            args.add("--steady-tempo");
+            args.add("off");
+        }
         if (refine) args.add("--audio-refine");
         if (seconds != null) {
             args.add("--seconds");
@@ -66,7 +71,7 @@ final class BenchReconstruction {
                 reductions.merge(change.reason() == null ? change.change() : change.reason(), 1L, Long::sum);
         }
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
-                output.resolve("render.wav"), report.referenceUs(), reductions);
+                output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped());
     }
 
     static List<BenchMetrics.Event> excludeEffectCopies(List<BenchMetrics.Event> events, List<String> lanes) {

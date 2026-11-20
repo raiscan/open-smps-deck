@@ -20,7 +20,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 final class BenchRun {
-    record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly, boolean oracle) {}
+    record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly, boolean oracle, String steadyTempo) {}
     private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
                         BenchTimeline.Truth nativeTruth) {}
 
@@ -63,6 +63,7 @@ final class BenchRun {
             var drums = new BenchDrums(catalogue, revision);
             var songs = new HashMap<Integer, Song>();
             var tasks = new ArrayList<Callable<BenchScorecard.Case>>();
+            var warps = new java.util.concurrent.ConcurrentSkipListMap<String, Boolean>();
             var reductions = new java.util.concurrent.ConcurrentSkipListMap<String, Map<String, Long>>();
             if (gold != null) tasks.add(() -> capture(gold.id(), null, null, scratch, out,
                     () -> scoreGold(gold, index, scratch.resolve("gold"), options, drums, hooks, reductions)));
@@ -85,7 +86,7 @@ final class BenchRun {
                 Song prepared = song;
                 Path target = scratch.resolve(Integer.toString(tasks.size()));
                 tasks.add(() -> capture(c.id(), c.profile(), c.variant(), scratch, out,
-                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks, reductions)));
+                        () -> scoreCase(c, corpus, target, prepared, options, catalogue, drums, hooks, reductions, warps)));
             }
             var rows = new ArrayList<BenchScorecard.Case>();
             try (var workers = Executors.newFixedThreadPool(options.jobs)) {
@@ -101,6 +102,7 @@ final class BenchRun {
             BenchFiles.write(output.resolve("scorecard.json"), card);
             Files.writeString(output.resolve("scorecard.md"), BenchScorecard.markdown(card));
             BenchFiles.write(output.resolve("stage-reductions.json"), reductions);
+            BenchFiles.write(output.resolve("tempo-warp.json"), warps);
             return rows.stream().anyMatch(row -> row.error() != null) ? 1 : 0;
         } finally {
             logger.setLevel(previousLevel);
@@ -126,11 +128,13 @@ final class BenchRun {
 
     private static BenchScorecard.Case scoreCase(BenchCorpus.Case c, Path root, Path output, Song song,
                                                  Options options, InstrumentCatalogue catalogue, BenchDrums drums,
-                                                 BenchCli.Hooks hooks, Map<String, Map<String, Long>> reductions) throws IOException {
+                                                 BenchCli.Hooks hooks, Map<String, Map<String, Long>> reductions,
+                                                 Map<String, Boolean> warps) throws IOException {
         try {
             var truth = song.truth.stream().filter(note -> note.drum() == null).toList();
             var reconstruction = BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
-                    output, options.audioRefine, null, Map.of(), drums, hooks, options.oracle ? truth : null);
+                    output, options.audioRefine, null, Map.of(), drums, hooks, options.oracle ? truth : null, options.steadyTempo);
+            warps.put(c.id(), reconstruction.warped());
             reductions.put(c.id(), reconstruction.reductions());
             var estimate = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
             var truthDrums = song.truth.stream().filter(note -> note.drum() != null).toList();
@@ -147,6 +151,11 @@ final class BenchRun {
                     == estimateDrums.get(p.estimate()).drum()).count();
             var voices = new BenchVoice(catalogue).score(truth, estimate, pairs, reconstruction.attribution(), options.holdout);
             float[] audio = BenchAudio.mono(BenchAudio.read(reconstruction.audio()));
+            if (c.drift() != null) {
+                // Score the same undrifted interval in both modes, including
+                // silence when playback ends early.
+                audio = java.util.Arrays.copyOf(audio, song.reference.length);
+            }
             var distance = BenchAudio.compare(song.reference, audio);
             var metrics = new TreeMap<String, Double>();
             if (c.grid() != null)
@@ -192,7 +201,7 @@ final class BenchRun {
                                                  Map<String, Map<String, Long>> reductions) throws IOException {
         try {
             var result = BenchReconstruction.run(gold.midi(), gold.reference(), index, output,
-                    options.audioRefine, gold.seconds(), gold.stems(), drums, hooks, null);
+                    options.audioRefine, gold.seconds(), gold.stems(), drums, hooks, null, options.steadyTempo);
             reductions.put(gold.id(), result.reductions());
             if (gold.regions().getLast().end() > result.referenceUs() / 1_000_000.0)
                 throw new IllegalArgumentException("Gold reconstruction ends before the annotations");

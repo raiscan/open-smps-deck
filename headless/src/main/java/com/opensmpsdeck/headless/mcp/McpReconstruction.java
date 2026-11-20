@@ -39,10 +39,11 @@ final class McpReconstruction {
             field("estimateTempo", "boolean", "Infer a musical grid").optional(),
             field("tempo", "number", "Override grid BPM").optional(),
             field("barOffset", "number", "Override bar origin in seconds (with tempo)").optional(),
+            field("steadyTempo", "string", "Steady output tempo: off, auto, or BPM").optional(),
             field("audioRepeats", "boolean", "Include audio chroma in repeat matching").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json");
+            "voicing.json", "roleplan.json", "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -80,7 +81,7 @@ final class McpReconstruction {
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
-                    "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "audioRepeats");
+                    "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats");
             if (options.has("candidates")) {
                 cli.add("--candidates");
                 cli.add(McpPaths.input(string(options, "candidates")).toString());

@@ -77,10 +77,20 @@ public final class ReconstructionStages {
                  List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
                  List<Note> notes, List<S3kReconstruction.Reduction> reductions,
                  List<ReconstructionPitchRefinement.Change> pitchChanges,
-                 @Nullable ReconstructionTempo.Estimate tempo, @Nullable List<ReconstructionStructure.Bar> midiBars) {
+                 @Nullable ReconstructionTempo.Estimate tempo, @Nullable List<ReconstructionStructure.Bar> midiBars, @Nullable ReconstructionBeatMap beatMap) {
+        Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
+              List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
+              List<Note> notes, List<S3kReconstruction.Reduction> reductions,
+              List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
+              List<ReconstructionStructure.Bar> midiBars) {
+            this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
+                    pitchChanges, tempo, midiBars, null);
+        }
+        boolean usesBeatGrid() { return beatMap != null && tempo != null && tempo.source().equals("tracked"); }
+
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
-                         ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars) {
-            return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions, pitchChanges, tempo, midiBars);
+                         ReconstructionTempo.Estimate tempo, List<ReconstructionStructure.Bar> midiBars, ReconstructionBeatMap beatMap) {
+            return new Score(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions, pitchChanges, tempo, midiBars, beatMap);
         }
     }
 
@@ -157,7 +167,7 @@ public final class ReconstructionStages {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
                         ReconstructionArtifacts.write(allocationFile, ReconstructionAllocation.allocate(
-                                roles, score.source.parts(), score.frames, score.inputs.fmOnly));
+                                roles, score.source.parts(), score.frames, score.inputs.fmOnly, ReconstructionTimeMap.of(score)));
                     }
                     case VOICE -> {
                         // Resuming an existing voicing uses the user's edits.
@@ -179,6 +189,20 @@ public final class ReconstructionStages {
             }
             progress.report(stage.ordinal() - request.from.ordinal() + 1, total, "Finished " + stageName(stage));
             if (!request.chain) break;
+        }
+    }
+
+    public static final String STEADY_REFERENCE = ReconstructionCli.STEADY_REFERENCE;
+
+    /** Use the assembly report, since score edits may not have been assembled yet. */
+    public static boolean usesSteadyReference(Path report, Path requestedReference) throws IOException {
+        if (!Files.isRegularFile(report) || Files.size(report) > 32L * 1024 * 1024) return false;
+        try (var reader = Files.newBufferedReader(report)) {
+            var json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+            var tempo = json.getAsJsonObject("tempoCurve");
+            if (tempo == null || !tempo.get("warped").getAsBoolean()) return false;
+            var original = json.getAsJsonObject("inputs").getAsJsonObject("wav");
+            return original.get("sha256").getAsString().equals(ReconstructionCli.audioHash(requestedReference));
         }
     }
 
@@ -281,7 +305,7 @@ public final class ReconstructionStages {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
-                || extra.grid.bpm() != null || extra.audioRepeats
+                || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
         return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz);
@@ -291,6 +315,7 @@ public final class ReconstructionStages {
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
         boolean estimate = false, audioRepeats = false;
+        String steady = null;
         var legacy = new ArrayList<>(Arrays.asList(args).subList(0, firstOption));
         for (int i = firstOption; i < args.length; i++) {
             switch (args[i]) {
@@ -299,6 +324,11 @@ public final class ReconstructionStages {
                 case "--tempo" -> {
                     if (bpm != null || ++i == args.length) throw new IllegalArgumentException("Expected one --tempo BPM");
                     bpm = Double.parseDouble(args[i]);
+                }
+                case "--steady-tempo" -> {
+                    if (steady != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --steady-tempo off|auto|BPM");
+                    steady = args[i];
                 }
                 case "--bar-offset" -> {
                     if (offset != null || ++i == args.length) throw new IllegalArgumentException("Expected one --bar-offset S");
@@ -323,7 +353,7 @@ public final class ReconstructionStages {
                 default -> legacy.add(args[i]);
             }
         }
-        return new StageOptions(legacy.toArray(String[]::new), candidates, hz, new ReconstructionTempo.Options(estimate, bpm, offset), audioRepeats);
+        return new StageOptions(legacy.toArray(String[]::new), candidates, hz, new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -344,12 +374,20 @@ public final class ReconstructionStages {
 
     private static ReconstructionStructure.Result structure(Score score) throws IOException {
         boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
+        boolean tracker = score.usesBeatGrid();
         double seconds = score.durationUs / 1e6;
+        var bars = tracker ? score.beatMap.bars(seconds) : score.bars;
         var audio = Boolean.TRUE.equals(score.inputs.audioRepeats)
                 ? ReconstructionRhythmAudio.read(Path.of(score.inputs.wav), seconds) : null;
-        return ReconstructionStructure.analyze(score.bars, score.notes.stream().sorted(NOTE_ORDER).toList(),
-                score.source.parts(), audio, inferred, inferred ? score.tempo.selected().beatsPerBar() : 4,
-                score.midiBars);
+        return ReconstructionStructure.analyze(bars, score.notes.stream().sorted(NOTE_ORDER).toList(),
+                score.source.parts(), audio, inferred, tracker ? score.beatMap.beatsPerBar()
+                        : inferred ? score.tempo.selected().beatsPerBar() : 4, score.midiBars,
+                ReconstructionTimeMap.of(score));
+    }
+
+    private static boolean trackedGrid(ReconstructionBeatMap beats, ReconstructionTempo.Options grid) {
+        return beats != null && grid.bpm() == null
+                && beats.confidence() >= ReconstructionTimeMap.MIN_CONFIDENCE && beats.deviation() >= .006;
     }
 
     private static Score retranscribe(Score saved) throws IOException {
@@ -384,12 +422,15 @@ public final class ReconstructionStages {
         var metadata = MidiScore.gridMetadata(midi);
         var grid = inputs.grid == null ? new ReconstructionTempo.Options(false, null, null) : inputs.grid;
         ReconstructionTempo.Estimate tempo = null;
+        ReconstructionBeatMap beats = null;
         double seconds = score.durationUs / 1e6;
         if (grid.bpm() != null) {
             tempo = ReconstructionTempo.override(grid, metadata.meter());
+            beats = ReconstructionBeatMap.constant(tempo.selected(), seconds);
         } else if (grid.force() || metadata.defaultTempo()) {
             var audio = seconds < .01 ? List.<ReconstructionRhythmAudio.Onset>of()
                     : ReconstructionRhythmAudio.read(Path.of(inputs.wav), seconds, false).onsets();
+            beats = ReconstructionBeatTracker.track(score.source, seconds, audio, metadata.meter());
             tempo = ReconstructionTempo.estimate(score.source, seconds, audio, metadata.meter());
             if (!grid.force() && (tempo.confidence() < .52 || tempo.midiEvidence() < .52)) {
                 tempo = new ReconstructionTempo.Estimate(tempo.selected(), tempo.confidence(), tempo.midiEvidence(),
@@ -399,7 +440,22 @@ public final class ReconstructionStages {
         boolean estimated = tempo != null && !tempo.source().equals("midi");
         var bars = estimated ? ReconstructionTempo.bars(tempo.selected(), seconds) : MidiScore.bars(midi, score.durationUs);
         var midiBars = estimated && !grid.force() && grid.bpm() == null ? MidiScore.bars(midi, score.durationUs) : null;
-        var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList(), tempo, midiBars);
+        if (trackedGrid(beats, grid)) {
+            // Keep the existing role window layout when changing musical bars.
+            if (midiBars == null) midiBars = bars;
+            bars = beats.bars(seconds);
+            double bpm = beats.openingBpm(), period = 60 / bpm;
+            double downbeat = beats.seconds(beats.downbeat());
+            var selected = new ReconstructionTempo.Grid(bpm, ReconstructionTempo.modulo(downbeat, period),
+                    ReconstructionTempo.modulo(downbeat, period * beats.beatsPerBar()), beats.beatsPerBar(), beats.confidence());
+            tempo = new ReconstructionTempo.Estimate(selected, beats.confidence(), tempo.midiEvidence(),
+                    tempo.audioEvidence(), tempo.alternatives(), "tracked");
+        }
+        if (grid.steady() != null && !List.of("auto", "off").contains(grid.steady()) && beats == null) {
+            if (estimated) beats = ReconstructionBeatMap.constant(tempo.selected(), seconds);
+            else beats = MidiScore.beatMap(midi, score.durationUs, metadata.meter());
+        }
+        var result = score.withInputs(inputs, bars, notes.stream().sorted(NOTE_ORDER).toList(), tempo, midiBars, beats);
         ReconstructionChecks.score(result);
         return result;
     }

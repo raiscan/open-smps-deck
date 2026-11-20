@@ -49,9 +49,28 @@ final class ReconstructionChecks {
                     at + ".source.notes", "invalid original MIDI note for part " + note.partId());
         }
         checkBars(at, value.bars(), duration(value));
+        var beatMap = value.beatMap();
+        if (beatMap != null) {
+            String where = at + ".beatMap";
+            var beats = beatMap.beats();
+            require(beats.size() >= 2 && beats.size() <= 4100 && unit(beatMap.confidence())
+                            && beatMap.beatsPerBar() >= 1 && beatMap.beatsPerBar() <= 255
+                            && beatMap.downbeat() >= 0 && beatMap.downbeat() < beatMap.beatsPerBar(),
+                    where, "invalid beat count, meter, phase or confidence");
+            require(beats.getFirst() >= -3 && beats.getFirst() <= 3 && beats.getLast() >= duration(value) - 3
+                    && beats.getLast() <= duration(value) + 6, where, "beat map must cover the score");
+            for (int i = 1; i < beats.size(); i++) {
+                double period = beats.get(i) - beats.get(i - 1);
+                require(period >= .14999 && period <= 3.00001, where, "beat times must increase (20–400 BPM)");
+            }
+            int frames = ReconstructionTimeMap.of(value).frames();
+            require(frames >= 1 && frames <= S3kRenderer.MAX_PRESENTATIONS, where,
+                    "project duration exceeds 600 seconds at the requested steady tempo");
+        }
         if (value.tempo() != null) {
+            require(!value.tempo().source().equals("tracked") || beatMap != null, at + ".beatMap", "required for a tracked grid");
             var tempo = value.tempo();
-            require(Set.of("estimated", "override", "midi").contains(tempo.source()), at + ".tempo.source",
+            require(Set.of("estimated", "override", "midi", "tracked").contains(tempo.source()), at + ".tempo.source",
                     "unknown grid source");
             require(unit(tempo.confidence()) && unit(tempo.midiEvidence()) && unit(tempo.audioEvidence()),
                     at + ".tempo", "confidence and evidence must be between 0 and 1");
@@ -236,6 +255,7 @@ final class ReconstructionChecks {
     }
 
     static void allocation(ReconstructionAllocation.Result allocation, ReconstructionStages.Score score) {
+        int projectFrames = ReconstructionTimeMap.of(score).frames();
         String at = "allocation.json";
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
                 score, Set.of("midi", "audio-refine", "consensus"));
@@ -268,7 +288,7 @@ final class ReconstructionChecks {
                 case drop -> false;
             }, where, "invalid lane for " + entry.role());
             require(entry.startTick() != null && entry.endTick() != null && entry.startTick() >= 0
-                            && entry.startTick() < entry.endTick() && entry.endTick() <= score.frames()
+                            && entry.startTick() < entry.endTick() && entry.endTick() <= projectFrames
                             && (!lane.equals("DAC") || entry.endTick() == entry.startTick() + 1),
                     where, "invalid startTick/endTick for " + lane);
             require(entry.mergedInto() == null && (entry.outcome() != ReconstructionAllocation.Outcome.shortened

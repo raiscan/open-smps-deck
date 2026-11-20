@@ -195,8 +195,12 @@ removes systematic bass octave doubles in synth lead parts. Use
 velocity to coarse tone volume. MIDI controllers, including sustain and
 pitch bend, are outside this pass.
 
-Without `--seconds`, the output covers the WAV duration. Bank and source size
-limits still apply. Set `--ticks-per-beat` to fit the Studio ruler without
+Without `--seconds`, reconstruction processes the full WAV. By default a
+confident gradual tempo change of 1.5% or more is corrected to the opening
+tempo. Use `--steady-tempo off` to keep source timing or supply a numeric target
+BPM. Warped runs include a pitch-preserving `reference-steady.wav` for A/B in
+Studio and MCP. Use `reconstruct time-map WORK_DIR --source S` or `--project S`
+to map times between the two timelines. Bank and source size limits still apply. Set `--ticks-per-beat` to fit the Studio ruler without
 changing playback timing. To check a render from an edited project, use
 `render-project` with the report's `presentations` as `--frames`.
 

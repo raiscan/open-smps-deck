@@ -61,6 +61,24 @@ java -jar "$jar" bench build-corpus "$rom" "$catalogue" "$bench/corpus-sunolike"
 java -jar "$jar" bench run "$bench/corpus-sunolike/manifest.json" "$catalogue" "$bench/suno-like"
 ```
 
+Build an accelerando fixture with `--profile suno-like --drift 0.07`. This
+raises the input tempo linearly by 7% across the song. It transforms both
+MIDI note endpoints and pitch-preservingly stretches each audio variant.
+Truth events and reference audio retain the original timeline. Score both
+modes against the same truth.
+
+```sh
+java -jar "$jar" bench build-corpus "$rom" "$catalogue" "$bench/drift" --profile suno-like --drift 0.07
+java -jar "$jar" bench run "$bench/drift/manifest.json" "$catalogue" "$bench/drift-auto"
+java -jar "$jar" bench run "$bench/drift/manifest.json" "$catalogue" "$bench/drift-off" --steady-tempo off
+```
+
+Read `onsetCorrelation`, `noteF1` and `melodyF1` from the three scorecards,
+including the separate undrifted `suno-like` run. Audio scoring uses the
+undrifted comparison interval, with silence padding if playback ends early.
+`tempo-warp.json` records the warp decision per successfully reconstructed
+case.
+
 `suno-like` uses the same attacks and perturbations as noisy, writes one
 explicit 120 BPM event, and adds a deterministic, nonzero random delay of
 less than one native bar. The delay is in whole 60 Hz presentations.

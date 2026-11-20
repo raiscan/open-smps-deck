@@ -35,7 +35,7 @@ public final class ReconstructionDescribe {
                         Map<Role, Integer> roles, List<String> bars) {}
     private record Section(String id, int firstBar, int lastBar, String sameAs, List<Line> parts) {}
     private record View(double bpm, double barSeconds, String tempoSource, String grid, List<Part> parts,
-                        List<Section> sections) {}
+                        List<Section> sections, ReconstructionBeatMap.Summary tempoCurve) {}
     private record Span(int first, int last) {}
 
     private ReconstructionDescribe() {}
@@ -105,6 +105,7 @@ public final class ReconstructionDescribe {
         var parts = score.source().parts().stream().filter(p -> filter.isEmpty() || filter.contains(p.id()))
                 .map(p -> new Part(p.id(), p.name(), p.program(), p.drums(), notes.getOrDefault(p.id(), List.of()).size()))
                 .toList();
+        var beatMap = score.usesBeatGrid() ? score.beatMap() : null;
         var barNumbers = new HashMap<String, Integer>();
         var bars = structure.bars();
         for (int i = 0; i < bars.size(); i++) barNumbers.put(bars.get(i).id(), i + 1);
@@ -127,7 +128,7 @@ public final class ReconstructionDescribe {
             if (first > last) continue;
             var lines = new ArrayList<Line>();
             for (var part : parts)
-                lines.add(line(part, notes.getOrDefault(part.id, List.of()), bars.subList(first - 1, last), roles));
+                lines.add(line(part, notes.getOrDefault(part.id, List.of()), bars.subList(first - 1, last), roles, beatMap));
             var current = new Section(section.id(), first, last, null, List.copyOf(lines));
             Section prior = collapse ? repeat(original, current, bars, repeatKeys, phraseKeys) : null;
             if (prior == null) {
@@ -144,12 +145,12 @@ public final class ReconstructionDescribe {
                 .mapToDouble(b -> b.end() - b.start()).sorted().toArray();
         var tempo = score.tempo();
         boolean inferred = tempo != null && !tempo.source().equals("midi");
-        double barSeconds = inferred ? tempo.selected().barLength()
+        double barSeconds = inferred && beatMap == null ? tempo.selected().barLength()
                 : lengths.length == 0 ? 2 : lengths[lengths.length / 2];
-        double bpm = inferred ? tempo.selected().bpm()
+        double bpm = beatMap != null ? beatMap.openingBpm() : inferred ? tempo.selected().bpm()
                 : 60 * (tempo == null ? 4 : tempo.selected().beatsPerBar()) / barSeconds;
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, parts,
-                List.copyOf(sections));
+                List.copyOf(sections), beatMap == null ? null : ReconstructionTimeMap.of(score).summary());
     }
 
     private static Section repeat(List<Section> earlier, Section current, List<ReconstructionStructure.Bar> bars,
@@ -170,7 +171,7 @@ public final class ReconstructionDescribe {
     }
 
     private static Line line(Part part, List<Note> notes, List<ReconstructionStructure.Bar> bars,
-                             Map<String, Role> roles) {
+                             Map<String, Role> roles, ReconstructionBeatMap beatMap) {
         double start = bars.getFirst().start(), end = bars.getLast().end();
         var sounding = notes.stream().filter(n -> n.start() < end && (n.start() >= start || n.end() > start)).toList();
         var counts = roles == null ? null : new EnumMap<Role, Integer>(Role.class);
@@ -188,24 +189,24 @@ public final class ReconstructionDescribe {
             min = Math.min(min, note.pitch());
             max = Math.max(max, note.pitch());
         }
-        var patterns = bars.stream().map(bar -> grid(bar, sounding, part.drums)).toList();
+        var patterns = bars.stream().map(bar -> grid(bar, sounding, part.drums, beatMap)).toList();
         String range = part.drums || sounding.isEmpty() ? null : pitch(min) + ".." + pitch(max);
         int figure = attacks == 0 ? 0 : figure(patterns);
         return new Line(part.id, range, round((double) attacks / bars.size()), polyphony, figure, counts, patterns);
     }
 
-    private static String grid(ReconstructionStructure.Bar bar, List<Note> notes, boolean drums) {
+    private static String grid(ReconstructionStructure.Bar bar, List<Note> notes, boolean drums, ReconstructionBeatMap beatMap) {
         var cells = new ArrayList<List<String>>(STEPS);
         var held = new boolean[STEPS];
         for (int i = 0; i < STEPS; i++) cells.add(new ArrayList<>());
         for (var note : notes) {
             if (note.start() >= bar.end()) break;
             if (note.start() < bar.start() && (drums || note.end() <= bar.start())) continue;
-            int step = Math.clamp(Math.round(bar.fraction(note.start()) * STEPS), 0, STEPS - 1);
+            int step = Math.clamp(Math.round(fraction(bar, note.start(), beatMap) * STEPS), 0, STEPS - 1);
             if (note.start() >= bar.start())
                 cells.get(step).add(drums ? DRUM.getOrDefault(note.pitch(), "D" + note.pitch()) : pitch(note.pitch()));
             if (!drums) {
-                int release = Math.clamp(Math.round(bar.fraction(note.end()) * STEPS), 0, STEPS);
+                int release = Math.clamp(Math.round(fraction(bar, note.end(), beatMap) * STEPS), 0, STEPS);
                 for (int i = note.start() >= bar.start() ? step + 1 : 0; i < release; i++) held[i] = true;
             }
         }
@@ -237,6 +238,12 @@ public final class ReconstructionDescribe {
         return 0;
     }
 
+    private static double fraction(ReconstructionStructure.Bar bar, double time, ReconstructionBeatMap beatMap) {
+        if (beatMap == null) return bar.fraction(time);
+        double start = beatMap.index(bar.start());
+        return (beatMap.index(time) - start) / (beatMap.index(bar.end()) - start);
+    }
+
     private static String pitch(int pitch) {
         return PITCH[pitch % 12] + (pitch / 12 - 1);
     }
@@ -247,6 +254,9 @@ public final class ReconstructionDescribe {
         var out = new StringBuilder();
         out.append(String.format(Locale.ROOT, "%.3f BPM, %.3f s/bar (%s)%n%s%n",
                 view.bpm, view.barSeconds, view.tempoSource, view.grid));
+        if (view.tempoCurve != null) out.append(String.format(Locale.ROOT, "Source tempo %.3f–%.3f BPM%s%n",
+                view.tempoCurve.startBpm(), view.tempoCurve.endBpm(), view.tempoCurve.warped()
+                        ? String.format(Locale.ROOT, ", steady playback at %.3f BPM", view.tempoCurve.steadyBpm()) : ""));
         for (var part : view.parts)
             out.append(String.format(Locale.ROOT, "P%d %s | program %d | drums %s | %d notes%n",
                     part.id, part.name.replaceAll("\\p{Cntrl}", " "), part.program, part.drums, part.notes));

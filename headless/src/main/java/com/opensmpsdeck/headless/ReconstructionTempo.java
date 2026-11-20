@@ -15,8 +15,10 @@ final class ReconstructionTempo {
     record Estimate(Grid selected, double confidence, double midiEvidence, double audioEvidence,
                     List<Grid> alternatives, String source) {}
     record Options(boolean force, @ReconstructionStages.Nullable Double bpm,
-                   @ReconstructionStages.Nullable Double offset) {
+                   @ReconstructionStages.Nullable Double offset, @ReconstructionStages.Nullable String steady) {
+        Options(boolean force, Double bpm, Double offset) { this(force, bpm, offset, null); }
         Options {
+            ReconstructionTimeMap.validateOption(steady);
             if (bpm != null && !(bpm >= 20 && bpm <= 400))
                 throw new IllegalArgumentException("--tempo must be between 20 and 400 BPM");
             if (offset != null && (bpm == null || !Double.isFinite(offset)))

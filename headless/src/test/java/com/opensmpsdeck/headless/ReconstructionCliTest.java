@@ -110,6 +110,28 @@ class ReconstructionCliTest {
         assertEquals(.15, firstBar.get("end").getAsDouble(), 1e-9);
         assertFalse(firstBar.get("complete").getAsBoolean());
 
+        Path steady = directory.resolve("steady");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
+                index.toString(), steady.toString(), "--seconds", ".5", "--tempo", "150", "--steady-tempo", "75"},
+                System.out, new PrintStream(errors)), errors.toString());
+        var steadyReport = JsonParser.parseString(Files.readString(steady.resolve("report.json"))).getAsJsonObject();
+        var curve = steadyReport.getAsJsonObject("tempoCurve");
+        assertTrue(curve.get("warped").getAsBoolean());
+        assertEquals(75, curve.get("steadyBpm").getAsDouble());
+        assertEquals(1, curve.get("durationSeconds").getAsDouble());
+        Path steadyWav = steady.resolve("reference-steady.wav");
+        assertEquals(1_000_000, ReferenceAudio.durationMicros(steadyWav));
+        Path steadyProject = steady.resolve("arrangement.smps.json");
+        assertEquals(steadyWav, ProjectFiles.load(steadyProject).project().references().getFirst().resolve(steadyProject));
+        for (var direction : List.of("--source", "--project")) {
+            var mapped = new ByteArrayOutputStream();
+            boolean fromSource = direction.equals("--source");
+            assertEquals(0, Main.run(new String[]{"reconstruct", "time-map", steady.toString(), direction,
+                    fromSource ? ".25" : ".5"}, new PrintStream(mapped), new PrintStream(errors)), errors.toString());
+            assertEquals(fromSource ? .5 : .25, Double.parseDouble(mapped.toString()), 1e-10);
+        }
+
+
         for (String stage : List.of("structure", "roles"))
             assertEquals(0, Main.run(new String[]{"reconstruct", stage, work.toString()},
                     System.out, new PrintStream(errors)), errors.toString());
@@ -175,13 +197,13 @@ class ReconstructionCliTest {
     }
 
     private void assertUnplannedArtifacts(Path work) throws Exception {
-        // Golden hashes from the same synthetic fixture run on cb33c9f.
+        // Golden hashes from cb33c9f, with the report updated for the tempo audit fields.
         var expected = java.util.Map.of(
                 "allocation.json", "7bf830b90c59fb781aae61f577b624deb53aea4be799eda811893957c2e33cc8",
                 "arrangement.smps.json", "21861a5e2b6fda2b21272818ff737d10cae4056d15a22df8e1273f4fd330a215",
                 "arrangement.smps.zip", "eef042d163278aa871c4b9b3d15fc895cf96dce5da0f1d67cfbc9af39dbf0f18",
                 "render.wav", "579c150877ab4a0597e50b8e33d94b0c1bfacca5800f85814271491b15a7c62d",
-                "report.json", "6ed08ed3961f2dab1a5bafa5b4efab7510fdde3d750598c994e9c4e42551dd6d",
+                "report.json", "30f822e8f14990de277d877f19ba20c2a35782e1eb07547957f058f5b2be0181",
                 "roles.json", "5e08f63fe79f62cdacfaf8552fbe4ddc6612de1a2c7d6323927fa2ffa5324dd2",
                 "score.json", "c99fa96c50b6231654f9638622d064fd27c7cfb7c7c6386ac6752ad86615b1b2",
                 "structure.json", "b1de076dad1f84fac16e556f9364dada60e0c8001374243d6ee806ad9022cbd1",
