@@ -63,7 +63,8 @@ final class ReconstructionCli {
                           StageEvidence stages, List<String> effectCopyLanes, ReconstructionBeatMap.Summary tempoCurve,
                           Map<Integer, ExternalTranscribers.Evidence> externalTranscription,
                           List<ReconstructionStages.Note> fastRunEvidence,
-                          List<ReconstructionAllocation.RunPlacement> fastRuns) {}
+                          List<ReconstructionAllocation.RunPlacement> fastRuns,
+                          Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -327,7 +328,7 @@ final class ReconstructionCli {
                     effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
                     ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
                     result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
-                    runEvidence.isEmpty() ? null : runEvidence, fastRuns);
+                    runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

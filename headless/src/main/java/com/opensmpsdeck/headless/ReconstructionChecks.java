@@ -91,6 +91,33 @@ final class ReconstructionChecks {
         }
         if (value.midiBars() != null) checkBars(at + ".midiBars", value.midiBars(), duration(value));
         checkNotes(at, value.notes(), value, duration(value), Set.of("midi", "audio-refine", "transcriber", "external", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+        if (value.figureVoices() != null) {
+            var figures = new HashMap<String, Note>();
+            for (var note : value.notes()) if (note.run() != null) figures.put(note.id(), note);
+            for (var entry : value.figureVoices().entrySet()) {
+                var figure = figures.get(entry.getKey());
+                var voices = entry.getValue();
+                String where = at + ".figureVoices." + entry.getKey();
+                require(figure != null && voices.size() >= 2, where, "expected two or more voices for an existing figure");
+                int previous = Integer.MAX_VALUE;
+                boolean anchor = false;
+                for (var voice : voices) {
+                    int interval = voice.interval();
+                    require(interval >= -12 && interval <= 12 && interval < previous && unit(voice.confidence())
+                                    && voice.role().equals(previous == Integer.MAX_VALUE ? "lead" : "harmony"),
+                            where, "expected ordered pitches and a single top lead");
+                    require(voice.pitches().size() == figure.run().size(), where, "expected one pitch per step");
+                    for (int step = 0; step < figure.run().size(); step++) {
+                        int pitch = voice.pitches().get(step);
+                        require(pitch >= 12 && pitch <= 106 && pitch == figure.run().get(step).pitch() + interval,
+                                where, "companion pitches must follow the figure at the declared interval");
+                    }
+                    anchor |= interval == 0;
+                    previous = interval;
+                }
+                require(anchor, where, "the figure's allocated pitch must be present");
+            }
+        }
     }
 
     private static void validateGrid(ReconstructionTempo.Grid grid, String at) {

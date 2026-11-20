@@ -83,6 +83,23 @@ class ReconstructionFastRunsTest {
                 69, 0, .8).isEmpty());
     }
 
+    @Test void keepsCoMovingThirdAndRejectsAStaticPad() {
+        var steps = new java.util.ArrayList<ReconstructionFastRuns.Step>();
+        for (int i = 0; i < 5; i++)
+            steps.add(new ReconstructionFastRuns.Step(72 + 2 * i, .10 + .08 * i, .10 + .08 * (i + 1)));
+        var lead = tone(.6, t -> t < .10 || t >= .50 ? Double.NaN : 72 + 2 * Math.floor((t - .10) / .08));
+        var harmony = tone(.6, t -> t < .10 || t >= .50 ? Double.NaN : 76 + 2 * Math.floor((t - .10) / .08));
+        var pad = tone(.6, t -> 65);
+        for (int i = 0; i < lead.samples().length; i++)
+            lead.samples()[i] += .8f * harmony.samples()[i] + .8f * pad.samples()[i];
+        var figure = new ReconstructionStages.Note("figure", 0, steps.getFirst().start(), steps.getLast().end(),
+                72, 90, ReconstructionFastRuns.REASON, .95, null, steps);
+        var voices = ReconstructionFigureVoices.find(lead, figure, List.of());
+        assertEquals(List.of(4, 0), voices.stream().map(ReconstructionFigureVoices.Voice::interval).toList());
+        assertEquals("lead", voices.getFirst().role());
+        assertEquals("harmony", voices.getLast().role());
+    }
+
     private static ReferenceAudio tone(double duration, DoubleUnaryOperator pitch) {
         int rate = 12_000;
         var samples = new float[(int) (rate * duration)];

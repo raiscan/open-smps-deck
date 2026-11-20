@@ -49,7 +49,7 @@ public final class ReconstructionDescribe {
                         List<Section> sections, ReconstructionBeatMap.Summary tempoCurve,
                         ReconstructionLeadContinuity.Stats leadContinuity, List<Run> fastRuns) {}
     private record Run(String kind, int part, double start, double end, Role role, double confidence,
-                       List<ReconstructionFastRuns.Step> steps) {}
+                       List<ReconstructionFastRuns.Step> steps, List<ReconstructionFigureVoices.Voice> voices) {}
 
     private record Span(int first, int last) {}
 
@@ -191,7 +191,7 @@ public final class ReconstructionDescribe {
         var runs = effectiveNotes.stream().filter(note -> note.run() != null && (filter.isEmpty() || filter.contains(note.part()))
                         && sections.stream().anyMatch(section -> note.end() > section.startSeconds && note.start() < section.endSeconds))
                 .map(note -> new Run(note.source(), note.part(), note.start(), note.end(), roles == null ? null : roles.get(note.id()),
-                        note.confidence(), note.run())).toList();
+                        note.confidence(), note.run(), score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
                 List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs);
     }
@@ -316,6 +316,11 @@ public final class ReconstructionDescribe {
             var sequence = run.steps.stream().map(step -> pitch(step.pitch())).collect(java.util.stream.Collectors.joining(" "));
             out.append(String.format(Locale.ROOT, "%s P%d %.3f–%.3f s %s (%.2f)%n",
                     run.kind, run.part, run.start, run.end, sequence, run.confidence));
+            if (run.voices != null) for (var voice : run.voices) {
+                var pitches = voice.pitches().stream().map(ReconstructionDescribe::pitch)
+                        .collect(java.util.stream.Collectors.joining(" "));
+                out.append("  ").append(voice.role()).append(" evidence ").append(pitches).append('\n');
+            }
         }
         for (var part : view.parts)
             out.append(String.format(Locale.ROOT, "P%d %s | program %d | drums %s | %d notes%n",

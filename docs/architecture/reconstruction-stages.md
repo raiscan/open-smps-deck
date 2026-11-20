@@ -302,6 +302,16 @@ allocated lane, span, and retained step indexes. A dropped figure
 has no lane. `reconstruct describe --json` gives ordered step boundaries
 on the current project clock.
 
+For accepted figures, `figureVoices` keeps separate spectral pitches
+whose changes follow the ordered steps. For retriggers, it requires a
+transcribed companion pitch and independent partial-envelope rises
+within one presentation of the anchor. Voice evidence shares the
+figure's boundaries. The highest supported voice is tagged `lead`
+and the others `harmony`. The original placement remains the playback
+anchor. Evidence for extra voices is available in the score, describe
+and report artifacts. Octave partials alone leave independent doubling
+ambiguous.
+
 For a mapped explicit lead, the roles stage can also restore already
 transcribed attacks in a locally monophonic phrase. It requires a
 consistent mixture of short and long attack intervals, audible onsets
