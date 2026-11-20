@@ -132,7 +132,7 @@ def smoke(jar, root):
     with Client(jar) as rpc:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
-            reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
+            transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare

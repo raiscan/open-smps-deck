@@ -27,14 +27,18 @@ final class ReconstructionArtifacts {
     private ReconstructionArtifacts() {}
 
     static <T> T read(Path file, Class<T> type) throws IOException {
+        return decode(file, type, readTree(file));
+    }
+
+    static JsonElement readTree(Path file) throws IOException {
         if (Files.size(file) > MAX_ARTIFACT_BYTES)
             throw new IllegalArgumentException(file + ": artifact exceeds 32 MiB");
         try (var reader = Files.newBufferedReader(file)) {
             var stream = new JsonReader(reader);
             var tree = JSON.getAdapter(JsonElement.class).read(stream);
             require(stream.peek() == JsonToken.END_DOCUMENT,
-                    file.toString(), "unexpected content after JSON object");
-            return decode(file, type, tree);
+                    file.toString(), "unexpected content after JSON value");
+            return tree;
         } catch (JsonParseException | MalformedJsonException | EOFException malformed) {
             throw new IllegalArgumentException(file + ": " + malformed.getMessage(), malformed);
         }

@@ -76,7 +76,13 @@ public final class ReconstructionStages {
     record Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                   boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                   @Nullable String candidates, double harmonyMaxHz, @Nullable ReconstructionTempo.Options grid,
-                  @Nullable Boolean audioRepeats) {
+                  @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes) {
+        Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
+               boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
+               String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats) {
+            this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null);
+        }
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
@@ -110,7 +116,9 @@ public final class ReconstructionStages {
     record Candidates(int version, List<Candidate> notes) {}
 
     private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
-                                ReconstructionTempo.Options grid, boolean audioRepeats) {}
+                                ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
+                                @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
+                                Map<Integer, ExternalTranscribers.Import> imports) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz) {}
 
     private ReconstructionStages() {}
@@ -307,12 +315,14 @@ public final class ReconstructionStages {
         double harmonyHz = extra.harmonyHz == null ? ReconstructionRoles.DEFAULT_HARMONY_HZ : extra.harmonyHz;
         var stems = new java.util.TreeMap<Integer, String>();
         options.stems().forEach((id, file) -> stems.put(id, file.toAbsolutePath().normalize().toString()));
+        progress.report(0, chain ? Stage.values().length : 1, "Starting transcribe");
+        var score = transcribe(midi, reference, options);
+        var external = ExternalTranscribers.collect(score.source, stems, extra.transcriber, extra.transcriberConfig,
+                extra.transcribeParts, extra.device == null ? "auto" : extra.device, extra.imports);
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
-                extra.grid, extra.audioRepeats);
-        progress.report(0, chain ? Stage.values().length : 1, "Starting transcribe");
-        var score = transcribe(midi, reference, options);
+                extra.grid, extra.audioRepeats, external);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz);
     }
 
@@ -320,6 +330,7 @@ public final class ReconstructionStages {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
+                || extra.transcriber != null || !extra.imports.isEmpty()
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
@@ -330,7 +341,10 @@ public final class ReconstructionStages {
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
         boolean estimate = false, audioRepeats = false;
-        String steady = null;
+        String steady = null, transcriber = null, device = null;
+        Path transcriberConfig = null;
+        var parts = new java.util.TreeMap<Integer, String>();
+        var imports = new java.util.TreeMap<Integer, ExternalTranscribers.Import>();
         var legacy = new ArrayList<>(Arrays.asList(args).subList(0, firstOption));
         for (int i = firstOption; i < args.length; i++) {
             switch (args[i]) {
@@ -354,6 +368,37 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("Expected one --candidates NOTES.json");
                     candidates = absolute(args[i]);
                 }
+                case "--transcriber" -> {
+                    if (transcriber != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --transcriber NAME");
+                    transcriber = args[i];
+                }
+                case "--transcriber-config" -> {
+                    if (transcriberConfig != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --transcriber-config FILE");
+                    transcriberConfig = absolute(args[i]);
+                }
+                case "--transcriber-device" -> {
+                    if (device != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --transcriber-device DEVICE");
+                    device = args[i];
+                }
+                case "--transcribe-part", "--replace-notes", "--add-notes" -> {
+                    String flag = args[i];
+                    if (++i == args.length) throw new IllegalArgumentException("Missing argument to " + flag);
+                    String[] assignment = args[i].split("=", 2);
+                    if (assignment.length != 2 || assignment[1].isBlank())
+                        throw new IllegalArgumentException("Expected " + flag + " PART=" +
+                                (flag.equals("--transcribe-part") ? "ROLE" : "FILE"));
+                    int part = Integer.parseInt(assignment[0]);
+                    if (flag.equals("--transcribe-part")) {
+                        if (parts.putIfAbsent(part, assignment[1]) != null)
+                            throw new IllegalArgumentException("Duplicate external role for part " + part);
+                    } else if (imports.putIfAbsent(part, new ExternalTranscribers.Import(
+                            absolute(assignment[1]), flag.equals("--replace-notes"))) != null) {
+                        throw new IllegalArgumentException("Duplicate notes import for part " + part);
+                    }
+                }
                 case "--harmony-max-hz" -> {
                     if (hz != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --harmony-max-hz RATE");
@@ -368,7 +413,13 @@ public final class ReconstructionStages {
                 default -> legacy.add(args[i]);
             }
         }
-        return new StageOptions(legacy.toArray(String[]::new), candidates, hz, new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats);
+        if (transcriber == null && (!parts.isEmpty() || transcriberConfig != null || device != null))
+            throw new IllegalArgumentException("External transcription options require --transcriber NAME");
+        if (transcriber != null && parts.isEmpty())
+            throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
+        return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
+                new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
+                transcriber, transcriberConfig, device, parts, imports);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -422,6 +473,23 @@ public final class ReconstructionStages {
 
     private static Score attach(Score score, Inputs inputs) throws IOException {
         var notes = new ArrayList<>(score.notes);
+        if (inputs.externalNotes != null) {
+            double limit = score.durationUs / (double) MICROS_PER_SECOND;
+            for (var entry : inputs.externalNotes.entrySet()) {
+                int part = entry.getKey();
+                ExternalTranscribers.validatePart(part, score.source.parts());
+                var imported = entry.getValue();
+                if (imported.provenance().replace()) notes.removeIf(note -> note.part == part);
+                int index = 0;
+                for (var raw : imported.notes()) {
+                    if (raw.start() < limit && raw.pitch() >= 12 && raw.pitch() <= 106) {
+                        notes.add(new Note("transcriber-" + part + "-" + index, part, raw.start(),
+                                Math.min(limit, raw.end()), raw.pitch(), raw.velocity(), "transcriber", 1));
+                    }
+                    index++;
+                }
+            }
+        }
         if (inputs.candidates != null) {
             var file = Path.of(inputs.candidates);
             var candidates = ReconstructionArtifacts.read(file, Candidates.class);

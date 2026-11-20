@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.mcp;
 
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.Main;
+import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.bench.BenchCli;
 
@@ -39,6 +40,8 @@ final class McpTools {
     private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report"};
 
     private static final List<Tool> TOOLS = List.of(
+            tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
+                    (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames()))),
             tool("reconstruct_run",
                     "Run all stages in a new work directory, or resume from the first stage that consumes your edit. From voice reuses existing voicing. Assembly carries forward project reviews.",
                     (args, progress) -> McpReconstruction.run(args, false, progress), WORK,

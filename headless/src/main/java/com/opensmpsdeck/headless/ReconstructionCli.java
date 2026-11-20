@@ -60,7 +60,8 @@ final class ReconstructionCli {
                           Map<Integer, ReconstructionVibrato.Estimate> vibratoEstimates,
                           List<ReconstructionReverb.Estimate> reverbEstimates,
                           List<S3kReconstruction.Reduction> reductions, List<ReconstructionAudioCheck.Section> audio,
-                          StageEvidence stages, List<String> effectCopyLanes, ReconstructionBeatMap.Summary tempoCurve) {}
+                          StageEvidence stages, List<String> effectCopyLanes, ReconstructionBeatMap.Summary tempoCurve,
+                          Map<Integer, ExternalTranscribers.Evidence> externalTranscription) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -77,6 +78,9 @@ final class ReconstructionCli {
     static void usage(PrintStream out) {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE]");
+        out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
+        out.println("           [--transcriber-device DEVICE] [--transcriber-config FILE]");
+        out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("           [--steady-tempo off|auto|BPM]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
@@ -305,6 +309,12 @@ final class ReconstructionCli {
                     structure.phrases() == null ? 0 : structure.phrases().size(), structure.sections().size(),
                     leadContinuity == null ? null : leadContinuity.reportCounts(fm1InterNoteGaps != null),
                     melodyGapFill, fm1InterNoteGaps);
+            Map<Integer, ExternalTranscribers.Evidence> external = null;
+            if (transcription.inputs() != null && transcription.inputs().externalNotes() != null) {
+                external = new java.util.TreeMap<>();
+                for (var entry : transcription.inputs().externalNotes().entrySet())
+                    external.put(entry.getKey(), entry.getValue().provenance());
+            }
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
@@ -313,7 +323,7 @@ final class ReconstructionCli {
                     transcription.pitchChanges(), List.copyOf(effects.echoes().values()), result.echoNotes(), echoBankLimit,
                     effects.vibrato(), List.copyOf(effects.reverb().values()), result.reductions(),
                     ReconstructionAudioCheck.compare(aligned, audio, frames), stages,
-                    result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary());
+                    result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external);
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

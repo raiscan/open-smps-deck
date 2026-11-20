@@ -274,7 +274,7 @@ line is assigned to planned candidates in the same bar, in which case
 it becomes harmony. Affected decisions carry a zero-based `roleplan#N`
 in their reason. Without a plan file, reconstruction uses the heuristic.
 
-The MCP server exposes 16 tools, including `reconstruct_describe` with the
+The MCP server exposes 17 tools, including `reconstruct_describe` with the
 same filters and `reconstruct_plan_template`. Use `artifact_read` and
 `artifact_write` with artifact `roleplan` to inspect or validate edits, then
 call `reconstruct_run` with `from` set to `roles`.
@@ -339,6 +339,45 @@ compiler/render integration, PCM equality with direct pinned-core rendering,
 bounded reads and file preservation. Upstream-source parity is checked separately
 by the repository's pin verification tooling; a passing demo alone is not a claim
 of broad ROM parity.
+
+## External transcription
+
+Suno MIDI is the default. To try an external transcriber on selected melodic
+parts, supply an aligned WAV stem and a role for each part ID.
+
+```sh
+java -jar "$CLI" reconstruct run song.mid mix.wav catalogue.json external-work \
+  --stem 0=lead.wav --transcriber muscriptor --transcribe-part 0=lead
+```
+
+The CLI reads `$XDG_CONFIG_HOME/opensmpsdeck/transcribers.json` (default
+`~/.config/opensmpsdeck/transcribers.json`). Set `OPENSMPSDECK_TRANSCRIBERS`
+or pass `--transcriber-config FILE` to select another file. Its JSON object
+maps names to executable argument arrays. Commands run directly with
+`{input}` and `{output}` substituted for the absolute stem and output paths,
+`{role}` for the requested role, and `{device}` for the device selected by
+`--transcriber-device` (default `auto`). Use an executable and arguments you
+trust. The command writes a JSON note array to the output path and can write
+a `<output>.meta.json` object with tool, model, version, prompt, and other
+provenance. See the [MuScriptor adapter](../tools/transcribers/muscriptor/)
+for setup and an example configuration.
+
+Use `--replace-notes 0=lead.mid` or `--add-notes 1=keys.json` to import a
+single melodic MIDI part or JSON `[[start, end, pitch], ...]` directly.
+Repeat the options for different parts. Times are in source seconds.
+JSON uses velocity 96. Notes outside the selected interval or the S3K
+melodic pitch range are omitted, and releases are clipped to the interval.
+An empty replacement clears the selected part. Drums, uncovered parts,
+and the original tempo analysis continue to use Suno MIDI. A missing or
+failed command aborts the requested run.
+
+For MCP, call `transcribers_list` and pass
+`options: {transcriber: "muscriptor", transcribeParts: {"0": "lead"}}` to
+`reconstruct_run` or a fresh `reconstruct_stage` for `transcribe`. Include
+the stem in `inputs.stems`. The server uses its own local configuration.
+The score embeds the imported notes and provenance, including file hashes,
+and the report includes per-part provenance. `run --from transcribe`
+reapplies the saved notes without invoking the external command.
 
 ## Reconstruction benchmark
 
