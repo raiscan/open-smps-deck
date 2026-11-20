@@ -306,11 +306,15 @@ timeline before legato and hardware allocation.
 
 After promotion, stem-backed legato can close a gap of up to 350 ms in
 source time between consecutive melody attacks from the same MIDI part.
-It requires the earlier or following pitch's fundamental throughout the
-gap at a substantial fraction of its level inside the corresponding
-note. The evidence can pass from the earlier pitch to the following
-pitch once. It excludes evidence
-that could be supplied by an overlapping MIDI tone or its harmonics.
+It requires the earlier or following pitch's fundamental in at least
+70% of the gap's analysis frames, at a substantial fraction of its level
+inside the corresponding note. A legato lead over chords dips briefly
+where its partials beat against chord tones, so not every frame has to
+pass. Evidence is excluded only when a notated unison tone sustains
+through the whole gap. Octave and other harmonic relations do not veto
+it: merged Suno chords usually contain the lead's pitch class, and a
+doubled chord tone across a short gap is a smaller fault than a hole in
+the melody.
 For gaps shorter than the spectrum window, it also checks samples
 strictly inside the gap so a same-pitch reattack cannot supply all the
 evidence. Motion-based releases retain priority. Legato only changes the

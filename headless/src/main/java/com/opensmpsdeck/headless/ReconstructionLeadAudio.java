@@ -17,6 +17,7 @@ final class ReconstructionLeadAudio {
     private static final double WINDOW = .052;
     private static final double LEGATO_MIN_LEVEL = .003;
     private static final double LEGATO_RELATIVE_LEVEL = .35;
+    private static final double LEGATO_SUPPORT = .70;
     private static final double CENTS = 1200 / Math.log(2);
     private static final double[] HARMONIC_OFFSETS = {0, 0, 12, 12 * Math.log(3) / Math.log(2), 24};
     private static final Model[][] MODELS = models();
@@ -199,15 +200,16 @@ final class ReconstructionLeadAudio {
                 if (outgoing != null && gapAmplitude(outgoing.frequency, end, next) < outgoing.floor) outgoing = null;
                 if (incoming != null && gapAmplitude(incoming.frequency, end, next) < incoming.floor) incoming = null;
             }
+            // A legato lead over chords dips briefly where partials beat against chord tones, so
+            // require most of the gap, not every sample, to carry the outgoing or incoming pitch.
             int samples = Math.max(1, (int) Math.ceil((next - end) / HOP));
+            int supported = 0;
             for (int i = 0; i < samples; i++) {
                 double center = end + (i + .5) * (next - end) / samples;
                 double audible = .10 * at(rms, center);
-                if (supports(outgoing, center, audible)) continue;
-                outgoing = null; // Support can pass from the earlier pitch to the next pitch once.
-                if (!supports(incoming, center, audible)) return false;
+                if (supports(outgoing, center, audible) || supports(incoming, center, audible)) supported++;
             }
-            return true;
+            return supported >= Math.ceil(LEGATO_SUPPORT * samples);
         }
 
         private static boolean supports(Band band, double center, double audible) {
@@ -219,7 +221,10 @@ final class ReconstructionLeadAudio {
             for (var other : competitors) {
                 if (other.start() >= next || other.end() <= cut) continue;
                 double ratio = hz(pitch) / hz(other.pitch());
-                if (ratio >= .98 && ratio <= 4.02 && Math.abs(ratio - Math.rint(ratio)) < .02)
+                // Only a unison chord tone can impersonate the lead's fundamental through the gap.
+                // Octave and other harmonic relations are left in, because a doubled chord tone is a
+                // harmless continuation and merged Suno chords usually contain the lead's pitch class.
+                if (ratio >= .98 && ratio <= 1.02 && other.start() < cut && other.end() > next)
                     return null;
             }
             int index = index(pitch, 1);

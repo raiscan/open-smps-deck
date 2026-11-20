@@ -89,10 +89,18 @@ class ReconstructionLeadAudioTest {
         assertFalse(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .395, .7), List.of(chord(64), chord(72))));
     }
 
-    @Test void rejectsPitchEvidenceFromANotatedBackingTone() {
+    @Test void rejectsPitchEvidenceFromANotatedUnisonBackingTone() {
+        var track = legatoTrack(.72, .20);
+        var backing = new ReconstructionStages.Note("backing", 0, .30, .6, 69, 90, "midi", 1);
+        assertFalse(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), List.of(backing)));
+    }
+
+    @Test void acceptsEvidenceDespiteAnOctaveBackingTone() {
+        // Merged Suno chords usually contain the lead's pitch class. A doubled chord tone through a
+        // short gap is a smaller fault than a hole in the melody, so octave relations do not veto.
         var track = legatoTrack(.72, .20);
         var backing = new ReconstructionStages.Note("backing", 0, .30, .6, 57, 90, "midi", 1);
-        assertFalse(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), List.of(backing)));
+        assertTrue(track.bridges(lead("prior", 69, .20, .38), lead("next", 69, .51, .7), List.of(backing)));
     }
 
     @Test void acceptsOnePitchHandoffOnlyWhenTheGapStaysSounding() {
