@@ -296,9 +296,12 @@ public final class ReconstructionDescribe {
                 view.tempoCurve.startBpm(), view.tempoCurve.endBpm(), view.tempoCurve.warped()
                         ? String.format(Locale.ROOT, ", steady playback at %.3f BPM", view.tempoCurve.steadyBpm()) : ""));
         var continuity = view.leadContinuity;
-        if (continuity != null)
-            out.append(String.format(Locale.ROOT, "Lead continuity: %d split, %d added, %d extended%n",
+        if (continuity != null) {
+            out.append(String.format(Locale.ROOT, "Lead continuity: %d split, %d added, %d extended",
                     continuity.split(), continuity.added(), continuity.extended()));
+            if (continuity.legato() != null) out.append(", ").append(continuity.legato()).append(" legato");
+            out.append('\n');
+        }
         if (view.sections.stream().flatMap(section -> section.parts.stream())
                 .flatMap(part -> part.bars.stream()).anyMatch(pattern -> pattern.contains("~")))
             out.append("~ periodic pitch modulation\n");

@@ -73,7 +73,7 @@ final class BenchReconstruction {
         }
         if (report.stages() != null && report.stages().leadContinuity() != null)
             report.stages().leadContinuity().forEach((key, count) -> {
-                if (count > 0) reductions.put("lead-" + key, count);
+                if (count > 0) reductions.put(key.startsWith("lead-") ? key : "lead-" + key, count);
             });
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
                 output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped());
