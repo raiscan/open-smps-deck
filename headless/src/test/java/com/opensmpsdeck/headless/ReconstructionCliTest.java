@@ -419,6 +419,13 @@ class ReconstructionCliTest {
         var levels = ReconstructionVoicing.preserveRefit(proposed, before, java.util.Set.of("FM1"), true);
         assertEquals(.8, levels.lanes().get("FM1").gain());
         assertSame(backing, levels.lanes().get("PSG2"));
+        // A lane whose role changed upstream carries new material and takes the refitted level.
+        var swapped = new ReconstructionVoicing.Lane(harmony, "pad", List.of(), 1.2, art, dry, "", "", "", List.of());
+        var roleChange = ReconstructionVoicing.preserveRefit(
+                new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", swapped, "PSG2", fit), null),
+                before, java.util.Set.of("FM1"), false);
+        assertEquals(1.2, roleChange.lanes().get("FM1").gain());
+        assertEquals(null, roleChange.lanes().get("FM1").partGains());
     }
 
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {

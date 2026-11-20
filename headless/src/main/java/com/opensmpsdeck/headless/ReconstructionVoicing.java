@@ -35,9 +35,11 @@ final class ReconstructionVoicing {
         }
 
         Lane withPreviousEdits(Lane previous, boolean refitLevels) {
-            return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
+            // A lane whose role changed upstream carries different material, so its old level is stale.
+            boolean keepLevels = !refitLevels && previous.role == role;
+            return new Lane(role, variantId, shortlist, keepLevels ? previous.gain : gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
-                    refitLevels ? partGains : previous.partGains, previous.overrides);
+                    keepLevels ? previous.partGains : partGains, previous.overrides);
         }
 
         double gainFor(int part, double level) {

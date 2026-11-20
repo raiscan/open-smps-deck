@@ -159,7 +159,7 @@ Limits:
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
 
 Standalone `voice` refits lane-wide choices and preserves scoped overrides,
-lane gain and per-part gains. Pass `--lane FM1` to leave the other lanes
+lane gain and per-part gains (a lane whose role changed is releveled). Pass `--lane FM1` to leave the other lanes
 untouched. Use `--refit-levels` only when changing levels is part of the review.
 MCP exposes the same choices as `options.refitLanes` and `options.refitLevels`.
 Read the changed-lane list in the result. For a fresh fit, back up and move

@@ -549,7 +549,8 @@ Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
 or generates it if missing. Use `reconstruct voice WORK_DIR` to refit after
 editing allocation. A refit preserves overrides, lane gain and part gains by
-default. Pass `--lane LANE` repeatedly to restrict which lanes can change, and
+default, except on a lane whose role changed upstream, which takes the
+refitted levels. Pass `--lane LANE` repeatedly to restrict which lanes can change, and
 `--refit-levels` to recompute the targeted levels. With no lane filter, an
 explicit refit considers every lane. The CLI lists every changed lane and MCP
 returns them in `refitChanges`. The fit starts from still-available FM variants
