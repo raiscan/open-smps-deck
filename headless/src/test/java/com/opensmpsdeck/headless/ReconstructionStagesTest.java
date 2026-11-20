@@ -130,7 +130,7 @@ class ReconstructionStagesTest {
         assertEquals(22, result.notes().size());
     }
 
-    @Test void linksIdenticalRepeatClipsAndKeepsDifferentArticulationIndependent() {
+    @Test void linksIdenticalRepeatClipsAndKeepsDifferentArticulationIndependent() throws java.io.IOException {
         var notes = phrases(3);
         notes.replaceAll(n -> n.id().equals("b2-2")
                 ? new Note(n.id(), n.part(), n.start(), n.end(), n.pitch(), 64, n.source(), n.confidence()) : n);

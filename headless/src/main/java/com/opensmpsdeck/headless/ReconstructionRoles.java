@@ -93,6 +93,7 @@ final class ReconstructionRoles {
         }
         Map<String, String> reasons = phraseReasons;
         if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence));
+        preferBendAttack(tones, roles, reasons);
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
             if (roles.get(id) != Role.harmony) continue;
@@ -115,6 +116,33 @@ final class ReconstructionRoles {
         decisions = ReconstructionMelodyGapFill.promote(decisions, permitted);
         if (continuity != null) decisions = continuity.legato(decisions, permitted);
         return new Result(VERSION, harmonyHz, decisions, structure.timeBase());
+    }
+
+    /** A transcriber can write the landing pitch as a simultaneous attack. */
+    private static void preferBendAttack(List<Note> tones, Map<String, Role> roles, Map<String, String> reasons) {
+        var byAttack = new HashMap<PartPitch, List<Note>>();
+        for (var note : tones) {
+            if (roles.get(note.id()) == Role.melody)
+                byAttack.computeIfAbsent(new PartPitch(note.part(), note.pitch()), ignored -> new ArrayList<>()).add(note);
+        }
+        for (var note : tones) {
+            var bend = note.bend();
+            if (bend == null || bend.confidence() < .92 || bend.delay() < .040 || roles.get(note.id()) == Role.melody)
+                continue;
+            int cents = bend.points().getLast().cents();
+            if (Math.abs(cents) < 150 || Math.abs(cents) > 400) continue;
+            int terminalPitch = note.pitch() + (int) Math.round(cents / 100.0);
+            if (Math.abs(cents - 100 * (terminalPitch - note.pitch())) > 30) continue;
+            for (var landing : byAttack.getOrDefault(new PartPitch(note.part(), terminalPitch), List.of())) {
+                if (Math.abs(landing.start() - note.start()) <= .010 && Math.abs(landing.end() - note.end()) <= .025
+                        && landing.bend() == null && landing.run() == null && roles.get(landing.id()) == Role.melody) {
+                    roles.put(note.id(), Role.melody);
+                    roles.put(landing.id(), Role.harmony);
+                    reasons.put(note.id(), ReconstructionBends.REASON);
+                    break;
+                }
+            }
+        }
     }
 
     private static List<Scope> scopes(ReconstructionStructure.Result structure, ReconstructionRolePlan plan) {

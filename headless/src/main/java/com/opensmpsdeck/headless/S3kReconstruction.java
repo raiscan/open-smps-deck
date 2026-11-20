@@ -42,7 +42,7 @@ final class S3kReconstruction {
     }
     record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
-                  List<Reduction> reductions) {}
+                  List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends) {}
 
     private record Event(MidiScore.Note note, int start, int end, int priority, String assetId, int volume) {}
 
@@ -52,6 +52,7 @@ final class S3kReconstruction {
         int detune;
         int volumeFloor;
         ReconstructionVoicing.Vibrato vibrato;
+        ReconstructionBendEncoding.Fit bend;
         Placement(Event event) { this.event = event; end = event.end(); }
     }
 
@@ -202,14 +203,14 @@ final class S3kReconstruction {
                 sequences, clips, List.copyOf(envelopes.values()),
                 samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList());
         return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
-                dac.size(), echoNotes, List.copyOf(reductions));
+                dac.size(), echoNotes, List.copyOf(reductions), List.of());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
                                    ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
                                    InstrumentCatalogue catalogue,
                                    Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
-                                   Map<Integer, ReconstructionEcho.Estimate> echoes) {
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes) throws java.io.IOException {
         return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
                 matches, echoes, Map.of(), false);
     }
@@ -219,7 +220,18 @@ final class S3kReconstruction {
                                    InstrumentCatalogue catalogue,
                                    Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
                                    Map<Integer, ReconstructionEcho.Estimate> echoes,
-                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies) {
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies) throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
+                matches, echoes, voicing, copies, false);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends) throws java.io.IOException {
+        var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var parts = indexParts(score.parts());
         var reductions = new ArrayList<>(score.reductions());
         var fm = ReconstructionAllocation.FM.stream().map(lane -> new ArrayList<Placement>()).toList();
@@ -279,6 +291,13 @@ final class S3kReconstruction {
                     placed.detune = voice.effects().detune();
                     placed.vibrato = voice.effects().vibrato();
                 }
+                if (bends && lane.equals("FM1") && entry.note().bend() != null) {
+                    placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration,
+                            placed.detune, voices.get(id));
+                    if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
+                            lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
+                            ReconstructionBends.REASON));
+                }
                 if (isFm) fm.get(ReconstructionAllocation.FM.indexOf(lane)).add(placed);
                 else psg.get(ReconstructionAllocation.PSG.indexOf(lane)).add(placed);
             }
@@ -299,7 +318,7 @@ final class S3kReconstruction {
         writeDacLane(dac, sequences, clips, repeats);
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
-        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions));
+        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied));
     }
 
     private static int addVoicingCopies(List<ArrayList<Placement>> fm,
@@ -455,6 +474,7 @@ final class S3kReconstruction {
             int volume = first.volume();
             int detune = 0;
             ReconstructionVoicing.Vibrato vibrato = null;
+            boolean bendModulation = false;
             if (noise) commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(0xe7)));
             for (int i = start; i < end; i++) {
                 Placement placement = notes.get(i);
@@ -468,11 +488,28 @@ final class S3kReconstruction {
                     volume = note.volume();
                     commands.add(new CommandEvent("volume-" + offset, offset, NativeCommand.VOLUME, List.of(volume)));
                 }
+                if (placement.bend != null) {
+                    if (placement.bend.mode() == ReconstructionBendEncoding.Mode.E7 && (vibrato != null || bendModulation)) {
+                        commands.add(new CommandEvent("bend-reset-" + offset, offset, NativeCommand.MODULATION_OFF, List.of()));
+                    }
+                    vibrato = null;
+                    bendModulation = placement.bend.modulatingAtEnd();
+                    for (var command : placement.bend.commands()) {
+                        commands.add(new CommandEvent(command.id() + "-" + offset, offset + command.tick(),
+                                command.command(), command.arguments()));
+                        if (command.command() == NativeCommand.DETUNE) detune = (byte) (int) command.arguments().getFirst();
+                    }
+                    for (var step : placement.bend.notes()) {
+                        events.add(new NoteEvent(step.id() + "-" + offset, offset + step.tick(), step.duration(), step.pitch()));
+                    }
+                    continue;
+                }
                 if (detune != placement.detune) {
                     detune = placement.detune;
                     commands.add(new CommandEvent("detune-" + offset, offset, NativeCommand.DETUNE, List.of(detune & 255)));
                 }
-                if (!java.util.Objects.equals(vibrato, placement.vibrato)) {
+                if (bendModulation || !java.util.Objects.equals(vibrato, placement.vibrato)) {
+                    bendModulation = false;
                     vibrato = placement.vibrato;
                     commands.add(new CommandEvent("vibrato-" + offset, offset,
                             vibrato == null ? NativeCommand.MODULATION_OFF : NativeCommand.MODULATION,

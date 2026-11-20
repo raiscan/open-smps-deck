@@ -258,7 +258,8 @@ public final class ReconstructionDescribe {
             int step = ReconstructionAttackGrid.attackStep(bar, note.start(), beatMap);
             if (note.start() >= bar.start())
                 cells.get(step).add(drums ? DRUM.getOrDefault(note.pitch(), "D" + note.pitch()) : pitch(note.pitch())
-                        + (note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED ? "~" : ""));
+                        + (note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED ? "~" : "")
+                        + (note.bend() == null ? "" : note.bend().marker()));
             if (!drums) {
                 int release = Math.clamp(ReconstructionAttackGrid.roundedStep(bar, note.end(), beatMap), 0, STEPS);
                 for (int i = note.start() >= bar.start() ? step + 1 : 0; i < release; i++) held[i] = true;

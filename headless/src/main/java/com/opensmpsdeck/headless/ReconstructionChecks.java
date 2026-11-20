@@ -449,6 +449,20 @@ final class ReconstructionChecks {
             }
             require(start == note.end(), at + ".run", "last step must end with the figure");
         }
+        if (note.bend() != null) {
+            var bend = note.bend();
+            require(note.run() == null && bend.kind() != null && bend.points().size() >= 2
+                            && bend.points().size() <= 512 && bend.delay() >= 0 && Double.isFinite(bend.delay())
+                            && bend.confidence() >= .8 && bend.confidence() <= 1,
+                    at + ".bend", "invalid bend envelope");
+            double prior = -1;
+            for (var point : bend.points()) {
+                require(point.time() > prior && point.time() >= 0 && point.time() <= duration
+                                && Math.abs((long) point.cents()) <= 1400,
+                        at + ".bend", "expected ordered finite pitch points in the score interval");
+                prior = point.time();
+            }
+        }
         if (note.motion() != null) {
             var motion = note.motion();
             require(motion.vibrato() >= 0 && motion.vibrato() <= 1 && motion.glide() >= 0 && motion.glide() <= 1,

@@ -20,6 +20,8 @@ final class LeadEffectMatcher {
     private static final int RATE = 12_000;
     private static final int FRAME_RATE = S3kRenderer.PRESENTATIONS_PER_SECOND;
     private static final int[] FNUM = {644,683,723,766,813,860,911,965,1023,1084,1148,1216};
+    static int fmFnum(int pitch) { return FNUM[pitch % 12]; }
+
     private static final int BINS = 4096;
     private static final int FIT_FRAME_CAP = 60 * FRAME_RATE;
     private static final double IMPROVEMENT = .008;
@@ -169,7 +171,7 @@ final class LeadEffectMatcher {
                     double seconds = (lane.clip().startTick() + tick) / (double) FRAME_RATE;
                     int direction = side == 0 && !profile.synchronous() ? -1 : 1;
                     double cents = direction * (profile.offset() + profile.depth() * Math.sin(Math.TAU * rate * seconds + phase));
-                    int delta = (int) Math.round(FNUM[note.pitch() % 12] * (Math.pow(2, cents / 1200) - 1));
+                    int delta = (int) Math.round(fmFnum(note.pitch()) * (Math.pow(2, cents / 1200) - 1));
                     if (delta == previous) continue;
                     commands.add(new CommandEvent(prefix + "detune-" + tick, tick, NativeCommand.DETUNE, List.of(delta & 255)));
                     previous = delta;
