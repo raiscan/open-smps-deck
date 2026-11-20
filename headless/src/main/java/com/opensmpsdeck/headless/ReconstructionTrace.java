@@ -208,7 +208,10 @@ public final class ReconstructionTrace {
     }
 
     private static Map<String, Row> read(Path work) throws IOException {
-        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        return read(work, ReconstructionStages.readScore(work.resolve("score.json")));
+    }
+
+    static Map<String, Row> read(Path work, ReconstructionStages.Score score) throws IOException {
         var structure = optional(work, "structure.json", ReconstructionStructure.Result.class);
         var roles = optional(work, "roles.json", ReconstructionRoles.Result.class);
         var allocation = optional(work, "allocation.json", ReconstructionAllocation.Result.class);
@@ -549,7 +552,7 @@ public final class ReconstructionTrace {
         throw new IllegalStateException("Missing note evidence");
     }
 
-    private static NoteAt at(Note note, TimeBase base, ReconstructionTimeMap timeline) {
+    static NoteAt at(Note note, TimeBase base, ReconstructionTimeMap timeline) {
         if (note == null) return null;
         boolean projectTime = base == TimeBase.project;
         double start = projectTime ? note.start() : timeline.project(note.start());
@@ -558,7 +561,7 @@ public final class ReconstructionTrace {
                 projectTime ? timeline.source(end) : note.end(), start, end, Math.round(start * 60), Math.round(end * 60)));
     }
 
-    private static Timing ticks(Integer start, Integer end, ReconstructionTimeMap timeline) {
+    static Timing ticks(Integer start, Integer end, ReconstructionTimeMap timeline) {
         return start == null || end == null ? null : timing(timeline.source(start / 60.0),
                 timeline.source(end / 60.0), start / 60.0, end / 60.0, start, end);
     }

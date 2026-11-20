@@ -71,6 +71,40 @@ java -jar "$jar" reconstruct trace "$work" --start 45.5 --end 46 --part 0 --pitc
 java -jar "$jar" reconstruct trace-diff "$baseline" "$candidate" --span 45.5,46 --json
 ```
 
+## Inspect attack timing and harmonics
+
+When a score grid makes an arpeggio look like a chord, a lead handoff is
+unclear, or an upper ridge could be a harmonic, open the PNG from
+`reconstruct_view {workDir, start, end, output, render: true}`. Start with a
+1–3 second window. Time is in source seconds unless you set `time: "project"`.
+Warped runs label both clocks. Select a mapped part with `stem`, and use
+`parts` or `lanes` to reduce overlay clutter.
+
+- Read the left edges of the bars against the bright audio ridges. Cyan
+  outlines are Suno, dotted cream outlines are imported transcriptions, and
+  purple dash-dot outlines are edits. Coral dashes flag dropped or merged
+  notes. Filled lane colors show the allocated or voiced gates, with patch
+  changes in the rows below.
+- Use a full ID from the JSON legend as `harmonics` to mark the expected
+  partials of a suspected fundamental. Check whether the upper ridge
+  shares its attack, movement and release. A separate onset can support an
+  independent note. `harmonicSum: true` can help locate a fundamental.
+- Compare the source and warmed chip render on the same pitch and time axes.
+  Each uses its own top-30 dB display scale. Follow the full ID in
+  `reconstruct_trace` to find the stage responsible for a changed gate or
+  missing note, then listen to the passage before accepting a repair.
+
+CLI equivalent:
+
+```sh
+java -jar "$jar" reconstruct view "$work" --start 45.3 --end 48.8 \
+  --stem 0 --parts 0 --harmonics "$note_id" --render "$work/evidence.png"
+```
+
+When comparing a stem with the render, pass the lanes that carry that part
+(for example `--lanes FM1,FM3`). The chip panel then solos them instead of
+playing the full mix, where bass and drums blur the comparison.
+
 ## Compare an optional stem transcriber
 
 Keep Suno MIDI as the default. If `transcribers_list` reports a configured

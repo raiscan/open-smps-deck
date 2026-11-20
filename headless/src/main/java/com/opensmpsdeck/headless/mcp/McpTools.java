@@ -24,7 +24,12 @@ final class McpTools {
 
     record Description(String name, String description, JsonObject inputSchema) {}
 
-    private record Tool(Description description, Handler handler) {}
+    record Result(JsonObject value, byte[] png) {}
+    private interface ImageHandler {
+        Result call(JsonObject args, ReconstructionStages.Progress progress) throws IOException;
+    }
+
+    private record Tool(Description description, ImageHandler handler) {}
 
     private static final Field WORK = field("workDir", "string", "Absolute work directory path");
     private static final Field PROJECT = field("project", "string", "Absolute project JSON path");
@@ -60,6 +65,23 @@ final class McpTools {
                     field("parts", "string", "Comma-separated MIDI part IDs").optional(),
                     field("bars", "string", "Inclusive one-based bar range such as 17-24").optional(),
                     field("output", "string", "Save inside the work directory instead of returning inline").optional()),
+            imageTool("reconstruct_view", "Save a time-aligned PNG of source audio, note fates, and lane gates.",
+                    (args, progress) -> McpReconstructionView.view(args), WORK,
+                    field("start", "number", "Inclusive start in the selected time base"),
+                    field("end", "number", "Exclusive end in the selected time base"),
+                    field("output", "string", "New PNG path relative to or inside the work directory"),
+                    choice("time", "Time base for the range (default source)", "source", "project").optional(),
+                    field("stem", "integer", "Zero-based part ID of a mapped stem").optional(),
+                    path("wav", "an aligned source-time WAV").optional(),
+                    field("render", "boolean", "Include a warmed chip render (solos `lanes` when given, else the full mix)").optional(),
+                    field("pitchMin", "integer", "Lowest displayed MIDI pitch (inclusive)").optional(),
+                    field("pitchMax", "integer", "Highest displayed MIDI pitch (inclusive)").optional(),
+                    lanes("lanes", "Filter note overlays and lane rows").optional(),
+                    field("parts", object(Map.of("type", "array", "items", Map.of("type", "integer"))),
+                            "Filter overlays to these zero-based part IDs").optional(),
+                    field("harmonics", "string", "Trace note ID whose expected harmonic series is drawn").optional(),
+                    field("harmonicSum", "boolean", "Emphasize fundamentals on the source spectrogram").optional(),
+                    field("width", "integer", "PNG width in pixels (640–2400, default 1440)").optional()),
             tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
                     field("start", "number", "Inclusive start in source seconds").optional(),
@@ -154,7 +176,7 @@ final class McpTools {
         return TOOLS.stream().anyMatch(tool -> tool.description.name.equals(name));
     }
 
-    static JsonObject call(String name, JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+    static Result call(String name, JsonObject args, ReconstructionStages.Progress progress) throws IOException {
         var tool = TOOLS.stream().filter(candidate -> candidate.description.name.equals(name)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tool: " + name));
         validate("arguments", tool.description.inputSchema, args);
@@ -171,6 +193,10 @@ final class McpTools {
     }
 
     private static Tool tool(String name, String description, Handler handler, Field... fields) {
+        return imageTool(name, description, (args, progress) -> new Result(handler.call(args, progress), null), fields);
+    }
+
+    private static Tool imageTool(String name, String description, ImageHandler handler, Field... fields) {
         return new Tool(new Description(name, description, schema(fields)), handler);
     }
 

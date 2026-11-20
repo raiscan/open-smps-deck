@@ -309,10 +309,53 @@ The choice persists in `score.json` for resumed stages. Backing parts remain
 available to allocation. A scoped roleplan can hand FM1 to another part.
 `--stem PART=WAV` supplies audio evidence without reserving FM1.
 
-The MCP server exposes 18 tools, including `reconstruct_describe` with the
+The MCP server includes `reconstruct_describe` with the
 same filters and `reconstruct_plan_template`. Use `artifact_read` and
 `artifact_write` with artifact `roleplan` to inspect or validate edits, then
 call `reconstruct_run` with `from` set to `roles`.
+
+### Inspect time-aligned evidence
+
+```sh
+java -jar "$deck_jar" reconstruct view "$work" --start 45.3 --end 48.8 \
+  --stem 0 --render --harmonics "$note_id" "$work/evidence.png"
+```
+
+The command creates a new PNG and prints a JSON legend. MCP
+`reconstruct_view` takes `workDir`, `start`, `end`, and a new `output` PNG
+path inside the work directory. It returns the image plus the same legend.
+The legend connects each `n…` label to its trace ID, layer, part, lane, pitch,
+fate, source and project seconds, and 60 Hz ticks. A pending insertion has
+no trace fate until it reaches a stage. Assembly-only events such as echo
+copies appear without a source part or trace fate when there is no part filter.
+The legend also records the lane patch changes.
+
+- `--time source|project` selects the input bounds and linear x-axis,
+  defaulting to source seconds. Warped views label both clocks.
+- `--stem PART` selects a zero-based mapped part. By default the view uses
+  the mapped FM1 lead in the passage, with a fallback to the configured lead
+  if no FM1 note overlaps, then to the steady reference or source mix.
+  `--wav FILE` overrides stem selection with an aligned source-time WAV.
+- `--render` runs the assembled full mix from time zero and displays its
+  spectrum alongside the source. Each panel scales the brightest energy
+  in its displayed range to white and clips below its top 30 dB, so compare
+  pitch and timing across panels.
+- `--pitch-min P --pitch-max P` sets inclusive MIDI pitch limits. Omit the
+  limits to show the selected notes in the span with three semitones of
+  padding. `--harmonics NOTE_ID` marks integer frequency multiples during
+  the selected note and expands the default upper bound for the first six
+  multiples when visible below Nyquist. `--harmonic-sum` optionally emphasizes
+  supported fundamentals in the source.
+- `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
+  source spectrum still shows the selected audio. With `--render`, `--lanes`
+  also solos those lanes in the chip panel, so it compares against a stem
+  rather than the full mix. `--width PX` defaults to 1440
+  (640–2400). A view can span up to 60 seconds in either clock. Use a short
+  span to resolve closely spaced attacks.
+
+MCP uses corresponding fields `time`, `stem`, `wav`, `render`, `pitchMin`,
+`pitchMax`, `lanes` (array), `parts` (array), `harmonics`, `harmonicSum`,
+and `width`.
 
 ### Per-note trace and replay
 
