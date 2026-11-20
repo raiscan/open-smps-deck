@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the packaged stdio server with an original MIDI phrase and demo audio."""
 import argparse
+import base64
 import hashlib
 from array import array
 import math
@@ -134,7 +135,7 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_trace reconstruct_trace_diff
+            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
@@ -158,6 +159,24 @@ def smoke(jar, root):
         assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
         trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
         assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)
+        artifact_hashes = {name: hashlib.sha256(Path(path).read_bytes()).digest()
+                           for name, path in files.items()}
+        view = rpc.request("tools/call", name="reconstruct_view", arguments={
+            "workDir": str(work), "start": 0.25, "end": 0.75, "render": True,
+            "output": "evidence.png", "width": 800, "lanes": ["FM1"], "parts": [0],
+        })
+        assert not view["isError"], view
+        legend = view["structuredContent"]
+        assert legend["plot"]["renderTop"] is not None and legend["notes"], legend
+        assert all(note["lane"] == "FM1" and note["status"] and note["pitchName"]
+                   for note in legend["notes"])
+        png, body = view["content"]
+        assert png["type"] == "image" and png["mimeType"] == "image/png"
+        assert base64.b64decode(png["data"]).startswith(b"\x89PNG\r\n\x1a\n")
+        assert base64.b64decode(png["data"]) == Path(legend["path"]).read_bytes()
+        assert json.loads(body["text"]) == legend
+        assert all(hashlib.sha256(Path(files[name]).read_bytes()).digest() == digest
+                   for name, digest in artifact_hashes.items())
         assert not rpc.call("reconstruct_trace_diff", oldWorkDir=work, newWorkDir=work, span="0,2")["changes"]
         rpc.call("reconstruct_stage", workDir=work, stage="voice")
         rpc.call("reference_add", project=project, wav=inputs["wav"], role="mix")

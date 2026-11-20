@@ -13,14 +13,23 @@ Run the following subcommands with the packaged headless JAR.
 1. Read `notes list song.smps.json --open`. Use `startSeconds` and optional
    `endSeconds` to target the passage. A `laneId` or `clipId` can identify the
    part. Keep the note ID for the response.
-2. Read the current project and update the arrangement while preserving the
+2. For a staged reconstruction, use
+   `reconstruct view WORK_DIR --time project --start S --end E --render OUT.png`
+   at the review note's project times. The source spectrum, transcription
+   outlines, voiced gates and lane rows share the same time axis. If two
+   attacks share a score-grid cell, inspect their exact spacing and use the
+   legend IDs with `reconstruct trace` to locate the affected stage. To check
+   whether an upper ridge is a partial, add `--harmonics NOTE_ID` and compare
+   its attack and movement with the annotated fundamental. Keep the PNG and
+   its source artifacts private.
+3. Read the current project and update the arrangement while preserving the
    `notes` and `references` arrays and existing IDs. Use a revision-checked
    write for changes to the shared file. Reread and reconcile if another writer
    changed the project before the write.
-3. Validate with `validate-project song.smps.json` and listen to the result of
+4. Validate with `validate-project song.smps.json` and listen to the result of
    `render-project song.smps.json revision.wav`. Compare the passage against
    its reference using the declared offset. The renderer exports the SMPS mix.
-4. Once the change is verified, run
+5. Once the change is verified, run
    `notes resolve song.smps.json NOTE-ID --reply "Shortened the FM1 attack" --author agent`.
    The original request and its timestamp are retained alongside the reply.
    Leave the note open if it still needs investigation. To flag a new passage,

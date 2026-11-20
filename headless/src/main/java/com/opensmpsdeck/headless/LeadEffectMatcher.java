@@ -371,24 +371,49 @@ final class LeadEffectMatcher {
 
     /** Reusable radix-2 transform for short, zero-padded stereo windows. */
     static final class Spectrum {
-        private static final int BITS = Integer.numberOfTrailingZeros(BINS);
-        private static final double[] COS = new double[BINS / 2];
-        private static final double[] SIN = new double[BINS / 2];
-        static {
-            for (int i = 0; i < COS.length; i++) {
-                COS[i] = Math.cos(Math.TAU * i / BINS);
-                SIN[i] = -Math.sin(Math.TAU * i / BINS);
+        private static final SpectrumPlan MATCHER_PLAN = new SpectrumPlan(BINS);
+        private final SpectrumPlan plan;
+        final double[] real;
+        final double[] imag;
+
+        Spectrum() {
+            this(MATCHER_PLAN);
+        }
+
+        Spectrum(int bins) {
+            this(new SpectrumPlan(bins));
+        }
+
+        private Spectrum(SpectrumPlan plan) {
+            this.plan = plan;
+            this.real = new double[plan.size];
+            this.imag = new double[plan.size];
+        }
+
+        private static final class SpectrumPlan {
+            final int size;
+            final int shift;
+            final double[] cos;
+            final double[] sin;
+
+            SpectrumPlan(int size) {
+                this.size = size;
+                this.shift = 32 - Integer.numberOfTrailingZeros(size);
+                this.cos = new double[size / 2];
+                this.sin = new double[size / 2];
+                for (int i = 0; i < cos.length; i++) {
+                    cos[i] = Math.cos(Math.TAU * i / size);
+                    sin[i] = -Math.sin(Math.TAU * i / size);
+                }
             }
         }
-        final double[] real = new double[BINS];
-        final double[] imag = new double[BINS];
 
         void transform(float[] audio, int channel, int center, int length) {
             java.util.Arrays.fill(real, 0);
             java.util.Arrays.fill(imag, 0);
             for (int i = 0; i < length; i++) {
                 double weight = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
-                real[Integer.reverse(i) >>> (32 - BITS)] = audio[2 * (center - length / 2 + i) + channel] * weight;
+                real[Integer.reverse(i) >>> plan.shift] = audio[2 * (center - length / 2 + i) + channel] * weight;
             }
             fft();
         }
@@ -396,20 +421,20 @@ final class LeadEffectMatcher {
         void transform(float[] mono, int start, double[] window) {
             java.util.Arrays.fill(real, 0);
             java.util.Arrays.fill(imag, 0);
-            for (int i = 0; i < window.length; i++)
-                real[Integer.reverse(i) >>> (32 - BITS)] = mono[start + i] * window[i];
+            for (int i = Math.max(0, -start); i < Math.min(window.length, mono.length - start); i++)
+                real[Integer.reverse(i) >>> plan.shift] = mono[start + i] * window[i];
             fft();
         }
 
         private void fft() {
-            for (int width = 2; width <= BINS; width *= 2) {
+            for (int width = 2; width <= plan.size; width *= 2) {
                 int half = width / 2;
-                int stride = BINS / width;
-                for (int i = 0; i < BINS; i += width) {
+                int stride = plan.size / width;
+                for (int i = 0; i < plan.size; i += width) {
                     for (int offset = 0; offset < half; offset++) {
                         int a = i + offset, b = a + half, k = offset * stride;
-                        double re = real[b] * COS[k] - imag[b] * SIN[k];
-                        double im = imag[b] * COS[k] + real[b] * SIN[k];
+                        double re = real[b] * plan.cos[k] - imag[b] * plan.sin[k];
+                        double im = imag[b] * plan.cos[k] + real[b] * plan.sin[k];
                         real[b] = real[a] - re;
                         imag[b] = imag[a] - im;
                         real[a] += re;

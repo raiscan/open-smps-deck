@@ -99,6 +99,7 @@ final class ReconstructionCli {
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...]");
         out.println("       reconstruct plan-template WORK_DIR");
+        out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
         out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
@@ -109,6 +110,10 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("view")) {
+            ReconstructionView.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("audition")) {

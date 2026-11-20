@@ -296,7 +296,7 @@ public final class ReconstructionDescribe {
         return 0;
     }
 
-    private static String pitch(int pitch) {
+    static String pitch(int pitch) {
         return PITCH[pitch % 12] + (pitch / 12 - 1);
     }
 

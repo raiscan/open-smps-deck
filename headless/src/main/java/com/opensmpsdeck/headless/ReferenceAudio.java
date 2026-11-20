@@ -57,6 +57,29 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
         }
     }
 
+    /** Native-rate mono evidence, retaining the exact frame offset and WAV duration. */
+    static EvidenceSpectrum.Audio evidenceRange(Path path, double start, double end) throws IOException {
+        try (var channel = FileChannel.open(path, StandardOpenOption.READ)) {
+            var wave = header(channel);
+            var format = wave.format();
+            int rate = format.sampleRate();
+            long available = wave.dataBytes() / format.frameBytes();
+            long startFrame = Math.clamp((long) Math.floor(start * rate), 0, available);
+            long endFrame = Math.clamp((long) Math.ceil(end * rate), startFrame, available);
+            var mono = new float[Math.toIntExact(endFrame - startFrame)];
+            for (int offset = 0; offset < mono.length; offset += rate) {
+                int count = Math.min(rate, mono.length - offset);
+                var data = readAt(channel, wave.dataStart() + (startFrame + offset) * format.frameBytes(),
+                        count * format.frameBytes());
+                for (int i = 0; i < count; i++) {
+                    float first = sample(data, format);
+                    mono[offset + i] = format.channels() == 1 ? first : (float) ((first + (double) sample(data, format)) * .5);
+                }
+            }
+            return new EvidenceSpectrum.Audio(mono, rate, startFrame / (double) rate, available / (double) rate);
+        }
+    }
+
     /** Bounded stereo comparison prefix, with linear resampling for uncommon WAV rates. */
     static float[] stereoPrefix(Path path, int rate, int frames) throws IOException {
         return stereoRange(path, rate, 0, frames, false);

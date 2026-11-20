@@ -162,10 +162,11 @@ public final class McpServer {
     private JsonObject tool(JsonObject params, JsonObject meta) {
         try {
             var arguments = params.has("arguments") ? params.getAsJsonObject("arguments") : EMPTY;
-            return toolResult(McpTools.call(params.get("name").getAsString(), arguments, progress(meta)), false);
+            var result = McpTools.call(params.get("name").getAsString(), arguments, progress(meta));
+            return toolResult(result.value(), false, result.png());
         } catch (IOException | RuntimeException failed) {
             String message = failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage();
-            return toolResult(object(Map.of("error", message)), true);
+            return toolResult(object(Map.of("error", message)), true, null);
         }
     }
 
@@ -176,10 +177,12 @@ public final class McpServer {
                 Map.of("progressToken", token, "progress", completed, "total", total, "message", message)));
     }
 
-    private static JsonObject toolResult(JsonObject value, boolean error) {
-        return object(Map.of("content", List.of(Map.of("type", "text", "text",
-                        error ? value.get("error").getAsString() : JSON.toJson(value))),
-                "structuredContent", value, "isError", error));
+    private static JsonObject toolResult(JsonObject value, boolean error, byte[] png) {
+        var content = new java.util.ArrayList<Map<String, String>>();
+        if (png != null) content.add(Map.of("type", "image", "mimeType", "image/png",
+                "data", java.util.Base64.getEncoder().encodeToString(png)));
+        content.add(Map.of("type", "text", "text", error ? value.get("error").getAsString() : JSON.toJson(value)));
+        return object(Map.of("content", content, "structuredContent", value, "isError", error));
     }
 
     private void error(JsonElement id, int code, String message, Object data) {
