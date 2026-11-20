@@ -11,6 +11,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 
@@ -51,7 +52,7 @@ final class BenchCorpus {
     private BenchCorpus() {}
 
     static void build(Path rom, Path index, Path root, List<Integer> songs, int frames, PrintStream out,
-                      BenchCli.SequencerFactory factory, boolean sunoLike, double drift) throws IOException {
+                      BenchCli.SequencerFactory factory, boolean sunoLike, double drift, boolean stems) throws IOException {
         var catalogue = InstrumentCatalogue.open(index);
         String romHash = BenchFiles.hash(rom);
         var drums = new BenchDrums(catalogue, "sha256:" + romHash);
@@ -79,29 +80,33 @@ final class BenchCorpus {
             var truthFile = File.at(root, truthPath);
             var referenceFile = File.at(root, reference);
             var variants = new ArrayList<File>();
+            var alignments = new EnumMap<BenchAudio.Variant, ReferenceStretch.Alignment>(BenchAudio.Variant.class);
             for (var variant : BenchAudio.Variant.values()) {
                 Path path = folder.resolve(variant + ".wav");
                 if (variant == BenchAudio.Variant.dry) Files.copy(reference, path);
                 else BenchAudio.write(BenchAudio.degrade(audio, variant), path);
                 if (drift != 0) {
-                    // Keep reference.wav and the truth events on the original clock.
-                    Path warped = folder.resolve(variant + "-drift.wav");
-                    ReferenceStretch.write(path, warped, (int) Math.ceil(accelerando.inputDuration() * 60),
-                            accelerando::truthTime);
+                    // Keep reference.wav and truth events on the original clock.
+                    Path warped = driftPath(path);
+                    int presentations = (int) Math.ceil(accelerando.inputDuration() * 60);
+                    if (stems) {
+                        alignments.put(variant, ReferenceStretch.writeAndCaptureAlignment(path, warped,
+                                presentations, accelerando::truthTime));
+                    } else {
+                        ReferenceStretch.write(path, warped, presentations, accelerando::truthTime);
+                    }
                     Files.delete(path);
                     path = warped;
                 }
                 variants.add(File.at(root, path));
             }
+            if (stems) BenchStems.build(compiled, truth, drums, folder, id, frames, grid, accelerando, alignments);
             var profiles = sunoLike ? List.of(BenchMidi.Profile.sunoLike)
                     : List.of(BenchMidi.Profile.clean, BenchMidi.Profile.merged, BenchMidi.Profile.noisy);
             for (var profile : profiles) {
                 Path midi = folder.resolve(profile + ".mid");
                 var events = BenchMidi.events(truth, drums, profile, seconds, id);
-                if (grid != null) events = BenchMidi.shift(events, grid.offsetFrames(), seconds);
-                if (drift != 0) events = events.stream().map(event -> new BenchMidi.Event(event.track(),
-                        event.drum(), accelerando.inputTime(event.start()), accelerando.inputTime(event.end()), event.pitch())).toList();
-                BenchMidi.write(events, profile, midi);
+                BenchMidi.write(inputClock(events, grid, accelerando), profile, midi);
                 var midiFile = File.at(root, midi);
                 for (var variant : BenchAudio.Variant.values()) {
                     cases.add(new Case(key + "/" + profile + "/" + variant, id, source.name(), profile, variant,
@@ -112,5 +117,17 @@ final class BenchCorpus {
         }
         BenchFiles.write(root.resolve("manifest.json"),
                 new Manifest(1, romHash, BenchFiles.hash(index), frames, List.copyOf(cases)));
+    }
+
+    static Path driftPath(Path path) {
+        String name = path.getFileName().toString();
+        return path.resolveSibling(name.substring(0, name.length() - 4) + "-drift.wav");
+    }
+
+    static List<BenchMidi.Event> inputClock(List<BenchMidi.Event> events, BenchStructure.Grid grid, Accelerando time) {
+        var shifted = grid == null ? events : BenchMidi.shift(events, grid.offsetFrames(), time.duration());
+        if (time.drift() == 0) return shifted;
+        return shifted.stream().map(event -> new BenchMidi.Event(event.track(), event.drum(),
+                time.inputTime(event.start()), time.inputTime(event.end()), event.pitch())).toList();
     }
 }
