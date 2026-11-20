@@ -68,6 +68,11 @@ The default role pass decides note by note. On merged Suno parts it can
 hand the lead between instruments mid-phrase, or promote chord tops and
 fills to melody. Make the decision the way an arranger would, per section
 and part, in `roleplan.json`. The code still traces individual notes.
+For a known song-wide lead, use `--lead-part PART` with staged
+`reconstruct run` or `reconstruct transcribe`. A scoped roleplan melody
+rule takes precedence within its section, bar and time bounds. Backing
+parts stay available for allocation. A `--stem PART=WAV` mapping supplies
+audio evidence without declaring the lead.
 
 1. Read the score: `reconstruct_describe {workDir}` (CLI
    `reconstruct describe "$work" --out "$work/describe.txt"`). A full song

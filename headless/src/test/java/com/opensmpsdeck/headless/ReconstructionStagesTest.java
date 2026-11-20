@@ -88,6 +88,22 @@ class ReconstructionStagesTest {
         assertTrue(allocation.notes().stream().filter(n -> n.role() == Role.bass).allMatch(n -> "FM2".equals(n.lane())));
     }
 
+    @Test void tracksSequentialReattacksThroughSamePartSustainAndReservesFm1() {
+        var notes = List.of(note("held", 0, 0, 1.15, 79),
+                note("a", 0, .15, .25, 70), note("b", 0, .25, .35, 72),
+                note("c", 0, .35, .45, 72), note("d", 0, .45, .60, 70),
+                note("e", 0, .60, .76, 69), note("f", 0, .76, .93, 70),
+                note("upper-backing", 1, 0, 1.20, 91)).stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
+        var parts = List.of(part(0), part(1));
+        var structure = ReconstructionStructure.analyze(bars(1), notes, parts);
+        var roles = ReconstructionRoles.assign(structure, parts, 0, null, null, null, 0);
+        var allocation = ReconstructionAllocation.allocate(roles, parts, 120, false);
+        assertEquals(List.of("a", "b", "c", "d", "e", "f"), allocation.notes().stream()
+                .filter(n -> "FM1".equals(n.lane())).map(n -> n.note().id()).toList());
+        assertTrue(allocation.notes().stream().anyMatch(n -> n.note().id().equals("upper-backing")
+                && n.lane() != null && !n.lane().equals("FM1")));
+    }
+
     @Test void minorityVotesStaySuggestions() {
         var notes = phrases(4);
         notes.add(note("optional-a", 0, 1.5, 1.7, 71));
