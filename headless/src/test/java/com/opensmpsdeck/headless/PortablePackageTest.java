@@ -56,6 +56,22 @@ class PortablePackageTest {
         assertEquals(-1, Files.mismatch(expected, rendered));
     }
 
+    @Test void portableWarningsReferenceStockAssetsAndReportSourceAudio() throws Exception {
+        var original = ProjectFiles.load(Path.of("../examples/dac-percussion.smps.json")).project();
+        assertEquals(List.of(), ProjectExport.portableWarnings(original));
+
+        var voice = original.voices().getFirst();
+        var ref = StockTable.ref("global-fm", null, 2, StockTable.hash(StockTable.bytes(voice.bytes())));
+        var voices = new java.util.ArrayList<>(original.voices());
+        voices.set(0, voice.withOrigin(AssetOrigin.stock(ref)));
+        var samples = new java.util.ArrayList<>(original.samples());
+        samples.set(0, samples.getFirst().withOrigin(AssetOrigin.sourceAudio()));
+        var project = original.withAssets(voices, original.envelopes(), samples);
+        // A legacy package would embed the stock voice; the portable one references it.
+        assertTrue(ProjectProvenance.detect(project).warnings().contains("ROM_DERIVED_DATA"));
+        assertEquals(List.of("SOURCE_AUDIO"), ProjectExport.portableWarnings(project));
+    }
+
     @Test void modJarHasBothManifestsAndIdenticalExplodedPackageEntries() throws Exception {
         Path source = example("lantern-walk");
         Path mod = directory.resolve("pack.jar"), pkg = directory.resolve("pack.smps.zip");

@@ -169,6 +169,11 @@ public final class ProjectExport {
         return payload;
     }
 
+    /** Provenance warnings for a default portable export, computed without writing a file. */
+    public static List<String> portableWarnings(StudioProject project) throws IOException {
+        return PortablePackageWriter.build(project, PortableOptions.DEFAULT).warnings();
+    }
+
     public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
                                                             ReconstructionStages.Progress progress) throws IOException {
         var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
