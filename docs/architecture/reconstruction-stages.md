@@ -48,21 +48,29 @@ directories outside public checkouts.
 
 ## Recover missed notes from stems
 
-The transcribe stage measures partials 2–4 against the fundamental in each
-mapped tonal stem. It learns a median and spread from isolated notes at the
-same pitch or in a nearby register. Several consecutive frames must exceed
-the learned level, with no written note or competing harmonic explaining
-the peak. A sufficiently strong excess with its own attack during the
-written note is inserted as `audio-template`. It supplements the existing
-contours as harmony. Pass `--no-stem-template-notes` on the initial run to
-disable automatic insertion while retaining detection and review proposals.
-The saved option carries into retranscription and manifest replay.
+The transcribe stage records sustained excess at partials 2–4 using a
+same-pitch or nearby-register median and spread from isolated MIDI notes.
+Written notes and competing harmonics veto the initial peak. For an
+octave or twelfth within the part's range (with a default ceiling of C7),
+the detector compares equivalent note phases in up to eight controls,
+preferring nearby exact-pitch notes and similar durations and velocities.
+Excess on adjacent upper partials discounts common brightness changes.
 
-`stem-template-candidates.json` records candidate confidence, source times,
-training counts, and observed and typical levels in dB. Lower-confidence
-candidates enter `edits.json` as agent `insertNote` proposals in the
-`audio-template` group. Use `reconstruct proposals list WORK_DIR --group audio-template`
-to inspect them. Rejected candidates stay in the evidence report.
+Review candidates need separate pitch or envelope evidence, such as
+a peak that persists beyond the fundamental. Candidates that follow the
+fundamental's pitch motion stay in the report. Close fragments of the
+same ridge share one review slot. At most three ranked peaks per
+16-second source-time window enter `edits.json` as agent `insertNote`
+proposals. `stem-template-candidates.json` contains the full scan, support
+measurements, and `shortlistedProposals` IDs. Previously rejected IDs
+stay suppressed on replay.
+
+Only a strong, sustained independent attack with sufficient controls can
+be inserted automatically as `audio-template` harmony.
+`--no-stem-template-notes` on the initial run disables automatic insertion
+and leaves detection and review enabled. The option carries into replay.
+Use `reconstruct proposals list WORK_DIR --group audio-template` to inspect
+the review queue.
 
 The automatic roles pass can restore a short skipped pulse bracketed by the
 same role in a regular monophonic run. The trace records

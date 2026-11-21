@@ -150,6 +150,10 @@ final class ReconstructionLeadAudio {
                     ? 0 : peaks[index(pitch, harmonic)][frame];
         }
 
+        double partialCents(int pitch, int harmonic, int frame) {
+            return cents[index(pitch, harmonic)][frame];
+        }
+
         double frameLevel(int frame) { return rms[frame]; }
 
         boolean clearAttack(Note note) {

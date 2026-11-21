@@ -153,15 +153,17 @@ playing the full mix, where bass and drums blur the comparison.
 
 ## Review stem-template candidates
 
-Look in `stem-template-candidates.json` for excess partials found in mapped
-tonal stems. Check the anchor pitch with `view --harmonics-at PITCH@TIME`
-and look for an attack or release distinct from the written fundamental.
-The detector adds strong independent attacks with `audio-template`
-provenance. On a fresh run, `--no-stem-template-notes` (MCP
-`options.noStemTemplateNotes`) skips those insertions and preserves the
-report and lower-confidence agent proposals. List or preview the
-`audio-template` proposal group and rebuild from `transcribe` after
-accepting an insertion.
+Use `stem-template-candidates.json` to inspect excess partials on mapped
+tonal stems. The `shortlistedProposals` IDs identify the ranked octave and
+twelfth candidates with separate pitch or timing evidence, with a limit of
+three per 16 seconds. Check the anchor with `view --harmonics-at PITCH@TIME`.
+Phase-matched excess can still be a timbre change. Compare pitch motion,
+neighboring partials, and the attack and release in the view before accepting.
+
+On a fresh run, `--no-stem-template-notes` (MCP
+`options.noStemTemplateNotes`) skips automatic insertions and preserves the
+report and review queue. List or preview the `audio-template` proposal
+group and rebuild from `transcribe` after accepting an insertion.
 
 ## Compare an optional stem transcriber
 
