@@ -147,8 +147,9 @@ separator output directories as desired.
   --separator sw="$LOCAL_STEMS" > "$PRIVATE_RESULTS/head-to-head.json"
 ```
 
-Save exported MIDI as `suno/suno.mid` and name each WAV by part and take,
-for example `Bass take 1.wav` or `Bass_1.wav`. The scorer also accepts
+Save exported MIDI as `suno/suno.mid` and name each WAV by part and take.
+The scorer accepts `suno/stems/bass_take1.wav` or WAVs directly inside the
+`suno` folder named like `Bass take 1.wav` or `Bass_1.wav`. It also accepts
 `suno/stems.json` with take IDs mapping to objects of part name to WAV
 filename arrays. Write `DONE` only when both takes and MIDI are present.
 The scorer reports pending IDs and paired aggregates. One common transport

@@ -78,6 +78,18 @@ class EvaluationTest(unittest.TestCase):
             self.assertGreater(result["separation"]["Suno-2/common"]["medianDb"]["other"], 60)
             self.assertEqual(set(takes(suno)), {"1", "2"})
 
+    def test_nested_stems_with_underscore_take_suffix(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            folder = Path(scratch)
+            stems = folder / "stems"
+            stems.mkdir()
+            for part in ("bass", "drums"):
+                for take in (1, 2):
+                    (stems / f"{part}_take{take}.wav").touch()
+            result = takes(folder)
+            self.assertEqual(set(result), {"1", "2"})
+            self.assertEqual({name for name, _ in result["2"]}, {"bass", "drums"})
+
     def test_take_delay_uses_mix_clock(self):
         mix = np.random.default_rng(0).normal(size=(2 * RATE, 2)).astype(np.float32)
         delayed = aligned(mix, len(mix), 32)

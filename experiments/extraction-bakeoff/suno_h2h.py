@@ -75,9 +75,12 @@ def takes(folder):
             result[take] = [(group(part), folder / name)
                             for part, files in parts.items() for name in files]
     else:
-        for path in sorted(folder.glob("*.wav")):
+        stem_folder = folder / "stems"
+        if not stem_folder.is_dir():
+            stem_folder = folder
+        for path in sorted(stem_folder.glob("*.wav")):
             label = path.stem
-            match = re.search(r"(?i)\btake[ _-]*(\d+)\b", label)
+            match = re.search(r"(?i)(?<![a-z0-9])take[ _-]*(\d+)\b", label)
             if not match:
                 match = re.search(r"[ _-]+(\d+)$", label)
             if not match:
