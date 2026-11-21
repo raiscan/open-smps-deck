@@ -13,8 +13,10 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 
 - [ ] For a Suno download, call `reconstruct_import` with absolute `folder`,
   `workDir` and your trusted `catalogue` path. Check `import.json` for
-  file status, alignment and the evidence for each mapping. Re-check with
-  `assign: {"stems/synth.wav": 0}` or `exclude: ["stems/fx.wav"]` if needed.
+  file status, alignment, winning scores and runner-up stems. Level fitting
+  uses one stem per part. For an `also_correlates_with_part` warning, audition
+  both references and re-check with `assign: {"stems/synth.wav": 0}` if needed.
+  Use `exclude: ["stems/fx.wav"]` to skip files.
   Pass the returned `runRequest` to `reconstruct_run` when it has a
   catalogue, or use the printed CLI command. CLI equivalent:
   `reconstruct import FOLDER WORK_DIR --catalogue INDEX.json`, with repeatable
@@ -157,8 +159,8 @@ inputs and the aligned melodic stems. For example, pass
 `options: {transcriber: "muscriptor", transcribeParts: {"0": "lead"}}` and
 include part 0 in `inputs.stems`. The CLI equivalent is
 `--transcriber muscriptor --transcribe-part 0=lead --stem "0=$lead"`.
-For an aligned tonal stem listed as `stem_without_part`, opt in at import
-with `--transcribe-unmapped muscriptor` (MCP `transcribeUnmapped: "muscriptor"`).
+For aligned tonal stems left unmapped, opt in at import with
+`--transcribe-unmapped muscriptor` (MCP `transcribeUnmapped: "muscriptor"`).
 On a fresh run use `--transcriber muscriptor --transcribe-unmapped keyboard=keyboard.wav`
 (MCP `options.transcribeUnmapped` maps absolute WAV paths to roles). The added
 part and its audio and note provenance are saved for replay. Vocals and FX

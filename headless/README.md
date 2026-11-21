@@ -195,8 +195,14 @@ java -jar "$DECK_JAR" reconstruct import "$download" "$work" --catalogue instrum
 Import checks the full mix, MIDI, root or `stems/` WAV files, and optional
 `stems.json`. It prints a status table and writes `import.json` with file
 hashes, MIDI part IDs, audio mapping scores, alignment and a reconstruction
-command. Unmapped MIDI parts use the mix. Vocals and FX stay unmapped by
-default. Use repeatable `--assign FILE=PART` and `--exclude FILE` with
+command. The automatic matcher maximizes the total score across all pairs,
+with small bonuses for matching names and MIDI program families. For each
+automatic match, the report shows the winning score and any runner-up stem.
+A stem that also strongly correlates with a part gets a warning and a hint
+for selecting it as that part's single fitting reference.
+
+Unmapped MIDI parts use the mix. Vocals and FX stay unmapped by default.
+Use repeatable `--assign FILE=PART` and `--exclude FILE` with
 download-relative paths, including `stems/` where applicable. Supply the
 desired overrides again when re-checking. A single missing mix or MIDI
 produces a warning and needs to be supplied before reconstruction can start.
@@ -704,8 +710,9 @@ java -jar "$CLI" reconstruct import DOWNLOAD IMPORT_WORK --catalogue catalogue.j
   --transcribe-unmapped muscriptor --run
 ```
 
-Import selects tonal stems reported as `stem_without_part`. It leaves vocals,
-FX, drums, percussion, and nearly silent stems out of automatic transcription.
+Import selects unmapped tonal stems, including those with an
+`also_correlates_with_part` warning. It leaves vocals, FX, drums, percussion,
+and nearly silent stems out of automatic transcription.
 For MCP, pass `transcribeUnmapped: "muscriptor"` on `reconstruct_import`, or
 `options: {transcriber: "muscriptor", transcribeUnmapped: {"/path/to/keys.wav": "keyboard"}}`
 on a fresh `reconstruct_run`. The import response includes the options in its

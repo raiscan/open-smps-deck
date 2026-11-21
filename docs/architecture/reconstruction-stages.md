@@ -57,10 +57,26 @@ Only file names and manifest values are used for detection. Downloaded files
 are parsed as data.
 
 The report records correlations for MIDI attacks against spectral flux and
-MIDI note gates against pitch-band energy. Clear audio evidence can override
-names or General MIDI programs. Default assignments are one-to-one and
-channel 10 takes the drum stem. The engine checks whole-file levels and
-durations, reconciles supported mono/stereo sample rates on a common analysis
+MIDI note gates against pitch-band energy. Manual assignments reserve their
+parts first. Automatic matching maximizes the sum of eligible pair scores
+across the remaining stems and parts. The audio score gets a 0.05 bonus for
+a name match or 0.03 for a General MIDI program-family match. These small
+margins let labels resolve close correlations while allowing a stronger
+audio match to win. Exact ties use stable stem-path and part-ID ordering.
+The MIDI drum channel gives dedicated drum stems precedence over percussion
+stems. The report shows the selected pair, the best other eligible stem for
+the part, and the stem's best alternative part when available.
+
+Level fitting uses one reference stem per part. When two stems have audio
+scores of at least 0.30 with pitch support for the same part, and that part
+leads one stem's other melodic candidates by at least 0.08, that stem gets an
+`also_correlates_with_part` warning if another stem was chosen for the part.
+Keeping one reference avoids raising the fit target by summing recordings
+that may contain overlapping audio. Use the warning's `--assign` hint to
+choose the other stem after listening.
+
+The engine checks whole-file levels and durations, reconciles supported
+mono/stereo sample rates on a common analysis
 grid, and cross-correlates the mix waveform with the summed stems within two
 seconds. Weak correlation produces a warning. A confident nonzero lag of
 25 ms or more blocks reconstruction. Excluded stems are left out of audio

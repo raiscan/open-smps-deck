@@ -28,6 +28,10 @@ public final class SunoImport {
     public static final String FILE = "import.json";
     private static final int MAX_FILES = 256;
     private static final int MAX_MIDI_PARTS = 128;
+    private static final double NAME_BONUS = .05;
+    private static final double FAMILY_BONUS = .03;
+    private static final double SHARED_PART_AUDIO = .30;
+    private static final double SHARED_PART_MARGIN = .08;
     private static final String CATALOGUE = "${CATALOGUE}";
 
     public enum Status {
@@ -72,7 +76,13 @@ public final class SunoImport {
                                 file.evidence.get("channels"), file.evidence.get("rms"));
                     out.println();
                 }
-                if (file.part != null && file.evidence.get("candidates") instanceof List<?> candidates) {
+                if (file.evidence.get("assignment") instanceof AssignmentEvidence assignment) {
+                    printChoice(out, "Winning score", assignment.winner);
+                    if (assignment.runnerUp == null) out.println("  Runner-up stem: none");
+                    else printChoice(out, "Runner-up stem " + printable(assignment.runnerUp.file), assignment.runnerUp);
+                    if (assignment.alternativePart != null)
+                        printChoice(out, "Alternative part " + assignment.alternativePart.part, assignment.alternativePart);
+                } else if (file.part != null && file.evidence.get("candidates") instanceof List<?> candidates) {
                     for (var item : candidates) {
                         if (item instanceof Candidate candidate && candidate.part == file.part)
                             out.printf(Locale.ROOT, "  Audio evidence · onset %.3f · pitch %.3f · combined %.3f%n",
@@ -94,6 +104,11 @@ public final class SunoImport {
             if (leadPart != null) out.printf("Lead candidate: part %d (%s)%n", leadPart, leadEvidence);
             if (runCommand != null) out.println("Run: " + runCommand);
         }
+    }
+
+    private static void printChoice(PrintStream out, String label, PairEvidence pair) {
+        out.printf(Locale.ROOT, "  %s: %.3f (audio %.3f · onset %.3f · pitch %.3f · label %s)%n",
+                label, pair.score, pair.audioScore, pair.onsetCorrelation, pair.pitchCorrelation, pair.labelEvidence);
     }
 
     public record RunRequest(String workDir, RunInputs inputs, Map<String, Object> options) {}
@@ -643,7 +658,17 @@ public final class SunoImport {
         return List.copyOf(scores);
     }
 
-    private record Choice(Input file, Candidate match, String reason, double priority) {}
+    private record Choice(Input file, Candidate match, double weight, String reason) {
+        PairEvidence evidence() {
+            return new PairEvidence(file.file, match.part, weight, match.audioScore,
+                    match.onsetCorrelation, match.pitchCorrelation, match.labelEvidence);
+        }
+    }
+
+    private record PairEvidence(String file, int part, double score, double audioScore,
+                                double onsetCorrelation, double pitchCorrelation, String labelEvidence) {}
+
+    private record AssignmentEvidence(PairEvidence winner, PairEvidence runnerUp, PairEvidence alternativePart) {}
 
     private static Set<Integer> map(List<Input> inputs, List<Part> parts, Map<String, Integer> assignments,
                                     List<Issue> issues) {
@@ -662,39 +687,97 @@ public final class SunoImport {
                 input.decidedBy = "override";
             }
         }
-        var choices = new ArrayList<Choice>();
-        for (var file : inputs) {
-            if (!file.role.equals("stem") || file.error() || file.silent || file.excluded || file.part != null
-                    || defaultUnmapped(file.family)) continue;
-            double bestLabelAudio = file.candidates.stream().filter(candidate -> !candidate.labelEvidence.equals("none"))
-                    .mapToDouble(Candidate::audioScore).max().orElse(0);
+        var available = parts.stream().filter(part -> !used.contains(part.id))
+                .sorted(Comparator.comparingInt(Part::id)).toList();
+        var stems = inputs.stream().filter(file -> file.role.equals("stem") && !file.error() && !file.silent
+                        && !file.excluded && file.part == null && !defaultUnmapped(file.family))
+                .sorted(Comparator.comparing(file -> file.file)).toList();
+        var columns = new LinkedHashMap<Integer, Integer>();
+        for (int i = 0; i < available.size(); i++) columns.put(available.get(i).id, i);
+        var choices = new Choice[stems.size()][available.size()];
+        var weights = new double[stems.size()][available.size()];
+        for (int row = 0; row < stems.size(); row++) {
+            var file = stems.get(row);
             double bestMelodicAudio = file.candidates.stream().filter(candidate -> !parts.get(candidate.part).drums)
                     .mapToDouble(Candidate::audioScore).max().orElse(0);
             for (var candidate : file.candidates) {
-                var part = parts.get(candidate.part);
-                boolean drumStem = "drums".equals(file.family);
-                if (drumStem != part.drums && (drumStem || !"percussion".equals(file.family))) continue;
-                double audio = candidate.audioScore;
-                boolean labelled = !candidate.labelEvidence.equals("none");
-                if (drumStem) choices.add(new Choice(file, candidate, "drum_channel", 5 + audio));
-                else if (audio >= .23 && audio > bestLabelAudio + .15)
-                    choices.add(new Choice(file, candidate, "audio", 3 + audio));
-                else if (labelled && (part.drums || bestMelodicAudio < .2 || audio >= bestMelodicAudio - .15))
-                    choices.add(new Choice(file, candidate, candidate.labelEvidence,
-                            ("name".equals(candidate.labelEvidence) ? 2 : 1.6) + audio));
-                else if (audio >= .14 && (part.drums || candidate.pitchCorrelation >= .12))
-                    choices.add(new Choice(file, candidate, "audio", audio));
+                Integer column = columns.get(candidate.part);
+                if (column == null) continue;
+                var choice = choice(file, candidate, parts.get(candidate.part), bestMelodicAudio);
+                if (choice == null) continue;
+                choices[row][column] = choice;
+                weights[row][column] = choice.weight;
             }
         }
-        choices.sort(Comparator.comparingDouble(Choice::priority).reversed());
-        for (var choice : choices) {
-            if (choice.file.part != null || !used.add(choice.match.part)) continue;
-            if (!choice.reason.equals("audio") && !choice.reason.equals("drum_channel") && choice.match.audioScore < .08)
-                choice.file.add(Status.warning, "weak_audio_match", "The label matches, with weak audio support");
-            choice.file.part = choice.match.part;
-            choice.file.decidedBy = choice.reason;
+        int[] assignment = MaximumWeightAssignment.match(weights);
+        var winners = new LinkedHashMap<Integer, Choice>();
+        for (int row = 0; row < assignment.length; row++) {
+            int column = assignment[row];
+            if (column < 0) continue;
+            var winner = choices[row][column];
+            var file = winner.file;
+            file.part = winner.match.part;
+            file.decidedBy = winner.reason;
+            if (!file.decidedBy.equals("audio") && !file.decidedBy.equals("drum_channel") && winner.match.audioScore < .08)
+                file.add(Status.warning, "weak_audio_match", "The label matches, with weak audio support");
+            used.add(file.part);
+            winners.put(file.part, winner);
+
+            Choice runnerUp = null;
+            for (var stemChoices : choices) {
+                var other = stemChoices[column];
+                if (other != winner) runnerUp = stronger(runnerUp, other);
+            }
+            Choice alternative = null;
+            for (var other : choices[row]) {
+                if (other != winner) alternative = stronger(alternative, other);
+            }
+            file.evidence.put("assignment", new AssignmentEvidence(winner.evidence(),
+                    runnerUp == null ? null : runnerUp.evidence(), alternative == null ? null : alternative.evidence()));
         }
+        for (var file : stems) warnAboutSharedPart(file, parts, winners);
         return used;
+    }
+
+    private static Choice choice(Input file, Candidate candidate, Part part, double bestMelodicAudio) {
+        boolean drumStem = "drums".equals(file.family);
+        if (drumStem != part.drums && (drumStem || !"percussion".equals(file.family))) return null;
+        double audio = candidate.audioScore;
+        // Dedicated drum stems take precedence over percussion stems on the MIDI drum channel.
+        if (drumStem) return new Choice(file, candidate, 2.1 + audio, "drum_channel");
+        double bonus = switch (candidate.labelEvidence) {
+            case "name" -> NAME_BONUS;
+            case "program", "percussion" -> FAMILY_BONUS;
+            default -> 0;
+        };
+        if (bonus > 0 && (part.drums || bestMelodicAudio < .2 || audio >= bestMelodicAudio - .15))
+            return new Choice(file, candidate, Math.max(.01, audio + bonus), candidate.labelEvidence);
+        if (audio >= .14 && (part.drums || candidate.pitchCorrelation >= .12))
+            return new Choice(file, candidate, audio, "audio");
+        return null;
+    }
+
+    private static Choice stronger(Choice best, Choice candidate) {
+        return candidate != null && (best == null || candidate.weight > best.weight) ? candidate : best;
+    }
+
+    private static void warnAboutSharedPart(Input file, List<Part> parts, Map<Integer, Choice> winners) {
+        if ("drums".equals(file.family)) return;
+        var melodic = file.candidates.stream().filter(candidate -> !parts.get(candidate.part).drums)
+                .sorted(Comparator.comparingDouble(Candidate::audioScore).reversed().thenComparingInt(Candidate::part))
+                .toList();
+        if (melodic.isEmpty()) return;
+        var best = melodic.getFirst();
+        var winner = winners.get(best.part);
+        if (winner == null || winner.file == file || best.audioScore < SHARED_PART_AUDIO
+                || winner.match.audioScore < SHARED_PART_AUDIO || best.pitchCorrelation < .12
+                || winner.match.pitchCorrelation < .12
+                || melodic.size() > 1 && best.audioScore - melodic.get(1).audioScore < SHARED_PART_MARGIN) return;
+        file.evidence.put("sharedPart", best.part);
+        file.add(Status.warning, "also_correlates_with_part", String.format(Locale.ROOT,
+                "This stem also correlates with part %d (audio %.3f). %s is the reference for that part. "
+                        + "To use this stem instead, re-check with --assign %s",
+                best.part, best.audioScore, winner.file.file, shellQuote(file.file + "=" + best.part)));
     }
 
     private static boolean vocals(String family) {
@@ -727,8 +810,10 @@ public final class SunoImport {
                     case "percussion" -> "percussion label and MIDI drum channel";
                     default -> "manual override";
                 });
-            } else if (!defaultUnmapped(input.family) && !input.error() && !input.silent)
-                input.add(Status.warning, "stem_without_part", "No matching or available MIDI part");
+            } else if (!defaultUnmapped(input.family) && !input.error() && !input.silent) {
+                if (!input.evidence.containsKey("sharedPart"))
+                    input.add(Status.warning, "stem_without_part", "No matching or available MIDI part");
+            }
         }
         if (input.issues.isEmpty())
             input.add(Status.ok, input.role.equals("other") ? "ignored_file" : "validated",
@@ -779,7 +864,8 @@ public final class SunoImport {
             var unmapped = new TreeMap<String, String>();
             for (var file : files) {
                 if (ReconstructionStemParts.tonalFamily(file.family)
-                        && file.issues.stream().anyMatch(issue -> issue.code.equals("stem_without_part")))
+                        && file.part == null && file.issues.stream().anyMatch(issue -> issue.code.equals("stem_without_part")
+                                || issue.code.equals("also_correlates_with_part")))
                     unmapped.put(file.path.toString(), file.family);
             }
             if (!unmapped.isEmpty()) {
