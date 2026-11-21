@@ -24,7 +24,17 @@ final class ReconstructionVoicing {
                   @Nullable String sustainWarning,
                   @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,
                   @Nullable Map<String, SourceSound> sourceInstruments,
-                  @Nullable ReconstructionLanePolicies.Configuration lanePolicies) {
+                  @Nullable ReconstructionLanePolicies.Configuration lanePolicies,
+                  @Nullable String leadProminenceWarning) {
+        Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
+               Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments,
+               ReconstructionLanePolicies.Configuration lanePolicies) {
+            this(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, lanePolicies, null);
+        }
+
+        Result withLevels(Map<String, Lane> lanes, Map<String, SourceSound> instruments, String warning) {
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, warning);
+        }
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
                Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments) {
             this(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, null);
@@ -34,15 +44,15 @@ final class ReconstructionVoicing {
         }
 
         Result withAssignments(Map<String, ReconstructionVoicePlan.Assignment> assignments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments, lanePolicies);
+            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments, lanePolicies, leadProminenceWarning);
         }
 
         Result withSourceInstruments(Map<String, SourceSound> instruments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, leadProminenceWarning);
         }
 
         Result withLanePolicies(ReconstructionLanePolicies.Configuration policies) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies, leadProminenceWarning);
         }
 
         SourceSound sourceSound(String lane, int part) {
@@ -103,6 +113,11 @@ final class ReconstructionVoicing {
 
         Lane withEffects(Effects value) {
             return new Lane(role, variantId, shortlist, gain, articulation, value, patchReason, articulationReason,
+                    effectReason, instruments, partGains, overrides, drumGains, drumGainOverrides, psgPercussion);
+        }
+
+        Lane withGain(double value) {
+            return new Lane(role, variantId, shortlist, value, articulation, effects, patchReason, articulationReason,
                     effectReason, instruments, partGains, overrides, drumGains, drumGainOverrides, psgPercussion);
         }
 
@@ -177,7 +192,7 @@ final class ReconstructionVoicing {
         if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
         var lanes = new java.util.LinkedHashMap<>(result.lanes());
         lanes.put("PSG3", lane.withPsgPercussion(settings));
-        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning(), result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies());
+        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning(), result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies(), result.leadProminenceWarning());
     }
 
     record DrumGain(@Nullable List<String> hitIds, @Nullable List<Double> span, @Nullable Integer pitch, double gain) {
@@ -363,7 +378,7 @@ final class ReconstructionVoicing {
         if (defaults.isEmpty()) return voicing;
         var lanes = new TreeMap<>(voicing.lanes());
         lanes.computeIfPresent("PSG3", (id, lane) -> lane.withDrumGains(mergeDrumGains(defaults, lane.drumGains())));
-        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning(), voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies());
+        return voicing.withLevels(lanes, voicing.sourceInstruments(), voicing.leadProminenceWarning());
     }
 
     private static Map<Integer, Double> mergeDrumGains(Map<Integer, Double> fitted, Map<Integer, Double> saved) {

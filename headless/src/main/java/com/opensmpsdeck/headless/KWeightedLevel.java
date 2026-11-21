@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntToDoubleFunction;
 
 /** Streaming stereo loudness power at 48 kHz, per ITU-R BS.1770 Annex 1. */
 final class KWeightedLevel {
@@ -30,8 +31,45 @@ final class KWeightedLevel {
     }
 
     double power() {
-        double active = meanAbove(ABSOLUTE_GATE);
-        return meanAbove(Math.max(ABSOLUTE_GATE, active * .1));
+        return meanAbove(relativeGate());
+    }
+
+    static double blockCenterSeconds(int block) {
+        return .2 + block * .1;
+    }
+
+    boolean[] activeBlocks() {
+        double gate = relativeGate();
+        var active = new boolean[blocks.size()];
+        for (int i = 0; i < active.length; i++) active[i] = blocks.get(i) > gate;
+        return active;
+    }
+
+    double powerOn(boolean[] active) {
+        return powerOn(active, block -> block);
+    }
+
+    /** Average on a reference's gate. Map its block centers onto this meter's clock. */
+    double powerOn(boolean[] active, IntToDoubleFunction position) {
+        double sum = 0;
+        int count = 0;
+        for (int i = 0; i < active.length; i++) {
+            if (!active[i]) continue;
+            double index = position.applyAsDouble(i);
+            if (index >= -.5 && index < blocks.size() - .5) {
+                double at = Math.max(0, index);
+                int left = (int) at;
+                double first = blocks.get(left);
+                double next = blocks.get(Math.min(left + 1, blocks.size() - 1));
+                sum += first + (next - first) * (at - left);
+            }
+            count++;
+        }
+        return count == 0 ? 0 : sum / count;
+    }
+
+    private double relativeGate() {
+        return Math.max(ABSOLUTE_GATE, meanAbove(ABSOLUTE_GATE) * .1);
     }
 
     double probePower() {

@@ -266,15 +266,17 @@ final class ReconstructionCli {
         }
         var selected = chosen;
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
-        var result = previous == null ? ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
+        var retained = previous == null ? ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
                 : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
                 ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
+        var result = previous == null || refitLevels
+                ? ReconstructionLevels.calibrate(score, catalogue, allocation, retained, targets) : retained;
         if (previous != null)
             ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
                 result.representative("FM1", allocated.get("FM1"))));
         return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning,
-                result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies());
+                result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies(), result.leadProminenceWarning());
     }
 
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
@@ -381,7 +383,10 @@ final class ReconstructionCli {
             }
             if (!allocation.chords().isEmpty()) report.add("chordVoicings", json.toJsonTree(allocation.chords()));
             report.add("sustainProbe", json.toJsonTree(sustain));
-            report.add("voicingWarnings", json.toJsonTree(sustain.warning() == null ? List.of() : List.of(sustain.warning())));
+            var voicingWarnings = new ArrayList<String>();
+            if (sustain.warning() != null) voicingWarnings.add(sustain.warning());
+            if (voicing.leadProminenceWarning() != null) voicingWarnings.add(voicing.leadProminenceWarning());
+            report.add("voicingWarnings", json.toJsonTree(voicingWarnings));
             var affinity = ReconstructionAllocation.Affinity.read(work);
             if (affinity != null && affinity.allocationHash().equals(assemblyInputs.get("allocation")))
                 report.add("allocationAffinityChanges", json.toJsonTree(affinity.changes()));

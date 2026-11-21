@@ -415,6 +415,7 @@ public final class ReconstructionStages {
                         }
                         ReconstructionArtifacts.write(voicingFile, fitted);
                         if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
+                        if (fitted.leadProminenceWarning() != null) out.println("Warning: " + fitted.leadProminenceWarning());
                         if (previous != null)
                             ReconstructionVoicing.changes(previous, fitted).forEach(change -> report.accept(change.describe()));
                     }

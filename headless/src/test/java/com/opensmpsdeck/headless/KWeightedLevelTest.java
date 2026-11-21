@@ -22,6 +22,21 @@ class KWeightedLevelTest {
         assertEquals(0, tone(1000, 1e-5).power());
     }
 
+    @Test void activeReferenceBlocksAlsoSelectTheRenderedAndBackingSamples() {
+        var reference = new KWeightedLevel();
+        var rendered = new KWeightedLevel();
+        for (int frame = 0; frame < 5 * S3kRenderer.SAMPLE_RATE; frame++) {
+            double tone = Math.sin(2 * Math.PI * 1000 * frame / S3kRenderer.SAMPLE_RATE);
+            boolean active = frame < S3kRenderer.SAMPLE_RATE;
+            reference.add(active ? tone * .1 : 0, active ? tone * .1 : 0);
+            rendered.add(active ? tone * .05 : frame < 2 * S3kRenderer.SAMPLE_RATE ? 0 : tone * .5, active ? tone * .05 : frame < 2 * S3kRenderer.SAMPLE_RATE ? 0 : tone * .5);
+        }
+        var blocks = reference.activeBlocks();
+        double ratio = rendered.powerOn(blocks) / reference.powerOn(blocks);
+        assertEquals(.25, ratio, .01);
+        assertTrue(rendered.power() > reference.power());
+    }
+
     private static KWeightedLevel tone(int hz, double amplitude) {
         var meter = new KWeightedLevel();
         for (int frame = 0; frame < 5 * S3kRenderer.SAMPLE_RATE; frame++) {

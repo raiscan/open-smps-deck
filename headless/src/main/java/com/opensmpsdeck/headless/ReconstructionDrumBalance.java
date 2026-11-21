@@ -1,12 +1,8 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.ProjectCompiler;
-import com.opensmpsdeck.project.CompiledProject;
-
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -43,14 +39,13 @@ final class ReconstructionDrumBalance {
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing) throws IOException {
         var stems = score.inputs().options(score.durationUs()).stems();
         if (stems.isEmpty()) return voicing;
-        var matches = ReconstructionCli.voicedMatches(catalogue, allocation, voicing).byLane();
+        var probe = new ReconstructionLevels.Probe(score, catalogue, allocation, voicing);
         var drumNotes = new ArrayList<ReconstructionAllocation.Entry>();
         var toneNotes = new ArrayList<ReconstructionAllocation.Entry>();
         var drumStems = new LinkedHashSet<Path>();
         var toneStems = new LinkedHashSet<Path>();
         Path mix = Path.of(score.inputs().wav());
-        for (var entry : allocation.notes()) {
-            if (entry.lane() == null || !playable(entry, matches)) continue;
+        for (var entry : probe.notes()) {
             Path stem = stems.get(entry.note().part());
             // An unreferenced audible part makes the relative target ambiguous.
             if (stem == null || stem.equals(mix)) return voicing;
@@ -68,40 +63,41 @@ final class ReconstructionDrumBalance {
         samples = Math.min(samples, samples(drumStems.getFirst()));
         // Avoid calibrating the whole arrangement against a partial stem export.
         if (samples < .95 * score.durationUs() * RATE / 1_000_000) return voicing;
-        double referenceDrums = referenceLevel(drumStems, List.of(), samples).power();
-        double referenceTone = referenceLevel(toneStems, List.of(), samples).power();
+        var referenceKit = referenceLevel(drumStems, List.of(), samples).meter();
+        var active = referenceKit.activeBlocks();
+        double referenceDrums = referenceKit.powerOn(active);
+        double referenceTone = referenceLevel(toneStems, List.of(), samples).meter().powerOn(active);
         if (referenceDrums == 0 || referenceTone == 0) return voicing;
 
-        var timeline = ReconstructionTimeMap.of(score);
+        var timeline = probe.timeline();
         int frames = Math.min(S3kRenderer.MAX_PRESENTATIONS,
                 (int) Math.ceil(timeline.project(samples / (double) RATE) * 60));
         int chipSamples = frames * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION;
-        var probe = new Probe(score, catalogue, allocation, timeline, matches);
-        var nativeTone = renderLevel(probe.compile(toneNotes, voicing), chipSamples);
-        var nativeDrums = renderLevel(probe.compile(drumNotes, voicing), chipSamples);
-        if (nativeDrums.power() == 0 || nativeTone.power() == 0) return voicing;
-        double target = nativeTone.power() * (referenceDrums / referenceTone);
-        double correction = db(target / nativeDrums.power());
+        double nativeTone = renderLevel(probe.compile(toneNotes, voicing), chipSamples).powerOn(active, timeline);
+        double nativeDrums = renderLevel(probe.compile(drumNotes, voicing), chipSamples).powerOn(active, timeline);
+        if (nativeDrums == 0 || nativeTone == 0) return voicing;
+        double target = nativeTone * (referenceDrums / referenceTone);
+        double correction = db(target / nativeDrums);
         if (Math.abs(correction) <= BALANCE_TOLERANCE_LU) return voicing;
 
         // PSG volume steps are 2 dB each, and saved drum gains are bounded by 4×.
         int noiseStep = Math.clamp((int) Math.round(correction / 2), -15, 6);
         double dacGain = Math.clamp(amplitude(correction), .125, 4);
         var fitted = apply(voicing, drumNotes, dacGain, noiseStep);
-        var rendered = renderLevel(probe.compile(drumNotes, fitted), chipSamples);
+        double rendered = renderLevel(probe.compile(drumNotes, fitted), chipSamples).powerOn(active, timeline);
         // Re-measure after native quantization. DAC can absorb the residual
         // from rounding the PSG level or from rounding/clipping PCM bytes.
-        if (rendered.power() > 0 && Math.abs(db(target / rendered.power())) > QUANTIZATION_TOLERANCE_LU
+        if (rendered > 0 && Math.abs(db(target / rendered)) > QUANTIZATION_TOLERANCE_LU
                 && voicing.lanes().containsKey("DAC")) {
-            double refinedGain = Math.clamp(dacGain * Math.sqrt(target / rendered.power()), .125, 4);
+            double refinedGain = Math.clamp(dacGain * Math.sqrt(target / rendered), .125, 4);
             var refined = apply(voicing, drumNotes, refinedGain, noiseStep);
-            var check = renderLevel(probe.compile(drumNotes, refined), chipSamples);
-            if (check.power() > 0 && Math.abs(db(target / check.power())) < Math.abs(db(target / rendered.power()))) {
+            double check = renderLevel(probe.compile(drumNotes, refined), chipSamples).powerOn(active, timeline);
+            if (check > 0 && Math.abs(db(target / check)) < Math.abs(db(target / rendered))) {
                 fitted = refined;
                 rendered = check;
             }
         }
-        if (rendered.power() == 0 || Math.abs(db(target / rendered.power())) >= Math.abs(correction)) return voicing;
+        if (rendered == 0 || Math.abs(db(target / rendered)) >= Math.abs(correction)) return voicing;
         if (correction > 0) {
             var all = new ArrayList<>(toneNotes);
             all.addAll(drumNotes);
@@ -109,14 +105,6 @@ final class ReconstructionDrumBalance {
             if (peak > PEAK_LIMIT && peak > renderLevel(probe.compile(all, voicing), chipSamples).peak()) return voicing;
         }
         return fitted;
-    }
-
-    private static boolean playable(ReconstructionAllocation.Entry entry,
-            Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches) {
-        if (entry.role() == drums && entry.lane().equals("PSG3")) return true;
-        var key = new ReconstructionVoices.Key(entry.note().part(), entry.lane().equals("DAC") ? entry.note().pitch() : null);
-        var choice = matches.get(entry.lane()).get(key);
-        return choice != null && choice.assetId() != null;
     }
 
     private static ReconstructionVoicing.Result apply(ReconstructionVoicing.Result base,
@@ -138,25 +126,7 @@ final class ReconstructionDrumBalance {
         }
         var lanes = new LinkedHashMap<>(base.lanes());
         byLane.forEach((id, gains) -> lanes.put(id, lanes.get(id).withDrumGains(gains)));
-        return new ReconstructionVoicing.Result(base.version(), lanes, base.fitWindows(), base.sustainWarning(),
-                base.voiceAssignments(), base.sourceInstruments(), base.lanePolicies());
-    }
-
-    private record Probe(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
-            ReconstructionAllocation.Result allocation, ReconstructionTimeMap timeline,
-            Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches) {
-        CompiledProject compile(List<ReconstructionAllocation.Entry> notes, ReconstructionVoicing.Result voicing)
-                throws IOException {
-            var ordered = notes.stream().sorted(Comparator.comparingInt(ReconstructionAllocation.Entry::startTick)).toList();
-            var playback = ReconstructionRetriggers.articulate(ordered, score.retriggers(), timeline, voicing::articulation);
-            var group = new ReconstructionAllocation.Result(allocation.version(), playback.notes(), allocation.timeBase(),
-                    null, null, null, null, allocation.chordVoicings());
-            var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
-            var arrangement = S3kReconstruction.arrangeAllocated("Level probe", score.inputs().ticksPerBeat(),
-                    timeline.frames(), source, group, null, catalogue, matches, Map.of(), voicing.lanes(),
-                    true, false, Map.of(), playback.origins(), Map.of(), null, Map.of(), voicing.sourceInstruments());
-            return ProjectCompiler.compileWithAssets(arrangement.project());
-        }
+        return base.withLevels(lanes, base.sourceInstruments(), base.leadProminenceWarning());
     }
 
     private static double db(double power) {
