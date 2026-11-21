@@ -184,6 +184,72 @@ MCP exposes `project_export` with exactly one of `project` or `workDir`, plus
 `output`, `format`, and the optional `start`, `end`, `fade`, `loops`, `stems`
 and `zip` fields. Use a new output inside the project or work directory.
 
+## External stem separation
+
+Start with a local WAV or MP3 to build an S3K arrangement without MIDI.
+Decode FLAC to WAV first with `ffmpeg -i mix.flac -c:a pcm_f32le mix.wav`.
+Set `CLI` to the absolute path of the packaged headless JAR and use a
+local [instrument catalogue](../docs/architecture/instrument-catalogue.md).
+Configure the [BS-RoFormer SW separator](../tools/separators/bs-roformer/)
+and [MuScriptor Medium adapter](../tools/transcribers/muscriptor/) under
+the names shown here. Run in a private workspace.
+
+```sh
+java -jar "$CLI" reconstruct separate mix.wav separated --separator bs-roformer --device auto
+java -jar "$CLI" reconstruct import separated import-work \
+  --catalogue catalogue.json --transcriber muscriptor-medium
+java -jar "$CLI" reconstruct import separated import-work \
+  --catalogue catalogue.json --transcriber muscriptor-medium --run
+```
+
+For a short baseline, cut a short excerpt before separation.
+The separator output directory must be new and its parent must exist.
+The adapter writes the decoded mix to `mix.wav`, aligned WAVs to
+`stems/NAME.wav`, and model provenance to `separation.json`. The CLI
+publishes the folder after validating the files and matching sample rates,
+channel counts and frame counts.
+
+Check `import-work/import.json` for errors, nearly silent stems and the
+assigned roles. `separation.json` enables audio-only import automatically
+for this folder without MIDI. Vocals map to lead and drums feed the
+onset detector. Use `--stem-role FILE=ROLE` with a folder-relative file
+name to override a role. Repeat the checked options with `--run` to build
+in `import-work/reconstruction`. Open this directory in Studio with
+**Open reconstruction…**. It must be new for an initial build.
+
+The CLI reads `$XDG_CONFIG_HOME/opensmpsdeck/separators.json` (default
+`~/.config/opensmpsdeck/separators.json`). Set `OPENSMPSDECK_SEPARATORS`
+or pass `--separator-config FILE` to choose a different file. The JSON maps
+names to trusted executable argument arrays. The CLI substitutes
+`{input}`, `{outputDir}` and `{device}` directly. `--device` accepts
+`auto` (the default), `cpu`, `rocm` and `cuda`. Put the tonal adapter in
+[the transcriber configuration](#external-transcription). Import selects a
+sole configured transcriber automatically and requires `--transcriber NAME`
+when several are configured. With no configured transcriber and no name
+requested, the separated-folder check writes a report and stops with
+`no MIDI: needs audio-only transcription`.
+
+For MCP, call `separators_list` and `transcribers_list` to find the server's
+configured names. Call `separate` with `input`, `outputDir`, `separator`
+and optional `device`. Call `reconstruct_import` with the resulting
+`folder`, a separate `workDir`, `catalogue` and `transcriber`. Pass the
+checked `runRequest` to `reconstruct_run`.
+
+### Recommended extraction models
+
+The [extraction bake-off](../experiments/extraction-bakeoff/RESULTS.md)
+supports starting with BS-RoFormer SW, MuScriptor Medium for bass, guitar,
+piano and other tonal material, Basic Pitch for vocals, and ADTOF for drums.
+In the four-track [Suno head-to-head](../experiments/extraction-bakeoff/README.md#original-midi-render-head-to-head),
+the local Medium + ADTOF route scored 0.775 onset F1 against 0.429 for the
+per-stem Suno MIDI after delay correction. The commands above explicitly
+select SW and Medium. The integrated
+audio-only build sends all tonal stems, including vocals, to the selected
+transcriber and uses the built-in spectral detector on drums. For separate
+vocal and drum estimates, use the
+[bake-off environments and CLI](../experiments/extraction-bakeoff/README.md#run-basic-pitch-and-adtof-on-separated-stems).
+Those estimates are independent of the audio-only import.
+
 ## Import a Suno download
 
 ```sh
@@ -706,53 +772,15 @@ mvn -B -pl headless -am verify
 python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$scratch"
 ```
 
-## External stem separation
-
-Use an optional local separator to prepare a WAV or MP3 for reconstruction.
-
-```sh
-java -jar "$CLI" reconstruct separate mix.mp3 separated --separator bs-roformer --device rocm
-java -jar "$CLI" reconstruct import separated import-work --catalogue catalogue.json --run
-```
-
-The output directory must be new and its parent must exist. The CLI looks for
-`$XDG_CONFIG_HOME/opensmpsdeck/separators.json` (default
-`~/.config/opensmpsdeck/separators.json`). Set `OPENSMPSDECK_SEPARATORS` or pass
-`--separator-config FILE` to choose a different file. The JSON object maps
-separator names to trusted executable argument arrays. The CLI runs the
-command directly with `{input}`, `{outputDir}` and `{device}` substituted.
-Paths are absolute. `--device` accepts `auto` (the default), `cpu`, `rocm` and
-`cuda`.
-
-The adapter writes a WAV copy of the mix at `mix.wav`, aligned WAVs at
-`stems/NAME.wav`, and a `separation.json` object with `tool`, `model`,
-`version`, `checkpointSha256`, `stemOrder` and `settings`. Each stem must
-match the mix's sample rate, channels and frame count. The CLI publishes the
-folder after these checks pass. See the [BS-RoFormer adapter](../tools/separators/bs-roformer/)
-for setup and a configuration example.
-
-Import recognizes `separation.json` and automatically prepares audio-only
-reconstruction for a separated folder without MIDI. Vocals become the lead,
-drums feed the onset detector, and bass, guitar, piano and other use their
-respective transcriber roles. With a configured transcriber, `--run` builds
-in `import-work/reconstruction`. Select a transcriber with `--transcriber NAME`
-if several are configured. Without one, import writes the report and stops
-with `no MIDI: needs audio-only transcription`.
-
-For MCP, call `separators_list` and then `separate` with `input`,
-`outputDir`, `separator` and optional `device`. The server uses its own
-local configuration. Pass the output folder and catalogue to
-`reconstruct_import`, with `transcriber` if you need to select one. Then
-pass the returned `runRequest` to `reconstruct_run`.
-
 ## External transcription
 
-Suno MIDI is the default. To try an external transcriber on selected melodic
-parts, supply an aligned WAV stem and a role for each part ID.
+On the MIDI route, the supplied MIDI provides the source notes by default.
+To replace selected melodic parts with an external transcriber, supply an
+aligned WAV stem and a role for each part ID.
 
 ```sh
 java -jar "$CLI" reconstruct run song.mid mix.wav catalogue.json external-work \
-  --stem 0=lead.wav --transcriber muscriptor --transcribe-part 0=lead
+  --stem 0=lead.wav --transcriber muscriptor-medium --transcribe-part 0=lead
 ```
 
 To add an aligned tonal stem that has no MIDI part, use a configured
@@ -760,16 +788,16 @@ polyphonic transcriber and repeat `--transcribe-unmapped ROLE=WAV`:
 
 ```sh
 java -jar "$CLI" reconstruct run song.mid mix.wav catalogue.json work \
-  --transcriber muscriptor --transcribe-unmapped keyboard=keyboard.wav
+  --transcriber muscriptor-medium --transcribe-unmapped keyboard=keyboard.wav
 java -jar "$CLI" reconstruct import DOWNLOAD IMPORT_WORK --catalogue catalogue.json \
-  --transcribe-unmapped muscriptor --run
+  --transcribe-unmapped muscriptor-medium --run
 ```
 
 Import selects unmapped tonal stems, including those with an
 `also_correlates_with_part` warning. It leaves vocals, FX, drums, percussion,
 and nearly silent stems out of automatic transcription.
-For MCP, pass `transcribeUnmapped: "muscriptor"` on `reconstruct_import`, or
-`options: {transcriber: "muscriptor", transcribeUnmapped: {"/path/to/keys.wav": "keyboard"}}`
+For MCP, pass `transcribeUnmapped: "muscriptor-medium"` on `reconstruct_import`, or
+`options: {transcriber: "muscriptor-medium", transcribeUnmapped: {"/path/to/keys.wav": "keyboard"}}`
 on a fresh `reconstruct_run`. The import response includes the options in its
 `runRequest`.
 
@@ -791,11 +819,11 @@ Repeat the options for different parts. Times are in source seconds.
 JSON uses velocity 96. Notes outside the selected interval or the S3K
 melodic pitch range are omitted, and releases are clipped to the interval.
 An empty replacement clears the selected part. Drums, uncovered parts,
-and the original tempo analysis continue to use Suno MIDI. A missing or
-failed command aborts the requested run.
+and the original tempo analysis continue to use the supplied MIDI. A
+missing or failed command aborts the requested run.
 
 For MCP, call `transcribers_list` and pass
-`options: {transcriber: "muscriptor", transcribeParts: {"0": "lead"}}` to
+`options: {transcriber: "muscriptor-medium", transcribeParts: {"0": "lead"}}` to
 `reconstruct_run` or a fresh `reconstruct_stage` for `transcribe`. Include
 the stem in `inputs.stems`. The server uses its own local configuration.
 The score embeds the imported notes and provenance, including file hashes,
@@ -810,7 +838,7 @@ Give the CLI a mix and already aligned, labelled WAV stems:
 java -jar "$CLI" reconstruct run --audio-only mix.wav catalogue.json work \
   --stem drums=drums.wav --stem bass=bass.wav --stem vocals=vocals.wav \
   --stem guitar=guitar.wav --stem piano=piano.wav --stem other=other.wav \
-  --transcriber muscriptor
+  --transcriber muscriptor-medium
 ```
 
 Audio-only mode selects the sole configured transcriber automatically.
@@ -835,8 +863,8 @@ For a folder containing `mix.wav` and labelled stems at its root or under
 `stems/`, use:
 
 ```sh
-java -jar "$CLI" reconstruct import DOWNLOAD IMPORT_WORK --audio-only \
-  --catalogue catalogue.json --transcriber muscriptor --run
+java -jar "$CLI" reconstruct import STEM_FOLDER IMPORT_WORK --audio-only \
+  --catalogue catalogue.json --transcriber muscriptor-medium --run
 ```
 
 Omit `--run` to check the folder and get a runnable request. In this command,
@@ -909,6 +937,11 @@ For MCP `reconstruct_stage`, pass `stage: "assemble"` and
 `options.lanePolicyPreset` to set or clear the preset. See the
 [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)
 for the override and custom scopes.
+
+For individual attacks, use the [`layer` edit](../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
+or Studio **Selection → Layer**. Choose echo, chorus, double or off, then
+rebuild from `assemble`. The selected notes' layer intents override the
+preset. Inspect `report.json.noteLayers` for applied and skipped copies.
 
 ## Reconstruction benchmark
 

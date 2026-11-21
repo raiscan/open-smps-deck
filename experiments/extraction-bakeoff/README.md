@@ -127,6 +127,30 @@ Suno synth part. `listen.py` accepts an array of cases with `title`,
 `mix`, `suno`, `local` and `duration`, plus optional `highlights` pairs.
 Its output is a standalone HTML with MP3 data URIs. Keep it private.
 
+## Run Basic Pitch and ADTOF on separated stems
+
+Use separate Python 3.11 environments for the two models. The table above
+lists the tested packages and ADTOF revision. Install Basic Pitch with its
+ONNX model and ONNX Runtime, and ADTOF with CPU PyTorch and the local
+Frame_RNN weights. Install NumPy and SoundFile in each environment for
+the shared runner. Set `BASIC_PITCH_PY` and `ADTOF_PY` to their Python
+executables, `NOTES` to the absolute path of this directory's `notes.py`,
+and `SEPARATED` to the output of `reconstruct separate`.
+Run in a private directory.
+
+```sh
+"$BASIC_PITCH_PY" "$NOTES" --model basic-pitch --device cpu --role vocals \
+  --input "$SEPARATED/stems/vocals.wav" --output vocals.json
+"$ADTOF_PY" "$NOTES" --model adtof --device cpu --role drums \
+  --input "$SEPARATED/stems/drums.wav" --output drums.json
+```
+
+ADTOF uses the package's default Frame_RNN checkpoint if present. Pass
+`--weights FILE` to select an installed checkpoint. Basic Pitch can also
+be registered as a tonal command in `transcribers.json` using the template
+above. Audio-only import currently chooses one tonal command for all tonal
+stems and takes drums from its spectral detector.
+
 ## Original MIDI render head-to-head
 
 Use `stage_original_h2h.py MANIFEST SOUND_FONT OUTPUT` with a local GM soundfont

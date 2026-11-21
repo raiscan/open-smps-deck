@@ -18,6 +18,14 @@ same `.smps.json` project format.
 - Keep private Suno and ROM data in a private data directory outside the repo.
   Never commit it to this public repository.
 
+## Reconstruction entry point
+
+Separate a local WAV or MP3 with `reconstruct separate` (decode FLAC to WAV
+first), then check the separated folder with `reconstruct import` and add
+`--run` to build. Review the audio-only baseline in Studio or over CLI/MCP.
+A Suno MIDI and stem download is another import source. See the
+[external-agent guide](docs/user-guide/agents.md#build-a-local-baseline).
+
 ## Maven modules
 
 ### openggf-audio
@@ -39,10 +47,19 @@ same `.smps.json` project format.
 ### headless
 
 - `Main` dispatches project validation, compilation, rendering, export and MCP.
-- `ReconstructionStages` builds the arrangement from MIDI and audio.
-  `ReconstructionVoicePlan` and `ReconstructionSections` manage voices and form.
-- `SunoImport` checks downloads and assigns stems. `ProjectExport` writes audio
-  and native formats. `McpServer` exposes the workflow over stdio.
+- `ExternalSeparators` invokes configured separator commands and validates
+  their aligned WAV outputs and `separation.json`. The BS-RoFormer SW
+  adapter is in [tools/separators](tools/separators/bs-roformer/).
+- `SunoImport` checks separated folders and downloads, then assigns stem
+  roles for audio-only input or maps stems to MIDI parts.
+- `ReconstructionAudioOnly` prepares labelled stems and the beat grid.
+  `ExternalTranscribers` runs the configured tonal adapter.
+  `AudioDrumDetector` supplies spectral drum onsets.
+- `ReconstructionStages` builds the arrangement from the audio-only or MIDI
+  score. `ReconstructionVoicePlan` and `ReconstructionSections` manage
+  voices and form.
+- `ProjectExport` writes audio and native formats. `McpServer` exposes the
+  workflow over stdio.
 - `S3kRenderer` renders through the pinned session without an audio device.
 - `S3kRomImporter` imports music and assets from verified locked-on S3&K images.
 - `NativeArrangement` derives a timeline from the pinned sequencer.

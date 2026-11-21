@@ -19,7 +19,7 @@ installs MuScriptor 0.4.0, and downloads the weights and matching model
 configuration from a single revision of the gated repository.
 
 ```sh
-./tools/transcribers/muscriptor/setup.sh /path/to/muscriptor-env cpu large --accept-license
+./tools/transcribers/muscriptor/setup.sh /path/to/muscriptor-env cpu medium --accept-license
 ```
 
 For ROCm, set `MUSCRIPTOR_TORCH_INDEX` to the wheel index recommended for
@@ -30,7 +30,7 @@ if the wheel requires a specific Python version. See the
 
 ```sh
 MUSCRIPTOR_TORCH_INDEX=https://download.pytorch.org/whl/rocm7.2 \
-  ./tools/transcribers/muscriptor/setup.sh /path/to/muscriptor-env rocm large --accept-license
+  ./tools/transcribers/muscriptor/setup.sh /path/to/muscriptor-env rocm medium --accept-license
 ```
 
 ROCm uses Torch device names such as `cuda:0`. Large uses fp32 by default.
@@ -48,25 +48,27 @@ The same configuration is used by the headless MCP server.
 
 ```json
 {
-  "muscriptor": [
+  "muscriptor-medium": [
     "/path/to/muscriptor-env/venv/bin/python",
     "/path/to/OpenSMPSDeck/tools/transcribers/muscriptor/run.py",
-    "--weights", "/path/to/muscriptor-env/weights/large/model.safetensors",
+    "--model", "medium",
+    "--weights", "/path/to/muscriptor-env/weights/medium/model.safetensors",
     "--input", "{input}", "--output", "{output}",
     "--role", "{role}", "--device", "{device}"
   ]
 }
 ```
 
-Pass `--model small` or `--model medium` in the template with the matching
-weights. MuScriptor 0.4.0 generates fresh output in non-overlapping five-second
-chunks. For Small and Medium, tie forcing defaults to off because combining it
+For another size, change `--model` and use the matching weights. MuScriptor
+0.4.0 generates fresh output in non-overlapping five-second chunks. For
+Small and Medium, tie forcing defaults to off because combining it
 with a learned instrument prompt can suppress long spans. Large defaults to
 tie forcing on. Override this with `--tie-forcing` or `--no-tie-forcing`.
 
 | Stem role | Prompt |
 | --- | --- |
 | `lead`, `synth` | `synth_lead` |
+| `vocals`, `backing_vocals` | `voice` |
 | `bass` | `electric_bass` |
 | `keys`, `keyboard`, `backing` | `electric_piano, chromatic_percussion, synth_lead, synth_pad` |
 | `guitar`, `strings`, `brass`, `woodwinds` | Corresponding instrument families |
@@ -77,6 +79,7 @@ The wrapper writes `[[start, end, pitch], ...]` in stem seconds and a
 `<output>.meta.json` sidecar with model, prompt, precision, version, and
 checkpoint, model config, and adapter hashes.
 
+Use `--transcriber muscriptor-medium` for audio-only imports.
 From this directory, run `python -m unittest` to check prompt mapping and
 note serialization without Torch, audio, or weights. See the
 [headless guide](../../../headless/README.md#external-transcription) for CLI

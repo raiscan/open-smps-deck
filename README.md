@@ -26,6 +26,12 @@ java -jar studio/target/opensmpsdeck-studio-0.1.0-SNAPSHOT.jar examples/lantern-
 - [External-agent guide](docs/user-guide/agents.md) covers installing the skill,
   connecting MCP and reviewing proposed edits.
 
+Build an S3K baseline from a local mix with
+[stem separation and audio-only reconstruction](headless/README.md#external-stem-separation).
+[Suno MIDI and stem downloads](headless/README.md#import-a-suno-download)
+are another input. Review the build in Studio or through the CLI before
+exporting.
+
 Staged reconstruction can recover fast scale passages and same-pitch
 retriggers from mapped stems. Read the ordered pitches and timing with
 `reconstruct describe` and check the allocated lane in `report.json`.

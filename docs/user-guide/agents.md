@@ -2,8 +2,9 @@
 
 Use Claude Code or Codex to drive reconstruction on the same local files that
 Studio opens. The headless JAR runs with JDK 25 and needs no audio device.
-The skill covers checking a Suno download, reconstructing from aligned MIDI
-and WAV, iterating on time-coded feedback, and exporting an S3K arrangement.
+The skill starts with local stem separation and audio-only reconstruction,
+then covers time-coded review, edits and S3K export. Suno MIDI and stems
+or other aligned MIDI and audio can also seed a build.
 
 ## Build the JAR and install the skill
 
@@ -30,6 +31,28 @@ ln -s "$repo/skills/opensmpsdeck" ~/.agents/skills/opensmpsdeck
 Keep the checkout available so the skill can link to the workflow guides.
 If your session does not see the skill, restart it and invoke `/opensmpsdeck` in Claude
 Code or `$opensmpsdeck` in Codex.
+
+## Build a local baseline
+
+Configure BS-RoFormer SW and MuScriptor Medium as shown in the
+[local extraction guide](../../headless/README.md#external-stem-separation).
+Use a new private output directory for separation and a local
+[instrument catalogue](../architecture/instrument-catalogue.md).
+
+```sh
+# For FLAC input, decode first. WAV and MP3 go directly to separate.
+ffmpeg -i mix.flac -c:a pcm_f32le mix.wav
+java -jar "$jar" reconstruct separate mix.wav separated --separator bs-roformer --device auto
+java -jar "$jar" reconstruct import separated import-work \
+  --catalogue catalogue.json --transcriber muscriptor-medium --run
+```
+
+Omit `--run` to check `import.json` first. Verify the stem roles, then
+repeat the command with `--run` to build `import-work/reconstruction`.
+For a quick CLI baseline, cut an excerpt before separation.
+The bake-off recommends Basic Pitch for vocals and ADTOF for drums.
+This command uses MuScriptor Medium for all tonal stems and the built-in
+spectral detector for drums.
 
 ## Connect MCP
 
@@ -75,17 +98,15 @@ tool_timeout_sec = 600
 
 ## Drive the product loop
 
-1. **Process.** Call `reconstruct_import` with absolute `folder`, `workDir`
-   and `catalogue` paths. Read the ✓/⚠/✗ checks and `import.json`, including
-   the winning stem match and runner-up for the lead. Supply `assign` as a
-   download-relative file-to-part map and `exclude` as a list of files to
-   override the matcher. Once the mix and MIDI are present and checks pass,
-   send the returned `runRequest` to `reconstruct_run`. For aligned MIDI
-   and WAV that need no import, call `reconstruct_run` with `workDir` and
-   `inputs` containing `midi`, `wav`, `catalogue` and optional `stems`.
-   Use `options.seconds` for a first pass. A fresh reconstruction needs a
-   new directory under an existing parent. Studio has **Import Suno
-   folder…**, **Override**, **Re-check** and **Start reconstruction**.
+1. **Process.** Use `separators_list` and `transcribers_list` to discover
+   configured adapters. Call `separate` with absolute `input` and a new
+   `outputDir`, plus `separator` and optional `device`. Call
+   `reconstruct_import` with the separated folder as `folder`, a separate
+   `workDir`, your `catalogue` and the selected `transcriber`. Read the
+   checks and `import.json` to verify stem roles. Use `stemRoles` to
+   override roles by folder-relative file name. Pass the returned
+   `runRequest` to `reconstruct_run` once the checks pass. For a first
+   pass, set `options.seconds` on that request before calling the tool.
 2. **Analyze.** Open the work directory in Studio with **Open
    reconstruction…**. Use `reconstruct_trace` with `byOnset: true` for
    attack clusters and `reconstruct_view` with a new `output` PNG for
@@ -104,7 +125,12 @@ tool_timeout_sec = 600
    `reconstruct_edit` with `action: "add"` and optional `rerun: true`, or
    resume with `reconstruct_run` and `from`. Use `options.keepVoicing` to
    preserve compatible settings. Record musical intent in `edits.json`.
-   Never hand-edit the score or allocation.
+   Keep the score and allocation as generated evidence. For selected
+   notes, use the `layer` edit or Studio **Selection → Layer** to add or
+   suppress a copy. Use **Lane policies → S3K layering** for an
+   arrangement-wide preset and `lanePolicies.echoAttenuation` in
+   `voicing.json` to set its echo level.
+   [Layering options](../../headless/README.md#reconstruction-layering)
 4. **Compare.** Use `reconstruct_trace_diff` on the baseline and candidate
    work directories with a source-time `span` such as `"12,14"`. Check lane
    permutations, voicing changes, compiled events and PCM outside the
@@ -129,13 +155,26 @@ targets and symlink escapes for these outputs. Reconstruction can take
 minutes. Calls on one server run serially and report progress when the client
 supplies a progress token. Keep input paths and path-bearing artifacts private.
 
+### Alternative inputs
+
+- Pass a Suno mix, MIDI and stem download as `folder` to `reconstruct_import`.
+  Check the winning stem and runner-up for the lead part. Override matches
+  with `assign` (folder-relative file to MIDI part ID) and `exclude`
+  (folder-relative file list), then pass the returned `runRequest` to
+  `reconstruct_run`. Studio can start this route from **Import Suno folder…**.
+- For other aligned labelled stems, pass `audioOnly: true` to
+  `reconstruct_import`. For already aligned MIDI and WAV, call
+  `reconstruct_run` with `workDir` and `inputs` containing `midi`,
+  `wav`, `catalogue` and optional `stems` keyed by part ID.
+
 ## MCP tools
 
-The packaged server exposes **27 tools** through `tools/list`. Use the
+The packaged server exposes **29 tools** through `tools/list`. Use the
 returned schemas for optional fields and types.
 
 | Task | Tools |
 | --- | --- |
+| Separate a mix | `separators_list`, `separate` |
 | Import, build and replay | `reconstruct_import`, `reconstruct_run`, `reconstruct_stage`, `reconstruct_rerun`, `transcribers_list` |
 | Inspect evidence | `reconstruct_describe`, `reconstruct_view`, `reconstruct_trace`, `reconstruct_trace_diff`, `artifact_read` |
 | Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |

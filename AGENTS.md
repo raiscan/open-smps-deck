@@ -11,11 +11,18 @@ folder into `~/.claude/skills` for Claude Code or `~/.agents/skills` for Codex.
 The [external-agent guide](docs/user-guide/agents.md) has the build, install
 and MCP setup commands.
 
-1. Check a Suno download with `reconstruct import` or Studio's **Import
-   Suno folder…**. Verify the stem assignments before starting reconstruction.
-2. Run reconstruction, inspect evidence, journal or propose edits, rebuild
-   from the affected stage, and prepare A/B audio for review.
+1. Start from a local WAV or MP3. Decode FLAC to WAV first. Run
+   `reconstruct separate`, check the stem roles with `reconstruct import`,
+   then add `--run` for an audio-only baseline. See the
+   [local extraction guide](headless/README.md#external-stem-separation)
+   for adapter setup and the recommended models.
+2. Inspect evidence and source voices, propose edits and layers, rebuild
+   from the affected stage, and prepare A/B audio for review. Open the
+   reconstruction in Studio to audition and edit it.
 3. Export the approved result or open it as an editable arrangement in Studio.
+
+For a Suno MIDI and stem download, use `reconstruct import` or Studio's
+**Import Suno folder…** and verify the MIDI-to-stem assignments before building.
 
 ## Repository rules
 
