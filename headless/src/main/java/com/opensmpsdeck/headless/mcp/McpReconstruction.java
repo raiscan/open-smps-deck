@@ -8,6 +8,7 @@ import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionEditCommand;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.ReconstructionSections;
+import com.opensmpsdeck.headless.ReconstructionVoicePlan;
 import com.opensmpsdeck.headless.ReconstructionTrace;
 import com.opensmpsdeck.headless.SunoImport;
 
@@ -24,7 +25,7 @@ import static com.opensmpsdeck.headless.mcp.McpArguments.*;
 import static com.opensmpsdeck.headless.mcp.McpJson.object;
 
 final class McpReconstruction {
-    static final String[] STAGES = {"transcribe", "structure", "roles", "allocate", "voice", "assemble"};
+    static final String[] STAGES = {"transcribe", "structure", "roles", "voices", "allocate", "voice", "assemble"};
     static final String[] ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan"};
     static final JsonObject INPUTS = schema(
             field("midi", "string", "Absolute MIDI file path"),
@@ -58,7 +59,7 @@ final class McpReconstruction {
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "manifest.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
+            "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -144,6 +145,11 @@ final class McpReconstruction {
         var result = object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
         var issues = ReconstructionSections.anchorIssues(work);
         if (!issues.isEmpty()) result.add("sectionIssues", McpJson.JSON.toJsonTree(issues));
+        var voicesFile = work.resolve(ReconstructionVoicePlan.FILE);
+        if (Files.isRegularFile(voicesFile)) {
+            var voiceIssues = read(voicesFile).getAsJsonObject().getAsJsonArray("issues");
+            if (!voiceIssues.isEmpty()) result.add("voiceEditIssues", voiceIssues);
+        }
         Path edits = work.resolve(ReconstructionEditCommand.RESULTS);
         if (Files.isRegularFile(edits)) result.add("editResults", read(edits).getAsJsonObject().get("stages"));
         if (command.equals("roles") || !single && (!resume || List.of("transcribe", "structure", "roles").contains(string(args, "from")))) {
@@ -176,6 +182,14 @@ final class McpReconstruction {
         var response = object(result);
         if (rmsJson != null) response.addProperty("rmsJson", rmsJson.toString());
         return response;
+    }
+
+    static JsonObject voices(JsonObject args) throws IOException {
+        var work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "roles.json", ReconstructionVoicePlan.JOURNAL, ReconstructionVoicePlan.LOCK))
+            McpPaths.managed(work, file);
+        return object(ReconstructionVoicePlan.run(work, args.has("action") ? string(args, "action") : "list",
+                args.get("entries")));
     }
 
     static JsonObject sections(JsonObject args) throws IOException {

@@ -219,7 +219,7 @@ class ReconstructionCliTest {
                 "voicing.json", "12a1d154a475a39f676a0348a6099a3b5654e47a68a3c6a3b03d3957feea431c");
         try (var paths = Files.list(work)) {
             var files = new java.util.HashSet<>(expected.keySet());
-            files.addAll(List.of("manifest.json", "snapshots", "allocation-affinity.json", "assembly-layout.json"));
+            files.addAll(List.of("manifest.json", "snapshots", "allocation-affinity.json", "assembly-layout.json", "voices.json"));
             assertEquals(files, paths.map(path -> path.getFileName().toString())
                     .collect(java.util.stream.Collectors.toSet()));
         }

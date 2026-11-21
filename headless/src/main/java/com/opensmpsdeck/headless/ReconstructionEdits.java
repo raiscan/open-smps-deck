@@ -27,19 +27,6 @@ final class ReconstructionEdits {
     static final String RESULTS = "edit-results.json";
 
     enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity }
-    enum LaneType {
-        FM, PSG, NOISE, DAC;
-
-        List<String> lanes() {
-            return switch (this) {
-                case FM -> ReconstructionAllocation.FM;
-                case PSG -> ReconstructionAllocation.PSG;
-                case NOISE -> List.of("PSG3");
-                case DAC -> List.of("DAC");
-            };
-        }
-    }
-
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -66,7 +53,7 @@ final class ReconstructionEdits {
                   Double scale, Boolean noExtension, Role role, Role fromRole,
                   String lane, List<ReconstructionBends.Point> points, List<Attack> selectors,
                   Integer voice, Role others, TimeBase timeBase, Shape shape, Double glideSeconds,
-                  Double splitAt, boolean allowDifferentPitches, boolean mergeGlide, LaneType laneType) {
+                  Double splitAt, boolean allowDifferentPitches, boolean mergeGlide, ReconstructionLaneType laneType) {
         String insertedId() { return "edit-" + id; }
         String tag() { return "edit:" + id; }
 
@@ -113,7 +100,7 @@ final class ReconstructionEdits {
     record Outcome(String id, Kind op, Status status, List<String> noteIds,
                    @Nullable List<String> missingNoteIds, @Nullable String detail, @Nullable Note original,
                    @Nullable List<Note> removedNotes, @Nullable List<Note> resultNotes,
-                   @Nullable LaneType laneType, @Nullable String lane) {
+                   @Nullable ReconstructionLaneType laneType, @Nullable String lane) {
         Outcome(String id, Kind op, Status status, List<String> noteIds, List<String> missingNoteIds,
                 String detail, Note original, List<Note> removedNotes, List<Note> resultNotes) {
             this(id, op, status, noteIds, missingNoteIds, detail, original, removedNotes, resultNotes, null, null);
@@ -163,12 +150,12 @@ final class ReconstructionEdits {
     record Resolution(String editId, String noteId, Role incomingRole, Role resultingRole,
                       boolean satisfied, Double sourceStart, Double projectStart) {}
 
-    record Pin(@Nullable String lane, String editId, int order, @Nullable LaneType laneType) {
+    record Pin(@Nullable String lane, String editId, int order, @Nullable ReconstructionLaneType laneType) {
         Pin(String lane, String editId, int order) { this(lane, editId, order, null); }
 
         String target() { return laneType == null ? lane : laneType.name(); }
 
-        String tag() { return "edit:" + editId; }
+        String tag() { return editId.startsWith("voice:") ? editId : "edit:" + editId; }
     }
 
     private final List<Intent> intents;
@@ -279,7 +266,7 @@ final class ReconstructionEdits {
         Role role = json.has("role") ? choice(Role.class, json, "role", at) : null;
         Role fromRole = target.has("fromRole") ? choice(Role.class, target, "fromRole", targetAt) : null;
         String lane = json.has("lane") ? string(json, "lane", at) : null;
-        LaneType laneType = json.has("laneType") ? choice(LaneType.class, json, "laneType", at) : null;
+        ReconstructionLaneType laneType = json.has("laneType") ? choice(ReconstructionLaneType.class, json, "laneType", at) : null;
         require(lane == null || ReconstructionAllocation.FM.contains(lane) || ReconstructionAllocation.PSG.contains(lane)
                 || lane.equals("DAC"), at + ".lane", "expected FM1–FM5, PSG1–PSG3 or DAC");
         require(lane == null || role != Role.drop, at + ".lane", "cannot pin a dropped role");
@@ -744,8 +731,8 @@ final class ReconstructionEdits {
         }
         for (var other : intents) {
             if (other == merge || other.kind == Kind.mergeNotes || other.kind == Kind.insertNote) continue;
-            if (sliding && (other.laneType != null && other.laneType != LaneType.FM
-                    || other.lane != null && !LaneType.FM.lanes().contains(other.lane))
+            if (sliding && (other.laneType != null && other.laneType != ReconstructionLaneType.FM
+                    || other.lane != null && !ReconstructionLaneType.FM.lanes().contains(other.lane))
                     && (targets(other, first, timeline) || targets(other, origins.get(first.id()), timeline)))
                 return "glide requires FM and conflicts with " + other.tag() + " targeting " + first.id();
             // A uniform span edit can still be applied to the resulting sustain.
@@ -871,7 +858,7 @@ final class ReconstructionEdits {
                 var choice = decisions.get(id);
                 if (choice != null && choice.role() != Role.drop && choice.note().bend() != null
                         && edit.tag().equals(choice.note().bend().editReason()))
-                    pins.putIfAbsent(id, new Pin(null, edit.id, order, LaneType.FM));
+                    pins.putIfAbsent(id, new Pin(null, edit.id, order, ReconstructionLaneType.FM));
             }
             if (edit.kind == Kind.splitNote || edit.kind == Kind.mergeNotes || edit.kind == Kind.setVelocity
                     || edit.kind == Kind.setNote && !edit.changesAttack()) continue;
@@ -1139,7 +1126,7 @@ final class ReconstructionEdits {
                 || !fmOnly && note.pitch() >= 45 && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
     }
 
-    static String laneTypeIssue(Note note, boolean drums, LaneType type, boolean fmOnly) {
+    static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly) {
         return switch (type) {
             case FM -> drums ? "FM percussion voicing is not supported for MIDI drum parts" : null;
             case DAC -> drums ? null : "DAC requires a MIDI drum part and sampled drum voicing";

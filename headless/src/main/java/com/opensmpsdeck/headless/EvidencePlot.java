@@ -34,15 +34,17 @@ final class EvidencePlot {
     private final BufferedImage image;
     private final Graphics2D g;
     private final List<ReconstructionSections.Section> bands;
+    private final java.util.Map<String, Color> noteColors;
 
     /** Which lanes the chip panel plays: the full mix, or the solo set from --lanes. */
     String renderLabel = "Full mix";
 
     EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes, boolean levels, boolean drums,
-                 List<ReconstructionSections.Section> bands) {
+                 List<ReconstructionSections.Section> bands, java.util.Map<String, Color> noteColors) {
         this.span = span;
         this.lanes = lanes;
         this.bands = bands;
+        this.noteColors = noteColors;
         this.minPitch = minPitch;
         this.maxPitch = maxPitch;
         int pitchHeight = Math.max(186, (maxPitch - minPitch + 1) * 14);
@@ -112,7 +114,7 @@ final class EvidencePlot {
 
     private void key() {
         int x = LEFT;
-        String[] labels = {"Suno MIDI", "External", "Inserted", "Dropped / merged", "Voiced lane"};
+        String[] labels = {"Suno MIDI", "External", "Inserted", "Dropped / merged", noteColors.isEmpty() ? "Voiced lane" : "Voice colors"};
         Color[] colors = {SUNO, EXTERNAL, EDIT, WARNING, CHANNELS[0]};
         for (int i = 0; i < labels.length; i++) {
             g.setColor(new Color(0x252e38));
@@ -168,10 +170,10 @@ final class EvidencePlot {
                 int width = Math.max(1, to - from);
                 int y = y(note.pitch(), geometry.sourceTop());
                 if (layer == Layer.lane) {
-                    g.setColor(laneColor(note.lane()));
+                    g.setColor(noteColor(note));
                     g.fillRect(from, y - 1, width, 3);
                 } else {
-                    g.setColor(outline(note));
+                    g.setColor(noteColor(note));
                     g.setStroke(stroke(note.warning(), layer == Layer.external ? new float[]{2, 3}
                             : layer == Layer.edit ? new float[]{6, 3, 2, 3} : null));
                     int radius = layer == Layer.suno ? 5 : layer == Layer.external ? 3 : 6;
@@ -197,7 +199,7 @@ final class EvidencePlot {
             if (row.stream().anyMatch(bounds::intersects)) continue;
             g.setColor(new Color(17, 22, 27, 229));
             g.fillRoundRect(bounds.x, bounds.y, bounds.width - 2, bounds.height, 4, 4);
-            g.setColor(note.layer() == Layer.lane ? laneColor(note.lane()) : outline(note));
+            g.setColor(noteColor(note));
             g.drawString(note.label(), from + 6, y + 4);
             row.add(bounds);
             labeled.add(note.id());
@@ -282,8 +284,12 @@ final class EvidencePlot {
         }
     }
 
+    private Color noteColor(DrawnNote note) {
+        return noteColors.getOrDefault(note.id(), outline(note));
+    }
+
     private static Color outline(DrawnNote note) {
-        if (note.warning()) return WARNING;
+        if (note.warning() && note.layer() != Layer.lane) return WARNING;
         return switch (note.layer()) {
             case suno -> SUNO;
             case external -> EXTERNAL;
@@ -338,7 +344,7 @@ final class EvidencePlot {
             if (note.layer() != Layer.lane) continue;
             int y = top + ROW * lanes.indexOf(note.lane());
             int from = x(span.start(note.timing())), to = x(span.end(note.timing()));
-            g.setColor(laneColor(note.lane()));
+            g.setColor(noteColor(note));
             g.fillRect(from, y + 18, Math.max(1, to - from), 7);
         }
         // A one-pixel separator makes successive gates visible even when

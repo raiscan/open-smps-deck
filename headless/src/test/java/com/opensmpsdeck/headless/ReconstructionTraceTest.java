@@ -87,7 +87,7 @@ class ReconstructionTraceTest {
         var allocation = new ReconstructionTrace.Allocation(at, Role.harmony, List.of("FM3", "FM4"), lane,
                 timing, ReconstructionAllocation.Outcome.kept, null, null, null, null, null, List.of());
         return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, timing, null, at, null, null, null,
-                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null);
+                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null, null);
     }
 
     @Test void samePitchAttacksHaveDistinctStableIdsInOneCluster(@TempDir Path work) throws Exception {

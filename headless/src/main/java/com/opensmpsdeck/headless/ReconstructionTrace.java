@@ -24,7 +24,7 @@ import static com.opensmpsdeck.headless.ReconstructionTimeMap.TimeBase;
 
 public final class ReconstructionTrace {
     public static final List<String> FILES = List.of("score.json", "structure.json", "roles.json",
-            "allocation.json", "voicing.json", "report.json", ReconstructionEdits.RESULTS);
+            "allocation.json", "voicing.json", "report.json", ReconstructionEdits.RESULTS, ReconstructionVoicePlan.FILE);
 
     enum Status { kept, moved, shortened, merged, dropped }
 
@@ -58,7 +58,7 @@ public final class ReconstructionTrace {
     record Allocation(NoteAt effective, ReconstructionRoles.Role role, List<String> expectedLanes, String lane,
                       Timing placement, ReconstructionAllocation.Outcome outcome, String reason, String mergedInto,
                       String competitorNoteId, List<String> blockingNoteIds, String relocatedFrom,
-                      List<ReconstructionAllocation.RunPlacement> figures, ReconstructionEdits.LaneType laneType) {
+                      List<ReconstructionAllocation.RunPlacement> figures, ReconstructionLaneType laneType) {
         Allocation(NoteAt effective, ReconstructionRoles.Role role, List<String> expectedLanes, String lane,
                    Timing placement, ReconstructionAllocation.Outcome outcome, String reason, String mergedInto,
                    String competitorNoteId, List<String> blockingNoteIds, String relocatedFrom,
@@ -72,7 +72,8 @@ public final class ReconstructionTrace {
     record Row(String id, int part, String partName, int pitch, Timing timing, Timing effectiveTiming, Origin source, NoteAt score,
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
-               Status status, String stage, String reason, List<String> editReasons, String fateDetail) {}
+               Status status, String stage, String reason, List<String> editReasons, String fateDetail,
+               ReconstructionVoicePlan.Identity voice) {}
     record Summary(int part, int pitch, Timing sourceTiming, Status status, String stage, String reason,
                    ReconstructionRoles.Role role, String roleReason, String lane, Timing placement,
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced) {}
@@ -184,7 +185,7 @@ public final class ReconstructionTrace {
     }
 
     private record ClusterNote(String id, int pitch, String name, ReconstructionRoles.Role role,
-                               String lane, Status fate) {}
+                               String lane, Status fate, ReconstructionVoicePlan.Identity voice) {}
     private record AttackCluster(int part, double sourceStart, double projectStart, List<ClusterNote> notes) {}
 
     private record Fate(Status status, String stage, String reason) {}
@@ -287,7 +288,7 @@ public final class ReconstructionTrace {
                 : row.structure != null && row.structure.effective != null ? row.structure.effective.note.pitch()
                 : row.score != null ? row.score.note.pitch() : row.pitch;
         return new ClusterNote(row.id, pitch, ReconstructionDescribe.pitch(pitch), row.roles == null ? null : row.roles.role,
-                allocatedLane(row), row.status);
+                allocatedLane(row), row.status, row.voice);
     }
 
     public static JsonObject diff(Path oldWork, Path newWork, String spanOption) throws IOException {
@@ -436,6 +437,8 @@ public final class ReconstructionTrace {
         var reportPath = work.resolve("report.json");
         var report = Files.exists(reportPath) ? ReconstructionArtifacts.readTree(reportPath).getAsJsonObject() : new JsonObject();
         var played = playback(score, allocation, voicing, report, timeline);
+        var plan = ReconstructionVoicePlan.saved(work);
+        var voices = plan == null ? Map.<String, ReconstructionVoicePlan.Voice>of() : plan.byNote();
 
         var scored = index(score.notes(), Note::id);
         var structured = index(structure == null ? List.of() : structure.notes(), Note::id);
@@ -491,6 +494,8 @@ public final class ReconstructionTrace {
             var expected = pin != null && pin.laneType() != null ? pin.laneType().lanes()
                     : placed != null || role != null ? ReconstructionAllocation.expectedLanes(
                     role == null ? placed.role() : role.role(), noise) : List.<String>of();
+            if (placed != null && placed.laneType() != null)
+                expected = placed.laneType().lanes();
             var fixes = corrections.getOrDefault(id, List.of());
             var scoreDecision = scoreDecisions.get(id);
             var roleTrace = role == null ? null : new Roles(roleNote, role.role(), roleReason(role, score),
@@ -521,11 +526,13 @@ public final class ReconstructionTrace {
             String reason = edits.isEmpty() ? fate.reason : String.join(" ", edits);
             var latest = placedNote != null ? placedNote : roleNote != null ? roleNote : effective != null ? effective : written;
             var gate = effectiveTiming(voiced, placement, latest, timeline);
+            var voice = ReconstructionVoicePlan.voiceFor(voices, id);
+            var identity = voice == null ? null : new ReconstructionVoicePlan.Identity(voice.id(), voice.name());
             rows.add(new Row(id, anchor.note.part(), part == null ? "" : part.name(), anchor.note.pitch(), anchor.timing,
                     gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
-                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason));
+                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity));
         }
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
@@ -634,7 +641,7 @@ public final class ReconstructionTrace {
     private static Allocation placement(ReconstructionAllocation.Entry entry, ReconstructionAllocation.RunPlacement run,
                                         List<ReconstructionAllocation.RunPlacement> retriggers, NoteAt note,
                                         List<String> expected, LaneEvidence lanes,
-                                        ReconstructionTimeMap timeline, ReconstructionEdits.LaneType laneType) {
+                                        ReconstructionTimeMap timeline, ReconstructionLaneType laneType) {
         if (entry == null && run == null) return null;
         var figures = new ArrayList<ReconstructionAllocation.RunPlacement>();
         if (run != null) figures.add(run);
@@ -928,7 +935,8 @@ public final class ReconstructionTrace {
                         cluster.projectStart, cluster.part);
                 for (var note : cluster.notes)
                     out.printf(" %s%s[%s %s %s %s]", note.name, "FM1".equals(note.lane) ? "*" : "",
-                            note.role == null ? "-" : note.role, note.lane == null ? "-" : note.lane, note.fate, note.id);
+                            note.role == null ? "-" : note.role, note.lane == null ? "-" : note.lane, note.fate,
+                            note.id + (note.voice == null ? "" : " voice=" + note.voice.id()));
                 out.println();
             }
         } else {
@@ -947,6 +955,7 @@ public final class ReconstructionTrace {
     private static void print(PrintStream out, String indent, Row row) {
         out.printf(Locale.ROOT, "%s%s part %d (%s) MIDI %d %s  %s @ %s (%s)%n",
                 indent, row.id, row.part, row.partName, row.pitch, format(row.timing), row.status, row.stage, row.reason);
+        if (row.voice != null) out.printf("%s  voice %s (%s)%n", indent, row.voice.name(), row.voice.id());
         if (row.fateDetail != null) out.printf("%s  %s%n", indent, row.fateDetail);
         if (row.source != null) {
             out.printf("%s  source %s%n", indent, row.source.transcriber == null

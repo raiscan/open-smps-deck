@@ -15,7 +15,6 @@ import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStages.VERSION;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
-import static com.opensmpsdeck.headless.ReconstructionEdits.LaneType;
 
 final class ReconstructionAllocation {
     static final List<String> FM = List.of("FM1", "FM2", "FM3", "FM4", "FM5");
@@ -28,7 +27,7 @@ final class ReconstructionAllocation {
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
                  Outcome outcome, @Nullable String reason, @Nullable String mergedInto,
                  @Nullable String competitorNoteId, @Nullable List<String> blockingNoteIds,
-                 @Nullable String relocatedFrom, @Nullable String pinnedLane, @Nullable LaneType laneType) {
+                 @Nullable String relocatedFrom, @Nullable String pinnedLane, @Nullable ReconstructionLaneType laneType) {
         Entry(Note note, Role role, String lane, Integer startTick, Integer endTick, Outcome outcome,
               String reason, String mergedInto, String competitorNoteId, List<String> blockingNoteIds,
               String relocatedFrom, String pinnedLane) {
@@ -185,6 +184,13 @@ final class ReconstructionAllocation {
     static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
                                        boolean fmOnly, boolean hasStems, Map<String, String> seed,
                                        Map<ReconstructionVoices.Key, Double> cymbalLevels) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels, Map.of());
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                                       Map<String, ReconstructionLaneType> voiceTypes) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -192,10 +198,13 @@ final class ReconstructionAllocation {
             int start = note.startTick(frames);
             boolean drum = decision.role() == Role.drums;
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
+            var voiceType = voiceTypes.get(note.id());
+            if (pin == null && voiceType != null)
+                pin = new ReconstructionEdits.Pin(null, "voice:assignment", Integer.MAX_VALUE, voiceType);
             boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part()))
-                    : "PSG3".equals(pin.lane()) || pin.laneType() == LaneType.NOISE);
+                    : "PSG3".equals(pin.lane()) || pin.laneType() == ReconstructionLaneType.NOISE);
             int end = drum && !noise ? start + 1 : note.endTick(frames);
-            if (noise && pin != null && pin.laneType() == LaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
+            if (noise && pin != null && pin.laneType() == ReconstructionLaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
                 end = Math.min(frames, start + ReconstructionCymbals.gate(note.pitch()));
             return new Attack(decision, start, end, noise, pin, null);
         }).sorted(attackOrder()).toList();
@@ -209,8 +218,20 @@ final class ReconstructionAllocation {
         // Resolve the DAC first so tonal spill can avoid upcoming noise hits.
         // Both passes retain the same attack ordering within their priority tiers.
         for (var attack : attacks) {
+            var voiceType = voiceTypes.get(attack.note().id());
+            if (attack.role() != Role.drop && voiceType != null) {
+                var issue = ReconstructionEdits.laneTypeIssue(attack.note(), attack.role() == Role.drums, voiceType, fmOnly);
+                var pin = attack.pin;
+                if (issue == null && (pin.laneType() != null ? pin.laneType() != voiceType
+                        : !voiceType.lanes().contains(pin.lane())))
+                    issue = "conflicts with " + pin.tag() + " " + pin.target();
+                if (issue != null) {
+                    allocator.drop(attack, "voice:assignment " + voiceType + " " + issue);
+                    continue;
+                }
+            }
             if (attack.noise || attack.role() != Role.drop && attack.pin != null
-                    && ("PSG3".equals(attack.pin.lane()) || attack.pin.laneType() == LaneType.NOISE))
+                    && ("PSG3".equals(attack.pin.lane()) || attack.pin.laneType() == ReconstructionLaneType.NOISE))
                 allocator.explicitNoise.add(attack.start);
             if (attack.role() != Role.drums || attack.noise) {
                 remaining.add(attack);

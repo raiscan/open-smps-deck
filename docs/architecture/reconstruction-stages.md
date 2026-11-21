@@ -12,10 +12,10 @@ java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json song-work \
 java -jar "$jar" reconstruct run --from allocate song-work
 ```
 
-The first command runs all six stages in a new directory. Use
+The first command runs all seven stages in a new directory. Use
 `--audio-repeats` to include reference chroma in phrase matching. The
 transcription options are saved for subsequent runs. The second
-rebuilds allocation, voicing and assembly from the existing `roles.json`. To run
+rebuilds allocation, voicing and assembly using the voices identified from `roles.json`. To run
 individual stages, use the following commands.
 
 ```sh
@@ -23,6 +23,7 @@ java -jar "$jar" reconstruct transcribe song.mid mix.wav catalogue.json stage-wo
   --candidates candidate-notes.json
 java -jar "$jar" reconstruct structure stage-work
 java -jar "$jar" reconstruct roles stage-work --harmony-max-hz 7.5
+java -jar "$jar" reconstruct voices stage-work
 java -jar "$jar" reconstruct allocate stage-work
 java -jar "$jar" reconstruct voice stage-work
 java -jar "$jar" reconstruct assemble stage-work
@@ -32,7 +33,7 @@ java -jar "$jar" reconstruct assemble stage-work
 | --- | --- |
 | `score.json` | `structure` |
 | `structure.json` | `roles` |
-| `roles.json` | `allocate` |
+| `roles.json`, `voice-edits.json` | `voices` |
 | `allocation.json` | `voice` |
 | `voicing.json` | `assemble` (or `run --from voice`) |
 
@@ -134,6 +135,70 @@ only when an explicit roleplan or edit selector requests it.
 - Java clients use `ReconstructionSections.load(Path)` for the effective
   hierarchy, proposal, and diagnostics.
 
+## Identify and assign voices
+
+The `voices` stage groups role-stage notes into named source instruments. A
+voice can carry different roles over time. Automatic IDs follow the MIDI
+part, its mapped stem and, for percussion, a General MIDI drum class.
+A tonal part with a gap of at least an octave and repeated simultaneous
+attacks on either side can propose a second voice. `voices.json` records
+the evidence, heuristic confidence, stable note IDs, explicit instrument
+assignments and journal issues. Added source parts are grouped by the same
+rules, including stem transcriptions.
+
+```sh
+java -jar "$jar" reconstruct voices song-work
+java -jar "$jar" reconstruct voices song-work rename   '{"id":"rename-lead","author":"human","voiceId":"part-0","name":"Lead instrument 1"}'
+java -jar "$jar" reconstruct voices song-work assign   '{"id":"hat-noise","author":"agent","voiceId":"part-2-closed-hat","assignment":{"laneType":"NOISE","instrument":"closed-hat"}}'
+java -jar "$jar" reconstruct run --from voices song-work --keep-voicing
+java -jar "$jar" reconstruct view song-work --start 0 --end 8 --color-by voice voices.png
+```
+
+List and edit commands evaluate the current proposal and journal. Each
+entry uses a unique `id`, an `author` of `human` or `agent`, and a `voiceId`.
+The action determines the remaining fields.
+
+| Action | Fields |
+| --- | --- |
+| `create` | A new `voiceId`, `name`, and `kind` of `tonal` or `drum`. |
+| `rename` | The new `name`. |
+| `merge` | `targetId` receives the source voice's notes. Clear one assignment before merging different instruments. |
+| `split` | A new `targetId`, `name`, and note selection from the source voice. The new voice inherits its assignment. |
+| `move` | A note selection to move into `voiceId`. |
+| `assign` | `assignment: {"laneType":"FM","instrument":"VARIANT_ID"}` or `clear: true`. |
+
+Use one selection for a move or split. Supply `noteIds`, `selectors` (an
+array of `{at, pitch, part}` point selectors with 20 ms tolerance), or a
+half-open `span: [start, end]` with optional `part`, `pitchMin` and
+`pitchMax` filters. Selectors and spans default to source seconds and accept
+`timeBase: "project"`. A mutation accepts one JSON object or an atomic array
+for that action. `voice-edits.json` stores ordered entries with an `op`
+field. It survives retranscription and replay. If a target disappears,
+the whole entry stays in the journal and appears under `issues` for repair.
+
+FM, PSG and DAC assignments select a catalogue variant of the corresponding
+FM patch, volume envelope or sample kind. NOISE uses PSG3 with `fixed`,
+`closed-hat` or `cymbal` voicing. Tonal voices use FM or PSG. Drum voices use
+DAC or NOISE. Allocation keeps the usual role preference within the requested
+type and records unavailable notes or incompatible exact-lane pins as
+reductions. An explicit assignment follows each allocated note through
+lane changes. It takes precedence over lane and scoped instrument settings.
+Assigned FM patches preserve their native release rates across lanes.
+Gain, gate and effects still come from the lane and its applicable overrides.
+Instrument changes involving an assignment start a new clip when needed.
+The assembly report counts applied assignments by lane and any extra clips
+from these boundaries in `voiceAssignmentExtraClips`. Unassigned voices are
+annotations and preserve the normal allocation and fit.
+
+MCP `reconstruct_voices` takes `workDir`, optional `action`, and an `entries`
+array for mutations. Call `reconstruct_stage` with `stage: "voices"` to
+write the artifact alone, or resume with `reconstruct_run` from `voices`.
+After the stage runs, `reconstruct_trace` gives each classified note's voice
+ID and name. `reconstruct_view` with `colorBy: "voice"` returns the same voice
+colors as the CLI view, with an ID-to-color legend and note-to-voice mapping.
+Java clients can call `ReconstructionVoicePlan.load(Path)` and append typed
+edits atomically with `ReconstructionVoicePlan.edit(Path, List<Edit>)`.
+
 ## Trace and reproducible inputs
 
 Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`
@@ -200,7 +265,7 @@ snapshot and its provenance. Original bytes are retained for new runs.
 `reconstruct rerun WORK_DIR NEW_WORK_DIR` verifies input hashes at the
 stored path or snapshot and checks any repeated `--search DIR` roots for
 missing bytes. The replay starts from transcription using the saved options
-and original external notes. Replay copies `edits.json` and `roleplan.json`.
+and original external notes. Replay copies `edits.json`, `roleplan.json` and `voice-edits.json`.
 The manifest records the plan's `rolePlanSha256`. Use `--keep-voicing` to
 carry accepted voicing settings. Manual changes to derived stage artifacts
 must be expressed through the corresponding recipe inputs to replay.
