@@ -2,8 +2,8 @@
 
 Use Claude Code or Codex to drive reconstruction on the same local files that
 Studio opens. The headless JAR runs with JDK 25 and needs no audio device.
-The skill explains how to turn an aligned MIDI and WAV into an S3K arrangement
-and iterate on time-coded feedback.
+The skill covers checking a Suno download, reconstructing from aligned MIDI
+and WAV, iterating on time-coded feedback, and exporting an S3K arrangement.
 
 ## Build the JAR and install the skill
 
@@ -27,9 +27,8 @@ mkdir -p ~/.agents/skills
 ln -s "$repo/skills/opensmpsdeck" ~/.agents/skills/opensmpsdeck
 ```
 
-You can copy the folder with `cp -R "$repo/skills/opensmpsdeck" DESTINATION`
-instead. Keep the checkout available for the linked workflow guides. If your
-session does not see the skill, restart it and invoke `/opensmpsdeck` in Claude
+Keep the checkout available so the skill can link to the workflow guides.
+If your session does not see the skill, restart it and invoke `/opensmpsdeck` in Claude
 Code or `$opensmpsdeck` in Codex.
 
 ## Connect MCP
@@ -47,8 +46,8 @@ claude mcp add --transport stdio opensmpsdeck -- java -jar "$jar" mcp
 ```
 
 For a project configuration, put this entry in `.mcp.json`. Replace the
-placeholder with the absolute path to your packaged JAR. Timeout is in
-milliseconds. [Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
+placeholder with the absolute path to your packaged JAR.
+[Claude Code MCP configuration](https://code.claude.com/docs/en/mcp)
 
 ```json
 {
@@ -56,8 +55,7 @@ milliseconds. [Claude Code MCP configuration](https://code.claude.com/docs/en/mc
     "opensmpsdeck": {
       "type": "stdio",
       "command": "java",
-      "args": ["-jar", "/absolute/path/to/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar", "mcp"],
-      "timeout": 600000
+      "args": ["-jar", "/absolute/path/to/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar", "mcp"]
     }
   }
 }
@@ -75,48 +73,84 @@ args = ["-jar", "/absolute/path/to/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar", "m
 tool_timeout_sec = 600
 ```
 
-## Drive a review
+## Drive the product loop
 
-1. Call `reconstruct_run` with `workDir`, `inputs: {midi, wav, catalogue}`
-   and optionally `inputs.stems`, a map of MIDI part IDs to aligned WAV paths.
-   `options.seconds` limits the first pass. An initial run requires a new work
-   directory under an existing parent. A resumed run takes `workDir` and
-   `from`. Reconstruction can take minutes and reports stage progress when the
-   client supplies a progress token. Calls on one server run serially.
-2. Open the returned `arrangement.smps.json` in Studio. Call `reference_add`
-   with the project and WAV. Use `notes_list` with `openOnly: true` to read the
-   latest saved notes. Inspect `report` or a stage with `artifact_read`.
-3. To edit a single decision, pass an existing `selection` such as
-   `["lanes", "FM1", "gain"]` to `artifact_write` with its new `value`.
-   Each path component is an object key or zero-based array index, as a
-   string. Omit `selection` to replace the whole artifact. The tool validates
-   the entire resulting artifact before publishing it. For large arrays,
-   local JSON tools can find the index before calling MCP.
-4. Rerun from the first stage that consumes your edit. For voicing changes,
-   use `from: "assemble"` or `from: "voice"`. Run standalone
-   `reconstruct_stage` with `stage: "voice"` to refit after allocation edits.
-   MCP assembly preserves the saved references and notes and checks the loaded
-   project revision before publication. Use `project_validate` after assembly.
-5. Use `render_clip` with the project, a new `output` WAV, and `start` and
-   `end` in project seconds. It advances the driver from time zero, rounds
-   both boundaries to 60 Hz, and supports optional `solo` and `mute` lists.
-   To compare with the source, call `render_compare` with the full time-zero
-   render WAV and reference WAV. It writes an A/B of up to 60 seconds per
-   side and returns the split point and gains. Use `referenceOffset` for
-   the project time where WAV time zero aligns. The comparison attenuates
-   to the quieter RMS level when both sides have audio.
-6. Listen and call `notes_resolve` with the note ID, reply and author when
-   the change is verified. A clean Studio window refreshes from disk. Check
-   for unsaved Studio edits before reconciling a disk revision.
+1. **Process.** Call `reconstruct_import` with absolute `folder`, `workDir`
+   and `catalogue` paths. Read the ✓/⚠/✗ checks and `import.json`, including
+   the winning stem match and runner-up for the lead. Supply `assign` as a
+   download-relative file-to-part map and `exclude` as a list of files to
+   override the matcher. Once the mix and MIDI are present and checks pass,
+   send the returned `runRequest` to `reconstruct_run`. For aligned MIDI
+   and WAV that need no import, call `reconstruct_run` with `workDir` and
+   `inputs` containing `midi`, `wav`, `catalogue` and optional `stems`.
+   Use `options.seconds` for a first pass. A fresh reconstruction needs a
+   new directory under an existing parent. Studio has **Import Suno
+   folder…**, **Override**, **Re-check** and **Start reconstruction**.
+2. **Analyze.** Open the work directory in Studio with **Open
+   reconstruction…**. Use `reconstruct_trace` with `byOnset: true` for
+   attack clusters and `reconstruct_view` with a new `output` PNG for
+   aligned evidence. Inspect voice and section IDs with
+   `reconstruct_voices` and `reconstruct_sections`. Reconstruction queries
+   default to source seconds. Use `time: "project"` for project-time view,
+   trace, audition or comparison bounds. Studio's **Project time** toggle
+   changes the ruler. Saved project review notes use project seconds.
+3. **Edit and review.** Send `reconstruct_edit` an `edit` or ordered `edits`
+   array with `propose: true` while a human is reviewing. Preview with
+   `reconstruct_run`, `withProposals: true` and an optional `proposalId` or
+   `group`. Review the sibling preview and its A/B WAVs, then accept or
+   reject in Studio **Proposals** or with `reconstruct_edit`. CLI/MCP
+   acceptance returns the stage to rebuild. Studio rebuilds when the
+   reviewer presses **Apply**. For authorized direct edits, use
+   `reconstruct_edit` with `action: "add"` and optional `rerun: true`, or
+   resume with `reconstruct_run` and `from`. Use `options.keepVoicing` to
+   preserve compatible settings. Record musical intent in `edits.json`.
+   Never hand-edit the score or allocation.
+4. **Compare.** Use `reconstruct_trace_diff` on the baseline and candidate
+   work directories with a source-time `span` such as `"12,14"`. Check lane
+   permutations, voicing changes, compiled events and PCM outside the
+   span. Use `render_compare` for an aligned chip/reference A/B or
+   `reconstruct_audition` for FM variants. Send the clips to the reviewer.
+   Studio can loop a passage, solo a lane or note, and switch between chip
+   and source with **R**. Use `notes_list` and `notes_resolve` to track
+   saved project feedback. Validate the approved project with
+   `project_validate`.
+5. **Output.** Call `project_export` with `workDir` or `project`, a new
+   `output` and `format` of `wav`, `mp3`, `vgm`, `smps` or `package`.
+   For WAV or MP3, use project seconds for optional span bounds and
+   `stems: true` for channel stems. Studio **Export…** supports the same
+   formats. **Open as arrangement** hands the result to the timeline
+   editor. Saved musical hand edits detach the arrangement. Rebuilding
+   over them requires explicit approval. Use `reconstruct_rerun` with a
+   new `output` to replay the recipe and preserve the original.
 
-Input paths must be absolute and exist. New WAV paths may be relative to or
-inside the supplied work directory or project parent. Existing WAVs and
-symlink escapes are rejected. Keep work directories, reports and review
-projects containing private input paths outside public repositories.
+Use absolute input paths. Create outputs inside the work directory or project
+parent when the tool asks for a new file. The server rejects existing export
+targets and symlink escapes for these outputs. Reconstruction can take
+minutes. Calls on one server run serially and report progress when the client
+supplies a progress token. Keep input paths and path-bearing artifacts private.
 
-Use the [agent skill](../../skills/opensmpsdeck/SKILL.md) for the edit routing
-checklist and CLI fallback. See the
-[headless command guide](../../headless/README.md),
-[stage artifact reference](../architecture/reconstruction-stages.md),
-[Studio review protocol](../architecture/review-loop.md), and
-[benchmark guide](../architecture/benchmark.md) for details.
+## MCP tools
+
+The packaged server exposes **27 tools** through `tools/list`. Use the
+returned schemas for optional fields and types.
+
+| Task | Tools |
+| --- | --- |
+| Import, build and replay | `reconstruct_import`, `reconstruct_run`, `reconstruct_stage`, `reconstruct_rerun`, `transcribers_list` |
+| Inspect evidence | `reconstruct_describe`, `reconstruct_view`, `reconstruct_trace`, `reconstruct_trace_diff`, `artifact_read` |
+| Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |
+| Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` |
+| Track project feedback | `reference_add`, `notes_list`, `notes_add`, `notes_resolve` |
+| Validate, export and check regressions | `project_validate`, `project_export`, `bench_compare` |
+
+`artifact_write` is available for validated configuration such as a
+`roleplan`. It accepts a complete object or a `selection` of object keys
+and zero-based indices as strings. Use `reconstruct_edit` for note and lane
+changes. `render_clip` remains available for an excerpt of an existing
+project, with project-time `start` and `end` and optional `solo` or `mute`
+lanes. Use `render_compare` for a reconstruction against its aligned source.
+
+See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
+equivalents, the [stage guide](../architecture/reconstruction-stages.md)
+for edit schemas and [Studio review protocol](../architecture/review-loop.md)
+for sharing feedback.

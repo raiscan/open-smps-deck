@@ -38,7 +38,11 @@ same `.smps.json` project format.
 
 ### headless
 
-- `Main` dispatches project validation, compilation, rendering and import commands.
+- `Main` dispatches project validation, compilation, rendering, export and MCP.
+- `ReconstructionStages` builds the arrangement from MIDI and audio.
+  `ReconstructionVoicePlan` and `ReconstructionSections` manage voices and form.
+- `SunoImport` checks downloads and assigns stems. `ProjectExport` writes audio
+  and native formats. `McpServer` exposes the workflow over stdio.
 - `S3kRenderer` renders through the pinned session without an audio device.
 - `S3kRomImporter` imports music and assets from verified locked-on S3&K images.
 - `NativeArrangement` derives a timeline from the pinned sequencer.
@@ -50,6 +54,8 @@ same `.smps.json` project format.
 - `StudioLauncher` starts JavaFX. `StudioWindow` hosts the project editors.
 - `TimelineView` edits clip placement and repetition. `PianoRollView` edits linked notes.
 - `NativeProgramPane` edits native bank bytes in place.
+- `SunoImportPane` checks downloads. `ReconstructionPane` hosts Analysis and
+  Proposals. `ExportDialog` exports arrangements and native banks.
 - `StudioPlayback` plays project snapshots off the JavaFX thread.
 
 ## Build and test

@@ -173,8 +173,9 @@ the loop when the native tracks share a repeat point. VGM uses a 44.1 kHz
 event clock and hardware time. The WAV renderer presents 60 frames per
 second, so their nominal durations differ slightly.
 
-`--format smps` is equivalent to `compile-project`. The binary targets a
-compatible S3K driver with local voices and has no embedded external assets.
+`--format smps` is equivalent to `compile-project` and targets a compatible
+S3K driver with local voices. Use the package format when the project declares
+external envelope or DAC sample assets.
 `--format package` is equivalent to `compile-package` and includes the
 addressed bank, bindings, resources and source required for integration with
 the pinned OpenGGF S3K driver. OpenGGF has no direct ZIP loader.
@@ -193,9 +194,9 @@ java -jar "$DECK_JAR" reconstruct import "$download" "$work" --catalogue instrum
 ```
 
 Import checks the full mix, MIDI, root or `stems/` WAV files, and optional
-`stems.json`. It prints a status table and writes `import.json` with file
-hashes, MIDI part IDs, audio mapping scores, alignment and a reconstruction
-command. The automatic matcher maximizes the total score across all pairs,
+`stems.json`. It prints a ✓ pass, ⚠ warning and ✗ error table and writes
+`import.json` with file hashes, MIDI part IDs, audio mapping scores, alignment
+and a reconstruction command. The automatic matcher maximizes the total score across all pairs,
 with small bonuses for matching names and MIDI program families. For each
 automatic match, the report shows the winning score and any runner-up stem.
 A stem that also strongly correlates with a part gets a warning and a hint
@@ -211,7 +212,8 @@ With `--run`, supply a trusted catalogue via `--catalogue`. Reconstruction
 starts when the check has no errors and both the mix and MIDI are present.
 It writes into the new `WORK_DIR/reconstruction` directory. Without a
 catalogue, set `CATALOGUE` before using the printed command. Keep the
-work directory separate from the read-only download.
+work directory separate from the read-only download. In MCP, call
+`reconstruct_import` and pass its ready `runRequest` to `reconstruct_run`.
 
 ## Reconstruct a track from MIDI and WAV
 
@@ -225,16 +227,17 @@ java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json first-m
 java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json full-song --name "Song"
 ```
 
-The command creates a new work directory with five editable stage artifacts
-and four assembly outputs. Use `reconstruct run --from STAGE WORK_DIR` to
-regenerate downstream decisions after an edit. Allocation prefers the prior
+The command creates a new work directory and runs seven stages. Use
+`reconstruct run --from STAGE WORK_DIR` to regenerate downstream decisions
+after a journal or configuration edit. Treat `score.json` and
+`allocation.json` as generated evidence. Allocation prefers the prior
 lane where it can do so with the same hardware priority and without
 shortening another note. The
 [reconstruction stage guide](../docs/architecture/reconstruction-stages.md)
 documents the files, individual stage commands, and how to add external
 note candidates. Use `reconstruct voice WORK_DIR` to fit `voicing.json`.
-Edit that file to change lane patches, gains, note gates, or native effects,
-then use `reconstruct run --from assemble WORK_DIR` to render the changes.
+Record musical changes with [persistent edits](#persistent-musical-edits) and use
+[voicing settings](#refine-and-audition-voicing) for patch and level fitting.
 
 - `arrangement.smps.json` contains editable clips and local assets.
 - `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
@@ -249,10 +252,9 @@ then use `reconstruct run --from assemble WORK_DIR` to render the changes.
 Use `--stem PART=stem.wav` to match a part against a time-aligned stem. Get
 zero-based part IDs from the report. The matcher uses the mix for other parts.
 It pools candidate rankings across several MIDI note windows and marks choices
-with weak evidence. A part can change FM patches in a 16-second section when
-a local candidate improves the match on two separate excerpts held out from
-the default and local patch selections. The report records the candidates
-and both distances. Use `--whole-part-voices` for a single FM patch per part.
+with weak evidence. Fresh staged fits share a sound across the function
+voices of each source instrument by default. See
+[voicing](#refine-and-audition-voicing) for scoped overrides and audition.
 Reconstruction excludes track data inferred to be Azure Lake FM voices on the
 verified locked-on ROM. Native playback still uses the original bytes.
 
@@ -305,7 +307,9 @@ changing playback timing. To check a render from an edited project, use
 Fresh staged reconstructions fit one shared sound per source instrument in
 `voicing.json.sourceInstruments`. Line and chord function voices share this
 sound unless assigned explicitly. Lane overrides and scoped edits remain
-available.
+available. When source stems support it, drum-to-tonal level fitting uses
+gated K-weighted loudness. RMS in the reports and audition output describes
+signal level.
 
 Use `reconstruct voice WORK_DIR --lane FM1` to refit only FM1. Refits preserve
 existing gains for unchanged lane material and retain scoped overrides.
@@ -515,8 +519,10 @@ java -jar "$jar" reconstruct edit "$work" list
 java -jar "$jar" reconstruct edit "$work" remove answer
 ```
 
-Inline `edit add JSON` takes one intent object. A batch is an ordered array of intents or a versioned edits object. The CLI
-returns the first affected stage as `from`. MCP `reconstruct_edit` accepts
+Keep musical changes in `edits.json` and propose by default when a human
+is reviewing. Inline `edit add JSON` takes one intent object. A batch is an
+ordered array of intents or a versioned edits object. The CLI returns the
+first affected stage as `from`. MCP `reconstruct_edit` accepts
 `workDir`, `action: "add" | "list" | "remove"`, and an `edit` object or
 `edits` array for add, or an `id` for remove. Set `rerun: true` on MCP add
 or remove to rebuild once and get a `traceDiff`. Check `lastRun` for invalid
@@ -594,8 +600,8 @@ intervals. MCP exposes the same options as `byOnset` and `time`.
 Use either `--pitch` or an inclusive range with `--pitch-min` and
 `--pitch-max`. `--lane` selects the allocated lane. Valid values for
 `--status` are `kept`, `moved`, `shortened`, `merged`, and `dropped`.
-The trace shows each stage's version of the note, including handwritten
-score edits awaiting a rebuild, and the reason and competing note IDs.
+The trace shows each stage's version of the note, including its reason and
+competing note IDs. Compare the result with the accepted edit journal.
 The diff compares stable IDs and sets `outsideSpan` when neither version
 of the note touches the specified source-time interval. It groups contiguous
 lane moves outside that span in `lanePermutations`, with the first diverging
@@ -623,7 +629,8 @@ under `snapshots/`. Rerun checks the original path and retained copy
 against the hash, then searches any supplied directories recursively for
 matching bytes. It reports all unresolved inputs together and starts in
 a new directory using the current build. It replays the original inputs
-and options with the saved external notes, musical edits and role plan.
+and options with the saved external notes, musical edits, role plan,
+section journal and voice journal.
 The manifest records the plan hash. Replay also reuses the saved clip
 anchors and allocation affinity seed. Use `--keep-voicing` for accepted
 voicing settings. Keep the recipe and snapshots with the private work
@@ -690,6 +697,14 @@ compiler/render integration, PCM equality with direct pinned-core rendering,
 bounded reads and file preservation. Upstream-source parity is checked separately
 by the repository's pin verification tooling; a passing demo alone is not a claim
 of broad ROM parity.
+
+Run the headless build gate and smoke-test the packaged MCP server. Set
+`scratch` to a writable directory outside the checkout.
+
+```sh
+mvn -B -pl headless -am verify
+python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$scratch"
+```
 
 ## External transcription
 

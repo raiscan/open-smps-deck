@@ -2,8 +2,9 @@
 
 Reconstruction builds an S3K arrangement from aligned MIDI and audio. Each
 stage reads the preceding artifact from a work directory and writes its own
-versioned JSON. Edit the artifact that owns the decision, then resume at the
-first stage that consumes it.
+versioned JSON. Record musical intent in `edits.json`, then resume at the
+first stage that consumes it. Keep `score.json` and `allocation.json` as
+generated evidence.
 
 ```sh
 jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
@@ -29,19 +30,19 @@ java -jar "$jar" reconstruct voice stage-work
 java -jar "$jar" reconstruct assemble stage-work
 ```
 
-| Artifact edited | First downstream stage |
+| Authored input | First downstream stage |
 | --- | --- |
-| `score.json` | `structure` |
-| `structure.json` | `roles` |
-| `roles.json`, `voice-edits.json` | `voices` |
-| `allocation.json` | `voice` |
-| `voicing.json` | `assemble` (or `run --from voice`) |
+| `edits.json` | Use the stage returned by the edit command |
+| `roleplan.json` | `roles` |
+| `voice-edits.json` | `voices` |
+| `sections.json` | Resume at the first stage using the section selector or voice grouping |
+| `voicing.json` configuration | `assemble` |
 
 Use `run --from transcribe WORK_DIR` to regenerate the score with the paths,
 duration, and transcription options stored in the existing score. An explicit
-stage writes only its own output. Resuming a chain replaces its downstream
-artifacts, so retain copies of any downstream edits you want to keep. The
-four assembly files are prepared before replacing the previous assembly.
+stage writes only its own output. Resuming a chain regenerates downstream
+artifacts. The four assembly files are prepared before replacing the
+previous assembly.
 Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
@@ -332,7 +333,8 @@ snapshot and its provenance. Original bytes are retained for new runs.
 `reconstruct rerun WORK_DIR NEW_WORK_DIR` verifies input hashes at the
 stored path or snapshot and checks any repeated `--search DIR` roots for
 missing bytes. The replay starts from transcription using the saved options
-and original external notes. Replay copies `edits.json`, `roleplan.json` and `voice-edits.json`.
+and original external notes. Replay copies `edits.json`, `roleplan.json`,
+`sections.json` and `voice-edits.json`.
 The manifest records the plan's `rolePlanSha256`. Use `--keep-voicing` to
 carry accepted voicing settings. Manual changes to derived stage artifacts
 must be expressed through the corresponding recipe inputs to replay.
@@ -735,10 +737,9 @@ tempo changes.
 Variable-length bars follow the selected beat map. A confident curve that
 deviates at least 0.6% from the opening rate can supply structure bars even
 when playback stays in source time. The tempo summary uses `tracked` in
-that case. To correct a tracked grid, edit `score.json` at `beatMap.beats` or
-`beatMap.downbeat` and run `reconstruct run --from structure WORK_DIR`.
-The structure stage rebuilds its bars from the edited curve. Corrections to
-a beat map can also change project timing under the saved steady-tempo
+that case. If the tracked grid is wrong, correct the input MIDI tempo map
+or use the explicit `--tempo` and `--bar-offset` options in a new run.
+Changes to the grid can also affect project timing under the steady-tempo
 setting.
 
 Use `--steady-tempo off|auto|BPM` on transcribe or a fresh run. The default
@@ -1348,9 +1349,9 @@ Hz to F0 on an FM note:
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
-or generates it if missing. Use `reconstruct voice WORK_DIR` to refit after
-editing allocation. A refit preserves overrides, lane gain and part gains by
-default. A rebuild from upstream recomputes levels for a lane when its
+or generates it if missing. Use `reconstruct voice WORK_DIR` to explicitly
+refit the current allocation. A refit preserves overrides, lane gain and
+part gains by default. A rebuild from upstream recomputes levels for a lane when its
 allocated notes, gates, velocities or bends change. Role labels alone do
 not trigger releveling. Pass `--lane LANE` repeatedly to restrict which lanes
 can change, and `--refit-levels` to recompute their levels. Without a lane
