@@ -3,7 +3,6 @@ package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.EnvelopeProgram;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
-import com.opensmpsdeck.project.ProjectCompiler;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashSet;
@@ -13,7 +12,7 @@ import java.util.TreeSet;
 
 /** Finite native-bank boundary with explicitly supplied envelope and DAC assets. */
 final class S3kBinary {
-    static final int MAX_BYTES = ProjectCompiler.MAX_BANK_BYTES;
+    static final int MAX_BYTES = 0x8000;
     private S3kBinary() {}
 
     static byte[] validateAndCopy(byte[] input) {
