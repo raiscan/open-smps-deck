@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
@@ -13,8 +14,10 @@ import java.util.List;
 /** Matches the FM amplitude contour using the PSG envelopes the driver can play. */
 final class ReconstructionSpill {
     private static final int RELEASE_TICKS = 12;
+    private static final int ATTACK_TICKS = 3;
 
     record Match(String variantId, int volumeOffset) {}
+    private record Contour(double[] amplitude, int attackAttenuation) {}
     private record Probe(int pitch, int gate, int fmLevel, int psgLevel, double[] target) {}
 
     private ReconstructionSpill() {}
@@ -35,7 +38,7 @@ final class ReconstructionSpill {
             int fmLevel = Math.max(ReconstructionEcho.fmVolumeFloor(bytes), ReconstructionEcho.scaleVolume(raw, fm.gain()));
             int psgLevel = psgLevel(fm, part, note);
             if (probes.stream().anyMatch(p -> p.pitch() == pitch && p.gate() == gate && p.fmLevel() == fmLevel)) continue;
-            var target = contour(catalogue, fm.variantId(), pitch, gate, fmLevel, bytes);
+            var target = contour(catalogue, fm.variantId(), pitch, gate, fmLevel, bytes).amplitude();
             probes.add(new Probe(pitch, gate, fmLevel, psgLevel, target));
         }
         var seen = new HashSet<String>();
@@ -46,17 +49,19 @@ final class ReconstructionSpill {
             if (asset.kind() != InstrumentCatalogue.Kind.PSG_VOLUME || !seen.add(variant.assetId())) continue;
             byte[] envelope = asset.bytes();
             if (!ReconstructionStemParts.startsAudibly(envelope)) continue;
-            // Reserve enough level for the quietest spill's first step after PSG quantization.
-            int minOffset = fm.gain() == 0 ? -120 : 8 * (Byte.toUnsignedInt(envelope[0]) + 1) - quietest;
-            var contours = new java.util.ArrayList<double[]>();
+            var contours = new java.util.ArrayList<Contour>();
             for (var probe : probes) contours.add(contour(catalogue, variant.id(), probe.pitch(), probe.gate(), 127, null));
+            int attack = contours.stream().mapToInt(Contour::attackAttenuation).max().orElseThrow();
+            if (attack == 15) continue;
+            // Leave room for the attack steps even at the quietest note's quantized level.
+            int minOffset = fm.gain() == 0 ? -120 : 8 * (attack + 1) - quietest;
             // Compare only legal PSG steps. A 2 dB step multiplies amplitude by approximately 0.794.
             for (int offset = -120; offset <= 120; offset += 8) {
                 if (offset < minOffset) continue;
                 double error = 0;
                 for (int i = 0; i < probes.size(); i++) {
                     var probe = probes.get(i);
-                    var contour = contours.get(i);
+                    var contour = contours.get(i).amplitude();
                     int attenuation = 15 - (Math.clamp(probe.psgLevel() + offset, 0, 127) >> 3);
                     double scale = attenuation == 15 ? 0 : Math.pow(10, -attenuation / 10.0);
                     double energy = 0, distance = 0;
@@ -83,7 +88,7 @@ final class ReconstructionSpill {
         return ReconstructionEcho.scaleVolume(Math.max(1, raw - 24), fm.gainFor(part.id()));
     }
 
-    private static double[] contour(InstrumentCatalogue catalogue, String variant, int pitch, int gate,
+    private static Contour contour(InstrumentCatalogue catalogue, String variant, int pitch, int gate,
                                     int volume, byte[] fmPatch) throws IOException {
         var raw = CataloguePlayback.matchProbe(catalogue, variant, pitch, gate, true);
         var setup = raw.sequences().getFirst();
@@ -107,11 +112,24 @@ final class ReconstructionSpill {
                 voices, List.of(sequence), raw.clips(), envelopes, raw.samples());
         double[] result = new double[gate + RELEASE_TICKS];
         int[] tick = {0};
-        S3kRenderer.render(ProjectCompiler.compileWithAssets(project), result.length, pcm -> {
+        int[] attenuation = {15, 0};
+        ChipWriteObserver observer = fmPatch != null ? null : new ChipWriteObserver() {
+            @Override public void onYm2612Write(int port, int register, int value) {}
+
+            @Override public void onPsgWrite(int value) {
+                if ((value & 0xf0) == 0xd0) attenuation[0] = value & 0xf;
+            }
+        };
+        S3kRenderer.PcmSink sink = pcm -> {
             double power = 0;
             for (short sample : pcm) power += (double) sample * sample;
+            if (observer != null && tick[0] < Math.min(gate, ATTACK_TICKS))
+                attenuation[1] = Math.max(attenuation[1], attenuation[0]);
             result[tick[0]++] = Math.sqrt(power / pcm.length) / 32768;
-        });
-        return result;
+        };
+        var compiled = ProjectCompiler.compileWithAssets(project);
+        if (observer == null) S3kRenderer.render(compiled, result.length, sink);
+        else S3kRenderer.render(compiled, result.length, sink, observer);
+        return new Contour(result, attenuation[1]);
     }
 }

@@ -1042,7 +1042,8 @@ fit and held-out errors (lower is better). For a part that spills to PSG,
 `psgVariantId` and `psgVolumeOffset` approximate that FM patch's attack,
 sustain, release, and loudness using the catalogue's PSG envelopes and
 hardware level steps. Automatic matching rejects muted attacks and mute pulses
-and keeps the quietest spill audible on its first frame. For otherwise
+and keeps the quietest spill audible for its first three frames or its full
+gate if shorter. For otherwise
 identical simultaneous harmony or counter attacks, allocation offers FM to the
 longer note first. It folds an automatic backing unison into an already
 allocated note of the same part and pitch when that note covers its full gate.
@@ -1078,9 +1079,15 @@ The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude
 spectrum as a sum of instrument spectra and uses constrained least squares
 to estimate instrument gains. Each candidate plays the part's allocated
-notes across all its lanes. Where stems are supplied, the stem objective
-also compares those notes against their mapped source. Separate excerpts
-validate patch changes. A low-register instrument on one FM lane can
+notes in the fit excerpts. When a source instrument carries an established
+melody and backing, its line drives the shared patch, gain and articulation.
+Excerpt selection weights sustained, higher-velocity line notes more heavily
+and discounts ticks covered by that source instrument's other notes. The
+attack shortlist also favors exposed, sustained onsets and weighs stronger
+audio probes more heavily. The same profile plays the backing voices.
+Where stems are supplied, the stem objective compares the fit notes against
+their mapped source. Separate excerpts validate patch changes. The final
+level accounts for backing that will play at the same gain. A low-register instrument on one FM lane can
 refine its patch using its mapped stem. This pass compares the first 16
 harmonics and the low-frequency energy of notes played with their preceding
 note context. A replacement must improve two sets of note excerpts.

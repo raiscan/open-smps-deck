@@ -104,6 +104,7 @@ class ReconstructionInstrumentPlaybackTest {
         var voice = settings(fm, .001, DRY);
         psgVariant(builder, "Delayed attack", new byte[]{15, 15, 0, 0, (byte) 0x83});
         psgVariant(builder, "Mute pulse", new byte[]{0, 15, 0, (byte) 0x80});
+        psgVariant(builder, "Single-frame gate", new byte[]{2, (byte) 0x83});
         assertNull(ReconstructionSpill.match(builder.build(), voice, part, notes).variantId());
 
         byte[] audible = {4, 4, 4, (byte) 0x81};
@@ -139,6 +140,25 @@ class ReconstructionInstrumentPlaybackTest {
         var counter = decision("counter", 0, 8, 12, Role.counter);
         assertEquals(counter.note(), ReconstructionLeadContinuity.legatoTarget(prior, List.of(otherPart, counter), nextLead));
         assertEquals(nextLead, ReconstructionLeadContinuity.legatoTarget(prior, List.of(otherPart), nextLead));
+    }
+
+    @Test void sharedFitSelectsTheLineAndPrefersExposedSustainedWindows() {
+        var notes = List.of(
+                decision("line-1", 0, 2, 5, Role.melody),
+                decision("line-2", 0, 6, 9, Role.melody),
+                decision("line-3", 0, 12, 16, Role.melody),
+                decision("line-4", 0, 70, 93, Role.melody),
+                decision("chord-1", 0, 0, 34, Role.harmony),
+                decision("chord-2", 0, 0, 34, Role.harmony));
+        var entries = notes.stream().map(n -> new ReconstructionAllocation.Entry(n.note(), n.role(), "FM1",
+                n.note().startTick(960), n.note().endTick(960), ReconstructionAllocation.Outcome.kept, null, null)).toList();
+        var line = ReconstructionVoiceStage.exposedLine(entries);
+        assertEquals(entries.subList(0, 4), line);
+        assertTrue(ReconstructionVoiceStage.exposedLine(entries.subList(2, 6)).isEmpty());
+
+        var windows = new VoiceWindows(960, Map.of("FM1", entries), null, List.of(new VoiceWindows.Focus(line, entries)));
+        int first = windows.fitWindows().starts().getFirst();
+        assertTrue(first <= 70 && first + 36 >= 93, "training window should cover the exposed sustain");
     }
 
     private static ReconstructionRoles.Decision decision(String id, int part, int start, int end, Role role) {

@@ -409,7 +409,8 @@ See [one-channel chord voicing](../../docs/architecture/reconstruction-stages.md
    `noteIds`. Entries can overlap if they set different fields. Assemble
    and check the passage again.
 
-Fresh runs fit one sound per source instrument. Find a function voice's
+Fresh runs fit one sound per source instrument, using its exposed melody
+when it also plays backing. Find a function voice's
 `instrumentIds` in `voices.json`. Edit that profile under
 `voicing.json.sourceInstruments` to change its sound across FM lanes. Automatic PSG spill fits an envelope
 with an audible attack to that profile.
