@@ -1058,13 +1058,19 @@ public final class ReconstructionStages {
                 parts.add(stem == null ? ReconstructionStemParts.part(part, imported.provenance().role())
                         : ReconstructionAudioOnly.part(part, stem));
                 newParts.add(part);
-                var spectrum = ReconstructionStemParts.Spectrum.read(Path.of(inputs.stems.get(part)), limit);
-                boolean vocalLead = stem != null && stem.transcriberRole().equals("vocals");
-                if (!vocalLead) candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
-                var joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
-                if (vocalLead) joined = ReconstructionAudioOnly.monophonic(joined);
+                Path stemPath = Path.of(inputs.stems.get(part));
+                boolean vocal = ReconstructionVocalLead.isVocal(inputs, part);
+                var spectrum = vocal ? null : ReconstructionStemParts.Spectrum.read(stemPath, limit);
+                List<Note> joined;
+                if (vocal) {
+                    joined = ReconstructionVocalLead.select(part, imported,
+                            ReconstructionLeadAudio.Track.read(stemPath, limit), limit);
+                } else {
+                    candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
+                    joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
+                }
                 for (var note : joined) {
-                    if (ReconstructionStemParts.doubling(note, midiByPitch, spectrum)) {
+                    if (spectrum != null && ReconstructionStemParts.doubling(note, midiByPitch, spectrum)) {
                         reductions.add(new S3kReconstruction.Reduction(note.midi(),
                                 S3kReconstruction.Change.OCTAVE_DOUBLE, note.id(), "stem-midi-doubling"));
                     } else {

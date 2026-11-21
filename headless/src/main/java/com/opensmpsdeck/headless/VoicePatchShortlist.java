@@ -43,6 +43,50 @@ final class VoicePatchShortlist {
                 .toList();
     }
 
+    RankedPatch leadSynth() throws IOException {
+        final int ticks = 24, pitch = 69;
+        RankedPatch best = null;
+        var measured = new java.util.HashSet<String>();
+        for (var variant : variants) {
+            if (!measured.add(variant.assetId())) continue;
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("lead synth selection cancelled");
+            var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ticks, true);
+            float[] audio = VoiceWindows.renderMono(ProjectCompiler.compileWithAssets(project), ticks);
+            double early = energy(audio, audio.length / 8, audio.length / 2);
+            double held = energy(audio, audio.length / 2, audio.length);
+            if (held < 1e-8) continue;
+            double fundamental = harmonic(audio, 440);
+            double overtones = harmonic(audio, 880) + harmonic(audio, 1320) + harmonic(audio, 1760);
+            // Favour audible, on-pitch sustained patches with a distinctive
+            // upper spectrum. Impulses, sub-oscillators and noise score poorly.
+            double pitched = Math.min(1, (fundamental + overtones) / held);
+            double brightness = Math.min(1, overtones / Math.max(1e-8, fundamental));
+            double sustain = Math.min(1, held / Math.max(1e-8, early));
+            double quality = sustain * pitched * (.35 + .65 * brightness)
+                    * Math.min(1, fundamental / (held * .25));
+            if (best == null || quality > best.score) best = new RankedPatch(variant.id(), quality);
+        }
+        return best == null && !variants.isEmpty() ? new RankedPatch(variants.getFirst().id(), 0) : best;
+    }
+
+    private static double energy(float[] audio, int from, int to) {
+        double total = 0;
+        for (int i = from; i < to; i++) total += audio[i] * audio[i];
+        return total / (to - from);
+    }
+
+    private static double harmonic(float[] audio, double hz) {
+        int from = audio.length / 2;
+        double re = 0, im = 0;
+        for (int i = from; i < audio.length; i++) {
+            double phase = Math.TAU * hz * i / VoiceSpectra.RATE;
+            re += audio[i] * Math.cos(phase);
+            im += audio[i] * Math.sin(phase);
+        }
+        double length = audio.length - from;
+        return 2 * (re * re + im * im) / (length * length);
+    }
+
     List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
                            Path mix, Map<Integer, Path> stems, VoiceWindows windows,
                            InstrumentCatalogue.Variant incumbent, boolean foreground) throws IOException {

@@ -2,6 +2,7 @@
 """Transcribe an aligned stem with the bundled Basic Pitch ONNX model."""
 
 import argparse
+import base64
 import hashlib
 from importlib.metadata import version
 import json
@@ -22,12 +23,36 @@ def infer(path):
     predictor.model_type = Model.MODEL_TYPES.ONNX
     predictor.model = InferenceSession(str(checkpoint), sess_options=opts,
                                        providers=["CPUExecutionProvider"])
-    _, _, notes = predict(path, predictor, minimum_note_length=50)
+    outputs, _, notes = predict(path, predictor, minimum_note_length=50)
     return notes, {
         "version": version("basic-pitch"),
         "onnxRuntimeVersion": version("onnxruntime"),
         "weightsSha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        "f0Midi10ms": contour_midi(outputs["contour"]),
     }
+
+
+def contour_midi(contour):
+    import numpy as np
+    from basic_pitch.note_creation import CONTOURS_BINS_PER_SEMITONE, MIDI_OFFSET, model_frames_to_time
+
+    if len(contour) == 0:
+        return ""
+    # The model's pitch head is independent of note boundaries and tracks
+    # sub-semitone motion. Keep one dominant pitch for an isolated vocal.
+    strongest = contour.argmax(axis=1)
+    confidence = contour[np.arange(len(contour)), strongest]
+    pitch = np.where(confidence >= .24,
+                     np.rint(MIDI_OFFSET + strongest / CONTOURS_BINS_PER_SEMITONE), 0)
+    times = model_frames_to_time(len(pitch))
+    grid = np.arange(0, times[-1] + .005, .010)
+    # Interpolation across silence would manufacture a glide. Use the nearest
+    # raw pitch sample on this uniform clock.
+    after = np.minimum(np.searchsorted(times, grid), len(pitch) - 1)
+    before = np.maximum(after - 1, 0)
+    indices = np.where(abs(times[before] - grid) <= abs(times[after] - grid), before, after)
+    result = pitch[indices].astype("uint8")
+    return base64.b64encode(result.tobytes()).decode("ascii")
 
 
 def transcribe(args):

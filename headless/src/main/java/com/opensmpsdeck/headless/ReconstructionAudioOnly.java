@@ -115,26 +115,6 @@ final class ReconstructionAudioOnly {
         return new MidiScore.Part(id, stem.label, program, false);
     }
 
-    /** Keep the strongest sustained contour when voice conditioning returns overlapping harmonies. */
-    static List<ReconstructionStages.Note> monophonic(List<ReconstructionStages.Note> candidates) {
-        var melody = new ArrayList<ReconstructionStages.Note>();
-        var order = Comparator.comparingDouble(ReconstructionStages.Note::start)
-                .thenComparing(Comparator.comparingDouble((ReconstructionStages.Note n) -> n.end() - n.start()).reversed())
-                .thenComparing(Comparator.comparingInt(ReconstructionStages.Note::velocity).reversed())
-                .thenComparing(Comparator.comparingInt(ReconstructionStages.Note::pitch).reversed());
-        for (var note : candidates.stream().sorted(order).toList()) {
-            if (!melody.isEmpty()) {
-                var prior = melody.getLast();
-                if (note.start() < prior.end()) {
-                    if (note.start() - prior.start() < .030 || note.end() <= prior.end() + .025) continue;
-                    melody.set(melody.size() - 1, prior.withTiming(prior.start(), note.start()));
-                }
-            }
-            melody.add(note);
-        }
-        return melody;
-    }
-
     record Grid(ReconstructionTempo.Estimate tempo, ReconstructionBeatMap beats, List<ReconstructionStructure.Bar> bars) {}
 
     static Grid grid(ReconstructionStages.Inputs inputs, MidiScore source, List<ReconstructionStages.Note> notes,

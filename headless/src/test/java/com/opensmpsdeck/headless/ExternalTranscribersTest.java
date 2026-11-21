@@ -198,6 +198,17 @@ class ExternalTranscribersTest {
         Path config = directory.resolve("transcribers.json");
         fixtureConfig(config);
         Path drum = directory.resolve("drum.wav");
+        Path vocal = directory.resolve("vocals.wav");
+        WaveFile.write(vocal, 60, sink -> {
+            for (int frame = 0; frame < 60; frame++) {
+                var block = new short[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
+                for (int i = 0; frame >= 12 && frame < 47 && i < block.length / 2; i++) {
+                    double t = frame / 60.0 + i / (double) S3kRenderer.SAMPLE_RATE;
+                    block[2 * i] = block[2 * i + 1] = (short) (14000 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(78) * t));
+                }
+                sink.accept(block);
+            }
+        });
         Path quiet = directory.resolve("quiet.wav");
         WaveFile.write(quiet, 60, sink -> {
             var silence = new short[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
@@ -216,7 +227,7 @@ class ExternalTranscribersTest {
         Files.delete(midi);
         var work = directory.resolve("audio-only");
         var args = List.of("reconstruct", "run", "--audio-only", wav.toString(), index.toString(), work.toString(),
-                "--stem", "vocals=" + wav, "--stem", "drums=" + drum, "--stem", "other=" + quiet,
+                "--stem", "vocals=" + vocal, "--stem", "drums=" + drum, "--stem", "other=" + quiet,
                 "--tempo", "105", "--bar-offset", "0.125", "--transcriber-config", config.toString(),
                 "--transcriber-device", "cuda:0", "--fm-only");
         run(0, args);
@@ -261,9 +272,13 @@ class ExternalTranscribersTest {
         run(0, List.of("reconstruct", "transcribe", "--audio-only", wav.toString(),
                 directory.resolve("index.json").toString(), work.toString(), "--stem", "vocals=" + wav,
                 "--stem", "keyboard=" + keyboard, "--stem", "drums=" + drum, "--transcriber-config", config.toString(),
-                "--transcriber-for", "vocals=override", "--transcriber-device", "cuda:0", "--tempo", "110"));
+                "--transcriber-for", "vocals=override,voice", "--transcriber-device", "cuda:0", "--tempo", "110"));
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
-        assertEquals("override", score.inputs().externalNotes().get(1).provenance().tool());
+        var provenance = score.inputs().externalNotes().get(1).provenance();
+        assertEquals("override,voice", provenance.tool());
+        assertEquals("2", provenance.metadata().get("vocalFirstNoteCount"));
+        assertEquals("override", provenance.metadata().get("vocalSelection"));
+        assertTrue(provenance.metadata().get("vocalComparison").contains("fusion"));
         assertEquals("keys", score.inputs().externalNotes().get(2).provenance().tool());
         var detector = score.inputs().audioOnly().drumDetector();
         assertEquals("drum-model", detector.name());

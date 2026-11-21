@@ -73,7 +73,11 @@ reductions.
 and its source-time hits. Each tonal part records its selected transcriber. The manifest
 records hashes for the mix, catalogue and participating stems, and snapshots
 each transcriber's output. Replay needs these audio and catalogue files and
-uses the saved detector output and transcription snapshots.
+uses the saved detector output and transcription snapshots. A paired vocal
+transcriber snapshot retains both candidates. Replay re-evaluates each
+candidate and their union against the aligned stem, then routes the
+selected monophonic contour to the lead. The vocal patch probe ranks
+sustained FM timbres independently of the singer's timbre.
 
 ## Recover missed notes from stems
 

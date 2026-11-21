@@ -12,7 +12,8 @@ final class ReconstructionLeadAudio {
     static final double HOP = .010;
     static final double MIN_TONE = .150;
     static final double MODULATED = .72;
-    private static final int LOW = 36, HIGH = 93, HARMONICS = 4;
+    static final int LOW = 36, HIGH = 93;
+    private static final int HARMONICS = 4;
     private static final int MAX_FIT = 45, MIN_FIT = 15;
     private static final double WINDOW = .052;
     private static final double LEGATO_MIN_LEVEL = .003;
@@ -141,6 +142,46 @@ final class ReconstructionLeadAudio {
                 }
                 result[pitch] = !harmonic;
             }
+        }
+
+        /**
+         * Normalized difference-function pitch estimate with the first credible
+         * period. A harmonic may be louder than the fundamental in FFT bins.
+         */
+        int periodicPitch(int frame, double[] difference) {
+            int stride = Math.max(1, (int) Math.round(rate / 6000));
+            double sampleRate = rate / stride;
+            int firstLag = Math.max(2, (int) (sampleRate / hz(HIGH)));
+            int lastLag = Math.min(difference.length - 2, (int) Math.ceil(sampleRate / hz(LOW)));
+            int window = (int) Math.round(.030 * sampleRate);
+            int start = (int) Math.round(frame * HOP * rate) - stride * (window + lastLag) / 2;
+            if (start < 0 || start + stride * (window + lastLag + 1) >= mono.length || rms[frame] < .0015)
+                return 0;
+            difference[0] = 1;
+            double cumulative = 0;
+            for (int lag = 1; lag <= lastLag + 1; lag++) {
+                double sum = 0;
+                for (int i = 0, at = start; i < window; i++, at += stride) {
+                    double delta = mono[at] - mono[at + lag * stride];
+                    sum += delta * delta;
+                }
+                cumulative += sum;
+                difference[lag] = cumulative > 0 ? sum * lag / cumulative : 1;
+            }
+            int best = firstLag;
+            for (int lag = firstLag; lag <= lastLag; lag++) {
+                if (difference[lag] < difference[best]) best = lag;
+                if (difference[lag] < .23 && difference[lag] <= difference[lag + 1]) {
+                    best = lag;
+                    break;
+                }
+            }
+            if (difference[best] > .32) return 0;
+            double prior = difference[best - 1], value = difference[best], next = difference[best + 1];
+            double curvature = prior - 2 * value + next;
+            double period = best + (curvature > 0 ? Math.clamp((prior - next) / (2 * curvature), -.5, .5) : 0);
+            int pitch = (int) Math.round(69 + 12 * Math.log(sampleRate / (period * 440)) / Math.log(2));
+            return pitch >= LOW && pitch <= HIGH ? pitch : 0;
         }
 
         int frames() { return rms.length; }

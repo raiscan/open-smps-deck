@@ -882,11 +882,28 @@ and replace the paths. Each command may choose its own device.
     "piano": "muscriptor-medium",
     "other": "muscriptor-medium",
     "synth": "muscriptor-medium",
-    "vocals": "basic-pitch",
+    "vocals": "muscriptor-medium,basic-pitch",
     "drums": "adtof"
   }
 }
 ```
+
+For vocals, a comma-separated pair such as `muscriptor-medium,basic-pitch`
+runs both adapters and evaluates each result plus their union. Use the same
+syntax with `--transcriber-for vocals=muscriptor-medium,basic-pitch` or MCP
+`transcriberFor.vocals`. The comparison balances voiced-time coverage and
+agreement within a semitone of the stem's F0 estimate. Basic Pitch supplies
+its dominant contour when periodicity alone leaves a gap. It records the winner
+and all three scores in the vocal part's transcription provenance. A single
+name uses only that adapter.
+
+Audio-only vocal cleanup follows a monophonic line using pitch salience,
+continuity and a range learned from the stem. It joins supported syllables,
+bridges short voiced gaps and can fill sustained pitches. The vocal-derived
+FM1 part uses a bright sustained patch selected from the catalogue by a
+held-note probe. When the stem supports a vibrato estimate, it is encoded
+using the usual FM modulation controls. Edit the source instrument and its
+effects in `voicing.json` to override these choices.
 
 An optional `drums` stem feeds DAC and PSG3 routing. External drum commands
 write `[[seconds, gmPitch, velocity], ...]` and may supply a

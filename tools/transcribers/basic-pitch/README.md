@@ -14,7 +14,8 @@ tools/transcribers/basic-pitch/setup.sh /path/to/basic-pitch
 
 The adapter writes `[[start, end, pitch], ...]` in source seconds and a
 `<output>.meta.json` sidecar with the package version, checkpoint hash,
-ONNX Runtime version and thresholds. Use `--device cpu` or `auto`.
+ONNX Runtime version, minimum note length and the dominant model pitch sampled
+at 10 ms for audio-only vocal cleanup. Use `--device cpu` or `auto`.
 See the [local extraction configuration](../../../headless/README.md#audio-only-reconstruction)
 for CLI and MCP selection. Run the weight-free test with
 `python3 -m unittest discover -s tools/transcribers/basic-pitch`.

@@ -59,7 +59,7 @@ public final class ExternalTranscribers {
             if (name == null && !explicitFallback) name = defaults.get(key);
             if (name == null) name = fallback;
             require(!tonal.isEmpty(), file.toString(), "reconstruction needs a configured transcriber");
-            require(name != null && tonal.containsKey(name), file.toString(),
+            require(name != null && names(key, name).stream().allMatch(tonal::containsKey), file.toString(),
                     "select a transcriber for role " + role + " from " + tonal.keySet());
             return name;
         }
@@ -94,8 +94,11 @@ public final class ExternalTranscribers {
         var defaults = new TreeMap<String, String>();
         for (var entry : roleEntries.entrySet()) {
             String role = ReconstructionAudioOnly.label(entry.getKey());
-            String name = commandName(entry.getValue(), file + ".defaults." + role);
-            require(role.equals("drums") ? name.equals("spectral") || drums.containsKey(name) : tonal.containsKey(name),
+            var value = entry.getValue();
+            require(value instanceof JsonPrimitive p && p.isString(), file.toString(), "expected a transcriber name");
+            String name = value.getAsString();
+            require(role.equals("drums") ? name.equals("spectral") || drums.containsKey(name)
+                            : names(role, name).stream().allMatch(tonal::containsKey),
                     file.toString(), "unknown transcriber " + name + " for role " + role);
             require(defaults.putIfAbsent(role, name) == null, file.toString(), "duplicate default for " + role);
         }
@@ -108,16 +111,20 @@ public final class ExternalTranscribers {
         return element.getAsJsonObject();
     }
 
-    private static String commandName(JsonElement value, String at) {
-        require(value instanceof JsonPrimitive p && p.isString() && LABEL.matcher(p.getAsString()).matches(),
-                at, "expected a transcriber name");
-        return value.getAsString();
+    private static List<String> names(String role, String value) {
+        var result = List.of(value.split(",", -1));
+        require((result.size() == 1 || result.size() == 2 && role.equals("vocals")
+                        && !result.getFirst().equals(result.getLast()))
+                        && result.stream().allMatch(name -> LABEL.matcher(name).matches()),
+                "Transcribers", "expected one command name or two distinct commands for vocals");
+        return result;
     }
 
     static void putRoleOverride(Map<String, String> overrides, String assignment) {
         String[] pair = assignment.split("=", -1);
-        require(pair.length == 2 && LABEL.matcher(pair[1]).matches(), "--transcriber-for", "expected ROLE=NAME");
+        require(pair.length == 2, "--transcriber-for", "expected ROLE=NAME");
         String role = ReconstructionAudioOnly.label(pair[0]);
+        names(role, pair[1]);
         require(overrides.putIfAbsent(role, pair[1]) == null, "--transcriber-for", "duplicate role " + role);
     }
 
@@ -166,14 +173,46 @@ public final class ExternalTranscribers {
                 String role = entry.getValue();
                 String selected = config.forRole(role, fallback, overrides, name != null);
                 try {
-                    result.put(part, run(config.tonal.get(selected), selected, configHash,
-                            Path.of(stems.get(part)), role, device, part, capture));
+                    Path input = Path.of(stems.get(part));
+                    var selectedNames = names(role.toLowerCase(java.util.Locale.ROOT), selected);
+                    if (selectedNames.size() == 1) {
+                        result.put(part, run(config.tonal.get(selected), selected, configHash, input, role, device, part, capture));
+                    } else {
+                        require(audioOnly, context, "two-command vocal selection requires audio-only mode");
+                        var contenders = new ArrayList<PartNotes>();
+                        for (String tool : selectedNames)
+                            contenders.add(run(config.tonal.get(tool), tool, configHash, input, role, device, part, null));
+                        result.put(part, combine(contenders, selected, configHash, input, device, part, capture));
+                    }
                 } catch (IllegalArgumentException | IOException error) {
                     throw new IOException("Transcriber " + selected + " for " + role + ": " + error.getMessage(), error);
                 }
             }
         }
         return result;
+    }
+
+    private static PartNotes combine(List<PartNotes> candidates, String names, String configHash, Path input,
+                                     String device, int part, ReconstructionManifest.Capture capture) throws IOException {
+        var notes = candidates.stream().flatMap(candidate -> candidate.notes.stream()).toList();
+        var metadata = new TreeMap<String, String>();
+        var gson = new com.google.gson.Gson();
+        metadata.put("vocalFirstNoteCount", Integer.toString(candidates.getFirst().notes.size()));
+        metadata.put("vocalCandidates", gson.toJson(candidates.stream().map(PartNotes::provenance).toList()));
+        for (var candidate : candidates) {
+            var f0 = candidate.provenance.metadata().get("f0Midi10ms");
+            if (f0 != null && !f0.isBlank()) metadata.putIfAbsent("f0Midi10ms", f0);
+        }
+        Path combined = Files.createTempFile("opensmpsdeck-vocals-", ".json");
+        try {
+            Files.writeString(combined, gson.toJson(notes.stream()
+                    .map(note -> List.of(note.start, note.end, note.pitch)).toList()));
+            Path recorded = capture == null ? combined : capture.external(part, combined, false);
+            return new PartNotes(new Evidence(names, "vocals", device, ReconstructionCli.audioHash(input),
+                    ReconstructionCli.audioHash(recorded), configHash, metadata, notes.size(), true), notes);
+        } finally {
+            Files.deleteIfExists(combined);
+        }
     }
 
     private static PartNotes run(List<String> template, String name, String configHash,

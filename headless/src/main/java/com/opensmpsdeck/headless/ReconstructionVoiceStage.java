@@ -52,10 +52,16 @@ final class ReconstructionVoiceStage {
                 mix, options.stems());
         var context = byLane.values().stream().flatMap(List::stream).toList();
         var fitGroups = shared ? bySourceInstrument(context) : byLane;
+        Integer lead = score.inputs().leadPart();
+        String vocalGroup = chosen != null || lead == null || !ReconstructionVocalLead.isVocal(score.inputs(), lead)
+                ? null : fitGroups.entrySet().stream()
+                .filter(entry -> entry.getValue().stream().anyMatch(note ->
+                        "FM1".equals(note.lane()) && note.note().part() == lead))
+                .map(Map.Entry::getKey).findFirst().orElse(null);
         var foreground = new LinkedHashMap<String, List<ReconstructionAllocation.Entry>>();
         if (shared) fitGroups.forEach((id, notes) -> {
             var line = exposedLine(notes);
-            if (!line.isEmpty()) foreground.put(id, line);
+            if (!id.equals(vocalGroup) && !line.isEmpty()) foreground.put(id, line);
         });
         var savedWindows = previous == null ? null : previous.fitWindows();
         var windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
@@ -93,6 +99,10 @@ final class ReconstructionVoiceStage {
             var incumbent = lane.equals(chosenLane) ? chosen
                     : fm ? incumbent(catalogue, previous, lane) : null;
             var patches = leadPatches.get(lane);
+            if (lane.equals(vocalGroup)) {
+                var synth = incumbent == null ? screening.leadSynth() : new RankedPatch(incumbent.id(), 0);
+                if (synth != null) patches = List.of(synth);
+            }
             if (patches == null) patches = fm
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane))
                     : List.of();
@@ -187,7 +197,10 @@ final class ReconstructionVoiceStage {
             var effects = DRY;
             String artReason = DEFAULT;
             String effectReason = DEFAULT;
-            if (role != Role.drums && !model.packed().notes().isEmpty()) {
+            if (model.id().equals(vocalGroup)) {
+                effects = vocalVibrato(score, lead, mix, options.stems());
+                effectReason = "vocal lead synth";
+            } else if (role != Role.drums && !model.packed().notes().isEmpty()) {
                 var articulations = new LinkedHashMap<String, Articulation>();
                 articulations.put(art.preset(), art);
                 articulations.put(WRITTEN.preset(), WRITTEN);
@@ -227,6 +240,8 @@ final class ReconstructionVoiceStage {
             String patchReason = EVIDENCE;
             if (model.id().equals(chosenLane)) {
                 patchReason = "explicit variant with fitted levels";
+            } else if (model.id().equals(vocalGroup) && incumbent == null) {
+                patchReason = "bright sustained vocal lead synth";
             } else if (patch == null) {
                 patchReason = model.instruments().isEmpty() ? "not applicable" : "catalogue matcher";
             } else if (patch.equals(initial.get(i).variantId()) && (incumbent == null || patch.equals(incumbent))) {
@@ -242,7 +257,8 @@ final class ReconstructionVoiceStage {
         for (int i = 0; i < models.size(); i++) {
             var model = models.get(i);
             var lane = result.get(model.id());
-            if (model.id().equals(chosenLane) || lane.variantId() == null || model.stem() == 0) continue;
+            if (model.id().equals(vocalGroup) || model.id().equals(chosenLane)
+                    || lane.variantId() == null || model.stem() == 0) continue;
             var notes = foreground.getOrDefault(model.id(), fitGroups.get(model.id()));
             if (model.shared() && !singleFm(notes)) continue;
             var stem = stemFor(notes, options.stems(), stems);
@@ -284,6 +300,21 @@ final class ReconstructionVoiceStage {
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
+    }
+
+    private static Effects vocalVibrato(ReconstructionStages.Score score, int part, Path mix,
+                                         Map<Integer, Path> stems) throws IOException {
+        var notes = score.notes().stream().filter(note -> note.part() == part)
+                .map(ReconstructionStages.Note::midi).toList();
+        var identity = score.source().parts().stream().filter(item -> item.id() == part).findFirst().orElseThrow();
+        var estimate = ReconstructionVibrato.detect(new MidiScore(List.of(identity), notes, List.of()),
+                mix, stems, score.durationUs()).get(part);
+        if (estimate == null) return idiom(Role.melody, null);
+        int[] pitches = notes.stream().mapToInt(MidiScore.Note::pitch).sorted().toArray();
+        int pitch = pitches[pitches.length / 2];
+        var modulation = ReconstructionEditing.vibrato(pitch, 0, estimate.rateHz(), estimate.depthCents());
+        return new Effects("vocal-stem-vibrato", 0,
+                new Vibrato(7, modulation.rate(), modulation.delta(), modulation.steps()), null);
     }
 
     private static VoiceWindows fitWindows(int frames, Map<String, List<ReconstructionAllocation.Entry>> byLane,
