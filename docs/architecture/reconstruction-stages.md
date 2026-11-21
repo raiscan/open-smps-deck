@@ -122,8 +122,8 @@ only when an explicit roleplan or edit selector requests it.
   to the structure stage IDs.
 - Span edits accept `"span":{"section":"chorus-1"}` wherever a numeric
   span is accepted. Resolve the selector on each run of the consuming
-  stage. After moving a designation, resume from `roles` for role edits
-  or `transcribe` for `setVelocity`.
+  stage. After moving a designation, resume from the edit’s first stage. Chord
+  voicing edits start at `allocate`.
 - View and render comparison accept `--section NAME` in place of explicit
   start/end bounds. Existing 60-second export limits apply. Use
   `view --sections --start S --end S` for bands in a custom range.
@@ -323,6 +323,8 @@ selector, gate, and curve. Pitch is a MIDI integer.
 | `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
 | `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. A point up to one project tick past the gate clamps to the gate end. | `transcribe` |
 | `glide` | `fromNoteId` and `toNoteId` identify two pitched score attacks in the same part. The first gate ends at the later attack, which retains its own note. Optional `seconds` gives the sliding portion of the gate (default up to 0.12 seconds). `shape` is `linear` (default), `easeIn`, `easeOut`, or `smooth`. The first note needs an FM lane for the bend to play. | `transcribe` |
+| `arpeggio` | `noteIds` or `span` with `part` and optional pitch bounds. `rate` is 1–127 driver ticks per step (default 2). `order` is `up`, `down`, or `up-down` (default `up`). | `allocate` |
+| `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
@@ -440,6 +442,71 @@ trace. A conflicting merge names the edit or voicing scope that blocked it.
 The trace includes `edit:<id>` reasons alongside the underlying fate detail.
 Consumed merge members link to the retained attack through
 `scoreDecision.successorId`.
+
+### One-channel chord voicing
+
+These edits select playable tonal notes of one MIDI part that attack on the
+same quantized driver tick. Select exact IDs to exclude a melody or an
+independent octave double from a chord. A span can use `pitchMin` and
+`pitchMax`, and selects attacks at its start through just before its end.
+Use `"span":{"section":"chorus-1"}` for a named section, or `"timeBase":"project"`
+for project-time bounds. Span selections skip single attacks. An attack at
+the end of the span is outside it. A selected held gate can extend past the span.
+
+```json
+{"id":"chorus-arp","reason":"Free lanes for the counterline","op":"arpeggio",
+ "part":0,"span":{"section":"chorus-1"},"rate":2,"order":"up-down"}
+```
+
+```json
+{"id":"hold-triad","reason":"Keep this triad simultaneous","op":"chordInstrument",
+ "noteIds":["C4_NOTE_ID","EB4_NOTE_ID","G4_NOTE_ID"]}
+```
+
+The first successfully selected edit claims each chord tone. The allocator
+uses the highest-priority selected attack to choose one lane and puts the
+other lanes back into circulation. It still observes lane priority and
+hardware limits. If no compatible lane can take the group, it reports a
+conflict and tries the original notes individually. Lane-type pins on any
+member constrain the entire group. A chord instrument needs FM. An arpeggio
+can use FM, PSG tone, or pitched noise if every tone fits the requested type.
+Conflicting lane types, exact lane pins or source voice instrument assignments
+leave ordinary allocation in place.
+Authored bends and detected fast runs or retriggers are incompatible. A chord edit
+controls pitch, gate and modulation during playback, inheriting the
+representative note’s attack patch, gain and minimum release rate. Individual
+velocity, bend, vibrato, gate shaping and copy effects are not carried into the
+combined performance. Remove or narrow an incompatible lane-specific
+override if allocation changes the set of notes it addresses.
+
+An arpeggio keys on at each written step. A 2-tick step is about 33 ms at
+reconstruction tempo. Up-down turns around without repeating its endpoints.
+Each tone leaves the cycle when its gate ends. The last surviving tone holds
+to its assigned release. Groups that cannot present all their pitches at the
+requested rate are refused. `report.json.arpeggioExtraNoteBytes` counts the
+extra pitch/duration bytes over a single held note on the same lane and gate.
+`bankBytes` includes all stream, command, allocation and voice-table changes.
+
+FM chord voices use two carriers in algorithm 4, three in algorithm 5, or four
+in algorithm 7. Major (4:5:6), minor (10:12:15), sus2 (8:9:12), sus4 (6:8:9),
+power chords (2:3), and octave stacks use integer ratios. Inversions and
+doubled registers work when reduced multiples fit 1–15. The fitter chooses an
+S3K note and signed detune byte with at most 18 cents of error per tone.
+For ambiguous suspended chords it tries a root in the bass first. Unsupported
+qualities (including seventh chords), excessive spreads and base pitches
+outside the driver’s tunable range leave the original notes in place.
+The carrier envelope and level come from the lane’s catalogue patch, with
+headroom for multiple carriers. This changes the FM topology and key scaling.
+Patch changes follow chord quality and carrier releases. Staggered releases
+reattack the remaining pitches with the released carriers muted.
+
+Use `reconstruct edit WORK_DIR add --dry-run JSON` to check the selection,
+then save it and run `reconstruct run --from allocate WORK_DIR --keep-voicing`.
+The same edits work through MCP `reconstruct_edit` and Java
+`ReconstructionEditCommand.run`. These operations are replayed from
+`edits.json` on rerun. Inspect `edit-results.json`, `report.json.chordVoicings`,
+`trace` and `view` for applied groups, refusals, the shared lane and the
+assembled gates of each tone.
 
 ## Artifact contract
 

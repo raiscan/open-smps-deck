@@ -41,7 +41,9 @@ final class EvidenceNotes {
                             case "midi", "audio-refine" -> Layer.suno;
                             default -> Layer.trace;
                         };
-                String evidence = origin.transcriber() == null ? origin.provenance() : origin.transcriber().tool();
+                String evidence = row.voiced().stream().map(ReconstructionTrace.Voiced::evidence)
+                        .filter(ReconstructionChords::isLabel).findFirst()
+                        .orElseGet(() -> origin.transcriber() == null ? origin.provenance() : origin.transcriber().tool());
                 add(notes, span, row.id(), layer, row.part(), lane, own.note().pitch(), own.timing(),
                         row.status(), evidence);
             } else if (sourceSelected && (row.status() == ReconstructionTrace.Status.dropped
@@ -74,7 +76,7 @@ final class EvidenceNotes {
             }
         }
         if (options.parts().isEmpty() && rows.values().stream().flatMap(row -> row.voiced().stream())
-                .anyMatch(gate -> "assembled".equals(gate.evidence()))) {
+                .anyMatch(gate -> "assembled".equals(gate.evidence()) || ReconstructionChords.isLabel(gate.evidence()))) {
             addAssemblyOnlyNotes(project, span, options.lanes(), notes);
         }
         return labels(notes, span);
@@ -151,7 +153,9 @@ final class EvidenceNotes {
                 .thenComparingInt(DrawnNote::pitch).thenComparing(DrawnNote::id).thenComparing(DrawnNote::layer));
         var labels = new HashMap<String, String>();
         return notes.stream().map(note -> new DrawnNote(note.id(),
-                labels.computeIfAbsent(note.id(), ignored -> "n" + (labels.size() + 1)), note.layer(), note.part(),
+                labels.computeIfAbsent(note.id(), ignored -> "n" + (labels.size() + 1))
+                        + (ReconstructionChords.isLabel(note.evidence()) ? " " + note.evidence() : ""),
+                note.layer(), note.part(),
                 note.lane(), note.pitch(), note.pitchName(), note.timing(), note.status(), note.evidence())).toList();
     }
 

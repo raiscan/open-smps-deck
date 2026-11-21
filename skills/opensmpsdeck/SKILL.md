@@ -339,6 +339,26 @@ Use `view --color-by voice` or MCP `colorBy: "voice"` to follow a source
 instrument across lanes. Inspect `voiceAssignmentExtraClips` in the report
 when voices with different instruments share a lane.
 
+## Fit a chord on one channel
+
+Use `reconstruct_edit` with `op: "arpeggio"` or `op: "chordInstrument"` and a
+stable edit ID and reason. Select the co-attacking tones with `noteIds`, or
+use `part` with a source-time `span: [start, end]` or
+`span: {"section":"chorus-1"}`. Use exact IDs to keep an independent lead out
+of the group. An arpeggio takes `rate` in driver ticks (try 2) and `order`
+(`up`, `down`, `up-down`). A chord instrument needs an FM lane and supports
+major, minor, sus, power and octave voicings within YM2612 pitch limits.
+Use a compatible `pinLane` with `laneType` on any member to constrain the
+whole chord. A conflicting pin leaves the individual notes in allocation.
+
+Preview with `dryRun: true` or CLI `reconstruct edit WORK_DIR add --dry-run JSON`.
+Save the edit, then use `rerun: true` or
+`reconstruct run --from allocate WORK_DIR --keep-voicing`. Check refusals in
+`edit-results.json` and the merged tone fates and gates in `trace` or `view`.
+Compare `arpeggioExtraNoteBytes` and `bankBytes` in the report. Audition a chip
+clip and a level-matched source comparison before choosing a voicing.
+See [one-channel chord voicing](../../docs/architecture/reconstruction-stages.md#one-channel-chord-voicing).
+
 ## Audition a phrase
 
 1. Use `catalog_search` to find FM variant IDs. Compare the current variant

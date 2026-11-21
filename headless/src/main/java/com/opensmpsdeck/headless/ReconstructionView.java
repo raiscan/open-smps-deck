@@ -73,7 +73,8 @@ public final class ReconstructionView {
     record DrawnNote(String id, String label, Layer layer, Integer part, String lane, int pitch,
                      String pitchName, Timing timing, ReconstructionTrace.Status status, String evidence) {
         boolean warning() {
-            return status == ReconstructionTrace.Status.dropped || status == ReconstructionTrace.Status.merged;
+            return status == ReconstructionTrace.Status.dropped
+                    || status == ReconstructionTrace.Status.merged && !ReconstructionChords.isLabel(evidence);
         }
     }
     record Harmonic(int multiple, double pitch, double hz) {}

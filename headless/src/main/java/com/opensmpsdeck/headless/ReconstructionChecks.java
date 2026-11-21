@@ -362,13 +362,14 @@ final class ReconstructionChecks {
         var lanes = new HashMap<String, java.util.ArrayList<ReconstructionAllocation.Entry>>();
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
         for (var entry : allocation.notes()) entries.put(entry.note().id(), entry);
+        var members = ReconstructionChords.validate(allocation.chords(), entries, projectFrames);
         for (var entry : allocation.notes()) {
             String where = at + ".notes." + entry.note().id();
             checkRole(parts, entry.note(), entry.role(), where);
             if (entry.outcome() == ReconstructionAllocation.Outcome.dropped) {
                 require(entry.lane() == null && entry.startTick() == null && entry.endTick() == null
                         && nonblank(entry.reason()), where, "a dropped note needs a reason and no lane or ticks");
-                if (entry.mergedInto() != null) {
+                if (entry.mergedInto() != null && !members.contains(entry.note().id())) {
                     var kept = entries.get(entry.mergedInto());
                     // An already merged note may itself have overflowed during allocation.
                     require(entry.role() == Role.drop && kept != null && kept.role() != Role.drop

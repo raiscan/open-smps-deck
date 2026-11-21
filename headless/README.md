@@ -475,6 +475,12 @@ each transition is already satisfied. Edit times default to source seconds;
 set `"timeBase":"project"` on an intent for project bounds. An upstream rebuild reapplies the
 intents, and manifest replay copies them into the new work directory.
 
+Use `arpeggio` or `chordInstrument` to fit selected co-attacking tones
+on one lane. Both resume from `allocate`, and take `noteIds` or `part` with a
+numeric or named section span. See
+[one-channel chord voicing](../docs/architecture/reconstruction-stages.md#one-channel-chord-voicing)
+for examples, tuning limits and byte cost reporting.
+
 See the [operation fields](../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
 for selectors, role swaps, velocity spans, extension guards and other edits.
 

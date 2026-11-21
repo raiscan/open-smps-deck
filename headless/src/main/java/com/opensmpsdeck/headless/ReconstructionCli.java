@@ -69,7 +69,7 @@ final class ReconstructionCli {
                           ReconstructionDrums.Source drumSource,
                           List<S3kReconstruction.VoicedGate> voicedGates,
                           Map<String, String> assemblyInputs, ReconstructionSustain.Probe sustainProbe,
-                          List<String> voicingWarnings, Integer voiceAssignmentExtraClips) {}
+                          List<String> voicingWarnings, Integer voiceAssignmentExtraClips, Integer arpeggioExtraNoteBytes) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -292,7 +292,8 @@ final class ReconstructionCli {
         var leadVoice = voicing.lanes().get("FM1");
         var articulation = leadVoice == null ? ReconstructionVoicing.WRITTEN : leadVoice.articulation();
         var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, articulation);
-        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes());
+        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
+                null, null, null, null, allocation.chordVoicings());
         var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
         if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
         placements.addAll(playback.placements());
@@ -324,6 +325,7 @@ final class ReconstructionCli {
             var plan = ReconstructionVoicePlan.saved(work);
             if (plan != null && !plan.issues().isEmpty())
                 report.add("voiceEditIssues", json.toJsonTree(plan.issues()));
+            if (!allocation.chords().isEmpty()) report.add("chordVoicings", json.toJsonTree(allocation.chords()));
             report.add("sustainProbe", json.toJsonTree(sustain));
             report.add("voicingWarnings", json.toJsonTree(sustain.warning() == null ? List.of() : List.of(sustain.warning())));
             var affinity = ReconstructionAllocation.Affinity.read(work);
@@ -433,6 +435,9 @@ final class ReconstructionCli {
                     if (!failure.getMessage().contains("32 KiB S3K bank")) throw failure;
                     if (!result.bends().isEmpty()) bendSizeLimit = true;
                     else if (result.echoNotes() > 0) echoBankLimit = true;
+                    else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
+                        throw new IllegalArgumentException(failure.getMessage() + " (arpeggios add "
+                                + result.arpeggioExtraNoteBytes() + " note bytes; use longer steps or a smaller scope)", failure);
                     else throw failure;
                     continue;
                 }
@@ -494,7 +499,8 @@ final class ReconstructionCli {
                     drumSource(transcription, result.dacHits()),
                     assemblyInputs == null ? null : result.voicedGates(), assemblyInputs, legacySustain,
                     legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()),
-                    result.assignmentClipCost() == 0 ? null : result.assignmentClipCost());
+                    result.assignmentClipCost() == 0 ? null : result.assignmentClipCost(),
+                    result.arpeggioExtraNoteBytes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

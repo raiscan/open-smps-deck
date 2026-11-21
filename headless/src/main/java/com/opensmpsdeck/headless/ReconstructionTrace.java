@@ -257,7 +257,8 @@ public final class ReconstructionTrace {
                     || min != null && row.pitch() < min || max != null && row.pitch() > max
                     || status != null && row.status != status) continue;
             if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane)
-                    && !(lane.equals("DAC") && "simultaneous-dac-hit".equals(row.allocation.reason)))) continue;
+                    && !(lane.equals("DAC") && "simultaneous-dac-hit".equals(row.allocation.reason))
+                    && row.voiced.stream().noneMatch(gate -> lane.equals(gate.lane)))) continue;
             notes.add(row);
         }
         if (clustered) {
@@ -404,7 +405,8 @@ public final class ReconstructionTrace {
     }
 
     private static Voiced voicedFate(Voiced gate) {
-        return new Voiced(gate.id, gate.lane, gate.pitch, gate.gate, gate.bend, null);
+        return new Voiced(gate.id, gate.lane, gate.pitch, gate.gate, gate.bend,
+                ReconstructionChords.isLabel(gate.evidence) ? gate.evidence : null);
     }
 
     private static Summary summary(Row row) {
@@ -414,7 +416,7 @@ public final class ReconstructionTrace {
         return new Summary(row.part, row.pitch, row.timing, row.status, row.stage, row.reason,
                 role == null ? null : role.role, role == null ? null : role.reason,
                 allocated == null ? null : allocated.lane, allocated == null ? null : allocated.placement,
-                role == null ? allocated == null ? null : allocated.mergedInto : role.mergedInto,
+                role != null && role.mergedInto != null ? role.mergedInto : allocated == null ? null : allocated.mergedInto,
                 allocated == null ? null : allocated.competitorNoteId,
                 allocated == null ? null : allocated.blockingNoteIds, row.voiced);
     }
@@ -598,6 +600,8 @@ public final class ReconstructionTrace {
                 return new Fate(Status.dropped, "assemble", "no-playable-catalogue-match");
             if (allocation.outcome == ReconstructionAllocation.Outcome.shortened)
                 return new Fate(Status.shortened, "allocate", allocation.reason);
+            if (!voiced.isEmpty() && ReconstructionChords.isLabel(voiced.getFirst().evidence))
+                return new Fate(Status.kept, "assemble", voiced.getFirst().evidence);
             if (allocation.placement != null && voiced.size() == 1
                     && voiced.getFirst().gate.gateTicks < allocation.placement.gateTicks)
                 return new Fate(Status.shortened, "voice", "voicing-articulation");
@@ -654,7 +658,7 @@ public final class ReconstructionTrace {
         if (competitor == null && entry.outcome() == ReconstructionAllocation.Outcome.shortened)
             competitor = lanes.next(entry.lane(), entry.endTick());
         if (competitor == null && blockers == null && entry.outcome() == ReconstructionAllocation.Outcome.dropped
-                && entry.reason() != null) {
+                && entry.reason() != null && !ReconstructionChords.isAbsorbed(entry.reason())) {
             int tick = (int) Math.clamp(note.timing.startTick, 0, timeline.frames() - 1);
             var occupied = lanes.blockers(entry, expected, tick);
             if (occupied.size() == 1) competitor = occupied.getFirst();
@@ -778,12 +782,12 @@ public final class ReconstructionTrace {
         if (exact) {
             for (var gate : reportList(report, "voicedGates", S3kReconstruction.VoicedGate.class, true)) {
                 gates.add(new Voiced(gate.id(), gate.lane(), gate.pitch(), ticks(gate.startTick(), gate.endTick(), timeline),
-                        bends.get(gate.id()), "assembled"));
+                        bends.get(gate.id()), Objects.requireNonNullElse(gate.evidence(), "assembled")));
             }
         } else {
             for (var entry : playback.notes()) {
                 String id = entry.note().id();
-                if (entry.lane() == null || reductions.containsKey(id)) continue;
+                if (entry.lane() == null || reductions.containsKey(id) || allocation.chords().containsKey(id)) continue;
                 var voice = voicing.lanes().get(entry.lane());
                 int duration = S3kReconstruction.voicedDuration(entry,
                         voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation());

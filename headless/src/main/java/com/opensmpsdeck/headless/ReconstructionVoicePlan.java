@@ -173,9 +173,13 @@ public final class ReconstructionVoicePlan {
     }
 
     static Result generate(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
-        var result = new ReconstructionVoicePlan(work, score, roles).apply(readJournal(work).edits);
+        var result = preview(work, score, roles);
         ReconstructionArtifacts.write(work.resolve(FILE), result);
         return result;
+    }
+
+    static Result preview(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
+        return new ReconstructionVoicePlan(work, score, roles).apply(readJournal(work).edits);
     }
 
     static Result saved(Path work) throws IOException {

@@ -26,7 +26,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -61,6 +61,7 @@ final class ReconstructionEdits {
             return switch (kind) {
                 case insertNote, deleteNote, setNote, splitNote, mergeNotes, bend, glide, setVelocity -> Stage.TRANSCRIBE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
+                case arpeggio, chordInstrument -> Stage.ALLOCATE;
             };
         }
 
@@ -222,8 +223,16 @@ final class ReconstructionEdits {
             case unmerge -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "voice");
             case bend -> List.of("noteId", "selector", "points");
             case glide -> List.of("fromNoteId", "toNoteId", "shape", "seconds");
+            case arpeggio -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "rate", "order");
+            case chordInstrument -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax");
         });
         fields(json, at, allowed);
+        if (kind == Kind.arpeggio) {
+            integer(json, "rate", at, 1, 127);
+            if (json.has("order"))
+                require(Set.of("up", "down", "up-down").contains(string(json, "order", at)),
+                        at + ".order", "expected up, down or up-down");
+        }
 
         JsonObject target = json;
         String targetAt = at;
@@ -334,7 +343,7 @@ final class ReconstructionEdits {
                 require(scale == null || scale >= 0, at + ".scale", "expected a nonnegative factor");
                 span = span(json, at, part);
             }
-            case setRole, pinLane, unmerge -> {
+            case setRole, pinLane, unmerge, arpeggio, chordInstrument -> {
                 require(kind != Kind.setRole || role != null, at + ".role", "required");
                 require(kind != Kind.pinLane || (lane == null) != (laneType == null), at, "choose lane or laneType");
                 if (attack != null || !selectors.isEmpty()) break;
@@ -851,6 +860,7 @@ final class ReconstructionEdits {
         int order = 0;
         for (Intent edit : intents) {
             order++;
+            if (edit.firstStage() == Stage.ALLOCATE) continue;
             var scoreResult = scoreResults.get(edit.id);
             if (edit.kind == Kind.mergeNotes && edit.mergeGlide && scoreResult != null
                     && scoreResult.status == Status.applied) {
@@ -1018,12 +1028,20 @@ final class ReconstructionEdits {
         if (pins == null) return List.of();
         var kinds = new LinkedHashMap<String, Kind>();
         for (var intent : intents) kinds.put(intent.id, intent.kind);
+        var chordLanes = new LinkedHashMap<String, String>();
+        if (!allocation.chords().isEmpty()) for (var entry : allocation.notes()) {
+            if (allocation.chords().containsKey(entry.note().id()))
+                chordLanes.put(entry.note().id(), entry.lane());
+        }
         var outcomes = new ArrayList<Outcome>();
         for (var entry : allocation.notes()) {
             String id = entry.note().id();
             var pin = pins.get(id);
-            if (pin != null && (entry.lane() == null || pin.laneType != null) && kinds.containsKey(pin.editId))
-                outcomes.add(allocationOutcome(id, entry.lane(), entry.reason(), pin, kinds.get(pin.editId)));
+            if (pin != null && (entry.lane() == null || pin.laneType != null) && kinds.containsKey(pin.editId)) {
+                String lane = ReconstructionChords.isAbsorbed(entry.reason())
+                        ? chordLanes.get(entry.mergedInto()) : entry.lane();
+                outcomes.add(allocationOutcome(id, lane, entry.reason(), pin, kinds.get(pin.editId)));
+            }
         }
         if (allocation.fastRuns() != null) for (var run : allocation.fastRuns()) {
             var pin = pins.get(run.id());

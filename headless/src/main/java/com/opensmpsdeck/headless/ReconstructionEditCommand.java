@@ -130,8 +130,10 @@ public final class ReconstructionEditCommand {
             return preview;
         }
         var args = new ArrayList<>(List.of("--from", stage, work.toString()));
+        if (rerun && from == ReconstructionStages.Stage.ALLOCATE && Files.isRegularFile(work.resolve("voicing.json")))
+            args.add("--keep-voicing");
         Path rolesFile = work.resolve("roles.json");
-        if (rerun && Files.isRegularFile(rolesFile)) {
+        if (rerun && from.ordinal() <= ReconstructionStages.Stage.ROLES.ordinal() && Files.isRegularFile(rolesFile)) {
             double rate = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class).harmonyMaxHz();
             args.add("--harmony-max-hz");
             args.add(Double.toString(rate));

@@ -114,7 +114,7 @@ final class McpTools {
             tool("reconstruct_edit", "Add, list or remove persistent musical intents. Optionally rebuild and compare note fates.",
                     McpReconstruction::edit, WORK,
                     choice("action", "Edit command", "add", "list", "remove"),
-                    field("edit", object(Map.of("type", "object")), "Intent object with id, reason, op and op fields, including splitNote, mergeNotes and pinLane with laneType").optional(),
+                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down).").optional(),
                     field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove").optional(),
