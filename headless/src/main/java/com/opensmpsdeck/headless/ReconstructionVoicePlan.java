@@ -181,7 +181,7 @@ public final class ReconstructionVoicePlan {
 
     private static List<Edit> combined(Path work, ReconstructionEdits edits) throws IOException {
         var journal = new ArrayList<>(readJournal(work).edits);
-        for (var intent : edits.intents())
+        for (var intent : edits.accepted().intents())
             if (intent.kind() == ReconstructionEdits.Kind.voiceEdit)
                 journal.add(reviewEdit(intent.json(), ReconstructionEdits.FILE));
         return journal;
@@ -267,7 +267,7 @@ public final class ReconstructionVoicePlan {
             }
             var accepted = new ArrayList<>(prior);
             accepted.addAll(edits);
-            for (var intent : ReconstructionEdits.read(work).intents())
+            for (var intent : ReconstructionEdits.read(work).accepted().intents())
                 if (intent.kind() == ReconstructionEdits.Kind.voiceEdit)
                     model.replay(reviewEdit(intent.json(), ReconstructionEdits.FILE), ids, issues);
             var result = model.result(issues);

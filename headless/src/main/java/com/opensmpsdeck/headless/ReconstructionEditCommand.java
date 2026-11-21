@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
@@ -34,21 +35,23 @@ public final class ReconstructionEditCommand {
 
     static void cli(String[] args, PrintStream out) throws IOException {
         var arguments = new ArrayList<>(List.of(args));
+        if (arguments.size() >= 2 && arguments.getFirst().equals("propose"))
+            java.util.Collections.swap(arguments, 0, 1);
         boolean dryRun = arguments.size() > 2 && arguments.get(2).equals("--dry-run");
         dryRun |= arguments.size() > 3 && arguments.getLast().equals("--dry-run");
         if (dryRun) arguments.remove("--dry-run");
         args = arguments.toArray(String[]::new);
         if (args.length < 2 || args.length > 4)
-            throw new IllegalArgumentException("reconstruct edit expects WORK_DIR add JSON | add --file BATCH | list | remove ID");
+            throw new IllegalArgumentException("reconstruct edit expects WORK_DIR add|propose JSON | add|propose --file BATCH | list | remove ID");
         JsonElement edit = null;
         String id = null;
         if (args.length == 4) {
-            require(args[1].equals("add") && args[2].equals("--file"), "edit", "expected add --file BATCH");
+            require((args[1].equals("add") || args[1].equals("propose")) && args[2].equals("--file"), "edit", "expected add --file BATCH");
             edit = ReconstructionArtifacts.readTree(Path.of(args[3]));
             if (!edit.isJsonArray()) edit = ReconstructionEdits.batch(edit, "batch");
         } else if (args.length == 3) {
             if (args[1].equals("remove")) id = args[2];
-            else if (args[1].equals("add")) {
+            else if (args[1].equals("add") || args[1].equals("propose")) {
                 try {
                     var value = JsonParser.parseString(args[2]);
                     require(value.isJsonObject(), "edit", "expected an intent object");
@@ -69,15 +72,18 @@ public final class ReconstructionEditCommand {
     public static synchronized JsonObject run(Path work, String action, JsonElement edit, String id,
                                               boolean rerun, boolean dryRun, ReconstructionStages.Progress progress)
             throws IOException {
-        require(!dryRun || action.equals("add") && !rerun, "dryRun", "requires add without rerun");
+        boolean propose = action.equals("propose");
+        boolean adding = action.equals("add") || propose;
+        require(!dryRun || adding && !rerun, "dryRun", "requires add or propose without rerun");
+        require(!propose || !rerun, "propose", "use a proposal preview to rebuild");
         require(Files.isDirectory(work), "workDir", "expected an existing directory");
         if (action.equals("list")) {
             require(edit == null && id == null && !rerun, "list", "does not take edit, id or rerun");
             return result(work, ReconstructionEdits.read(work).intents());
         }
-        require(action.equals("add") || action.equals("remove"), "action", "expected add, list or remove");
-        require(action.equals("add") ? edit != null && id == null : edit == null && id != null,
-                action, action.equals("add") ? "requires edit" : "requires id");
+        require(adding || action.equals("remove"), "action", "expected add, propose, list or remove");
+        require(adding ? edit != null && id == null : edit == null && id != null,
+                action, adding ? "requires edit" : "requires id");
         // Preview publishes no artifacts, including the lock file.
         if (dryRun) return change(work, action, edit, id, false, true, progress);
         try (var channel = FileChannel.open(work.resolve(LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
@@ -86,11 +92,51 @@ public final class ReconstructionEditCommand {
         }
     }
 
+    public static synchronized JsonObject proposals(Path work, String action, String id, String group)
+            throws IOException {
+        require(Files.isDirectory(work), "workDir", "expected an existing directory");
+        if (action.equals("list"))
+            return ReconstructionProposals.listing(work, ReconstructionEdits.read(work), id, group);
+        require(action.equals("accept") || action.equals("reject"), "action", "expected list, accept or reject");
+        return reviewProposals(work, action.equals("accept"), null,
+                journal -> ReconstructionProposals.select(journal, id, group));
+    }
+
+    public static synchronized void rejectProposals(Path work, List<String> ids, ReconstructionReview.Revision expected)
+            throws IOException {
+        var wanted = Set.copyOf(ids);
+        reviewProposals(work, false, expected, journal -> journal.intents().stream()
+                .filter(intent -> intent.proposed() && wanted.contains(intent.id())).toList());
+    }
+
+    private static JsonObject reviewProposals(Path work, boolean accept, ReconstructionReview.Revision expected,
+                                               java.util.function.Function<ReconstructionEdits, List<ReconstructionEdits.Intent>> select)
+            throws IOException {
+        try (var channel = FileChannel.open(work.resolve(LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
+             var lock = channel.lock()) {
+            if (expected != null && !expected.equals(ReconstructionReview.revision(work))) throw new ReconstructionReview.Changed();
+            var journal = ReconstructionEdits.read(work);
+            var selected = select.apply(journal);
+            require(!selected.isEmpty(), "proposals", "no matching proposals");
+            var ids = selected.stream().map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
+            var updated = new ReconstructionEdits(journal.intents().stream()
+                    .filter(intent -> accept || !ids.contains(intent.id()))
+                    .map(intent -> ids.contains(intent.id()) ? intent.accept() : intent).toList());
+            ReconstructionProposals.refresh(work, updated);
+            updated.write(work);
+            var result = ReconstructionProposals.listing(work, updated, null, null);
+            result.add("ids", JSON.toJsonTree(selected.stream().map(ReconstructionEdits.Intent::id).toList()));
+            if (accept) result.addProperty("from", ReconstructionProposals.from(updated.accepted(), selected,
+                    ReconstructionEdits.Journal.read(work)).name().toLowerCase(Locale.ROOT));
+            return result;
+        }
+    }
+
     private static JsonObject change(Path work, String action, JsonElement edit, String id, boolean rerun,
                                      boolean dryRun, ReconstructionStages.Progress progress) throws IOException {
         var intents = new ArrayList<>(ReconstructionEdits.read(work).intents());
         var changed = new ArrayList<ReconstructionEdits.Intent>();
-        if (action.equals("add")) {
+        if (!action.equals("remove")) {
             var seen = new HashSet<>(intents.stream().map(ReconstructionEdits.Intent::id).toList());
             var entries = edit.isJsonArray() ? edit.getAsJsonArray().asList() : List.of(edit);
             require(!entries.isEmpty(), "edits", "expected at least one intent");
@@ -98,7 +144,10 @@ public final class ReconstructionEditCommand {
                 var entry = entries.get(i);
                 String at = edit.isJsonArray() ? "edits[" + i + "]" : "edit";
                 require(entry.isJsonObject(), at, "expected an intent object");
-                var intent = ReconstructionEdits.parse(entry.getAsJsonObject(), at);
+                var entryObject = entry.getAsJsonObject();
+                if (action.equals("propose")) entryObject = ReconstructionProposals.proposed(entryObject);
+                var intent = ReconstructionEdits.parse(entryObject, at);
+                require(!rerun || !intent.proposed(), at, "use a proposal preview to rebuild");
                 require(seen.add(intent.id()), at + ".id", "duplicate edit ID " + intent.id());
                 changed.add(intent);
             }
@@ -106,20 +155,29 @@ public final class ReconstructionEditCommand {
         } else {
             var intent = intents.stream().filter(existing -> existing.id().equals(id)).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("edit.id: no edit named " + id));
+            require(!rerun || !intent.proposed(), action, "proposals do not affect the built arrangement");
             changed.add(intent);
             intents.remove(intent);
         }
         var before = rerun ? ReconstructionTrace.read(work) : Map.<String, ReconstructionTrace.Row>of();
         var updated = new ReconstructionEdits(intents);
+        var proposed = changed.stream().filter(ReconstructionEdits.Intent::proposed).toList();
+        if (!proposed.isEmpty() && dryRun) {
+            require(proposed.size() == changed.size(), action, "dry-run accepts one status per batch");
+            var result = JSON.toJsonTree(Map.of("dryRun", true, "proposals",
+                    ReconstructionProposals.resolve(work, updated, proposed))).getAsJsonObject();
+            return result;
+        }
         var prior = ReconstructionEdits.Journal.read(work);
-        var from = Objects.equals(prior.scoreRecipe(), updated.scoreRecipe())
-                ? changed.stream().map(ReconstructionEdits.Intent::firstStage).min(Comparator.naturalOrder()).orElseThrow()
+        var from = Objects.equals(prior.scoreRecipe(), updated.accepted().scoreRecipe())
+                ? changed.stream().filter(intent -> !intent.proposed()).map(ReconstructionEdits.Intent::firstStage)
+                    .min(Comparator.naturalOrder()).orElse(ReconstructionStages.Stage.ASSEMBLE)
                 : ReconstructionStages.Stage.TRANSCRIBE;
         String stage = from.name().toLowerCase(Locale.ROOT);
         if (dryRun) {
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
             var resolutions = new ArrayList<ReconstructionEdits.Resolution>();
-            ReconstructionStages.previewEdits(work, from, updated, prior, outcomes, resolutions);
+            ReconstructionStages.previewEdits(work, from, updated.accepted(), prior, outcomes, resolutions);
             var ids = new HashSet<>(changed.stream().map(ReconstructionEdits.Intent::id).toList());
             var preview = new JsonObject();
             preview.addProperty("dryRun", true);
@@ -138,10 +196,12 @@ public final class ReconstructionEditCommand {
             args.add("--harmony-max-hz");
             args.add(Double.toString(rate));
         }
+        ReconstructionProposals.refresh(work, updated);
         updated.write(work);
         if (rerun) ReconstructionStages.runForReview("run", args.toArray(String[]::new), progress);
         var result = result(work, intents);
-        result.addProperty("from", stage);
+        if (proposed.size() < changed.size()) result.addProperty("from", stage);
+        if (!proposed.isEmpty()) result.add("proposals", ReconstructionProposals.listing(work, updated, null, null).get("proposals"));
         if (edit != null && edit.isJsonArray())
             result.add("ids", JSON.toJsonTree(changed.stream().map(ReconstructionEdits.Intent::id).toList()));
         else result.addProperty("id", changed.getFirst().id());
@@ -187,7 +247,8 @@ public final class ReconstructionEditCommand {
         var ids = new java.util.LinkedHashSet<>(edit.noteIds());
         if (edit.kind() == ReconstructionEdits.Kind.insertNote) ids.add(edit.insertedId());
         for (var outcome : journal.all())
-            if (outcome.id().equals(edit.id()) && outcome.status() == ReconstructionEdits.Status.applied) {
+            if (outcome.id().equals(edit.id()) && (outcome.status() == ReconstructionEdits.Status.applied
+                    || outcome.status() == ReconstructionEdits.Status.satisfied)) {
                 ids.addAll(outcome.noteIds());
                 if (outcome.removedNotes() != null)
                     for (var removed : outcome.removedNotes()) ids.add(removed.id());

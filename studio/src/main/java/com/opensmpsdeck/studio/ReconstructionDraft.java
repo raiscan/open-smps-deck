@@ -35,7 +35,7 @@ final class ReconstructionDraft {
         }
     }
 
-    void applied() { saved = entries; }
+    void applied(JsonArray published) { saved = entries = published.deepCopy(); }
 
     boolean adopt(JsonArray incoming, boolean sectionsChanged) {
         if (saved.equals(incoming) && !sectionsChanged) return true;

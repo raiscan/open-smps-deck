@@ -135,7 +135,10 @@ final class ReconstructionPane implements AutoCloseable {
     private void initialize(Path work, ReconstructionEditor.Snapshot snapshot, HBox title) {
         model = snapshot.inspection();
         view = new ReconstructionCanvas(model, status::setText);
-        editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh);
+        editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh, position -> {
+            if (playing || playWhenLoaded) stopPlayback();
+            updatePosition(position, true);
+        });
         stage.setOnCloseRequest(event -> { if (!editor.allowClose()) event.consume(); });
         view.onNote = selected -> {
             note = selected;
@@ -415,6 +418,7 @@ final class ReconstructionPane implements AutoCloseable {
     }
 
     private void startPlayback() {
+        if (editor != null) editor.stopAudition();
         if (loadedSamples == null && !(soloActive() && sources.getValue().kind() == AudioKind.CHIP)) {
             playWhenLoaded = true;
             play.setText("Cancel");

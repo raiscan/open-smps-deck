@@ -77,6 +77,14 @@ final class ReconstructionEdits {
             return timeBase == TimeBase.project ? timeline.source(time) : time;
         }
 
+        boolean proposed() { return ReconstructionProposals.isProposed(json); }
+
+        Intent accept() {
+            var accepted = json.deepCopy();
+            accepted.addProperty("status", "accepted");
+            return parse(accepted, FILE);
+        }
+
         boolean matchesSpan(Note note, double sourceStart) {
             return part == note.part() && span.contains(sourceStart)
                     && (pitchMin == null || note.pitch() >= pitchMin)
@@ -168,6 +176,11 @@ final class ReconstructionEdits {
     List<Intent> intents() { return intents; }
     boolean isEmpty() { return intents.isEmpty(); }
 
+    ReconstructionEdits accepted() {
+        return intents.stream().noneMatch(Intent::proposed) ? this
+                : new ReconstructionEdits(intents.stream().filter(edit -> !edit.proposed()).toList());
+    }
+
     String scoreRecipe() {
         var scoreIntents = intents.stream().filter(edit -> edit.firstStage() == Stage.TRANSCRIBE)
                 .map(Intent::json).toList();
@@ -209,7 +222,7 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
@@ -231,6 +244,24 @@ final class ReconstructionEdits {
             case chordInstrument -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax");
         });
         fields(json, at, allowed);
+        if (json.has("status"))
+            require(Set.of("proposed", "accepted").contains(string(json, "status", at)),
+                    at + ".status", "expected proposed or accepted");
+        if (ReconstructionProposals.isProposed(json))
+            require(json.has("author") && string(json, "author", at).equals("agent"),
+                    at + ".author", "proposed edits require an agent author");
+        if (json.has("group")) string(json, "group", at);
+        if (json.has("evidence")) {
+            require(json.get("evidence").isJsonObject(), at + ".evidence", "expected an evidence object");
+            var evidence = json.getAsJsonObject("evidence");
+            fields(evidence, at + ".evidence", Set.of("text", "path"));
+            string(evidence, "text", at + ".evidence");
+            String relative = string(evidence, "path", at + ".evidence");
+            var path = Path.of(relative);
+            require(!path.isAbsolute() && !relative.contains("\\") && !relative.contains(":")
+                            && !path.normalize().startsWith("..") && !path.normalize().toString().isEmpty(),
+                    at + ".evidence.path", "expected a path inside the work directory");
+        }
         if (kind == Kind.arpeggio) {
             integer(json, "rate", at, 1, 127);
             if (json.has("order"))

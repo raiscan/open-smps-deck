@@ -26,7 +26,7 @@ import static java.nio.file.StandardOpenOption.WRITE;
 /** Revision-aware journal operations for interactive reconstruction review. */
 public final class ReconstructionReview {
     private static final List<String> OUTPUTS = List.of("score.json", "structure.json", "roles.json",
-            "allocation.json", "voicing.json", ReconstructionEdits.RESULTS,
+            "allocation.json", "voicing.json", ReconstructionEdits.RESULTS, ReconstructionProposals.RESULTS,
             ReconstructionAllocation.Affinity.FILE, ReconstructionClipLinks.LAYOUT, ReconstructionManifest.FILE,
             "arrangement.smps.json", "arrangement.smps.zip", "render.wav", ReconstructionCli.STEADY_REFERENCE,
             ReconstructionEdits.FILE, ReconstructionVoicePlan.FILE, "report.json");
@@ -74,7 +74,7 @@ public final class ReconstructionReview {
     public static ReconstructionVoicePlan.Result voices(Path work, JsonArray entries) throws IOException {
         if (!Files.isRegularFile(work.resolve("roles.json")))
             return new ReconstructionVoicePlan.Result(1, List.of(), List.of());
-        return ReconstructionVoicePlan.review(work, parse(entries));
+        return ReconstructionVoicePlan.review(work, parse(entries).accepted());
     }
 
     public static String validationIssue(JsonElement entry) {
@@ -119,7 +119,7 @@ public final class ReconstructionReview {
     private static String stage(Path work, List<ReconstructionEdits.Intent> changed, ReconstructionEdits edits)
             throws IOException {
         var prior = ReconstructionEdits.Journal.read(work);
-        if (!Objects.equals(prior.scoreRecipe(), edits.scoreRecipe())) return "transcribe";
+        if (!Objects.equals(prior.scoreRecipe(), edits.accepted().scoreRecipe())) return "transcribe";
         return changed.stream().map(ReconstructionEdits.Intent::firstStage).min(Comparator.naturalOrder())
                 .orElse(ReconstructionStages.Stage.ROLES).name().toLowerCase(Locale.ROOT);
     }
@@ -183,6 +183,8 @@ public final class ReconstructionReview {
                 progress.report(completed, total + 1, message);
             });
             checkCancelled();
+            if (updated.intents().stream().noneMatch(ReconstructionEdits.Intent::proposed))
+                Files.deleteIfExists(after.resolve(ReconstructionProposals.RESULTS));
             int total = ReconstructionStages.Stage.values().length
                     - ReconstructionStages.Stage.parse(from).ordinal() + 1;
             progress.report(total - 1, total, "Comparing trace, compiled timeline and PCM…");
@@ -207,6 +209,106 @@ public final class ReconstructionReview {
         } finally {
             removeTree(scratch);
         }
+    }
+
+    public record ProposalPreview(Path workDir, List<String> ids, List<RenderComparison.Result> comparisons) {}
+
+    public static ProposalPreview preview(Path work, String id, String group, ReconstructionStages.Progress progress)
+            throws IOException {
+        return preview(work, id, group, null, null, progress);
+    }
+
+    public static ProposalPreview preview(Path work, String id, Revision expected, ReconstructionStages.Progress progress)
+            throws IOException {
+        return preview(work, id, null, null, expected, progress);
+    }
+
+    private static ProposalPreview preview(Path work, String id, String group, ReconstructionStages.Stage start,
+                                           Revision expected, ReconstructionStages.Progress progress) throws IOException {
+        work = work.toRealPath();
+        if (expected == null) expected = revision(work);
+        requireRevision(work, expected);
+        var journal = parse(expected.entries());
+        var selected = ReconstructionProposals.select(journal, id, group);
+        ReconstructionArtifacts.require(!selected.isEmpty(), "proposals", "no matching proposals");
+        var shadow = ReconstructionProposals.shadow(journal, selected);
+        var from = ReconstructionProposals.from(shadow, selected, ReconstructionEdits.Journal.read(work));
+        if (start != null && start.ordinal() < from.ordinal()) from = start;
+        Path before = work.resolve("render.wav");
+        ReconstructionArtifacts.require(Files.isRegularFile(before, NOFOLLOW_LINKS), "proposals",
+                "build the accepted arrangement before previewing");
+        var oldRows = ReconstructionTrace.read(work);
+        Path target = Files.createTempDirectory(work.getParent(), work.getFileName() + "-preview-");
+        boolean ready = false;
+        try {
+            var paths = new ArrayList<>(OUTPUTS);
+            paths.removeAll(List.of(ReconstructionEdits.FILE, ReconstructionProposals.RESULTS,
+                    "arrangement.smps.zip", ReconstructionCli.STEADY_REFERENCE));
+            paths.addAll(List.of(ReconstructionSections.FILE, "roleplan.json", ReconstructionVoicePlan.JOURNAL));
+            for (var file : paths) {
+                var source = work.resolve(file);
+                if (Files.isRegularFile(source, NOFOLLOW_LINKS))
+                    Files.copy(source, target.resolve(file.equals("render.wav") ? "built.wav" : file));
+                checkCancelled();
+            }
+            var snapshots = work.resolve("snapshots");
+            if (Files.isDirectory(snapshots, NOFOLLOW_LINKS)) {
+                try (var files = Files.list(snapshots)) {
+                    for (var file : files.toList()) {
+                        if (Files.isRegularFile(file, NOFOLLOW_LINKS)) copy(file, target.resolve(work.relativize(file)));
+                    }
+                }
+            }
+            requireRevision(work, expected);
+            shadow.write(target);
+            var args = new ArrayList<>(List.of("--from", from.name().toLowerCase(Locale.ROOT), target.toString()));
+            if (from.ordinal() <= ReconstructionStages.Stage.VOICE.ordinal()) args.add("--keep-voicing");
+            var roles = ReconstructionTrace.optional(target, "roles.json", ReconstructionRoles.Result.class);
+            if (roles != null && from.ordinal() <= ReconstructionStages.Stage.ROLES.ordinal()) {
+                args.add("--harmony-max-hz");
+                args.add(Double.toString(roles.harmonyMaxHz()));
+            }
+            ReconstructionStages.runForReview("run", args.toArray(String[]::new), (done, total, message) -> {
+                if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+                progress.report(done, total + 1, message);
+            });
+            checkCancelled();
+            var after = ReconstructionTrace.read(target);
+            var outcomes = ReconstructionEdits.Journal.read(target);
+            var clock = ReconstructionTimeMap.of(ReconstructionStages.readScore(target.resolve("score.json")));
+            ReconstructionEdits.Span span = null;
+            for (var edit : selected) {
+                var range = ReconstructionEditCommand.span(edit, outcomes, oldRows, after, clock);
+                if (range != null) span = range.union(span);
+            }
+            var comparisons = RenderComparison.proposals(target, clock, span);
+            if (!same(before, target.resolve("built.wav"))) throw new Changed();
+            Files.delete(target.resolve("built.wav"));
+            requireRevision(work, expected);
+            checkCancelled();
+            ready = true;
+            return new ProposalPreview(target, selected.stream().map(ReconstructionEdits.Intent::id).toList(), comparisons);
+        } finally {
+            if (!ready) removeTree(target);
+        }
+    }
+
+    static void previewCli(String[] args, java.io.PrintStream out) throws IOException {
+        var values = new ArrayList<>(List.of(args));
+        values.remove("--with-proposals");
+        ReconstructionStages.Stage from = null;
+        int fromAt = values.indexOf("--from");
+        if (fromAt >= 0 && fromAt + 1 < values.size()) {
+            values.remove(fromAt);
+            from = ReconstructionStages.Stage.parse(values.remove(fromAt));
+        }
+        ReconstructionArtifacts.require(!values.isEmpty() && !values.getFirst().startsWith("--"),
+                "proposals", "expected reconstruct run WORK_DIR --with-proposals [--id ID | --group GROUP]");
+        var work = Path.of(values.removeFirst());
+        var selection = ReconstructionProposals.selection(values);
+        var result = preview(work, selection.id(), selection.group(), from, null, (a, b, c) -> {});
+        out.println(new com.google.gson.Gson().toJson(java.util.Map.of("workDir", result.workDir().toString(),
+                "ids", result.ids(), "comparisons", result.comparisons())));
     }
 
     private static JsonObject compare(Path before, Path after, List<ReconstructionEdits.Intent> changed) throws IOException {

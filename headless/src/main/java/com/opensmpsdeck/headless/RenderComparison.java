@@ -101,6 +101,25 @@ public final class RenderComparison {
         }
     }
 
+    static List<Result> proposals(Path work, ReconstructionTimeMap clock, ReconstructionEdits.Span span)
+            throws IOException {
+        if (span == null) return List.of();
+        int start = Math.clamp((int) Math.floor(clock.project(span.start()) * PRESENTATIONS_PER_SECOND), 0, clock.frames());
+        int end = Math.clamp((int) Math.ceil(clock.project(span.end()) * PRESENTATIONS_PER_SECOND), start, clock.frames());
+        var comparisons = new java.util.ArrayList<Result>();
+        for (int at = start; at < end; at += 60 * PRESENTATIONS_PER_SECOND) {
+            var range = new WaveFile.Range(at, Math.min(end, at + 60 * PRESENTATIONS_PER_SECOND));
+            var name = comparisons.isEmpty() ? "proposal-ab.wav" : "proposal-ab-" + (comparisons.size() + 1) + ".wav";
+            var path = work.resolve(name);
+            long frame = (long) at * STEREO_FRAMES_PER_PRESENTATION;
+            var result = write(work.resolve("built.wav"), work.resolve("render.wav"), path, range, frame, clock);
+            comparisons.add(new Result(path.toString(), List.of("built", "with-proposals"), result.splitSeconds(),
+                    result.renderGain(), result.referenceGain(), result.levelMatched(), result.sourceStart(),
+                    result.sourceEnd(), result.projectStart(), result.projectEnd(), result.startTick(), result.endTick()));
+        }
+        return List.copyOf(comparisons);
+    }
+
     private static Result export(Path render, Path reference, Path output, WaveFile.Range range, long referenceStart,
                                  ReconstructionTimeMap timeline, double sourceEnd, boolean stretch, boolean mp3)
             throws IOException {

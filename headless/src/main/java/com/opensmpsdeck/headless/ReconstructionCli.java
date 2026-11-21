@@ -99,6 +99,9 @@ final class ReconstructionCli {
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct edit WORK_DIR add [--dry-run] JSON | add [--dry-run] --file BATCH | list | remove ID");
+        out.println("       reconstruct edit propose WORK_DIR [--dry-run] JSON | [--dry-run] --file BATCH");
+        out.println("       reconstruct proposals list|accept|reject WORK_DIR [ID | --group GROUP]");
+        out.println("       reconstruct run WORK_DIR --with-proposals [--id ID | --group GROUP]");
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
@@ -137,6 +140,14 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("view")) {
             ReconstructionView.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("proposals")) {
+            ReconstructionProposals.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("run") && List.of(args).contains("--with-proposals")) {
+            ReconstructionReview.previewCli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("edit")) {

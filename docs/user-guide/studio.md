@@ -274,6 +274,17 @@ stems, and reads `render.wav` for the chip spectrogram and playback.
   to audition that lane through the chip renderer. **Solo note** loops the
   selected gate. Turn it off to return to your previous loop selection.
 
+### Review agent proposals
+
+Agent proposals appear as magenta dashed outlines on the pitch plot. Hover
+to read the reason. Open **Proposals** to see the dry-run results and review
+individual edits or a whole batch. **Preview A/B** builds a sibling preview
+and plays the same span twice, built first and proposal second. The playhead
+returns to the start of the span for the second pass. **Accept** stages an
+edit for **Apply**, and undo can bring the proposal back before Apply.
+**Reject** removes it from the shared journal immediately. Studio picks up
+new proposals from agents while the reconstruction window is open.
+
 ## Review a reconstruction
 
 1. Open the shared project and choose **Review → Add reference…**. Pick a

@@ -63,6 +63,14 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private Mode mode = Mode.SELECT;
     private ReconstructionInspection.Grid grid = ReconstructionInspection.Grid.BEAT;
     private final ReconstructionTools selection = new ReconstructionTools();
+    record ProposalMark(com.opensmpsdeck.headless.ReconstructionProposals.Marker note, String reason) {}
+    private record ProposalHit(ProposalMark proposal, double left, double top, double width, double height) {
+        boolean contains(double x, double y) {
+            return x >= left && x <= left + width && y >= top && y <= top + height;
+        }
+    }
+    private List<ProposalMark> proposals = List.of();
+    private final List<ProposalHit> proposalHits = new ArrayList<>();
     private List<Overlay> pending = List.of();
     private Map<String, Overlay> pendingByNote = Map.of();
     private boolean outline;
@@ -101,8 +109,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private final Tooltip hover = new Tooltip();
     private final List<Hit> hits = new ArrayList<>();
     private List<String> lanes;
-    private int low;
-    private int high;
+    private int builtLow, builtHigh;
+    private int low, high;
     private static final List<String> SECTION_LABELS = List.of("Section", "Period", "Phrase");
     private double[] endByIndex;
     private final Set<Role> roles = EnumSet.allOf(Role.class);
@@ -145,7 +153,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         canvas.setOnMouseMoved(event -> {
             var hit = hit(event.getX(), event.getY());
             var section = sectionAt(event.getX(), event.getY());
-            String text = hit != null ? description(hit.note()) : section != null
+            var proposalsAtPointer = proposalHits.stream().filter(mark -> mark.contains(event.getX(), event.getY()))
+                    .map(mark -> mark.proposal().reason()).distinct().limit(4)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            String text = !proposalsAtPointer.isEmpty() ? proposalsAtPointer
+                    : hit != null ? description(hit.note()) : section != null
                     ? section.label() + " · " + section.author() : "";
             if (text.isEmpty()) hover.hide();
             hover.setText(text);
@@ -178,10 +190,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 .mapToDouble(BendPoint::pitch).min().orElse(127);
         double highestBend = notes.stream().flatMap(note -> note.bend().stream())
                 .mapToDouble(BendPoint::pitch).max().orElse(0);
-        low = Math.max(0, Math.min((int) Math.floor(lowestBend),
+        builtLow = Math.max(0, Math.min((int) Math.floor(lowestBend),
                 notes.stream().mapToInt(Overlay::pitch).min().orElse(42)) - 3);
-        high = Math.min(127, Math.max((int) Math.ceil(highestBend),
+        builtHigh = Math.min(127, Math.max((int) Math.ceil(highestBend),
                 notes.stream().mapToInt(Overlay::pitch).max().orElse(78)) + 4);
+        proposalPitchRange();
         endByIndex = new double[notes.size()];
         double priorEnd = 0;
         for (int i = 0; i < notes.size(); i++) {
@@ -198,6 +211,21 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         sections = next;
         cancelGesture();
         draw();
+    }
+
+    void proposals(List<ProposalMark> marks) {
+        proposals = List.copyOf(marks);
+        proposalPitchRange();
+        draw();
+    }
+
+    private void proposalPitchRange() {
+        low = builtLow;
+        high = builtHigh;
+        for (var mark : proposals) {
+            low = Math.min(low, Math.max(0, mark.note().pitch() - 3));
+            high = Math.max(high, Math.min(127, mark.note().pitch() + 4));
+        }
     }
 
     void pending(List<Overlay> overlays) {
@@ -663,6 +691,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         var g = canvas.getGraphicsContext2D();
         double width = canvas.getWidth();
         hits.clear();
+        proposalHits.clear();
         g.setFill(BACKGROUND);
         g.fillRect(0, 0, width, contentHeight);
         g.setFont(Font.font("Monospaced", 11));
@@ -875,6 +904,24 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             }
             hits.add(new Hit(note, left, top, barWidth, height));
         }
+        var proposalColor = Color.web("#ef8aff");
+        g.setStroke(proposalColor);
+        g.setLineWidth(1.6);
+        g.setLineDashes(4, 2);
+        for (var proposal : proposals) {
+            var mark = proposal.note();
+            if (mark.pitch() < low || mark.pitch() > high || mark.end() < seconds(AXIS) || mark.start() > seconds(width))
+                continue;
+            double left = x(mark.start());
+            double barWidth = Math.max(5, x(mark.end()) - left);
+            double height = Math.max(6, Math.min(17, rowHeight() + 2));
+            double top = y(mark.pitch()) - height / 2;
+            g.strokeRect(left, top, barWidth, height);
+            if (!mark.bend().isEmpty()) drawCurve(g, mark.bend(), proposalColor, false);
+            proposalHits.add(new ProposalHit(proposal, left, top, barWidth, height));
+        }
+        g.setLineDashes();
+        g.setLineWidth(1);
         if (box != null && dragged) {
             g.setFill(Color.LIGHTSKYBLUE.deriveColor(0, 1, 1, .2));
             g.fillRect(box.left(), box.top(), box.width(), box.height());

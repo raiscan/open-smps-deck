@@ -281,7 +281,8 @@ public final class ReconstructionStages {
         Path voicingFile = work.resolve("voicing.json");
         var previousAllocation = request.chain && request.from.ordinal() <= Stage.ALLOCATE.ordinal()
                 ? previousAllocation(previousWork.resolve("allocation.json"), out) : null;
-        var edits = ReconstructionEdits.read(work);
+        var journal = ReconstructionEdits.read(work);
+        var edits = journal.accepted();
         var previousEdits = ReconstructionEdits.Journal.read(work);
         var editJournal = previousEdits.through(request.from);
         boolean trackEdits = !edits.isEmpty() || !previousEdits.stages().isEmpty();
@@ -403,6 +404,7 @@ public final class ReconstructionStages {
             progress.report(stage.ordinal() - request.from.ordinal() + 1, total, "Finished " + stageName(stage));
             if (!request.chain) break;
         }
+        if (journal != edits) ReconstructionProposals.refresh(work, ReconstructionEdits.read(work));
         if (!preserveReview) for (var issue : ReconstructionSections.anchorIssues(work))
             out.println("section:" + issue.id() + " " + issue.detail());
     }
@@ -471,18 +473,29 @@ public final class ReconstructionStages {
     static void previewEdits(Path work, Stage from, ReconstructionEdits edits, ReconstructionEdits.Journal prior,
                              List<ReconstructionEdits.Outcome> outcomes, List<ReconstructionEdits.Resolution> resolutions)
             throws IOException {
+        previewEdits(work, from, edits, prior, outcomes, resolutions, null);
+    }
+
+    static void previewEdits(Path work, Stage from, ReconstructionEdits edits, ReconstructionEdits.Journal prior,
+                             List<ReconstructionEdits.Outcome> outcomes, List<ReconstructionEdits.Resolution> resolutions,
+                             Map<String, Note> resolvedNotes) throws IOException {
         var score = readScore(work.resolve("score.json"));
+        if (resolvedNotes != null) for (var note : score.notes()) resolvedNotes.put(note.id(), note);
         var structureFile = work.resolve("structure.json");
         Path rolesFile = work.resolve("roles.json");
         var currentRoles = Files.isRegularFile(rolesFile)
                 ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : null;
+        if (resolvedNotes != null && currentRoles != null) {
+            var clock = ReconstructionTimeMap.of(score);
+            for (var row : currentRoles.notes()) resolvedNotes.putIfAbsent(row.note().id(), row.note().mapTime(clock::source));
+        }
         if (from == Stage.ASSEMBLE) {
             var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
             previewNoteVoicing(edits, score, allocation, outcomes);
             return;
         }
         if (from.ordinal() >= Stage.VOICES.ordinal() && currentRoles != null) {
-            previewAllocationEdits(work, edits, score, currentRoles, outcomes);
+            previewAllocationEdits(work, edits, score, currentRoles, outcomes, resolvedNotes != null);
             return;
         }
         List<ReconstructionEdits.Outcome> scoreEdits;
@@ -503,7 +516,12 @@ public final class ReconstructionStages {
         var boundEdits = edits.bindSections(work, score, structure, Stage.ROLES, outcomes);
         var roles = boundEdits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes, resolutions);
 
-        previewAllocationEdits(work, edits, score, roles, outcomes);
+        if (resolvedNotes != null) {
+            var clock = ReconstructionTimeMap.of(score);
+            for (var row : roles.notes()) resolvedNotes.put(row.note().id(), row.note().mapTime(clock::source));
+            for (var note : score.notes()) resolvedNotes.put(note.id(), note);
+        }
+        previewAllocationEdits(work, edits, score, roles, outcomes, resolvedNotes != null);
         if (from != Stage.TRANSCRIBE) return;
         var previous = new HashMap<String, ReconstructionRoles.Decision>();
         if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
@@ -528,15 +546,16 @@ public final class ReconstructionStages {
     }
 
     private static void previewAllocationEdits(Path work, ReconstructionEdits edits, Score score,
-                                               ReconstructionRoles.Result roles, List<ReconstructionEdits.Outcome> outcomes)
+                                               ReconstructionRoles.Result roles, List<ReconstructionEdits.Outcome> outcomes,
+                                               boolean allPins)
             throws IOException {
         var pins = roles.lanePins();
         var bound = edits.bindSections(work, score, null, Stage.ALLOCATE, outcomes);
         boolean hasChordEdits = bound.intents().stream().anyMatch(edit -> edit.firstStage() == Stage.ALLOCATE);
         boolean hasVoiceEdits = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.voiceEdit);
         boolean hasNoteVoicing = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing);
-        boolean hasTypedPins = pins != null && pins.values().stream().anyMatch(pin -> pin.laneType() != null);
-        if (!hasChordEdits && !hasTypedPins && !hasVoiceEdits && !hasNoteVoicing) return;
+        boolean checkPins = pins != null && pins.values().stream().anyMatch(pin -> allPins || pin.laneType() != null);
+        if (!hasChordEdits && !checkPins && !hasVoiceEdits && !hasNoteVoicing) return;
         var laneTypes = Map.<String, ReconstructionLaneType>of();
         if (hasVoiceEdits || Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))) {
             var voices = ReconstructionVoicePlan.preview(work, score, roles, edits);
@@ -544,7 +563,7 @@ public final class ReconstructionStages {
             ReconstructionVoicePlan.reviewOutcomes(edits, voices, outcomes);
         }
         var chords = ReconstructionChords.select(bound, score, roles, laneTypes, outcomes);
-        if (chords.isEmpty() && !hasTypedPins && !hasNoteVoicing) return;
+        if (chords.isEmpty() && !checkPins && !hasNoteVoicing) return;
         try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
@@ -554,7 +573,7 @@ public final class ReconstructionStages {
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience, chordReduction);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
-                    .filter(outcome -> outcome.laneType() != null).toList());
+                    .filter(outcome -> allPins || outcome.laneType() != null).toList());
             if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
         }
     }

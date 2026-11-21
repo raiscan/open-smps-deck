@@ -355,6 +355,17 @@ An intent may include `"author":"human"` or `"author":"agent"`. The field is
 optional for legacy journals and does not change the reconstruction operation.
 Studio writes its new intents with `"author":"human"`.
 
+An intent's optional `status` is `proposed` or `accepted`. Omitted status
+means accepted. A proposal requires `"author":"agent"` and may include a
+`group` string and an `evidence` object with `text` and a work-relative `path`.
+Stage runs consume accepted intents only. They record the shadow dry run of
+the proposals together in `proposal-results.json`, including outcome statuses
+and the source-time note outlines. This report is separate from
+`edit-results.json`, which records the built state. Accept preserves the
+intent's journal order and makes it eligible for the next rebuild. Reject
+removes only the selected proposals. See the
+[CLI and MCP commands](../../headless/README.md#review-edit-proposals).
+
 | Op | Fields | First stage |
 | --- | --- | --- |
 | `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |
