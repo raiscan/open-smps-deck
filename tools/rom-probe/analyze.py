@@ -8,7 +8,17 @@ from pathlib import Path
 
 import numpy as np
 
-from run import input_hashes
+
+def input_hashes(path):
+    """SHA-1 and SHA-256 of an input file. Kept local so `python3 -I` works."""
+    import hashlib
+    sha1 = hashlib.sha1(usedforsecurity=False)
+    sha256 = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            sha1.update(block)
+            sha256.update(block)
+    return {"name": Path(path).name, "sha1": sha1.hexdigest(), "sha256": sha256.hexdigest()}
 
 
 ENVELOPE_RATE = 100
