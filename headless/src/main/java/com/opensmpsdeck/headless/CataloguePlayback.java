@@ -214,9 +214,15 @@ public final class CataloguePlayback {
         String voice(InstrumentCatalogue.Asset asset) {
             requireKind(asset, Kind.FM_VOICE);
             var bytes = unsigned(asset.bytes());
-            for (var existing : voices) if (existing.bytes().equals(bytes)) return existing.id();
+            var origin = catalogue.origin(asset);
+            for (int i = 0; i < voices.size(); i++) {
+                var existing = voices.get(i);
+                if (!existing.bytes().equals(bytes)) continue;
+                if (existing.origin() == null && origin != null) voices.set(i, existing.withOrigin(origin));
+                return existing.id();
+            }
             String id = freeId(asset.id(), candidate -> voices.stream().anyMatch(voice -> voice.id().equals(candidate)));
-            voices.add(new Voice(id, asset.name(), bytes));
+            voices.add(new Voice(id, asset.name(), bytes, origin));
             return id;
         }
 
@@ -224,21 +230,31 @@ public final class CataloguePlayback {
             requireKind(asset, kind);
             String type = kind == Kind.PSG_VOLUME ? Envelope.PSG_VOLUME : Envelope.MODULATION;
             var bytes = unsigned(asset.bytes());
-            for (var existing : envelopes)
-                if (existing.type().equals(type) && existing.bytes().equals(bytes)) return existing.id();
+            var origin = catalogue.origin(asset);
+            for (int i = 0; i < envelopes.size(); i++) {
+                var existing = envelopes.get(i);
+                if (!existing.type().equals(type) || !existing.bytes().equals(bytes)) continue;
+                if (existing.origin() == null && origin != null) envelopes.set(i, existing.withOrigin(origin));
+                return existing.id();
+            }
             String id = freeId(asset.id(), candidate -> envelopes.stream().anyMatch(env -> env.id().equals(candidate)));
             version = 4;
-            envelopes.add(new Envelope(id, asset.name(), type, bytes));
+            envelopes.add(new Envelope(id, asset.name(), type, bytes, origin));
             return id;
         }
 
         String dac(InstrumentCatalogue.Asset asset, int rate) {
             byte[] bytes = asset.bytes();
-            for (var existing : samples)
-                if (existing.rate() == rate && Arrays.equals(existing.pcm(), bytes)) return existing.id();
+            var origin = catalogue.origin(asset);
+            for (int i = 0; i < samples.size(); i++) {
+                var existing = samples.get(i);
+                if (existing.rate() != rate || !Arrays.equals(existing.pcm(), bytes)) continue;
+                if (existing.origin() == null && origin != null) samples.set(i, existing.withOrigin(origin));
+                return existing.id();
+            }
             String id = freeId(asset.id(), candidate -> samples.stream().anyMatch(sample -> sample.id().equals(candidate)));
             version = 4;
-            samples.add(DacSample.of(id, asset.name(), rate, bytes));
+            samples.add(DacSample.of(id, asset.name(), rate, bytes).withOrigin(origin));
             return id;
         }
 
@@ -308,7 +324,7 @@ public final class CataloguePlayback {
 
         StudioProject finish() {
             var result = new StudioProject(version, target.name(), target.mode(), target.ticksPerBeat(),
-                    target.tempo(), voices, sequences, clips, envelopes, samples);
+                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom());
             ProjectFormat.validate(result);
             return result.equals(target) ? target : result;
         }

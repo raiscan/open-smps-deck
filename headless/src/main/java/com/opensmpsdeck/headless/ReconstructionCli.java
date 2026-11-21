@@ -148,7 +148,7 @@ final class ReconstructionCli {
             return;
         }
         if (args.length >= 2 && args[1].equals("import")) {
-            SunoImport.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            SunoImport.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out, err);
             return;
         }
         if (args.length >= 2 && args[1].equals("view")) {
@@ -214,6 +214,7 @@ final class ReconstructionCli {
         Options options = parseOptions(args, midi.getFileName().toString());
         var transcription = ReconstructionStages.transcribe(midi, reference, options);
         assembleLegacy(midi, reference, index, target, options, transcription, out);
+        ProjectProvenance.printWarnings(ReconstructionStages.packageWarnings(target), err);
     }
 
     private static void assembleLegacy(Path midi, Path reference, Path index, Path target,

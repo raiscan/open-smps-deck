@@ -31,7 +31,7 @@ import java.util.zip.ZipOutputStream;
 public final class ProjectPackage {
     private ProjectPackage() {}
 
-    public static void write(StudioProject project, Path output) throws IOException {
+    public static List<String> write(StudioProject project, Path output) throws IOException {
         var compiled = ProjectCompiler.compileWithAssets(project);
         var nativeProgram = compiled.nativeProgram();
         boolean nativeBank = nativeProgram != null;
@@ -135,7 +135,10 @@ public final class ProjectPackage {
             }
             manifest.add("dac", dac);
         }
-        byte[] manifestBytes = (new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(manifest) + "\n")
+        var provenance = ProjectProvenance.detect(project);
+        if (provenance.containsRomDerivedData() || provenance.containsRetailSongData())
+            manifest.add("provenance", provenance.json());
+        byte[] manifestBytes = (new GsonBuilder().serializeNulls().setPrettyPrinting().disableHtmlEscaping().create().toJson(manifest) + "\n")
                 .getBytes(StandardCharsets.UTF_8);
 
         // All validation and serialization precede publication. CREATE_NEW
@@ -153,6 +156,7 @@ public final class ProjectPackage {
         } finally {
             if (!complete) Files.deleteIfExists(output);
         }
+        return provenance.warnings();
     }
 
     private static void writeEntry(ZipOutputStream archive, Entry value) throws IOException {

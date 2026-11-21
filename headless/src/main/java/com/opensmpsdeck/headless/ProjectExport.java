@@ -58,22 +58,22 @@ public final class ProjectExport {
         return new Source(ProjectFiles.load(work == null ? input : work.resolve("arrangement.smps.json")).project(), work);
     }
 
-    public static void write(StudioProject project, Path work, Path output, Options options,
+    public static List<String> write(StudioProject project, Path work, Path output, Options options,
                              ReconstructionStages.Progress progress) throws IOException {
         output = output.toAbsolutePath().normalize();
         if (Files.exists(output, NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(output.toString());
         if (options.format == Format.PACKAGE) {
             progress.report(0, 1, "Writing SMPS package");
-            ProjectPackage.write(project, output);
+            var warnings = ProjectPackage.write(project, output);
             progress.report(1, 1, "Export complete");
-            return;
+            return warnings;
         }
         var compiled = ProjectCompiler.compileWithAssets(project);
         if (options.format == Format.SMPS) {
             progress.report(0, 1, "Writing raw S3K track");
             Main.writeNewBinary(output, rawBytes(compiled));
             progress.report(1, 1, "Export complete");
-            return;
+            return List.of();
         }
 
         int length = length(project, work);
@@ -135,6 +135,7 @@ public final class ProjectExport {
                 for (var path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
             }
         }
+        return List.of();
     }
 
     private static void publish(Path staged, Path output) throws IOException {
@@ -262,7 +263,7 @@ public final class ProjectExport {
         }
     }
 
-    static void cli(String[] args, java.io.PrintStream out) throws IOException {
+    static void cli(String[] args, java.io.PrintStream out, java.io.PrintStream err) throws IOException {
         if (args.length < 5) throw new IllegalArgumentException("export expects INPUT OUTPUT --format FORMAT");
         Format format = null;
         Double start = null, end = null, fade = null;
@@ -287,8 +288,9 @@ public final class ProjectExport {
         }
         if (format == null) throw new IllegalArgumentException("Choose --format wav|mp3|vgm|smps|package");
         var source = open(Path.of(args[1]));
-        write(source.project(), source.work(), Path.of(args[2]), new Options(format, start, end, fade, loops, stems, zip),
+        var warnings = write(source.project(), source.work(), Path.of(args[2]), new Options(format, start, end, fade, loops, stems, zip),
                 (done, total, message) -> {});
+        ProjectProvenance.printWarnings(warnings, err);
         out.println("Exported " + format + " to " + args[2]);
     }
 }

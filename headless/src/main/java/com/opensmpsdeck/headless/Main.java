@@ -54,6 +54,11 @@ public final class Main {
                         throw new IOException("Arrangement conversion interrupted", stopped);
                     }
                 }
+                case "stock-table" -> {
+                    requireArguments(args, 4);
+                    if (!args[1].equals("build")) throw new IllegalArgumentException("Expected stock-table build ROM OUT.json");
+                    StockTable.build(Path.of(args[2]), Path.of(args[3]));
+                }
                 case "list-rom-songs" -> {
                     requireArguments(args, 2);
                     for (var song : S3kRomImporter.listSongs(Path.of(args[1]))) {
@@ -108,7 +113,7 @@ public final class Main {
                     requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
-                    ProjectPackage.write(ProjectFiles.load(input).project(), output);
+                    ProjectProvenance.printWarnings(ProjectPackage.write(ProjectFiles.load(input).project(), output), err);
                     out.println("Exported S3K bank and declared resources to " + output);
                 }
                 case "demo-project" -> {
@@ -119,7 +124,7 @@ public final class Main {
                             + "; use validate-project, compile-project or render-project to work with it");
                 }
                 case "demo", "render", "render-project" -> render(args, out);
-                case "export" -> ProjectExport.cli(args, out);
+                case "export" -> ProjectExport.cli(args, out, err);
                 case "render-compare" -> RenderComparison.cli(args, out);
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
@@ -289,6 +294,7 @@ public final class Main {
     }
 
     private static void usage(PrintStream out) {
+        out.println("  stock-table build ROM OUT.json");
         out.println("Usage: java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");

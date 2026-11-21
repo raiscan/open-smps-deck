@@ -206,6 +206,7 @@ public final class ReconstructionEditCommand {
             result.add("ids", JSON.toJsonTree(changed.stream().map(ReconstructionEdits.Intent::id).toList()));
         else result.addProperty("id", changed.getFirst().id());
         if (rerun) {
+            result.add("warnings", JSON.toJsonTree(ReconstructionStages.packageWarnings(work)));
             var after = ReconstructionTrace.read(work);
             var journal = action.equals("add") ? ReconstructionEdits.Journal.read(work) : prior;
             var timeline = ReconstructionTimeMap.of(ReconstructionStages.readScore(work.resolve("score.json")));

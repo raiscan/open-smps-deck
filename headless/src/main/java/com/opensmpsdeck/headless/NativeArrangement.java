@@ -84,7 +84,8 @@ public final class NativeArrangement {
         return new StudioProject(4, assets == null ? source.name() : source.name() + " (editable)",
                 "S3K", FRAMES_PER_SECOND, 0, assets == null ? List.of() : List.copyOf(assets.voices.values()),
                 sequences, clips, assets == null ? List.of() : List.copyOf(assets.envelopes.values()),
-                assets == null ? source.samples() : List.copyOf(assets.samples.values()));
+                assets == null ? source.samples() : List.copyOf(assets.samples.values()))
+                .withDerivedFrom(ProjectProvenance.retailOrigin(source));
     }
 
     private static final class Recorder extends Sonic3kCoordFlagHandler implements SmpsNoteListener {
@@ -356,6 +357,8 @@ public final class NativeArrangement {
 
     private static final class CopyAssets {
         final Map<List<Integer>, Voice> voices = new LinkedHashMap<>();
+        final Map<List<Integer>, com.opensmpsdeck.project.AssetOrigin> voiceOrigins = new LinkedHashMap<>();
+        final boolean retail;
         final Map<SampleRate, DacSample> samples = new LinkedHashMap<>();
         final Map<String, DacSample> sourceSamples;
         final Map<EnvelopeSlot, Envelope> sourceEnvelopes = new LinkedHashMap<>();
@@ -363,6 +366,10 @@ public final class NativeArrangement {
         final IdentityHashMap<byte[], Voice> loadedVoices = new IdentityHashMap<>();
 
         CopyAssets(StudioProject source) {
+            retail = ProjectProvenance.retailOrigin(source) != null;
+            for (var voice : source.voices()) {
+                if (voice.origin() != null) voiceOrigins.putIfAbsent(voice.bytes(), voice.origin());
+            }
             sourceSamples = source.samples().stream().collect(Collectors.toMap(DacSample::id, Function.identity()));
             var byId = source.envelopes().stream().collect(Collectors.toMap(Envelope::id, Function.identity()));
             for (var slot : source.nativeProgram().envelopeSlots()) {
@@ -410,8 +417,14 @@ public final class NativeArrangement {
                 throw new IllegalArgumentException("A sounding FM track has no complete voice");
             return loadedVoices.computeIfAbsent(bytes, patch -> {
                 var values = IntStream.range(0, patch.length).map(i -> patch[i] & 0xFF).boxed().toList();
-                return voices.computeIfAbsent(values, key ->
-                        new Voice("fm-" + (voices.size() + 1), "Imported FM " + (voices.size() + 1), key));
+                return voices.computeIfAbsent(values, key -> {
+                    var origin = voiceOrigins.get(key);
+                    if (origin == null) {
+                        var ref = StockTable.match("FM_VOICE", patch);
+                        if (retail || ref != null) origin = com.opensmpsdeck.project.AssetOrigin.stock(ref);
+                    }
+                    return new Voice("fm-" + (voices.size() + 1), "Imported FM " + (voices.size() + 1), key, origin);
+                });
             }).id();
         }
 
@@ -419,7 +432,7 @@ public final class NativeArrangement {
             return samples.computeIfAbsent(new SampleRate(id, rate), key -> {
                 var source = sourceSamples.get(id);
                 return new DacSample("sample-" + (samples.size() + 1),
-                        "%s (rate %02X)".formatted(source.name(), rate), rate, source.pcmBase64());
+                        "%s (rate %02X)".formatted(source.name(), rate), rate, source.pcmBase64(), source.origin());
             }).id();
         }
     }

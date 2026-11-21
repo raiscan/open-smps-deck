@@ -182,6 +182,43 @@ public final class InstrumentCatalogue {
         }
     }
 
+    private final Map<String, java.util.Optional<com.opensmpsdeck.project.AssetOrigin>> origins =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    com.opensmpsdeck.project.AssetOrigin origin(Asset asset) {
+        return origins.computeIfAbsent(asset.id(), ignored -> java.util.Optional.ofNullable(findOrigin(asset))).orElse(null);
+    }
+
+    private com.opensmpsdeck.project.AssetOrigin findOrigin(Asset asset) {
+        var choices = assetVariants.getOrDefault(asset.id(), List.of());
+        String hash = digest(asset.bytes());
+        com.opensmpsdeck.project.StockRef best = null;
+        boolean stock = false;
+        for (var variant : choices) {
+            for (var usage : variant.occurrences()) {
+                if (!usage.driver().equalsIgnoreCase("s3k") || usage.songId() == null) continue;
+                stock = true;
+                if (usage.table() == null || usage.slot() == null) continue;
+                String table = switch (usage.table()) {
+                    case "global-fm", "local-fm", "dac" -> usage.table();
+                    case "psg-envelope" -> "psg";
+                    case "modulation" -> "mod";
+                    default -> null;
+                };
+                if (table == null) continue;
+                try {
+                    var candidate = StockTable.ref(table, table.equals("local-fm") ? usage.songId() : null, usage.slot(), hash);
+                    if (candidate.kind().equals(asset.kind().name()))
+                        best = best == null ? candidate : StockTable.prefer(best, candidate);
+                } catch (IllegalArgumentException invalidLocator) {
+                    // Older or custom catalogues may only identify the source song.
+                }
+            }
+        }
+        if (best == null) best = StockTable.match(asset.kind().name(), asset.bytes());
+        return stock || best != null ? com.opensmpsdeck.project.AssetOrigin.stock(best) : null;
+    }
+
     public List<Asset> assets() { return index.assets(); }
     public List<Variant> variants() { return index.variants(); }
     public List<Issue> issues() { return index.issues(); }
