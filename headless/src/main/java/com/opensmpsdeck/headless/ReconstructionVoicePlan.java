@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
@@ -35,7 +36,10 @@ public final class ReconstructionVoicePlan {
 
     public record Evidence(List<Integer> parts, List<String> stems, List<Integer> programs,
                            List<String> noteSources, List<Integer> drumPitches,
-                           @Nullable String register) {}
+                           @Nullable String register, @Nullable String basis,
+                           @Nullable Map<String, Integer> roles, @Nullable Map<String, Integer> sections,
+                           @Nullable Integer singletonAttacks, @Nullable Integer stackedAttacks,
+                           @Nullable String attributedStem) {}
 
     /** Instrument is a catalogue variant ID, or a named noise preset for NOISE. */
     public record Assignment(ReconstructionLaneType laneType, String instrument) {
@@ -108,15 +112,18 @@ public final class ReconstructionVoicePlan {
         String name;
         final Kind kind;
         final String register;
+        final String basis;
         final double confidence;
         final LinkedHashSet<String> notes = new LinkedHashSet<>();
+        String attributedStem;
         Assignment assignment;
 
-        Group(String id, String name, Kind kind, String register, double confidence) {
+        Group(String id, String name, Kind kind, String register, String basis, double confidence) {
             this.id = id;
             this.name = name;
             this.kind = kind;
             this.register = register;
+            this.basis = basis;
             this.confidence = confidence;
         }
     }
@@ -127,20 +134,36 @@ public final class ReconstructionVoicePlan {
     private final Map<Integer, MidiScore.Part> parts = new HashMap<>();
     private final Map<String, ReconstructionStages.Note> notes = new LinkedHashMap<>();
     private final Map<String, Double> onsets = new HashMap<>();
+    private final Map<String, ReconstructionVoiceProposal.Attack> attacks = new HashMap<>();
+    private final Map<String, Boolean> stacked = new HashMap<>();
     private final Map<String, Group> groups = new LinkedHashMap<>();
     private final Map<String, Group> owners = new HashMap<>();
     private InstrumentCatalogue catalogue;
 
-    private ReconstructionVoicePlan(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) {
+    private ReconstructionVoicePlan(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
         this.work = work;
         this.score = score;
         timeline = ReconstructionTimeMap.of(score);
         for (var part : score.source().parts()) parts.put(part.id(), part);
-        for (var decision : roles.notes()) notes.put(decision.note().id(), decision.note());
-        // Use score attacks where available so a role correction does not move selector anchors.
-        for (var note : notes.values()) onsets.put(note.id(), roles.timeBase() == ReconstructionTimeMap.TimeBase.project
-                ? timeline.source(note.start()) : note.start());
-        for (var note : score.notes()) if (onsets.containsKey(note.id())) onsets.put(note.id(), note.start());
+        var original = new HashMap<String, ReconstructionStages.Note>();
+        for (var note : score.notes()) original.put(note.id(), note);
+        var sections = new TreeMap<Double, ReconstructionSections.Section>();
+        for (var section : ReconstructionSections.load(work, score).sections())
+            if (section.level() == ReconstructionSections.Level.section) sections.put(section.sourceStart(), section);
+
+        for (var decision : roles.notes()) {
+            var note = decision.note();
+            notes.put(note.id(), note);
+            var source = original.get(note.id());
+            boolean project = roles.timeBase() == ReconstructionTimeMap.TimeBase.project;
+            // Prefer original attack times for onset texture, stem evidence and edit selectors.
+            double start = source != null ? source.start() : project ? timeline.source(note.start()) : note.start();
+            double end = source != null ? source.end() : project ? timeline.source(note.end()) : note.end();
+            onsets.put(note.id(), start);
+            var entry = sections.floorEntry(start);
+            String section = entry != null && start < entry.getValue().sourceEnd() ? entry.getValue().id() : "unsectioned";
+            attacks.put(note.id(), new ReconstructionVoiceProposal.Attack(note, decision.role(), start, end, section));
+        }
         propose();
     }
 
@@ -222,50 +245,42 @@ public final class ReconstructionVoicePlan {
     }
 
     private void propose() {
-        var byPart = new java.util.TreeMap<Integer, List<ReconstructionStages.Note>>();
-        for (var note : notes.values()) byPart.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
+        var byPart = new TreeMap<Integer, List<ReconstructionVoiceProposal.Attack>>();
+        for (String id : notes.keySet()) {
+            var attack = attacks.get(id);
+            byPart.computeIfAbsent(attack.part(), ignored -> new ArrayList<>()).add(attack);
+        }
+        var audio = new ReconstructionVoiceStems(score, byPart);
         for (var entry : byPart.entrySet()) {
             int partId = entry.getKey();
+            String id = "part-" + partId;
             var part = parts.get(partId);
+            var members = entry.getValue();
+            if (part.drums()) {
+                for (var attack : members) {
+                    String drum = drumClass(attack.note().pitch());
+                    String label = "Drum " + drum.replace('-', ' ');
+                    double confidence = drum.startsWith("pitch-") ? .65 : .98;
+                    var group = groups.computeIfAbsent(id + "-" + drum,
+                            key -> new Group(key, label, Kind.drum, null, "General MIDI drum class", confidence));
+                    move(attack.note().id(), group);
+                }
+                continue;
+            }
+            for (var cluster : ReconstructionVoiceProposal.clusters(members.stream()
+                    .filter(attack -> attack.role() != ReconstructionRoles.Role.drop).toList()))
+                for (var attack : cluster.notes()) stacked.put(attack.note().id(), cluster.notes().size() > 1);
             String stem = stem(partId);
-            boolean drums = part.drums();
-            int split = drums ? -1 : registerSplit(entry.getValue());
-            for (var note : entry.getValue()) {
-                String drum = drums ? drumClass(note.pitch()) : null;
-                String register = split < 0 ? null : note.pitch() < split ? "lower" : "upper";
-                String id = "part-" + partId + (drums ? "-" + drum : "upper".equals(register) ? "-upper" : "");
-                String label = drums ? "Drum " + drum.replace('-', ' ')
-                        : part.name() + (stem == null ? "" : " (" + stem + ")")
-                        + (register == null ? "" : " · " + register);
-                double confidence = drums ? (drum.startsWith("pitch-") ? .65 : .98)
-                        : register != null ? .65 : stem == null ? .75 : .9;
-                var group = groups.computeIfAbsent(id, key -> new Group(key, label, drums ? Kind.drum : Kind.tonal,
-                        register, confidence));
-                move(note.id(), group);
+            for (var proposal : ReconstructionVoiceProposal.identify(members, stem, audio)) {
+                String key = proposal.suffix().isEmpty() ? id : id + "-" + proposal.suffix();
+                String name = part.name() + (stem == null || proposal.attributedStem() != null ? "" : " (" + stem + ")")
+                        + (proposal.label() == null ? "" : " — " + proposal.label());
+                var group = new Group(key, name, Kind.tonal, proposal.register(), proposal.basis(), proposal.confidence());
+                group.attributedStem = proposal.attributedStem();
+                groups.put(key, group);
+                for (var attack : proposal.attacks()) move(attack.note().id(), group);
             }
         }
-    }
-
-    // A wide gap alone can describe a melody's register change. Require repeated
-    // simultaneous attacks on both sides before proposing two instruments.
-    private static int registerSplit(List<ReconstructionStages.Note> notes) {
-        var ordered = notes.stream().sorted(java.util.Comparator.comparingInt(ReconstructionStages.Note::pitch)).toList();
-        int gap = 11, boundary = -1;
-        for (int i = 8; i <= ordered.size() - 8; i++) {
-            int distance = ordered.get(i).pitch() - ordered.get(i - 1).pitch();
-            if (distance <= gap) continue;
-            int pitch = ordered.get(i).pitch();
-            var lower = new java.util.HashSet<Integer>();
-            var upper = new java.util.HashSet<Integer>();
-            for (var note : ordered)
-                (note.pitch() < pitch ? lower : upper).add(ReconstructionOverrides.tick(note.start()));
-            lower.retainAll(upper);
-            if (lower.size() >= 3) {
-                boundary = pitch;
-                gap = distance;
-            }
-        }
-        return boundary;
     }
 
     private String stem(int part) {
@@ -389,7 +404,7 @@ public final class ReconstructionVoicePlan {
     private Group add(String id, String name, Kind kind) {
         require(!id.startsWith("part-"), id, "part- IDs are reserved for automatic voices");
         require(!groups.containsKey(id), id, "voice already exists");
-        var group = new Group(id, name, kind, null, 1);
+        var group = new Group(id, name, kind, null, null, 1);
         groups.put(id, group);
         return group;
     }
@@ -444,11 +459,18 @@ public final class ReconstructionVoicePlan {
         for (var group : groups.values()) {
             var members = group.notes.stream().map(notes::get).toList();
             var partIds = members.stream().map(ReconstructionStages.Note::part).distinct().sorted().toList();
+            var voiceAttacks = group.notes.stream().map(attacks::get).toList();
+            boolean tonal = group.kind == Kind.tonal;
+            var stackedCount = tonal ? (int) group.notes.stream().filter(id -> Boolean.TRUE.equals(stacked.get(id))).count() : null;
+            var singletonCount = tonal ? (int) group.notes.stream().filter(id -> Boolean.FALSE.equals(stacked.get(id))).count() : null;
             var evidence = new Evidence(partIds, partIds.stream().map(this::stem).filter(java.util.Objects::nonNull).distinct().toList(),
                     partIds.stream().map(id -> parts.get(id).program()).distinct().toList(),
                     members.stream().map(ReconstructionStages.Note::source).distinct().sorted().toList(),
                     group.kind == Kind.drum ? members.stream().map(ReconstructionStages.Note::pitch).distinct().sorted().toList()
-                            : List.of(), group.register);
+                            : List.of(), group.register, group.basis,
+                    tonal ? ReconstructionVoiceProposal.counts(voiceAttacks, attack -> attack.role().name()) : null,
+                    tonal ? ReconstructionVoiceProposal.counts(voiceAttacks, ReconstructionVoiceProposal.Attack::section) : null,
+                    singletonCount, stackedCount, group.attributedStem);
             voices.add(new Voice(group.id, group.name, group.kind, evidence, group.confidence,
                     List.copyOf(group.notes), group.assignment));
         }

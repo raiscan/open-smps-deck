@@ -137,14 +137,30 @@ only when an explicit roleplan or edit selector requests it.
 
 ## Identify and assign voices
 
-The `voices` stage groups role-stage notes into named source instruments. A
-voice can carry different roles over time. Automatic IDs follow the MIDI
-part, its mapped stem and, for percussion, a General MIDI drum class.
-A tonal part with a gap of at least an octave and repeated simultaneous
-attacks on either side can propose a second voice. `voices.json` records
-the evidence, heuristic confidence, stable note IDs, explicit instrument
-assignments and journal issues. Added source parts are grouped by the same
-rules, including stem transcriptions.
+The `voices` stage groups role-stage notes into named source instruments.
+A voice can carry different roles over time. Parts with a recurring melody
+or counter line and repeated stacked accompaniment can propose separate
+line and chord voices. The detector checks attack patterns within musical
+sections and uses source-time onset clusters, including for steady-grid
+projects. Repeated simultaneous attacks in pitch bands separated by an
+octave can also establish a lower and upper voice.
+
+For otherwise ambiguous parts, accessible tonal stems can supply acoustic
+evidence. The proposal checks whether pitches repeatedly sound more
+strongly in different mapped stems, or whether the same pitches have
+distinct harmonic profiles across sections of one stem. If the evidence
+is weak or the audio is unavailable, the part can stay together. Drum
+identities follow General MIDI drum classes.
+
+`voices.json` records role and section counts, singleton and stacked
+attacks within the source part, available stem evidence and heuristic
+confidence. Role-stage drops remain in the proposed membership for
+review. IDs use the MIDI part and the evidence for the split, such as
+`part-0-line`, `part-0-chords`, or `part-0-lower`. Replay applies the
+authored voice journal to these IDs. If a prior whole-part ID disappears
+after a split, the edit is reported as orphaned. Review the new proposal
+before targeting a replacement ID. Resume from `voices` after changing
+section boundaries used by the proposal.
 
 ```sh
 java -jar "$jar" reconstruct voices song-work
@@ -181,7 +197,8 @@ FM patch, volume envelope or sample kind. NOISE uses PSG3 with `fixed`,
 `closed-hat` or `cymbal` voicing. Tonal voices use FM or PSG. Drum voices use
 DAC or NOISE. Allocation keeps the usual role preference within the requested
 type and records unavailable notes or incompatible exact-lane pins as
-reductions. An explicit assignment follows each allocated note through
+reductions. A melody voice assigned to FM keeps ordinary FM1 overlap
+handling before using another FM lane. An explicit assignment follows each allocated note through
 lane changes. It takes precedence over lane and scoped instrument settings.
 Assigned FM patches preserve their native release rates across lanes.
 Gain, gate and effects still come from the lane and its applicable overrides.

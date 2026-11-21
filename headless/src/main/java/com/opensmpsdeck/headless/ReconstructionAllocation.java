@@ -20,6 +20,7 @@ final class ReconstructionAllocation {
     static final List<String> FM = List.of("FM1", "FM2", "FM3", "FM4", "FM5");
     static final List<String> PSG = List.of("PSG1", "PSG2", "PSG3");
     static final List<String> INNER_FM = FM.subList(2, FM.size());
+    private static final String VOICE_ASSIGNMENT = "voice:assignment";
     private static final int RELEASE_TICKS = 2;
     private static final int SUSTAINED_SPILL_TICKS = 6;
 
@@ -50,7 +51,8 @@ final class ReconstructionAllocation {
         }
 
         Entry shorten(int end, String why, String competitor) {
-            return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null, competitor, null, relocatedFrom);
+            return new Entry(note, role, lane, startTick, end, Outcome.shortened, why, null, competitor, null,
+                    relocatedFrom, pinnedLane, laneType);
         }
     }
     record Result(int version, List<Entry> notes, @Nullable ReconstructionTimeMap.TimeBase timeBase,
@@ -200,7 +202,7 @@ final class ReconstructionAllocation {
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
             var voiceType = voiceTypes.get(note.id());
             if (pin == null && voiceType != null)
-                pin = new ReconstructionEdits.Pin(null, "voice:assignment", Integer.MAX_VALUE, voiceType);
+                pin = new ReconstructionEdits.Pin(null, VOICE_ASSIGNMENT, Integer.MAX_VALUE, voiceType);
             boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part()))
                     : "PSG3".equals(pin.lane()) || pin.laneType() == ReconstructionLaneType.NOISE);
             int end = drum && !noise ? start + 1 : note.endTick(frames);
@@ -448,7 +450,15 @@ final class ReconstructionAllocation {
         var lanes = type.lanes();
         String previous = previousLanes.get(attack.note().id());
         String lane = null;
-        if (previous != null && lanes.contains(previous) && available(previous, attack)) lane = previous;
+        if (attack.role() == Role.melody && type == ReconstructionLaneType.FM
+                && VOICE_ASSIGNMENT.equals(attack.pin.tag())) {
+            // An instrument assignment does not need another chip channel
+            // for a release overlap on the normal melody lane.
+            var melody = expectedLanes(attack.role(), attack.noise);
+            lane = free(melody, attack);
+            if (lane == null) lane = shorten(melody, attack);
+        }
+        if (lane == null && previous != null && lanes.contains(previous) && available(previous, attack)) lane = previous;
         if (lane == null) {
             var preferred = expectedLanes(attack.role(), attack.noise).stream().filter(lanes::contains).toList();
             lane = free(preferred, attack);
@@ -548,7 +558,12 @@ final class ReconstructionAllocation {
     }
 
     private static boolean canShorten(Entry last, Attack next) {
-        if (last == null || last.pinnedLane != null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start) return false;
+        if (last == null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start)
+            return false;
+        if (last.pinnedLane != null && !(last.laneType == ReconstructionLaneType.FM
+                && last.role == Role.melody && next.role() == Role.melody
+                && (VOICE_ASSIGNMENT + " laneType=FM").equals(last.reason)))
+            return false;
         if (last.role == Role.drums)
             return next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
         return last.endTick - next.start <= RELEASE_TICKS || next.role() == Role.melody || next.role() == Role.bass
