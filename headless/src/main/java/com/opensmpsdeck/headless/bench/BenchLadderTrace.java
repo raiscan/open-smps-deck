@@ -221,7 +221,7 @@ final class BenchLadderTrace {
 
     static BenchMetrics.Event map(BenchMetrics.Event note, DoubleUnaryOperator clock) {
         return new BenchMetrics.Event(note.lane(), clock.applyAsDouble(note.start()), clock.applyAsDouble(note.end()),
-                note.pitch(), note.hash(), note.drum());
+                note.pitch(), note.hash(), note.drum(), note.legacyDrum());
     }
 
     static BenchGold.Score leadScore(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,

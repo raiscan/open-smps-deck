@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 final class BenchScorecard {
+    private static final int VERSION = 2;
+    private static final String DRUM_CLASS = "drumClassAccuracy";
+    private static final String LEGACY_DRUM_CLASS = "drumClassAccuracyLegacy";
     record Case(String id, BenchMidi.Profile profile, BenchAudio.Variant variant, Map<String, Double> metrics,
                 BenchMetrics.F1 notes, BenchMetrics.F1 offsets, BenchMetrics.F1 melody, BenchMetrics.F1 drums,
                 BenchVoice.Score voices, BenchGold.Score gold, String error) {}
@@ -19,7 +22,7 @@ final class BenchScorecard {
 
     private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance", "leadGap");
     private static final List<String> HEADLINES = List.of("noteF1", "notePrecision", "noteRecall", "offsetF1",
-            "melodyF1", "leadFidelityF1", "drumF1", "drumClassAccuracy", "voiceTop1", "voiceTop3", "voiceSpectralDistance",
+            "melodyF1", "leadFidelityF1", "drumF1", DRUM_CLASS, "voiceTop1", "voiceTop3", "voiceSpectralDistance",
             "voiceSpectralCoverage", "logMelDistance", "onsetCorrelation", "releaseEnergy",
             "leadAttackF1", "leadPitchAccuracy", "leadGap");
 
@@ -38,7 +41,7 @@ final class BenchScorecard {
             var matches = corpus.stream().filter(c -> c.variant == variant).toList();
             if (!matches.isEmpty()) variants.put(variant.name(), mean(matches));
         }
-        return new Card(1, manifest, catalogue, holdout, audioRefine, goldInputs, cases, mean(corpus), profiles,
+        return new Card(VERSION, manifest, catalogue, holdout, audioRefine, goldInputs, cases, mean(corpus), profiles,
                 variants, mean(cases.stream().filter(c -> c.profile == null).toList()));
     }
 
@@ -95,7 +98,7 @@ final class BenchScorecard {
     }
 
     static Comparison compare(Card old, Card current, double tolerance, boolean alternateMidi) {
-        if (old.version != 1 || current.version != 1 || old.holdout != current.holdout
+        if (!supported(old) || !supported(current) || old.holdout != current.holdout
                 || (!alternateMidi && !old.manifestSha256.equals(current.manifestSha256))
                 || !old.goldInputs.equals(current.goldInputs)
                 || !caseIds(old).equals(caseIds(current))) {
@@ -106,21 +109,32 @@ final class BenchScorecard {
         boolean failed = failedCases;
         var deltas = new ArrayList<Delta>();
         for (String metric : HEADLINES) {
-            Double before = old.overall.mean.getOrDefault(metric, old.gold.mean.get(metric));
-            Double after = current.overall.mean.getOrDefault(metric, current.gold.mean.get(metric));
+            boolean historicalDrums = metric.equals(DRUM_CLASS) && (old.version == 1 || current.version == 1);
+            String label = historicalDrums ? LEGACY_DRUM_CLASS : metric;
+            Double before = headline(old, metric, historicalDrums);
+            Double after = headline(current, metric, historicalDrums);
             if (before == null && after == null) continue;
             if (before == null || after == null) {
                 boolean lost = after == null;
                 failed |= lost && !metric.equals("leadFidelityF1");
-                deltas.add(new Delta(metric, before, after, null, lost ? "missing" : "new"));
+                deltas.add(new Delta(label, before, after, null, lost ? "missing" : "new"));
                 continue;
             }
             double delta = after - before;
             boolean regression = (LOWER.contains(metric) ? delta : -delta) > tolerance + 1e-12;
             failed |= regression;
-            deltas.add(new Delta(metric, before, after, delta, regression ? "regression" : "pass"));
+            deltas.add(new Delta(label, before, after, delta, regression ? "regression" : "pass"));
         }
         return new Comparison(!failed, failedCases, List.copyOf(deltas));
+    }
+
+    private static boolean supported(Card card) {
+        return card.version == 1 || card.version == VERSION;
+    }
+
+    private static Double headline(Card card, String metric, boolean historicalDrums) {
+        String key = historicalDrums && card.version != 1 ? LEGACY_DRUM_CLASS : metric;
+        return card.overall.mean.getOrDefault(key, card.gold.mean.get(key));
     }
 
     static int print(Comparison comparison, PrintStream out) {

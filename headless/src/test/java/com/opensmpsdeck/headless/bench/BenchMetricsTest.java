@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static com.opensmpsdeck.headless.bench.BenchDrums.Drum.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -38,6 +39,33 @@ class BenchMetricsTest {
         assertTrue(BenchMetrics.attacks(List.of(note(1, 1.1, 0)), List.of(note(1.031, 1.1, 9)), .03).isEmpty());
         assertEquals(1, new BenchMetrics.F1(0, 0, 0).f1());
         assertEquals(0, new BenchMetrics.F1(1, 0, 0).f1());
+    }
+
+    @Test void drumClassAttacksPreferClassAcrossSimultaneousHits() {
+        var truth = List.of(drum(1, KICK), drum(1, HAT), drum(2, OPEN_HAT), drum(3, CRASH));
+        var estimate = List.of(drum(1, KICK), drum(1, HAT), drum(2.03, OPEN_HAT), drum(3, HAT));
+
+        assertEquals(4, BenchMetrics.attacks(truth, estimate, .03).size());
+        assertEquals(List.of(new BenchMetrics.Pair(0, 0), new BenchMetrics.Pair(1, 1),
+                        new BenchMetrics.Pair(2, 2)),
+                BenchMetrics.drumClassAttacks(truth, estimate, .03));
+    }
+
+    @Test void psgSourceClassesUseOnlyPlacedDrumsAndKeepCymbalsDistinct() {
+        var allocation = new BenchReconstruction.Allocation(List.of(
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(42), "drums", "PSG3", 30),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(46), "drums", "PSG3", 40),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(49), "drums", "PSG3", 50),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(51), "drums", "PSG3", 60),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(36), "drums", "DAC", 30),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(70), "harmony", "PSG3", 70),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(57), "drums", null, null)));
+        assertEquals(java.util.Map.of(30, HAT, 40, OPEN_HAT, 50, CRASH, 60, RIDE),
+                BenchReconstruction.noiseClasses(allocation));
+    }
+
+    private static BenchMetrics.Event drum(double time, BenchDrums.Drum type) {
+        return new BenchMetrics.Event("drums", time, time, 0, null, type);
     }
 
     @Test void selectsHighestSustainedLineIndependentlyForEachBar() {

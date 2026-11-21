@@ -236,6 +236,20 @@ class BenchCliTest {
         assertEquals(-1, Files.mismatch(first.resolve("scorecard.json"), second.resolve("scorecard.json")));
     }
 
+    @Test void compareUsesTheSameDrumClassDefinitionOnBothSides() {
+        var legacy = scorecard(Map.of("drumClassAccuracy", .7));
+        var old = new BenchScorecard.Card(1, legacy.manifestSha256(), legacy.catalogueSha256(),
+                legacy.holdout(), legacy.audioRefine(), legacy.goldInputs(), legacy.cases(), legacy.overall(),
+                legacy.profiles(), legacy.variants(), legacy.gold());
+        var fixed = scorecard(Map.of("drumClassAccuracy", .5, "drumClassAccuracyLegacy", .7));
+        var regressed = scorecard(Map.of("drumClassAccuracy", .4, "drumClassAccuracyLegacy", .7));
+
+        assertEquals(List.of(new BenchScorecard.Delta("drumClassAccuracyLegacy", .7, .7, 0.0, "pass")),
+                BenchScorecard.compare(old, fixed, 0).deltas());
+        assertTrue(BenchScorecard.compare(old, fixed, 0).passed());
+        assertFalse(BenchScorecard.compare(fixed, regressed, 0).passed());
+    }
+
     private static BenchScorecard.Card card(double f1, double distance) {
         return scorecard(Map.of("noteF1", f1, "logMelDistance", distance));
     }

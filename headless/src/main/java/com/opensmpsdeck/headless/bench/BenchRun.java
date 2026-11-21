@@ -176,8 +176,6 @@ final class BenchRun {
             var melody = counts(leadTruth, leadEstimate, BenchMetrics.notes(leadTruth, leadEstimate, false));
             var drumPairs = BenchMetrics.attacks(truthDrums, estimateDrums, .030);
             var drum = counts(truthDrums, estimateDrums, drumPairs);
-            long drumCorrect = drumPairs.stream().filter(p -> truthDrums.get(p.truth()).drum()
-                    == estimateDrums.get(p.estimate()).drum()).count();
             var voices = ladder ? BenchVoice.ladder(truth, estimate, pairs, song.nativeTruth.voices(), reconstruction.voices())
                     : new BenchVoice(catalogue).score(truth, estimate, pairs, reconstruction.attribution(), options.holdout);
             float[] audio = BenchAudio.mono(BenchAudio.read(reconstruction.audio()));
@@ -196,7 +194,13 @@ final class BenchRun {
             metrics.put("offsetF1", offsets.f1());
             metrics.put("melodyF1", melody.f1());
             metrics.put("drumF1", drum.f1());
-            if (drum.matched() > 0) metrics.put("drumClassAccuracy", (double) drumCorrect / drum.matched());
+            if (drum.matched() > 0) {
+                int sameClass = BenchMetrics.drumClassAttacks(truthDrums, estimateDrums, .030).size();
+                long legacyCorrect = drumPairs.stream().filter(p -> truthDrums.get(p.truth()).legacyDrum()
+                        == estimateDrums.get(p.estimate()).legacyDrum()).count();
+                metrics.put("drumClassAccuracy", (double) sameClass / drum.matched());
+                metrics.put("drumClassAccuracyLegacy", (double) legacyCorrect / drum.matched());
+            }
             if (options.holdout || ladder) {
                 if (voices.distance() != null) metrics.put("voiceSpectralDistance", voices.distance());
                 if (voices.matched() > 0) metrics.put("voiceSpectralCoverage", (double) voices.compared() / voices.matched());
