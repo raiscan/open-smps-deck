@@ -151,6 +151,20 @@ When comparing a stem with the render, pass the lanes that carry that part
 (for example `--lanes FM1,FM3`). The chip panel then solos them instead of
 playing the full mix, where bass and drums blur the comparison.
 
+## Review stem-template candidates
+
+Use `stem-template-candidates.json` to inspect excess partials on mapped
+tonal stems. The `shortlistedProposals` IDs identify the ranked octave and
+twelfth candidates with separate pitch or timing evidence, with a limit of
+three per 16 seconds. Check the anchor with `view --harmonics-at PITCH@TIME`.
+Phase-matched excess can still be a timbre change. Compare pitch motion,
+neighboring partials, and the attack and release in the view before accepting.
+
+On a fresh run, `--no-stem-template-notes` (MCP
+`options.noStemTemplateNotes`) skips automatic insertions and preserves the
+report and review queue. List or preview the `audio-template` proposal
+group and rebuild from `transcribe` after accepting an insertion.
+
 ## Compare an optional stem transcriber
 
 Keep Suno MIDI as the default. If `transcribers_list` reports a configured

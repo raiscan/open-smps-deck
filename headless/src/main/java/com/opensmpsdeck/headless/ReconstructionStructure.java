@@ -90,7 +90,8 @@ final class ReconstructionStructure {
         for (var part : parts) if (part.drums()) drums.add(part.id());
         var originals = score.stream().filter(note -> !note.source().equals("external")).toList();
         var candidates = score.stream().filter(note -> note.source().equals("external")).toList();
-        var tones = originals.stream().filter(note -> note.run() == null && !drums.contains(note.part())).toList();
+        var tones = originals.stream().filter(note -> note.run() == null && !drums.contains(note.part())
+                && !ReconstructionStemTemplates.SOURCE.equals(note.source())).toList();
         var patterns = patterns(bars, tones);
         var rolePatterns = midiBars == null ? patterns : patterns(midiBars, tones);
         var groups = inferred && midiBars == null ? List.<List<Pattern>>of() : group(rolePatterns);
@@ -110,7 +111,8 @@ final class ReconstructionStructure {
         for (var pattern : patterns) byBar.put(pattern.bar.id, pattern.notes);
         var programs = new HashMap<Integer, Integer>();
         for (var part : parts) programs.put(part.id(), part.program());
-        var prepared = corrected.values().stream().filter(note -> !drums.contains(note.part()))
+        var prepared = corrected.values().stream().filter(note -> !drums.contains(note.part())
+                        && !ReconstructionStemTemplates.SOURCE.equals(note.source()))
                 .sorted(ReconstructionStages.NOTE_ORDER).toList();
         var melody = ReconstructionRoles.melody(roleLayout == null ? new Layout(bars, sections, repeats) : roleLayout,
                 prepared, programs);

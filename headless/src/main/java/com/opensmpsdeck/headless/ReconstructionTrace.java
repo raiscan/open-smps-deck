@@ -736,7 +736,7 @@ public final class ReconstructionTrace {
         }
         for (var note : score.notes()) {
             switch (note.source()) {
-                case "external", "edit" -> raw.putIfAbsent(note.id(), new Raw(note, null, null));
+                case "external", "edit", ReconstructionStemTemplates.SOURCE -> raw.putIfAbsent(note.id(), new Raw(note, null, null));
                 case "audio-transcribed" -> raw.putIfAbsent(note.id(),
                         new Raw(note, replacedParts.get(note.part()).provenance(), null));
                 default -> {}
@@ -769,7 +769,7 @@ public final class ReconstructionTrace {
 
     private static Origin origin(Raw raw, Map<PartOnset, Refinement> refinements, ReconstructionTimeMap timeline) {
         Note note = raw.note;
-        var refinement = raw.external != null || "edit".equals(note.source()) ? null : refinements.get(new PartOnset(note.part(), note.midi().startUs()));
+        var refinement = raw.external != null || "edit".equals(note.source()) || ReconstructionStemTemplates.SOURCE.equals(note.source()) ? null : refinements.get(new PartOnset(note.part(), note.midi().startUs()));
         if (refinement == null) return new Origin(at(note, TimeBase.source, timeline), note.source(), raw.external, null, List.of());
         var original = refinement.original;
         String provenance = note.source();

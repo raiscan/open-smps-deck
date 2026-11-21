@@ -768,6 +768,30 @@ field and edit spans accept `{"section":"chorus-1"}`. See the
 [musical sections guide](../docs/architecture/reconstruction-stages.md#musical-sections)
 for payloads, split and merge, and MCP equivalents.
 
+### Recover missing notes from mapped stems
+
+Staged `reconstruct run` and `reconstruct transcribe` measure excess
+partials 2–4 on each mapped tonal stem and record them in
+`stem-template-candidates.json`. For review, the detector focuses on the
+octave and twelfth, up to C7 or the highest written pitch on the part.
+It compares each peak to the same phase of nearby isolated notes with
+similar duration and velocity and checks whether neighboring partials
+also grew. An upper ridge needs evidence of separate pitch or timing to
+be shortlisted. A tightly matched glide or vibrato suppresses the proposal.
+
+The strongest shortlist entries become agent `insertNote` proposals in
+the `audio-template` group, with up to three per 16 seconds of source
+time across the song. The report includes the shortlist IDs and other
+peaks. A strong, distinct attack with enough control notes can add
+harmony with `audio-template` provenance. Use `--no-stem-template-notes`
+on a fresh run (MCP `options.noStemTemplateNotes`) to suppress those
+automatic insertions.
+
+Use the proposal commands above to list, preview, accept or reject entries.
+Acceptance takes effect on a rebuild from `transcribe`. Retranscription
+refreshes the pending detector queue and keeps accepted edits and
+rejection history.
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then
