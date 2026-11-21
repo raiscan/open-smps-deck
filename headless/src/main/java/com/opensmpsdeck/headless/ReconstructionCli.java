@@ -5,6 +5,7 @@ import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.project.LoadedProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.StudioProject;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -255,8 +256,9 @@ final class ReconstructionCli {
         if (previous != null)
             ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
-                result.lanes().get("FM1")));
-        return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning);
+                result.representative("FM1", allocated.get("FM1"))));
+        return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning,
+                result.voiceAssignments(), result.sourceInstruments());
     }
 
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
@@ -267,11 +269,33 @@ final class ReconstructionCli {
         var allocated = ReconstructionVoicing.byLane(allocation);
         var targets = ReconstructionVoicing.lanesNeedingFit(previous, allocated);
         ReconstructionVoicing.Result fitted = null;
-        if (!targets.isEmpty()) {
+        boolean needsSourceFit = previous.sourceInstruments() != null && allocated.entrySet().stream()
+                .filter(entry -> !entry.getKey().equals("DAC"))
+                .flatMap(entry -> entry.getValue().stream())
+                .filter(entry -> entry.role() != ReconstructionRoles.Role.drums)
+                .anyMatch(entry -> {
+                    var sound = previous.sourceInstruments().get(ReconstructionVoicePlan.SourceInstrument.id(entry.note().part()));
+                    return sound == null;
+                });
+        if (!targets.isEmpty() || needsSourceFit) {
             var source = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), timeline);
-            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, targets, null));
+            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, previous.sourceInstruments() == null ? targets : java.util.Set.of(), null));
         }
         var result = ReconstructionVoicing.keepCompatible(previous, fitted, allocated, report);
+        if (result.sourceInstruments() != null) {
+            var instruments = new LinkedHashMap<>(result.sourceInstruments());
+            var spilled = allocated.entrySet().stream().filter(e -> e.getKey().startsWith("PSG"))
+                    .flatMap(e -> e.getValue().stream()).filter(n -> n.role() != ReconstructionRoles.Role.drums)
+                    .collect(java.util.stream.Collectors.groupingBy(n -> n.note().part()));
+            for (var part : score.source().parts()) {
+                String id = ReconstructionVoicePlan.SourceInstrument.id(part.id());
+                var sound = instruments.get(id);
+                if (sound == null || sound.psgVariantId() != null || !spilled.containsKey(part.id())) continue;
+                var match = ReconstructionSpill.match(catalogue, sound.fm(), part, spilled.get(part.id()));
+                instruments.put(id, new ReconstructionVoicing.SourceSound(sound.fm(), match.variantId(), match.volumeOffset()));
+            }
+            result = result.withSourceInstruments(instruments);
+        }
         result = ReconstructionVoicing.withCymbalGains(result,
                 ReconstructionCymbals.gains(score, allocated.getOrDefault("PSG3", List.of())));
         ReconstructionVoicing.validate(result, allocation, catalogue, timeline.frames());
@@ -300,11 +324,15 @@ final class ReconstructionCli {
         var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
-        var copyLanes = voicing.lanes().values().stream().map(lane -> lane.effects().copy())
-                .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).sorted().toList();
-        var leadVoice = voicing.lanes().get("FM1");
-        var articulation = leadVoice == null ? ReconstructionVoicing.WRITTEN : leadVoice.articulation();
-        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, articulation);
+        var instruments = voicing.sourceInstruments();
+        var copyLanes = java.util.stream.Stream.concat(voicing.lanes().values().stream(),
+                        instruments == null ? java.util.stream.Stream.empty()
+                                : instruments.values().stream().map(ReconstructionVoicing.SourceSound::fm))
+                .map(lane -> lane.effects().copy())
+                .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).distinct().sorted().toList();
+        var leadNotes = ordered.notes().stream().filter(entry -> "FM1".equals(entry.lane())).toList();
+        var leadVoice = voicing.representative("FM1", leadNotes);
+        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
                 null, null, null, null, allocation.chordVoicings());
         var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
@@ -313,7 +341,6 @@ final class ReconstructionCli {
         var assemblyInputs = assemblyInputs(score, allocation, voicing);
         var layout = ReconstructionClipLinks.Layout.read(work);
         var layoutPath = work.resolve(ReconstructionClipLinks.LAYOUT);
-        var leadNotes = ordered.notes().stream().filter(entry -> "FM1".equals(entry.lane())).toList();
         var sustain = matchQuietly(() -> ReconstructionSustain.inspect(score, catalogue, leadNotes, leadVoice));
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
@@ -321,7 +348,8 @@ final class ReconstructionCli {
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, authored.scopes(), playback.origins(), drumGains, layout, authored.instruments()),
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
+                            authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments),
                     out, existing, assemblyInputs);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
             edits.addAll(outcomes);
@@ -342,6 +370,11 @@ final class ReconstructionCli {
             var plan = ReconstructionVoicePlan.saved(work);
             if (plan != null && !plan.issues().isEmpty())
                 report.add("voiceEditIssues", json.toJsonTree(plan.issues()));
+            if (instruments != null) {
+                var project = ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project();
+                report.addProperty("fmPatchSwitchBytes", fmPatchSwitchBytes(project));
+                report.addProperty("fmPatchBankBytes", project.voices().size() * 25);
+            }
             if (!allocation.chords().isEmpty()) report.add("chordVoicings", json.toJsonTree(allocation.chords()));
             report.add("sustainProbe", json.toJsonTree(sustain));
             report.add("voicingWarnings", json.toJsonTree(sustain.warning() == null ? List.of() : List.of(sustain.warning())));
@@ -378,7 +411,7 @@ final class ReconstructionCli {
                 "allocation", ReconstructionArtifacts.fingerprint(allocation),
                 "voicing", ReconstructionArtifacts.fingerprint(
                         new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
-                                voicing.voiceAssignments())));
+                                voicing.voiceAssignments(), voicing.sourceInstruments())));
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
@@ -397,6 +430,28 @@ final class ReconstructionCli {
             var choices = ReconstructionVoiceStage.choices(catalogue, lane, notes);
             result.put(id, choices);
             var kind = id.startsWith("PSG") ? Kind.PSG_VOLUME : Kind.FM_VOICE;
+            var laneChoices = new LinkedHashMap<>(choices);
+            for (var entry : notes) {
+                int part = entry.note().part();
+                var sound = entry.role() == ReconstructionRoles.Role.drums ? null : voicing.sourceSound(id, part);
+                if (sound == null) continue;
+                var key = new ReconstructionVoices.Key(part, null);
+                if (choices.containsKey(key)) continue;
+                boolean fm = kind == Kind.FM_VOICE;
+                var profile = sound.fm();
+                var choice = ReconstructionVoiceStage.choice(catalogue, fm ? profile.variantId() : sound.psgVariantId(),
+                        null, profile.patchReason(), fm ? profile.shortlist() : List.of());
+                choices.put(key, choice);
+                if (fm) {
+                    var asset = catalogue.asset(choice.assetId());
+                    var articulation = sound.settings(lane, true).articulation();
+                    String emitted = ReconstructionVoicing.patchId(asset, ReconstructionVoicing.patchBytes(asset, articulation));
+                    evidence.add(new MatchEvidence(kind, id, key, new ReconstructionVoices.Choice(emitted,
+                            choice.variantId(), choice.name(), null, choice.status(), choice.probes(), choice.shortlist())));
+                } else {
+                    evidence.add(new MatchEvidence(kind, id, key, choice.report()));
+                }
+            }
             if (lane.variantId() != null && lane.articulation().minimumReleaseRate() > 0) {
                 var asset = catalogue.match(lane.variantId()).asset();
                 String emitted = ReconstructionVoicing.patchId(asset, ReconstructionVoicing.patchBytes(asset, lane.articulation()));
@@ -404,10 +459,26 @@ final class ReconstructionCli {
                         new ReconstructionVoices.Choice(emitted, choice.variantId(), choice.name(), null,
                                 choice.status(), choice.probes(), choice.shortlist()))));
             } else {
-                recordMatches(evidence, id, kind, choices);
+                recordMatches(evidence, id, kind, laneChoices);
             }
         });
         return new Matched(result, evidence, List.of());
+    }
+
+    static int fmPatchSwitchBytes(StudioProject project) {
+        var sources = project.sequences().stream().collect(java.util.stream.Collectors.toMap(
+                com.opensmpsdeck.project.Sequence::id, java.util.function.Function.identity()));
+        int bytes = 0;
+        for (var clip : project.clips()) {
+            if (!clip.lane().startsWith("FM")) continue;
+            var sequence = sources.get(clip.sequenceId());
+            for (var command : sequence.commands()) {
+                if (command.command() == com.opensmpsdeck.project.NativeCommand.FM_VOICE
+                        && command.tick() < clip.lengthTicks())
+                    bytes += 2 * (1 + (clip.lengthTicks() - 1 - command.tick()) / sequence.lengthTicks());
+            }
+        }
+        return bytes;
     }
 
     private static void recordMatches(List<MatchEvidence> evidence, String lane, Kind kind,

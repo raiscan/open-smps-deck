@@ -26,7 +26,7 @@ final class VoicePatchShortlist {
     record RankedPatch(String id, double score) {}
     private record Key(String asset, int pitch) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
-    private record Probe(int pitch, float[] target, float[] weights) {}
+    private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
     private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile) {}
     private static final Map<Key, Template> TEMPLATES = new ConcurrentHashMap<>();
 
@@ -45,7 +45,7 @@ final class VoicePatchShortlist {
 
     List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
                            Path mix, Map<Integer, Path> stems, VoiceWindows windows,
-                           InstrumentCatalogue.Variant incumbent) throws IOException {
+                           InstrumentCatalogue.Variant incumbent, boolean foreground) throws IOException {
         var available = new ArrayList<>(notes.stream().filter(n -> windows.trainingAttack(n.startTick(), ATTACK_TICKS)).toList());
         var occupied = new java.util.HashMap<String, int[]>();
         available.sort(Comparator.comparingInt((ReconstructionAllocation.Entry note) -> {
@@ -54,7 +54,8 @@ final class VoicePatchShortlist {
             int[] coverage = occupied.computeIfAbsent(stem, ignored -> coverage(context, stems, stem, windows.songFrames()));
             return coverage[note.startTick()];
         }).thenComparing(Comparator.comparingInt((ReconstructionAllocation.Entry n) ->
-                Math.min(ATTACK_TICKS, n.endTick() - n.startTick())).reversed()));
+                Math.min(foreground ? 18 : ATTACK_TICKS, n.endTick() - n.startTick())).reversed())
+                .thenComparingInt(n -> foreground ? -n.note().velocity() : 0));
         var chosen = new ArrayList<ReconstructionAllocation.Entry>();
         var probes = new ArrayList<Probe>();
         var durations = new java.util.HashMap<Path, Long>();
@@ -67,7 +68,7 @@ final class VoicePatchShortlist {
                 end = ReferenceAudio.durationMicros(path);
                 durations.put(path, end);
             }
-            var probe = probe(path, end, note);
+            var probe = probe(path, end, note, foreground);
             if (probe == null) continue;
             chosen.add(note);
             probes.add(probe);
@@ -131,9 +132,12 @@ final class VoicePatchShortlist {
     }
 
     private RankedPatch rank(InstrumentCatalogue.Variant variant, List<Probe> probes) throws IOException {
-        double score = 0;
-        for (var probe : probes) score += similarity(probe, template(variant, probe.pitch()).spectrum());
-        return new RankedPatch(variant.id(), probes.isEmpty() ? 0 : score / probes.size());
+        double score = 0, exposure = 0;
+        for (var probe : probes) {
+            score += probe.exposure() * similarity(probe, template(variant, probe.pitch()).spectrum());
+            exposure += probe.exposure();
+        }
+        return new RankedPatch(variant.id(), exposure == 0 ? 0 : score / exposure);
     }
 
     private static int[] coverage(List<ReconstructionAllocation.Entry> notes, Map<Integer, Path> stems,
@@ -154,7 +158,8 @@ final class VoicePatchShortlist {
         return activity;
     }
 
-    private Probe probe(Path path, long audioEnd, ReconstructionAllocation.Entry note) throws IOException {
+    private Probe probe(Path path, long audioEnd, ReconstructionAllocation.Entry note, boolean foreground)
+            throws IOException {
         double start = note.note().start();
         double duration = ATTACK_TICKS / (double) PRESENTATIONS_PER_SECOND;
         if (start + duration > audioEnd / 1e6) return null;
@@ -170,7 +175,8 @@ final class VoicePatchShortlist {
         var weights = new float[target.length];
         for (int i = 0; i < target.length; i++)
             weights[i] = 1 / (target[i] + .03f * peak);
-        return new Probe(note.note().pitch(), target, weights);
+        double exposure = foreground ? Math.sqrt(peak * Math.min(ATTACK_TICKS, note.endTick() - note.startTick())) : 1;
+        return new Probe(note.note().pitch(), target, weights, exposure);
     }
 
     private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {

@@ -795,9 +795,8 @@ public final class ReconstructionTrace {
                 S3kReconstruction.Reduction::id);
         var bends = index(reportList(report, "bends", ReconstructionBendEncoding.Applied.class, exact || legacy),
                 ReconstructionBendEncoding.Applied::id);
-        var lead = voicing.lanes().get("FM1");
         var playback = ReconstructionRetriggers.articulate(allocation.notes(), score.retriggers(), timeline,
-                lead == null ? ReconstructionVoicing.WRITTEN : lead.articulation());
+                voicing::articulation);
         var gates = new ArrayList<Voiced>();
         if (exact) {
             for (var gate : reportList(report, "voicedGates", S3kReconstruction.VoicedGate.class, true)) {
@@ -808,9 +807,7 @@ public final class ReconstructionTrace {
             for (var entry : playback.notes()) {
                 String id = entry.note().id();
                 if (entry.lane() == null || reductions.containsKey(id) || allocation.chords().containsKey(id)) continue;
-                var voice = voicing.lanes().get(entry.lane());
-                int duration = S3kReconstruction.voicedDuration(entry,
-                        voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation());
+                int duration = S3kReconstruction.voicedDuration(entry, voicing.articulation(entry));
                 gates.add(new Voiced(id, entry.lane(), entry.note().pitch(),
                         ticks(entry.startTick(), entry.startTick() + duration, timeline), bends.get(id),
                         legacy ? "legacy-report-and-voicing" : "voicing-projection"));

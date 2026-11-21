@@ -137,7 +137,12 @@ only when an explicit roleplan or edit selector requests it.
 
 ## Identify and assign voices
 
-The `voices` stage groups role-stage notes into named source instruments.
+The `voices` stage groups role-stage notes into named function voices.
+The top-level `instruments` array records the MIDI part, program and mapped
+stem for each source instrument. Tonal voices reference them with
+`instrumentIds`. A split into line and chords retains the same instrument
+for both. A manually merged voice may reference more than one source
+instrument, and each note keeps its source identity until assigned explicitly.
 A voice can carry different roles over time. Parts with a recurring melody
 or counter line and repeated stacked accompaniment can propose separate
 line and chord voices. The detector checks attack patterns within musical
@@ -201,11 +206,10 @@ reductions. A melody voice assigned to FM keeps ordinary FM1 overlap
 handling before using another FM lane. An explicit assignment follows each allocated note through
 lane changes. It takes precedence over lane and scoped instrument settings.
 Assigned FM patches preserve their native release rates across lanes.
-Gain, gate and effects still come from the lane and its applicable overrides.
-Instrument changes involving an assignment start a new clip when needed.
-The assembly report counts applied assignments by lane and any extra clips
-from these boundaries in `voiceAssignmentExtraClips`. Unassigned voices are
-annotations and preserve the normal allocation and fit.
+Gain, gate and effects come from the source instrument and its applicable
+lane overrides. Instrument changes involving an assignment start a new clip
+when needed. The assembly report counts applied assignments by lane and
+any extra clips from these boundaries in `voiceAssignmentExtraClips`.
 
 MCP `reconstruct_voices` takes `workDir`, optional `action`, and an `entries`
 array for mutations. Call `reconstruct_stage` with `stage: "voices"` to
@@ -1029,11 +1033,31 @@ the substitute cannot play.
 
 ### Voice
 
-`voicing.json` maps hardware lane IDs to settings under `lanes`. FM lanes
-have one `variantId` for the allocated notes. The `shortlist` lists up to
-18 candidate IDs, their pitch-aligned attack match scores (higher is better),
-and their contextual fit and held-out errors (lower is better). DAC and PSG
-retain part-level matching under `instruments`. DAC entries also specify
+Fresh `voicing.json` stores tonal profiles in `sourceInstruments`, keyed by
+the instrument ID from `voices.json`. Each profile has one FM variant,
+linear gain, articulation, and effects under `fm`. Every allocated FM lane
+uses the same profile. The `shortlist` lists up to 18 candidate IDs, their
+pitch-aligned attack match scores (higher is better), and their contextual
+fit and held-out errors (lower is better). For a part that spills to PSG,
+`psgVariantId` and `psgVolumeOffset` approximate that FM patch's attack,
+sustain, release, and loudness using the catalogue's PSG envelopes and
+hardware level steps. Automatic matching rejects muted attacks and mute pulses
+and keeps the quietest spill audible for its first three frames or its full
+gate if shorter. For otherwise
+identical simultaneous harmony or counter attacks, allocation offers FM to the
+longer note first. In stem-backed runs, allocation omits a repeat-consensus
+backing note when an allocated note of the same part and pitch already covers
+its full gate.
+A fresh written attack still bounds a lead's inferred legato extension when
+it carries a backing role.
+
+The `lanes` map retains DAC and PSG3 drum settings and explicit lane
+overrides. New tonal lanes start with unity gain and inherit their source
+profile. A lane-wide FM `variantId`, a PSG part entry in `lanes.*.instruments`,
+or a scoped patch override can replace the default. An explicit voice
+assignment takes priority over these patch choices. Existing lane-only
+files can still be assembled. Back up or move one aside before refitting
+to adopt the shared defaults. DAC `instruments` entries also specify
 `drumPitch`. A fitted DAC entry also has a `drumSelection` with the chosen
 rate, optional stem slice and match evidence. To use a different catalogue
 variant at its native rate, change `variantId` and remove `drumSelection`.
@@ -1054,11 +1078,19 @@ Without enough stem evidence the substitute uses its base level.
 
 The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude
-spectrum as a sum of lane spectra and uses constrained least squares to
-estimate the lane gains. The mix models all lanes. Where stems are supplied,
-the stem objective also compares the lane's notes from its most represented
-stem against that reference. Separate excerpts validate patch changes.
-An FM lane that spends most of its sounding time in a low register can
+spectrum as a sum of instrument spectra and uses constrained least squares
+to estimate instrument gains. Each candidate plays the part's allocated
+notes in the fit excerpts. When a source instrument carries an established
+melody and backing, its line drives the shared patch, gain and articulation.
+Excerpt selection weights sustained, higher-velocity line notes more heavily
+and discounts ticks covered by that source instrument's other notes. The
+attack shortlist also favors exposed, sustained onsets and weighs stronger
+audio probes more heavily. If none of the candidates explains enough of the
+line’s attack spectrum, the fit uses the whole part as evidence. The same
+profile plays the backing voices.
+Where stems are supplied, the stem objective compares the fit notes against
+their mapped source. Separate excerpts validate patch changes. The final
+level accounts for backing that will play at the same gain. A low-register instrument on one FM lane can
 refine its patch using its mapped stem. This pass compares the first 16
 harmonics and the low-frequency energy of notes played with their preceding
 note context. A replacement must improve two sets of note excerpts.
@@ -1266,6 +1298,10 @@ Assembly reads the selected voices, gates, gains and native effect settings
 from `voicing.json`. The output is `arrangement.smps.json`, `arrangement.smps.zip`,
 `render.wav`, and `report.json`. The report includes stage totals,
 matcher evidence with lane IDs, and reductions with note IDs and reasons.
+`fmPatchSwitchBytes` counts two bytes for each explicit FM patch selection
+inside a compiled clip, including scoped changes and repeat occurrences.
+Initial clip voice selections are part of clip reset and excluded.
+`fmPatchBankBytes` counts 25 bytes per FM patch installed in the bank.
 `tempoCurve` includes the start and end BPM when known, the maximum sustained
 fractional deviation from the opening tempo, confidence, whether a warp
 was applied, the steady BPM when applicable, and the presentation-rounded

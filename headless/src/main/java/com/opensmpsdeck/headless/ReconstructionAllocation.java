@@ -312,7 +312,7 @@ final class ReconstructionAllocation {
             var attack = allocator.pending.remove();
             var chord = chords.get(attack.note().id());
             if (chord == null) {
-                allocator.place(attack);
+                if (!hasStems || !allocator.dropCoveredUnison(attack)) allocator.place(attack);
                 continue;
             }
             String anchor = anchors.get(chord);
@@ -379,6 +379,7 @@ final class ReconstructionAllocation {
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
+                .thenComparingInt(a -> a.role() == Role.harmony || a.role() == Role.counter ? a.start - a.end : 0)
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER);
     }
 
@@ -439,6 +440,22 @@ final class ReconstructionAllocation {
 
     private double salience(Note note) {
         return salience.getOrDefault(origin(note), 0.0);
+    }
+
+    private boolean dropCoveredUnison(Attack attack) {
+        // A merged MIDI part can contain real written doublings. Remove only
+        // repeat-consensus fills, which should not double a retained attack.
+        if (!backing(attack.role()) || !attack.note().source().equals("consensus")
+                || attack.pin != null || attack.note().run() != null) return false;
+        var cover = tail.values().stream()
+                .filter(entry -> entry.role() != Role.drums && entry.pinnedLane() == null
+                        && entry.note().run() == null && !chordAnchors.contains(entry.note().id())
+                        && entry.note().part() == attack.note().part() && entry.note().pitch() == attack.note().pitch()
+                        && entry.startTick() <= attack.start && entry.endTick() >= attack.end)
+                .min(Comparator.comparingInt(Entry::startTick).thenComparing(entry -> entry.note().id())).orElse(null);
+        if (cover == null) return false;
+        drop(attack, "covered-source-unison", List.of(cover.note().id()));
+        return true;
     }
 
     private void place(Attack attack) {
