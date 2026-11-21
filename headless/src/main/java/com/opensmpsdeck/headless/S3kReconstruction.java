@@ -749,13 +749,13 @@ final class S3kReconstruction {
             int end = Math.min(frames, dry.end + settings.delayFrames());
             var names = settings.laneType().lanes();
             String reason = null;
+            ReconstructionLayers.Curve curve = null;
             FreeSlot slot = null;
             if (!targetFm && fmOnly) reason = "PSG disabled by FM-only reconstruction";
             else if (start >= end) reason = "Layer starts outside the render";
             else if (noiseKind(dry) != PsgMode.TONE) reason = "Source note uses a noise lane";
-            else if (pitch < (targetFm ? 12 : 45) || pitch > (targetFm ? 106 : 117))
+            else if (dry.bend == null && (pitch < (targetFm ? 12 : 45) || pitch > (targetFm ? 106 : 117)))
                 reason = "Pitch is outside the target chip range";
-            else if (dry.bend != null) reason = "Source note has a rendered pitch bend";
             else {
                 slot = freeSlot(targetFm ? fm : psg, names, source.entry().lane(), start, end);
                 if (slot == null) reason = "No free " + settings.laneType() + " lane for the full layer gate";
@@ -768,12 +768,14 @@ final class S3kReconstruction {
                 var layer = targetFm
                         ? fmLayer(dry, tone, fmVoice, layerNote, settings, start, end, voices, catalogue, instruments)
                         : psgLayer(dry, tone, fmVoice, psgVoice, layerNote, settings, start, end, envelopes, levels);
-                if (layer != null) slot.lane().add(slot.index(), layer);
-                else reason = targetFm ? "No usable FM instrument" : "Source has no measurable PSG level match";
+                if (layer != null) {
+                    curve = copyBend(dry, layer, fmVoice, targetFm, settings.detune());
+                    slot.lane().add(slot.index(), layer);
+                } else reason = targetFm ? "No usable FM instrument" : "Source has no measurable PSG level match";
             }
             results.add(ReconstructionLayers.Result.of(id, request,
                     reason == null ? ReconstructionLayers.Status.applied : ReconstructionLayers.Status.skipped,
-                    reason, reason == null ? slot.id() : null, pitch, start, end > start ? end : null));
+                    reason, reason == null ? slot.id() : null, pitch, start, end > start ? end : null, curve));
             placedIds.add(id);
         }
         layers.forEach((id, request) -> {
@@ -785,6 +787,15 @@ final class S3kReconstruction {
                         "Source has no independent playable tonal gate", null, null, null, null));
         });
         return List.copyOf(results);
+    }
+
+    private static ReconstructionLayers.Curve copyBend(Placement dry, Placement layer, Voice source,
+                                                       boolean targetFm, int detune) throws java.io.IOException {
+        if (dry.bend == null) return null;
+        var copy = ReconstructionLayerPitch.copy(dry.bend, source, targetFm, layer.end - layer.event.start(),
+                dry.event.note().pitch(), layer.event.note().pitch(), detune);
+        layer.bend = copy.fit();
+        return copy.curve();
     }
 
     private static Placement fmLayer(Placement dry, Tone tone, Voice voice, MidiScore.Note note,
@@ -822,7 +833,8 @@ final class S3kReconstruction {
     private static Placement psgLayer(Placement dry, Tone tone, Voice fm, Envelope psg, MidiScore.Note note,
                                       ReconstructionLayers.Settings settings, int start, int end, Map<String, Envelope> envelopes,
                                       ReconstructionLanePolicies.Levels levels) throws java.io.IOException {
-        int volume = levels.volume(fm, psg, dry.event.note().pitch(), tone.volume(), note.pitch(), LAYER_PSG,
+        int volume = levels.volume(fm, psg, dry.event.note().pitch(), tone.volume(), dry.bend == null ? note.pitch() : Math.clamp(note.pitch(), 45, 115),
+                LAYER_PSG,
                 end - start, -settings.attenuation() * ReconstructionLayers.DB_PER_TL);
         if (volume == 0) return null;
         envelopes.putIfAbsent(LAYER_PSG.id(), LAYER_PSG);
@@ -879,6 +891,7 @@ final class S3kReconstruction {
             var selected = claimed.computeIfAbsent(new PolicyKey(kind, mode), ignored -> new HashSet<>());
             var freed = new ArrayList<FreedWindow>();
             var byLane = new LinkedHashMap<String, Integer>();
+            var bendLayers = new ArrayList<ReconstructionLanePolicies.BendLayer>();
             int eligible = 0, count = 0, busy = 0, incompatible = 0, movedFromFm = 0;
             for (var source : sources) {
                 var entry = source.entry();
@@ -891,11 +904,19 @@ final class S3kReconstruction {
                 int pitch = rule.pitch(dry.event.note().pitch());
                 int start = dry.event.start() + rule.delay();
                 int end = Math.min(frames, dry.end + rule.delay());
-                if (end <= start || dry.bend != null || !fmDouble && (pitch < 45 || pitch > 117)
-                        || pads && (source.assigned() || entry.pinnedLane() != null || entry.laneType() != null
-                                     || noiseKind(dry) != PsgMode.TONE || dry.copy != null
-                                     || !dry.scopedTones.isEmpty() || !dry.releaseTones.isEmpty())) {
+                String incompatibleReason = null;
+                if (end <= start) incompatibleReason = "Layer starts outside the render";
+                else if (pads && dry.bend != null) incompatibleReason = "Pad routing preserves the dry FM bend";
+                else if (!fmDouble && dry.bend == null && (pitch < 45 || pitch > 117))
+                    incompatibleReason = "Pitch is outside the target chip range";
+                else if (pads && (source.assigned() || entry.pinnedLane() != null || entry.laneType() != null
+                        || noiseKind(dry) != PsgMode.TONE || dry.copy != null
+                        || !dry.scopedTones.isEmpty() || !dry.releaseTones.isEmpty()))
+                    incompatibleReason = "Pad source requires its original lane or voicing";
+                if (incompatibleReason != null) {
                     incompatible++;
+                    if (dry.bend != null) bendLayers.add(new ReconstructionLanePolicies.BendLayer(
+                            id, start, end, null, null, incompatibleReason));
                     continue;
                 }
                 var original = fromFm ? fm.get(ReconstructionAllocation.FM.indexOf(entry.lane()))
@@ -911,6 +932,8 @@ final class S3kReconstruction {
                 }
                 if (slot == null) {
                     busy++;
+                    if (dry.bend != null) bendLayers.add(new ReconstructionLanePolicies.BendLayer(
+                            id, start, end, null, null, "No free lane for the full layer gate"));
                     continue;
                 }
                 Placement placed;
@@ -929,15 +952,22 @@ final class S3kReconstruction {
                     }
                 } else {
                     int volume = levels.volume(voices.get(tone.asset()), envelopes.get(tone.asset()),
-                            dry.event.note().pitch(), tone.volume(), pitch, envelope, end - start, rule.db());
+                            dry.event.note().pitch(), tone.volume(), dry.bend == null ? pitch : Math.clamp(pitch, 45, 115),
+                            envelope, end - start, rule.db());
                     if (volume == 0) {
                         incompatible++;
+                        if (dry.bend != null) bendLayers.add(new ReconstructionLanePolicies.BendLayer(
+                                id, start, end, null, null, "Source has no measurable PSG level match"));
                         continue;
                     }
                     envelopes.putIfAbsent(envelope.id(), envelope);
                     var note = dry.event.note();
                     var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
                     placed = new Placement(new Event(pitched, start, end, dry.event.priority(), envelope.id(), volume));
+                }
+                if (dry.bend != null) {
+                    var curve = copyBend(dry, placed, voices.get(tone.asset()), fmDouble, fmDouble ? rule.fmDetune() : 0);
+                    bendLayers.add(new ReconstructionLanePolicies.BendLayer(id, start, end, slot.id(), curve, null));
                 }
                 if (pads && slot.lane() == original) slot.lane().set(slot.index(), placed);
                 else {
@@ -957,7 +987,7 @@ final class S3kReconstruction {
             }
             int promoted = promoteCounters(scoped, sources, freed, moved, fm, psg, voices, gates, catalogue, instruments, parts);
             coverage.add(new ReconstructionLanePolicies.Coverage(scoped.index(), kind, mode, eligible, count,
-                    busy, incompatible, movedFromFm, promoted, byLane));
+                    busy, incompatible, movedFromFm, promoted, byLane, bendLayers.isEmpty() ? null : List.copyOf(bendLayers)));
         }
         return List.copyOf(coverage);
     }

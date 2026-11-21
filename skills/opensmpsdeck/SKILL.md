@@ -218,6 +218,9 @@ publishing. [Studio controls](../../docs/user-guide/studio.md#review-a-reconstru
 `pads`, `leadEcho`, `psgDouble` and `fmDouble` (chorus or echo) layers on
 free PSG and FM lanes, scoped by `voice`, `section` or `span`. The
 `s3k-layering` preset combines an octave PSG double with a 14-frame FM echo.
+Per-note layers and copy policies follow rendered bends, including the
+dry note's vibrato. Check the curve fit and cents RMS error in `noteLayers`
+or `lanePolicies[].bendLayers` in the report.
 Use `reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering`, MCP
 `options.lanePolicyPreset`, or Studio **Lane policies → S3K layering**.
 The echo defaults to 11 carrier TL steps below dry (8.25 dB nominal),

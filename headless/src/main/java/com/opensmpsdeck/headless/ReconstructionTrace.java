@@ -1022,9 +1022,10 @@ public final class ReconstructionTrace {
         for (var gate : row.voiced) out.printf("%s  voiced %s MIDI %d %s%s%n", indent, gate.lane, gate.pitch, format(gate.gate),
                 gate.bend == null ? "" : " bend " + gate.bend.mode());
         if (row.layers != null) for (var layer : row.layers)
-            out.printf("%s  layer %s %s • delay %d frames • %d TL%s%n", indent, layer.mode(), layer.status(),
+            out.printf("%s  layer %s %s • delay %d frames • %d TL%s%s%n", indent, layer.mode(), layer.status(),
                     layer.delayFrames(), layer.attenuation(), layer.lane() == null ? " • " + layer.reason()
-                            : " • " + layer.lane() + " ticks " + layer.startTick() + "–" + layer.endTick());
+                            : " • " + layer.lane() + " ticks " + layer.startTick() + "–" + layer.endTick(),
+                    layer.curve() == null ? "" : " • " + layer.curve().summary());
     }
 
     private static void printSummary(PrintStream out, String label, Summary note) {
