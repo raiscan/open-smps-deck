@@ -38,10 +38,15 @@ public final class ExternalSeparators {
     }
 
     public static List<String> configuredNames() throws IOException {
-        Path config = defaultConfig();
+        return configuredNames(null);
+    }
+
+    static List<String> configuredNames(Path config) throws IOException {
+        Path file = config == null ? defaultConfig() : config;
         String override = System.getenv(CONFIG_ENV);
-        if ((override == null || override.isBlank()) && Files.notExists(config, NOFOLLOW_LINKS)) return List.of();
-        return List.copyOf(commands(config).keySet());
+        if (config == null && (override == null || override.isBlank()) && Files.notExists(file, NOFOLLOW_LINKS))
+            return List.of();
+        return List.copyOf(commands(file).keySet());
     }
 
     public static Path separate(Path input, Path output, String name, String device, Path config,

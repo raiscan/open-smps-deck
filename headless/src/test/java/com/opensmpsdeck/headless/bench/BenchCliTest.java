@@ -229,8 +229,9 @@ class BenchCliTest {
         assertEquals(0, cli("run", manifest.toString(), index.toString(), first.toString(), "--quick", "--jobs", "1"));
         assertEquals(0, cli("run", manifest.toString(), index.toString(), second.toString(), "--quick", "--jobs", "2"));
         var card = BenchFiles.read(first.resolve("scorecard.json"), BenchScorecard.Card.class);
-        assertEquals(1.0, card.overall().mean().get("noteF1"));
-        assertEquals(1.0, card.overall().mean().get("offsetF1"));
+        // The default layering adds a PSG octave and an FM echo to this one unaccompanied note.
+        assertEquals(.5, card.overall().mean().get("noteF1"));
+        assertEquals(.5, card.overall().mean().get("offsetF1"));
         assertEquals(1.0, card.overall().mean().get("voiceTop1"));
         assertEquals(1.0, card.overall().mean().get("voiceTop3"));
         assertEquals(-1, Files.mismatch(first.resolve("scorecard.json"), second.resolve("scorecard.json")));

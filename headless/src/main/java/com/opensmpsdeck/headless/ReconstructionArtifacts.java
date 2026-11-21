@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
@@ -107,6 +108,8 @@ final class ReconstructionArtifacts {
                     shape(at + "." + field.getKey(), args[1], field.getValue());
                 }
             }
+        } else if (type == JsonObject.class) {
+            require(value.isJsonObject(), at, "expected an object");
         } else if (type == ReconstructionLanePolicies.Configuration.class) {
             // Its adapter validates the explicit-rule array or named preset object.
             return;

@@ -181,6 +181,17 @@ public final class SunoImport {
                                  String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
                                  String drumDetector, String device, Path configFile,
                                  ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, transcriber, audioOnly, audioTranscriber,
+                stemRoles, transcriberFor, drumDetector, device, configFile, null, null, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, boolean audioOnly,
+                                 String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
+                                 String drumDetector, String device, Path configFile, String lanePolicyPreset,
+                                 Path separatorConfig, ReconstructionStages.Progress progress) throws IOException {
+        if (lanePolicyPreset != null && !Set.of("off", ReconstructionLanePolicies.S3K_LAYERING).contains(lanePolicyPreset))
+            throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
         Path source = folder.toRealPath();
         if (!Files.isDirectory(source)) throw new IOException("Expected a Suno folder: " + source);
         Path work = prepareWork(source, workDir);
@@ -269,6 +280,12 @@ public final class SunoImport {
         if (!gaps.isEmpty() && status == Status.ok) status = Status.warning;
         var request = audioOnly ? (status == Status.error ? null : audioRequest)
                 : runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
+        if (request != null && (lanePolicyPreset != null || separatorConfig != null)) {
+            var options = new LinkedHashMap<>(request.options);
+            if (lanePolicyPreset != null) options.put("lanePolicyPreset", lanePolicyPreset);
+            if (separatorConfig != null) options.put("separatorConfig", separatorConfig.toString());
+            request = new RunRequest(request.workDir, request.inputs, options);
+        }
         var args = request == null ? List.<String>of() : runArguments(request);
         String command = args.isEmpty() ? null : "java -jar \"$DECK_JAR\" " + args.stream()
                 .map(arg -> arg.equals(CATALOGUE) ? "\"$CATALOGUE\"" : shellQuote(arg))
@@ -313,8 +330,8 @@ public final class SunoImport {
         String transcriber = null, audioTranscriber = null;
         var stemRoles = new LinkedHashMap<String, String>();
         var transcriberFor = new TreeMap<String, String>();
-        String drumDetector = null, device = null;
-        Path configFile = null;
+        String drumDetector = null, device = null, lanePolicyPreset = null;
+        Path configFile = null, separatorConfig = null;
         var assignments = new LinkedHashMap<String, Integer>();
         var exclusions = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
@@ -341,6 +358,8 @@ public final class SunoImport {
                     audioTranscriber = value;
                 }
                 case "--transcriber-for" -> ExternalTranscribers.putRoleOverride(transcriberFor, value);
+                case "--lane-policy-preset" -> lanePolicyPreset = value;
+                case "--separator-config" -> separatorConfig = Path.of(value).toAbsolutePath().normalize();
                 case "--transcriber-config" -> configFile = Path.of(value).toAbsolutePath().normalize();
                 case "--transcriber-device" -> device = value;
                 case "--drum-detector" -> drumDetector = value;
@@ -362,7 +381,7 @@ public final class SunoImport {
             }
         }
         var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber,
-                audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, (a, b, c) -> {});
+                audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -1078,6 +1097,12 @@ public final class SunoImport {
                 args.add("--stem-role");
                 args.add(label + "=" + role);
             });
+        }
+        for (String[] option : List.of(new String[]{"lanePolicyPreset", "--lane-policy-preset"},
+                new String[]{"separatorConfig", "--separator-config"})) {
+            if (!request.options.containsKey(option[0])) continue;
+            args.add(option[1]);
+            args.add(request.options.get(option[0]).toString());
         }
         if (request.options.containsKey("leadPart")) {
             args.add("--lead-part");

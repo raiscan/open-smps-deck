@@ -188,7 +188,7 @@ public final class ReconstructionStages {
                                 boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached,
                                 @Nullable String lanePolicyPreset,
                                 Map<String, Path> audioStems, Map<String, String> stemRoles, @Nullable String drumDetector,
-                                Map<String, String> transcriberFor) {}
+                                Map<String, String> transcriberFor, @Nullable Path separatorConfig) {}
     private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Transcription initial, @Nullable Double harmonyHz,
                            java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant,
@@ -222,17 +222,18 @@ public final class ReconstructionStages {
                             boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange)
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
-            Request request = request(command, args, progress, capture);
+            Request request = request(command, args, progress, err, capture);
             if (request.chain || request.from == Stage.ASSEMBLE)
                 ReconstructionReview.requireAttached(request.work, request.overwriteDetached);
             var run = new ReconstructionManifest.Run(stageName(request.from), request.harmonyHz);
             if (request.initial != null) {
                 Files.createDirectory(request.work);
-                capture.write(request.work, request.initial.score(), List.of(args).subList(4, args.length), run);
+                capture.write(request.work, capture.relocateGeneratedStems(request.work, request.initial.score()),
+                        List.of(args).subList(4, args.length), run, request.lanePolicyPreset);
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
-            execute(request, request.work, out, preserveReview, progress, refitChange);
+            execute(request, request.work, out, preserveReview, progress, refitChange, capture);
             if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             if (request.chain) summarizeEdits(request.work, err);
@@ -270,7 +271,7 @@ public final class ReconstructionStages {
         var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false, null), oldWork, out, false,
-                (completed, total, message) -> {}, ignored -> {});
+                (completed, total, message) -> {}, ignored -> {}, null);
         summarizeEdits(work, err);
     }
 
@@ -299,7 +300,8 @@ public final class ReconstructionStages {
 
     private static void execute(Request request, Path previousWork, PrintStream out, boolean preserveReview,
                                 Progress progress,
-                                java.util.function.Consumer<String> refitChange) throws IOException {
+                                java.util.function.Consumer<String> refitChange,
+                                ReconstructionManifest.Capture capture) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
@@ -326,6 +328,7 @@ public final class ReconstructionStages {
             if (stage == Stage.TRANSCRIBE) {
                 var transcription = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
                 Score score = transcription.score();
+                if (request.initial != null && capture != null) score = capture.relocateGeneratedStems(work, score);
                 score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
                 ReconstructionArtifacts.write(scoreFile, score);
                 journal = ReconstructionStemTemplates.publish(work, journal, transcription.candidates());
@@ -403,7 +406,8 @@ public final class ReconstructionStages {
                                 ? ReconstructionCli.keepVoicing(score, allocation, previous, report)
                                 : ReconstructionCli.fitVoicing(score, allocation, previousWork.equals(work) ? previous : null,
                                         request.lanes, request.refitLevels, previousAllocation, request.variant);
-                        fitted = ReconstructionVoicing.withPercussionEvidence(fitted, allocation);
+                        var policy = previous != null ? previous.lanePolicies() : initialLanePolicy(work);
+                        fitted = ReconstructionVoicing.withPercussionEvidence(fitted.withLanePolicies(policy), allocation);
                         if (voicePlan == null) voicePlan = ReconstructionVoicePlan.saved(work);
                         if (voicePlan != null && !voicePlan.laneTypes().isEmpty()) {
                             var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
@@ -674,7 +678,15 @@ public final class ReconstructionStages {
         }
     }
 
-    private static Request request(String command, String[] args, Progress progress,
+    private static ReconstructionLanePolicies.Configuration initialLanePolicy(Path work) throws IOException {
+        Path file = work.resolve(ReconstructionManifest.FILE);
+        String preset = Files.exists(file)
+                ? ReconstructionArtifacts.read(file, ReconstructionManifest.Manifest.class).initialLanePolicyPreset() : null;
+        return "off".equals(preset) ? null
+                : ReconstructionLanePolicies.Configuration.preset(ReconstructionLanePolicies.S3K_LAYERING);
+    }
+
+    private static Request request(String command, String[] args, Progress progress, PrintStream err,
                                    ReconstructionManifest.Capture capture) throws IOException {
         boolean chain = command.equals("run");
         Stage stage = chain ? Stage.TRANSCRIBE : Stage.parse(command);
@@ -695,8 +707,6 @@ public final class ReconstructionStages {
         Path midi = audioOnly ? null : absolute(args[0]), reference = absolute(args[1]), index = absolute(args[2]), work = absolute(args[3]);
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var extra = stageOptions(args, 4, audioOnly);
-        if (extra.lanePolicyPreset != null)
-            throw new IllegalArgumentException("--lane-policy-preset requires an existing work directory");
         if (!extra.lanes.isEmpty() || extra.refitLevels || extra.keepVoicing || extra.variant != null || extra.overwriteDetached)
             throw new IllegalArgumentException("Refit and overwrite options require an existing work directory");
         String[] legacy = java.util.stream.Stream.concat(java.util.stream.Stream.of("reconstruct"),
@@ -720,14 +730,31 @@ public final class ReconstructionStages {
         Score score;
         if (audioOnly) {
             long duration = duration(reference, options);
+            boolean mappedDrums = extra.audioStems.keySet().stream().anyMatch(label ->
+                    extra.stemRoles.getOrDefault(label, ReconstructionAudioOnly.defaultRole(label)).equals("drums"));
+            Path drums = mappedDrums || extra.audioStems.isEmpty() ? null
+                    : separateDrums(reference, extra.separatorConfig, progress, err, capture, chain);
             audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, config.fallback(transcriber, true),
                     AudioDrumDetector.select(config, config.drumName(drumOverride == null ? extra.drumDetector : drumOverride),
-                            device), duration / 1e6, extra.leadPart != null);
+                            device), duration / 1e6, extra.leadPart != null, mappedDrums ? null : drums,
+                    mappedDrums ? null : reference);
+            if (drums != null) capture.recordDrums(audio.drums().keySet(), drums);
             audio.drums().forEach((id, file) -> stems.put(id, file.toString()));
             score = prepare(ReconstructionAudioOnly.drumScore(audio.provenance()), reference, options, duration,
                     ReconstructionAudioOnly.DRUM_SOURCE);
         } else {
             score = transcribe(midi, reference, options);
+            var drumParts = score.source.parts().stream().filter(MidiScore.Part::drums)
+                    .map(MidiScore.Part::id).filter(id -> !stems.containsKey(id))
+                    .filter(id -> score.source.notes().stream().anyMatch(note ->
+                            note.partId() == id && note.startUs() < score.durationUs)).toList();
+            if (!drumParts.isEmpty()) {
+                Path drums = separateDrums(reference, extra.separatorConfig, progress, err, capture, chain);
+                if (drums != null) {
+                    drumParts.forEach(id -> stems.put(id, drums.toString()));
+                    capture.recordDrums(drumParts, drums);
+                }
+            }
         }
         var source = score.source;
         var roles = new java.util.TreeMap<>(extra.transcribeParts);
@@ -767,7 +794,19 @@ public final class ReconstructionStages {
                 extra.fastRunsOff ? true : null, extra.drumSource, extra.stemTemplateNotesOff ? true : null,
                 audioOnly ? audio.provenance() : null);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz,
-                extra.lanes, extra.refitLevels, extra.keepVoicing, null, false, null);
+                extra.lanes, extra.refitLevels, extra.keepVoicing, null, false, extra.lanePolicyPreset);
+    }
+
+    private static Path separateDrums(Path reference, Path config, Progress progress, PrintStream err,
+                                      ReconstructionManifest.Capture capture, boolean chain) throws IOException {
+        int total = chain ? Stage.values().length : 1;
+        if (!ExternalSeparators.configuredNames(config).contains("bs-roformer")) {
+            String warning = "Warning: no mapped drums stem or configured bs-roformer separator; fitting drums from the mix";
+            err.println(warning);
+            progress.report(0, total, warning);
+            return null;
+        }
+        return capture.separateDrums(reference, config, (done, steps, message) -> progress.report(0, total, message));
     }
 
     private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) throws IOException {
@@ -784,7 +823,7 @@ public final class ReconstructionStages {
                 || extra.refitLevels || !extra.lanes.isEmpty()))
             throw new IllegalArgumentException("--keep-voicing requires a run through voice and cannot be combined with refit options");
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
-                || extra.transcriber != null || !extra.transcriberFor.isEmpty() || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
+                || extra.transcriber != null || extra.separatorConfig != null || !extra.transcriberFor.isEmpty() || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
@@ -802,7 +841,7 @@ public final class ReconstructionStages {
         ReconstructionDrums.Source drumSource = null;
         boolean estimate = false, audioRepeats = false, fastRunsOff = false, stemTemplateNotesOff = false;
         String steady = null, transcriber = null, device = null, variant = null, lanePolicyPreset = null;
-        Path transcriberConfig = null;
+        Path transcriberConfig = null, separatorConfig = null;
         var audioStems = new LinkedHashMap<String, Path>();
         var stemRoles = new java.util.TreeMap<String, String>();
         String drumDetector = null;
@@ -834,6 +873,11 @@ public final class ReconstructionStages {
                     if (candidates != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --candidates NOTES.json");
                     candidates = absolute(args[i]);
+                }
+                case "--separator-config" -> {
+                    if (separatorConfig != null || ++i == args.length)
+                        throw new IllegalArgumentException("Expected one --separator-config FILE");
+                    separatorConfig = absolute(args[i]);
                 }
                 case "--transcriber" -> {
                     if (transcriber != null || ++i == args.length)
@@ -955,7 +999,7 @@ public final class ReconstructionStages {
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
                 transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff,
                 stemTemplateNotesOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant,
-                overwriteDetached, lanePolicyPreset, audioStems, stemRoles, drumDetector, transcriberFor);
+                overwriteDetached, lanePolicyPreset, audioStems, stemRoles, drumDetector, transcriberFor, separatorConfig);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
