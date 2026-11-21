@@ -45,12 +45,14 @@ final class S3kReconstruction {
                   List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends,
                   List<VoicedGate> voicedGates, int assignmentClipCost, Integer arpeggioExtraNoteBytes,
                   List<ReconstructionLanePolicies.Coverage> policyCoverage,
-                  List<ReconstructionLayers.Result> layers) {
+                  List<ReconstructionLayers.Result> layers, List<CopyWindow> lanePolicyCopies) {
         Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends, List<VoicedGate> voicedGates) {
-            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of(), List.of());
+            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of(), List.of(), List.of());
         }
     }
+    record CopyWindow(String lane, int startTick, int endTick) {}
+
     record VoicedGate(String id, String lane, int pitch, int startTick, int endTick, String evidence) {
         VoicedGate(String id, String lane, int pitch, int startTick, int endTick) {
             this(id, lane, pitch, startTick, endTick, null);
@@ -547,8 +549,9 @@ final class S3kReconstruction {
         if (copies) echoNotes += addVoicingCopies(fm, frames);
         var policySources = layers.isEmpty() ? candidates
                 : candidates.stream().filter(source -> !layers.containsKey(source.origin())).toList();
+        var lanePolicyCopies = new ArrayList<CopyWindow>();
         var coverage = applyLanePolicies(policies, levels, frames, fm, psg, policySources, voices, envelopes, gates,
-                catalogue, sourceInstruments, parts, overlappingTone);
+                catalogue, sourceInstruments, parts, overlappingTone, lanePolicyCopies);
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -579,7 +582,8 @@ final class S3kReconstruction {
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
-                List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes, coverage, layerResults);
+                List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes,
+                coverage, layerResults, List.copyOf(lanePolicyCopies));
     }
 
     private static ReconstructionVoices.Choice assignedChoice(InstrumentCatalogue catalogue,
@@ -870,7 +874,7 @@ final class S3kReconstruction {
             List<ArrayList<Placement>> fm, List<ArrayList<Placement>> psg, List<PolicySource> sources,
             Map<String, Voice> voices, Map<String, Envelope> envelopes, List<VoicedGate> gates,
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
-            Map<Integer, MidiScore.Part> parts, int[] overlappingTone) throws java.io.IOException {
+            Map<Integer, MidiScore.Part> parts, int[] overlappingTone, List<CopyWindow> copies) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -981,7 +985,7 @@ final class S3kReconstruction {
                         freed.add(new FreedWindow(ReconstructionAllocation.FM.indexOf(entry.lane()), start, end));
                     }
                     gates.set(source.gate(), new VoicedGate(id, slot.id(), pitch, start, end, "pads"));
-                }
+                } else copies.add(new CopyWindow(slot.id(), start, end));
                 byLane.merge(slot.id(), 1, Integer::sum);
                 count++;
             }

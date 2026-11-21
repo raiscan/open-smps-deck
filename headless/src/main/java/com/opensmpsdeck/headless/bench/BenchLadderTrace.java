@@ -34,7 +34,32 @@ final class BenchLadderTrace {
     record Example(String lane, int pitch, double second, String reason) {}
     record Loss(int count, Map<String, Integer> reasons, List<Example> examples) {}
     record Waterfall(int truth, int survived, Map<String, Loss> lost) {}
-    record Window(String section, double start, double end, double noteF1, double melodyF1, double leadAttackF1) {}
+    record Window(String section, double start, double end, double noteF1, double melodyF1, double leadAttackF1,
+                  double noteF1WithLayers, double melodyF1WithLayers, double leadAttackF1WithLayers) {}
+
+    private record SectionTones(List<BenchMetrics.Event> all, List<BenchMetrics.Event> melody, List<BenchMetrics.Event> lead) {
+        static SectionTones estimate(List<BenchMetrics.Event> events) {
+            return new SectionTones(events, BenchMetrics.melody(events),
+                    events.stream().filter(note -> note.lane().equals("FM1")).toList());
+        }
+
+        SectionTones within(double start, double end) {
+            return new SectionTones(BenchLadderTrace.within(all, start, end), BenchLadderTrace.within(melody, start, end),
+                    BenchLadderTrace.within(lead, start, end));
+        }
+
+        double noteF1(SectionTones estimate) { return pitchF1(all, estimate.all); }
+        double melodyF1(SectionTones estimate) { return pitchF1(melody, estimate.melody); }
+
+        double leadAttackF1(SectionTones estimate) {
+            return new BenchMetrics.F1(lead.size(), estimate.lead.size(),
+                    BenchMetrics.attacks(lead, estimate.lead, .050).size()).f1();
+        }
+
+        private static double pitchF1(List<BenchMetrics.Event> expected, List<BenchMetrics.Event> actual) {
+            return new BenchMetrics.F1(expected.size(), actual.size(), BenchMetrics.notes(expected, actual, false).size()).f1();
+        }
+    }
     record Detail(Waterfall allNotes, Waterfall lead, List<Window> sections, int inferredSections,
                   int repeats, int phrases) {}
 
@@ -71,15 +96,15 @@ final class BenchLadderTrace {
     }
 
     static Detail read(Path work, List<BenchMetrics.Event> truth, List<BenchMetrics.Event> nativeEvents,
-                       BenchLadder.Input input, Integer leadPart, DoubleUnaryOperator projectToTruth,
+                       List<BenchMetrics.Event> nativeEventsWithLayers, BenchLadder.Input input,
+                       Integer leadPart, DoubleUnaryOperator projectToTruth,
                        DoubleUnaryOperator inputToTruth) throws IOException {
         var trace = new BenchLadderTrace(work, projectToTruth, inputToTruth);
         var lead = truth.stream().filter(note -> note.lane().equals(input.leadLane())).toList();
         var assembled = trace.assembled(nativeEvents);
-        var estimate = nativeEvents.stream().map(note -> map(note, projectToTruth)).toList();
         return new Detail(trace.waterfall(truth, assembled, false, null, input.rung() == BenchLadder.Rung.EXACT),
                 trace.waterfall(lead, assembled, true, leadPart, false),
-                input.torture() ? trace.sections(truth, estimate, lead) : List.of(),
+                input.torture() ? trace.sections(truth, lead, nativeEvents, nativeEventsWithLayers) : List.of(),
                 trace.structure.sections().size(), trace.structure.repeats().size(),
                 trace.structure.phrases() == null ? 0 : trace.structure.phrases().size());
     }
@@ -189,28 +214,23 @@ final class BenchLadderTrace {
         return pairs.stream().collect(Collectors.toMap(BenchMetrics.Pair::truth, BenchMetrics.Pair::estimate));
     }
 
-    private List<Window> sections(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,
-                                  List<BenchMetrics.Event> lead) {
+    private List<Window> sections(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> lead,
+                                  List<BenchMetrics.Event> nativeEvents, List<BenchMetrics.Event> nativeEventsWithLayers) {
         var bars = structure.bars().stream().collect(Collectors.toMap(Bar::id, bar -> bar));
-        var melody = BenchMetrics.melody(truth);
-        var emittedMelody = BenchMetrics.melody(estimate);
-        var fm1 = estimate.stream().filter(note -> note.lane().equals("FM1")).toList();
+        var expected = new SectionTones(truth, BenchMetrics.melody(truth), lead);
+        var dry = SectionTones.estimate(nativeEvents.stream().map(note -> map(note, projectToTruth)).toList());
+        var layered = SectionTones.estimate(nativeEventsWithLayers.stream().map(note -> map(note, projectToTruth)).toList());
         var result = new ArrayList<Window>();
         for (var section : structure.sections()) {
             var span = section.bars().stream().map(bars::get).filter(java.util.Objects::nonNull).toList();
             if (span.isEmpty()) continue;
             double a = projectToTruth.applyAsDouble(span.getFirst().start());
             double b = projectToTruth.applyAsDouble(span.getLast().end());
-            var tones = within(truth, a, b);
-            var reconstructed = within(estimate, a, b);
-            var m = within(melody, a, b);
-            var n = within(emittedMelody, a, b);
-            var expected = within(lead, a, b);
-            var actual = within(fm1, a, b);
-            result.add(new Window(section.id(), a, b, new BenchMetrics.F1(tones.size(), reconstructed.size(),
-                    BenchMetrics.notes(tones, reconstructed, false).size()).f1(),
-                    new BenchMetrics.F1(m.size(), n.size(), BenchMetrics.notes(m, n, false).size()).f1(),
-                    new BenchMetrics.F1(expected.size(), actual.size(), BenchMetrics.attacks(expected, actual, .050).size()).f1()));
+            var target = expected.within(a, b);
+            var actual = dry.within(a, b);
+            var full = layered.within(a, b);
+            result.add(new Window(section.id(), a, b, target.noteF1(actual), target.melodyF1(actual),
+                    target.leadAttackF1(actual), target.noteF1(full), target.melodyF1(full), target.leadAttackF1(full)));
         }
         return List.copyOf(result);
     }

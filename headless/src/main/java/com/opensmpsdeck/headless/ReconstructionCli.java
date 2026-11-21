@@ -698,6 +698,8 @@ final class ReconstructionCli {
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
             if (!result.layers().isEmpty()) reportJson.add("noteLayers", json.toJsonTree(result.layers()));
+            if (!result.lanePolicyCopies().isEmpty())
+                reportJson.add("lanePolicyCopies", json.toJsonTree(result.lanePolicyCopies()));
             if (!result.policyCoverage().isEmpty()) {
                 var policyReport = new com.google.gson.JsonArray();
                 for (var coverage : result.policyCoverage()) {
