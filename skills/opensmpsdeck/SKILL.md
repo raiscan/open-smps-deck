@@ -421,6 +421,13 @@ See the [musical sections guide](../../docs/architecture/reconstruction-stages.m
 
 ## Studio review
 
+Studio writes note, role and lane intents to the shared `edits.json` on
+**Apply** and writes section mutations to `sections.json` immediately. New
+Studio intents include `"author":"human"`. Agent intents may specify
+`"author":"agent"`. Legacy intents may omit the field. An open Studio window
+adopts external journal revisions when it has no local draft, and prompts on
+conflict when it has pending edits.
+
 1. Open the same `arrangement.smps.json` in Studio. Attach the mix with
    `reference_add` or CLI `reference add PROJECT WAV` if needed.
 2. Fetch open items with `notes_list {project, openOnly: true}` or CLI

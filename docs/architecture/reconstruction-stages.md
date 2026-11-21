@@ -309,6 +309,11 @@ taking precedence. Intents use source seconds by default. Set
 `"timeBase":"project"` on an intent to use project seconds for its span,
 selector, gate, and curve. Pitch is a MIDI integer.
 
+Studio uses the same versioned `edits.json` as `reconstruct edit`.
+An intent may include `"author":"human"` or `"author":"agent"`. The field is
+optional for legacy journals and does not change the reconstruction operation.
+Studio writes its new intents with `"author":"human"`.
+
 | Op | Fields | First stage |
 | --- | --- | --- |
 | `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |

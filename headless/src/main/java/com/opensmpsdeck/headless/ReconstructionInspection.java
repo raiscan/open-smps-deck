@@ -48,22 +48,23 @@ public final class ReconstructionInspection {
     public record Ridge(double sourceSeconds, double pitch, double dbfs) {}
     public record SpectrumTile(int columns, int rows, float[] dbfs, List<Ridge> ridges) {}
 
-    public record Band(String label, int level, double start, double end) {}
-    /** Band positions are in source seconds. Levels are ordered from broad to narrow. */
-    public interface Sections {
-        List<String> levelLabels();
-        List<Band> bands();
+    public record Part(int id, String name, boolean drums) {
+        @Override public String toString() { return id + (name.isBlank() ? "" : " · " + name); }
     }
-    private record StructureBands(List<Band> bands) implements Sections {
-        @Override public List<String> levelLabels() { return List.of("Sections", "Bars"); }
-    }
+
+    public record NoteDetails(boolean scored, boolean generated, Integer velocity, List<String> edits) {}
+
+    public enum Grid { BEAT, BAR }
 
     private final ReconstructionTimeMap clock;
     private final Map<String, ReconstructionTrace.Row> trace;
     private final StudioProject project;
     private final List<AudioSource> sources;
     private final List<Overlay> overlays;
-    private final Sections sections;
+    private final ReconstructionSections.Result sections;
+    private final List<Part> parts;
+    private final List<ReconstructionStructure.Bar> bars;
+    private final ReconstructionBeatMap beats;
 
     private ReconstructionInspection(Path work, ReconstructionStages.Score score, StudioProject project) throws IOException {
         this.clock = ReconstructionTimeMap.of(score);
@@ -87,8 +88,10 @@ public final class ReconstructionInspection {
         addAssemblyOnlyNotes(project, span, patches, notes);
         notes.sort(Comparator.comparingDouble(note -> note.interval().sourceStart()));
         this.overlays = List.copyOf(notes);
-        this.sections = structureBands(ReconstructionTrace.optional(work, "structure.json",
-                ReconstructionStructure.Result.class), score.bars());
+        this.sections = ReconstructionSections.load(work, score);
+        this.parts = score.source().parts().stream().map(part -> new Part(part.id(), part.name(), part.drums())).toList();
+        this.beats = score.beatMap();
+        this.bars = score.usesBeatGrid() ? beats.bars(duration()) : score.bars();
     }
 
     public static ReconstructionInspection open(Path work) throws IOException {
@@ -105,7 +108,45 @@ public final class ReconstructionInspection {
     public StudioProject project() { return project; }
     public List<AudioSource> sources() { return sources; }
     public List<Overlay> overlays() { return overlays; }
-    public Sections sections() { return sections; }
+    public ReconstructionSections.Result sections() { return sections; }
+    public List<Part> parts() { return parts; }
+
+    public double snap(double seconds, Grid grid) {
+        return Math.clamp(gridTime(seconds, grid, false), 0, duration());
+    }
+
+    public double nextBeat(double seconds) {
+        return Math.clamp(gridTime(seconds, Grid.BEAT, true), 0, duration());
+    }
+
+    private double gridTime(double seconds, Grid grid, boolean next) {
+        if (beats != null && grid == Grid.BEAT) {
+            double index = beats.index(seconds);
+            return beats.seconds(next ? Math.floor(index + 1e-7) + 1 : Math.round(index));
+        }
+        if (bars.isEmpty()) return next ? seconds + .25 : Math.round(seconds * 4) / 4.0;
+        double best = next ? duration() : 0;
+        for (var bar : bars) {
+            // Old scores may have bar anchors without a recorded beat map.
+            int divisions = grid == Grid.BAR ? 1 : 4;
+            for (int i = 0; i <= divisions; i++) {
+                double point = bar.at(i / (double) divisions);
+                if (next ? point > seconds + 1e-7 && point < best
+                        : Math.abs(point - seconds) < Math.abs(best - seconds)) best = point;
+            }
+        }
+        return best;
+    }
+
+    public NoteDetails noteDetails(String id) {
+        var row = trace.get(id);
+        if (row == null) return new NoteDetails(false, false, null, List.of());
+        var role = row.roles();
+        boolean generated = row.score() == null && role != null && role.effective() != null && row.source() == null;
+        Integer velocity = row.score() != null ? row.score().note().velocity()
+                : generated ? role.effective().note().velocity() : null;
+        return new NoteDetails(row.score() != null, generated, velocity, row.editReasons());
+    }
     public String trace(String id) { return trace.containsKey(id) ? JSON.toJson(trace.get(id)) : ""; }
 
     /** Replay chip frequency writes for assembled gates. Call from a worker after opening the snapshot. */
@@ -242,23 +283,4 @@ public final class ReconstructionInspection {
         return patch == null ? null : patch.getValue();
     }
 
-    private Sections structureBands(ReconstructionStructure.Result structure, List<ReconstructionStructure.Bar> scoreBars) {
-        var bars = structure == null ? scoreBars : structure.bars();
-        boolean project = structure != null && structure.timeBase() == TimeBase.project;
-        var byId = new HashMap<String, Band>();
-        var bands = new ArrayList<Band>();
-        for (var bar : bars) {
-            var band = new Band(bar.id(), 1, project ? toSource(bar.start()) : bar.start(),
-                    project ? toSource(bar.end()) : bar.end());
-            bands.add(band);
-            byId.put(bar.id(), band);
-        }
-        if (structure != null) for (var section : structure.sections()) {
-            var members = section.bars().stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
-            if (!members.isEmpty()) bands.add(new Band(section.id(), 0,
-                    members.stream().mapToDouble(Band::start).min().orElseThrow(),
-                    members.stream().mapToDouble(Band::end).max().orElseThrow()));
-        }
-        return new StructureBands(List.copyOf(bands));
-    }
 }

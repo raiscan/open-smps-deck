@@ -245,13 +245,12 @@ separate working copy. Reload will not discard work if the disk file is invalid.
 New/Open/Close ask about unsaved changes. Undo history resets on adopting an
 external revision; undo never secretly crosses into another writer's version.
 
-## Inspect a reconstruction
+## Inspect and edit a reconstruction
 
 Choose **Open reconstruction…** from the Studio toolbar and select the work
 directory created by `reconstruct run`. Studio reads its stage artifacts and
-opens a read-only workspace. It uses recorded WAV paths for the mix and mapped
-stems, and reads `render.wav` for the chip spectrogram and playback. Reopen
-the directory after a rebuild to inspect the updated artifacts.
+opens an editing workspace. It uses recorded WAV paths for the mix and mapped
+stems, and reads `render.wav` for the chip spectrogram and playback.
 
 - Choose a **Source** to change the spectrogram and playback together. Use
   **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**
@@ -259,8 +258,8 @@ the directory after a rebuild to inspect the updated artifacts.
   **Project time** to see the steady project clock on the same aligned view.
 - Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
   background detail. **Ridges** marks the three strongest spectral peaks in
-  each analysis column. The bands above show sections and bars from
-  `structure.json`.
+  each analysis column. **Note opacity** controls the fill. Press **O** to
+  toggle outlines. The bands above show sections, periods and phrases.
 - Filter notes by **role** and **Lanes**. Zoom or hover to read pitch, lane and
   patch. Dashed bars mark dropped or merged notes. Hover for the fate and any
   competing note IDs. Click the pitch overlay or a note in the chip lane
@@ -305,6 +304,31 @@ Review edits use the same undo, save and conflict behavior as arrangement
 edits. A clean window picks up notes written by the CLI, and a draft in the
 composer stays available across a refresh. The
 [review protocol](../architecture/review-loop.md) covers the agent side.
+
+- Choose **Insert** and a MIDI part, then click an empty pitch row. The initial
+  gate ends at the next beat. Drag either end to resize it, or drag its body
+  to move it in time or pitch. Switch between **Beat** and **Bar** snapping,
+  or hold **Alt** while placing or dragging to work freely. Zoom in to grab
+  short note edges. **Select** is the inspection and drag tool.
+- Select a scored note to set its velocity or delete it with **Delete**.
+  Set a role or pin a lane from the **Note** tab. Delete on a note generated
+  during role assignment records a drop. The trace shows the fate and reason,
+  role, lane, instrument, both clocks, competing note IDs, and applied edits.
+  Expand **Raw trace JSON** for detailed evidence.
+- Gold outlines mark pending edits. **Undo** and **Redo** change the draft,
+  including removals from the **Edits** tab. Press **Apply** to save the
+  shared `edits.json` and rebuild from the first affected stage. Cancel before
+  publication to keep the draft. The **Trace diff** tab summarizes changed
+  notes, lane permutations, compiled events and PCM outside the edited span.
+- The **Edits** tab lists the shared intents with their author, reason and
+  last build outcome. Old entries with no author are shown as agent edits.
+  Studio adopts updates to `edits.json` and `sections.json` when the draft
+  is clean. When pending edits conflict, **Resolve conflict…** can reload
+  the disk version and discard the draft, or keep the draft visible.
+- Click a section, period or phrase to loop it. Drag a boundary or right-click
+  a band to rename, split at the pointer or merge with the next sibling.
+  These changes go directly to `sections.json` as human edits.
+
 
 ## Listen and export
 

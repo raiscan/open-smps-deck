@@ -207,7 +207,7 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
@@ -232,6 +232,10 @@ final class ReconstructionEdits {
             if (json.has("order"))
                 require(Set.of("up", "down", "up-down").contains(string(json, "order", at)),
                         at + ".order", "expected up, down or up-down");
+        }
+        if (json.has("author")) {
+            String author = string(json, "author", at);
+            require(author.equals("agent") || author.equals("human"), at + ".author", "expected human or agent");
         }
 
         JsonObject target = json;

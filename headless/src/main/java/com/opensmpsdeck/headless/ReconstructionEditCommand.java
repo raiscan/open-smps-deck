@@ -176,7 +176,7 @@ public final class ReconstructionEditCommand {
                 "lastRun", ReconstructionEdits.Journal.read(work).all())).getAsJsonObject();
     }
 
-    private static ReconstructionEdits.Span span(ReconstructionEdits.Intent edit, ReconstructionEdits.Journal journal,
+    static ReconstructionEdits.Span span(ReconstructionEdits.Intent edit, ReconstructionEdits.Journal journal,
                                                   Map<String, ReconstructionTrace.Row> before,
                                                   Map<String, ReconstructionTrace.Row> after,
                                                   ReconstructionTimeMap timeline) {
