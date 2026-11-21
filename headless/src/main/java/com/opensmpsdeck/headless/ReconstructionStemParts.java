@@ -29,7 +29,7 @@ final class ReconstructionStemParts {
     static boolean startsAudibly(byte[] envelope) {
         // A backing patch should start with its note and cannot reset through
         // silence while its gate is still open. A natural one-shot decay is fine.
-        if (Byte.toUnsignedInt(envelope[0]) >= 15) return false;
+        if (envelope.length == 0 || Byte.toUnsignedInt(envelope[0]) >= 15) return false;
         boolean muted = false;
         for (byte raw : envelope) {
             int value = Byte.toUnsignedInt(raw);

@@ -136,12 +136,12 @@ class ReconstructionFastRunsTest {
         var shortened = fm1.shorten(17, "next-attack");
         for (var rejected : List.of(fm3, shortened)) {
             var playback = ReconstructionRetriggers.articulate(List.of(rejected), bursts,
-                    timeline, ReconstructionVoicing.WRITTEN);
+                    timeline, ignored -> ReconstructionVoicing.WRITTEN);
             assertEquals(List.of(rejected), playback.notes());
             assertTrue(playback.placements().isEmpty());
         }
         var articulation = new ReconstructionVoicing.Articulation("test", .8, 0);
-        var playback = ReconstructionRetriggers.articulate(List.of(fm1), bursts, timeline, articulation);
+        var playback = ReconstructionRetriggers.articulate(List.of(fm1), bursts, timeline, ignored -> articulation);
         assertEquals(List.of(5, 9, 12, 15), playback.notes().stream()
                 .map(ReconstructionAllocation.Entry::startTick).toList());
         assertEquals(List.of(9, 12, 15, 25), playback.notes().stream()

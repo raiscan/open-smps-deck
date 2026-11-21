@@ -75,7 +75,7 @@ public final class ReconstructionReview {
 
     public static ReconstructionVoicePlan.Result voices(Path work, JsonArray entries) throws IOException {
         if (!Files.isRegularFile(work.resolve("roles.json")))
-            return new ReconstructionVoicePlan.Result(1, List.of(), List.of());
+            return new ReconstructionVoicePlan.Result(1, List.of(), List.of(), List.of());
         return ReconstructionVoicePlan.review(work, parse(entries).accepted());
     }
 

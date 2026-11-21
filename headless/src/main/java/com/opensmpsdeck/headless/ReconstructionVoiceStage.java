@@ -18,9 +18,12 @@ import com.opensmpsdeck.headless.VoicePatchShortlist.RankedPatch;
 final class ReconstructionVoiceStage {
     private static final double ARTICULATION_MARGIN = .004;
     private static final double EFFECT_MARGIN = .012;
+    // Squared weighted cosine from the attack shortlist. Below this bound,
+    // no catalogue candidate explains enough of the exposed attack spectrum.
+    private static final double MIN_EXPOSED_ATTACK_MATCH = .16;
 
     private record Model(String id, Role role, ReconstructionAllocation.Result packed, int stem, ReconstructionAllocation.Result stemNotes,
-                         List<RankedPatch> patches, List<Instrument> instruments) {}
+                         List<RankedPatch> patches, List<Instrument> instruments, boolean shared) {}
 
     private ReconstructionVoiceStage() {}
 
@@ -28,6 +31,9 @@ final class ReconstructionVoiceStage {
                       ReconstructionAllocation.Result allocation, Result previous, java.util.Set<String> targets,
                       InstrumentCatalogue.Variant chosen) throws IOException {
         String chosenLane = chosen == null ? null : targets.iterator().next();
+        boolean shared = chosen == null && targets.isEmpty()
+                && (previous == null || previous.sourceInstruments() != null)
+                && catalogue.variants().stream().anyMatch(v -> catalogue.asset(v.assetId()).kind() == Kind.FM_VOICE);
         var byLane = byLane(allocation);
         var noise = byLane.getOrDefault("PSG3", List.of());
         var cymbalGains = ReconstructionCymbals.gains(score, noise);
@@ -40,12 +46,34 @@ final class ReconstructionVoiceStage {
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
-        var tonalInstruments = matchPsg(score, catalogue, byLane, mix, options.stems());
+        var tonalInstruments = shared ? Map.<ReconstructionVoices.Key, ReconstructionVoices.Choice>of()
+                : matchPsg(score, catalogue, byLane, mix, options.stems());
         var drumInstruments = ReconstructionDrums.match(score, catalogue, byLane.getOrDefault("DAC", List.of()),
                 mix, options.stems());
-        var windows = new VoiceWindows(score.frames(), byLane, previous == null ? null : previous.fitWindows());
-        var screening = new VoicePatchShortlist(catalogue);
         var context = byLane.values().stream().flatMap(List::stream).toList();
+        var fitGroups = shared ? bySourceInstrument(context) : byLane;
+        var foreground = new LinkedHashMap<String, List<ReconstructionAllocation.Entry>>();
+        if (shared) fitGroups.forEach((id, notes) -> {
+            var line = exposedLine(notes);
+            if (!line.isEmpty()) foreground.put(id, line);
+        });
+        var savedWindows = previous == null ? null : previous.fitWindows();
+        var windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
+        var screening = new VoicePatchShortlist(catalogue);
+        var leadPatches = new HashMap<String, List<RankedPatch>>();
+        var unsupported = new ArrayList<String>();
+        for (var focus : foreground.entrySet()) {
+            var candidates = screening.rank(focus.getValue(), context, mix, options.stems(), windows,
+                    incumbent(catalogue, previous, focus.getKey()), true);
+            if (candidates.stream().anyMatch(patch -> patch.score() >= MIN_EXPOSED_ATTACK_MATCH))
+                leadPatches.put(focus.getKey(), candidates);
+            else unsupported.add(focus.getKey());
+        }
+        if (!unsupported.isEmpty()) {
+            unsupported.forEach(foreground::remove);
+            windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
+            leadPatches.clear(); // The held-out windows may have moved.
+        }
         var references = new ArrayList<VoiceWindows.Reference>();
         references.add(windows.read(mix, 1));
         var stems = new LinkedHashMap<Path, Integer>();
@@ -57,26 +85,31 @@ final class ReconstructionVoiceStage {
         var models = new ArrayList<Model>();
         var initial = new ArrayList<Lane>();
         var incumbents = new ArrayList<String>();
-        for (var entry : byLane.entrySet()) {
+        for (var entry : fitGroups.entrySet()) {
             String lane = entry.getKey();
-            var notes = entry.getValue();
+            var notes = foreground.getOrDefault(lane, entry.getValue());
+            boolean instrument = shared && lane.startsWith("part-");
+            boolean fm = instrument || lane.startsWith("FM");
             var incumbent = lane.equals(chosenLane) ? chosen
-                    : lane.startsWith("FM") ? incumbent(catalogue, previous, lane) : null;
-            var patches = lane.startsWith("FM")
-                    ? screening.rank(notes, context, mix, options.stems(), windows, incumbent) : List.<RankedPatch>of();
+                    : fm ? incumbent(catalogue, previous, lane) : null;
+            var patches = leadPatches.get(lane);
+            if (patches == null) patches = fm
+                    ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane))
+                    : List.of();
             incumbents.add(incumbent == null ? null : incumbent.id());
-            var instruments = lane.startsWith("FM") ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
+            var instruments = fm ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
             var toneContext = notes;
             if (lane.equals("PSG3") && notes.stream().anyMatch(n -> n.role() != Role.drums))
                 toneContext = notes.stream().filter(n -> !ReconstructionCymbals.automatic(n.reason())).toList();
-            Role role = dominantRole(toneContext);
+            Role role = instrument && toneContext.stream().anyMatch(n -> n.role() == Role.melody)
+                    ? Role.melody : dominantRole(toneContext);
             var packed = windows.pack(notes);
             // A lane can carry more than one MIDI part. Use its most represented
             // stem for fitting, with only the notes belonging to that stem.
             var stem = stemFor(toneContext, options.stems(), stems);
             var stemNotes = stem == null ? null : windows.pack(toneContext.stream()
                     .filter(note -> stem.equals(options.stems().get(note.note().part()))).toList());
-            models.add(new Model(lane, role, packed, stems.getOrDefault(stem, 0), stemNotes, patches, instruments));
+            models.add(new Model(lane, role, packed, stems.getOrDefault(stem, 0), stemNotes, patches, instruments, instrument));
             var settings = settings(role, patches.isEmpty() ? null : patches.getFirst().id(), WRITTEN, DRY, instruments);
             initial.add(lane.equals("PSG3") && !cymbalGains.isEmpty() ? settings.withDrumGains(cymbalGains) : settings);
         }
@@ -134,9 +167,14 @@ final class ReconstructionVoiceStage {
         }
 
         var reservedCopies = new java.util.HashSet<String>();
-        if (previous != null && !targets.isEmpty()) previous.lanes().forEach((id, lane) -> {
-            if (!targets.contains(id) && lane.effects().copy() != null) reservedCopies.add(lane.effects().copy().lane());
-        });
+        if (previous != null && !targets.isEmpty()) {
+            previous.lanes().forEach((id, lane) -> {
+                if (!targets.contains(id) && lane.effects().copy() != null) reservedCopies.add(lane.effects().copy().lane());
+            });
+            if (previous.sourceInstruments() != null) previous.sourceInstruments().values().forEach(sound -> {
+                if (sound.fm().effects().copy() != null) reservedCopies.add(sound.fm().effects().copy().lane());
+            });
+        }
         String free = ReconstructionAllocation.FM.reversed().stream()
                 .filter(lane -> !byLane.containsKey(lane) && !reservedCopies.contains(lane)).findFirst().orElse(null);
         var result = new LinkedHashMap<String, Lane>();
@@ -161,7 +199,8 @@ final class ReconstructionVoiceStage {
                 art = articulations.get(fit.selection(i).candidate().id());
                 if (changed) artReason = EVIDENCE;
 
-                var idioms = effects(role, role == Role.melody && model.id().startsWith("FM") ? free : null);
+                boolean singleFm = model.shared() ? singleFm(fitGroups.get(model.id())) : model.id().startsWith("FM");
+                var idioms = effects(role, role == Role.melody && singleFm ? free : null);
                 final var selectedArticulation = art;
                 if (idioms.size() > 1) {
                     changed = choose(windows, references, source, catalogue, model, fit, i, idioms,
@@ -174,6 +213,16 @@ final class ReconstructionVoiceStage {
                 if (effects.copy() != null && (targets.isEmpty() || targets.contains(model.id()))) free = null;
             }
             double gain = role == Role.drums ? 1 : fit.selection(i).gain();
+            if (foreground.containsKey(model.id())) {
+                // The line determines the level. Account for the backing that
+                // will also sound at that level so its energy cannot inflate it.
+                var wholePart = windows.pack(fitGroups.get(model.id()));
+                var contextModel = new Model(model.id(), model.role(), wholePart, model.stem(),
+                        wholePart, model.patches(), model.instruments(), model.shared());
+                var full = render(windows, references, source, catalogue, contextModel, "",
+                        settings(role, patch, art, effects, model.instruments()));
+                gain = Math.min(gain, fit.trial(i, full).selection().gain());
+            }
             String incumbent = incumbents.get(i);
             String patchReason = EVIDENCE;
             if (model.id().equals(chosenLane)) {
@@ -194,13 +243,14 @@ final class ReconstructionVoiceStage {
             var model = models.get(i);
             var lane = result.get(model.id());
             if (model.id().equals(chosenLane) || lane.variantId() == null || model.stem() == 0) continue;
-            var notes = byLane.get(model.id());
+            var notes = foreground.getOrDefault(model.id(), fitGroups.get(model.id()));
+            if (model.shared() && !singleFm(notes)) continue;
             var stem = stemFor(notes, options.stems(), stems);
             if (!LowRegisterSpectrum.lowRegister(notes)) continue;
             var isolated = notes.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
             var stemContext = context.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
             var candidatesForBass = screening.lowCandidates(isolated, stemContext, stem, windows);
-            var selected = LowRegisterFit.refine(source, catalogue, stem, model.id(), lane,
+            var selected = LowRegisterFit.refine(source, catalogue, stem, notes.getFirst().lane(), lane,
                     notes, isolated, candidatesForBass);
             if (selected == null) continue;
             var choice = selected.patch();
@@ -213,14 +263,62 @@ final class ReconstructionVoiceStage {
                     selected.changedArticulation() ? "low-register stem harmonics" : lane.articulationReason(),
                     lane.effectReason(), lane.instruments()));
         }
+        if (shared) {
+            var instruments = new LinkedHashMap<String, SourceSound>();
+            for (var model : models) if (model.shared()) {
+                var fm = result.remove(model.id());
+                var spilled = fitGroups.get(model.id()).stream().filter(n -> n.lane().startsWith("PSG")).toList();
+                int partId = fitGroups.get(model.id()).getFirst().note().part();
+                var part = source.parts().stream().filter(item -> item.id() == partId).findFirst().orElseThrow();
+                if (fm.variantId() == null) continue;
+                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled);
+                instruments.put(model.id(), new SourceSound(fm, psg.variantId(), psg.volumeOffset()));
+            }
+            byLane.forEach((lane, notes) -> result.putIfAbsent(lane,
+                    settings(dominantRole(notes), null, WRITTEN, DRY, List.of())));
+            if (!noise.isEmpty() && fitPsg3.isEmpty())
+                result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
+            return new Result(ReconstructionStages.VERSION, result, windows.fitWindows()).withSourceInstruments(instruments);
+        }
         ReconstructionLevels.calibrate(score.frames(), source, catalogue, byLane, mix, options.stems(), result);
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
     }
 
+    private static VoiceWindows fitWindows(int frames, Map<String, List<ReconstructionAllocation.Entry>> byLane,
+                                           FitWindows previous, Map<String, List<ReconstructionAllocation.Entry>> foreground,
+                                           Map<String, List<ReconstructionAllocation.Entry>> fitGroups) {
+        return new VoiceWindows(frames, byLane, previous, foreground.entrySet().stream()
+                .map(entry -> new VoiceWindows.Focus(entry.getValue(), fitGroups.get(entry.getKey()))).toList());
+    }
+
+    static List<ReconstructionAllocation.Entry> exposedLine(List<ReconstructionAllocation.Entry> notes) {
+        var melody = notes.stream().filter(n -> n.role() == Role.melody).toList();
+        // A handful of isolated notes cannot stand in for the whole source part.
+        return melody.size() >= 4 && melody.size() < notes.size() ? melody : List.of();
+    }
+
+    private static Map<String, List<ReconstructionAllocation.Entry>> bySourceInstrument(
+            List<ReconstructionAllocation.Entry> notes) {
+        var groups = new LinkedHashMap<String, List<ReconstructionAllocation.Entry>>();
+        notes.stream().sorted(Comparator.comparingInt(ReconstructionAllocation.Entry::startTick))
+                .forEach(note -> {
+                    String id = note.role() == Role.drums ? note.lane()
+                            : ReconstructionVoicePlan.SourceInstrument.id(note.note().part());
+                    groups.computeIfAbsent(id, ignored -> new ArrayList<>()).add(note);
+                });
+        return groups;
+    }
+
+    private static boolean singleFm(List<ReconstructionAllocation.Entry> notes) {
+        String lane = notes.getFirst().lane();
+        return lane.startsWith("FM") && notes.stream().allMatch(n -> lane.equals(n.lane()));
+    }
+
     private static InstrumentCatalogue.Variant incumbent(InstrumentCatalogue catalogue, Result previous, String id) {
-        var lane = previous == null ? null : previous.lanes().get(id);
+        var source = previous == null || previous.sourceInstruments() == null ? null : previous.sourceInstruments().get(id);
+        var lane = source != null ? source.fm() : previous == null ? null : previous.lanes().get(id);
         if (lane == null || lane.variantId() == null) return null;
         InstrumentCatalogue.Match match;
         try {
@@ -248,12 +346,12 @@ final class ReconstructionVoiceStage {
     private static VoiceFit.Candidate render(VoiceWindows windows, List<VoiceWindows.Reference> references,
                                              S3kReconstruction.Score score, InstrumentCatalogue catalogue,
                                              Model model, String id, Lane lane) throws IOException {
-        var mix = windows.render(score, catalogue, model.packed(), model.id(), lane);
+        var mix = windows.render(score, catalogue, model.packed(), lane, model.shared());
         var spectra = new HashMap<Integer, float[][]>();
         spectra.put(0, mix);
         if (model.stem() != 0) {
             var stem = model.stemNotes().equals(model.packed()) ? mix
-                    : windows.render(score, catalogue, model.stemNotes(), model.id(), lane);
+                    : windows.render(score, catalogue, model.stemNotes(), lane, model.shared());
             spectra.put(model.stem(), stem);
         }
         return new VoiceFit.Candidate(id, windows.vector(references, spectra));
@@ -347,7 +445,7 @@ final class ReconstructionVoiceStage {
                 selection.evidence().reason(), List.of(), List.of(), "perceptual-drum", slice, selection.evidence());
     }
 
-    private static ReconstructionVoices.Choice choice(InstrumentCatalogue catalogue, String variant, Integer drumPitch,
+    static ReconstructionVoices.Choice choice(InstrumentCatalogue catalogue, String variant, Integer drumPitch,
                                                       String reason, List<ScoredPatch> scores) {
         if (variant == null) return new ReconstructionVoices.Choice(null, null, null, null, "no-match", List.of(), List.of());
         var match = catalogue.match(variant);
