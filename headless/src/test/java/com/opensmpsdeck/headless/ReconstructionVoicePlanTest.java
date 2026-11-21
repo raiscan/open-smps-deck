@@ -32,7 +32,7 @@ class ReconstructionVoicePlanTest {
         decisions.add(decision(note("hat", 1, .1, 42), Role.drums));
         writeFixture(work, decisions);
         var proposal = ReconstructionVoicePlan.load(work);
-        assertEquals(List.of("part-0", "part-0-upper", "part-1-kick", "part-1-closed-hat"),
+        assertEquals(List.of("part-0-lower", "part-0-upper", "part-1-kick", "part-1-closed-hat"),
                 proposal.voices().stream().map(ReconstructionVoicePlan.Voice::id).toList());
         assertEquals(List.of("synth.wav"), proposal.voices().getFirst().evidence().stems());
         assertEquals(List.of(35, 36), proposal.voices().get(2).evidence().drumPitches());
@@ -60,6 +60,52 @@ class ReconstructionVoicePlanTest {
         assertEquals("orphaned", replayed.issues().getFirst().status());
         assertEquals("point", replayed.issues().getFirst().id());
         assertEquals(List.of("high-1", "high-2"), replayed.voices().getLast().noteIds());
+    }
+
+    @Test void separatesARecurringLineFromStackedAccompanimentAndReportsOldId(@TempDir Path work) throws Exception {
+        var line = new ArrayList<ReconstructionRoles.Decision>();
+        var chords = new ArrayList<ReconstructionRoles.Decision>();
+        for (int i = 0; i < 12; i++) {
+            double at = i * .06;
+            line.add(decision(note("line-" + i, 0, at, 68 + i % 4), Role.melody));
+            if (i % 2 == 0) {
+                chords.add(decision(note("inner-" + i, 0, at + .005, 65), Role.counter));
+                chords.add(decision(note("chord-" + i, 0, at + .01, 60), Role.harmony));
+            }
+        }
+        writeFixture(work, line);
+        run(work, "rename", """
+                {"id":"old","author":"human","voiceId":"part-0","name":"Original part"}
+                """);
+        var mixed = new ArrayList<>(line);
+        mixed.addAll(chords);
+        writeFixture(work, mixed);
+        var split = ReconstructionVoicePlan.load(work);
+        assertEquals(List.of("part-0-line", "part-0-chords"),
+                split.voices().stream().map(ReconstructionVoicePlan.Voice::id).toList());
+        assertEquals(line.stream().map(item -> item.note().id()).toList(), split.voices().getFirst().noteIds());
+        assertEquals(List.of(new ReconstructionVoicePlan.Issue("old", "orphaned", "voice part-0 is missing")), split.issues());
+        run(work, "rename", """
+                {"id":"new-line","author":"agent","voiceId":"part-0-line","name":"Lead instrument 1"}
+                """);
+        mixed.removeLast();
+        writeFixture(work, mixed);
+        assertEquals("Lead instrument 1", ReconstructionVoicePlan.load(work).byNote().get("line-0").name());
+    }
+
+    @Test void assignedFmLinePreservesNormalMelodyOverlapHandling() {
+        var lead = new Note("lead-a", 0, 0, .25, 72, 96, "midi", 1);
+        var next = note("lead-b", 0, .2, 74);
+        var parts = List.of(new MidiScore.Part(0, "Lead", 81, false));
+        var roles = new ReconstructionRoles.Result(1, 7.5, List.of(
+                decision(lead, Role.melody), decision(next, Role.melody)), null);
+        var result = ReconstructionAllocation.allocateWithAffinity(roles, parts, 60, false, false, Map.of(), Map.of(),
+                Map.of(lead.id(), ReconstructionLaneType.FM, next.id(), ReconstructionLaneType.FM));
+        assertEquals(Map.of(lead.id(), "FM1", next.id(), "FM1"), ReconstructionAllocation.lanes(result));
+        var tail = result.notes().getFirst();
+        assertEquals(ReconstructionAllocation.Outcome.shortened, tail.outcome());
+        assertEquals(ReconstructionLaneType.FM, tail.laneType());
+        assertEquals(result.notes().getLast().startTick(), tail.endTick());
     }
 
     @Test void oneAssignedPatchFollowsAnInstrumentAcrossLanesAndSplitsSharedClips() throws Exception {

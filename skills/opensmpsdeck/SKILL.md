@@ -317,8 +317,10 @@ or work on a separate copy.
 ## Review source voices before assigning chip instruments
 
 Use `reconstruct voices WORK_DIR` or MCP `reconstruct_voices {workDir}` to
-review names, note IDs, part and stem evidence, and confidence. Voices
-identify source instruments across musical roles. The proposal alone
+review names, note IDs, part, stem, role, section and attack evidence, and
+confidence. A mixed MIDI part can propose a lead line and separate chords,
+register bands, or voices supported by distinct stem evidence. Check the
+line's membership before assigning a fixed instrument. The proposal alone
 preserves the existing chip allocation and voicing.
 
 Use `voices WORK_DIR create|rename|merge|split|move|assign JSON` or MCP
@@ -330,8 +332,9 @@ Assign with `assignment: {laneType: "FM", instrument: "VARIANT_ID"}` or
 an assignment. See the [voices stage](../../docs/architecture/reconstruction-stages.md#identify-and-assign-voices)
 for all fields and instrument types.
 
-Resume from `voices` to apply the journal. Review `issues` for orphaned
-edits and trace for notes that could not be placed on the requested hardware.
+Resume from `voices` to apply the journal or to pick up edited section
+boundaries. Review `issues` for orphaned edits if a split changes a voice ID.
+Use trace to check for notes that could not be placed on the requested hardware.
 Use `view --color-by voice` or MCP `colorBy: "voice"` to follow a source
 instrument across lanes. Inspect `voiceAssignmentExtraClips` in the report
 when voices with different instruments share a lane.
