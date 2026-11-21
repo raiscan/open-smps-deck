@@ -120,6 +120,12 @@ public final class ReconstructionStages {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
                     stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null, null, null, null);
         }
+        Inputs withLeadPart(Integer lead) {
+            return new Inputs(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices,
+                    audioRefine, stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, lead,
+                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly);
+        }
+
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
@@ -716,7 +722,7 @@ public final class ReconstructionStages {
             long duration = duration(reference, options);
             audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, config.fallback(transcriber, true),
                     AudioDrumDetector.select(config, config.drumName(drumOverride == null ? extra.drumDetector : drumOverride),
-                            device), duration / 1e6);
+                            device), duration / 1e6, extra.leadPart != null);
             audio.drums().forEach((id, file) -> stems.put(id, file.toString()));
             score = prepare(ReconstructionAudioOnly.drumScore(audio.provenance()), reference, options, duration,
                     ReconstructionAudioOnly.DRUM_SOURCE);
@@ -1029,6 +1035,8 @@ public final class ReconstructionStages {
     private static Transcription attach(Score score, Inputs inputs) throws IOException {
         var notes = new ArrayList<>(score.notes);
         var newParts = new java.util.HashSet<Integer>();
+        Integer lead = inputs.leadPart;
+        Double otherTonalRms = null;
         if (inputs.externalNotes != null) {
             var parts = new ArrayList<>(score.source.parts());
             var sourceCounts = new LinkedHashMap<>(score.sourceCounts);
@@ -1063,8 +1071,28 @@ public final class ReconstructionStages {
                 var spectrum = vocal ? null : ReconstructionStemParts.Spectrum.read(stemPath, limit);
                 List<Note> joined;
                 if (vocal) {
-                    joined = ReconstructionVocalLead.select(part, imported,
+                    var selection = ReconstructionVocalLead.select(part, imported,
                             ReconstructionLeadAudio.Track.read(stemPath, limit), limit);
+                    joined = selection.notes();
+                    boolean pinned = Boolean.TRUE.equals(inputs.audioOnly.explicitLead())
+                            && java.util.Objects.equals(lead, part);
+                    if (!pinned) {
+                        if (otherTonalRms == null) {
+                            otherTonalRms = 0.0;
+                            for (var other : inputs.audioOnly.stems().entrySet()) {
+                                if (other.getValue().role().equals("drums")
+                                        || "vocals".equals(other.getValue().transcriberRole())) continue;
+                                otherTonalRms = Math.max(otherTonalRms, ReconstructionVocalLead.rms(
+                                        Path.of(inputs.stems.get(other.getKey())), limit));
+                            }
+                        }
+                        if (joined.isEmpty() || !selection.supportsLead(limit, otherTonalRms)) {
+                            if (java.util.Objects.equals(lead, part)) lead = null;
+                            for (var note : joined) reductions.add(new S3kReconstruction.Reduction(note.midi(),
+                                    S3kReconstruction.Change.ROLE_OVERFLOW, note.id(), "residual-vocal-stem"));
+                            continue;
+                        }
+                    }
                 } else {
                     candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
                     joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
@@ -1164,8 +1192,9 @@ public final class ReconstructionStages {
             stemCandidates.stream().filter(ReconstructionStemTemplates.Candidate::automatic)
                     .map(ReconstructionStemTemplates.Candidate::note).forEach(notes::add);
         if (inputs.audioOnly != null) {
-            var grid = ReconstructionAudioOnly.grid(inputs, score.source, notes, score.durationUs / 1e6);
-            var result = score.withInputs(inputs, grid.bars(), notes.stream().sorted(NOTE_ORDER).toList(),
+            var effective = inputs.withLeadPart(lead);
+            var grid = ReconstructionAudioOnly.grid(effective, score.source, notes, score.durationUs / 1e6);
+            var result = score.withInputs(effective, grid.bars(), notes.stream().sorted(NOTE_ORDER).toList(),
                     grid.tempo(), null, grid.beats());
             ReconstructionChecks.score(result);
             return new Transcription(result, List.copyOf(stemCandidates));

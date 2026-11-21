@@ -29,6 +29,13 @@ class ReconstructionVocalLeadTest {
         assertTrue(notes.getLast().end() - notes.getLast().start() > .35);
     }
 
+    @Test void leadRequiresBothSustainedPeriodicityAndCompetitiveLevel() {
+        assertFalse(new ReconstructionVocalLead.Selection(List.of(), .7, .04).supportsLead(100, .1));
+        assertFalse(new ReconstructionVocalLead.Selection(List.of(), 12, .002).supportsLead(100, .1));
+        assertTrue(new ReconstructionVocalLead.Selection(List.of(), 12, .018).supportsLead(100, .1));
+        assertTrue(new ReconstructionVocalLead.Selection(List.of(), .3, .018).supportsLead(1, .1));
+    }
+
     private static Note note(String id, int pitch, double start, double end) {
         return new Note(id, 1, start, end, pitch, 96, "audio-transcribed", 1);
     }

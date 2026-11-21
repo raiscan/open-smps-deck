@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless;
 
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -21,17 +24,20 @@ final class ReconstructionVocalLead {
     }
 
     static int[] contour(ReconstructionLeadAudio.Track track) {
-        return contour(track, null);
+        return smooth(periodicContour(track));
     }
 
-    private static int[] contour(ReconstructionLeadAudio.Track track, int[] alternate) {
+    private static int[] periodicContour(ReconstructionLeadAudio.Track track) {
         int[] raw = new int[track.frames()];
         var distances = new double[128];
         for (int frame = 0; frame < raw.length; frame++) {
             if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("vocal contour cancelled");
-            int pitch = track.periodicPitch(frame, distances);
-            raw[frame] = pitch != 0 || alternate == null ? pitch : alternate[frame];
+            raw[frame] = track.periodicPitch(frame, distances);
         }
+        return raw;
+    }
+
+    private static int[] smooth(int[] raw) {
         var stable = new int[raw.length];
         for (int frame = 0; frame < raw.length; frame++) {
             if (raw[frame] == 0) continue;
@@ -58,14 +64,51 @@ final class ReconstructionVocalLead {
         }
     }
 
-    static List<Note> select(int part, ExternalTranscribers.PartNotes imported, ReconstructionLeadAudio.Track track,
+    record Selection(List<Note> notes, double periodicSeconds, double rms) {
+        boolean supportsLead(double duration, double otherRms) {
+            return otherRms == 0 || periodicSeconds >= Math.min(2, .15 * duration) && rms >= .035 * otherRms;
+        }
+    }
+
+    static double rms(Path stem, double duration) throws IOException {
+        double energy = 0;
+        long samples = 0;
+        for (double start = 0; start < duration; start += 1) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Vocal level analysis cancelled");
+            for (float sample : ReferenceAudio.read(stem, start, Math.min(1, duration - start)).samples()) {
+                energy += (double) sample * sample;
+                samples++;
+            }
+        }
+        return samples == 0 ? 0 : Math.sqrt(energy / samples);
+    }
+
+    static Selection select(int part, ExternalTranscribers.PartNotes imported, ReconstructionLeadAudio.Track track,
                              double duration) {
         var encoded = imported.provenance().metadata().get("f0Midi10ms");
-        int[] f0 = contour(track, encoded == null || encoded.isBlank() ? null : modelContour(track, encoded));
+        int[] rawPeriodic = periodicContour(track);
+        int[] periodic = smooth(rawPeriodic);
+        int[] f0 = periodic;
+        if (encoded != null && !encoded.isBlank()) {
+            var alternate = modelContour(track, encoded);
+            for (int frame = 0; frame < rawPeriodic.length; frame++)
+                if (rawPeriodic[frame] == 0) rawPeriodic[frame] = alternate[frame];
+            f0 = smooth(rawPeriodic);
+        }
+        double floor = voicedFloor(track, periodic.length);
+        int voiced = 0;
+        double energy = 0;
+        for (int frame = 0; frame < periodic.length; frame++) {
+            double level = track.frameLevel(frame);
+            energy += level * level;
+            if (periodic[frame] != 0 && level >= floor) voiced++;
+        }
+        double rms = periodic.length == 0 ? 0 : Math.sqrt(energy / periodic.length);
         var raw = imported.notes();
         var metadata = imported.provenance().metadata();
         if (!metadata.containsKey("vocalFirstNoteCount")) {
-            return clean(part, ReconstructionStemParts.notes(part, raw, duration, true), track, f0);
+            return new Selection(clean(part, ReconstructionStemParts.notes(part, raw, duration, true),
+                    track, f0), voiced * HOP, rms);
         }
         int split = Integer.parseInt(metadata.get("vocalFirstNoteCount"));
         ReconstructionArtifacts.require(split >= 0 && split <= raw.size(), "vocalFirstNoteCount", "outside the note snapshot");
@@ -89,7 +132,7 @@ final class ReconstructionVocalLead {
         }
         metadata.put("vocalSelection", bestName);
         metadata.put("vocalComparison", new com.google.gson.Gson().toJson(report));
-        return bestNotes;
+        return new Selection(bestNotes, voiced * HOP, rms);
     }
 
     private static int[] modelContour(ReconstructionLeadAudio.Track track, String encoded) {

@@ -22,13 +22,13 @@ final class ReconstructionAudioOnly {
     record Stem(String label, String role, @Nullable String transcriberRole) {}
     record Detector(String name, String version, List<MidiScore.Note> hits, @Nullable Map<String, String> metadata) {}
     record Provenance(String source, @Nullable String transcriber, Detector drumDetector, Map<Integer, Stem> stems,
-                      List<String> skippedStems) {}
+                      List<String> skippedStems, @Nullable Boolean explicitLead) {}
     record Input(Provenance provenance, Map<Path, String> tonal, Map<Integer, Path> drums, @Nullable Integer leadPart) {}
 
     private ReconstructionAudioOnly() {}
 
     static Input prepare(Map<String, Path> stems, Map<String, String> overrides, String transcriber,
-                         AudioDrumDetector detector, double seconds) throws IOException {
+                         AudioDrumDetector detector, double seconds, boolean explicitLead) throws IOException {
         if (stems.isEmpty()) throw new IllegalArgumentException("--audio-only needs labelled --stem LABEL=WAV inputs");
         if (!stems.keySet().containsAll(overrides.keySet()))
             throw new IllegalArgumentException("--stem-role must name a supplied --stem label");
@@ -75,7 +75,7 @@ final class ReconstructionAudioOnly {
         if (tonal.isEmpty()) throw new IllegalArgumentException("No audible tonal stem to transcribe in the requested interval");
         hits.sort(Comparator.comparingLong(MidiScore.Note::startUs).thenComparingInt(MidiScore.Note::pitch));
         return new Input(new Provenance(SOURCE, transcriber, new Detector(detector.id(), detection == null ? "unused" : detection.version(),
-                List.copyOf(hits), detection == null || detection.metadata().isEmpty() ? null : detection.metadata()), identities, List.copyOf(skipped)), tonal, drums, lead);
+                List.copyOf(hits), detection == null || detection.metadata().isEmpty() ? null : detection.metadata()), identities, List.copyOf(skipped), explicitLead ? true : null), tonal, drums, lead);
     }
 
     static String label(String value) {

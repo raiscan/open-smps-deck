@@ -211,8 +211,8 @@ channel counts and frame counts.
 
 Check `import-work/import.json` for errors, nearly silent stems and the
 assigned roles. `separation.json` enables audio-only import automatically
-for this folder without MIDI. Vocals map to lead and drums feed the
-onset detector. Use `--stem-role FILE=ROLE` with a folder-relative file
+for this folder without MIDI. Vocals are candidates for lead and drums feed
+the onset detector. Use `--stem-role FILE=ROLE` with a folder-relative file
 name to override a role. Repeat the checked options with `--run` to build
 in `import-work/reconstruction`. Open this directory in Studio with
 **Open reconstruction…**. It must be new for an initial build.
@@ -224,8 +224,8 @@ names to trusted executable argument arrays. The CLI substitutes
 `{input}`, `{outputDir}` and `{device}` directly. `--device` accepts
 `auto` (the default), `cpu`, `rocm` and `cuda`. Put the tonal adapter in
 [the transcriber configuration](#external-transcription). Import selects a
-sole configured transcriber automatically and requires `--transcriber NAME`
-when several are configured. With no configured transcriber and no name
+sole configured transcriber automatically. With several configured, use
+per-role defaults or explicit transcriber options. With no configured transcriber and no name
 requested, the separated-folder check writes a report and stops with
 `no MIDI: needs audio-only transcription`.
 
@@ -899,8 +899,12 @@ name uses only that adapter.
 
 Audio-only vocal cleanup follows a monophonic line using pitch salience,
 continuity and a range learned from the stem. It joins supported syllables,
-bridges short voiced gaps and can fill sustained pitches. The vocal-derived
-FM1 part uses a bright sustained patch selected from the catalogue by a
+bridges short voiced gaps and can fill sustained pitches. When other tonal stems are present, vocals need at least two seconds of
+audible periodic pitch (or 15% of a short excerpt, whichever is smaller)
+and an RMS level of at least 3.5% of the strongest other tonal stem.
+Residual vocals are skipped and normal lead selection resumes.
+Use `--lead-part` on a direct run to pin the vocal part explicitly.
+The vocal-derived FM1 part uses a bright sustained patch selected from the catalogue by a
 held-note probe. When the stem supports a vibrato estimate, it is encoded
 using the usual FM modulation controls. Edit the source instrument and its
 effects in `voicing.json` to override these choices.
