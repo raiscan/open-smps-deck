@@ -104,7 +104,9 @@ final class ReconstructionCli {
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
-        out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
+        out.println("       reconstruct structure|roles|allocate WORK_DIR");
+        out.println("       reconstruct assemble WORK_DIR [--policy-decisions]");
+        out.println("       reconstruct run --from STAGE WORK_DIR [--policy-decisions]");
         out.println("       reconstruct voices WORK_DIR [list | create|rename|merge|split|move|assign JSON]");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
@@ -319,7 +321,7 @@ final class ReconstructionCli {
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                                   ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing,
                                   PrintStream out, boolean preserveReview, boolean overwriteDetached, ReconstructionEdits intents,
-                                  List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+                                  List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions) throws IOException {
         Path destination = work.resolve(OUTPUTS.getFirst());
         var existing = ReconstructionReview.requireAttached(work, overwriteDetached);
         var inputs = score.inputs();
@@ -327,7 +329,7 @@ final class ReconstructionCli {
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var catalogue = InstrumentCatalogue.open(index);
-        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes);
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, policyDecisions);
         var matched = assembly.matched();
         var instruments = voicing.sourceInstruments();
         var effects = new Effects(Map.of(), Map.of(), Map.of());
@@ -353,6 +355,7 @@ final class ReconstructionCli {
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
+            if (policyDecisions) report.add("policyDecisions", json.toJsonTree(rendered.policyDecisions()));
             for (var layer : rendered.layers()) layer.report(outcomes);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
             edits.addAll(outcomes);
@@ -407,7 +410,7 @@ final class ReconstructionCli {
     private static Assembly prepareAssembly(Path work, ReconstructionStages.Score score,
                                             ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
                                             ReconstructionVoicing.Result voicing, InstrumentCatalogue catalogue,
-                                            ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes)
+                                            ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions)
             throws IOException {
         var options = score.inputs().options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
@@ -437,7 +440,7 @@ final class ReconstructionCli {
                 structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
                 authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
                 omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
-                policyLevels, layers, score.inputs().fmOnly());
+                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0);
         return new Assembly(matched, ordered, layout, playback, arrange);
     }
 
@@ -452,7 +455,7 @@ final class ReconstructionCli {
             voicing = voicing.withAssignments(plan.assignments(allocation, roles.lanePins()));
         }
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
-        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes);
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true);
         var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
         for (var layer : arrangement.layers()) layer.report(outcomes);
     }

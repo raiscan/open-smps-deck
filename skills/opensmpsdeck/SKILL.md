@@ -162,7 +162,15 @@ when a mapped or unmatched stem needs a separate transcriber.
 
 ## 4. Propose or apply a scoped edit
 
-Use `edits.json` for musical intent. Never hand-edit `score.json` or
+For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`
+or `--lane PSG3`. Review the busy intervals and competing notes in
+`drums.droppedHits`. Dry-run a suggested `pinLane` to move a tonal blocker.
+
+Use `edits.json` for musical intent. For a repeated pitch inside a held
+note, use `retrigger` with `attacks: [{"offset":0,"gate":0.06}, …]` or
+`rate` and `count` with an optional `gate`. Offsets, interval and gates are
+in seconds. Dry-run to get the stable IDs for layer edits and rebuild from
+transcribe. Never hand-edit `score.json` or
 `allocation.json`. Keep each batch scoped to a musical reason and record
 the evidence. Use stable note IDs or a point selector with part, pitch and
 onset. For spans, check the part, inclusive pitch bounds and voice rank
@@ -174,7 +182,7 @@ lists field names, selector rules and rebuild stages.
 
 | Goal | Operations |
 | --- | --- |
-| Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `mergeNotes` |
+| Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `retrigger`, `mergeNotes` |
 | Route a line or register | `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
 | Shape articulation and level | `bend`, `glide`, `noteVoicing` for instrument or vibrato overrides, `setVelocity` |
 | Layer selected attacks | `layer` with `echo`, `chorus`, `double` or `off` |
@@ -187,7 +195,10 @@ echo, use 14 frames and 11 TL below dry. Studio shows this as a −3 dB
 trim from the original 7-TL echo. A layer edit overrides lane policies for
 its notes and rebuilds from `assemble`. In Studio, use **Selection → Layer**,
 then **Queue layer** and **Apply**. Check the dry-run and trace results for
-skipped copies before review.
+skipped copies before review. Use `off` with `"policies":["fmDouble"]` to
+keep other policies eligible. Assemble with `--policy-decisions` (MCP
+`options.policyDecisions: true`) to inspect each policy's attacks, gates and
+blockers in `report.json` and `trace`.
 
 **Propose by default when a human is reviewing.** For example, save an
 ordered array of intents to `batch.json` and preview the group before it

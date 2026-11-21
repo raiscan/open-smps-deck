@@ -27,7 +27,13 @@ public final class ReconstructionLayers {
     record Decay(int frame, int attenuation) {}
 
     record Settings(Mode mode, ReconstructionLaneType laneType, int delayFrames, int attenuation,
-                    int detune, int octave, List<Decay> decay) {}
+                    int detune, int octave, List<Decay> decay, Set<ReconstructionLanePolicies.Kind> policies) {
+        boolean overridesAll() { return policies.isEmpty(); }
+
+        boolean masks(ReconstructionLanePolicies.Kind policy) {
+            return overridesAll() || policies.contains(policy);
+        }
+    }
 
     record Request(Intent edit, Settings settings) {}
 
@@ -124,9 +130,21 @@ public final class ReconstructionLayers {
             }
         }
         int delayFrames = mode == Mode.echo ? (delay == null ? DEFAULT_ECHO_DELAY_FRAMES : delay) : 0;
+        var policies = new LinkedHashSet<ReconstructionLanePolicies.Kind>();
+        if (json.has("policies")) {
+            require(mode == Mode.off, at + ".policies", "policy masks require off");
+            var values = array(json, "policies", at);
+            require(!values.isEmpty(), at + ".policies", "expected one or more policy names");
+            for (var value : values) {
+                var name = new JsonObject();
+                name.add("policy", value);
+                require(policies.add(choice(ReconstructionLanePolicies.Kind.class, name, "policy", at)),
+                        at + ".policies", "duplicate policy name");
+            }
+        }
         return new Settings(mode, type, delayFrames, level,
                 mode == Mode.chorus ? (detune == null ? -3 : detune) : 0, octave == null ? 0 : octave,
-                List.copyOf(decay));
+                List.copyOf(decay), java.util.Collections.unmodifiableSet(policies));
     }
 
     static boolean present(ReconstructionEdits edits) {
