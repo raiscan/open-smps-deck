@@ -29,6 +29,7 @@ public final class ProjectDocument {
 
     public synchronized StudioProject project() { return project; }
     public synchronized Path path() { return path; }
+    public synchronized String savedRevision() { return baseline.revision(); }
     public synchronized boolean dirty() { return dirty; }
     public synchronized boolean conflicted() { return conflicted; }
     public synchronized String message() { return message; }

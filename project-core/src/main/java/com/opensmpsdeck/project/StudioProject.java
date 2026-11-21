@@ -8,7 +8,7 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
                             List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
                             List<AudioReference> references, List<ReviewNote> notes,
                             int arrangementVersion, List<GroupSequence> groupSequences,
-                            List<GroupPlacement> groupPlacements) {
+                            List<GroupPlacement> groupPlacements, boolean detachedFromReconstruction) {
     public StudioProject {
         voices = List.copyOf(voices);
         sequences = List.copyOf(sequences);
@@ -24,6 +24,22 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
     public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
                          List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
                          List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
+                         List<AudioReference> references, List<ReviewNote> notes, int arrangementVersion,
+                         List<GroupSequence> groupSequences, List<GroupPlacement> groupPlacements) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
+                groupPlacements, false);
+    }
+
+    public StudioProject withDetachedFromReconstruction(boolean detached) {
+        return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
+                groupPlacements, detached);
+    }
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
+                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
                          List<AudioReference> references, List<ReviewNote> notes) {
         this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, formatVersion, List.of(), List.of());
@@ -33,12 +49,12 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
                                   List<Clip> clips, List<Envelope> envelopes, List<DacSample> samples) {
         return new StudioProject(formatVersion == 6 ? 6 : version, name, mode, ticksPerBeat, tempo,
                 voices, sequences, clips, envelopes, samples, nativeProgram, references, notes,
-                version, groupSequences, groupPlacements);
+                version, groupSequences, groupPlacements, detachedFromReconstruction);
     }
 
     public StudioProject withSettings(String name, int ticksPerBeat, int tempo) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements);
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements, detachedFromReconstruction);
     }
 
     public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
@@ -50,7 +66,7 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
 
     public StudioProject withReview(List<AudioReference> references, List<ReviewNote> notes) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements);
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements, detachedFromReconstruction);
     }
     public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
                          List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes,List<DacSample> samples) {

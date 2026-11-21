@@ -35,6 +35,22 @@ class NativeBankPlaybackTest {
             7, 1, 2, 3, 4, 31, 31, 31, 31, 0, 0, 0, 0, 0, 0, 0, 0,
             15, 15, 15, 15, 0x9C, 0xA4, 0xAC, 0xB4));
 
+    @Test void exportIncludesNativeLoopAndRepeatsTheRequestedNumberOfPasses() throws Exception {
+        var project = restoreFixture(new int[]{0xF2}, new int[]{0xEF, 0, 0xA1, 2, 0xA5, 2, 0xF6, 0x42, 0x80});
+        var playback = NativeExportLength.measure(ProjectCompiler.compileWithAssets(project), 1);
+        assertNotNull(playback.loop());
+        assertEquals(4, playback.loop().period());
+        var vgm = directory.resolve("loop.vgm");
+        ProjectExport.write(project, null, vgm, new ProjectExport.Options(ProjectExport.Format.VGM,
+                null, null, null, null, false, false), (done, total, message) -> {});
+        var info = VgmFile.read(vgm, (at, command, register, value) -> {});
+        assertTrue(info.loopSample() >= 0 && info.loopSample() < info.samples());
+        var wav = directory.resolve("three-loops.wav");
+        ProjectExport.write(project, null, wav, new ProjectExport.Options(ProjectExport.Format.WAV,
+                null, null, null, 3, false, false), (done, total, message) -> {});
+        assertEquals(44 + (playback.loop().start() + 12) * 3200L, Files.size(wav));
+    }
+
     @Test void preservesPreheaderCallsCountedLoopHeaderStateAndTempoChangesInPlayback() throws Exception {
         var normal = observe(ProjectCompiler.compileWithAssets(project(0x80)));
         var unweighted = observe(ProjectCompiler.compileWithAssets(project(0)));

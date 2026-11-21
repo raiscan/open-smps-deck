@@ -42,6 +42,9 @@ public final class ProjectFormat {
             int version=integer(tree.getAsJsonObject(),"formatVersion");
             if(version<1 || version>6) throw invalid("formatVersion", "only versions 1 through 6 are supported");
             JsonObject root = tree.getAsJsonObject();
+            var detached = root.remove("detachedFromReconstruction");
+            if (detached != null && (!detached.isJsonPrimitive() || !detached.getAsJsonPrimitive().isBoolean()))
+                throw invalid("detachedFromReconstruction", "must be a boolean");
             var references = optionalList(root.remove("references"), "references", ProjectFormat::reference);
             var notes = optionalList(root.remove("notes"), "notes", ProjectFormat::reviewNote);
             var groups = version == 6 ? list(root, "groupSequences", ProjectFormat::groupSequence) : List.<GroupSequence>of();
@@ -63,7 +66,8 @@ public final class ProjectFormat {
                     version==5?List.of():list(o,"sequences",e->sequence(e,arrangement)),
                     version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     arrangement>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
-                    arrangement>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes,arrangement,groups,placements);
+                    arrangement>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes,arrangement,groups,placements,
+                    detached != null && detached.getAsBoolean());
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -200,6 +204,7 @@ public final class ProjectFormat {
             }
             o.add("samples",samples);
         }
+        if (project.detachedFromReconstruction()) o.addProperty("detachedFromReconstruction", true);
         if (project.nativeProgram()!=null) o.add("nativeProgram",GSON.toJsonTree(project.nativeProgram()));
         if (project.formatVersion() == 6) {
             o.addProperty("arrangementVersion", project.arrangementVersion());

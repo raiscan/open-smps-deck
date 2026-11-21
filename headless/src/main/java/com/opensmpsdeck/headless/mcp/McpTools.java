@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.mcp;
 
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.Main;
+import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.bench.BenchCli;
@@ -10,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +69,22 @@ final class McpTools {
                     field("withProposals", "boolean", "Render proposals in a new sibling directory and export built/proposed A/B WAVs").optional(),
                     field("proposalId", "string", "Preview only this proposed edit").optional(),
                     field("group", "string", "Preview only this proposal group").optional()),
+            tool("reconstruct_rerun", "Replay a saved reconstruction in a new directory, or rebuild in place with explicit overwrite permission.",
+                    (args, progress) -> rerun(args), WORK,
+                    field("output", "string", "Absolute destination work directory").optional(),
+                    field("overwriteDetached", "boolean", "Allow replacing the arrangement for in-place replay").optional(),
+                    field("keepVoicing", "boolean", "Keep compatible voicing").optional(),
+                    field("search", object(Map.of("type", "array", "items", Map.of("type", "string"))),
+                            "Directories to search for moved inputs on new-directory replay").optional()),
+            tool("project_export", "Export a project or reconstruction as WAV, MP3, VGM, raw S3K bytes or an SMPS package.",
+                    McpTools::export, PROJECT.optional(), WORK.optional(),
+                    field("output", "string", "New file or stem directory inside the project or work directory"),
+                    choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package"),
+                    START.optional(), END.optional(),
+                    field("fade", "number", "Fade-out seconds within the exported WAV or MP3 interval").optional(),
+                    field("loops", "integer", "Number of loop passes for native bank WAV or MP3").optional(),
+                    field("stems", "boolean", "Render one WAV or MP3 per hardware channel").optional(),
+                    field("zip", "boolean", "Write the stems to a ZIP archive").optional()),
             tool("reconstruct_stage", "Run one reconstruction stage. Voice refits preserve scoped overrides and existing levels by default.",
                     (args, progress) -> McpReconstruction.run(args, true, progress), WORK,
                     choice("stage", "Stage to execute", McpReconstruction.STAGES),
@@ -283,6 +301,45 @@ final class McpTools {
         var result = McpJson.parse(cli(command)).getAsJsonObject();
         result.addProperty("output", output.toString());
         return result;
+    }
+
+    private static JsonObject export(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+        boolean work = args.has("workDir");
+        if (work == args.has("project")) throw new IllegalArgumentException("Supply exactly one of project or workDir");
+        var input = work ? McpPaths.directory(string(args, "workDir")) : McpPaths.project(string(args, "project"));
+        if (work) {
+            McpPaths.managed(input, "arrangement.smps.json");
+            McpPaths.managed(input, "score.json");
+        }
+        var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
+        var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
+        var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
+                args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
+                flag(args, "stems"), flag(args, "zip"));
+        var source = ProjectExport.open(input);
+        ProjectExport.write(source.project(), source.work(), output, options, progress);
+        return object(Map.of("output", output.toString(), "format", string(args, "format")));
+    }
+
+    private static Double decimal(JsonObject args, String name) {
+        return args.has(name) ? args.get(name).getAsDouble() : null;
+    }
+
+    private static JsonObject rerun(JsonObject args) throws IOException {
+        var work = McpPaths.directory(string(args, "workDir"));
+        var output = args.has("output") ? McpPaths.absolute(string(args, "output")) : work;
+        if (output.equals(work)) {
+            McpReconstruction.requireManaged(work);
+        } else {
+            output = McpPaths.newDirectory(output.toString());
+        }
+        var command = new ArrayList<>(List.of("reconstruct", "rerun", work.toString(), output.toString()));
+        options(command, args, "keepVoicing", "overwriteDetached");
+        if (args.has("search")) for (var directory : args.getAsJsonArray("search")) {
+            command.add("--search");
+            command.add(McpPaths.directory(directory.getAsString()).toString());
+        }
+        return object(Map.of("workDir", output.toString(), "summary", cli(command)));
     }
 
     private static String cli(List<String> command) throws IOException {

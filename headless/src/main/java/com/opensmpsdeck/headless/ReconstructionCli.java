@@ -105,14 +105,14 @@ final class ReconstructionCli {
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
-        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
+        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
         out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [--color-by voice] [options] OUT.png");
         out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
         out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
-        out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing]");
+        out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing] [--overwrite-detached]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
@@ -280,11 +280,10 @@ final class ReconstructionCli {
 
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                                   ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing,
-                                  PrintStream out, boolean preserveReview, ReconstructionEdits intents,
+                                  PrintStream out, boolean preserveReview, boolean overwriteDetached, ReconstructionEdits intents,
                                   List<ReconstructionEdits.Outcome> outcomes) throws IOException {
         Path destination = work.resolve(OUTPUTS.getFirst());
-        var existing = preserveReview && Files.exists(destination, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                ? ProjectFiles.load(destination) : null;
+        var existing = ReconstructionReview.requireAttached(work, overwriteDetached);
         var inputs = score.inputs();
         Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
@@ -322,7 +321,7 @@ final class ReconstructionCli {
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, authored.scopes(), playback.origins(), drumGains, layout, authored.instruments()),
-                    out, existing, assemblyInputs);
+                    out, preserveReview ? existing : null, assemblyInputs);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
             edits.addAll(outcomes);
             Path reportFile = staging.resolve("report.json");
@@ -349,16 +348,11 @@ final class ReconstructionCli {
             if (affinity != null && affinity.allocationHash().equals(assemblyInputs.get("allocation")))
                 report.add("allocationAffinityChanges", json.toJsonTree(affinity.changes()));
             ReconstructionArtifacts.write(reportFile, report);
-            var savedProject = (preserveReview || layout == null)
-                    ? ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project() : null;
+            var savedProject = ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project();
+            ProjectFiles.save(destination, savedProject, existing == null ? null : existing.revision());
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            if (preserveReview) {
-                ProjectFiles.save(destination, savedProject,
-                        existing == null ? null : existing.revision());
-            }
-            for (String name : OUTPUTS) {
-                if (preserveReview && name.equals(OUTPUTS.getFirst())) continue;
+            for (String name : OUTPUTS.subList(1, OUTPUTS.size())) {
                 Files.move(staging.resolve(name), work.resolve(name),
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             }

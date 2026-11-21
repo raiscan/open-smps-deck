@@ -137,7 +137,7 @@ def smoke(jar, root):
         expected = set("""
             transcribers_list reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
             reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
-            artifact_read artifact_write project_validate
+            artifact_read artifact_write project_validate project_export reconstruct_rerun
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
         """.split())
@@ -203,6 +203,18 @@ def smoke(jar, root):
         files = rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)["files"]
         assert Path(files["manifest.json"]) == work / "manifest.json"
         manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]
+        exported = rpc.call("project_export", workDir=work, output="output.wav", format="wav", progress=True)
+        assert Path(exported["output"]).read_bytes() == Path(files["render.wav"]).read_bytes()
+        arrangement = Path(files["arrangement.smps.json"])
+        attached = arrangement.read_bytes()
+        detached = json.loads(attached)
+        detached["detachedFromReconstruction"] = True
+        arrangement.write_text(json.dumps(detached))
+        rpc.call("reconstruct_run", workDir=work, **{"from": "assemble"}, error="hand edits")
+        rpc.call("reconstruct_rerun", workDir=work, error="hand edits")
+        assert json.loads(arrangement.read_bytes()) == detached
+        rpc.call("reconstruct_run", workDir=work, **{"from": "assemble"}, options={"overwriteDetached": True})
+        assert arrangement.read_bytes() == attached
         assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
         trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
         assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)

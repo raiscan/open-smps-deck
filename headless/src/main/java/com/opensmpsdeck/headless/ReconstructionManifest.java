@@ -322,17 +322,21 @@ final class ReconstructionManifest {
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("rerun expects WORKDIR NEWWORKDIR [--search DIR ...]");
         var search = new ArrayList<Path>();
-        boolean keepVoicing = false;
+        boolean keepVoicing = false, overwriteDetached = false;
         for (int i = 2; i < args.length; i++) {
             if (args[i].equals("--keep-voicing")) {
                 keepVoicing = true;
                 continue;
             }
+            if (args[i].equals("--overwrite-detached")) {
+                overwriteDetached = true;
+                continue;
+            }
             if (!args[i].equals("--search") || ++i == args.length)
-                throw new IllegalArgumentException("rerun expects --search DIR or --keep-voicing");
+                throw new IllegalArgumentException("rerun expects --search DIR, --keep-voicing or --overwrite-detached");
             search.add(Path.of(args[i]).toAbsolutePath().normalize());
         }
         ReconstructionStages.rerun(Path.of(args[0]).toAbsolutePath().normalize(),
-                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, out, err);
+                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, overwriteDetached, out, err);
     }
 }

@@ -287,6 +287,17 @@ The manifest records the plan's `rolePlanSha256`. Use `--keep-voicing` to
 carry accepted voicing settings. Manual changes to derived stage artifacts
 must be expressed through the corresponding recipe inputs to replay.
 
+Studio's **Open as arrangement** exposes the final project to the
+arrangement editors. Saving a musical hand edit sets the optional
+`detachedFromReconstruction` boolean in the project JSON. Export reads that
+project directly. Assembly refuses to replace it without
+`--overwrite-detached`. Studio Apply binds approval to the shown arrangement's
+revision and can preserve a copy. In-place rerun with the explicit flag
+rebuilds from the current saved score inputs. Replay to a new directory
+leaves the hand-edited source arrangement intact. The
+[headless guide](../../headless/README.md#export-project-output) lists the
+export formats and MCP options.
+
 Allocation prefers prior lanes when they have the same hardware priority
 and can accommodate the attack. `allocation-affinity.json` records the lane
 seed used for the last allocation so replay can reproduce that decision.

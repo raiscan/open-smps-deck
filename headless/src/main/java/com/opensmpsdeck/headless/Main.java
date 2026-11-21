@@ -100,10 +100,7 @@ public final class Main {
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
                     var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
-                    if (compiled.nativeProgram() != null)
-                        throw new IllegalArgumentException("Use compile-package to preserve native bank addresses and resources");
-                    if (compiled.requiresAssets()) throw new IllegalArgumentException("Project declares envelope or DAC sample assets; use compile-package for a complete export");
-                    byte[] song = S3kBinary.validateAndCopy(compiled.song());
+                    byte[] song = ProjectExport.rawBytes(compiled);
                     writeNewBinary(output, song);
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
                 }
@@ -122,6 +119,7 @@ public final class Main {
                             + "; use validate-project, compile-project or render-project to work with it");
                 }
                 case "demo", "render", "render-project" -> render(args, out);
+                case "export" -> ProjectExport.cli(args, out);
                 case "render-compare" -> RenderComparison.cli(args, out);
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
@@ -278,7 +276,7 @@ public final class Main {
         }
     }
 
-    private static void writeNewBinary(Path output, byte[] song) throws IOException {
+    static void writeNewBinary(Path output, byte[] song) throws IOException {
         // The compiler finishes before CREATE_NEW; malformed sources never leave an output.
         var created = Files.newOutputStream(output, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         boolean complete = false;
@@ -316,6 +314,8 @@ public final class Main {
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
+        out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package");
+        out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
         out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
 }

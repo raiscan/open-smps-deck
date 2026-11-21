@@ -146,6 +146,43 @@ Compiled output and CLI binary input are limited to one 32 KiB bank.
 The binary demo is an original finite FM/PSG phrase
 with a synthetic, deliberately asymmetric FM patch; it contains no ROM assets.
 
+## Export project output
+
+```sh
+java -jar "$deck_jar" export WORK_DIR song.wav --format wav
+java -jar "$deck_jar" export PROJECT.smps.json clip.mp3 --format mp3 --start 12 --end 24 --fade 1
+java -jar "$deck_jar" export WORK_DIR stems.zip --format wav --stems --zip
+java -jar "$deck_jar" export NATIVE.smps.json song.wav --format wav --loops 3
+java -jar "$deck_jar" export WORK_DIR song.vgm --format vgm
+java -jar "$deck_jar" export WORK_DIR song.smps.zip --format package
+```
+
+WAV and MP3 require ffmpeg on `PATH` (with libmp3lame for MP3). WAV preserves
+48 kHz stereo PCM. Span bounds are project seconds rounded to presentations.
+Fade length is in seconds and stays inside the exported span. Without
+`--zip`, stems go into a new directory. The stems are FM1–FM5, PSG1–PSG3,
+PSG noise and DAC, which uses the FM6 hardware output. Export uses the full
+reconstruction interval from an attached work directory and the editable
+arrangement's length after detachment. Native exports use the detected end or
+loop, with the project preview length as a fallback. `--loops` requests
+1–99 passes of a detected native loop, subject to the ten-minute bound.
+
+VGM exports the full song at NTSC YM2612 and Sega PSG clocks. It encodes DAC
+bytes as YM2612 register writes, uses the project title in GD3, and marks
+the loop when the native tracks share a repeat point. VGM uses a 44.1 kHz
+event clock and hardware time. The WAV renderer presents 60 frames per
+second, so their nominal durations differ slightly.
+
+`--format smps` is equivalent to `compile-project`. The binary targets a
+compatible S3K driver with local voices and has no embedded external assets.
+`--format package` is equivalent to `compile-package` and includes the
+addressed bank, bindings, resources and source required for integration with
+the pinned OpenGGF S3K driver. OpenGGF has no direct ZIP loader.
+
+MCP exposes `project_export` with exactly one of `project` or `workDir`, plus
+`output`, `format`, and the optional `start`, `end`, `fade`, `loops`, `stems`
+and `zip` fields. Use a new output inside the project or work directory.
+
 ## Import a Suno download
 
 ```sh
@@ -519,6 +556,16 @@ Use `action: "proposals"`, `"accept"` or `"reject"` with an optional `id` or
 optionally, `proposalId` or `group` to render the sibling preview.
 
 ### Per-note trace and replay
+
+Studio hand edits set `detachedFromReconstruction` in `arrangement.smps.json`.
+A resumed `reconstruct run` or `assemble` rejects a detached arrangement
+unless given `--overwrite-detached`. `reconstruct rerun WORK_DIR NEW_WORK_DIR`
+leaves the original arrangement in place. To rebuild in place using the
+current score inputs, pass the same directory twice and add
+`--overwrite-detached`. In MCP, use `options.overwriteDetached` for
+`reconstruct_run` or `reconstruct_stage`, and `overwriteDetached` for
+`reconstruct_rerun` (omit `output` for in-place rebuild).
+
 
 ```sh
 java -jar "$deck_jar" reconstruct trace full-song --start 45.5 --end 46 --part 0 --pitch 68

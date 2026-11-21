@@ -487,6 +487,22 @@ Their results include both clocks. Select another aligned recording with
 `--reference WAV` or a replacement project-time render with `--render WAV`.
 Choose `.wav` when ffmpeg is unavailable.
 
+## Export the finished arrangement
+
+Use `export WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package` or MCP
+`project_export` with `workDir` (or `project`). WAV/MP3 use ffmpeg and accept
+project seconds via `--start`, `--end` and `--fade`, native `--loops`, and
+`--stems [--zip]`. Use the package for projects with a native bank or declared
+chip assets. See the [format notes](../../headless/README.md#export-project-output).
+
+A Studio hand edit can detach the final arrangement from Analysis. Preserve a
+copy before rebuilding over it. Use `--overwrite-detached` with a resumed run,
+assemble, or an in-place rerun only when authorized. MCP uses
+`options.overwriteDetached` for `reconstruct_run` and `reconstruct_stage`.
+`reconstruct_rerun` takes `workDir`, optional new `output`, optional
+`search` directories and `keepVoicing`. Omit `output` and set
+`overwriteDetached` to rebuild in place using the saved score inputs.
+
 ## Gate pipeline code changes
 
 Run `bench run MANIFEST CATALOGUE OUTPUT --quick` before and after with the
