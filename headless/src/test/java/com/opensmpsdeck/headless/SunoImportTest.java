@@ -65,6 +65,57 @@ class SunoImportTest {
         assertEquals(ReconstructionCli.audioHash(source.resolve("Title (Bass).wav")), file(report, "Title (Bass).wav").sha256());
     }
 
+    @Test void prefersASynthLabelWhenTheKeyboardAudioScoresSlightlyHigher() throws Exception {
+        Path source = fixture();
+        wav(source.resolve("keyboard.wav"), 8000, 1, 4.5, t -> tone(t - .003, 1));
+        wav(source.resolve("synth.wav"), 8000, 1, 4.5, t -> tone(t, 1));
+
+        var report = inspect(source);
+        var keyboard = file(report, "keyboard.wav");
+        var synth = file(report, "synth.wav");
+        double gap = audioScore(keyboard, 1) - audioScore(synth, 1);
+        assertTrue(gap > 0 && gap < .05, () -> "Audio gap " + gap);
+        assertEquals(1, synth.part());
+        assertNull(keyboard.part());
+    }
+
+    @Test void reportsASecondStemCorrelatingWithTheSamePartAndKeepsOneReference() throws Exception {
+        Path source = fixture();
+        wav(source.resolve("keyboard.wav"), 8000, 1, 4.5, t -> tone(t, 1) * .5);
+        wav(source.resolve("synth.wav"), 8000, 1, 4.5, t -> tone(t, 1));
+
+        var report = inspect(source);
+        assertEquals(Map.of(1, source.resolve("synth.wav").toString()), report.runRequest().inputs().stems());
+        var keyboard = file(report, "keyboard.wav");
+        assertNull(keyboard.part());
+        assertTrue(keyboard.issues().stream().anyMatch(issue -> issue.code().equals("also_correlates_with_part")));
+        var out = new ByteArrayOutputStream();
+        report.print(new PrintStream(out, true, StandardCharsets.UTF_8));
+        String printed = out.toString(StandardCharsets.UTF_8);
+        assertTrue(printed.contains("Winning score"));
+        assertTrue(printed.contains("Runner-up stem keyboard.wav"));
+        assertTrue(printed.contains("--assign keyboard.wav=1"));
+    }
+
+    @Test void neverSuggestsADrumStemAsAMelodicReference() throws Exception {
+        Path source = fixture();
+        wav(source.resolve("drums.wav"), 8000, 1, 4.5, t -> tone(t, 1) * .5);
+        wav(source.resolve("synth.wav"), 8000, 1, 4.5, t -> tone(t, 1));
+
+        var report = inspect(source);
+        assertEquals(1, file(report, "synth.wav").part());
+        var drums = file(report, "drums.wav");
+        assertTrue(audioScore(drums, 1) >= .30);
+        assertNull(drums.part());
+        assertFalse(drums.evidence().containsKey("sharedPart"));
+    }
+
+    private static double audioScore(SunoImport.FileResult file, int part) {
+        return ((List<?>) file.evidence().get("candidates")).stream()
+                .map(SunoImport.Candidate.class::cast).filter(candidate -> candidate.part() == part)
+                .findFirst().orElseThrow().audioScore();
+    }
+
     @Test void manualAssignmentAndExclusionTakePriority() throws Exception {
         Path source = fixture();
         wav(source.resolve("bass.wav"), 8000, 1, 4.5, t -> tone(t, 0));
