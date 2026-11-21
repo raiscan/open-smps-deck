@@ -261,7 +261,7 @@ Limits:
 | A note needs an explicit pitch curve | `edits.json` via `bend` | `transcribe` |
 | Lead swaps parts, chord tones in the lead, or backing taken as melody | `roleplan.json` section and part rules. See **Plan lead and backing**. | `roles` |
 | A phrase's notes have the wrong role or lane | `edits.json` via `setRole` with `fromRole`, `swapRoles` (destination notes go to harmony), or `pinLane`. | `roles` |
-| Attacks need a velocity change or a fixed release | `setNote` with `velocity` or `noExtension: true`. Use `setVelocity` with a source span and `velocity` or `scale` to change a group. | `transcribe` |
+| Attacks need a velocity change or a fixed release | `setNote` with `velocity` or `noExtension: true`. Use `setVelocity` with `noteIds` or a source span and `velocity` or `scale` to change a group. | `transcribe` |
 | Kick, snare or hat level | `voicing.json` with per-pitch `drumGains` on DAC or PSG3. For example, `{"42":0.1}` attenuates the closed hi-hat. | `assemble` |
 | Channel overflow, audible drops or clipped note lengths | `allocation.json` lane, timing and drop decisions | Run standalone `voice` to refit, then resume at `assemble` |
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
@@ -421,8 +421,13 @@ See the [musical sections guide](../../docs/architecture/reconstruction-stages.m
 
 ## Studio review
 
-Studio writes note, role and lane intents to the shared `edits.json` on
-**Apply** and writes section mutations to `sections.json` immediately. New
+Studio writes note, role, lane, voice and note-voicing intents to the shared
+`edits.json` on **Apply**. Section mutations go directly to `sections.json`.
+A voice operation is wrapped in `{"op":"voiceEdit","voiceEdit":{...}}`
+with the outer intent supplying ID, reason and author. Voice-scoped instruments
+replay at `voices`. `noteVoicing` takes `noteIds` and an `instrument` plus
+`laneType`, a native `vibrato` object, or `modulationOff: true`. It resolves
+against the current allocation at `assemble`. New
 Studio intents include `"author":"human"`. Agent intents may specify
 `"author":"agent"`. Legacy intents may omit the field. An open Studio window
 adopts external journal revisions when it has no local draft, and prompts on

@@ -29,9 +29,9 @@ public final class ReconstructionReview {
             "allocation.json", "voicing.json", ReconstructionEdits.RESULTS,
             ReconstructionAllocation.Affinity.FILE, ReconstructionClipLinks.LAYOUT, ReconstructionManifest.FILE,
             "arrangement.smps.json", "arrangement.smps.zip", "render.wav", ReconstructionCli.STEADY_REFERENCE,
-            ReconstructionEdits.FILE, "report.json");
+            ReconstructionEdits.FILE, ReconstructionVoicePlan.FILE, "report.json");
 
-    public record Revision(String edits, String sections) {
+    public record Revision(String edits, String sections, String voices) {
         public JsonArray entries() {
             return edits == null ? new JsonArray() : ReconstructionEdits.batch(JsonParser.parseString(edits),
                     ReconstructionEdits.FILE);
@@ -51,7 +51,7 @@ public final class ReconstructionReview {
 
     public static Revision revision(Path work) throws IOException {
         return new Revision(contents(work.resolve(ReconstructionEdits.FILE)),
-                contents(work.resolve(ReconstructionSections.FILE)));
+                contents(work.resolve(ReconstructionSections.FILE)), contents(work.resolve(ReconstructionVoicePlan.JOURNAL)));
     }
 
     private static String contents(Path file) throws IOException {
@@ -69,6 +69,12 @@ public final class ReconstructionReview {
                     .add(new EditResult(outcome.status().name(), outcome.detail(), outcome.noteIds()));
         results.replaceAll((id, values) -> List.copyOf(values));
         return java.util.Map.copyOf(results);
+    }
+
+    public static ReconstructionVoicePlan.Result voices(Path work, JsonArray entries) throws IOException {
+        if (!Files.isRegularFile(work.resolve("roles.json")))
+            return new ReconstructionVoicePlan.Result(1, List.of(), List.of());
+        return ReconstructionVoicePlan.review(work, parse(entries));
     }
 
     public static String validationIssue(JsonElement entry) {
@@ -124,7 +130,7 @@ public final class ReconstructionReview {
             throws IOException {
         var revision = new Revision[1];
         var result = ReconstructionSections.run(work, action, entries, () -> requireRevision(work, expected),
-                () -> revision[0] = new Revision(expected.edits(), contents(work.resolve(ReconstructionSections.FILE))));
+                () -> revision[0] = new Revision(expected.edits(), contents(work.resolve(ReconstructionSections.FILE)), expected.voices()));
         return new SectionUpdate(result, revision[0]);
     }
 
@@ -145,7 +151,7 @@ public final class ReconstructionReview {
         try {
             var before = Files.createDirectory(scratch.resolve("before"));
             var after = Files.createDirectory(scratch.resolve("after"));
-            var inputs = List.of(ReconstructionSections.FILE, "roleplan.json");
+            var inputs = List.of(ReconstructionSections.FILE, "roleplan.json", ReconstructionVoicePlan.JOURNAL);
             var paths = new ArrayList<>(OUTPUTS);
             paths.addAll(inputs);
             for (String file : paths) {
@@ -158,10 +164,17 @@ public final class ReconstructionReview {
             }
             requireRevision(before, expected);
             String from = stage(before, changed, updated);
+            if (expected.voices() != null && ReconstructionStages.Stage.parse(from).ordinal()
+                    > ReconstructionStages.Stage.VOICES.ordinal()) {
+                var voices = ReconstructionVoicePlan.saved(before);
+                if (voices == null || !voices.equals(ReconstructionVoicePlan.load(before))) from = "voices";
+            }
             updated.write(after);
-            var args = new ArrayList<>(List.of("--from", from, after.toString(), "--keep-voicing"));
+            var args = new ArrayList<>(List.of("--from", from, after.toString()));
+            var fromStage = ReconstructionStages.Stage.parse(from);
+            if (fromStage.ordinal() <= ReconstructionStages.Stage.VOICE.ordinal()) args.add("--keep-voicing");
             var roles = ReconstructionTrace.optional(before, "roles.json", ReconstructionRoles.Result.class);
-            if (roles != null) {
+            if (roles != null && fromStage.ordinal() <= ReconstructionStages.Stage.ROLES.ordinal()) {
                 args.add("--harmony-max-hz");
                 args.add(Double.toString(roles.harmonyMaxHz()));
             }
@@ -242,7 +255,9 @@ public final class ReconstructionReview {
             try (var edits = FileChannel.open(work.resolve(ReconstructionEditCommand.LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
                  var editLock = edits.lock();
                  var sections = FileChannel.open(work.resolve(ReconstructionSections.LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
-                 var sectionLock = sections.lock()) {
+                 var sectionLock = sections.lock();
+                 var voices = FileChannel.open(work.resolve(ReconstructionVoicePlan.LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
+                 var voiceLock = voices.lock()) {
                 requireRevision(work, expected);
                 for (String file : paths) if (!same(work.resolve(file), before.resolve(file))) throw new Changed();
                 checkCancelled();

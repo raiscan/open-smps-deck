@@ -2,7 +2,12 @@ package com.opensmpsdeck.studio;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.ReconstructionEditing;
 import com.opensmpsdeck.headless.ReconstructionInspection;
+import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
+import com.opensmpsdeck.headless.ReconstructionLaneType;
+import com.opensmpsdeck.headless.ReconstructionVoicePlan;
+import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionReview;
@@ -43,15 +48,18 @@ import static com.opensmpsdeck.studio.ReconstructionDraft.text;
 /** Owns draft history, note controls and the two watched reconstruction journals. */
 final class ReconstructionEditor implements AutoCloseable {
     record Snapshot(ReconstructionInspection inspection, Revision revision,
-                    Map<String, List<EditResult>> outcomes, BasicFileAttributes report) {
+                    Map<String, List<EditResult>> outcomes, BasicFileAttributes report, ReconstructionEditing editing,
+                    ReconstructionVoicePlan.Result voices) {
         static Snapshot read(Path work) throws IOException {
             var revision = ReconstructionReview.revision(work);
             revision.entries();
             var report = report(work);
             var inspection = ReconstructionInspection.open(work);
             var outcomes = ReconstructionReview.outcomes(work);
+            var editing = ReconstructionEditing.open(work);
+            var voices = ReconstructionReview.voices(work, revision.entries());
             if (!revision.equals(ReconstructionReview.revision(work))) throw new ReconstructionReview.Changed();
-            return new Snapshot(inspection, revision, outcomes, report);
+            return new Snapshot(inspection, revision, outcomes, report, editing, voices);
         }
 
         private static BasicFileAttributes report(Path work) throws IOException {
@@ -102,7 +110,10 @@ final class ReconstructionEditor implements AutoCloseable {
     private final Tab noteTab = new Tab("Note");
     private final Tab editTab = new Tab("Edits");
     private final Tab diffTab = new Tab("Trace diff");
-    private final TabPane tabs = new TabPane(noteTab, editTab, diffTab);
+    private final Tab bulkTab = new Tab("Selection");
+    private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, diffTab);
+    private final ReconstructionBulk bulk;
+    private final StudioPlayback audition = new StudioPlayback();
 
     private Snapshot snapshot;
     private List<ReconstructionSections.Section> sections;
@@ -118,6 +129,8 @@ final class ReconstructionEditor implements AutoCloseable {
     private Thread running;
     private boolean cancelling;
     private boolean publishing;
+    private long auditionEpoch;
+    private List<String> inspectedSelection = List.of();
 
     ReconstructionEditor(Path work, Window owner, ReconstructionCanvas view, Snapshot initial,
                          Consumer<String> status, Consumer<ReconstructionInspection> refresh) {
@@ -129,11 +142,17 @@ final class ReconstructionEditor implements AutoCloseable {
         this.refresh = refresh;
         sections = initial.inspection().sections().sections();
         draft = new ReconstructionDraft(initial.revision().entries());
+        bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::audition, this::stopAudition);
+        view.onSelection = this::selectionChanged;
+        view.onEffect = this::gesture;
+        view.attack = this::attack;
+        view.detune = note -> snapshot.editing().detune(note.lane());
+        view.vibrato = this::vibrato;
         view.onInsert = this::insert;
         view.onPlacement = this::move;
         view.onSectionEdit = this::section;
         view.onSectionMenu = this::sectionMenu;
-        for (String filename : List.of("edits.json", "sections.json", "report.json")) {
+        for (String filename : List.of("edits.json", "sections.json", ReconstructionVoicePlan.JOURNAL, "report.json")) {
             try {
                 watchers.add(new ProjectWatcher(work.resolve(filename), () -> Platform.runLater(this::readExternal)));
             } catch (IOException failure) {
@@ -151,11 +170,12 @@ final class ReconstructionEditor implements AutoCloseable {
             var button = new ToggleButton(mode.label);
             button.setId("reconstruction-tool-" + mode.name().toLowerCase(Locale.ROOT));
             button.setToggleGroup(buttons);
-            button.setDisable(!mode.available);
             button.setTooltip(new Tooltip(switch (mode) {
-                case SELECT -> "Select or drag a note";
+                case SELECT -> "Drag from empty space to box-select. Shift adds. Ctrl toggles. Drag a note to move it.";
                 case INSERT -> "Click an empty pitch row to insert";
-                default -> "Planned for a later release";
+                case CUT -> "Click inside a note. Alt-click at a new pitch to retune the second half.";
+                case BEND -> "Drag to bend a note or edit a point. Hold Shift to snap to semitones.";
+                case VIBRATO -> "Drag horizontally for rate and vertically for depth on an FM note.";
             }));
             bar.getChildren().add(button);
         }
@@ -248,6 +268,7 @@ final class ReconstructionEditor implements AutoCloseable {
         var details = new VBox(12, noteTitle, noteSummary, placement, raw);
         details.getStyleClass().add("inspector");
         noteTab.setContent(scroll(details));
+        bulkTab.setContent(scroll(bulk));
         journal.setId("reconstruction-edit-list");
         journal.setCellFactory(ignored -> new ListCell<>() {
             private final Label label = new Label();
@@ -312,6 +333,8 @@ final class ReconstructionEditor implements AutoCloseable {
                 note.fate(), note.reason() == null ? "" : "\n" + note.reason(), ReconstructionCanvas.roleName(note.role()),
                 orDash(note.lane()), orDash(note.patch()), time.sourceStart(), time.sourceEnd(),
                 time.projectStart(), time.projectEnd(), names(note.competitors()), names(detail.edits()));
+        var vibration = vibrato(note);
+        if (vibration != null) body += "\n\nVibrato  " + ReconstructionCanvas.vibratoLabel(vibration);
         noteSummary.setText(body);
         rawTrace.setText(json);
         rawTrace.positionCaret(0);
@@ -323,6 +346,122 @@ final class ReconstructionEditor implements AutoCloseable {
         velocity.getValueFactory().setValue(pendingVelocity(note, detail.velocity() == null ? 96 : detail.velocity()));
         velocity.getEditor().setText(Integer.toString(velocity.getValue()));
         updateControls();
+    }
+
+    private void selectionChanged() {
+        updateBulk();
+        var selectedIds = view.selectedNotes().stream().map(Overlay::id).toList();
+        if (selectedIds.size() > 1 && !selectedIds.equals(inspectedSelection)) tabs.getSelectionModel().select(bulkTab);
+        inspectedSelection = selectedIds;
+    }
+
+    private void updateBulk() {
+        var voices = new LinkedHashMap<String, ReconstructionBulk.Voice>();
+        var membership = new LinkedHashMap<String, String>();
+        for (var voice : snapshot.voices().voices()) {
+            voices.put(voice.id(), new ReconstructionBulk.Voice(voice.id(), voice.name(), voice.kind(), voice.assignment()));
+            for (String id : voice.noteIds()) membership.put(id, voice.id());
+        }
+        for (var entry : draft.entries()) {
+            if (!draft.changed(entry) || !"voiceEdit".equals(text(entry, "op", ""))
+                    || ReconstructionReview.validationIssue(entry) != null) continue;
+            var body = entry.getAsJsonObject().getAsJsonObject("voiceEdit");
+            String id = body.get("voiceId").getAsString();
+            switch (body.get("op").getAsString()) {
+                case "create" -> voices.put(id, new ReconstructionBulk.Voice(id, body.get("name").getAsString(),
+                        ReconstructionVoicePlan.Kind.valueOf(body.get("kind").getAsString()), null));
+                case "move" -> body.getAsJsonArray("noteIds").forEach(note -> membership.put(note.getAsString(), id));
+                case "assign" -> {
+                    var voice = voices.get(id);
+                    if (voice == null) continue;
+                    var assignment = body.getAsJsonObject("assignment");
+                    var value = assignment == null ? null : new ReconstructionVoicePlan.Assignment(
+                            ReconstructionLaneType.valueOf(assignment.get("laneType").getAsString()),
+                            assignment.get("instrument").getAsString());
+                    voices.put(id, new ReconstructionBulk.Voice(id, voice.name(), voice.kind(), value));
+                }
+                default -> { }
+            }
+        }
+        var owners = new LinkedHashMap<String, ReconstructionBulk.Voice>();
+        var notes = view.selectedNotes().stream().filter(note -> note.part() >= 0
+                && !note.fate().equals("Pending deletion") && !note.fate().equals("Superseded draft")).toList();
+        for (var note : notes) {
+            var owner = voices.get(membership.get(note.id()));
+            if (owner != null) owners.put(note.id(), owner);
+        }
+        bulk.show(notes, List.copyOf(voices.values()), owners, snapshot.editing(), snapshot.inspection()::laneType);
+    }
+
+    private ReconstructionEditing.Attack attack(Overlay note) {
+        var original = snapshot.editing().attack(note.id());
+        if (original == null && !note.fate().startsWith("Pending")) return null;
+        if (note.fate().equals("Superseded draft") || note.fate().equals("Pending deletion")) return null;
+        if (!note.fate().startsWith("Pending") && original != null) return original;
+        boolean drums = snapshot.inspection().parts().stream().anyMatch(part -> part.id() == note.part() && part.drums());
+        var pendingAttack = note.fate().equals("Pending insertion") || note.fate().equals("Pending cut");
+        var place = pendingAttack || original == null ? Placement.of(note)
+                : new Placement(original.start(), original.end(), original.pitch());
+        for (var entry : draft.entries()) {
+            if (!draft.changed(entry) || !note.id().equals(targetId(entry)) || !"setNote".equals(text(entry, "op", ""))) continue;
+            var json = entry.getAsJsonObject();
+            place = new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
+                    (int) number(json, "pitch", place.pitch()));
+        }
+        return new ReconstructionEditing.Attack(place.start(), place.end(), place.pitch(), drums,
+                original == null || original.single(), note.bend());
+    }
+
+    private ReconstructionEditing.Vibrato vibrato(Overlay note) {
+        if (note.lane() == null || !note.lane().startsWith("FM")) return null;
+        ReconstructionEditing.Vibrato result = null;
+        for (var entry : draft.entries()) {
+            if (!"noteVoicing".equals(text(entry, "op", "")) || !targetIds(entry).contains(note.id())
+                    || ReconstructionReview.validationIssue(entry) != null) continue;
+            var json = entry.getAsJsonObject();
+            if (json.has("modulationOff")) result = ReconstructionEditing.vibrato(note.pitch(), 0, 5, 0);
+            else if (json.has("vibrato")) {
+                var nativeMod = json.getAsJsonObject("vibrato");
+                result = snapshot.editing().vibrato(note.pitch(), note.lane(), nativeMod.get("rate").getAsInt(),
+                        nativeMod.get("delta").getAsInt(), nativeMod.get("steps").getAsInt());
+            }
+        }
+        return result;
+    }
+
+    private void audition(List<String> ids, ReconstructionEditing.Instrument instrument) {
+        if (busy || external != null || externalError) return;
+        stopAudition();
+        long request = auditionEpoch;
+        status.accept("Preparing selection audition…");
+        worker.execute(() -> {
+            try {
+                var sample = ReconstructionEditing.audition(work, java.util.Set.copyOf(ids), instrument);
+                Platform.runLater(() -> {
+                    if (closed || busy || request != auditionEpoch) return;
+                    var transport = new ReviewTransport();
+                    transport.seconds = sample.start();
+                    // Stop at the end of the selected excerpt, including its release.
+                    audition.playMonitor(sample.project(), transport, S3kRenderer.ChannelMask.NONE, sample.end(), () -> null,
+                            message -> Platform.runLater(() -> {
+                                if (!closed && request == auditionEpoch) status.accept(message);
+                            }), position -> {
+                                if (position >= sample.end()) Platform.runLater(() -> {
+                                    if (request == auditionEpoch) stopAudition();
+                                });
+                            });
+                });
+            } catch (IOException | IllegalArgumentException failure) {
+                Platform.runLater(() -> {
+                    if (!closed && request == auditionEpoch) status.accept("Audition unavailable · " + failure.getMessage());
+                });
+            }
+        });
+    }
+
+    private void stopAudition() {
+        auditionEpoch++;
+        audition.stop();
     }
 
     private int pendingVelocity(Overlay note, int fallback) {
@@ -339,7 +478,9 @@ final class ReconstructionEditor implements AutoCloseable {
     private static String names(List<String> values) { return values == null || values.isEmpty() ? "—" : String.join(", ", values); }
 
     private boolean editableScore(Overlay note) {
-        return snapshot.inspection().noteDetails(note.id()).scored() || localInsert(note.id());
+        return !note.fate().equals("Superseded draft")
+                && (snapshot.inspection().noteDetails(note.id()).scored() || localInsert(note.id())
+                    || note.fate().equals("Pending cut"));
     }
 
     private boolean localInsert(String noteId) {
@@ -413,14 +554,31 @@ final class ReconstructionEditor implements AutoCloseable {
         return intent;
     }
 
-    private void add(JsonObject intent) {
-        if (busy || external != null) return;
-        var error = ReconstructionReview.validationIssue(intent);
-        if (error != null) {
-            status.accept(error);
-            return;
+    private void gesture(JsonObject intent) {
+        String op = text(intent, "op", "");
+        if (op.equals("bend") && selected != null && (selected.lane() == null || !selected.lane().startsWith("FM"))
+                && selected.id().equals(targetId(intent))) {
+            addBatch(List.of(intent, ReconstructionDraft.target(selected.id(), "pinLane", "laneType", "FM",
+                    "Route the pitch slide to FM")));
+        } else add(intent);
+        if (!op.equals("splitNote")) return;
+        String left = "edit-" + text(intent, "id", "") + "-left";
+        overlays().stream().filter(note -> note.id().equals(left)).findFirst()
+                .ifPresent(note -> view.select(note, note.lane()));
+    }
+
+    private void add(JsonObject intent) { addBatch(List.of(intent)); }
+
+    private void addBatch(List<JsonObject> intents) {
+        if (busy || external != null || externalError) return;
+        for (var intent : intents) {
+            var error = ReconstructionReview.validationIssue(intent);
+            if (error != null) {
+                status.accept(error);
+                return;
+            }
         }
-        draft.add(intent);
+        draft.change(entries -> intents.forEach(entries::add));
         updateDraft();
     }
 
@@ -431,6 +589,18 @@ final class ReconstructionEditor implements AutoCloseable {
         if (ids != null && ids.isJsonArray() && ids.getAsJsonArray().size() == 1
                 && ids.getAsJsonArray().get(0).isJsonPrimitive()) return ids.getAsJsonArray().get(0).getAsString();
         return text(entry, "noteId", null);
+    }
+
+    private static List<String> targetIds(JsonElement entry) {
+        if (!entry.isJsonObject()) return List.of();
+        var json = entry.getAsJsonObject();
+        if (json.has("voiceEdit") && json.get("voiceEdit").isJsonObject()) json = json.getAsJsonObject("voiceEdit");
+        var ids = json.get("noteIds");
+        if (ids != null && ids.isJsonArray())
+            return ids.getAsJsonArray().asList().stream().filter(JsonElement::isJsonPrimitive)
+                    .map(JsonElement::getAsString).toList();
+        String id = targetId(entry);
+        return id == null ? List.of() : List.of(id);
     }
 
     private List<Overlay> overlays() {
@@ -449,38 +619,69 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         for (var entry : draft.entries()) {
             if (!draft.changed(entry) || ReconstructionReview.validationIssue(entry) != null) continue;
-            String id = targetId(entry);
-            if (id == null) continue;
             var json = entry.getAsJsonObject();
-            var note = pending.getOrDefault(id, built.get(id));
             var op = text(entry, "op", "");
-            if (op.equals("insertNote")) {
-                var part = inspection.parts().stream().filter(p -> p.id() == json.get("part").getAsInt())
-                        .findFirst().orElse(null);
-                if (part == null) continue;
-                var place = new Placement(json.get("start").getAsDouble(), json.get("end").getAsDouble(),
-                        json.get("pitch").getAsInt());
-                note = new Overlay(id, id, part.id(), part.name(), part.drums() ? Role.DRUMS : Role.UNASSIGNED,
-                        null, place.pitch(), null, place.interval(inspection), List.of(), false,
-                        ReconstructionInspection.Style.SOLID, "Pending insertion", text(entry, "reason", ""), List.of());
-                pending.put(id, note);
-                continue;
+            for (String id : targetIds(entry)) {
+                var note = pending.getOrDefault(id, built.get(id));
+                if (op.equals("insertNote")) {
+                    var part = inspection.parts().stream().filter(p -> p.id() == json.get("part").getAsInt())
+                            .findFirst().orElse(null);
+                    if (part == null) continue;
+                    var place = new Placement(json.get("start").getAsDouble(), json.get("end").getAsDouble(),
+                            json.get("pitch").getAsInt());
+                    note = new Overlay(id, id, part.id(), part.name(), part.drums() ? Role.DRUMS : Role.UNASSIGNED,
+                            null, place.pitch(), null, place.interval(inspection), List.of(), false,
+                            ReconstructionInspection.Style.SOLID, "Pending insertion", text(entry, "reason", ""), List.of());
+                    pending.put(id, note);
+                    continue;
+                }
+                if (note == null || note.fate().equals("Superseded draft")) continue;
+                var place = Placement.of(note);
+                String reason = text(entry, "reason", "");
+                if (op.equals("splitNote")) {
+                    var original = attack(note);
+                    double at = json.get("at").getAsDouble();
+                    double start = original == null ? place.start() : original.start();
+                    double end = original == null ? place.end() : original.end();
+                    int pitch = original == null ? place.pitch() : original.pitch();
+                    String prefix = "edit-" + text(entry, "id", "");
+                    pending.put(id, preview(note, place, note.role(), note.lane(), "Superseded draft", reason, false));
+                    pending.put(prefix + "-left", half(note, prefix + "-left", new Placement(start, at, pitch), reason));
+                    pending.put(prefix + "-right", half(note, prefix + "-right",
+                            new Placement(at, end, (int) number(json, "pitch", pitch)), reason));
+                    continue;
+                }
+                var next = op.equals("setNote")
+                        ? new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
+                            (int) number(json, "pitch", place.pitch())) : place;
+                String nextRole = text(entry, "role", null);
+                boolean drop = op.equals("deleteNote") || "drop".equals(nextRole)
+                        || nextRole == null && note.fate().equals("Pending deletion");
+                var color = nextRole == null || drop ? note.role() : Role.valueOf(nextRole.toUpperCase(Locale.ROOT));
+                String fate = drop ? "Pending deletion" : note.fate().equals("Pending insertion")
+                        || note.fate().equals("Pending cut") ? note.fate() : "Pending change";
+                String nextLane = text(entry, "lane", note.lane());
+                if (op.equals("pinLane") && json.has("laneType")) reason += " · " + json.get("laneType").getAsString();
+                var overlay = preview(note, next, color, nextLane, fate, reason, !drop && nextLane != null);
+                if (op.equals("bend")) {
+                    var original = snapshot.editing().attack(id);
+                    int pitch = original == null ? note.pitch() : original.pitch();
+                    var points = json.getAsJsonArray("points").asList().stream().map(JsonElement::getAsJsonArray)
+                            .map(pair -> new BendPoint(pair.get(0).getAsDouble(), pitch + pair.get(1).getAsDouble())).toList();
+                    overlay = new Overlay(overlay.id(), overlay.eventId(), overlay.part(), overlay.partName(), overlay.role(),
+                            overlay.lane(), overlay.pitch(), overlay.patch(), overlay.interval(), points, overlay.sounds(),
+                            overlay.style(), overlay.fate(), overlay.reason(), overlay.competitors());
+                }
+                pending.put(id, overlay);
             }
-            if (note == null) continue;
-            var place = Placement.of(note);
-            var next = new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
-                    (int) number(json, "pitch", place.pitch()));
-            String nextRole = text(entry, "role", null);
-            boolean drop = op.equals("deleteNote") || "drop".equals(nextRole)
-                    || nextRole == null && note.fate().equals("Pending deletion");
-            var color = nextRole == null || drop ? note.role() : Role.valueOf(nextRole.toUpperCase(Locale.ROOT));
-            String fate = drop ? "Pending deletion" : note.fate().equals("Pending insertion")
-                    ? note.fate() : "Pending change";
-            String nextLane = text(entry, "lane", note.lane());
-            pending.put(id, preview(note, next, color, nextLane, fate, text(entry, "reason", ""),
-                    !drop && nextLane != null));
         }
         return List.copyOf(pending.values());
+    }
+
+    private Overlay half(Overlay note, String id, Placement place, String reason) {
+        return new Overlay(id, id, note.part(), note.partName(), note.role(), note.lane(), place.pitch(),
+                note.patch(), place.interval(snapshot.inspection()), List.of(), false,
+                ReconstructionInspection.Style.SOLID, "Pending cut", reason, note.competitors());
     }
 
     private static double number(JsonObject json, String key, double fallback) {
@@ -490,7 +691,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private Overlay preview(Overlay source, Placement place, Role role, String lane, String fate, String reason,
                             boolean sounds) {
         return new Overlay(source.id(), source.eventId(), source.part(), source.partName(), role, lane, place.pitch(),
-                source.patch(), place.interval(snapshot.inspection()), List.of(), sounds,
+                source.patch(), place.interval(snapshot.inspection()), source.bend(), sounds,
                 ReconstructionInspection.Style.SOLID, fate, reason, source.competitors());
     }
 
@@ -526,6 +727,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private void updateControls() {
         boolean editing = !busy && external == null && !externalError;
         view.editing(editing);
+        bulk.setDisable(!editing);
         var entries = draft.entries();
         boolean unbuilt = entries.asList().stream().anyMatch(e -> !snapshot.outcomes().containsKey(text(e, "id", "")));
         apply.setDisable(!editing || !draft.pending() && !unbuilt && !externalUnbuilt);
@@ -634,6 +836,7 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void setBusy() {
         busy = true;
+        stopAudition();
         synchronized (jobLock) {
             cancelling = false;
             publishing = false;
@@ -715,7 +918,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     if (draft.adopt(next.revision().entries(), sectionsChanged || journalsChanged && draft.pending())) {
                         external = null;
                         if (rebuilt) externalUnbuilt = false;
-                        else if (!Objects.equals(current.revision().edits(), next.revision().edits())) externalUnbuilt = true;
+                        else if (journalsChanged) externalUnbuilt = true;
                         adopt(next);
                         status.accept("Adopted reconstruction changes from disk");
                     } else {
@@ -798,7 +1001,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 Platform.runLater(() -> {
                     if (closed) return;
                     busy = false;
-                    snapshot = new Snapshot(snapshot.inspection(), result.revision(), snapshot.outcomes(), snapshot.report());
+                    snapshot = new Snapshot(snapshot.inspection(), result.revision(), snapshot.outcomes(), snapshot.report(), snapshot.editing(), snapshot.voices());
                     sections = result.result().sections();
                     view.sections(sections);
                     status.accept("Musical sections saved");
@@ -832,6 +1035,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     @Override public void close() {
+        audition.close();
         closed = true;
         watchers.forEach(ProjectWatcher::close);
         synchronized (jobLock) {

@@ -33,7 +33,7 @@ final class ReconstructionOverrides {
                     variantId == null ? other.variantId : variantId, gain == null ? other.gain : gain,
                     gate == null ? other.gate : gate,
                     minimumReleaseRate == null ? other.minimumReleaseRate : minimumReleaseRate,
-                    vibrato == null ? other.vibrato : vibrato,
+                    changesModulation() ? vibrato : other.vibrato,
                     changesModulation() ? modulationOff : other.modulationOff);
         }
     }

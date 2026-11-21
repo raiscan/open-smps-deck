@@ -309,7 +309,31 @@ composer stays available across a refresh. The
   gate ends at the next beat. Drag either end to resize it, or drag its body
   to move it in time or pitch. Switch between **Beat** and **Bar** snapping,
   or hold **Alt** while placing or dragging to work freely. Zoom in to grab
-  short note edges. **Select** is the inspection and drag tool.
+  short note edges.
+- In **Select**, drag from empty space to box-select. Hold **Shift** to add
+  or **Ctrl** to toggle notes, including when the box starts on an overlay.
+  A plain drag on a note still moves or resizes it. In **Selection**, filter
+  the current selection by role, identified voice or lane. Shift-drag on
+  the ruler still sets a loop.
+- Use **Selection** to set roles, move notes to a voice, create a named voice,
+  choose FM, PSG tone, PSG noise or DAC, pin an exact lane, or set or scale
+  velocity. An incompatible chip choice shows the reason. **This voice**
+  sets the instrument for the whole identified voice. **These notes only**
+  applies it to the selected attacks. Search the catalogue and use **Audition
+  selection** to hear the chosen instrument on the selected allocated notes.
+- **Collapse repeats** sustains same-pitch attacks from one part. Select
+  two notes of different pitches for **Merge with glide**. Select
+  co-attacking chord tones from one part for **Arpeggio** or **Chord instrument**.
+- In **Cut**, click inside a scored note. Select the note first and
+  **Alt-click** at the desired pitch within the note's time span to retune
+  the second half. You can also Alt-drag from the cut time to the new pitch.
+- In **Bend / slide**, grab the point where the slide should begin and
+  drag up or down. Drag farther right for a longer slide. Hold **Shift**
+  to snap to semitones. Drag a handle on the selected curve to revise it.
+  The driver plays authored bends on FM.
+- In **Vibrato**, drag right to increase rate and up to increase depth
+  on an FM note. The readout shows the achievable Hz and cents. Drag down
+  to zero depth to turn modulation off for that note.
 - Select a scored note to set its velocity or delete it with **Delete**.
   Set a role or pin a lane from the **Note** tab. Delete on a note generated
   during role assignment records a drop. The trace shows the fate and reason,

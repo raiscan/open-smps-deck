@@ -80,13 +80,16 @@ public final class ReconstructionVoicePlan {
             return types;
         }
 
-        Map<String, Assignment> assignments(ReconstructionAllocation.Result allocation) {
+        Map<String, Assignment> assignments(ReconstructionAllocation.Result allocation, Map<String, ReconstructionEdits.Pin> pins) {
             var byNote = byNote();
             var assignments = new java.util.TreeMap<String, Assignment>();
             for (var entry : allocation.notes()) {
                 var voice = voiceFor(byNote, entry.note().id());
                 if (entry.lane() == null || voice == null || voice.assignment == null) continue;
-                require(voice.assignment.laneType.accepts(entry.lane(), voice.kind == Kind.drum), FILE,
+                boolean compatible = voice.assignment.laneType.accepts(entry);
+                // An explicit per-note lane pin supersedes the source voice's chip choice.
+                if (!compatible && pins != null && pins.containsKey(entry.note().id())) continue;
+                require(compatible, FILE,
                         "note " + entry.note().id() + " needs " + voice.assignment.laneType
                                 + "; resume from allocate to apply the voice assignment");
                 assignments.put(entry.note().id(), voice.assignment);
@@ -169,7 +172,36 @@ public final class ReconstructionVoicePlan {
 
     /** Load the current proposal and replay its journal against the saved roles. */
     public static Result load(Path work) throws IOException {
-        return open(work).apply(readJournal(work).edits);
+        return review(work, ReconstructionEdits.read(work));
+    }
+
+    static Result review(Path work, ReconstructionEdits edits) throws IOException {
+        return open(work).apply(combined(work, edits));
+    }
+
+    private static List<Edit> combined(Path work, ReconstructionEdits edits) throws IOException {
+        var journal = new ArrayList<>(readJournal(work).edits);
+        for (var intent : edits.intents())
+            if (intent.kind() == ReconstructionEdits.Kind.voiceEdit)
+                journal.add(reviewEdit(intent.json(), ReconstructionEdits.FILE));
+        return journal;
+    }
+
+    static Edit reviewEdit(JsonObject outer, String at) {
+        var value = outer.get("voiceEdit");
+        require(value != null && value.isJsonObject(), at + ".voiceEdit", "expected a voice operation");
+        var body = value.getAsJsonObject().deepCopy();
+        require(!body.has("id") && !body.has("author"), at + ".voiceEdit", "id and author belong to the outer edit");
+        body.add("id", outer.get("id"));
+        body.addProperty("author", outer.has("author") ? outer.get("author").getAsString() : "agent");
+        var wrapped = new JsonObject();
+        wrapped.addProperty("version", VERSION);
+        var entries = new com.google.gson.JsonArray();
+        entries.add(body);
+        wrapped.add("edits", entries);
+        var edit = ReconstructionArtifacts.decode(Path.of(ReconstructionEdits.FILE), Journal.class, wrapped).edits.getFirst();
+        validate(edit, new LinkedHashSet<>());
+        return edit;
     }
 
     static Result generate(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
@@ -179,7 +211,27 @@ public final class ReconstructionVoicePlan {
     }
 
     static Result preview(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
-        return new ReconstructionVoicePlan(work, score, roles).apply(readJournal(work).edits);
+        return preview(work, score, roles, ReconstructionEdits.read(work));
+    }
+
+    static Result preview(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles,
+                          ReconstructionEdits edits) throws IOException {
+        return new ReconstructionVoicePlan(work, score, roles).apply(combined(work, edits));
+    }
+
+    static void reviewOutcomes(ReconstructionEdits edits, Result result, List<ReconstructionEdits.Outcome> outcomes) {
+        for (var intent : edits.intents()) {
+            if (intent.kind() != ReconstructionEdits.Kind.voiceEdit) continue;
+            var edit = reviewEdit(intent.json(), ReconstructionEdits.FILE);
+            var issue = result.issues().stream().filter(item -> item.id().equals(edit.id())).findFirst();
+            var affected = edit.noteIds() != null ? edit.noteIds() : result.voices().stream()
+                    .filter(voice -> voice.id().equals(edit.voiceId())).findFirst()
+                    .map(Voice::noteIds).orElse(List.of());
+            outcomes.add(new ReconstructionEdits.Outcome(intent.id(), intent.kind(),
+                    issue.map(item -> ReconstructionEdits.Status.valueOf(item.status()))
+                            .orElse(ReconstructionEdits.Status.applied), affected, null,
+                    issue.map(Issue::detail).orElse(null), null));
+        }
     }
 
     static Result saved(Path work) throws IOException {
@@ -215,8 +267,12 @@ public final class ReconstructionVoicePlan {
             }
             var accepted = new ArrayList<>(prior);
             accepted.addAll(edits);
+            for (var intent : ReconstructionEdits.read(work).intents())
+                if (intent.kind() == ReconstructionEdits.Kind.voiceEdit)
+                    model.replay(reviewEdit(intent.json(), ReconstructionEdits.FILE), ids, issues);
+            var result = model.result(issues);
             ReconstructionArtifacts.write(work.resolve(JOURNAL), new Journal(VERSION, accepted));
-            return model.result(issues);
+            return result;
         }
     }
 

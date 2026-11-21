@@ -26,7 +26,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -61,7 +61,9 @@ final class ReconstructionEdits {
             return switch (kind) {
                 case insertNote, deleteNote, setNote, splitNote, mergeNotes, bend, glide, setVelocity -> Stage.TRANSCRIBE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
+                case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
+                case noteVoicing -> Stage.ASSEMBLE;
             };
         }
 
@@ -217,7 +219,9 @@ final class ReconstructionEdits {
                     "allowDifferentPitches", "glide");
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
-            case setVelocity -> List.of("span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
+            case voiceEdit -> List.of("voiceEdit");
+            case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "modulationOff");
+            case setVelocity -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",
                     "pitchMax", "voice", "lane", "laneType");
             case unmerge -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "voice");
@@ -342,10 +346,19 @@ final class ReconstructionEdits {
                         "from and to must be distinct tonal roles");
                 span = span(json, at, part);
             }
+            case voiceEdit -> ReconstructionVoicePlan.reviewEdit(json, at);
+            case noteVoicing -> {
+                ids = noteIds(json, at, 1);
+                ReconstructionNoteVoicing.validate(json, laneType, at);
+            }
             case setVelocity -> {
                 require((velocity == null) != (scale == null), at, "choose velocity or scale");
                 require(scale == null || scale >= 0, at + ".scale", "expected a nonnegative factor");
-                span = span(json, at, part);
+                if (json.has("noteIds")) {
+                    require(!json.has("span") && part == null && min == null && max == null, at,
+                            "use noteIds or span with part and optional pitch bounds");
+                    ids = noteIds(json, at, 1);
+                } else span = span(json, at, part);
             }
             case setRole, pinLane, unmerge, arpeggio, chordInstrument -> {
                 require(kind != Kind.setRole || role != null, at + ".role", "required");
@@ -533,11 +546,13 @@ final class ReconstructionEdits {
                 continue;
             }
             if (edit.kind == Kind.setVelocity) {
-                var affected = List.copyOf(register(edit, notes.values().stream()
-                        .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(), id -> true).keySet());
+                var affected = edit.noteIds.isEmpty() ? List.copyOf(register(edit, notes.values().stream()
+                        .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(), id -> true).keySet())
+                        : edit.noteIds.stream().filter(notes::containsKey).toList();
+                var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id)).toList();
                 for (String id : affected) notes.computeIfPresent(id, (key, note) -> edit.level(note));
-                outcomes.add(affected.isEmpty() ? orphan(edit, List.of())
-                        : new Outcome(edit.id, edit.kind, Status.applied, List.copyOf(affected), null, null, null));
+                outcomes.add(affected.isEmpty() ? orphan(edit, missing)
+                        : new Outcome(edit.id, edit.kind, Status.applied, affected, missing.isEmpty() ? null : missing, null, null));
                 continue;
             }
             List<String> requested = edit.attack == null ? edit.noteIds
@@ -864,7 +879,7 @@ final class ReconstructionEdits {
         int order = 0;
         for (Intent edit : intents) {
             order++;
-            if (edit.firstStage() == Stage.ALLOCATE) continue;
+            if (edit.firstStage().ordinal() > Stage.ROLES.ordinal()) continue;
             var scoreResult = scoreResults.get(edit.id);
             if (edit.kind == Kind.mergeNotes && edit.mergeGlide && scoreResult != null
                     && scoreResult.status == Status.applied) {
@@ -1195,11 +1210,11 @@ final class ReconstructionEdits {
         return value.getAsJsonArray();
     }
 
-    private static String string(JsonObject json, String key, String at) {
+    static String string(JsonObject json, String key, String at) {
         return string(json.get(key), at + "." + key);
     }
 
-    private static String string(JsonElement value, String at) {
+    static String string(JsonElement value, String at) {
         require(value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
                 && !value.getAsString().isBlank(), at, "expected a nonblank string");
         return value.getAsString();
@@ -1218,7 +1233,7 @@ final class ReconstructionEdits {
         return value.getAsDouble();
     }
 
-    private static Integer integer(JsonObject json, String key, String at, int min, int max) {
+    static Integer integer(JsonObject json, String key, String at, int min, int max) {
         if (!json.has(key)) return null;
         double value = number(json.get(key), at + "." + key);
         require(value == Math.rint(value) && value >= min && value <= max, at + "." + key,

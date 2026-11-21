@@ -48,7 +48,7 @@ final class ReconstructionCli {
     private record Effects(Map<Integer, ReconstructionEcho.Estimate> echoes,
                            Map<Integer, ReconstructionVibrato.Estimate> vibrato,
                            Map<Integer, ReconstructionReverb.Estimate> reverb) {}
-    private record Matched(Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> byLane,
+    record Matched(Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> byLane,
                            List<MatchEvidence> evidence, List<ReconstructionVoices.SectionTrial> sectionTrials) {}
     private record Report(int version, String matcher, long referenceUs, int presentations, int bankBytes,
                           int sourceNotes, int fmNotes, int psgNotes, int dacHits, boolean keepOctaves, boolean fmOnly,
@@ -269,7 +269,8 @@ final class ReconstructionCli {
 
     static void assembleAllocated(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                                   ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing,
-                                  PrintStream out, boolean preserveReview) throws IOException {
+                                  PrintStream out, boolean preserveReview, ReconstructionEdits intents,
+                                  List<ReconstructionEdits.Outcome> outcomes) throws IOException {
         Path destination = work.resolve(OUTPUTS.getFirst());
         var existing = preserveReview && Files.exists(destination, java.nio.file.LinkOption.NOFOLLOW_LINKS)
                 ? ProjectFiles.load(destination) : null;
@@ -284,6 +285,7 @@ final class ReconstructionCli {
         var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
         var voiceAssignments = voicing.voiceAssignments() == null
                 ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
+        var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
         var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
@@ -308,9 +310,10 @@ final class ReconstructionCli {
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), drumGains, layout, voiceAssignments),
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, authored.scopes(), playback.origins(), drumGains, layout, authored.instruments()),
                     out, existing, assemblyInputs);
-            var edits = ReconstructionEdits.Journal.read(work).all();
+            var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
+            edits.addAll(outcomes);
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
@@ -371,7 +374,7 @@ final class ReconstructionCli {
                 ReconstructionReverb.detect(score, reference, options.stems(), durationUs));
     }
 
-    private static Matched voicedMatches(InstrumentCatalogue catalogue, ReconstructionAllocation.Result allocation,
+    static Matched voicedMatches(InstrumentCatalogue catalogue, ReconstructionAllocation.Result allocation,
                                          ReconstructionVoicing.Result voicing) {
         var result = new LinkedHashMap<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>>();
         var evidence = new ArrayList<MatchEvidence>();
