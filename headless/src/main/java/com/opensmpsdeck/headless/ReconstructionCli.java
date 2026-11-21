@@ -79,7 +79,8 @@ final class ReconstructionCli {
 
     @FunctionalInterface
     private interface Arrangement {
-        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends) throws IOException;
+        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends,
+                                         int omitPolicy) throws IOException;
     }
 
     private ReconstructionCli() {}
@@ -228,7 +229,7 @@ final class ReconstructionCli {
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
-                (echoes, copies, bends) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
+                (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null, null);
     }
 
@@ -260,7 +261,7 @@ final class ReconstructionCli {
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
                 result.representative("FM1", allocated.get("FM1"))));
         return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning,
-                result.voiceAssignments(), result.sourceInstruments());
+                result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies());
     }
 
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
@@ -325,6 +326,8 @@ final class ReconstructionCli {
         var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
+        var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
+        var policyLevels = policies.isEmpty() ? null : new ReconstructionLanePolicies.Levels();
         var instruments = voicing.sourceInstruments();
         var copyLanes = java.util.stream.Stream.concat(voicing.lanes().values().stream(),
                         instruments == null ? java.util.stream.Stream.empty()
@@ -347,10 +350,12 @@ final class ReconstructionCli {
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
-                    (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
+                    (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
-                            authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments),
+                            authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
+                            omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
+                            policyLevels),
                     out, preserveReview ? existing : null, assemblyInputs);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
             edits.addAll(outcomes);
@@ -407,7 +412,7 @@ final class ReconstructionCli {
                 "allocation", ReconstructionArtifacts.fingerprint(allocation),
                 "voicing", ReconstructionArtifacts.fingerprint(
                         new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
-                                voicing.voiceAssignments(), voicing.sourceInstruments())));
+                                voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies())));
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
@@ -503,7 +508,7 @@ final class ReconstructionCli {
             Path audio = target.resolve(OUTPUTS.get(2));
             Path aligned = timeline.warped() ? target.resolve(STEADY_REFERENCE) : reference;
             while (true) {
-                result = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(), !echoBankLimit, !bendSizeLimit);
+                result = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(), !echoBankLimit, !bendSizeLimit, -1);
                 var project = result.project();
                 if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
                 if (timeline.warped() || existing != null) {
@@ -522,6 +527,8 @@ final class ReconstructionCli {
                     else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
                         throw new IllegalArgumentException(failure.getMessage() + " (arpeggios add "
                                 + result.arpeggioExtraNoteBytes() + " note bytes; use longer steps or a smaller scope)", failure);
+                    else if (!result.policyCoverage().isEmpty())
+                        throw new IllegalArgumentException(failure.getMessage() + " (narrow voicing.json.lanePolicies scopes)", failure);
                     else throw failure;
                     continue;
                 }
@@ -586,7 +593,27 @@ final class ReconstructionCli {
                     result.assignmentClipCost() == 0 ? null : result.assignmentClipCost(),
                     result.arpeggioExtraNoteBytes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
-            Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
+            var reportJson = json.toJsonTree(report).getAsJsonObject();
+            if (!result.policyCoverage().isEmpty()) {
+                var policyReport = new com.google.gson.JsonArray();
+                for (var coverage : result.policyCoverage()) {
+                    var row = json.toJsonTree(coverage).getAsJsonObject();
+                    var without = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(),
+                            !echoBankLimit, !bendSizeLimit, coverage.index());
+                    row.addProperty("psgEnvelopeBytesDelta", psgEnvelopeBytes(result.project()) - psgEnvelopeBytes(without.project()));
+                    try {
+                        int withoutBytes = ProjectCompiler.compile(without.project()).length;
+                        row.addProperty("bankBytesDelta", compiled.song().length - withoutBytes);
+                    } catch (IllegalArgumentException failure) {
+                        if (!failure.getMessage().contains("32 KiB S3K bank")) throw failure;
+                        row.addProperty("bankBytesDeltaUnavailable", "bank without this policy exceeds the S3K limit");
+                    }
+                    policyReport.add(row);
+                }
+                reportJson.add("lanePolicies", policyReport);
+            }
+            Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(reportJson) + "\n",
+                    java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
             out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
                     result.fmNotes(), result.psgNotes(), result.dacHits(), frames, destination);
@@ -597,6 +624,11 @@ final class ReconstructionCli {
                 Files.delete(target);
             }
         }
+    }
+
+    private static int psgEnvelopeBytes(StudioProject project) {
+        return project.envelopes().stream().filter(e -> e.type().equals(com.opensmpsdeck.project.Envelope.PSG_VOLUME))
+                .mapToInt(e -> e.bytes().size()).sum();
     }
 
     private static ReconstructionDrums.Source drumSource(ReconstructionStages.Score score, int hits) {

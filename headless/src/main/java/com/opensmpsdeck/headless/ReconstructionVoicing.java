@@ -23,17 +23,26 @@ final class ReconstructionVoicing {
     record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows,
                   @Nullable String sustainWarning,
                   @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,
-                  @Nullable Map<String, SourceSound> sourceInstruments) {
+                  @Nullable Map<String, SourceSound> sourceInstruments,
+                  @Nullable ReconstructionLanePolicies.Configuration lanePolicies) {
+        Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
+               Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments) {
+            this(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, null);
+        }
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning) {
             this(version, lanes, fitWindows, sustainWarning, null, null);
         }
 
         Result withAssignments(Map<String, ReconstructionVoicePlan.Assignment> assignments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments);
+            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments, lanePolicies);
         }
 
         Result withSourceInstruments(Map<String, SourceSound> instruments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies);
+        }
+
+        Result withLanePolicies(ReconstructionLanePolicies.Configuration policies) {
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies);
         }
 
         SourceSound sourceSound(String lane, int part) {
@@ -168,7 +177,7 @@ final class ReconstructionVoicing {
         if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
         var lanes = new java.util.LinkedHashMap<>(result.lanes());
         lanes.put("PSG3", lane.withPsgPercussion(settings));
-        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning(), result.voiceAssignments(), result.sourceInstruments());
+        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning(), result.voiceAssignments(), result.sourceInstruments(), result.lanePolicies());
     }
 
     record DrumGain(@Nullable List<String> hitIds, @Nullable List<Double> span, @Nullable Integer pitch, double gain) {
@@ -354,7 +363,7 @@ final class ReconstructionVoicing {
         if (defaults.isEmpty()) return voicing;
         var lanes = new TreeMap<>(voicing.lanes());
         lanes.computeIfPresent("PSG3", (id, lane) -> lane.withDrumGains(mergeDrumGains(defaults, lane.drumGains())));
-        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning(), voicing.voiceAssignments(), voicing.sourceInstruments());
+        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning(), voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies());
     }
 
     private static Map<Integer, Double> mergeDrumGains(Map<Integer, Double> fitted, Map<Integer, Double> saved) {
@@ -415,7 +424,7 @@ final class ReconstructionVoicing {
             return new SourceSound(sound.fm().withEffects(effects), sound.psgVariantId(), sound.psgVolumeOffset());
         });
         return new Result(previous.version(), lanes, previous.fitWindows(), null, null,
-                previous.sourceInstruments() == null ? null : instruments);
+                previous.sourceInstruments() == null ? null : instruments, previous.lanePolicies());
     }
 
     private static Effects compatibleCopy(String id, Effects effects, Map<String, ?> allocated, Set<String> copies,
@@ -462,7 +471,7 @@ final class ReconstructionVoicing {
             require(targets.contains(id) || previous.lanes().containsKey(id), "voicing.json.lanes." + id,
                     "new lane must be explicitly targeted");
         return new Result(fitted.version(), lanes, fitted.fitWindows(), null, null,
-                targets.isEmpty() ? fitted.sourceInstruments() : previous.sourceInstruments());
+                targets.isEmpty() ? fitted.sourceInstruments() : previous.sourceInstruments(), previous.lanePolicies());
     }
 
     static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue, int frames) {

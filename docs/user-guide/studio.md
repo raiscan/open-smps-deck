@@ -274,6 +274,10 @@ stems, and reads `render.wav` for the chip spectrogram and playback.
   to audition that lane through the chip renderer. **Solo note** loops the
   selected gate. Turn it off to return to your previous loop selection.
 
+- Choose **Lane policies → S3K layering** to rebuild with octave-up PSG
+  doubling and a short FM echo on available channels. Choose **Off** to
+  clear the lane policies. Both choices replace any custom lane policies.
+
 ### Review agent proposals
 
 Agent proposals appear as magenta dashed outlines on the pitch plot. Hover

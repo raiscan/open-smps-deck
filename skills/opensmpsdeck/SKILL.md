@@ -178,6 +178,15 @@ tab handles bulk roles, pins, velocity, merges and chord fitting. **Undo**,
 **Redo** and **Apply** operate on the draft. Resolve dirty-draft conflicts before
 publishing. [Studio controls](../../docs/user-guide/studio.md#review-a-reconstruction)
 
+**Layering on spare channels.** `voicing.json.lanePolicies` adds opt-in
+`pads`, `leadEcho`, `psgDouble` and `fmDouble` (chorus or echo) layers on
+free PSG and FM lanes, scoped by `voice`, `section` or `span`. The
+`s3k-layering` preset combines an octave PSG double with an 8-frame FM echo:
+`reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering`, MCP
+`options.lanePolicyPreset`, or Studio **Lane policies → S3K layering**.
+Check `report.json.lanePolicies` for coverage and skips before auditioning.
+[Lane policies](../../docs/architecture/reconstruction-stages.md#optional-lane-policies)
+
 ## 5. Compare and listen
 
 ```sh

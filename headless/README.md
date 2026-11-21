@@ -808,6 +808,15 @@ Acceptance takes effect on a rebuild from `transcribe`. Retranscription
 refreshes the pending detector queue and keeps accepted edits and
 rejection history.
 
+## Reconstruction layering
+
+`reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering` enables
+octave-up PSG doubling and an eight-frame FM echo. Use `off` to clear lane
+policies. Both choices replace the previous policy configuration in
+`voicing.json`. For MCP `reconstruct_stage`, pass `stage: "assemble"` and
+`options.lanePolicyPreset`. See the [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)
+for custom scopes.
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then

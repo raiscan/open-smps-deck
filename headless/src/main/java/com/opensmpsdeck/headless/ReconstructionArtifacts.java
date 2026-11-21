@@ -86,7 +86,7 @@ final class ReconstructionArtifacts {
         }
     }
 
-    private static void shape(String at, Type type, JsonElement value) {
+    static void shape(String at, Type type, JsonElement value) {
         require(value != null && !value.isJsonNull(), at, "required");
         if (type instanceof ParameterizedType generic) {
             Type[] args = generic.getActualTypeArguments();
@@ -107,6 +107,9 @@ final class ReconstructionArtifacts {
                     shape(at + "." + field.getKey(), args[1], field.getValue());
                 }
             }
+        } else if (type == ReconstructionLanePolicies.Configuration.class) {
+            // Its adapter validates the explicit-rule array or named preset object.
+            return;
         } else if (type instanceof Class<?> clazz && clazz.isRecord()) {
             require(value.isJsonObject(), at, "expected an object");
             var object = value.getAsJsonObject();
