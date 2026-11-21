@@ -69,7 +69,7 @@ public final class ReconstructionView {
         }
     }
 
-    enum Layer { suno, external, edit, trace, lane }
+    enum Layer { suno, external, edit, trace, lane, noteLayer, layerSkip }
     record DrawnNote(String id, String label, Layer layer, Integer part, String lane, int pitch,
                      String pitchName, Timing timing, ReconstructionTrace.Status status, String evidence) {
         boolean warning() {
@@ -106,7 +106,8 @@ public final class ReconstructionView {
                          List<HarmonicGuide> harmonicsAt, Levels levels, String ridgesPath,
                          List<EvidenceBends.Curve> bends, List<EvidenceTrajectories.Track> sourceLevels,
                          List<EvidenceTrajectories.Track> renderLevels, DrumEvidence.Review drums,
-                         Map<String, VoiceColor> voiceColors, Map<String, String> noteVoices) {}
+                         Map<String, VoiceColor> voiceColors, Map<String, String> noteVoices,
+                         List<ReconstructionLayers.Result> noteLayers) {}
     public record Result(Legend legend, byte[] png) {}
 
     private ReconstructionView() {}
@@ -342,13 +343,23 @@ public final class ReconstructionView {
             }
         }
         pngTarget.publish();
+        var noteLayers = rows.values().stream()
+                .filter(row -> row.layers() != null && (options.parts().isEmpty() || options.parts().contains(row.part())))
+                .flatMap(row -> row.layers().stream().filter(layer -> {
+                    var gate = ReconstructionTrace.ticks(layer.startTick(), layer.endTick(), span.timeline());
+                    String layerLane = layer.lane() == null && row.allocation() != null ? row.allocation().lane() : layer.lane();
+                    return (options.lanes().isEmpty() || layerLane != null && options.lanes().contains(layerLane))
+                            && (span.overlaps(java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing()))
+                                    || gate != null && span.overlaps(gate));
+                })).toList();
         var legend = new Legend(output.toAbsolutePath().normalize().toString(), source.label, options.time,
                 span.start, span.end, span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source),
                 span.seconds(span.start, TimeBase.project), span.seconds(span.end, TimeBase.project), low, high, timeline.warped(), options.harmonicSum,
                 picture.geometry(), visible, harmonics, patchChanges, guides.isEmpty() ? null : guides, levels,
                 ridgeFile == null ? null : ridgeFile.toAbsolutePath().normalize().toString(),
                 bends.isEmpty() ? null : bends, options.db ? sourceTracks : null, options.db ? renderTracks : null, drums,
-                options.colorByVoice ? voiceColors : null, options.colorByVoice ? noteVoices : null);
+                options.colorByVoice ? voiceColors : null, options.colorByVoice ? noteVoices : null,
+                noteLayers.isEmpty() ? null : noteLayers);
         return new Result(legend, png);
     }
 

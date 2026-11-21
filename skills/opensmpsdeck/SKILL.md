@@ -161,8 +161,15 @@ lists field names, selector rules and rebuild stages.
 | Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `mergeNotes` |
 | Route a line or register | `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
 | Shape articulation and level | `bend`, `glide`, `noteVoicing` for instrument or vibrato overrides, `setVelocity` |
+| Layer selected attacks | `layer` with `echo`, `chorus`, `double` or `off` |
 | Fit stacked tones | `arpeggio`, `chordInstrument` |
 | Change a voice in a reviewable batch | `voiceEdit` |
+
+For a note-scoped echo, choose `laneType: "FM"` or `"PSG"` and set
+`delayFrames` and `levelDb` or `attenuation`. To match Studio's default
+echo, use 14 frames and 11 TL below dry. Studio shows this as a −3 dB
+trim from the original 7-TL echo. A layer edit overrides lane policies for
+its notes. Check the dry-run and trace results for skipped copies before review.
 
 **Propose by default when a human is reviewing.** For example, save an
 ordered array of intents to `batch.json` and preview the group before it
@@ -195,12 +202,13 @@ publishing. [Studio controls](../../docs/user-guide/studio.md#review-a-reconstru
 **Layering on spare channels.** `voicing.json.lanePolicies` adds opt-in
 `pads`, `leadEcho`, `psgDouble` and `fmDouble` (chorus or echo) layers on
 free PSG and FM lanes, scoped by `voice`, `section` or `span`. The
-`s3k-layering` preset combines an octave PSG double with an 8-frame FM echo:
-`reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering`, MCP
+`s3k-layering` preset combines an octave PSG double with a 14-frame FM echo.
+Use `reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering`, MCP
 `options.lanePolicyPreset`, or Studio **Lane policies → S3K layering**.
-The echo defaults to 15 carrier TL steps below the dry note (11.25 dB
-nominal). To audition a different level, set `lanePolicies.echoAttenuation`
-in `voicing.json` to an integer from 0 to 127 (0.75 dB per step) and
+The echo defaults to 11 carrier TL steps below dry (8.25 dB nominal),
+4 TL steps or 3 dB quieter than the original 7-TL echo. To audition a
+different level, set `lanePolicies.echoAttenuation` in `voicing.json` to
+an integer from 0 to 127 (0.75 dB per step) and
 rebuild with `reconstruct assemble WORK_DIR` using the saved preset.
 Check `report.json.lanePolicies` for coverage and skips before auditioning.
 [Lane policies](../../docs/architecture/reconstruction-stages.md#optional-lane-policies)

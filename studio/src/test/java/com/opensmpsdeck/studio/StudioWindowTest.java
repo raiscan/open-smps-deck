@@ -1142,7 +1142,7 @@ class StudioWindowTest {
         fx(() -> {
             var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
             var panel = new ReconstructionBulk(ignored -> {}, edits -> draft.change(entries -> edits.forEach(entries::add)),
-                    (ids, instrument) -> fail("Unexpected audition"), () -> {});
+                    (ids, instrument) -> fail("Unexpected audition"), () -> {}, edit -> fail("Unexpected preview"));
             var host = new Stage();
             host.setScene(new javafx.scene.Scene(new ScrollPane(panel), 320, 700));
             host.show();
@@ -1178,6 +1178,30 @@ class StudioWindowTest {
                 assertEquals(1, draft.entries().size());
                 draft.undo(true);
                 assertEquals(intents, draft.entries());
+                ((Button) panel.lookup("#reconstruction-queue-layer")).fire();
+                var layer = draft.entries().get(3).getAsJsonObject();
+                assertEquals("layer", layer.get("op").getAsString());
+                assertEquals("human", layer.get("author").getAsString());
+                assertEquals("echo", layer.get("mode").getAsString());
+                assertEquals("FM", layer.get("laneType").getAsString());
+                assertEquals(14, layer.get("delayFrames").getAsInt());
+                assertEquals(11, layer.get("attenuation").getAsInt());
+                var echoLevel = (TextField) panel.lookup("#reconstruction-layer-level");
+                assertEquals("-3", echoLevel.getText());
+                assertEquals("test-note", layer.getAsJsonArray("noteIds").get(0).getAsString());
+                assertNull(com.opensmpsdeck.headless.ReconstructionReview.validationIssue(layer));
+                draft.undo(false);
+                assertEquals(intents, draft.entries());
+                draft.undo(true);
+                assertEquals(layer, draft.entries().get(3));
+                ((CheckBox) panel.lookup("#reconstruction-layer-echo-trim")).setSelected(false);
+                assertEquals("-8.25", echoLevel.getText());
+                echoLevel.setText("-9");
+                ((TextField) panel.lookup("#reconstruction-layer-delay")).setText("10");
+                ((Button) panel.lookup("#reconstruction-queue-layer")).fire();
+                var absolute = draft.entries().get(4).getAsJsonObject();
+                assertEquals(10, absolute.get("delayFrames").getAsInt());
+                assertEquals(-9, absolute.get("levelDb").getAsDouble());
                 assertFalse(Files.exists(work.resolve("edits.json")));
             } finally {
                 host.close();

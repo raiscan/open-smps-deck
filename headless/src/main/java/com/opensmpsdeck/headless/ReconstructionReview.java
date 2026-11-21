@@ -40,7 +40,9 @@ public final class ReconstructionReview {
         }
     }
 
-    public record EditResult(String status, String reason, List<String> noteIds) {}
+    public record EditResult(String status, String reason, List<String> noteIds, ReconstructionLayers.Result layer) {
+        EditResult(String status, String reason, List<String> noteIds) { this(status, reason, noteIds, null); }
+    }
 
     public static final class Changed extends IOException {
         public Changed() { super("The reconstruction changed on disk. Reload before applying your edits."); }
@@ -68,7 +70,7 @@ public final class ReconstructionReview {
         var results = new java.util.LinkedHashMap<String, List<EditResult>>();
         for (var outcome : ReconstructionEdits.Journal.read(work).all())
             results.computeIfAbsent(outcome.id(), id -> new ArrayList<>())
-                    .add(new EditResult(outcome.status().name(), outcome.detail(), outcome.noteIds()));
+                    .add(new EditResult(outcome.status().name(), outcome.detail(), outcome.noteIds(), outcome.layer()));
         results.replaceAll((id, values) -> List.copyOf(values));
         return java.util.Map.copyOf(results);
     }
@@ -262,6 +264,19 @@ public final class ReconstructionReview {
         return preview(work, id, null, null, expected, progress);
     }
 
+    public static ProposalPreview previewLayer(Path work, JsonObject layer, Revision expected,
+                                               ReconstructionStages.Progress progress) throws IOException {
+        work = work.toRealPath();
+        requireRevision(work, expected);
+        var edit = parse(layer);
+        ReconstructionArtifacts.require(edit.kind() == ReconstructionEdits.Kind.layer && !edit.proposed(),
+                "layer", "expected a layer edit");
+        var entries = expected.entries();
+        entries.add(layer);
+        var shadow = parse(entries).accepted();
+        return preview(work, expected, List.of(edit), shadow, ReconstructionStages.Stage.ASSEMBLE, progress);
+    }
+
     private static ProposalPreview preview(Path work, String id, String group, ReconstructionStages.Stage start,
                                            Revision expected, ReconstructionStages.Progress progress) throws IOException {
         work = work.toRealPath();
@@ -273,6 +288,12 @@ public final class ReconstructionReview {
         var shadow = ReconstructionProposals.shadow(journal, selected);
         var from = ReconstructionProposals.from(shadow, selected, ReconstructionEdits.Journal.read(work));
         if (start != null && start.ordinal() < from.ordinal()) from = start;
+        return preview(work, expected, selected, shadow, from, progress);
+    }
+
+    private static ProposalPreview preview(Path work, Revision expected, List<ReconstructionEdits.Intent> selected,
+                                           ReconstructionEdits shadow, ReconstructionStages.Stage from,
+                                           ReconstructionStages.Progress progress) throws IOException {
         Path before = work.resolve("render.wav");
         ReconstructionArtifacts.require(Files.isRegularFile(before, NOFOLLOW_LINKS), "proposals",
                 "build the accepted arrangement before previewing");

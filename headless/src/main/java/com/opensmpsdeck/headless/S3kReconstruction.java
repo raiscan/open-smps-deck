@@ -44,10 +44,11 @@ final class S3kReconstruction {
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                   List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends,
                   List<VoicedGate> voicedGates, int assignmentClipCost, Integer arpeggioExtraNoteBytes,
-                  List<ReconstructionLanePolicies.Coverage> policyCoverage) {
+                  List<ReconstructionLanePolicies.Coverage> policyCoverage,
+                  List<ReconstructionLayers.Result> layers) {
         Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends, List<VoicedGate> voicedGates) {
-            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of());
+            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of(), List.of());
         }
     }
     record VoicedGate(String id, String lane, int pitch, int startTick, int endTick, String evidence) {
@@ -317,6 +318,24 @@ final class S3kReconstruction {
                                    Map<String, ReconstructionVoicing.SourceSound> sourceInstruments,
                                    List<ReconstructionLanePolicies.Scoped> policies, ReconstructionLanePolicies.Levels levels)
             throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue, matches,
+                echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, layout, assignments, sourceInstruments,
+                policies, levels, Map.of(), false);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout,
+                                   Map<String, ReconstructionVoicePlan.Assignment> assignments,
+                                   Map<String, ReconstructionVoicing.SourceSound> sourceInstruments,
+                                   List<ReconstructionLanePolicies.Scoped> policies, ReconstructionLanePolicies.Levels levels,
+                                   Map<String, ReconstructionLayers.Request> layers, boolean fmOnly)
+            throws java.io.IOException {
         var candidates = new ArrayList<PolicySource>();
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var gates = new ArrayList<VoicedGate>();
@@ -508,8 +527,9 @@ final class S3kReconstruction {
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
                             curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
                 }
-                if (!policies.isEmpty())
+                if (!policies.isEmpty() || layers.containsKey(origin))
                     candidates.add(new PolicySource(entry, origin, placed, gates.size(), assignment != null));
+                if (layers.containsKey(origin)) placed.copy = null;
                 // Record after scoped gate overrides so the trace reports the voiced length.
                 gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, placed.end));
                 if (isFm) fm.get(ReconstructionAllocation.FM.indexOf(lane)).add(placed);
@@ -521,11 +541,15 @@ final class S3kReconstruction {
         if (fmNotes + psgNotes + dac.size() == 0)
             throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
         int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
+        var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, psg, candidates, voices, envelopes,
+                levels, catalogue, sourceInstruments);
         int echoNotes = addEchoes(fm, echoes, frames, 2);
         if (copies) echoNotes += addVoicingCopies(fm, frames);
-        var coverage = applyLanePolicies(policies, levels, frames, fm, psg, candidates, voices, envelopes, gates,
+        var policySources = layers.isEmpty() ? candidates
+                : candidates.stream().filter(source -> !layers.containsKey(source.origin())).toList();
+        var coverage = applyLanePolicies(policies, levels, frames, fm, psg, policySources, voices, envelopes, gates,
                 catalogue, sourceInstruments, parts, overlappingTone);
-        if (!coverage.isEmpty()) {
+        if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
         }
@@ -538,7 +562,7 @@ final class S3kReconstruction {
         for (int i = 0; i < psg.size(); i++)
             assignmentClipCost += writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
         writeDacLane(dac, sequences, clips, repeats);
-        if (!scopes.isEmpty() || !allocation.chords().isEmpty() || !policies.isEmpty()) {
+        if (!scopes.isEmpty() || !allocation.chords().isEmpty() || !policies.isEmpty() || !layers.isEmpty()) {
             var used = new HashSet<String>();
             for (var sequence : sequences) {
                 used.add(sequence.voiceId());
@@ -555,7 +579,7 @@ final class S3kReconstruction {
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
-                List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes, coverage);
+                List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes, coverage, layerResults);
     }
 
     private static ReconstructionVoices.Choice assignedChoice(InstrumentCatalogue catalogue,
@@ -698,6 +722,134 @@ final class S3kReconstruction {
                                 boolean assigned) {}
 
     private record FreeSlot(List<Placement> lane, String id, int index) {}
+    private static final Envelope LAYER_PSG = new Envelope("note-layer-psg", "Note layer", Envelope.PSG_VOLUME,
+            List.of(0, 0x81));
+
+    private static List<ReconstructionLayers.Result> applyNoteLayers(
+            Map<String, ReconstructionLayers.Request> layers, int frames, boolean fmOnly,
+            List<ArrayList<Placement>> fm, List<ArrayList<Placement>> psg, List<PolicySource> sources,
+            Map<String, Voice> voices, Map<String, Envelope> envelopes, ReconstructionLanePolicies.Levels levels,
+            InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments) throws java.io.IOException {
+        if (layers.isEmpty()) return List.of();
+        var results = new ArrayList<ReconstructionLayers.Result>();
+        var placedIds = new HashSet<String>();
+        var ordered = sources.stream().filter(source -> layers.containsKey(source.origin()))
+                .filter(source -> layers.get(source.origin()).settings().mode() != ReconstructionLayers.Mode.off)
+                .sorted(Comparator.comparingInt(source -> source.placed().event.start()
+                        + layers.get(source.origin()).settings().delayFrames())).toList();
+        for (var source : ordered) {
+            String id = source.origin();
+            var request = layers.get(id);
+            var settings = request.settings();
+            var dry = source.placed();
+            var note = dry.event.note();
+            boolean targetFm = settings.laneType() == ReconstructionLaneType.FM;
+            int pitch = note.pitch() + 12 * settings.octave();
+            int start = dry.event.start() + settings.delayFrames();
+            int end = Math.min(frames, dry.end + settings.delayFrames());
+            var names = settings.laneType().lanes();
+            String reason = null;
+            FreeSlot slot = null;
+            if (!targetFm && fmOnly) reason = "PSG disabled by FM-only reconstruction";
+            else if (start >= end) reason = "Layer starts outside the render";
+            else if (noiseKind(dry) != PsgMode.TONE) reason = "Source note uses a noise lane";
+            else if (pitch < (targetFm ? 12 : 45) || pitch > (targetFm ? 106 : 117))
+                reason = "Pitch is outside the target chip range";
+            else if (dry.bend != null) reason = "Source note has a rendered pitch bend";
+            else {
+                slot = freeSlot(targetFm ? fm : psg, names, source.entry().lane(), start, end);
+                if (slot == null) reason = "No free " + settings.laneType() + " lane for the full layer gate";
+            }
+            if (slot != null) {
+                var tone = dry.attackTone();
+                var fmVoice = voices.get(tone.asset());
+                var psgVoice = envelopes.get(tone.asset());
+                var layerNote = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
+                var layer = targetFm
+                        ? fmLayer(dry, tone, fmVoice, layerNote, settings, start, end, voices, catalogue, instruments)
+                        : psgLayer(dry, tone, fmVoice, psgVoice, layerNote, settings, start, end, envelopes, levels);
+                if (layer != null) slot.lane().add(slot.index(), layer);
+                else reason = targetFm ? "No usable FM instrument" : "Source has no measurable PSG level match";
+            }
+            results.add(ReconstructionLayers.Result.of(id, request,
+                    reason == null ? ReconstructionLayers.Status.applied : ReconstructionLayers.Status.skipped,
+                    reason, reason == null ? slot.id() : null, pitch, start, end > start ? end : null));
+            placedIds.add(id);
+        }
+        layers.forEach((id, request) -> {
+            if (request.settings().mode() == ReconstructionLayers.Mode.off)
+                results.add(ReconstructionLayers.Result.of(id, request, ReconstructionLayers.Status.off,
+                        "Per-note layers and lane policies disabled for this note", null, null, null, null));
+            else if (!placedIds.contains(id))
+                results.add(ReconstructionLayers.Result.of(id, request, ReconstructionLayers.Status.skipped,
+                        "Source has no independent playable tonal gate", null, null, null, null));
+        });
+        return List.copyOf(results);
+    }
+
+    private static Placement fmLayer(Placement dry, Tone tone, Voice voice, MidiScore.Note note,
+                                     ReconstructionLayers.Settings settings, int start, int end, Map<String, Voice> voices,
+                                     InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments) {
+        int baseVolume = tone.volume();
+        var vibrato = settings.mode() == ReconstructionLayers.Mode.chorus ? null : tone.vibrato();
+        int detune = dry.detune;
+        if (voice == null) {
+            var fitted = instruments == null ? null : instruments.get(ReconstructionVoicePlan.SourceInstrument.id(note.partId()));
+            var profile = fitted == null ? null : fitted.fm();
+            var asset = profile == null || profile.variantId() == null ? catalogue.assets().stream()
+                    .filter(candidate -> candidate.kind() == InstrumentCatalogue.Kind.FM_VOICE).findFirst().orElse(null)
+                    : catalogue.match(profile.variantId()).asset();
+            if (asset == null) return null;
+            var patch = profile == null ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, profile.articulation());
+            String id = ReconstructionVoicing.patchId(asset, patch);
+            voice = voices.computeIfAbsent(id, key -> new Voice(key, asset.name(), unsigned(patch)));
+            baseVolume = voicedVolume(Math.min(127, tone.volume() + 24), 0,
+                    profile == null ? 1 : profile.gainFor(note.partId()), 0);
+            detune = profile == null ? 0 : profile.effects().detune();
+            vibrato = null;
+        }
+        var patch = new byte[voice.bytes().size()];
+        for (int i = 0; i < patch.length; i++) patch[i] = voice.bytes().get(i).byteValue();
+        int floor = ReconstructionEcho.fmVolumeFloor(patch);
+        int volume = fmLayerVolume(baseVolume, floor, settings.attenuation());
+        var layer = new Placement(new Event(note, start, end, dry.event.priority(), voice.id(), volume));
+        layer.detune = Math.clamp(detune + settings.detune(), -128, 127);
+        layer.vibrato = vibrato;
+        placeLayerDecay(layer, settings, baseVolume, floor, start, end, true);
+        return layer;
+    }
+
+    private static Placement psgLayer(Placement dry, Tone tone, Voice fm, Envelope psg, MidiScore.Note note,
+                                      ReconstructionLayers.Settings settings, int start, int end, Map<String, Envelope> envelopes,
+                                      ReconstructionLanePolicies.Levels levels) throws java.io.IOException {
+        int volume = levels.volume(fm, psg, dry.event.note().pitch(), tone.volume(), note.pitch(), LAYER_PSG,
+                end - start, -settings.attenuation() * ReconstructionLayers.DB_PER_TL);
+        if (volume == 0) return null;
+        envelopes.putIfAbsent(LAYER_PSG.id(), LAYER_PSG);
+        var layer = new Placement(new Event(note, start, end, dry.event.priority(), LAYER_PSG.id(), volume));
+        int baseDetune = psg == null ? psgPitchOffset(note.pitch(), dry.detune) : dry.detune;
+        layer.detune = Math.clamp(baseDetune + psgPitchOffset(note.pitch(), settings.detune()), -128, 127);
+        placeLayerDecay(layer, settings, volume, 0, start, end, false);
+        return layer;
+    }
+
+    private static void placeLayerDecay(Placement layer, ReconstructionLayers.Settings settings, int baseVolume,
+                                        int floor, int start, int end, boolean fm) {
+        if (settings.decay().isEmpty()) return;
+        layer.scopedTones = new java.util.TreeMap<>();
+        for (var step : settings.decay()) {
+            if (start + step.frame() >= end) break;
+            int decrease = fm ? step.attenuation()
+                    : 8 * (int) Math.round((step.attenuation() - settings.attenuation()) * ReconstructionLayers.DB_PER_TL / 2);
+            layer.scopedTones.put(start + step.frame(),
+                    new Tone(layer.event.assetId(), fmLayerVolume(baseVolume, floor, decrease), layer.vibrato));
+        }
+    }
+
+    private static int fmLayerVolume(int sourceVolume, int carrierFloor, int attenuation) {
+        return Math.max(carrierFloor, sourceVolume - attenuation);
+    }
+
     private record FreedWindow(int lane, int start, int end) {}
     private record PolicyKey(ReconstructionLanePolicies.Kind kind, ReconstructionLanePolicies.Mode mode) {}
 
@@ -765,13 +917,13 @@ final class S3kReconstruction {
                 var tone = dry.attackTone();
                 if (fmDouble) {
                     int detune = Math.clamp(dry.detune + rule.fmDetune(), -128, 127);
-                    placed = fmCopy(dry, start, end, tone, tone.volume() - rule.fmAttenuation(),
+                    placed = fmCopy(dry, start, end, tone, fmLayerVolume(tone.volume(), dry.volumeFloor, rule.fmAttenuation()),
                             detune, chorus ? null : tone.vibrato());
                     if (!chorus && rule.volumeSteps() != null) {
                         placed.scopedTones = new java.util.TreeMap<>();
                         for (var step : rule.volumeSteps()) {
                             if (step.tick() >= end - start) break;
-                            int volume = Math.max(dry.volumeFloor, tone.volume() - step.attenuation());
+                            int volume = fmLayerVolume(tone.volume(), dry.volumeFloor, step.attenuation());
                             placed.scopedTones.put(start + step.tick(), new Tone(tone.asset(), volume, tone.vibrato()));
                         }
                     }

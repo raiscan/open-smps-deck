@@ -120,7 +120,7 @@ class ReconstructionLanePoliciesTest {
         assertTrue(result.project().clips().stream().filter(clip -> clip.lane().equals("FM1"))
                 .anyMatch(clip -> result.project().sequences().stream().filter(seq -> seq.id().equals(clip.sequenceId()))
                         .flatMap(seq -> seq.notes().stream())
-                        .anyMatch(note -> clip.startTick() + note.tick() == 8 && note.pitch() == 65)));
+                        .anyMatch(note -> clip.startTick() + note.tick() == 14 && note.pitch() == 65)));
         ProjectCompiler.compile(result.project());
     }
 
@@ -132,8 +132,8 @@ class ReconstructionLanePoliciesTest {
         var preset = ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base).lanePolicies();
         assertEquals("s3k-layering", preset.preset());
         assertEquals(73, preset.rules().getFirst().pitch(61));
-        assertEquals(8, preset.rules().getLast().delay());
-        assertEquals(15, preset.rules().getLast().fmAttenuation());
+        assertEquals(14, preset.rules().getLast().delay());
+        assertEquals(11, preset.rules().getLast().fmAttenuation());
         base.add("lanePolicies", JsonParser.parseString("""
                 [{"policy":"fmDouble","mode":"echo","delayTicks":14}]
                 """));
@@ -156,12 +156,12 @@ class ReconstructionLanePoliciesTest {
     @Test void presetEchoAttenuationRoundTripsAndValidatesTlSteps() {
         var path = Path.of("voicing.json");
         var base = JsonParser.parseString("""
-                {"version":1,"lanes":{},"lanePolicies":{"preset":"s3k-layering","echoAttenuation":11}}
+                {"version":1,"lanes":{},"lanePolicies":{"preset":"s3k-layering","echoAttenuation":15}}
                 """).getAsJsonObject();
         var voicing = ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base);
         var echo = voicing.lanePolicies().rules().getLast();
-        assertEquals(11, echo.fmAttenuation());
-        assertEquals(8, echo.delay());
+        assertEquals(15, echo.fmAttenuation());
+        assertEquals(14, echo.delay());
         assertEquals(73, voicing.lanePolicies().rules().getFirst().pitch(61));
         assertEquals(base.get("lanePolicies"), new Gson().toJsonTree(voicing).getAsJsonObject().get("lanePolicies"));
 
@@ -171,6 +171,56 @@ class ReconstructionLanePoliciesTest {
             assertThrows(IllegalArgumentException.class,
                     () -> ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base), invalid);
         }
+    }
+
+    @Test void noteLayersUseCarrierAttenuationAndReserveSpareChannelsBeforePolicies() throws Exception {
+        var entries = new ArrayList<>(List.of(entry("lead", Role.melody, "FM1", 0, 7, 67),
+                entry("backing", Role.harmony, "FM3", 26, 32, 66),
+                entry("dry", Role.melody, "FM1", 26, 32, 72),
+                entry("busy", Role.melody, "FM1", 45, 55, 71)));
+        for (var lane : List.of("FM2", "FM3", "FM4", "FM5"))
+            entries.add(entry("occupies-" + lane, Role.counter, lane, 45, 55, 65));
+        var policy = scoped(rule(Kind.fmDouble, Mode.echo, null), 0, 60, null);
+        var result = arrange(entries, policy, Map.of(
+                "lead", layer("lead", """
+                        "mode":"echo","laneType":"FM","delayFrames":10,"levelDb":-9,
+                        "volumeDecay":[{"frame":3,"attenuation":18}]
+                        """),
+                "dry", layer("dry", "\"mode\":\"off\""),
+                "backing", layer("backing", """
+                        "mode":"double","laneType":"PSG","octave":1
+                        """),
+                "busy", layer("busy", """
+                        "mode":"chorus","laneType":"FM","detune":-4
+                        """)));
+        var byId = new LinkedHashMap<String, ReconstructionLayers.Result>();
+        result.layers().forEach(layer -> byId.put(layer.noteId(), layer));
+        assertEquals(List.of("lead", "backing", "busy"), result.layers().stream()
+                .filter(layer -> layer.startTick() != null).map(ReconstructionLayers.Result::noteId).toList());
+        var echo = byId.get("lead");
+        assertEquals("FM2", echo.lane());
+        assertEquals(10, echo.startTick());
+        assertEquals(17, echo.endTick());
+        assertEquals(12, echo.attenuation());
+        assertEquals(ReconstructionLayers.Status.off, byId.get("dry").status());
+        assertEquals("PSG1", byId.get("backing").lane());
+        assertEquals(78, byId.get("backing").pitch());
+        assertEquals(ReconstructionLayers.Status.skipped, byId.get("busy").status());
+        assertTrue(byId.get("busy").reason().contains("No free FM"));
+        assertEquals(0, result.policyCoverage().getFirst().eligible());
+        var dry = result.project().sequences().stream().filter(s -> s.id().startsWith("FM1-")).findFirst().orElseThrow();
+        var wet = result.project().sequences().stream().filter(s -> s.id().startsWith("FM2-")).findFirst().orElseThrow();
+        assertEquals(dry.volume() - 12, wet.volume());
+        assertTrue(wet.commands().stream().anyMatch(c -> c.tick() == 3 && c.command() == NativeCommand.VOLUME
+                && c.arguments().equals(List.of(dry.volume() - 18))));
+        ProjectCompiler.compile(result.project());
+    }
+
+    private static ReconstructionLayers.Request layer(String id, String fields) {
+        var edit = ReconstructionEdits.parse(JsonParser.parseString("""
+                {"op":"layer","id":"layer-%s","reason":"fixture","noteIds":["%s"],%s}
+                """.formatted(id, id, fields)).getAsJsonObject(), "edit");
+        return new ReconstructionLayers.Request(edit, ReconstructionLayers.settings(edit.json(), edit.laneType(), id));
     }
 
     private static ReconstructionLanePolicies.Rule rule(Kind kind, Mode mode, List<ReconstructionLanePolicies.VolumeStep> steps) {
@@ -191,6 +241,12 @@ class ReconstructionLanePoliciesTest {
 
     private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
                                                      List<ReconstructionLanePolicies.Scoped> policies) throws Exception {
+        return arrange(entries, policies, Map.of());
+    }
+
+    private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
+                                                     List<ReconstructionLanePolicies.Scoped> policies,
+                                                     Map<String, ReconstructionLayers.Request> layers) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var bytes = DemoProject.create().voices().getFirst().bytes();
         byte[] patch = new byte[bytes.size()];
@@ -214,6 +270,6 @@ class ReconstructionLanePoliciesTest {
         return S3kReconstruction.arrangeAllocated("Fixture", 30, 60,
                 new S3kReconstruction.Score(parts, List.of(), List.of()), new ReconstructionAllocation.Result(1, sorted),
                 null, catalogue, choices, Map.of(), Map.of(), false, false, Map.of(), Map.of(), Map.of(),
-                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels());
+                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(), layers, false);
     }
 }

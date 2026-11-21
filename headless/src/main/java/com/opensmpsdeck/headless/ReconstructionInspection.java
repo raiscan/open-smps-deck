@@ -39,6 +39,8 @@ public final class ReconstructionInspection {
                           String patch, Interval interval, List<BendPoint> bend, boolean sounds,
                           Style style, String fate, String reason, List<String> competitors) {}
 
+    public record LayerOverlay(ReconstructionLayers.Result layer, int part, Role role, int pitch, Interval interval) {}
+
     public enum AudioKind { MIX, STEM, CHIP }
 
     public record AudioSource(AudioKind kind, String label, Path path, boolean projectClock) {
@@ -61,6 +63,7 @@ public final class ReconstructionInspection {
     private final StudioProject project;
     private final List<AudioSource> sources;
     private final List<Overlay> overlays;
+    private final List<LayerOverlay> layers;
     private final ReconstructionSections.Result sections;
     private final List<Part> parts;
     private final List<ReconstructionStructure.Bar> bars;
@@ -70,6 +73,7 @@ public final class ReconstructionInspection {
         this.clock = ReconstructionTimeMap.of(score);
         this.trace = ReconstructionTrace.read(work, score);
         this.project = project;
+        this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
         this.sources = sources(work, score);
         var span = new ReconstructionView.Span(0, duration(), TimeBase.source, clock);
         var patches = new HashMap<String, NavigableMap<Double, String>>();
@@ -150,6 +154,28 @@ public final class ReconstructionInspection {
                 ? ReconstructionLaneType.NOISE : ReconstructionLaneType.PSG;
     }
 
+    public List<LayerOverlay> layers() { return layers; }
+
+    public List<ReconstructionLayers.Result> noteLayers(String noteId) {
+        var row = trace.get(noteId);
+        return row == null || row.layers() == null ? List.of() : row.layers();
+    }
+
+    public static int laneRgb(String lane) { return EvidencePlot.laneColor(lane).getRGB() & 0xffffff; }
+
+    private static List<LayerOverlay> layerOverlays(ReconstructionTrace.Row row, ReconstructionTimeMap clock) {
+        if (row.layers() == null) return List.of();
+        var role = row.allocation() != null ? row.allocation().role() : row.roles() == null ? null : row.roles().role();
+        var color = role == null || role == ReconstructionRoles.Role.drop ? Role.UNASSIGNED
+                : Role.valueOf(role.name().toUpperCase(Locale.ROOT));
+        return row.layers().stream().filter(layer -> layer.status() != ReconstructionLayers.Status.off)
+                .map(layer -> new LayerOverlay(layer, row.part(), color,
+                        layer.status() == ReconstructionLayers.Status.applied ? layer.pitch() : row.pitch(),
+                        interval(layer.status() == ReconstructionLayers.Status.applied
+                                ? ReconstructionTrace.ticks(layer.startTick(), layer.endTick(), clock)
+                                : java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing())))).toList();
+    }
+
     public NoteDetails noteDetails(String id) {
         var row = trace.get(id);
         if (row == null) return new NoteDetails(false, false, null, List.of());
@@ -187,6 +213,10 @@ public final class ReconstructionInspection {
         var covered = new ArrayList<ReconstructionView.DrawnNote>();
         for (var gate : voiced) covered.add(new ReconstructionView.DrawnNote(gate.id(), null,
                 ReconstructionView.Layer.lane, null, gate.lane(), gate.pitch(), null, gate.gate(), null, gate.evidence()));
+        for (var layer : layers) if (layer.layer().status() == ReconstructionLayers.Status.applied)
+            covered.add(new ReconstructionView.DrawnNote(layer.layer().noteId(), null,
+                    ReconstructionView.Layer.noteLayer, layer.part(), layer.layer().lane(), layer.pitch(), null,
+                    ReconstructionTrace.ticks(layer.layer().startTick(), layer.layer().endTick(), clock), null, layer.layer().mode()));
         int count = covered.size();
         EvidenceNotes.addAssemblyOnlyNotes(project, span, List.of(), covered);
         for (var note : covered.subList(count, covered.size())) {

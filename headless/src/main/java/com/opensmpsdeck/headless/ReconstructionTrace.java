@@ -73,10 +73,11 @@ public final class ReconstructionTrace {
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
                Status status, String stage, String reason, List<String> editReasons, String fateDetail,
-               ReconstructionVoicePlan.Identity voice) {}
+               ReconstructionVoicePlan.Identity voice, List<ReconstructionLayers.Result> layers) {}
     record Summary(int part, int pitch, Timing sourceTiming, Status status, String stage, String reason,
                    ReconstructionRoles.Role role, String roleReason, String lane, Timing placement,
-                   String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced) {}
+                   String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced,
+                   List<ReconstructionLayers.Result> layers) {}
     record Change(String id, Boolean outsideSpan, List<String> changedStages, Summary old,
                   @com.google.gson.annotations.SerializedName("new") Summary updated) {}
     private record OverrideSelector(Double startSeconds, Double endSeconds, Integer startTick, Integer endTick,
@@ -253,12 +254,15 @@ public final class ReconstructionTrace {
         var notes = new ArrayList<Row>();
         var rows = read(work, score).values();
         for (var row : rows) {
-            if ((clustered ? !span.contains(writtenOnset(row)) : !overlaps(span, row)) || part != null && part != row.part()
+            if ((clustered ? !span.contains(writtenOnset(row))
+                    : !overlaps(span, row) && !layerOverlaps(row, span, lane, timeline))
+                    || part != null && part != row.part()
                     || min != null && row.pitch() < min || max != null && row.pitch() > max
                     || status != null && row.status != status) continue;
             if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane)
                     && !(lane.equals("DAC") && "simultaneous-dac-hit".equals(row.allocation.reason))
-                    && row.voiced.stream().noneMatch(gate -> lane.equals(gate.lane)))) continue;
+                    && row.voiced.stream().noneMatch(gate -> lane.equals(gate.lane))
+                    && (row.layers == null || row.layers.stream().noneMatch(layer -> lane.equals(layer.lane()))))) continue;
             notes.add(row);
         }
         if (clustered) {
@@ -381,6 +385,7 @@ public final class ReconstructionTrace {
         if (!samePlacement(a.allocation, b.allocation)) stages.add("allocate");
         if (!a.voiced.stream().map(ReconstructionTrace::voicedFate).toList()
                 .equals(b.voiced.stream().map(ReconstructionTrace::voicedFate).toList())) stages.add("voice");
+        if (!Objects.equals(a.layers, b.layers)) stages.add("layer");
         if ((a.status != b.status || !a.reason.equals(b.reason)) && !stages.contains(b.stage)) stages.add(b.stage);
         return List.copyOf(stages);
     }
@@ -418,12 +423,19 @@ public final class ReconstructionTrace {
                 allocated == null ? null : allocated.lane, allocated == null ? null : allocated.placement,
                 role != null && role.mergedInto != null ? role.mergedInto : allocated == null ? null : allocated.mergedInto,
                 allocated == null ? null : allocated.competitorNoteId,
-                allocated == null ? null : allocated.blockingNoteIds, row.voiced);
+                allocated == null ? null : allocated.blockingNoteIds, row.voiced, row.layers);
     }
 
     private static boolean overlaps(Span span, Row row) {
         return row != null && (span.overlaps(row.timing) || span.overlaps(row.effectiveTiming)
                 || row.score != null && span.overlaps(row.score.timing));
+    }
+
+    private static boolean layerOverlaps(Row row, Span span, String lane, ReconstructionTimeMap timeline) {
+        return row.layers != null && row.layers.stream().anyMatch(layer ->
+                layer.status() == ReconstructionLayers.Status.applied
+                        && (lane == null || lane.equals(layer.lane()))
+                        && span.overlaps(ticks(layer.startTick(), layer.endTick(), timeline)));
     }
 
     static Map<String, Row> read(Path work) throws IOException {
@@ -530,11 +542,12 @@ public final class ReconstructionTrace {
             var gate = effectiveTiming(voiced, placement, latest, timeline);
             var voice = ReconstructionVoicePlan.voiceFor(voices, id);
             var identity = voice == null ? null : new ReconstructionVoicePlan.Identity(voice.id(), voice.name());
+            var layers = played.layers.get(id);
             rows.add(new Row(id, anchor.note.part(), part == null ? "" : part.name(), anchor.note.pitch(), anchor.timing,
                     gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
-                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity));
+                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers));
         }
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
@@ -783,11 +796,12 @@ public final class ReconstructionTrace {
 
     private record Playback(Map<String, List<Voiced>> byId, Map<String, S3kReconstruction.Reduction> unmatched,
                             Map<String, List<ReconstructionAllocation.RunPlacement>> figures,
-                            Map<String, List<Voiced>> figureGates) {}
+                            Map<String, List<Voiced>> figureGates,
+                            Map<String, List<ReconstructionLayers.Result>> layers) {}
 
     private static Playback playback(ReconstructionStages.Score score, ReconstructionAllocation.Result allocation,
                                      ReconstructionVoicing.Result voicing, JsonObject report, ReconstructionTimeMap timeline) {
-        if (allocation == null || voicing == null) return new Playback(Map.of(), Map.of(), Map.of(), Map.of());
+        if (allocation == null || voicing == null) return new Playback(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         boolean exact = report.has("voicedGates") && JSON.toJsonTree(ReconstructionCli.assemblyInputs(score, allocation, voicing))
                 .equals(report.get("assemblyInputs"));
         boolean legacy = report.has("version") && !report.has("assemblyInputs");
@@ -828,7 +842,9 @@ public final class ReconstructionTrace {
             for (int step : figure.retainedSteps()) parents.put(figure.id() + "-step-" + step, parent);
         }
         return new Playback(group(gates, Voiced::id), reductions, figureInfo,
-                group(gates.stream().filter(gate -> parents.containsKey(gate.id)).toList(), gate -> parents.get(gate.id)));
+                group(gates.stream().filter(gate -> parents.containsKey(gate.id)).toList(), gate -> parents.get(gate.id)),
+                group(reportList(report, "noteLayers", ReconstructionLayers.Result.class, exact),
+                        ReconstructionLayers.Result::noteId));
     }
 
     private static <T> List<T> reportList(JsonObject report, String name, Class<T> type, boolean available) {
@@ -1005,6 +1021,10 @@ public final class ReconstructionTrace {
             out.printf("%s  score figure %s → %s%n", indent, row.scoreDecision.reason(), row.scoreDecision.successorId());
         for (var gate : row.voiced) out.printf("%s  voiced %s MIDI %d %s%s%n", indent, gate.lane, gate.pitch, format(gate.gate),
                 gate.bend == null ? "" : " bend " + gate.bend.mode());
+        if (row.layers != null) for (var layer : row.layers)
+            out.printf("%s  layer %s %s • delay %d frames • %d TL%s%n", indent, layer.mode(), layer.status(),
+                    layer.delayFrames(), layer.attenuation(), layer.lane() == null ? " • " + layer.reason()
+                            : " • " + layer.lane() + " ticks " + layer.startTick() + "–" + layer.endTick());
     }
 
     private static void printSummary(PrintStream out, String label, Summary note) {
