@@ -4,11 +4,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.BiPredicate;
 
 final class BenchMetrics {
-    record Event(String lane, double start, double end, int pitch, String hash, BenchDrums.Drum drum) {}
+    record Event(String lane, double start, double end, int pitch, String hash, BenchDrums.Drum drum,
+                 BenchDrums.Drum legacyDrum) {
+        Event(String lane, double start, double end, int pitch, String hash, BenchDrums.Drum drum) {
+            this(lane, start, end, pitch, hash, drum, drum);
+        }
+    }
     record Pair(int truth, int estimate) {}
     record F1(int truth, int estimate, int matched) {
         double precision() { return estimate == 0 ? (truth == 0 ? 1 : 0) : (double) matched / estimate; }
@@ -23,16 +29,27 @@ final class BenchMetrics {
     private BenchMetrics() {}
 
     static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, boolean nativeSlots) {
+        return events(truth, drums, nativeSlots, Map.of());
+    }
+
+    static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, boolean nativeSlots,
+                              Map<Integer, BenchDrums.Drum> noiseClasses) {
         var result = new ArrayList<Event>();
         for (var channel : truth.channels()) {
             boolean noise = channel.kind().equals("noise");
             for (var note : channel.notes()) {
-                result.add(new Event(channel.kind(), note.start(), note.end(), note.pitch(), note.voiceHash(),
+                BenchDrums.Drum drum = null;
+                if (noise) {
+                    drum = nativeSlots ? drums.nativeNoise(note.envelopeId())
+                            : noiseClasses.getOrDefault((int) Math.round(note.start() * 60), BenchDrums.Drum.NOISE);
+                }
+                result.add(new Event(channel.kind(), note.start(), note.end(), note.pitch(), note.voiceHash(), drum,
                         noise ? BenchDrums.Drum.HAT : null));
             }
             for (var hit : channel.hits()) {
+                var legacy = drums.classify(hit.sampleHash(), nativeSlots ? hit.slot() : -1);
                 result.add(new Event(channel.kind(), hit.time(), hit.time(), 0, hit.sampleHash(),
-                        drums.classify(hit.sampleHash(), nativeSlots ? hit.slot() : -1)));
+                        drums.detailed(hit.sampleHash(), legacy), legacy));
             }
         }
         return result.stream().sorted(Comparator.comparingDouble(Event::start)
@@ -50,6 +67,10 @@ final class BenchMetrics {
 
     static List<Pair> attacks(List<Event> truth, List<Event> estimate, double tolerance) {
         return match(truth, estimate, tolerance, (a, b) -> true);
+    }
+
+    static List<Pair> drumClassAttacks(List<Event> truth, List<Event> estimate, double tolerance) {
+        return match(truth, estimate, tolerance, (a, b) -> a.drum == b.drum);
     }
 
     // Maximum-cardinality bipartite matching. Onset proximity orders equal-cardinality

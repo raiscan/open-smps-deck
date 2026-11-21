@@ -152,7 +152,8 @@ timeline unchanged. Audio metrics use the full render, including copies.
 | Offset F1 | Also requires end error ≤ the greater of 50 ms and 20% of truth duration. |
 | Melody F1 | Select one lane per four beats on the corpus MIDI's 120 BPM grid (two-second proxy bars). Prefer notes sustaining at least 100 ms in the bar, then choose the highest duration-weighted mean pitch. If none sustain, use all notes. Apply the same rule to the output, counting attacks in the selected lanes. |
 | Lead fidelity F1 | Compare the declared native lead with compiled FM1 on the native clock. Use one-to-one pitch and onset matching within 50 ms, with the supported lead-copy substitutions below. Measured on ladder cases with a declared lead. |
-| Drum F1 and class accuracy | Associate DAC triggers and PSG noise attacks by onset within 30 ms. Class accuracy is over matches. Catalogue labels take precedence, with native sample slots mapping recognized kick and snare/clap presets, PSG noise mapping to hat, and unclassified presets to other. |
+| Drum F1 | Maximum one-to-one matches of DAC triggers and PSG noise attacks within 30 ms, with any pairing of classes. |
+| Drum class accuracy | Maximum one-to-one matches within 30 ms restricted to the same class, divided by the timing-only match count. Undefined when there are no timing matches. Simultaneous kick and hat hits can each get credit for their own class. |
 | Voice top-1 and top-3 | For matched truth FM notes, compare actual emitted patch content and the first three entries in the reported shortlist by hash. Match report choices to output by source pitch, nearest quantized onset within one presentation, and emitted patch, with part ID breaking ties. The scorecard also gives counts by truth FM channel. |
 | Holdout voice spectral distance | Compare the truth and emitted patch using `AudioFingerprint` spectral distance on raw same-pitch 200 ms FM probes. Coverage is the fraction of matched truth FM notes for which both patches could be probed. |
 | Log-mel distance | Mean absolute log-mel magnitude difference between mono dry truth and output, over 40 bands, 512/1024/2048-sample Hann windows and 10 ms hops at 24 kHz. |
@@ -202,6 +203,21 @@ false positive. Repeat precision is undefined without a prediction.
 Repeat recall is undefined without a truth pair. The scorecard reports
 how many cases contribute to each mean. The existing regression
 comparison continues to gate the original headline metrics.
+
+DAC classes use catalogue labels and known native kick and snare/clap slots.
+Compiled PSG noise attacks use the GM drum pitch of the source placement on
+PSG3 at that playback tick, distinguishing closed and pedal hats, open hats,
+crash-family cymbals, rides and other percussion. Native S3K noise has no GM
+instrument label. Its short envelopes (slots 1 and 2) serve as closed hats,
+and its longer envelopes (slots 4 and 8) serve as open hats. Other native
+noise and compiled noise without a source placement use an unclassified
+noise bucket. The corpus MIDI projection stays fixed, so a native long
+accent can still be supplied to reconstruction as a closed hat.
+
+Scorecard version 2 reports the original time-only pairing diagnostic with
+its original drum classes under `drumClassAccuracyLegacy`. `compare` uses
+the legacy metric when either card is version 1, and the fixed metric when
+both cards are version 2.
 
 Higher is better except for log-mel distance, holdout voice spectral distance,
 and release energy. `compare` returns 1 if an overall headline or gold metric

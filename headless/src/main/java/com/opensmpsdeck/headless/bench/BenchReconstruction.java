@@ -18,6 +18,9 @@ final class BenchReconstruction {
     record Midi(List<Part> parts, List<Note> notes) {}
     record Part(int id, boolean drums, String name) {}
     record Note(int partId, int pitch, long startUs, long endUs) {}
+    record Allocation(List<Placement> notes) {}
+    record Placement(SourceNote note, String role, String lane, Integer startTick) {}
+    record SourceNote(int pitch) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
                   List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages) {}
     record Stages(Map<String, Long> leadContinuity) {}
@@ -76,7 +79,9 @@ final class BenchReconstruction {
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer(), captureVoices);
-        var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false), report.effectCopyLanes());
+        var noiseClasses = truth.channels().stream().anyMatch(channel -> channel.kind().equals("noise"))
+                ? noiseClasses(BenchFiles.read(output.resolve("allocation.json"), Allocation.class)) : Map.<Integer, BenchDrums.Drum>of();
+        var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
         var reductions = new java.util.TreeMap<String, Long>();
         if (report.reductions() != null) {
@@ -89,6 +94,15 @@ final class BenchReconstruction {
             });
         return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
                 output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices());
+    }
+
+    static Map<Integer, BenchDrums.Drum> noiseClasses(Allocation allocation) {
+        var classes = new HashMap<Integer, BenchDrums.Drum>();
+        for (var placement : allocation.notes()) {
+            if ("drums".equals(placement.role()) && "PSG3".equals(placement.lane()) && placement.startTick() != null)
+                classes.put(placement.startTick(), BenchDrums.fromPitch(placement.note().pitch()));
+        }
+        return classes;
     }
 
     static List<BenchMetrics.Event> excludeEffectCopies(List<BenchMetrics.Event> events, List<String> lanes) {
