@@ -279,6 +279,8 @@ class ExternalTranscribersTest {
         assertEquals("2", provenance.metadata().get("vocalFirstNoteCount"));
         assertEquals("override", provenance.metadata().get("vocalSelection"));
         assertTrue(provenance.metadata().get("vocalComparison").contains("fusion"));
+        var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+        assertEquals("vocal-candidates.json", manifest.externalNotes().get(1).file().basename());
         assertEquals("keys", score.inputs().externalNotes().get(2).provenance().tool());
         var detector = score.inputs().audioOnly().drumDetector();
         assertEquals("drum-model", detector.name());

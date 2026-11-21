@@ -203,7 +203,8 @@ public final class ExternalTranscribers {
             var f0 = candidate.provenance.metadata().get("f0Midi10ms");
             if (f0 != null && !f0.isBlank()) metadata.putIfAbsent("f0Midi10ms", f0);
         }
-        Path combined = Files.createTempFile("opensmpsdeck-vocals-", ".json");
+        Path scratch = Files.createTempDirectory("opensmpsdeck-vocals-");
+        Path combined = scratch.resolve("vocal-candidates.json");
         try {
             Files.writeString(combined, gson.toJson(notes.stream()
                     .map(note -> List.of(note.start, note.end, note.pitch)).toList()));
@@ -212,6 +213,7 @@ public final class ExternalTranscribers {
                     ReconstructionCli.audioHash(recorded), configHash, metadata, notes.size(), true), notes);
         } finally {
             Files.deleteIfExists(combined);
+            Files.deleteIfExists(scratch);
         }
     }
 
