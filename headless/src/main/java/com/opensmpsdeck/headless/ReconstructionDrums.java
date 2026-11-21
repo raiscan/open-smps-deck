@@ -300,7 +300,7 @@ final class ReconstructionDrums {
             if (asset.kind() != InstrumentCatalogue.Kind.DAC_SAMPLE) continue;
             int nativeRate = variant.recipe().rate();
             double nativeHz = DacSample.sampleRateHz(nativeRate);
-            float[] pcm = DacAcoustics.pcm(asset);
+            float[] pcm = DacAcoustics.pcm(asset.bytes());
             var assetProfile = acoustics.asset(asset.id());
             for (int semitones : tuning) {
                 if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
@@ -335,14 +335,18 @@ final class ReconstructionDrums {
         var asset = probe.asset();
         var rateClass = probe.acoustics().sampleClass();
         var sampleClass = asset.sampleClass().pitched() ? asset.sampleClass() : rateClass;
-        String reason = asset.excludeFromDrumFit() ? "excludeFromDrumFit" : switch (sampleClass) {
+        String reason = asset.excludeFromDrumFit() ? "excludeFromDrumFit" : exclusionReason(sampleClass, pitch);
+        return reason == null ? null : new Exclusion(asset.assetId(), asset.name(), probe.rate(), sampleClass, reason);
+    }
+
+    private static String exclusionReason(DacAcoustics.SampleClass sampleClass, int pitch) {
+        return switch (sampleClass) {
             case SPEECH_LIKE -> "speech-like";
             case PITCHED_TONAL -> "pitched-tonal";
             case UNCLASSIFIED -> "insufficient-acoustic-evidence";
-            default -> ReconstructionCymbals.eligible(pitch) && rateClass != DacAcoustics.SampleClass.NOISE_LIKE
+            default -> ReconstructionCymbals.eligible(pitch) && sampleClass != DacAcoustics.SampleClass.NOISE_LIKE
                     ? "hat-or-cymbal-requires-noise" : null;
         };
-        return reason == null ? null : new Exclusion(asset.assetId(), asset.name(), probe.rate(), sampleClass, reason);
     }
 
     private static int nearestRate(double hz) {
@@ -592,6 +596,17 @@ final class ReconstructionDrums {
             var sliced = fit.slice();
             boolean useSlice = sliced != null && (mode == Source.sliced || mode == Source.auto
                     && (chosen == null || chosen.distance() > AUTO_THRESHOLD));
+            var exclusions = fit.exclusions();
+            if (useSlice && mode == Source.auto) {
+                var sampleClass = DacAcoustics.profile(sliced).sampleClass();
+                String exclusion = exclusionReason(sampleClass, entry.getKey().drumPitch());
+                if (exclusion != null) {
+                    useSlice = false;
+                    var rejected = new ArrayList<>(exclusions);
+                    rejected.add(new Exclusion(sliced.id(), sliced.name(), sliced.rate(), sampleClass, exclusion));
+                    exclusions = List.copyOf(rejected);
+                }
+            }
             AssetRate key = useSlice ? new AssetRate(sliced.id(), sliced.rate()) : chosen == null ? null : key(chosen);
             int size = useSlice ? sliced.pcm().length : chosen == null ? 0 : catalogue.asset(chosen.assetId()).bytes().length;
             if (key != null && !sizes.containsKey(key) && (sizes.size() >= DacSample.MAX_SAMPLES
@@ -616,7 +631,7 @@ final class ReconstructionDrums {
                     summarize(fit.clips()), fit.candidates().stream().limit(5).toList(), chosen,
                     useSlice ? Source.sliced : Source.catalogue, reason, fit.stem() ? preferred : null,
                     !fit.stem() || preferred == null || chosen == null ? null : kitAssets.contains(chosen.assetId()),
-                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, fit.exclusions(), fallbackLane);
+                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane);
             result.put(entry.getKey(), new Selection(chosen == null ? null : chosen.variantId(),
                     useSlice ? sliced.rate() : chosen == null ? 0 : chosen.rate(), useSlice ? sliced : null, evidence));
         }

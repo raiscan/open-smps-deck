@@ -1238,8 +1238,9 @@ spectral fit and preferred kit for eligible candidates. When no DAC
 candidate qualifies, the catalogue fit uses the PSG3 noise envelope where
 the lane can accommodate the attack. Existing PSG3 notes have priority.
 Assembly records the actual PSG3 gate or a collision in the report. The
-FM-only option disables the fallback. Explicit stem-slice modes can still
-select their own PCM. To deliberately use a DAC variant at its native rate,
+FM-only option disables the fallback. In `auto` source mode, a candidate
+stem slice must pass the same eligibility check. The explicit `sliced` mode
+uses the chosen stem as its source. To deliberately use a DAC variant at its native rate,
 set `variantId` and remove `drumSelection` from the DAC instrument entry.
 This also works for an asset marked `excludeFromDrumFit` in the catalogue.
 

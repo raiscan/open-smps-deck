@@ -55,7 +55,7 @@ final class DacAcoustics {
                             && CatalogueMatcher.LOCKED_ON_S3K.equals(usage.revision()))
                     .map(usage -> S3kDacFamily.slot(usage.slot())).filter(family -> family != S3kDacFamily.OTHER)
                     .map(Enum::name).distinct().sorted().toList();
-            float[] pcm = pcm(asset);
+            float[] pcm = pcm(asset.bytes());
             var rates = new LinkedHashMap<Integer, RateProfile>();
             for (var variant : sounds) {
                 int rate = variant.recipe().rate();
@@ -83,8 +83,13 @@ final class DacAcoustics {
         return profiles.computeIfAbsent(new Key(id, rate), key -> analyze(audio, DacSample.sampleRateHz(rate)));
     }
 
-    static float[] pcm(InstrumentCatalogue.Asset asset) {
-        byte[] bytes = asset.bytes();
+    static Profile profile(DacSample slice) {
+        double playbackHz = slice.sampleRateHz();
+        float[] audio = ReconstructionDrums.resample(pcm(slice.pcm()), playbackHz, ANALYSIS_RATE);
+        return analyze(audio, playbackHz);
+    }
+
+    static float[] pcm(byte[] bytes) {
         float[] pcm = new float[bytes.length];
         for (int i = 0; i < bytes.length; i++) pcm[i] = (Byte.toUnsignedInt(bytes[i]) - 128) / 128f;
         return pcm;

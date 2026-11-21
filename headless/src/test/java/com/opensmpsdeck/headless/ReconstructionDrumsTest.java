@@ -168,6 +168,15 @@ class ReconstructionDrumsTest {
         var overridden = ProjectFiles.load(arrangement).project();
         assertEquals(rate, overridden.samples().getFirst().rate());
         assertTrue(overridden.samples().getFirst().id().startsWith(asset));
+
+        // Auto may consider a stem slice. A tonal slice must not take the
+        // place of the tonal catalogue sample that was just rejected.
+        Path auto = directory.resolve("auto-fit");
+        command("reconstruct", "run", midi.toString(), wav.toString(), index.toString(), auto.toString(),
+                "--steady-tempo", "off", "--stem", "0=" + wav, "--drum-source", "auto");
+        var autoProject = ProjectFiles.load(auto.resolve("arrangement.smps.json")).project();
+        assertTrue(autoProject.samples().isEmpty());
+        assertTrue(autoProject.clips().stream().anyMatch(clip -> clip.lane().equals("PSG3")));
     }
 
     @Test void dacCollisionUsesPsgNoiseAndProtectsTheKickTail() {
