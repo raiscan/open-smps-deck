@@ -56,16 +56,6 @@ class McpServerTest {
                 "reconstruct_edit", "reconstruct_voices", "reconstruct_sections", "reconstruct_plan_template", "reconstruct_view",
                 "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect",
                 "rom_list", "rom_set", "rom_patch")));
-        var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
-        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_trace", "reconstruct_trace_diff",
-                "reconstruct_edit", "reconstruct_voices", "reconstruct_sections", "reconstruct_plan_template", "reconstruct_view",
-                "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect",
-        assertEquals(34, tools.size());
-        var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
-        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_trace", "reconstruct_trace_diff",
-                "reconstruct_edit", "reconstruct_voices", "reconstruct_sections", "reconstruct_plan_template", "reconstruct_view",
-                "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect",
-                "rom_list", "rom_set", "rom_patch")));
 
         var modern = exchange("""
                 {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}

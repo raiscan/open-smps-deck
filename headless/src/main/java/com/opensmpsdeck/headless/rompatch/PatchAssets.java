@@ -114,6 +114,7 @@ final class PatchAssets {
                 result.add(new EnvelopeMapping(index, match, true));
             } else {
                 int nearest = stock.entrySet().stream()
+                        .filter(entry -> safeStockEnvelope(entry.getValue()))
                         .min(Comparator.comparingLong(entry -> envelopeError(envelope, entry.getValue())))
                         .orElseThrow().getKey();
                 result.add(new EnvelopeMapping(index, nearest, false));
@@ -176,6 +177,16 @@ final class PatchAssets {
             }
         }
         return Arrays.copyOf(playback, end);
+    }
+
+    private static boolean safeStockEnvelope(byte[] envelope) {
+        for (int i = 0; i < envelope.length; i++) {
+            int value = u8(envelope, i);
+            if (value == 0x81 || value == 0x83) return true;
+            if (value == 0x80) return i != 0;
+            if (value >= 0x80) return false;
+        }
+        return false;
     }
 
     private static long envelopeError(byte[] first, byte[] second) {

@@ -182,6 +182,27 @@ class RomPatchTest {
         assertEquals((byte) 0x43, ram.get(PSG_MASTER));
     }
 
+    @Test void envelopeFallbackSkipsStockProgramsThatReadDriverCode() throws Exception {
+        var values = new java.util.ArrayList<>(java.util.Collections.nCopies(120, 0));
+        values.add(0x81);
+        var envelope = new Envelope("psg", "Too long for RAM", Envelope.PSG_VOLUME, values);
+        byte[] song = hex("00000101010010000000110000000001f2f2");
+        var layout = SongLayout.music(song, 0, 0, 0, true);
+        var input = SongInput.of(new CompiledProject(song, List.of(envelope)), song, List.of());
+        byte[] driver = new byte[0x2000];
+        word(driver, PSG_MASTER, PSG_TABLE);
+        for (int i = 0; i < PSG_COUNT; i++) {
+            int target = 0x13D5 + 2 * i;
+            word(driver, PSG_TABLE + 2 * i, target);
+            driver[target + 1] = (byte) (i == 0 ? 0x84 : 0x81);
+        }
+        var writes = new LinkedHashMap<Integer, Byte>();
+        var mapping = PatchAssets.envelopes(input, layout, song, driver, writes).getFirst();
+        assertEquals(2, mapping.mappedIndex());
+        assertFalse(mapping.exact());
+        assertTrue(writes.isEmpty());
+    }
+
     @Test void loopRewriteMatchesLinearRepetitionThroughPinnedRenderer() throws Exception {
         byte[] original = hex("0000010001000a00000081048004f2");
         var layout = SongLayout.music(original, 0, 0, 0, true);
