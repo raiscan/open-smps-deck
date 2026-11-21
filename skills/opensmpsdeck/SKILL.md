@@ -60,7 +60,9 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 - After a focused repair, compare separate baseline and candidate work
   directories with `reconstruct_trace_diff {oldWorkDir, newWorkDir, span}`.
   Use `span: "START,END"` in source seconds to flag changes outside the
-  edited passage. Check those notes before accepting the repair.
+  edited passage. Check `lanePermutations` for grouped swaps, the first
+  affected note IDs, and suggested `pinLane` edits. Check `voicingChanges`
+  for variant and level changes.
 - Use `reconstruct rerun "$work" "$fresh" --search "$input_dir"` to replay
   the inputs and options of a historical fresh run. The private
   `manifest.json` pins input hashes and retains imported note snapshots.
@@ -162,7 +164,8 @@ line is masked, and preserve variations supported by the local audio.
      `voice: "all"` when the part is truly monophonic.
    - **Backing.** Everything else is harmony.
 3. Create a starting plan with `reconstruct_plan_template` (CLI
-   `reconstruct plan-template "$work"`). It mirrors the default choices.
+   `reconstruct plan-template "$work"`). The CLI prints the default choices
+   to stdout. Add `--out "$work/roleplan.json"` to save them as a new plan.
    Change only the sections where the score view shows the default is
    wrong, and keep each rule as narrow as the evidence allows. On the
    benchmark, blanket per-section rules helped merged Suno-like parts but
@@ -203,8 +206,8 @@ Limits:
 - Suno MIDI may have no vocal part. When a vocal carries the tune, either
   write no lead for that section or ask the user which instrument should
   take the vocal line.
-- Re-planning reruns allocation and voicing. Save any hand edits to
-  `voicing.json` first.
+- Re-planning reruns allocation and voicing. Use `--keep-voicing` to carry
+  compatible settings forward while checking the new allocation.
 
 ## Problem → artifact
 
@@ -227,11 +230,13 @@ targets and inspect both the edited passage and any `outsideSpan` changes.
 The [reconstruction stages guide](../../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
 lists the fields for every operation.
 
-Standalone `voice` refits lane-wide choices and preserves scoped overrides,
-lane gain and per-part gains (a lane whose role changed is releveled). Pass `--lane FM1` to leave the other lanes
-untouched. Use `--refit-levels` only when changing levels is part of the review.
-MCP exposes the same choices as `options.refitLanes` and `options.refitLevels`.
-Read the changed-lane list in the result. For a fresh fit, back up and move
+Standalone `voice` refits lane-wide choices and preserves scoped overrides
+and compatible gains. A rebuild from an upstream stage can relevel lanes
+whose allocated material changed. Pass `--lane FM1` to limit a refit and
+`--refit-levels` to recalculate levels. Use `--keep-voicing` with `run --from roles`
+or `rerun` to reuse accepted settings and see which stale part entries were
+dropped. MCP resumed runs expose `options.refitLanes`, `options.refitLevels`
+and `options.keepVoicing`. Read the variant and level changes in the result. For a fresh fit, back up and move
 `voicing.json` before running `voice`. A chained run starting at `voice` reuses
 existing voicing unless refit options are supplied. Assembly regenerates the
 arrangement. Apply direct project and group edits after the final assembly,

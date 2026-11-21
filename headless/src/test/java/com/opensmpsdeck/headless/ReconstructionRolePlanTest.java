@@ -204,17 +204,22 @@ class ReconstructionRolePlanTest {
         run("roles", work.toString());
         Path roles = work.resolve("roles.json");
         byte[] original = Files.readAllBytes(roles);
-        run("plan-template", work.toString());
         var template = work.resolve("roleplan.json");
+        var printed = run("plan-template", work.toString());
+        assertFalse(Files.exists(template));
+        run("plan-template", work.toString(), "--out", template.toString());
+        assertEquals(printed.strip(), Files.readString(template).strip());
         assertEquals(6, ReconstructionArtifacts.read(template, ReconstructionRolePlan.class).rules().size());
-        assertTrue(call("plan-template", work.toString()).contains("roleplan.json"));
+        assertTrue(call("plan-template", work.toString(), "--out", template.toString()).contains("roleplan.json"));
         for (String bad : List.of(
                 "\"sections\":[\"missing\"],\"part\":0",
                 "\"sections\":[\"*\"],\"part\":4",
                 "\"bars\":\"2-5\",\"part\":0",
                 "\"bars\":\"2-2\",\"part\":0,\"startSeconds\":3,\"endSeconds\":2")) {
             Files.writeString(template, "{\"version\":1,\"rules\":[{" + bad + ",\"role\":\"melody\"}]}");
-            assertTrue(call("roles", work.toString()).contains("roleplan.json.rules[0]"));
+            String error = call("roles", work.toString());
+            assertTrue(error.startsWith("Error: ") && error.contains("roleplan.json.rules[0]"), error);
+            assertEquals(1, error.lines().count(), error);
             assertArrayEquals(original, Files.readAllBytes(roles));
         }
     }
@@ -240,7 +245,7 @@ class ReconstructionRolePlanTest {
         assertEquals(16, sections.get(sections.size() - 1).getAsJsonObject().get("endSeconds").getAsDouble());
 
         var plan = work.resolve("roleplan.json");
-        run("plan-template", work.toString());
+        run("plan-template", work.toString(), "--out", plan.toString());
         assertEquals(ReconstructionTimeMap.TimeBase.project,
                 ReconstructionArtifacts.read(plan, ReconstructionRolePlan.class).timeBase());
         String override = """

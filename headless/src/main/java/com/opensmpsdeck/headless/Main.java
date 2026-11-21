@@ -125,10 +125,12 @@ public final class Main {
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
             return 0;
-        } catch (FileAlreadyExistsException failure) {
-            return error(err, "output already exists: " + failure.getFile());
         } catch (IllegalArgumentException | IOException failure) {
-            return error(err, failure.getMessage());
+            String message = failure instanceof FileAlreadyExistsException exists
+                    ? "output already exists: " + exists.getFile() : failure.getMessage();
+            err.println("Error: " + message);
+            if (args.length == 0 || !args[0].equals("reconstruct")) usage(err);
+            return 2;
         }
     }
 
@@ -255,12 +257,6 @@ public final class Main {
         } finally {
             if (!complete) Files.deleteIfExists(output);
         }
-    }
-
-    private static int error(PrintStream err, String message) {
-        err.println("Error: " + message);
-        usage(err);
-        return 2;
     }
 
     private static void usage(PrintStream out) {

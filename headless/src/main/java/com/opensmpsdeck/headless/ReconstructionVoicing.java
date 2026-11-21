@@ -4,6 +4,10 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Consumer;
 import java.util.TreeMap;
 
 import static com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
@@ -34,12 +38,10 @@ final class ReconstructionVoicing {
                     effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides);
         }
 
-        Lane withPreviousEdits(Lane previous, boolean refitLevels) {
-            // A lane whose role changed upstream carries different material, so its old level is stale.
-            boolean keepLevels = !refitLevels && previous.role == role;
-            return new Lane(role, variantId, shortlist, keepLevels ? previous.gain : gain, articulation, effects,
+        Lane withPreviousEdits(Lane previous, boolean refitLevels, List<ReconstructionAllocation.Entry> notes) {
+            return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
-                    keepLevels ? previous.partGains : partGains, previous.overrides);
+                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides);
         }
 
         double gainFor(int part, double level) {
@@ -109,7 +111,159 @@ final class ReconstructionVoicing {
         return lanes;
     }
 
-    static Result preserveRefit(Result fitted, Result previous, java.util.Set<String> targets, boolean refitLevels) {
+    record InstrumentVariant(int part, Integer drumPitch, String variantId, String sliceId, Integer rate) {}
+    record Settings(String variantId, double gain, Map<Integer, Double> partGains, List<InstrumentVariant> instruments) {
+        static Settings of(Lane lane) {
+            return lane == null ? null : new Settings(lane.variantId(), lane.gain(), lane.partGains(),
+                    lane.instruments().stream().map(instrument -> {
+                        var drum = instrument.drumSelection();
+                        return new InstrumentVariant(instrument.part(), instrument.drumPitch(), instrument.variantId(),
+                                drum == null || drum.slice() == null ? null : drum.slice().id(),
+                                drum == null ? null : drum.rate());
+                    }).toList());
+        }
+    }
+    record Change(String lane, Settings before, Settings after) {
+        String describe() {
+            return "Voicing changed " + lane + " (" + describe(before) + " → " + describe(after) + ")";
+        }
+
+        private static String describe(Settings settings) {
+            if (settings == null) return "absent";
+            return "variant " + settings.variantId + ", gain " + settings.gain + ", partGains " + settings.partGains
+                    + (settings.instruments.isEmpty() ? "" : ", instruments " + settings.instruments);
+        }
+    }
+
+    static List<Change> changes(Result before, Result after) {
+        var ids = new TreeSet<String>();
+        if (before != null) ids.addAll(before.lanes().keySet());
+        if (after != null) ids.addAll(after.lanes().keySet());
+        return ids.stream().map(id -> new Change(id, Settings.of(before == null ? null : before.lanes().get(id)),
+                        Settings.of(after == null ? null : after.lanes().get(id))))
+                .filter(change -> !Objects.equals(change.before, change.after)).toList();
+    }
+
+    private record Material(int part, int pitch, int velocity, int start, int end, boolean drums,
+                            ReconstructionBends.Bend bend) {}
+
+    private static List<Material> material(List<ReconstructionAllocation.Entry> notes) {
+        return notes.stream().map(entry -> new Material(entry.note().part(), entry.note().pitch(), entry.note().velocity(),
+                entry.startTick(), entry.endTick(), entry.role() == Role.drums, entry.note().bend())).toList();
+    }
+
+    static Set<String> changedMaterial(ReconstructionAllocation.Result previous, ReconstructionAllocation.Result current) {
+        if (previous == null) return Set.of();
+        var before = byLane(previous);
+        var changed = new HashSet<String>();
+        byLane(current).forEach((id, notes) -> {
+            if (!material(before.getOrDefault(id, List.of())).equals(material(notes))) changed.add(id);
+        });
+        return changed;
+    }
+
+    private static Map<Integer, Double> compatibleGains(Map<Integer, Double> gains, List<ReconstructionAllocation.Entry> notes) {
+        if (gains == null) return null;
+        var parts = new HashSet<Integer>();
+        for (var entry : notes) if (entry.role() != Role.drums) parts.add(entry.note().part());
+        if (parts.containsAll(gains.keySet())) return gains;
+        var kept = new TreeMap<>(gains);
+        kept.keySet().retainAll(parts);
+        return kept.isEmpty() ? null : kept;
+    }
+
+    private static ReconstructionVoices.Key key(Instrument instrument) {
+        return new ReconstructionVoices.Key(instrument.part(), instrument.drumPitch());
+    }
+
+    private static Set<ReconstructionVoices.Key> instrumentKeys(String id, List<ReconstructionAllocation.Entry> notes) {
+        var keys = new HashSet<ReconstructionVoices.Key>();
+        if (!id.startsWith("FM")) for (var entry : notes) {
+            if (id.equals("DAC")) keys.add(new ReconstructionVoices.Key(entry.note().part(), entry.note().pitch()));
+            else if (entry.role() != Role.drums) keys.add(new ReconstructionVoices.Key(entry.note().part(), null));
+        }
+        return keys;
+    }
+
+    static Set<String> lanesNeedingFit(Result previous, Map<String, List<ReconstructionAllocation.Entry>> allocated) {
+        var targets = new HashSet<String>();
+        allocated.forEach((id, notes) -> {
+            var lane = previous.lanes().get(id);
+            if (lane == null || !lane.instruments().stream().map(ReconstructionVoicing::key)
+                    .collect(java.util.stream.Collectors.toSet()).containsAll(instrumentKeys(id, notes))) targets.add(id);
+        });
+        return targets;
+    }
+
+    static Result keepCompatible(Result previous, Result fitted, Map<String, List<ReconstructionAllocation.Entry>> allocated,
+                                 Consumer<String> report) {
+        var lanes = new TreeMap<String, Lane>();
+        var copies = new HashSet<String>();
+        // Give saved copy effects first claim on free lanes.
+        previous.lanes().forEach((id, lane) -> {
+            if (!allocated.containsKey(id)) {
+                report.accept("Dropped voicing for " + id + " (lane no longer allocated)");
+                reportStaleGains(id, lane.partGains(), null, report);
+                for (var instrument : lane.instruments()) reportStaleInstrument(id, instrument, report);
+                return;
+            }
+            var notes = allocated.get(id);
+            var gains = compatibleGains(lane.partGains(), notes);
+            reportStaleGains(id, lane.partGains(), gains, report);
+            var keys = instrumentKeys(id, notes);
+            var instruments = new java.util.ArrayList<Instrument>();
+            var retained = new HashSet<ReconstructionVoices.Key>();
+            for (var instrument : lane.instruments()) {
+                if (keys.contains(key(instrument))) {
+                    instruments.add(instrument);
+                    retained.add(key(instrument));
+                } else {
+                    reportStaleInstrument(id, instrument, report);
+                }
+            }
+            if (!retained.containsAll(keys) && fitted != null)
+                fitted.lanes().get(id).instruments().stream().filter(instrument -> !retained.contains(key(instrument)))
+                        .forEach(instruments::add);
+            Role role = notes.stream().anyMatch(entry -> entry.role() == lane.role())
+                    ? lane.role() : ReconstructionVoiceStage.dominantRole(notes);
+            var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
+            lanes.put(id, new Lane(role, lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(), effects,
+                    lane.patchReason(), lane.articulationReason(), lane.effectReason(), List.copyOf(instruments),
+                    gains, lane.overrides()));
+        });
+        if (fitted != null) fitted.lanes().forEach((id, lane) -> {
+            if (lanes.containsKey(id)) return;
+            var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
+            lanes.put(id, new Lane(lane.role(), lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(),
+                    effects, lane.patchReason(), lane.articulationReason(), lane.effectReason(), lane.instruments(),
+                    lane.partGains(), lane.overrides()));
+        });
+        return new Result(previous.version(), lanes, previous.fitWindows());
+    }
+
+    private static Effects compatibleCopy(String id, Effects effects, Map<String, ?> allocated, Set<String> copies,
+                                          Consumer<String> report) {
+        var copy = effects.copy();
+        if (copy == null || !allocated.containsKey(copy.lane()) && copies.add(copy.lane())) return effects;
+        report.accept("Dropped " + id + " copy effect to " + copy.lane() + " (destination is in use)");
+        return new Effects(effects.preset(), effects.detune(), effects.vibrato(), null);
+    }
+
+    private static void reportStaleGains(String id, Map<Integer, Double> before, Map<Integer, Double> kept,
+                                         Consumer<String> report) {
+        if (before != null) for (int part : new TreeSet<>(before.keySet())) {
+            if (kept == null || !kept.containsKey(part))
+                report.accept("Dropped " + id + " partGains[" + part + "] (part no longer allocated)");
+        }
+    }
+
+    private static void reportStaleInstrument(String id, Instrument instrument, Consumer<String> report) {
+        report.accept("Dropped " + id + " instrument for part " + instrument.part()
+                + (instrument.drumPitch() == null ? "" : " pitch " + instrument.drumPitch()) + " (no longer allocated)");
+    }
+
+    static Result preserveRefit(Result fitted, Result previous, Set<String> targets, boolean refitLevels,
+                                Set<String> changedMaterial, Map<String, List<ReconstructionAllocation.Entry>> allocated) {
         var lanes = new java.util.LinkedHashMap<>(fitted.lanes());
         for (var entry : previous.lanes().entrySet()) {
             String id = entry.getKey();
@@ -121,7 +275,7 @@ final class ReconstructionVoicing {
                 require(before.overrides() == null || before.overrides().isEmpty(), "voicing.json.lanes." + id,
                         "cannot refit a removed lane with scoped overrides");
             } else {
-                lanes.put(id, targeted ? after.withPreviousEdits(before, refitLevels) : before);
+                lanes.put(id, targeted ? after.withPreviousEdits(before, refitLevels || changedMaterial.contains(id), allocated.getOrDefault(id, List.of())) : before);
             }
         }
         if (!targets.isEmpty()) for (String id : lanes.keySet())

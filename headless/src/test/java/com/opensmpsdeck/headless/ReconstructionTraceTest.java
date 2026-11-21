@@ -15,6 +15,41 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionTraceTest {
+    @Test void groupsSwapsOutsideTheSpanAndSuggestsPinsAtTheFirstDivergence() {
+        var before = new java.util.LinkedHashMap<String, ReconstructionTrace.Row>();
+        var after = new java.util.LinkedHashMap<String, ReconstructionTrace.Row>();
+        for (int i = 0; i < 8; i++) {
+            String id = "note-" + i;
+            String lane = i % 2 == 0 ? "FM3" : "FM4";
+            String swapped = lane.equals("FM3") ? "FM4" : "FM3";
+            before.put(id, placed(id, lane, i));
+            after.put(id, placed(id, i == 5 ? lane : swapped, i));
+        }
+        var diff = ReconstructionTrace.diff(before, after, new ReconstructionTrace.Span(0.0, 1.5));
+        var groups = diff.getAsJsonArray("lanePermutations");
+        assertEquals(2, groups.size());
+        var first = groups.get(0).getAsJsonObject();
+        assertEquals(3, first.get("noteCount").getAsInt());
+        assertEquals(2.0, first.get("startSeconds").getAsDouble());
+        assertEquals(4.5, first.get("endSeconds").getAsDouble());
+        assertEquals(JsonParser.parseString("{\"FM3\":\"FM4\",\"FM4\":\"FM3\"}"), first.get("lanes"));
+        assertEquals(JsonParser.parseString("[\"note-2\",\"note-3\"]"), first.get("firstNoteIds"));
+        var pin = ReconstructionEdits.parse(first.getAsJsonArray("pins").get(0).getAsJsonObject(), "pin");
+        assertEquals(List.of("note-2"), pin.noteIds());
+        assertEquals("FM3", pin.lane());
+    }
+
+    private static ReconstructionTrace.Row placed(String id, String lane, int start) {
+        var note = new Note(id, 0, start, start + .5, 60, 90, "midi", 1);
+        var timing = new ReconstructionTrace.Timing(start, start + .5, .5, start, start + .5, .5,
+                start * 60L, start * 60L + 30, 30);
+        var at = new ReconstructionTrace.NoteAt(note, timing);
+        var allocation = new ReconstructionTrace.Allocation(at, Role.harmony, List.of("FM3", "FM4"), lane,
+                timing, ReconstructionAllocation.Outcome.kept, null, null, null, null, null, List.of());
+        return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, null, at, null, null, null,
+                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null);
+    }
+
     @Test void tracesMergesTruncationAndUnpropagatedScoreEdits(@TempDir Path work) throws Exception {
         var held = new Note("held", 0, .1, .8, 68, 96, "midi", 1);
         var winner = new Note("winner", 0, .5, .7, 70, 96, "midi", 1);

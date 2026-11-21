@@ -416,6 +416,31 @@ class ReconstructionCliTest {
                 .getMessage().contains("missing"));
     }
 
+    @Test void keepVoicingDropsAndReportsOnlyStalePartEntries() {
+        var harmony = ReconstructionRoles.Role.harmony;
+        var retained = new ReconstructionVoicing.Instrument(0, null, "envelope");
+        var stale = new ReconstructionVoicing.Instrument(1, null, "old-envelope");
+        var lane = new ReconstructionVoicing.Lane(harmony, null, List.of(), .6,
+                ReconstructionVoicing.WRITTEN, ReconstructionVoicing.DRY, "", "", "", List.of(retained, stale))
+                .withPartGains(java.util.Map.of(0, .8, 1, .9));
+        var previous = new ReconstructionVoicing.Result(1, java.util.Map.of("PSG2", lane), null);
+        var note = new ReconstructionStages.Note("note", 0, .1, .2, 64, 90, "midi", 1);
+        var entry = new ReconstructionAllocation.Entry(note, ReconstructionRoles.Role.counter, "PSG2", 6, 12,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var allocated = java.util.Map.of("PSG2", List.of(entry));
+        var messages = new java.util.ArrayList<String>();
+
+        assertTrue(ReconstructionVoicing.lanesNeedingFit(previous, allocated).isEmpty());
+        var result = ReconstructionVoicing.keepCompatible(previous, null, allocated, messages::add);
+        var kept = result.lanes().get("PSG2");
+        assertEquals(entry.role(), kept.role());
+        assertEquals(.6, kept.gain());
+        assertEquals(List.of(retained), kept.instruments());
+        assertEquals(java.util.Map.of(0, .8), kept.partGains());
+        assertEquals(List.of("Dropped PSG2 partGains[1] (part no longer allocated)",
+                "Dropped PSG2 instrument for part 1 (no longer allocated)"), messages);
+    }
+
     @Test void onlyRefitsLevelsOnExplicitlyTargetedLanes() {
         var dry = ReconstructionVoicing.DRY;
         var art = ReconstructionVoicing.WRITTEN;
@@ -427,21 +452,38 @@ class ReconstructionCliTest {
         var fit = new ReconstructionVoicing.Lane(melody, "next", List.of(), .8, art, dry, "", "", "", List.of());
         var before = new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", lead, "PSG2", backing), null);
         var proposed = new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", fit, "PSG2", fit), null);
-        var keep = ReconstructionVoicing.preserveRefit(proposed, before, java.util.Set.of("FM1"), false);
+        var note = new ReconstructionStages.Note("lead", 0, .1, .2, 64, 90, "midi", 1);
+        var allocated = new ReconstructionAllocation.Entry(note, melody, "FM1", 6, 12,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var placement = java.util.Map.of("FM1", List.of(allocated));
+        var targets = java.util.Set.of("FM1");
+        var keep = ReconstructionVoicing.preserveRefit(proposed, before, targets, false, java.util.Set.of(), placement);
         assertEquals(.5, keep.lanes().get("FM1").gain());
         assertEquals(lead.partGains(), keep.lanes().get("FM1").partGains());
         assertEquals("next", keep.lanes().get("FM1").variantId());
         assertSame(backing, keep.lanes().get("PSG2"));
-        var levels = ReconstructionVoicing.preserveRefit(proposed, before, java.util.Set.of("FM1"), true);
+        var levels = ReconstructionVoicing.preserveRefit(proposed, before, targets, true, java.util.Set.of(), placement);
         assertEquals(.8, levels.lanes().get("FM1").gain());
         assertSame(backing, levels.lanes().get("PSG2"));
-        // A lane whose role changed upstream carries new material and takes the refitted level.
         var swapped = new ReconstructionVoicing.Lane(harmony, "pad", List.of(), 1.2, art, dry, "", "", "", List.of());
-        var roleChange = ReconstructionVoicing.preserveRefit(
-                new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", swapped, "PSG2", fit), null),
-                before, java.util.Set.of("FM1"), false);
-        assertEquals(1.2, roleChange.lanes().get("FM1").gain());
-        assertEquals(null, roleChange.lanes().get("FM1").partGains());
+        var withRoleChange = new ReconstructionVoicing.Result(1, java.util.Map.of("FM1", swapped, "PSG2", fit), null);
+        var sameNotes = new ReconstructionAllocation.Entry(note, harmony, "FM1", 6, 12,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var oldAllocation = new ReconstructionAllocation.Result(1, List.of(allocated));
+        var sameMaterial = ReconstructionVoicing.changedMaterial(oldAllocation,
+                new ReconstructionAllocation.Result(1, List.of(sameNotes)));
+        assertTrue(sameMaterial.isEmpty());
+        var roleChange = ReconstructionVoicing.preserveRefit(withRoleChange, before, targets, false, sameMaterial, placement);
+        assertEquals(.5, roleChange.lanes().get("FM1").gain());
+        assertEquals(lead.partGains(), roleChange.lanes().get("FM1").partGains());
+
+        var shorter = sameNotes.shorten(10, "test", null);
+        var changedMaterial = ReconstructionVoicing.changedMaterial(oldAllocation,
+                new ReconstructionAllocation.Result(1, List.of(shorter)));
+        assertEquals(targets, changedMaterial);
+        var gateChange = ReconstructionVoicing.preserveRefit(withRoleChange, before, targets, false, changedMaterial, placement);
+        assertEquals(1.2, gateChange.lanes().get("FM1").gain());
+        assertNull(gateChange.lanes().get("FM1").partGains());
     }
 
     @Test void removesSystematicCrossPartBassOctavesButPreservesThemOnRequest() {

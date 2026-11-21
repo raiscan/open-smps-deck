@@ -98,12 +98,12 @@ final class ReconstructionCli {
         out.println("       reconstruct trace WORK_DIR [--start S] [--end S] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
-        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...]");
-        out.println("       reconstruct plan-template WORK_DIR");
+        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
+        out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
         out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] OUT.wav");
-        out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE]");
+        out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
@@ -151,8 +151,10 @@ final class ReconstructionCli {
             return;
         }
         if (args.length >= 2 && args[1].equals("plan-template")) {
-            if (args.length != 3) throw new IllegalArgumentException("reconstruct plan-template expects WORK_DIR");
-            out.println(ReconstructionStages.planTemplate(Path.of(args[2])));
+            if (args.length == 3) out.print(ReconstructionStages.planTemplateJson(Path.of(args[2])));
+            else if (args.length == 5 && args[3].equals("--out"))
+                out.println(ReconstructionStages.writePlanTemplate(Path.of(args[2]), Path.of(args[4])));
+            else throw new IllegalArgumentException("reconstruct plan-template expects WORK_DIR [--out FILE]");
             return;
         }
         if (args.length >= 2 && ReconstructionStages.isCommand(args[1])) {
@@ -197,7 +199,8 @@ final class ReconstructionCli {
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
-            java.util.Set<String> targets, boolean refitLevels) throws IOException {
+            java.util.Set<String> targets, boolean refitLevels, ReconstructionAllocation.Result previousAllocation)
+            throws IOException {
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
         var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
         var allocated = ReconstructionVoicing.byLane(allocation);
@@ -207,8 +210,26 @@ final class ReconstructionCli {
             throw new IllegalArgumentException("A lane-targeted refit needs existing voicing for the other lanes");
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets));
         if (previous == null) return fitted;
-        var result = ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels);
+        var result = ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
+                ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
         ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
+        return result;
+    }
+
+    static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
+            ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
+            java.util.function.Consumer<String> report) throws IOException {
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var timeline = ReconstructionTimeMap.of(score);
+        var allocated = ReconstructionVoicing.byLane(allocation);
+        var targets = ReconstructionVoicing.lanesNeedingFit(previous, allocated);
+        ReconstructionVoicing.Result fitted = null;
+        if (!targets.isEmpty()) {
+            var source = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), timeline);
+            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, targets));
+        }
+        var result = ReconstructionVoicing.keepCompatible(previous, fitted, allocated, report);
+        ReconstructionVoicing.validate(result, allocation, catalogue, timeline.frames());
         return result;
     }
 

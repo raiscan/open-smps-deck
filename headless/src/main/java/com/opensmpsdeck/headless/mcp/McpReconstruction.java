@@ -39,6 +39,7 @@ final class McpReconstruction {
             field("audioRefine", "boolean", "Use audio pitch refinement").optional(),
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
             field("refitLanes", object(Map.of("type", "array", "items", Map.of("type", "string"))),
                     "Limit a resumed voice fit to specific lanes").optional(),
@@ -92,7 +93,7 @@ final class McpReconstruction {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
-                    "transcriber", "transcriberDevice", "refitLevels");
+                    "transcriber", "transcriberDevice", "refitLevels", "keepVoicing");
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");
                 cli.add(lane.getAsString());

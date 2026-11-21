@@ -17,6 +17,26 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionStagesTest {
+    @Test void rerunRetainsFreeBackingLanesAfterAnEarlyAttackIsRemoved() {
+        var parts = List.of(part(0));
+        var decisions = new java.util.ArrayList<ReconstructionRoles.Decision>();
+        for (int i = 0; i < 4; i++) {
+            for (int pitch : List.of(60, 72)) {
+                var note = new ReconstructionStages.Note("note-" + i + "-" + pitch, 0, i * .2, i * .2 + .1,
+                        pitch, 90, "midi", 1);
+                decisions.add(new ReconstructionRoles.Decision(note, ReconstructionRoles.Role.harmony, null, null));
+            }
+        }
+        var original = new ReconstructionRoles.Result(1, 7.5, decisions, null);
+        var previous = ReconstructionAllocation.allocate(original, parts, 60, false);
+        var edited = new ReconstructionRoles.Result(1, 7.5, decisions.subList(1, decisions.size()), null);
+        var fresh = ReconstructionAllocation.allocate(edited, parts, 60, false);
+        var rerun = ReconstructionAllocation.allocate(edited, parts, 60, false, false, previous);
+
+        assertNotEquals(previous.notes().subList(1, previous.notes().size()), fresh.notes());
+        assertEquals(previous.notes().subList(1, previous.notes().size()), rerun.notes());
+    }
+
     @Test void roundTripsLegatoCountsAndGapHistograms(@TempDir Path dir) throws Exception {
         var prior = note("prior", 0, .1, .4, 72);
         var next = note("next", 0, .4, .6, 74);
