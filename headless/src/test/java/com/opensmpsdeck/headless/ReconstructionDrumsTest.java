@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.Envelope;
+import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
@@ -234,6 +235,9 @@ class ReconstructionDrumsTest {
                 .findFirst().orElseThrow();
         assertEquals(ReconstructionCymbals.envelope(42).id(), automatic.psgEnvelopeId());
         assertEquals(231, automatic.commands().getFirst().arguments().getFirst());
+        assertTrue(automatic.commands().stream().anyMatch(event ->
+                event.command() == NativeCommand.DETUNE
+                        && event.arguments().equals(List.of(248))));
         var batch = directory.resolve("edits.json");
         Files.writeString(batch, """
                 [{"id":"keep-tone","reason":"Keep tonal spill away from noise","op":"pinLane",

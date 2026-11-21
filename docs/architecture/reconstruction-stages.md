@@ -775,12 +775,15 @@ retain part-level matching under `instruments`. DAC entries also specify
 `drumPitch`. A fitted DAC entry also has a `drumSelection` with the chosen
 rate, optional stem slice and match evidence. To use a different catalogue
 variant at its native rate, change `variantId` and remove `drumSelection`.
-Automatic PSG3 cymbals use tone-linked white noise with short closed-hat
-decays and longer open-hat and cymbal decays. The voice stage measures the
-median upper-band attack energy above bleed in isolated drum-stem excerpts
-and selects the nearest audible PSG attenuation. The fitted correction is
-saved in PSG3 `drumGains`. With insufficient stem evidence, the substitute
-uses a native-style fixed level.
+Automatic PSG3 cymbals use tone-linked white noise. Closed and pedal hats
+halve the native tone-3 period to shift noise at about 14 kHz, with a
+full-level attack and steeper decay. Open hats and other cymbals use the
+native-rate clock and longer decay. For closed and pedal hats, the voice
+stage weights the drum stem toward 6 kHz and above, subtracts pre-hit bleed,
+and targets 6 dB above the median isolated attack excess. Open hats and other
+cymbals use the broader upper-band fit. The nearest PSG level is saved in
+`drumGains`. With insufficient stem evidence, the substitute uses the
+native-style base level.
 
 The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude
@@ -879,6 +882,8 @@ Read `lanes.PSG3.psgPercussion` for the noise settings. Byte 231 (0xE7)
 selects white noise clocked by tone 3. `envelopeSlot: 0` is the fixed-level
 mode used for pinned and explicitly named PSG percussion. Automatic
 cymbals use the short or long decay envelope assigned in the arrangement.
+Automatic closed and pedal hats add a native detune command to raise the
+shift rate. Check both the envelope and the detune in the generated sequence.
 
 The existing PSG velocity curve starts with an FM-style logarithmic
 velocity conversion and then quantizes the resulting 7-bit level to the

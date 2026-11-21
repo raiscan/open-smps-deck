@@ -282,14 +282,13 @@ final class S3kReconstruction {
                 int pitch = automatic ? ReconstructionCymbals.PITCH : 81;
                 var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
                 int volume = automatic ? (ReconstructionCymbals.NATIVE_LEVEL << 3) : volume(part, note);
-                String asset = NOISE;
-                if (automatic) {
-                    var envelope = ReconstructionCymbals.envelope(note.pitch());
-                    asset = envelope.id();
-                    envelopes.putIfAbsent(asset, envelope);
-                }
+                var envelope = automatic ? ReconstructionCymbals.envelope(note.pitch()) : null;
+                String asset = envelope == null ? NOISE : envelope.id();
+                if (envelope != null) envelopes.putIfAbsent(asset, envelope);
                 if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
-                psg.get(2).add(new Placement(new Event(pitched, start, end, 0, asset, volume)));
+                var placed = new Placement(new Event(pitched, start, end, 0, asset, volume));
+                if (envelope != null) placed.detune = ReconstructionCymbals.detune(envelope);
+                psg.get(2).add(placed);
                 gates.add(new VoicedGate(entry.note().id(), lane, pitched.pitch(), start, end));
                 continue;
             }

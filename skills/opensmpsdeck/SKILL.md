@@ -137,7 +137,8 @@ Use `trace --lane PSG3` for automatically routed cymbals and `trace --lane DAC`
 or the view's drum rows for remaining DAC losses. The
 [PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats)
 shows how to tune fitted gains or override routing with pins. Check
-`lanes.PSG3.psgPercussion` for the noise mode. On DAC, use
+`lanes.PSG3.psgPercussion` for the noise mode and the generated sequence
+for the automatic closed-hat envelope and faster tone-3 clock. On DAC, use
 `drumGainOverrides` with `hitIds` or a half-open source-time `span` to replace
 the gain for selected DAC hits.
 
