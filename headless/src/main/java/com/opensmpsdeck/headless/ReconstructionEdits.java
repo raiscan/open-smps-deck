@@ -29,7 +29,9 @@ final class ReconstructionEdits {
     enum Kind { insertNote, deleteNote, setNote, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
-    record Span(double start, double end) {
+    record Span(double start, double end, String section) {
+        Span(double start, double end) { this(start, end, null); }
+
         boolean contains(double time) { return start <= time && time < end; }
         Span union(Span other) {
             return other == null ? this : new Span(Math.min(start, other.start), Math.max(end, other.end));
@@ -83,7 +85,14 @@ final class ReconstructionEdits {
         }
 
         Span explicitSpan() {
-            return span != null ? span : start != null && end != null ? new Span(start, end) : null;
+            return span != null ? span.section == null ? span : null
+                    : start != null && end != null ? new Span(start, end) : null;
+        }
+
+        Intent withSpan(Span resolved) {
+            return new Intent(id, kind, json, part, resolved, pitchMin, pitchMax, noteIds, attack, start, end, pitch,
+                    velocity, scale, noExtension, role, fromRole, lane, points, selectors, voice, others,
+                    timeBase, shape, glideSeconds);
         }
     }
 
@@ -373,12 +382,45 @@ final class ReconstructionEdits {
 
     private static Span span(JsonObject target, String at, Integer part) {
         require(part != null, at + ".part", "required with span");
+        var value = target.get("span");
+        if (value != null && value.isJsonObject()) {
+            var selector = value.getAsJsonObject();
+            fields(selector, at + ".span", Set.of("section"));
+            return new Span(0, 0, string(selector, "section", at + ".span"));
+        }
         var values = array(target, "span", at);
         require(values.size() == 2, at + ".span", "expected [start, end] in source seconds");
         double from = time(values.get(0), at + ".span[0]");
         double to = time(values.get(1), at + ".span[1]");
         require(to > from, at + ".span[1]", "must follow span start");
         return new Span(from, to);
+    }
+
+    ReconstructionEdits bindSections(Path work, Score score, ReconstructionStructure.Result structure, Stage stage,
+                                    List<Outcome> outcomes) throws IOException {
+        if (intents.stream().noneMatch(edit -> usesSection(edit, stage))) return this;
+        var form = structure == null ? ReconstructionSections.load(work, score)
+                : ReconstructionSections.load(work, score, structure);
+        var bound = new ArrayList<Intent>();
+        for (var edit : intents) {
+            if (!usesSection(edit, stage)) {
+                bound.add(edit);
+                continue;
+            }
+            try {
+                var selected = form.select(edit.span.section);
+                Span range = edit.timeBase == TimeBase.project ? new Span(selected.projectStart(), selected.projectEnd())
+                        : new Span(selected.sourceStart(), selected.sourceEnd());
+                bound.add(edit.withSpan(range));
+            } catch (IllegalArgumentException error) {
+                outcomes.add(new Outcome(edit.id, edit.kind, Status.invalid, List.of(), null, error.getMessage(), null));
+            }
+        }
+        return new ReconstructionEdits(bound);
+    }
+
+    private static boolean usesSection(Intent edit, Stage stage) {
+        return edit.firstStage() == stage && edit.span != null && edit.span.section != null;
     }
 
     Score applyScore(Score score, List<Outcome> outcomes) {

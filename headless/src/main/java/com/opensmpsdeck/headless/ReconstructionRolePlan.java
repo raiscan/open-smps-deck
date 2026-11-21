@@ -26,8 +26,23 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
             if (timeBase(rule, timeline) != ReconstructionTimeMap.TimeBase.source || !timeline.warped()) return rule;
             return new Rule(rule.sections, rule.bars, rule.part, rule.role, rule.voice, rule.pitchMin, rule.pitchMax,
                     rule.startSeconds == null ? null : timeline.project(rule.startSeconds),
-                    rule.endSeconds == null ? null : timeline.project(rule.endSeconds), rule.texture);
+                    rule.endSeconds == null ? null : timeline.project(rule.endSeconds), rule.texture, rule.section);
         }).toList(), timeline.timeBase());
+    }
+
+    ReconstructionRolePlan resolveSections(ReconstructionSections.Result form, ReconstructionTimeMap timeline) {
+        var project = projectBounds(timeline);
+        return new ReconstructionRolePlan(version, project.rules.stream().map(rule -> {
+            if (rule.section == null) return rule;
+            var span = form.select(rule.section);
+            ReconstructionArtifacts.require(span.level() != ReconstructionSections.Level.phrase, "roleplan.json",
+                    "section must name a section or period: " + rule.section);
+            double start = rule.startSeconds == null ? span.projectStart() : Math.max(span.projectStart(), rule.startSeconds);
+            double end = rule.endSeconds == null ? span.projectEnd() : Math.min(span.projectEnd(), rule.endSeconds);
+            ReconstructionArtifacts.require(start < end, "roleplan.json", "time bounds do not intersect " + rule.section);
+            return new Rule(rule.sections, rule.bars, rule.part, rule.role, rule.voice, rule.pitchMin, rule.pitchMax,
+                    start, end, rule.texture);
+        }).toList(), project.timeBase);
     }
 
     List<ResolvedTime> resolvedTimes(ReconstructionTimeMap timeline) {
@@ -49,7 +64,13 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
 
     record Rule(@Nullable List<String> sections, @Nullable String bars, int part, Role role,
                 @Nullable Voice voice, @Nullable Integer pitchMin, @Nullable Integer pitchMax,
-                @Nullable Double startSeconds, @Nullable Double endSeconds, @Nullable String texture) {
+                @Nullable Double startSeconds, @Nullable Double endSeconds, @Nullable String texture,
+                @Nullable String section) {
+        Rule(List<String> sections, String bars, int part, Role role, Voice voice, Integer pitchMin, Integer pitchMax,
+             Double startSeconds, Double endSeconds, String texture) {
+            this(sections, bars, part, role, voice, pitchMin, pitchMax, startSeconds, endSeconds, texture, null);
+        }
+
         Voice line() {
             return voice == null ? defaultVoice(role) : voice;
         }

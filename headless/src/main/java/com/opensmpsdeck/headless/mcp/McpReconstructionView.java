@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionStages;
+import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.ReconstructionTrace;
 import com.opensmpsdeck.headless.ReconstructionView;
 
@@ -18,12 +19,15 @@ final class McpReconstructionView {
     static McpTools.Result view(JsonObject args) throws IOException {
         var work = McpPaths.directory(string(args, "workDir"));
         for (String file : ReconstructionTrace.FILES) McpPaths.managed(work, file);
-        for (String file : List.of("arrangement.smps.json", "edits.json", ReconstructionStages.STEADY_REFERENCE))
+        for (String file : List.of("arrangement.smps.json", "edits.json", ReconstructionSections.FILE, ReconstructionStages.STEADY_REFERENCE))
             McpPaths.managed(work, file);
         var output = McpPaths.output(work, string(args, "output"));
         if (flag(args, "ridges") || args.has("ridgeCount")) McpPaths.output(work, ReconstructionView.ridgesPath(output).toString());
-        var options = new ReconstructionView.Options(args.get("start").getAsDouble(), args.get("end").getAsDouble(),
-                args.has("time") ? string(args, "time") : "source", integer(args, "stem"),
+        String time = args.has("time") ? string(args, "time") : "source";
+        var bounds = ReconstructionSections.bounds(work, args.has("section") ? string(args, "section") : null,
+                args.has("start") ? args.get("start").getAsDouble() : null,
+                args.has("end") ? args.get("end").getAsDouble() : null, time);
+        var options = new ReconstructionView.Options(bounds[0], bounds[1], time, integer(args, "stem"),
                 args.has("wav") ? McpPaths.input(string(args, "wav")) : null,
                 flag(args, "render"), integer(args, "pitchMin"), integer(args, "pitchMax"),
                 args.has("lanes") ? args.getAsJsonArray("lanes").asList().stream()
@@ -37,7 +41,7 @@ final class McpReconstructionView {
                         .map(JsonElement::getAsString).toList() : List.of(),
                 flag(args, "ridges") || args.has("ridgeCount"), flag(args, "sharedDb"), flag(args, "db"),
                 args.has("pitchPreset") ? string(args, "pitchPreset") : null, args.has("ridgeCount") ? exactInteger(args.get("ridgeCount")) : 3);
-        var result = ReconstructionView.run(work, options, output);
+        var result = ReconstructionView.run(work, options, output, args.has("section") || flag(args, "sections"));
         return new McpTools.Result(ReconstructionView.legendJson(result.legend()), result.png());
     }
 

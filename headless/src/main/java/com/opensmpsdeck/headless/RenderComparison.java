@@ -20,12 +20,12 @@ public final class RenderComparison {
     private RenderComparison() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
-        if (args.length < 7)
+        if (args.length < 5)
             throw new IllegalArgumentException("Expected render-compare WORK_DIR --start S --end S [options] OUT.wav|OUT.mp3");
         Path work = Path.of(args[1]);
         Path render = work.resolve("render.wav"), reference = null;
         Double start = null, end = null;
-        String time = "source";
+        String time = "source", section = null;
         var seen = new HashSet<String>();
         for (int i = 2; i < args.length - 1;) {
             String key = args[i++];
@@ -37,14 +37,15 @@ public final class RenderComparison {
                 case "--start" -> start = Double.parseDouble(value);
                 case "--end" -> end = Double.parseDouble(value);
                 case "--time" -> time = value;
+                case "--section" -> section = value;
                 case "--render" -> render = Path.of(value);
                 case "--reference" -> reference = Path.of(value);
                 default -> throw new IllegalArgumentException("Unknown render-compare option " + key);
             }
         }
-        if (start == null || end == null) throw new IllegalArgumentException("Expected --start and --end");
+        var bounds = ReconstructionSections.bounds(work, section, start, end, time);
         out.println(new Gson().toJson(run(work, render, reference, Path.of(args[args.length - 1]),
-                start, end, time, null, seen.contains("--force"))));
+                bounds[0], bounds[1], time, null, seen.contains("--force"))));
     }
 
     public static Result run(Path work, Path render, Path reference, Path output,

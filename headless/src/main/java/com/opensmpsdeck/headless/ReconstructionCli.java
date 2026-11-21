@@ -101,7 +101,8 @@ final class ReconstructionCli {
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
-        out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
+        out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
+        out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [options] OUT.png");
         out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
         out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
@@ -117,6 +118,10 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("sections")) {
+            ReconstructionSections.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("view")) {

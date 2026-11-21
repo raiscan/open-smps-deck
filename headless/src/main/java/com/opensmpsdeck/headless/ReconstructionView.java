@@ -100,9 +100,9 @@ public final class ReconstructionView {
 
     static void cli(String[] args, PrintStream out) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("Expected view WORK_DIR --start S --end S [options] OUT.png");
-        var switches = Set.of("--render", "--harmonic-sum", "--ridges", "--shared-db", "--db", "--force");
+        var switches = Set.of("--render", "--harmonic-sum", "--ridges", "--shared-db", "--db", "--force", "--sections");
         var keys = Set.of("--start", "--end", "--time", "--stem", "--wav", "--pitch-min", "--pitch-max",
-                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset", "--ridge-count");
+                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset", "--ridge-count", "--section");
         var flags = new HashMap<String, String>();
         var harmonicsAt = new ArrayList<String>();
         for (int i = 1; i < args.length - 1; i++) {
@@ -117,10 +117,11 @@ public final class ReconstructionView {
             else if (i + 1 < args.length - 1) flags.put(key, args[++i]);
             else throw new IllegalArgumentException("Missing value for " + key);
         }
-        if (!flags.containsKey("--start") || !flags.containsKey("--end"))
-            throw new IllegalArgumentException("Expected --start and --end");
-        var options = new Options(Double.parseDouble(flags.get("--start")), Double.parseDouble(flags.get("--end")),
-                flags.getOrDefault("--time", "source"), integer(flags, "--stem"),
+        Path work = Path.of(args[0]);
+        String time = flags.getOrDefault("--time", "source");
+        double[] bounds = ReconstructionSections.bounds(work, flags.get("--section"),
+                decimal(flags, "--start"), decimal(flags, "--end"), time);
+        var options = new Options(bounds[0], bounds[1], time, integer(flags, "--stem"),
                 flags.containsKey("--wav") ? Path.of(flags.get("--wav")) : null, flags.containsKey("--render"),
                 integer(flags, "--pitch-min"), integer(flags, "--pitch-max"), csv(flags.get("--lanes")),
                 csv(flags.get("--parts")).stream().map(Integer::valueOf).toList(), flags.get("--harmonics"),
@@ -129,7 +130,9 @@ public final class ReconstructionView {
                 flags.containsKey("--ridges") || flags.containsKey("--ridge-count"),
                 flags.containsKey("--shared-db"), flags.containsKey("--db"),
                 flags.get("--pitch-preset"), Integer.parseInt(flags.getOrDefault("--ridge-count", "3")));
-        out.println(JSON.toJson(legendJson(run(Path.of(args[0]), options, Path.of(args[args.length - 1]), flags.containsKey("--force")).legend())));
+        var result = run(work, options, Path.of(args[args.length - 1]),
+                flags.containsKey("--force"), flags.containsKey("--section") || flags.containsKey("--sections"));
+        out.println(JSON.toJson(legendJson(result.legend())));
     }
 
     public static com.google.gson.JsonObject legendJson(Legend legend) {
@@ -137,6 +140,10 @@ public final class ReconstructionView {
         for (String key : List.of("harmonicsAt", "levels", "ridgesPath", "bends", "sourceLevels", "renderLevels", "drums"))
             if (json.get(key).isJsonNull()) json.remove(key);
         return json;
+    }
+
+    private static Double decimal(HashMap<String, String> flags, String key) {
+        return flags.containsKey(key) ? Double.valueOf(flags.get(key)) : null;
     }
 
     private static Integer integer(HashMap<String, String> flags, String key) {
@@ -155,20 +162,24 @@ public final class ReconstructionView {
     }
 
     public static Result run(Path work, Options options, Path output) throws IOException {
-        return run(work, options, output, false);
+        return run(work, options, output, false, false);
     }
 
-    private static Result run(Path work, Options options, Path output, boolean force) throws IOException {
+    public static Result run(Path work, Options options, Path output, boolean showSections) throws IOException {
+        return run(work, options, output, false, showSections);
+    }
+
+    private static Result run(Path work, Options options, Path output, boolean force, boolean showSections) throws IOException {
         Path sidecar = ridgesPath(output);
         Path ridgeFile = options.ridges ? sidecar : null;
         try (var png = new ExportTarget(output, force);
              var ridge = ridgeFile == null ? null : new ExportTarget(ridgeFile, force)) {
-            return renderView(work, options, output, ridgeFile, png, ridge, force);
+            return renderView(work, options, output, ridgeFile, png, ridge, force, showSections);
         }
     }
 
     private static Result renderView(Path work, Options options, Path output, Path ridgeFile,
-                                     ExportTarget pngTarget, ExportTarget ridgeTarget, boolean force) throws IOException {
+                                     ExportTarget pngTarget, ExportTarget ridgeTarget, boolean force, boolean showSections) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var timeline = ReconstructionTimeMap.of(score);
         var span = new Span(options.start, options.end, TimeBase.valueOf(options.time), timeline);
@@ -238,7 +249,10 @@ public final class ReconstructionView {
                 && ("voicing-projection".equals(note.evidence) || "allocated".equals(note.evidence)
                 || "legacy-report-and-voicing".equals(note.evidence)));
         boolean trajectories = (target != null || !targets.isEmpty()) && (options.ridges || options.db);
-        var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes, trajectories && options.db, drums != null);
+        var bands = showSections || Files.exists(work.resolve(ReconstructionSections.FILE))
+                ? ReconstructionSections.load(work, score).sections() : List.<ReconstructionSections.Section>of();
+        var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes,
+                trajectories && options.db, drums != null, bands);
         if (!options.lanes.isEmpty()) picture.renderLabel = "Solo " + String.join(", ", options.lanes);
         var sounding = lanes.stream().filter(lane -> visible.stream()
                 .anyMatch(note -> note.layer == Layer.lane && lane.equals(note.lane))).toList();
