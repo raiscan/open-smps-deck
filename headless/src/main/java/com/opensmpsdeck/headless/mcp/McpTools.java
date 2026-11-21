@@ -96,11 +96,14 @@ final class McpTools {
                     field("keepVoicing", "boolean", "Keep compatible voicing").optional(),
                     field("search", object(Map.of("type", "array", "items", Map.of("type", "string"))),
                             "Directories to search for moved inputs on new-directory replay").optional()),
-            tool("project_export", "Export a project or reconstruction as WAV, MP3, VGM, raw S3K bytes or an SMPS package.",
+            tool("project_export", "Export a project or reconstruction as audio, SMPS or a disassembly kit. Disasm also accepts a portable package as project.",
                     McpTools::export, PROJECT.optional(), WORK.optional(),
-                    field("output", "string", "New file or stem directory inside the project or work directory"),
-                    choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod"),
+                    field("output", "string", "New file or directory inside the project or work directory"),
+                    choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod", "disasm"),
                     ROMS,
+                    field("dpcmClosed", "boolean", "Quantise disassembly WAVs to DPCM-representable PCM").optional(),
+                    field("replaceDac", object(Map.of("type", "array", "items", Map.of("type", "integer"))),
+                            "Unused retail DAC notes (129–196) to repurpose, in order").optional(),
                     choice("driver", "Portable target driver", "s3k").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
                     field("license", "string", "SPDX license expression").optional(),
@@ -355,6 +358,17 @@ final class McpTools {
             McpPaths.managed(input, "score.json");
         }
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
+        if (string(args, "format").equalsIgnoreCase("disasm")) {
+            if (List.of("start", "end", "fade", "loops", "stems", "zip", "driver", "noSource", "license",
+                    "packageId", "packageVersion", "authors", "replace").stream().anyMatch(args::has))
+                throw new IllegalArgumentException("Disassembly export accepts roms, dpcmClosed and replaceDac");
+            var slots = args.has("replaceDac") ? args.getAsJsonArray("replaceDac").asList().stream()
+                    .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
+            var warnings = ProjectExport.exportDisasm(input, output, roms(args), flag(args, "dpcmClosed"), slots, progress);
+            return object(Map.of("output", output.toString(), "format", "disasm", "warnings", warnings));
+        }
+        if (args.has("dpcmClosed") || args.has("replaceDac"))
+            throw new IllegalArgumentException("dpcmClosed and replaceDac require format disasm");
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
         boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
         if (!portable && List.of("driver", "noSource", "license", "packageId", "packageVersion", "authors", "replace")

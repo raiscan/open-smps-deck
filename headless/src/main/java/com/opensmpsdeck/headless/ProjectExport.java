@@ -310,9 +310,16 @@ public final class ProjectExport {
         }
     }
 
+    public static List<String> exportDisasm(Path input, Path output, List<Path> roms, boolean dpcmClosed,
+                                            List<Integer> replaceDac, ReconstructionStages.Progress progress) throws IOException {
+        return DisassemblyKit.write(input, output, roms, dpcmClosed, replaceDac, progress);
+    }
+
     static void cli(String[] args, java.io.PrintStream out, java.io.PrintStream err) throws IOException {
         if (args.length < 5) throw new IllegalArgumentException("export expects INPUT OUTPUT --format FORMAT");
-        Format format = null;
+        String formatName = null;
+        boolean dpcmClosed = false;
+        var replaceDac = new ArrayList<Integer>();
         Double start = null, end = null, fade = null;
         Integer loops = null;
         boolean stems = false, zip = false;
@@ -324,13 +331,20 @@ public final class ProjectExport {
                 continue;
             }
             String option = args[i];
+            if (option.equals("--replace-dac")) {
+                if (++i == args.length || !args[i].matches("(?:0[xX]|\\$)?[0-9A-Fa-f]{2}"))
+                    throw new IllegalArgumentException("--replace-dac requires a two-digit hexadecimal DAC note");
+                replaceDac.add(Integer.parseInt(args[i].substring(args[i].length() - 2), 16));
+                continue;
+            }
             if (!seen.add(option)) throw new IllegalArgumentException("Duplicate option " + option);
             if (option.equals("--stems")) { stems = true; continue; }
             if (option.equals("--zip")) { zip = true; continue; }
+            if (option.equals("--dpcm-closed")) { dpcmClosed = true; continue; }
             if (++i == args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[i];
             switch (option) {
-                case "--format" -> format = Format.valueOf(value.toUpperCase(Locale.ROOT));
+                case "--format" -> formatName = value;
                 case "--start" -> start = Double.valueOf(value);
                 case "--end" -> end = Double.valueOf(value);
                 case "--fade" -> fade = Double.valueOf(value);
@@ -338,7 +352,19 @@ public final class ProjectExport {
                 default -> throw new IllegalArgumentException("Unknown option " + option);
             }
         }
-        if (format == null) throw new IllegalArgumentException("Choose --format wav|mp3|vgm|smps|package|portable|mod");
+        if (formatName == null) throw new IllegalArgumentException("Choose --format wav|mp3|vgm|smps|package|portable|mod|disasm");
+        if (formatName.equalsIgnoreCase("disasm")) {
+            if (flags.hasPackageOptions() || start != null || end != null || fade != null || loops != null || stems || zip)
+                throw new IllegalArgumentException("Disassembly export accepts --rom, --dpcm-closed and --replace-dac");
+            var warnings = exportDisasm(Path.of(args[1]), Path.of(args[2]), flags.roms(), dpcmClosed, replaceDac,
+                    (done, total, message) -> {});
+            for (String code : warnings) err.println("Warning [" + code + "]: " + DisassemblyKit.warningMessage(code));
+            out.println("Exported disassembly kit to " + args[2]);
+            return;
+        }
+        if (dpcmClosed || !replaceDac.isEmpty())
+            throw new IllegalArgumentException("--dpcm-closed and --replace-dac require --format disasm");
+        var format = Format.valueOf(formatName.toUpperCase(Locale.ROOT));
         boolean portable = format == Format.PORTABLE || format == Format.MOD;
         if (flags.portable() || !portable && flags.hasPackageOptions())
             throw new IllegalArgumentException("Use --format portable or --format mod for portable package options");

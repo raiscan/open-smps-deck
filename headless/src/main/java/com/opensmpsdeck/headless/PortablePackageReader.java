@@ -33,11 +33,17 @@ final class PortablePackageReader {
     private PortablePackageReader() {}
 
     static Package read(Path file) throws IOException {
+        return read(file, manifest -> {
+            if (!manifest.driver().equals("s3k") && manifest.requires().stockAssets())
+                PackageDriver.supported(manifest.driver());
+        });
+    }
+
+    static Package read(Path file, java.util.function.Consumer<PackageManifest> checkDriver) throws IOException {
         var entries = PortableArchive.read(file);
         var manifest = PackageManifest.decode(required(entries, "manifest.json"));
         validateStructure(manifest, entries);
-        if (!manifest.driver().equals("s3k") && manifest.requires().stockAssets())
-            PackageDriver.supported(manifest.driver());
+        checkDriver.accept(manifest);
         return new Package(manifest, entries);
     }
 

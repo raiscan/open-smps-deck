@@ -352,7 +352,7 @@ public final class Main {
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
-        out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package|portable|mod");
+        out.println("       export PROJECT.json|WORK_DIR|PACKAGE.smps.zip OUTPUT --format wav|mp3|vgm|smps|package|portable|mod|disasm");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
         out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }

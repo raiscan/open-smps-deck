@@ -385,5 +385,11 @@ read S1/S2 metadata without references.
 
 Studio requires a resolved project. Use a ROM with the headless tools before
 rendering or compiling redacted source. A Studio ROM picker is a follow-up.
+The [disassembly kit](disassembly-kit.md) reads the same portable bank and
+asset bindings. It relocates pointers and remaps DAC notes for skdisasm.
+`DPCM_INEXACT` compares the decoded build output with the package PCM.
+For inexact samples, `--dpcm-closed` makes the exported WAV round-trip
+through DPCM with the quantised PCM. The package PCM stays unchanged.
+
 The mod JAR tests verify the exploded layout and both manifests. OpenGGF
 integration is tracked separately.

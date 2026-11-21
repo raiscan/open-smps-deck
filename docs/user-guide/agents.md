@@ -141,12 +141,16 @@ tool_timeout_sec = 600
    saved project feedback. Validate the approved project with
    `project_validate`.
 5. **Output.** Call `project_export` with `workDir` or `project`, a new
-   `output` and `format` of `wav`, `mp3`, `vgm`, `smps`, `package`, `portable` or `mod`.
+   `output` and `format` of `wav`, `mp3`, `vgm`, `smps`, `package`, `portable`, `mod` or `disasm`.
    For WAV or MP3, use project seconds for optional span bounds and
    `stems: true` for channel stems. Use `package_validate` on a portable
    export and supply `roms` for stock references. Check the returned
-   `warnings` before sharing. Studio **Export…** supports audio, VGM, raw
-   SMPS and legacy packages. **Open as arrangement** hands the result to the timeline
+   `warnings` before sharing. For a [skdisasm kit](../architecture/disassembly-kit.md),
+   `project` also accepts a portable package. Disassembly options are
+   `roms` for personal-use stock materialisation, `dpcmClosed` to quantise
+   WAVs, and `replaceDac` for unused retail note numbers. Studio **Export…**
+   supports audio, VGM, raw SMPS and legacy packages. **Open as arrangement**
+   hands the result to the timeline
    editor. Saved musical hand edits detach the arrangement. Rebuilding
    over them requires explicit approval. Use `reconstruct_rerun` with a
    new `output` to replay the recipe and preserve the original.

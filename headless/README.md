@@ -155,6 +155,7 @@ java -jar "$deck_jar" export WORK_DIR stems.zip --format wav --stems --zip
 java -jar "$deck_jar" export NATIVE.smps.json song.wav --format wav --loops 3
 java -jar "$deck_jar" export WORK_DIR song.vgm --format vgm
 java -jar "$deck_jar" export WORK_DIR song.smps.zip --format package
+java -jar "$deck_jar" export song.smps.zip song-kit.zip --format disasm
 ```
 
 WAV and MP3 require ffmpeg on `PATH` (with libmp3lame for MP3). WAV preserves
@@ -180,9 +181,19 @@ external envelope or DAC sample assets.
 addressed bank, bindings, resources and source required for integration with
 the pinned OpenGGF S3K driver. OpenGGF has no direct ZIP loader.
 
+Use `--format disasm` for an S3K skdisasm kit from a project, work
+directory or portable `.smps.zip`. A `.zip` output wraps the files in a kit
+directory. Use `--rom PATH` to materialise stock assets for personal use.
+`--dpcm-closed` changes the WAVs to DPCM-representable PCM. Repeat
+`--replace-dac NN` (hexadecimal) to repurpose audited retail notes. See the
+[disassembly kit integration guide](../docs/architecture/disassembly-kit.md).
+
 MCP exposes `project_export` with exactly one of `project` or `workDir`, plus
 `output`, `format`, and the optional `start`, `end`, `fade`, `loops`, `stems`
 and `zip` fields. Use a new output inside the project or work directory.
+For `format: "disasm"`, `project` can also point to a portable package.
+Use optional `roms`, `dpcmClosed` and `replaceDac` (integer note array).
+Inspect the returned `warnings`.
 
 ## External stem separation
 
