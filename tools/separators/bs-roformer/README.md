@@ -42,14 +42,18 @@ Add a command to `~/.config/opensmpsdeck/separators.json` using absolute paths.
 
 ```sh
 java -jar "$CLI" reconstruct separate mix.mp3 separated --separator bs-roformer --device rocm
-java -jar "$CLI" reconstruct import separated import-work
+java -jar "$CLI" reconstruct import separated import-work \
+  --catalogue catalogue.json --transcriber muscriptor-medium --run
 ```
 
+Set up the tonal adapter before import using the
+[local extraction guide](../../../headless/README.md#external-stem-separation).
 `auto` selects a PyTorch GPU when available and CPU otherwise. Explicit GPU
 requests require the matching backend. The adapter decodes the mix once to
 44.1 kHz stereo float WAV. Every stem starts at the same sample and has the
 same sample count as that decoded mix. The six model outputs are bass, drums,
-other, vocals, guitar and piano. Import classifies piano as keyboard.
+other, vocals, guitar and piano. Import classifies piano under the keyboard
+family and gives it the piano role.
 
 `separation.json` records the inference package version, model, checkpoint
 hash, stem order, device, chunk size and overlap used for the run.

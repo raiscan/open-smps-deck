@@ -1,6 +1,9 @@
 # Staged reconstruction
 
-Reconstruction builds an S3K arrangement from aligned MIDI and audio, or from a mix and labelled stems in audio-only mode. Each
+Start from a local mix with
+[`reconstruct separate` and `reconstruct import --run`](../../headless/README.md#external-stem-separation).
+This builds an S3K arrangement from the mix and aligned labelled stems
+in audio-only mode. Aligned MIDI and audio are also supported. Each
 stage reads the preceding artifact from a work directory and writes its own
 versioned JSON. Record musical intent in `edits.json`, then resume at the
 first stage that consumes it. Keep `score.json` and `allocation.json` as
@@ -13,7 +16,9 @@ java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json song-work \
 java -jar "$jar" reconstruct run --from allocate song-work
 ```
 
-The first command runs all seven stages in a new directory. Use
+The first command shows the direct MIDI route and runs all seven stages
+in a new directory. For a build from import, use `IMPORT_WORK/reconstruction`
+as the stage work directory. Use
 `--audio-repeats` to include reference chroma in phrase matching. The
 transcription options are saved for subsequent runs. The second
 rebuilds allocation, voicing and assembly using the voices identified from `roles.json`. To run
@@ -49,9 +54,13 @@ directories outside public checkouts.
 
 ## Audio-only source score
 
-`run --audio-only` and `transcribe --audio-only` create the source on the
-input audio clock. The drum detector supplies a GM drum part, and tonal stems
-take the same external transcription path as `--transcribe-unmapped`.
+Import recognizes a separator's `separation.json` and prepares an audio-only
+request when the folder has no MIDI. For other aligned stem folders, pass
+`--audio-only` explicitly. `run --audio-only` and `transcribe --audio-only`
+also accept explicit stem paths. All three entry points create the source on
+the input audio clock. The built-in spectral detector supplies a GM drum part
+from the drum stem. A single configured external transcriber handles the
+tonal stems, receiving a role for each stem.
 The beat tracker uses drum attacks when available and mix onsets otherwise.
 The downstream structure, allocation, fitting and assembly stages use the
 same score interface as a MIDI run.

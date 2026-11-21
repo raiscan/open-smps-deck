@@ -41,6 +41,14 @@ opened and rendered without the cartridge. **Extra Life** restores previous
 music and uses the headless renderer's `--previous-project` and
 `--previous-frames` options for that context. [CLI import and rendering](../../headless/README.md#import-locked-on-s3k-music)
 
+## Open a local audio reconstruction
+
+Start from a local mix using the headless
+[separation and audio-only build](../../headless/README.md#external-stem-separation).
+Choose **Open reconstruction…** and select the generated
+`import-work/reconstruction` directory to inspect the aligned stems,
+audition the result and make or review edits.
+
 ## Import a Suno folder
 
 Choose **Import Suno folder…**, select the download, then select a separate
@@ -247,10 +255,12 @@ external revision; undo never secretly crosses into another writer's version.
 
 ## Inspect and edit a reconstruction
 
-Choose **Open reconstruction…** from the Studio toolbar and select the work
-directory created by `reconstruct run`. Studio reads its stage artifacts and
-opens an editing workspace. It uses recorded WAV paths for the mix and mapped
-stems, and reads `render.wav` for the chip spectrogram and playback.
+Choose **Open reconstruction…** from the Studio toolbar and select the
+stage work directory created by `reconstruct import --run` (the
+`reconstruction` subdirectory) or `reconstruct run`. Studio reads the stage
+artifacts and opens an editing workspace. It uses recorded WAV paths for the
+mix and mapped stems, and reads `render.wav` for the chip spectrogram and
+playback.
 
 - Choose a **Source** to change the spectrogram and playback together. Use
   **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**

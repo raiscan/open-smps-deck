@@ -1,6 +1,6 @@
 ---
 name: opensmpsdeck
-description: Use when reconstructing Mega Drive music from a Suno download, separated mix, or aligned MIDI and audio, inspecting SMPS note decisions, proposing arrangement edits, or preparing audio and S3K exports for review.
+description: Use when reconstructing Mega Drive music from a local mix, a Suno download, or aligned MIDI and audio, inspecting SMPS note decisions, proposing arrangement edits, or preparing audio and S3K exports for review.
 ---
 
 # Reconstruct and review an S3K arrangement
@@ -11,59 +11,72 @@ Run the examples from your private workspace. Set `jar` to the absolute
 path of the packaged JAR and `work` to the reconstruction work directory. Keep downloads, ROMs, catalogues derived
 from ROMs, work artifacts and renders outside public checkouts.
 
-## 1. Import and check the source
+## 1. Separate and check a local mix
+
+Start with a WAV or MP3. For FLAC, decode to WAV first
+(`ffmpeg -i mix.flac -c:a pcm_f32le mix.wav`). Configure BS-RoFormer SW
+and MuScriptor Medium under the names used here. Set `catalogue` to the
+absolute path of your local instrument catalogue.
 
 ```sh
-java -jar "$jar" reconstruct import "$download" "$import_work" --catalogue catalogue.json
+java -jar "$jar" reconstruct separate mix.wav separated --separator bs-roformer --device auto
+java -jar "$jar" reconstruct import separated import-work \
+  --catalogue "$catalogue" --transcriber muscriptor-medium
 ```
 
-Read the ✓ pass, ⚠ warning and ✗ error report and the saved `import.json`.
-Check the full mix, MIDI, alignment, the requested lead part and its
-assigned stem. Compare the winning match with its runner-up. The matcher
-optimizes the assignments together and uses one reference stem per MIDI
-part. Unmapped parts can use the mix. Use repeatable `--assign FILE=PART`
-and `--exclude FILE` with download-relative paths to correct a mapping,
-and repeat the overrides on subsequent checks. For MIDI-based import, supply
-both MIDI and mix and resolve blocking errors before starting.
-An `also_correlates_with_part` warning means another stem also fits that
-part. Audition both before overriding. To transcribe aligned tonal stems
-that have no MIDI part, opt in with `--transcribe-unmapped muscriptor`
-(MCP `transcribeUnmapped: "muscriptor"`).
+Use a new separator output directory. Read the ✓ pass, ⚠ warning and ✗ error
+checks and `import-work/import.json`. Check the lead stem, drums and any
+skipped stems. `separation.json` records the model and aligned outputs and
+lets import recognize the audio-only source automatically. Override a role
+with `--stem-role stems/NAME.wav=ROLE` and repeat it on subsequent checks.
 
-With MCP, call `reconstruct_import` with `folder`, `workDir`, and
-`catalogue`. Use an `assign` map and an `exclude` list for overrides.
-Pass the returned `runRequest` to `reconstruct_run` once the inputs are
-ready. In Studio use **Import Suno folder… → Override → Re-check → Start
-reconstruction**. [Import reference](../../headless/README.md#import-a-suno-download)
+The [local extraction guide](../../headless/README.md#external-stem-separation)
+covers model setup and config paths. The bake-off recommends SW, MuScriptor
+Medium for tonal instruments, Basic Pitch for vocals and ADTOF for drums.
+The current audio-only path uses one configured tonal transcriber and the
+built-in spectral drum detector. Use the explicit Medium option above for
+the integrated baseline.
 
-For a standalone WAV or MP3, use
-`reconstruct separate MIX OUT_DIR --separator NAME --device auto` (MCP
-`separators_list`, then `separate`). Import the resulting folder with its
-`separation.json`. With no MIDI, import prepares audio-only reconstruction
-using a configured transcriber. Check that vocals map to lead and drums to
-the onset detector. If import warns that it needs audio-only transcription,
-configure a transcriber before running.
-[Separation reference](../../headless/README.md#external-stem-separation)
+With MCP, call `separators_list` and `transcribers_list`, then `separate`
+with absolute `input` and new `outputDir`, `separator: "bs-roformer"` and
+optional `device`. Pass the separated directory as `folder` to
+`reconstruct_import` with `workDir`, `catalogue` and `transcriber`. Use
+file-relative keys in `stemRoles`.
+
+### Alternative inputs
+
+- **Suno mix, MIDI and stems.** Use `reconstruct import DOWNLOAD IMPORT_WORK
+  --catalogue CATALOGUE`. Check alignment, the lead part's winning stem and
+  runner-up, and any `also_correlates_with_part` warning. Each MIDI part can
+  use one fitting stem. Unmapped parts can use the mix. Use repeatable
+  `--assign FILE=PART` and `--exclude FILE` with download-relative paths
+  (MCP `assign` map and `exclude` list). Add `--transcribe-unmapped
+  muscriptor-medium` (MCP `transcribeUnmapped`) for unmatched tonal stems.
+  Studio offers **Import Suno folder… → Override → Re-check → Start
+  reconstruction**. [Suno import reference](../../headless/README.md#import-a-suno-download)
+- **Already aligned WAV stems without MIDI.** Use `reconstruct import
+  --audio-only` for a labelled stem folder or `reconstruct run --audio-only`
+  with explicit stem paths. [Audio-only inputs](../../headless/README.md#audio-only-reconstruction)
+- **Already aligned MIDI and WAV.** Run directly with `reconstruct run
+  song.mid mix.wav CATALOGUE WORK_DIR --seconds 60 --stem 0=lead.wav`.
+  For MCP, send `workDir`, `inputs` with `midi`, `wav`, `catalogue` and
+  optional `stems` keyed by part ID. Use `options.seconds` to cap a fresh run.
 
 ## 2. Run and preserve a baseline
 
-Use `--run` with the checked import arguments and catalogue to build in
-`IMPORT_WORK/reconstruction`. For already aligned inputs, start directly.
-
 ```sh
-java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json "$work" \
-  --seconds 60 --stem 0=lead.wav
+java -jar "$jar" reconstruct import separated import-work \
+  --catalogue "$catalogue" --transcriber muscriptor-medium --run
 ```
 
-For separated audio, use the same `import --run` flow or pass the audio-only
-`runRequest` from `reconstruct_import` to `reconstruct_run`. To build from
-other aligned WAV stems without MIDI, use `reconstruct run --audio-only`.
-[Audio-only inputs](../../headless/README.md#audio-only-reconstruction)
+Repeat any checked import overrides. The command builds in
+`import-work/reconstruction`. For MCP, pass the returned `runRequest` to
+`reconstruct_run`. For a short CLI smoke run with `import --run`, separate
+a short excerpt of the mix. The stage work directory must be new. Set
+`work` to that directory for the remaining examples. In Studio, choose
+**Open reconstruction…** and select the stage work directory.
 
-Choose a new work directory. Omit `--seconds` for the full song. MCP
-`reconstruct_run` takes `workDir`, `inputs` with `midi`, `wav`,
-`catalogue` and optional `stems` keyed by part ID, and optional
-`options.seconds`. The stages run in this order.
+The stages run in this order.
 
 | Stage | Decision |
 | --- | --- |
@@ -169,7 +182,9 @@ For a note-scoped echo, choose `laneType: "FM"` or `"PSG"` and set
 `delayFrames` and `levelDb` or `attenuation`. To match Studio's default
 echo, use 14 frames and 11 TL below dry. Studio shows this as a −3 dB
 trim from the original 7-TL echo. A layer edit overrides lane policies for
-its notes. Check the dry-run and trace results for skipped copies before review.
+its notes and rebuilds from `assemble`. In Studio, use **Selection → Layer**,
+then **Queue layer** and **Apply**. Check the dry-run and trace results for
+skipped copies before review.
 
 **Propose by default when a human is reviewing.** For example, save an
 ordered array of intents to `batch.json` and preview the group before it
@@ -271,7 +286,7 @@ with options to preserve the edited arrangement before rebuilding.
   and treat RMS measurements as diagnostics.
 - Keep one instrument per source part by default, including line and chord
   function voices.
-- Check that `import.json` mapped the intended stem to the lead part before
+- Check the lead stem role or MIDI assignment in `import.json` before
   correcting the transcription.
 - Agents cannot hear the render. Produce short A/B clips so the human can
   judge the change.
