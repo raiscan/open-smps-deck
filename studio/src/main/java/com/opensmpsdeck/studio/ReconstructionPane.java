@@ -6,7 +6,7 @@ import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionView;
-import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.project.ProjectDocument;
 import javafx.animation.AnimationTimer;
@@ -123,8 +123,7 @@ final class ReconstructionPane implements AutoCloseable {
         output.setOnAction(event -> {
             var open = openProject.get();
             var snapshot = open != null && arrangement.equals(open.path()) ? open.project() : null;
-            ExportDialog.show(stage, false, () -> snapshot == null ? ProjectExport.open(work)
-                    : new ProjectExport.Source(snapshot, work), loader, status::setText);
+            ExportDialog.show(stage, snapshot, arrangement, work, RomLibrary.userLibrary(), loader, status::setText);
         });
         title.getChildren().add(output);
         if (openArrangement != null) {

@@ -426,6 +426,10 @@ local voices, or **SMPS package** to keep native bank addresses, envelope
 and DAC bindings, resources and editable source. OpenGGF can use the native
 contents via an adapter. OpenGGF currently has no direct ZIP loader.
 
+To hear the song on the Sonic 3 & Knuckles title screen, register a verified
+locked-on ROM under **ROM settings…** and choose **Export… → Test in game…**.
+[Test in game setup and options](14-test-in-game.md)
+
 In the reconstruction window, choose **Open as arrangement** to edit the
 final sequence in the Studio timeline, piano roll and command editor. The
 first hand edit marks the arrangement as **Detached from reconstruction**.

@@ -35,20 +35,8 @@ bindings. OpenGGF currently has no direct ZIP loader.
 See the [Studio guide](studio.md#listen-and-export) and
 [CLI and MCP export commands](../../headless/README.md#export-project-output).
 
-## Set up a ROM for Test in game
+## Test in game
 
-Use the headless CLI to register a clean retail dump for each game you plan to
-test. For example, run `java -jar "$deck_jar" rom set s2 "/path/to/sonic2.gen"`
-with `deck_jar` pointing to the packaged headless JAR. Use `rom list` to confirm
-it is ready. The supported revisions are Sonic 1 World REV01 (`s1`), Sonic 2
-World REV01 (`s2`), and the locked-on Sonic 3 & Knuckles image (`s3k`). Use
-raw `.bin` or `.gen` dumps and convert interleaved SMD files first.
-
-The ROM library and export writer are the foundation for separate title-music
-patch engines. When an engine is available, a patched `.gen` is for personal
-emulator or flash-cart testing. It contains copyrighted ROM data, so do not
-redistribute it. Share the `.bps` form subject to the original rights of any
-stock assets used by the song. Recipients need the matching clean retail ROM
-to apply the BPS. Users perform real-hardware testing on their own equipment.
-
-See the [CLI and MCP ROM library commands](../../headless/README.md#rom-library-and-bps-output).
+Export a patched Sonic 3 & Knuckles ROM or a BPS patch to hear your song on
+the title screen. Register your clean ROM in Studio or with the CLI first.
+[Test in game setup and options](14-test-in-game.md)

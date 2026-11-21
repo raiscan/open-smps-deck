@@ -175,7 +175,7 @@ supplies a progress token. Keep input paths and path-bearing artifacts private.
 
 ## MCP tools
 
-The packaged server exposes **31 tools** through `tools/list`. Use the
+The packaged server exposes **34 tools** through `tools/list`. Use the
 returned schemas for optional fields and types.
 
 | Task | Tools |
@@ -186,6 +186,7 @@ returned schemas for optional fields and types.
 | Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |
 | Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` |
 | Track project feedback | `reference_add`, `notes_list`, `notes_add`, `notes_resolve` |
+| Test in game | `rom_list`, `rom_set`, `rom_patch` |
 | Validate, export and check regressions | `project_validate`, `project_export`, `package_validate`, `package_inspect`, `bench_compare` |
 
 `artifact_write` is available for validated configuration such as a
@@ -194,6 +195,13 @@ and zero-based indices as strings. Use `reconstruct_edit` for note and lane
 changes. `render_clip` remains available for an excerpt of an existing
 project, with project-time `start` and `end` and optional `solo` or `mute`
 lanes. Use `render_compare` for a reconstruction against its aligned source.
+
+For S3K Test in game, set the clean ROM with `rom_set` or pass a one-off
+absolute `rom` path to `rom_patch`. Supply an absolute `project` path and
+at least one absolute `out` (personal-use ROM) or `bps` (shareable patch)
+path. The optional fields are `slot`, `titleMusic`, `noDemo`, `loop`, and
+`force`. Read the returned `report` and `warnings` before handing off a patch.
+[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-sonic-3--knuckles)
 
 See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
 equivalents, the [stage guide](../architecture/reconstruction-stages.md)

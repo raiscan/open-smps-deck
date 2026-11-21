@@ -1,5 +1,6 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.headless.NativeArrangement;
 import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.ReconstructionReview;
@@ -124,8 +125,10 @@ public final class StudioWindow implements AutoCloseable {
         sunoImport.setId("import-suno");
         var openReconstruction = button("Open reconstruction…", this::openReconstruction);
         openReconstruction.setId("open-reconstruction");
+        var romSettings = button("ROM settings…", () -> RomSettingsDialog.show(stage, RomLibrary.userLibrary(), io));
+        romSettings.setId("rom-settings");
         var fileActions=new FlowPane(8,6,button("New",this::newProject),button("Open…",this::open),romImport,sunoImport,
-                openReconstruction,button("Save",this::save),button("Save as…",this::saveAs));
+                openReconstruction,romSettings,button("Save",this::save),button("Save as…",this::saveAs));
         fileActions.setPrefWrapLength(720);
         fileActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
         for(Node action:fileActions.getChildren())((Button)action).setMinWidth(Region.USE_PREF_SIZE);
@@ -1154,8 +1157,7 @@ public final class StudioWindow implements AutoCloseable {
     private void export() {
         var project = document.project();
         var work = reconstructionWork(document.path());
-        ExportDialog.show(stage, project.nativeProgram() != null, () -> new ProjectExport.Source(project, work),
-                io, status::setText);
+        ExportDialog.show(stage, project, document.path(), work, RomLibrary.userLibrary(), io, status::setText);
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
     @Override public void close(){if(closed)return;closed=true;if(reconstruction!=null)reconstruction.close();if(watcher!=null)watcher.close();playback.close();timeline.referenceLane.close();nativeArrangement.timeline.referenceLane.close();samples.close();nativeArrangement.close();catalogue.close();io.shutdownNow();}

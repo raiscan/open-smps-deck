@@ -3,9 +3,12 @@
 The patched ROM is derived from the player's retail ROM and contains
 copyrighted data. **Personal use only. Do not redistribute.**
 
-The [headless command](../../headless/README.md#test-an-arrangement-in-sonic-3--knuckles)
-and MCP tool use the same in-memory exporter. The supported revision is
-the verified 4 MiB locked-on image with SHA-1
+The [headless command](../../headless/README.md#test-an-arrangement-in-sonic-3--knuckles),
+the MCP tool and Studio's Test in game action use a `RomTarget.Engine` adapter
+over the same in-memory patcher. The ROM library supplies the verified clean
+image. The output writer reapplies a staged BPS to that image and verifies
+the result against the patched bytes before publication. The supported revision
+is the verified 4 MiB locked-on image with SHA-1
 `cfbf98c36c776677290a872547ac47c53d2761d6`. The patch engine checks the image
 size and SHA-1, the original instruction and checksum bytes, and hashes of the
 first and last eight bytes of every writable fragment. It outputs a 4 MiB image

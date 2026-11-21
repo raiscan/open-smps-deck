@@ -23,6 +23,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProjectCliTest {
     @TempDir Path directory;
 
+    @Test void testInGameRequiresAnOutputAndRejectsTheUnreleasedPositionalForm() {
+        assertTrue(run("rom-patch", "song.smps.json").err().contains("--out or --bps"));
+        assertTrue(run("rom-patch", "song.smps.json", "clean.gen", "patched.gen").err()
+                .contains("Unknown option clean.gen"));
+        assertTrue(run("rom-patch", "song.smps.json", "--out", "--loop").err()
+                .contains("Missing --out value"));
+        assertTrue(run("rom-patch", "song.smps.json", "--bps", "song.bps", "--slot", "0x34").err()
+                .contains("Music ID must be in"));
+    }
+
     @Test void validatesProjectWithoutCreatingOutputAndReportsWhatWasValidated() throws Exception {
         Path source = source("phrase.json", validSource());
         Result result = run("validate-project", source.toString());

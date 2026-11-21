@@ -4,6 +4,10 @@ import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.ProjectProvenance;
 import com.opensmpsdeck.headless.ProjectExport.Format;
 import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
+import com.opensmpsdeck.headless.TestInGame;
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.project.StudioProject;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -12,6 +16,7 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
@@ -20,8 +25,13 @@ import javafx.stage.Window;
 final class ExportDialog {
     private ExportDialog() {}
 
-    static void show(Window owner, boolean nativeBank, Callable<ProjectExport.Source> source,
-                     Executor worker, Consumer<String> status) {
+    static void show(Window owner, StudioProject project, Path projectPath, Path work,
+                     RomLibrary library, Executor worker, Consumer<String> status) {
+        boolean nativeBank = project != null && project.nativeProgram() != null;
+        Callable<ProjectExport.Source> source = () -> project == null ? ProjectExport.open(work)
+                : new ProjectExport.Source(project, work);
+        RomGame game = project == null ? RomGame.S3K : TestInGame.game(project);
+        String name = project == null ? work.getFileName().toString() : project.name();
         var dialog = new Dialog<ProjectExport.Options>();
         dialog.initOwner(owner);
         dialog.setTitle("Export");
@@ -87,7 +97,7 @@ final class ExportDialog {
         form.add(stems, 1, 6);
         form.add(zip, 1, 7);
         form.addRow(8, driverLabel, drivers);
-        var body = new VBox(14, form, note, error);
+        var body = new VBox(14, form, note, error, new Separator());
         body.setPadding(new Insets(8, 6, 4, 6));
         dialog.getDialogPane().setContent(body);
 
@@ -127,7 +137,62 @@ final class ExportDialog {
             }
         });
         dialog.setResultConverter(button -> button == export ? result[0] : null);
-        dialog.showAndWait().ifPresent(options -> chooseDestination(owner, source, worker, status, options));
+        var testRequested = new javafx.beans.property.SimpleBooleanProperty();
+        addTestInGame(dialog, body, game, library, worker, () -> {
+            testRequested.set(true);
+            dialog.close();
+        });
+        var options = dialog.showAndWait();
+        if (testRequested.get()) {
+            TestInGameDialog.show(owner, name, source, projectPath, library, worker, status);
+        } else {
+            options.ifPresent(value -> chooseDestination(owner, source, worker, status, value));
+        }
+    }
+
+    private static void addTestInGame(Dialog<?> dialog, VBox body, RomGame game, RomLibrary library,
+                                      Executor worker, Runnable openTestInGame) {
+        var test = new Button("Test in game…");
+        test.setId("export-test-in-game");
+        var settings = new Button("ROM settings…");
+        settings.setId("export-rom-settings");
+        var hint = new Label();
+        hint.setId("export-rom-hint");
+        hint.setWrapText(true);
+        hint.setMaxWidth(435);
+        body.getChildren().addAll(new HBox(8, test, settings), hint);
+
+        Runnable refresh = () -> {
+            test.setDisable(true);
+            if (!TestInGame.available(game)) {
+                hint.setText("Test in game for " + game.id() + " is not available yet.");
+                return;
+            }
+            hint.setText("Checking the ROM library…");
+            var job = new Task<RomLibrary.Entry>() {
+                @Override protected RomLibrary.Entry call() throws Exception {
+                    return library.list().stream().filter(entry -> entry.game().equals(game.id()))
+                            .findFirst().orElseThrow();
+                }
+            };
+            job.setOnSucceeded(event -> {
+                var entry = job.getValue();
+                test.setDisable(!entry.status().equals("ok"));
+                hint.setText(switch (entry.status()) {
+                    case "ok" -> entry.revision() + " ROM verified.";
+                    case "changed-on-disk" -> "The saved ROM changed on disk. Select a clean ROM in ROM settings.";
+                    default -> "Select a clean " + game.id().toUpperCase(java.util.Locale.ROOT) + " ROM in ROM settings.";
+                });
+            });
+            job.setOnFailed(event -> hint.setText("Could not read ROM settings. " + job.getException().getMessage()));
+            worker.execute(job);
+        };
+        settings.setOnAction(event -> {
+            RomSettingsDialog.show(dialog.getDialogPane().getScene().getWindow(), library, worker);
+            refresh.run();
+        });
+        test.setOnAction(event -> openTestInGame.run());
+        refresh.run();
     }
 
     private static TextField field(String prompt, String id) {

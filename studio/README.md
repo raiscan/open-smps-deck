@@ -64,6 +64,10 @@ source to open Notes. The clip inspector scrolls independently.
 See the [Studio guide](../docs/user-guide/studio.md) for editing and external-agent
 workflows and [project format](../project-core/README.md) for the file contract.
 
+Use **ROM settings…** to register a clean locked-on S3&K ROM. Then choose
+**Export… → Test in game…** to write a personal-use ROM or a shareable BPS.
+[Test in game user guide](../docs/user-guide/14-test-in-game.md)
+
 ## Verification
 
 ```sh

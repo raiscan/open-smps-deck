@@ -1,6 +1,10 @@
 package com.opensmpsdeck.headless.rompatch;
 
 import com.opensmpsdeck.headless.S3kRenderer;
+import com.opensmpsdeck.headless.rom.BpsPatch;
+import com.opensmpsdeck.headless.rom.RomExport;
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
@@ -25,6 +29,29 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class RomPatchTest {
+    @Test void verifiedTargetMatchesPureEngineAndProducesCompactRoundTripBps(@TempDir Path scratch) throws Exception {
+        String path = System.getenv("OPENSMPSDECK_S3K_ROM");
+        assumeTrue(path != null && !path.isBlank(), "Set OPENSMPSDECK_S3K_ROM to a verified retail dump");
+        var clean = VerifiedRom.read(RomGame.S3K, Path.of(path));
+        var compiled = new CompiledProject(hex("0000010001000a0000008004f2"), List.of());
+        var options = new RomPatch.Options(0x24, true, true, true);
+        var direct = RomPatch.patch(clean.bytes(), compiled, options);
+        var target = S3kRomTarget.TARGET.patch(clean, new S3kRomTarget.Song(compiled, List.of(6)), options);
+        assertEquals(direct.report(), target.report());
+        assertArrayEquals(direct.bytes(), target.bytes());
+
+        var written = RomExport.write(clean, target, scratch.resolve("test.gen"), scratch.resolve("test.bps"), false);
+        assertArrayEquals(Files.readAllBytes(written.rom()), BpsPatch.apply(Files.readAllBytes(written.bps()), clean.bytes()));
+        int patchedBytes = direct.report().getAsJsonArray("romRangesWritten").asList().stream()
+                .mapToInt(range -> range.getAsJsonObject().get("end").getAsInt()
+                        - range.getAsJsonObject().get("start").getAsInt()).sum();
+        assertTrue(written.bpsStats().targetReadBytes() > 0);
+        assertTrue(written.bpsStats().targetReadBytes() <= patchedBytes);
+        assertTrue(written.bpsStats().sourceReadBytes() >= RomPatch.INPUT_ROM_BYTES - patchedBytes - 128);
+        System.out.printf("S3K BPS TargetRead: %d bytes (%d bytes of patch writes)%n",
+                written.bpsStats().targetReadBytes(), patchedBytes);
+    }
+
     @Test void retailAuditReproducesFragmentsAndUnusedDacNotes() throws Exception {
         byte[] rom = retailRom();
         var retail = new RetailLayoutAudit(rom);
