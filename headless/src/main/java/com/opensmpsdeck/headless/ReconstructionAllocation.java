@@ -312,7 +312,7 @@ final class ReconstructionAllocation {
             var attack = allocator.pending.remove();
             var chord = chords.get(attack.note().id());
             if (chord == null) {
-                if (!allocator.dropCoveredUnison(attack)) allocator.place(attack);
+                if (!hasStems || !allocator.dropCoveredUnison(attack)) allocator.place(attack);
                 continue;
             }
             String anchor = anchors.get(chord);
@@ -443,8 +443,10 @@ final class ReconstructionAllocation {
     }
 
     private boolean dropCoveredUnison(Attack attack) {
-        if (!backing(attack.role()) || attack.pin != null || attack.note().run() != null
-                || continuations.containsKey(attack.note().id())) return false;
+        // A merged MIDI part can contain real written doublings. Remove only
+        // repeat-consensus fills, which should not double a retained attack.
+        if (!backing(attack.role()) || !attack.note().source().equals("consensus")
+                || attack.pin != null || attack.note().run() != null) return false;
         var cover = tail.values().stream()
                 .filter(entry -> entry.role() != Role.drums && entry.pinnedLane() == null
                         && entry.note().run() == null && !chordAnchors.contains(entry.note().id())

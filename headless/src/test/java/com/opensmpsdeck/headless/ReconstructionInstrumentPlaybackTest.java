@@ -119,17 +119,19 @@ class ReconstructionInstrumentPlaybackTest {
     @Test void allocationDropsOnlyCoveredAutomaticUnisonsWithinTheSameInstrument() {
         var voices = List.of(
                 decision("lead", 0, 0, 20, Role.melody),
-                decision("covered", 0, 4, 16, Role.counter),
+                new ReconstructionRoles.Decision(new ReconstructionStages.Note("covered", 0, 4 / 60.0,
+                        16 / 60.0, 72, 96, "consensus", 1), Role.counter, null, null),
                 decision("otherPart", 1, 4, 16, Role.harmony),
+                decision("written", 0, 6, 14, Role.harmony),
                 decision("extends", 0, 17, 24, Role.counter));
         var parts = List.of(new MidiScore.Part(0, "Main", 81, false),
                 new MidiScore.Part(1, "Other", 0, false));
         var roles = new ReconstructionRoles.Result(1, 0, voices, null);
-        var allocated = ReconstructionAllocation.allocate(roles, parts, 30, false).notes();
+        var allocated = ReconstructionAllocation.allocate(roles, parts, 30, false, true).notes();
         var covered = allocated.stream().filter(n -> n.note().id().equals("covered")).findFirst().orElseThrow();
         assertNull(covered.lane());
         assertEquals("lead", covered.competitorNoteId());
-        assertEquals(List.of("lead", "otherPart", "extends"), allocated.stream().filter(n -> n.lane() != null)
+        assertEquals(List.of("lead", "otherPart", "written", "extends"), allocated.stream().filter(n -> n.lane() != null)
                 .map(n -> n.note().id()).toList());
     }
 

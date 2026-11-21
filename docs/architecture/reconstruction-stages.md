@@ -1045,8 +1045,9 @@ hardware level steps. Automatic matching rejects muted attacks and mute pulses
 and keeps the quietest spill audible for its first three frames or its full
 gate if shorter. For otherwise
 identical simultaneous harmony or counter attacks, allocation offers FM to the
-longer note first. It folds an automatic backing unison into an already
-allocated note of the same part and pitch when that note covers its full gate.
+longer note first. In stem-backed runs, allocation omits a repeat-consensus
+backing note when an allocated note of the same part and pitch already covers
+its full gate.
 A fresh written attack still bounds a lead's inferred legato extension when
 it carries a backing role.
 
