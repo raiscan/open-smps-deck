@@ -407,6 +407,21 @@ def smoke(jar, root):
         assert all(result["status"] == "applied" for result in added["lastRun"])
         rpc.call("reconstruct_edit", workDir=work, action="add", edit=edit, edits=batch, error="Choose edit or edits")
         assert rpc.call("notes_list", project=project) == notes
+        built_wave = Path(files["render.wav"]).read_bytes()
+        proposed = rpc.call("reconstruct_edit", workDir=work, propose=True, edits=[
+            {**edit, "group": "phrase"},
+            {**edit, "id": "alternate", "pitch": 66, "group": "phrase"},
+        ])
+        assert all(row["edit"]["status"] == "proposed" for row in proposed["proposals"])
+        listed = rpc.call("reconstruct_edit", workDir=work, action="proposals", group="phrase")
+        assert len(listed["proposals"]) == 2
+        preview = rpc.call("reconstruct_run", workDir=work, withProposals=True, proposalId="answer", progress=True)
+        assert preview["ids"] == ["answer"] and Path(preview["workDir"]).parent == work.parent
+        pair = preview["comparisons"][0]
+        assert pair["order"] == ["built", "with-proposals"] and Path(pair["output"]).is_file()
+        assert rpc.call("reconstruct_edit", workDir=work, action="accept", id="answer")["from"] == "transcribe"
+        assert rpc.call("reconstruct_edit", workDir=work, action="reject", group="phrase")["ids"] == ["alternate"]
+        assert Path(files["render.wav"]).read_bytes() == built_wave
         steady = root / "steady"
         files = rpc.call("reconstruct_run", workDir=steady, inputs=inputs,
                          options={"seconds": 2, "tempo": 120, "steadyTempo": "80"})["files"]

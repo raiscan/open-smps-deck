@@ -163,6 +163,57 @@ class ReconstructionEditsTest {
         assertEquals(List.of(30, 90), result.notes().stream().map(Note::velocity).toList());
     }
 
+    @Test void proposalsResolveAndPreviewWithoutChangingBuiltState(@TempDir Path dir) throws Exception {
+        var midi = dir.resolve("fixture.mid");
+        var wav = dir.resolve("mix.wav");
+        var catalogue = dir.resolve("index.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav);
+        var work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        var score = Files.readAllBytes(work.resolve("score.json"));
+        var render = Files.readAllBytes(work.resolve("render.wav"));
+        var batch = dir.resolve("batch.json");
+        Files.writeString(batch, """
+                [{"id":"keep","group":"phrase","reason":"Missed attack","op":"insertNote",
+                  "part":0,"start":0.85,"end":1.2,"pitch":68},
+                 {"id":"reject","group":"phrase","reason":"Try a second attack","op":"insertNote",
+                  "part":0,"start":1.25,"end":1.45,"pitch":71}]
+                """);
+        cli("reconstruct", "edit", "propose", work.toString(), "--file", batch.toString());
+        var listed = json(cli("reconstruct", "proposals", "list", work.toString(), "--group", "phrase"));
+        assertEquals(2, listed.getAsJsonArray("proposals").size());
+        var proposal = listed.getAsJsonArray("proposals").get(0).getAsJsonObject();
+        assertEquals("agent", proposal.getAsJsonObject("edit").get("author").getAsString());
+        assertEquals("proposed", proposal.getAsJsonObject("edit").get("status").getAsString());
+        assertEquals("applied", proposal.getAsJsonArray("outcomes").get(0).getAsJsonObject().get("status").getAsString());
+        assertThrows(IllegalArgumentException.class, () -> ReconstructionEditCommand.run(work, "propose", json("""
+                {"id":"invalid-evidence","reason":"Missing note","op":"insertNote",
+                 "part":0,"start":0.85,"end":1.2,"pitch":68,
+                 "evidence":{"text":"Outside work directory","path":"../source.wav"}}
+                """), null, false, (a, b, c) -> {}));
+
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        assertArrayEquals(score, Files.readAllBytes(work.resolve("score.json")));
+        assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
+        var journal = Files.readAllBytes(work.resolve("edits.json"));
+        var preview = json(cli("reconstruct", "run", work.toString(), "--with-proposals", "--id", "keep"));
+        var shadow = Path.of(preview.get("workDir").getAsString());
+        assertTrue(ReconstructionTrace.read(shadow).containsKey("edit-keep"));
+        assertFalse(ReconstructionTrace.read(shadow).containsKey("edit-reject"));
+        assertTrue(Files.isRegularFile(Path.of(preview.getAsJsonArray("comparisons").get(0).getAsJsonObject()
+                .get("output").getAsString())));
+        assertArrayEquals(journal, Files.readAllBytes(work.resolve("edits.json")));
+        assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
+
+        cli("reconstruct", "proposals", "accept", work.toString(), "keep");
+        cli("reconstruct", "proposals", "reject", work.toString(), "--group", "phrase");
+        assertArrayEquals(score, Files.readAllBytes(work.resolve("score.json")));
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        assertTrue(ReconstructionTrace.read(work).containsKey("edit-keep"));
+        assertFalse(ReconstructionTrace.read(work).containsKey("edit-reject"));
+    }
+
     @Test void studioApplyPublishesOnlyOnSuccessAndSharesTheCliJournal(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("fixture.mid");
         Path wav = dir.resolve("mix.wav");

@@ -46,15 +46,17 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   `render_compare` with the full `render.wav`, reference WAV, `workDir`,
   and the same range to write a level-matched render-then-reference WAV.
   Apply the reference's offset if its time zero is shifted.
-- [ ] Save note repairs with `reconstruct_edit`. Give each intent a stable
-  `id` and a `reason` describing the evidence. For plans and sound choices,
-  use `artifact_write` on the owning artifact. Fix validation errors before
-  listening to the revision.
-- [ ] Pass `rerun: true` to `reconstruct_edit` to rebuild and inspect its
-  `traceDiff`. For other artifact changes, resume with `reconstruct_run`
-  using `from` and `workDir` (CLI `reconstruct run --from STAGE "$work"`).
-  Validate the rebuilt project, then compare the revised render with the
-  previous clip and the source.
+- [ ] When a human is reviewing the same work directory, save note repairs as
+  proposals with `reconstruct_edit {workDir, propose: true, edit}`. Give each
+  intent a stable `id` and `reason`. Use a shared `group` for a batch and
+  optionally include `evidence: {text, path}` with a view or render path
+  relative to the work directory. Let the human accept or reject in Studio.
+  In your own work copy, use `action: "add", rerun: true` to apply directly.
+- [ ] For proposals, use `reconstruct_run {workDir, withProposals: true, proposalId}`
+  or pass `group` to audition the batch. Read the dry-run outcomes from
+  `reconstruct_edit {workDir, action: "proposals"}`. For direct edits, inspect
+  `traceDiff`. Validate the rebuilt project and compare the revised render
+  with the previous clip and source.
 - [ ] Reply after verifying the change. Mention the specific change, lane
   and time range, and the clip filename. Keep unresolved issues open.
 
@@ -285,7 +287,10 @@ Limits:
 | Move, repeat or regroup sections | Project JSON, Studio, or the CLI `group` commands | Validate and render the edited project directly |
 
 For example, call `reconstruct_edit` with
-`{workDir, action: "add", edit: {id: "answer", reason: "separate attack in the stem", op: "insertNote", part: 0, start: 12.5, end: 12.8, pitch: 68, role: "melody", lane: "FM1"}, rerun: true}`.
+`{workDir, propose: true, edit: {id: "answer", reason: "separate attack in the stem", op: "insertNote", part: 0, start: 12.5, end: 12.8, pitch: 68, role: "melody", lane: "FM1"}}`.
+The CLI equivalent is `reconstruct edit propose WORK_DIR JSON`; use
+`--file batch.json` for a batch. Preview with
+`reconstruct run WORK_DIR --with-proposals --id answer` or `--group GROUP`.
 Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`
 (MCP `reconstruct_trace` with `byOnset: true`) to see pitch, assigned role,
 lane, fate and stable ID for each attack cluster. Use a trace note ID or
@@ -368,7 +373,8 @@ Use a compatible `pinLane` with `laneType` on any member to constrain the
 whole chord. A conflicting pin leaves the individual notes in allocation.
 
 Preview with `dryRun: true` or CLI `reconstruct edit WORK_DIR add --dry-run JSON`.
-Save the edit, then use `rerun: true` or
+For shared work, save a proposal and use `withProposals: true` to audition it.
+In your own copy, use `rerun: true` or
 `reconstruct run --from allocate WORK_DIR --keep-voicing`. Check refusals in
 `edit-results.json` and the merged tone fates and gates in `trace` or `view`.
 Compare `arpeggioExtraNoteBytes` and `bankBytes` in the report. Audition a chip
@@ -444,10 +450,13 @@ with the outer intent supplying ID, reason and author. Voice-scoped instruments
 replay at `voices`. `noteVoicing` takes `noteIds` and an `instrument` plus
 `laneType`, a native `vibrato` object, or `modulationOff: true`. It resolves
 against the current allocation at `assemble`. New
-Studio intents include `"author":"human"`. Agent intents may specify
-`"author":"agent"`. Legacy intents may omit the field. An open Studio window
-adopts external journal revisions when it has no local draft, and prompts on
-conflict when it has pending edits.
+Studio intents include `"author":"human"`. An open window shows agent
+proposals as magenta dashed outlines and lists them by group in **Proposals**.
+**Preview A/B** auditions a proposal against the built span. The reviewer can
+accept into pending edits, then **Apply**, or reject from the shared journal.
+If the reviewer delegates the decision, use the MCP actions `accept` or
+`reject` or `reconstruct proposals accept|reject WORK_DIR ID`
+(with `--group GROUP` to select a batch).
 
 1. Open the same `arrangement.smps.json` in Studio. Attach the mix with
    `reference_add` or CLI `reference add PROJECT WAV` if needed.

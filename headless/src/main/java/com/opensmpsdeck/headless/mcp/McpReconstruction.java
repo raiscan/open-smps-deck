@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionAudition;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionEditCommand;
+import com.opensmpsdeck.headless.ReconstructionProposals;
+import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.ReconstructionVoicePlan;
@@ -61,7 +63,7 @@ final class McpReconstruction {
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
+            "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, ReconstructionProposals.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -91,6 +93,17 @@ final class McpReconstruction {
         String command = single ? string(args, "stage") : "run";
         boolean initial = args.has("inputs");
         boolean resume = args.has("from");
+        if (args.has("withProposals") && args.get("withProposals").getAsBoolean()) {
+            if (single || initial || resume || args.has("options"))
+                throw new IllegalArgumentException("Proposal preview only takes workDir and an optional proposalId or group");
+            Path work = McpPaths.directory(string(args, "workDir"));
+            for (String file : FILES) McpPaths.managed(work, file);
+            var preview = ReconstructionReview.preview(work, optional(args, "proposalId"), optional(args, "group"), progress);
+            return object(Map.of("workDir", preview.workDir().toString(), "ids", preview.ids(),
+                    "comparisons", preview.comparisons()));
+        }
+        if (args.has("proposalId") || args.has("group"))
+            throw new IllegalArgumentException("Proposal selection requires withProposals");
         if (!single && initial == resume)
             throw new IllegalArgumentException("Supply inputs for a fresh run or from to resume a work directory");
         if (single && initial != command.equals("transcribe"))
@@ -213,9 +226,21 @@ final class McpReconstruction {
         for (String file : FILES) McpPaths.managed(work, file);
         McpPaths.managed(work, ReconstructionEditCommand.LOCK);
         if (args.has("edit") && args.has("edits")) throw new IllegalArgumentException("Choose edit or edits");
-        return ReconstructionEditCommand.run(work, string(args, "action"), args.get(args.has("edits") ? "edits" : "edit"),
-                optional(args, "id"), args.has("rerun") && args.get("rerun").getAsBoolean(),
-                args.has("dryRun") && args.get("dryRun").getAsBoolean(), progress);
+        boolean propose = args.has("propose") && args.get("propose").getAsBoolean();
+        String action = args.has("action") ? string(args, "action") : propose ? "add" : "list";
+        var edit = args.get(args.has("edits") ? "edits" : "edit");
+        var id = optional(args, "id");
+        var group = optional(args, "group");
+        boolean rerun = args.has("rerun") && args.get("rerun").getAsBoolean();
+        boolean dryRun = args.has("dryRun") && args.get("dryRun").getAsBoolean();
+        if (List.of("accept", "reject", "proposals").contains(action)) {
+            if (propose || rerun || dryRun || edit != null)
+                throw new IllegalArgumentException("Proposal review takes only an optional id or group");
+            return ReconstructionEditCommand.proposals(work, action.equals("proposals") ? "list" : action, id, group);
+        }
+        if (group != null || propose && !action.equals("add"))
+            throw new IllegalArgumentException("Use propose with add and include the group on each intent");
+        return ReconstructionEditCommand.run(work, propose ? "propose" : action, edit, id, rerun, dryRun, progress);
     }
 
     static JsonObject trace(JsonObject args) throws IOException {

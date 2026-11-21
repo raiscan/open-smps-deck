@@ -1,8 +1,12 @@
 package com.opensmpsdeck.studio;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionEditing;
+import com.opensmpsdeck.headless.ReconstructionEditCommand;
+import com.opensmpsdeck.headless.ReconstructionProposals;
+import com.opensmpsdeck.headless.RenderComparison;
 import com.opensmpsdeck.headless.ReconstructionInspection;
 import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
 import com.opensmpsdeck.headless.ReconstructionLaneType;
@@ -41,6 +45,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 import java.util.stream.Collectors;
 
 import static com.opensmpsdeck.studio.ReconstructionDraft.text;
@@ -49,7 +54,7 @@ import static com.opensmpsdeck.studio.ReconstructionDraft.text;
 final class ReconstructionEditor implements AutoCloseable {
     record Snapshot(ReconstructionInspection inspection, Revision revision,
                     Map<String, List<EditResult>> outcomes, BasicFileAttributes report, ReconstructionEditing editing,
-                    ReconstructionVoicePlan.Result voices) {
+                    ReconstructionVoicePlan.Result voices, List<ReconstructionProposals.Result> proposals) {
         static Snapshot read(Path work) throws IOException {
             var revision = ReconstructionReview.revision(work);
             revision.entries();
@@ -58,8 +63,15 @@ final class ReconstructionEditor implements AutoCloseable {
             var outcomes = ReconstructionReview.outcomes(work);
             var editing = ReconstructionEditing.open(work);
             var voices = ReconstructionReview.voices(work, revision.entries());
+            var proposals = ReconstructionProposals.results(work);
             if (!revision.equals(ReconstructionReview.revision(work))) throw new ReconstructionReview.Changed();
-            return new Snapshot(inspection, revision, outcomes, report, editing, voices);
+            return new Snapshot(inspection, revision, outcomes, report, editing, voices, proposals);
+        }
+
+        Snapshot proposalsFromDisk(Path work, Revision incoming) throws IOException {
+            var proposals = ReconstructionProposals.results(work);
+            if (!incoming.equals(ReconstructionReview.revision(work))) throw new ReconstructionReview.Changed();
+            return new Snapshot(inspection, incoming, outcomes, report, editing, voices, proposals);
         }
 
         private static BasicFileAttributes report(Path work) throws IOException {
@@ -81,6 +93,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private final ReconstructionCanvas view;
     private final Consumer<String> status;
     private final Consumer<ReconstructionInspection> refresh;
+    private final DoubleConsumer previewPosition;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(
             task -> Thread.ofPlatform().daemon().name("reconstruction-editor").unstarted(task));
     private final List<ProjectWatcher> watchers = new ArrayList<>();
@@ -111,7 +124,10 @@ final class ReconstructionEditor implements AutoCloseable {
     private final Tab editTab = new Tab("Edits");
     private final Tab diffTab = new Tab("Trace diff");
     private final Tab bulkTab = new Tab("Selection");
-    private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, diffTab);
+    private final Tab proposalTab = new Tab("Proposals");
+    private final VBox proposalList = new VBox(8);
+    private final Button stopPreview = new Button("Stop preview");
+    private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, proposalTab, diffTab);
     private final ReconstructionBulk bulk;
     private final StudioPlayback audition = new StudioPlayback();
 
@@ -130,18 +146,21 @@ final class ReconstructionEditor implements AutoCloseable {
     private boolean cancelling;
     private boolean publishing;
     private long auditionEpoch;
+    private boolean previewPlaying;
     private List<String> inspectedSelection = List.of();
 
     ReconstructionEditor(Path work, Window owner, ReconstructionCanvas view, Snapshot initial,
-                         Consumer<String> status, Consumer<ReconstructionInspection> refresh) {
+                         Consumer<String> status, Consumer<ReconstructionInspection> refresh,
+                         DoubleConsumer previewPosition) {
         this.work = work;
         this.owner = owner;
         this.view = view;
         this.snapshot = initial;
         this.status = status;
         this.refresh = refresh;
+        this.previewPosition = previewPosition;
         sections = initial.inspection().sections().sections();
-        draft = new ReconstructionDraft(initial.revision().entries());
+        draft = new ReconstructionDraft(accepted(initial.revision().entries()));
         bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::audition, this::stopAudition);
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
@@ -293,6 +312,13 @@ final class ReconstructionEditor implements AutoCloseable {
         editList.getStyleClass().add("inspector");
         VBox.setVgrow(journal, Priority.ALWAYS);
         editTab.setContent(editList);
+        proposalTab.setId("reconstruction-proposals-tab");
+        proposalList.setId("reconstruction-proposals");
+        proposalList.getStyleClass().add("inspector");
+        stopPreview.setOnAction(event -> stopAudition());
+        var proposalPanel = new VBox(8, stopPreview, scroll(proposalList));
+        VBox.setVgrow(proposalPanel.getChildren().getLast(), Priority.ALWAYS);
+        proposalTab.setContent(proposalPanel);
         comparison.setWrapText(true);
         comparison.setId("reconstruction-diff-summary");
         var summary = new VBox(comparison);
@@ -459,7 +485,9 @@ final class ReconstructionEditor implements AutoCloseable {
         });
     }
 
-    private void stopAudition() {
+    void stopAudition() {
+        previewPlaying = false;
+        stopPreview.setDisable(true);
         auditionEpoch++;
         audition.stop();
     }
@@ -695,6 +723,190 @@ final class ReconstructionEditor implements AutoCloseable {
                 ReconstructionInspection.Style.SOLID, fate, reason, source.competitors());
     }
 
+    static JsonArray accepted(JsonArray journal) {
+        var entries = new JsonArray();
+        journal.asList().stream().filter(entry -> !ReconstructionProposals.isProposed(entry)).forEach(entries::add);
+        return entries;
+    }
+
+    static JsonArray forApply(JsonArray journal, JsonArray local) {
+        var byId = new LinkedHashMap<String, JsonElement>();
+        for (var entry : local) byId.put(text(entry, "id", ""), entry);
+        var combined = new JsonArray();
+        for (var entry : journal) {
+            var replacement = byId.remove(text(entry, "id", ""));
+            if (replacement != null) combined.add(replacement);
+            else if (ReconstructionProposals.isProposed(entry)) combined.add(entry);
+        }
+        byId.values().forEach(combined::add);
+        return combined;
+    }
+
+    private void updateProposals() {
+        var drafted = draft.entries().asList().stream().map(edit -> text(edit, "id", ""))
+                .collect(Collectors.toSet());
+        var groups = new LinkedHashMap<String, List<ReconstructionProposals.Result>>();
+        var marks = new ArrayList<ReconstructionCanvas.ProposalMark>();
+        for (var proposal : snapshot.proposals()) {
+            if (drafted.contains(proposal.id())) continue;
+            groups.computeIfAbsent(text(proposal.edit(), "group", null), ignored -> new ArrayList<>()).add(proposal);
+            String reason = text(proposal.edit(), "reason", "");
+            for (var marker : proposal.markers())
+                marks.add(new ReconstructionCanvas.ProposalMark(marker, "Agent proposal · " + reason));
+        }
+        view.proposals(marks);
+        proposalList.getChildren().clear();
+        if (groups.isEmpty()) proposalList.getChildren().add(new Label("No proposals to review"));
+        groups.forEach((group, proposals) -> {
+            var heading = new Label(group == null ? "Ungrouped" : group);
+            heading.setWrapText(true);
+            heading.getStyleClass().add("panel-heading");
+            proposalList.getChildren().add(heading);
+            if (group != null) {
+                var acceptGroup = new Button("Accept all");
+                acceptGroup.setOnAction(event -> acceptProposals(proposals));
+                var rejectGroup = new Button("Reject all");
+                // A group may already have locally accepted entries. Reject only the still-visible proposals.
+                rejectGroup.setOnAction(event -> rejectProposals(proposals));
+                proposalList.getChildren().add(new FlowPane(5, 4, acceptGroup, rejectGroup));
+            }
+            for (var proposal : proposals) {
+                var edit = proposal.edit();
+                var title = new Label(text(edit, "op", "") + " · " + proposal.id());
+                title.setWrapText(true);
+                var detail = new StringBuilder(text(edit, "reason", ""));
+                for (var result : proposal.outcomes()) {
+                    String outcome = switch (result.status()) {
+                        case "applied" -> "Would apply";
+                        case "satisfied" -> "Already satisfied";
+                        case "conflict" -> "Conflict";
+                        case "orphaned" -> "Target missing";
+                        case "invalid" -> "Invalid";
+                        default -> "Unresolved";
+                    };
+                    detail.append("\n").append(outcome).append(result.reason() == null ? "" : " · " + result.reason());
+                }
+                if (proposal.roles() != null) {
+                    proposal.roles().stream().filter(role -> role.from() != null && role.to() != null && !role.satisfied())
+                            .map(role -> role.from() + " → " + role.to()).distinct().limit(3)
+                            .forEach(change -> detail.append("\n").append(change));
+                }
+                if (edit.has("evidence")) {
+                    var evidence = edit.getAsJsonObject("evidence");
+                    detail.append("\n").append(text(evidence, "text", "")).append(" · ").append(text(evidence, "path", ""));
+                }
+                var reason = new Label(detail.toString());
+                reason.setWrapText(true);
+                var preview = new Button("Preview A/B");
+                preview.setOnAction(event -> previewProposal(proposal.id()));
+                var accept = new Button("Accept");
+                accept.setOnAction(event -> acceptProposals(List.of(proposal)));
+                var reject = new Button("Reject");
+                reject.setOnAction(event -> rejectProposals(List.of(proposal)));
+                proposalList.getChildren().addAll(title, reason, new FlowPane(5, 4, preview, accept, reject), new Separator());
+            }
+        });
+    }
+
+    private void acceptProposals(List<ReconstructionProposals.Result> proposals) {
+        addBatch(proposals.stream().map(proposal -> {
+            var edit = proposal.edit().deepCopy();
+            edit.addProperty("status", "accepted");
+            return edit;
+        }).toList());
+        status.accept("Accepted into pending edits · Apply to rebuild");
+    }
+
+    private void rejectProposals(List<ReconstructionProposals.Result> proposals) {
+        if (busy || external != null || externalError) return;
+        var expected = snapshot.revision();
+        var ids = proposals.stream().map(ReconstructionProposals.Result::id).toList();
+        setBusy();
+        cancel.setDisable(true);
+        worker.execute(() -> {
+            try {
+                ReconstructionEditCommand.rejectProposals(work, ids, expected);
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    busy = false;
+                    updateControls();
+                    status.accept("Rejected " + ids.size() + (ids.size() == 1 ? " proposal" : " proposals"));
+                    readExternal();
+                });
+            } catch (IOException | IllegalArgumentException failure) {
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    busy = false;
+                    updateControls();
+                    status.accept("Reject failed · " + failure.getMessage());
+                    readExternal();
+                });
+            }
+        });
+    }
+
+    private record PreviewAudio(RenderComparison.Result comparison, ReferenceWave wave) {}
+
+    private void previewProposal(String id) {
+        if (busy || external != null || externalError) return;
+        setBusy();
+        var expected = snapshot.revision();
+        worker.execute(() -> {
+            var audio = new ArrayList<PreviewAudio>();
+            String failure = null;
+            try {
+                synchronized (jobLock) {
+                    running = Thread.currentThread();
+                    if (cancelling) throw new java.util.concurrent.CancellationException();
+                }
+                var result = ReconstructionReview.preview(work, id, expected, this::reportProgress);
+                for (var comparison : result.comparisons())
+                    audio.add(new PreviewAudio(comparison, ReferenceWave.read(Path.of(comparison.output()))));
+            } catch (Exception error) {
+                failure = cancelling ? "Preview cancelled" : "Preview unavailable · " + error.getMessage();
+            } finally {
+                synchronized (jobLock) { running = null; }
+                Thread.interrupted();
+            }
+            String problem = failure;
+            Platform.runLater(() -> {
+                if (closed) return;
+                busy = false;
+                if (problem != null || audio.isEmpty())
+                    status.accept(problem == null ? "No affected span to preview" : problem);
+                else {
+                    previewPlaying = true;
+                    playPreview(audio, 0, auditionEpoch);
+                }
+                updateControls();
+                readExternal();
+            });
+        });
+    }
+
+    private void playPreview(List<PreviewAudio> audio, int index, long request) {
+        var clip = audio.get(index);
+        var comparison = clip.comparison();
+        previewPosition.accept(comparison.projectStart());
+        status.accept("Preview A/B · built, then proposal");
+        audition.playMonitor(null, new ReviewTransport(), S3kRenderer.ChannelMask.NONE, clip.wave().duration(),
+                () -> clip.wave()::sample, message -> Platform.runLater(() -> {
+                    if (closed || request != auditionEpoch) return;
+                    if (message.equals("Playback finished") && index + 1 < audio.size()) {
+                        playPreview(audio, index + 1, request);
+                    } else if (!message.equals("Playing")) {
+                        stopAudition();
+                        status.accept(message);
+                    }
+                }), position -> Platform.runLater(() -> {
+                    if (!closed && request == auditionEpoch) {
+                        boolean built = position < comparison.splitSeconds();
+                        previewPosition.accept(comparison.projectStart() + (built ? position : position - comparison.splitSeconds()));
+                        status.accept(built ? "Preview A · built" : "Preview B · proposal");
+                    }
+                }));
+    }
+
     private void updateDraft() {
         view.pending(overlays());
         var rows = new ArrayList<EditRow>();
@@ -715,6 +927,7 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         for (var removed : draft.removed()) rows.add(row(-1, removed, "pending removal", ""));
         journal.getItems().setAll(rows);
+        updateProposals();
         updateControls();
     }
 
@@ -728,6 +941,8 @@ final class ReconstructionEditor implements AutoCloseable {
         boolean editing = !busy && external == null && !externalError;
         view.editing(editing);
         bulk.setDisable(!editing);
+        proposalList.setDisable(!editing);
+        stopPreview.setDisable(!previewPlaying);
         var entries = draft.entries();
         boolean unbuilt = entries.asList().stream().anyMatch(e -> !snapshot.outcomes().containsKey(text(e, "id", "")));
         apply.setDisable(!editing || !draft.pending() && !unbuilt && !externalUnbuilt);
@@ -766,7 +981,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private void apply() {
         setBusy();
         var expected = snapshot.revision();
-        var intents = draft.entries();
+        var intents = forApply(expected.entries(), draft.entries());
         worker.execute(() -> {
             JsonObject diff = null;
             Snapshot next = null;
@@ -810,7 +1025,8 @@ final class ReconstructionEditor implements AutoCloseable {
         if (closed) return;
         busy = false;
         if (diff != null) {
-            draft.applied();
+            var published = next != null ? next.revision().entries() : forApply(snapshot.revision().entries(), draft.entries());
+            draft.applied(accepted(published));
             externalUnbuilt = false;
             comparison.setText(summary(diff));
             tabs.getSelectionModel().select(diffTab);
@@ -902,7 +1118,11 @@ final class ReconstructionEditor implements AutoCloseable {
                 boolean rebuilt = report == null ? current.report() != null : current.report() == null
                         || !report.lastModifiedTime().equals(current.report().lastModifiedTime())
                         || !Objects.equals(report.fileKey(), current.report().fileKey());
-                var next = !rebuilt && revision.equals(current.revision()) ? current : Snapshot.read(work);
+                boolean proposalsOnly = !rebuilt && Objects.equals(current.revision().sections(), revision.sections())
+                        && Objects.equals(current.revision().voices(), revision.voices())
+                        && accepted(current.revision().entries()).equals(accepted(revision.entries()));
+                var next = !rebuilt && revision.equals(current.revision()) ? current
+                        : proposalsOnly ? current.proposalsFromDisk(work, revision) : Snapshot.read(work);
                 Platform.runLater(() -> {
                     refreshQueued = false;
                     if (closed || busy || snapshot != current) return;
@@ -914,11 +1134,18 @@ final class ReconstructionEditor implements AutoCloseable {
                         return;
                     }
                     boolean sectionsChanged = !Objects.equals(current.revision().sections(), next.revision().sections());
-                    boolean journalsChanged = !current.revision().equals(next.revision());
-                    if (draft.adopt(next.revision().entries(), sectionsChanged || journalsChanged && draft.pending())) {
+                    var incoming = next.revision().entries();
+                    var previous = current.revision().entries();
+                    boolean acceptedChanged = !accepted(previous).equals(accepted(incoming))
+                            || !Objects.equals(current.revision().voices(), next.revision().voices());
+                    var local = draft.entries();
+                    boolean superseded = previous.asList().stream().filter(ReconstructionProposals::isProposed)
+                            .anyMatch(entry -> !incoming.contains(entry)
+                                    && local.asList().stream().anyMatch(edit -> text(edit, "id", "").equals(text(entry, "id", ""))));
+                    if (draft.adopt(accepted(incoming), sectionsChanged || superseded || acceptedChanged && draft.pending())) {
                         external = null;
                         if (rebuilt) externalUnbuilt = false;
-                        else if (journalsChanged) externalUnbuilt = true;
+                        else if (acceptedChanged) externalUnbuilt = true;
                         adopt(next);
                         status.accept("Adopted reconstruction changes from disk");
                     } else {
@@ -943,10 +1170,13 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void adopt(Snapshot next) {
+        boolean rebuilt = snapshot.inspection() != next.inspection();
         snapshot = next;
-        sections = next.inspection().sections().sections();
         external = null;
-        refresh.accept(next.inspection());
+        if (rebuilt) {
+            sections = next.inspection().sections().sections();
+            refresh.accept(next.inspection());
+        }
         updateDraft();
     }
 
@@ -959,8 +1189,9 @@ final class ReconstructionEditor implements AutoCloseable {
         prompt.initOwner(owner);
         prompt.setHeaderText("Reconstruction conflict");
         if (prompt.showAndWait().orElse(ButtonType.CANCEL) == reload && external != null) {
-            externalUnbuilt = !Objects.equals(snapshot.revision().edits(), external.revision().edits());
-            draft.discard(external.revision().entries());
+            externalUnbuilt = !accepted(snapshot.revision().entries()).equals(accepted(external.revision().entries()))
+                    || !Objects.equals(snapshot.revision().voices(), external.revision().voices());
+            draft.discard(accepted(external.revision().entries()));
             adopt(external);
             status.accept("Reloaded reconstruction journals");
             readExternal();
@@ -998,14 +1229,15 @@ final class ReconstructionEditor implements AutoCloseable {
         worker.execute(() -> {
             try {
                 var result = ReconstructionReview.section(work, expected, mutation.action(), mutation.entries());
+                var updated = snapshot.proposalsFromDisk(work, result.revision());
                 Platform.runLater(() -> {
                     if (closed) return;
                     busy = false;
-                    snapshot = new Snapshot(snapshot.inspection(), result.revision(), snapshot.outcomes(), snapshot.report(), snapshot.editing(), snapshot.voices());
+                    snapshot = updated;
                     sections = result.result().sections();
                     view.sections(sections);
                     status.accept("Musical sections saved");
-                    updateControls();
+                    updateDraft();
                     readExternal();
                 });
             } catch (Exception failure) {

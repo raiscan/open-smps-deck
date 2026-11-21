@@ -486,6 +486,38 @@ for examples, tuning limits and byte cost reporting.
 See the [operation fields](../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
 for selectors, role swaps, velocity spans, extension guards and other edits.
 
+### Review edit proposals
+
+```sh
+java -jar "$jar" reconstruct edit propose "$work" --file batch.json
+java -jar "$jar" reconstruct proposals list "$work" --group phrase-1
+java -jar "$jar" reconstruct run "$work" --with-proposals --id answer
+java -jar "$jar" reconstruct proposals accept "$work" answer
+java -jar "$jar" reconstruct proposals reject "$work" --group phrase-1
+```
+
+`edit propose WORK_DIR JSON` also takes a single intent. Add the same
+`"group":"phrase-1"` to intents you want reviewed together. Optional
+`"evidence":{"text":"Separate attack in the stem","path":"evidence.png"}`
+links a view or render inside the work directory. Propose sets the author to
+`agent` by default. The response and `proposal-results.json` report dry-run
+outcomes and affected notes. Regular stage runs refresh these outcomes
+without applying the proposals.
+
+Preview all proposals by omitting the filter, or use `--group GROUP`. The
+accepted arrangement must have a `render.wav`. The command creates a new
+sibling preview directory and returns its path and A/B WAVs. Each WAV plays
+the built render followed by the proposal render at the same project times.
+Long spans are split into excerpts of up to 60 seconds per side. If no target
+resolves there is no A/B span. Accept changes the journal and returns the first
+stage to rebuild. Reject removes the selected proposals. Without an ID or
+group, accept and reject act on all proposals.
+
+In MCP, use `reconstruct_edit` with `propose: true` and `edit` or `edits`.
+Use `action: "proposals"`, `"accept"` or `"reject"` with an optional `id` or
+`group`. Use `reconstruct_run` with `workDir`, `withProposals: true` and,
+optionally, `proposalId` or `group` to render the sibling preview.
+
 ### Per-note trace and replay
 
 ```sh
