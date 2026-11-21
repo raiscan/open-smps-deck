@@ -402,7 +402,7 @@ public final class ReconstructionView {
         return new ChannelMask(fm, psg);
     }
 
-    private static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo,
+    static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo,
                                                 EvidenceBends bends, boolean captureAudio) throws IOException {
         if (project.nativeProgram() != null || project.tempo() != 0)
             throw new IllegalArgumentException("Render view requires an editable arrangement at 60 project ticks per second");

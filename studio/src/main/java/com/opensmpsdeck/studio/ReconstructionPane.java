@@ -1,0 +1,469 @@
+package com.opensmpsdeck.studio;
+
+import com.opensmpsdeck.headless.ReconstructionInspection;
+import com.opensmpsdeck.headless.ReconstructionInspection.AudioKind;
+import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
+import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
+import com.opensmpsdeck.headless.ReconstructionInspection.Role;
+import com.opensmpsdeck.headless.ReconstructionView;
+import javafx.animation.AnimationTimer;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.CheckMenuItem;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.Slider;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.ToggleButton;
+import javafx.scene.control.Tooltip;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.FlowPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
+import javafx.stage.Screen;
+import javafx.stage.Stage;
+import javafx.stage.Window;
+
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.function.Consumer;
+
+/** Read-only reconstruction workspace with its own playback and background jobs. */
+final class ReconstructionPane implements AutoCloseable {
+    private static final String EMPTY_TRACE = "Select a note in the spectrogram or lane strip.";
+    private final Stage stage = new Stage();
+    private final BorderPane root = new BorderPane();
+    private final Label status = new Label("Loading reconstruction…");
+    private final Label clock = new Label();
+    private final StudioPlayback player = new StudioPlayback();
+    private final ReviewTransport transport = new ReviewTransport();
+    private final ExecutorService loader = worker("reconstruction-load");
+    private final ExecutorService bendLoader = worker("reconstruction-bends");
+    private final ExecutorService audioControl = worker("reconstruction-audio-control");
+    // Only the loader touches this cache. Playback holds the current immutable waveform.
+    private final LinkedHashMap<AudioSource, ReferenceWave> waves = new LinkedHashMap<>(4, .75f, true);
+    private final ComboBox<AudioSource> sources = new ComboBox<>();
+    private final Button play = new Button("Play");
+    private final ToggleButton soloLane = new ToggleButton("Solo lane");
+    private final ToggleButton soloNote = new ToggleButton("Solo note");
+    private final Button clearRange = new Button("Clear loop");
+    private final Label loopLabel = new Label("Shift-drag to loop");
+    private final Label noteTitle = new Label("Note trace");
+    private final Label noteSummary = new Label(EMPTY_TRACE);
+    private final TextArea trace = new TextArea();
+    private final Slider zoom = new Slider(0, 9, 0);
+    private final AnimationTimer playheadTimer = new AnimationTimer() {
+        @Override public void handle(long now) {
+            if (playing && Double.isFinite(devicePosition) && devicePosition != projectPosition)
+                updatePosition(devicePosition, true);
+        }
+    };
+
+    private ReconstructionInspection model;
+    private ReconstructionCanvas view;
+    private ReviewTransport.Range range;
+    private Overlay note;
+    private AudioSource lastReference;
+    private String lane;
+    private Future<?> waveRead;
+    private StudioPlayback.Samples loadedSamples;
+    private volatile StudioPlayback.Samples monitorSamples;
+    private volatile double devicePosition = Double.NaN;
+    private double projectPosition;
+    private volatile long epoch;
+    private boolean playing;
+    private boolean playWhenLoaded;
+    private boolean closed;
+
+    ReconstructionPane(Window owner, Path work) {
+        if (owner != null) stage.initOwner(owner);
+        var screen = Screen.getPrimary().getVisualBounds();
+        var scene = new Scene(root, Math.min(1510, screen.getWidth() * .96), Math.min(920, screen.getHeight() * .93));
+        scene.getStylesheets().add(getClass().getResource("studio.css").toExternalForm());
+        String folder = work.getFileName() == null ? work.toString() : work.getFileName().toString();
+        stage.setTitle("Reconstruction · " + folder);
+        stage.setScene(scene);
+        stage.setMinWidth(Math.min(970, screen.getWidth() * .9));
+        stage.setMinHeight(Math.min(670, screen.getHeight() * .9));
+        stage.setOnHidden(event -> close());
+        status.getStyleClass().add("status");
+        var footer = new HBox(12, status, spacer(), clock);
+        footer.getStyleClass().add("statusbar");
+        root.setBottom(footer);
+        var heading = new Label("Reconstruction");
+        heading.getStyleClass().add("project-title");
+        var tag = new Label("READ ONLY");
+        tag.getStyleClass().add("tag");
+        var project = new Label(folder);
+        project.getStyleClass().add("muted");
+        var title = new HBox(14, heading, tag, spacer(), project);
+        title.getStyleClass().add("topbar");
+        root.setTop(title);
+        stage.show();
+        loader.submit(() -> {
+            try {
+                var inspection = ReconstructionInspection.open(work);
+                Platform.runLater(() -> {
+                    if (!closed) initialize(inspection, title);
+                });
+            } catch (Exception failure) {
+                Platform.runLater(() -> {
+                    if (!closed) status.setText("Could not open reconstruction · " + failure.getMessage());
+                });
+            }
+        });
+    }
+
+    Stage stage() { return stage; }
+
+    private static ExecutorService worker(String name) {
+        return Executors.newSingleThreadExecutor(runnable -> Thread.ofPlatform().daemon().name(name).unstarted(runnable));
+    }
+
+    private void initialize(ReconstructionInspection inspection, HBox title) {
+        model = inspection;
+        view = new ReconstructionCanvas(model, status::setText);
+        view.onNote = this::showNote;
+        view.onLane = selected -> {
+            lane = selected;
+            refreshSolo();
+        };
+        view.onSeek = seconds -> {
+            updatePosition(model.toProject(seconds), false);
+            if (playing) startPlayback();
+        };
+        view.onRange = selected -> {
+            range = selected;
+            updateLoop();
+        };
+        sources.getItems().setAll(model.sources());
+        sources.setId("reconstruction-source");
+        sources.setPrefWidth(216);
+        sources.setPromptText("No source audio");
+        sources.setTooltip(new Tooltip("Press R to compare the selected reference with the chip render"));
+        sources.setDisable(model.sources().isEmpty());
+        sources.valueProperty().addListener((ignored, previous, next) -> choose(next));
+        play.setId("reconstruction-play");
+        play.setDisable(true);
+        play.setOnAction(event -> togglePlayback());
+        var playback = new FlowPane(8, 6, play, new Label("Source"), sources, soloLane, soloNote, clearRange, loopLabel);
+        playback.getStyleClass().addAll("panelbar", "reconstruction-controls");
+        playback.setAlignment(Pos.CENTER_LEFT);
+
+        soloLane.setOnAction(event -> {
+            soloNote.setSelected(false);
+            soloChanged();
+        });
+        soloNote.setOnAction(event -> {
+            soloLane.setSelected(false);
+            if (soloNote.isSelected()) updatePosition(note.interval().projectStart(), false);
+            soloChanged();
+        });
+        clearRange.setOnAction(event -> view.clearRange());
+        clearRange.setDisable(true);
+
+        root.setTop(new VBox(title, playback, displayControls(), roleControls()));
+        noteTitle.getStyleClass().add("inspector-title");
+        noteTitle.setWrapText(true);
+        noteSummary.getStyleClass().add("help");
+        noteSummary.setWrapText(true);
+        trace.setId("reconstruction-trace");
+        trace.setEditable(false);
+        trace.setWrapText(true);
+        trace.setVisible(false);
+        trace.managedProperty().bind(trace.visibleProperty());
+        VBox.setVgrow(trace, Priority.ALWAYS);
+        var inspector = new VBox(12, noteTitle, noteSummary, trace);
+        inspector.setPrefWidth(310);
+        inspector.setMinWidth(250);
+        inspector.getStyleClass().add("inspector");
+        root.setRight(inspector);
+        root.setCenter(view.scroll);
+        stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
+        updatePosition(0, false);
+        refreshSolo();
+        bendLoader.submit(() -> {
+            try {
+                var bends = inspection.assembledBends();
+                if (!bends.isEmpty()) Platform.runLater(() -> {
+                    if (!closed) view.assembledBends(bends);
+                });
+            } catch (Exception failure) {
+                if (!Thread.currentThread().isInterrupted() && !(failure instanceof java.io.InterruptedIOException))
+                    System.getLogger(ReconstructionPane.class.getName()).log(System.Logger.Level.WARNING,
+                            "Could not replay assembled bend evidence", failure);
+            }
+        });
+        if (model.sources().isEmpty()) {
+            status.setText("No recorded audio found · note trace is still available");
+        } else {
+            sources.getSelectionModel().selectFirst();
+        }
+    }
+
+    private FlowPane displayControls() {
+        zoom.setId("reconstruction-zoom");
+        zoom.setPrefWidth(160);
+        zoom.setBlockIncrement(1);
+        zoom.valueProperty().addListener((ignored, previous, next) -> view.zoom(next.doubleValue()));
+        var fit = new Button("Fit song");
+        fit.setOnAction(event -> zoom.setValue(0));
+        var db = new Slider(20, 85, 55);
+        db.setPrefWidth(120);
+        var dbLabel = new Label();
+        Consumer<Number> setDb = value -> {
+            int range = value.intValue();
+            dbLabel.setText((ReconstructionTiles.CEILING_DB - range) + " to " + ReconstructionTiles.CEILING_DB + " dBFS");
+            view.dbRange(range);
+        };
+        setDb.accept(db.getValue());
+        db.valueProperty().addListener((ignored, previous, next) -> {
+            if (!db.isValueChanging()) setDb.accept(next);
+        });
+        db.valueChangingProperty().addListener((ignored, previous, changing) -> {
+            if (!changing) setDb.accept(db.getValue());
+        });
+        var ridges = new CheckBox("Ridges");
+        ridges.setTooltip(new Tooltip("Show the three strongest pitch peaks per column"));
+        ridges.selectedProperty().addListener((ignored, previous, selected) -> view.ridges(selected));
+        var project = new CheckBox("Project time");
+        project.selectedProperty().addListener((ignored, previous, selected) -> view.projectRuler(selected));
+        var row = new FlowPane(9, 6, new Label("Time zoom"), zoom, fit, new Label("Spectrum"), db, dbLabel,
+                ridges, project);
+        row.setAlignment(Pos.CENTER_LEFT);
+        row.getStyleClass().addAll("panelbar", "reconstruction-controls");
+        return row;
+    }
+
+    private FlowPane roleControls() {
+        var roles = new FlowPane(12, 6, new Label("Notes"));
+        roles.setAlignment(Pos.CENTER_LEFT);
+        for (var role : Role.values()) {
+            var filter = new CheckBox(ReconstructionCanvas.roleName(role));
+            filter.setStyle("-fx-text-fill: #%06x".formatted(role.rgb()));
+            filter.setSelected(true);
+            filter.selectedProperty().addListener((ignored, previous, visible) -> view.roleVisible(role, visible));
+            roles.getChildren().add(filter);
+        }
+        var lanes = new MenuButton("Lanes");
+        for (String channel : java.util.stream.Stream.concat(view.lanes().stream(),
+                java.util.stream.Stream.of(ReconstructionCanvas.UNASSIGNED)).toList()) {
+            var filter = new CheckMenuItem(channel);
+            filter.setSelected(true);
+            filter.setOnAction(event -> view.laneVisible(channel, filter.isSelected()));
+            lanes.getItems().add(filter);
+        }
+        roles.getChildren().add(lanes);
+        roles.getStyleClass().addAll("panelbar", "reconstruction-controls");
+        return roles;
+    }
+
+    private void showNote(Overlay selected) {
+        note = selected;
+        trace.setVisible(note != null && note.part() >= 0);
+        if (note == null) {
+            noteTitle.setText("Note trace");
+            noteSummary.setText(EMPTY_TRACE);
+            trace.clear();
+            return;
+        }
+        noteTitle.setText(ReconstructionCanvas.shortLabel(note));
+        var interval = note.interval();
+        String role = note.part() < 0 ? "Assembly event" : ReconstructionCanvas.roleName(note.role()) + " · " + note.partName();
+        noteSummary.setText(String.format(Locale.ROOT, "%s%n%.3f–%.3f s source%n%.3f–%.3f s project%n%s%s",
+                role, interval.sourceStart(), interval.sourceEnd(),
+                interval.projectStart(), interval.projectEnd(), note.fate(),
+                note.reason() == null ? "" : " · " + note.reason()));
+        trace.setText(model.trace(note.id()));
+        trace.positionCaret(0);
+    }
+
+    private void key(KeyEvent event) {
+        if (event.isShortcutDown() || event.isAltDown() || trace.isFocused()) return;
+        if (event.getCode() == KeyCode.SPACE && !(stage.getScene().getFocusOwner() instanceof javafx.scene.control.Control))
+            togglePlayback();
+        else if (event.getCode() == KeyCode.R) {
+            var current = sources.getValue();
+            if (current != null && current.kind() == AudioKind.CHIP) {
+                if (lastReference != null) sources.setValue(lastReference);
+            } else {
+                chip().ifPresent(sources::setValue);
+            }
+        } else if (event.getCode() == KeyCode.ESCAPE && range != null) view.clearRange();
+        else return;
+        event.consume();
+    }
+
+    private void choose(AudioSource source) {
+        if (source == null) return;
+        if (source.kind() != AudioKind.CHIP) lastReference = source;
+        view.source(source);
+        loadedSamples = null;
+        if (waveRead != null) waveRead.cancel(true);
+        play.setDisable(false);
+        status.setText("Loading " + source.label() + "…");
+        waveRead = loader.submit(() -> {
+            try {
+                var wave = waves.get(source);
+                if (wave == null) {
+                    wave = ReferenceWave.read(source.path());
+                    waves.put(source, wave);
+                    if (waves.size() > 3) waves.pollFirstEntry();
+                }
+                var ready = wave;
+                Platform.runLater(() -> {
+                    if (closed || !source.equals(sources.getValue())) return;
+                    loadedSamples = (seconds, channel) -> ready.sample(source.projectClock() ? seconds : model.toSource(seconds), channel);
+                    updateMonitor();
+                    status.setText(playing ? "Playing · " + source.label() : source.label() + " ready");
+                    if (playWhenLoaded) startPlayback();
+                });
+            } catch (Exception failure) {
+                if (Thread.currentThread().isInterrupted() || failure instanceof java.io.InterruptedIOException) return;
+                Platform.runLater(() -> {
+                    if (closed || !source.equals(sources.getValue())) return;
+                    stopPlayback();
+                    status.setText("Playback unavailable · " + failure.getMessage());
+                });
+            }
+        });
+        updateMonitor();
+    }
+
+    private void updateMonitor() {
+        if (sources.getValue().kind() == AudioKind.CHIP && soloActive()) monitorSamples = null;
+        else if (loadedSamples != null) monitorSamples = loadedSamples;
+    }
+
+    private boolean soloActive() { return soloLane.isSelected() || soloNote.isSelected(); }
+
+    private void refreshSolo() {
+        boolean hasLane = model.project() != null && lane != null && chip().isPresent();
+        boolean hadSolo = soloActive();
+        soloLane.setDisable(!hasLane);
+        soloNote.setDisable(!hasLane || note == null || !note.sounds());
+        if (soloLane.isDisabled()) soloLane.setSelected(false);
+        if (soloNote.isDisabled()) soloNote.setSelected(false);
+        if (hadSolo) {
+            updateLoop();
+            if (sources.getValue() != null) updateMonitor();
+        }
+    }
+
+    private Optional<AudioSource> chip() {
+        return model.sources().stream().filter(source -> source.kind() == AudioKind.CHIP).findFirst();
+    }
+
+    private void soloChanged() {
+        updateLoop();
+        if (soloActive()) chip().ifPresent(sources::setValue);
+        if (sources.getValue() != null) updateMonitor();
+        if (playing) startPlayback();
+    }
+
+    private void updateLoop() {
+        if (soloNote.isSelected()) {
+            var time = note.interval();
+            transport.loop = new ReviewTransport.Range(Math.max(0, time.projectStart()), time.projectEnd());
+            loopLabel.setText("Looping selected note");
+        } else {
+            transport.loop = range == null ? null
+                    : new ReviewTransport.Range(model.toProject(range.start()), model.toProject(range.end()));
+            loopLabel.setText(range == null ? "Shift-drag to loop" : String.format(Locale.ROOT,
+                    "%.2f–%.2f s loop", range.start(), range.end()));
+        }
+        clearRange.setDisable(range == null);
+    }
+
+    private void updatePosition(double seconds, boolean follow) {
+        projectPosition = Math.clamp(seconds, 0, model.projectDuration());
+        double source = model.toSource(projectPosition);
+        view.movePlayhead(source, follow);
+        clock.setText(String.format(Locale.ROOT, "%.2f s source  /  %.2f s project", source, projectPosition));
+    }
+
+    private void togglePlayback() {
+        if (sources.getValue() == null) return;
+        if (playing || playWhenLoaded) stopPlayback();
+        else startPlayback();
+    }
+
+    private void startPlayback() {
+        if (loadedSamples == null && !(soloActive() && sources.getValue().kind() == AudioKind.CHIP)) {
+            playWhenLoaded = true;
+            play.setText("Cancel");
+            return;
+        }
+        playWhenLoaded = false;
+        long request = ++epoch;
+        playing = true;
+        play.setText("Stop");
+        devicePosition = Double.NaN;
+        double start = projectPosition;
+        var project = soloActive() ? model.project() : null;
+        var mask = ReconstructionView.laneMask(project == null ? List.of() : List.of(lane), List.of());
+        audioControl.execute(() -> {
+            if (request != epoch) return;
+            transport.seconds = start;
+            player.playMonitor(project, transport, mask, model.projectDuration(), () -> monitorSamples,
+                    message -> Platform.runLater(() -> {
+                        if (closed || request != epoch) return;
+                        status.setText(message);
+                        if (!message.startsWith("Playing")) {
+                            if (Double.isFinite(devicePosition)) updatePosition(devicePosition, false);
+                            playbackStopped();
+                        }
+                    }), position -> {
+                        if (request == epoch) devicePosition = position;
+                    });
+        });
+        playheadTimer.start();
+    }
+
+    private void stopPlayback() {
+        epoch++;
+        audioControl.execute(player::stop);
+        playbackStopped();
+    }
+
+    private void playbackStopped() {
+        playing = false;
+        playWhenLoaded = false;
+        play.setText("Play");
+        playheadTimer.stop();
+    }
+
+    private static Region spacer() {
+        var spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        return spacer;
+    }
+
+    @Override public void close() {
+        if (closed) return;
+        closed = true;
+        epoch++;
+        playheadTimer.stop();
+        if (view != null) view.close();
+        loader.shutdownNow();
+        bendLoader.shutdownNow();
+        audioControl.execute(player::close);
+        audioControl.shutdown();
+        stage.hide();
+    }
+}

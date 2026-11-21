@@ -245,10 +245,41 @@ separate working copy. Reload will not discard work if the disk file is invalid.
 New/Open/Close ask about unsaved changes. Undo history resets on adopting an
 external revision; undo never secretly crosses into another writer's version.
 
+## Inspect a reconstruction
+
+Choose **Open reconstruction…** from the Studio toolbar and select the work
+directory created by `reconstruct run`. Studio reads its stage artifacts and
+opens a read-only workspace. It uses recorded WAV paths for the mix and mapped
+stems, and reads `render.wav` for the chip spectrogram and playback. Reopen
+the directory after a rebuild to inspect the updated artifacts.
+
+- Choose a **Source** to change the spectrogram and playback together. Use
+  **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**
+  restores the overview. The ruler starts in source seconds. Toggle
+  **Project time** to see the steady project clock on the same aligned view.
+- Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
+  background detail. **Ridges** marks the three strongest spectral peaks in
+  each analysis column. The bands above show sections and bars from
+  `structure.json`.
+- Filter notes by **role** and **Lanes**. Zoom or hover to read pitch, lane and
+  patch. Dashed bars mark dropped or merged notes. Hover for the fate and any
+  competing note IDs. Click the pitch overlay or a note in the chip lane
+  strip to read its full trace. For a bend, the curve shows the applied FM
+  pitch when available and the stage pitch curve otherwise.
+- Click the ruler or a note to seek. Press **Space** in the plot or click
+  **Play**. Press **R** to switch between the chip and the last mix or stem
+  at the same aligned position. On tempo-warped projects, reference playback
+  follows the project clock. Shift-drag across the plot to loop a range.
+  Click **Clear loop** or press **Esc** to remove the loop.
+- Click a lane or a sounding note, then choose **Solo lane** or **Solo note**
+  to audition that lane through the chip renderer. **Solo note** loops the
+  selected gate. Turn it off to return to your previous loop selection.
+
 ## Review a reconstruction
 
 1. Open the shared project and choose **Review → Add reference…**. Pick a
-   16- or 24-bit PCM WAV with one or two channels and up to 256 MiB of PCM.
+   16-, 24-, or 32-bit PCM or 32-bit float WAV with one or two channels and
+   up to 256 MiB of audio.
    For several guides or stems,
    use the reference picker to choose the visible and audible WAV. The
    waveform shares the arrangement's horizontal scroll, zoom and playhead.

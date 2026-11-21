@@ -33,6 +33,17 @@ class ReferenceWaveTest {
         assertEquals(1, peaks.maximum()[0], 1e-6);
     }
 
+    @Test void ieeeFloatStereoPreservesTheSamplesOfMappedStems() throws Exception {
+        Path file = wav(directory.resolve("float.wav"), 32, 2, 48_000,
+                Float.floatToIntBits(-.25f), Float.floatToIntBits(.75f));
+        var bytes = Files.readAllBytes(file);
+        bytes[20] = 3; // WAVE_FORMAT_IEEE_FLOAT
+        Files.write(file, bytes);
+        var wave = ReferenceWave.read(file);
+        assertEquals(-.25, wave.sample(0, 0));
+        assertEquals(.75, wave.sample(0, 1));
+    }
+
     static Path wav(Path path, int bits, int channels, int rate, int... samples) throws Exception {
         int size = samples.length * (bits / 8);
         var header = ByteBuffer.allocate(44 + size).order(ByteOrder.LITTLE_ENDIAN);

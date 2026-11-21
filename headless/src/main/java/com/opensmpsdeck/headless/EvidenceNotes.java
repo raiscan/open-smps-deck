@@ -80,7 +80,7 @@ final class EvidenceNotes {
         return labels(notes, span);
     }
 
-    private static void addAssemblyOnlyNotes(StudioProject project, Span span, List<String> lanes,
+    static void addAssemblyOnlyNotes(StudioProject project, Span span, List<String> lanes,
                                              List<DrawnNote> notes) {
         if (project == null || project.nativeProgram() != null || project.tempo() != 0) return;
         var covered = new HashMap<String, java.util.NavigableMap<Long, Long>>();

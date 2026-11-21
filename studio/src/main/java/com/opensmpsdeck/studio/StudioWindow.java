@@ -80,6 +80,7 @@ public final class StudioWindow implements AutoCloseable {
     private boolean updating;
     private volatile boolean closed;
     private long playbackEpoch;
+    private ReconstructionPane reconstruction;
 
     public StudioWindow(Stage stage,Path file) throws IOException {
         this.stage=stage;
@@ -121,9 +122,11 @@ public final class StudioWindow implements AutoCloseable {
         romImport.setId("import-s3k");
         Button sunoImport=button("Import Suno folder…",this::importSuno);
         sunoImport.setId("import-suno");
+        var openReconstruction = button("Open reconstruction…", this::openReconstruction);
+        openReconstruction.setId("open-reconstruction");
         var fileActions=new FlowPane(8,6,button("New",this::newProject),button("Open…",this::open),romImport,sunoImport,
-                button("Save",this::save),button("Save as…",this::saveAs));
-        fileActions.setPrefWrapLength(560);
+                openReconstruction,button("Save",this::save),button("Save as…",this::saveAs));
+        fileActions.setPrefWrapLength(720);
         fileActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
         for(Node action:fileActions.getChildren())((Button)action).setMinWidth(Region.USE_PREF_SIZE);
         HBox top=new HBox(10,brand,label("STUDIO","tag"),spacer(),fileActions);
@@ -886,6 +889,19 @@ public final class StudioWindow implements AutoCloseable {
     private void stop(){stopPlayback();status.setText("Stopped");}
     private boolean save(){try{document.save();refreshStatus();status.setText("Saved "+document.path().getFileName());return true;}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();return false;}}
     private void reload(){try{Path recovery=document.reloadKeepingRecovery();stop();undo.clear();redo.clear();refreshView();status.setText(recovery==null?"Reloaded file":"Local edits preserved in "+recovery.getFileName());}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();}}
+    private void openReconstruction() {
+        var chooser = new DirectoryChooser();
+        chooser.setTitle("Open reconstruction work directory");
+        var folder = chooser.showDialog(stage);
+        if (folder == null) return;
+        if (reconstruction != null) reconstruction.close();
+        var pane = new ReconstructionPane(stage, folder.toPath());
+        reconstruction = pane;
+        pane.stage().addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> {
+            if (reconstruction == pane) reconstruction = null;
+        });
+    }
+
     private FileChooser chooser(String heading,String extension){FileChooser chooser=new FileChooser();chooser.setTitle(heading);chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extension.equals("json")?"SMPS Studio project":"Export ("+extension+")","*."+extension));return chooser;}
     private void open(){if(!confirmLeave())return;var file=chooser("Open shared project","json").showOpenDialog(stage);if(file!=null)try{load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
     private void saveAs(){var chooser=chooser("Save a project copy (choose a new file)","json");chooser.setInitialFileName("project-copy.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{ProjectFiles.save(file.toPath(),relocateReview(document.project(),document.path(),file.toPath()),null);load(file.toPath());status.setText("Saved project copy");}catch(IOException|IllegalArgumentException e){error(e);}}
@@ -1100,5 +1116,5 @@ public final class StudioWindow implements AutoCloseable {
         io.submit(()->{try{ProjectPackage.write(snapshot,file.toPath());Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
-    @Override public void close(){if(closed)return;closed=true;if(watcher!=null)watcher.close();playback.close();timeline.referenceLane.close();nativeArrangement.timeline.referenceLane.close();samples.close();nativeArrangement.close();catalogue.close();io.shutdownNow();}
+    @Override public void close(){if(closed)return;closed=true;if(reconstruction!=null)reconstruction.close();if(watcher!=null)watcher.close();playback.close();timeline.referenceLane.close();nativeArrangement.timeline.referenceLane.close();samples.close();nativeArrangement.close();catalogue.close();io.shutdownNow();}
 }
