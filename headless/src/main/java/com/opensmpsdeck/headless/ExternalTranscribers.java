@@ -15,13 +15,13 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
+import static com.opensmpsdeck.headless.ExternalCommands.LABEL;
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 
 /** User-local, explicitly selected transcription commands and their replayable outputs. */
 public final class ExternalTranscribers {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{(input|output|role|device)}");
-    private static final Pattern LABEL = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9_.:-]*");
     private static final String CONFIG_ENV = "OPENSMPSDECK_TRANSCRIBERS";
 
     record RawNote(double start, double end, int pitch, int velocity) {}
@@ -39,11 +39,7 @@ public final class ExternalTranscribers {
     private ExternalTranscribers() {}
 
     private static Path defaultConfig() {
-        String override = System.getenv(CONFIG_ENV);
-        if (override != null && !override.isBlank()) return Path.of(override);
-        String xdg = System.getenv("XDG_CONFIG_HOME");
-        Path root = xdg == null || xdg.isBlank() ? Path.of(System.getProperty("user.home"), ".config") : Path.of(xdg);
-        return root.resolve("opensmpsdeck/transcribers.json");
+        return ExternalCommands.defaultConfig(CONFIG_ENV, "transcribers.json");
     }
 
     public static List<String> configuredNames() throws IOException {
@@ -55,27 +51,7 @@ public final class ExternalTranscribers {
     }
 
     private static Map<String, List<String>> commands(Path file) throws IOException {
-        JsonElement tree = ReconstructionArtifacts.readTree(file);
-        require(tree != null && tree.isJsonObject(), file.toString(), "expected an object mapping tool names to commands");
-        var commands = new TreeMap<String, List<String>>();
-        for (var entry : tree.getAsJsonObject().entrySet()) {
-            String at = file + "." + entry.getKey();
-            var value = entry.getValue();
-            require(LABEL.matcher(entry.getKey()).matches(), at, "invalid tool name");
-            require(value.isJsonArray() && !value.getAsJsonArray().isEmpty(), at, "expected a nonempty argument array");
-            var command = new ArrayList<String>();
-            for (var arg : value.getAsJsonArray()) {
-                require(arg instanceof JsonPrimitive scalar && scalar.isString() && !scalar.getAsString().contains("\0"),
-                        at, "expected string arguments");
-                command.add(arg.getAsString());
-            }
-            require(!command.getFirst().isBlank() && !PLACEHOLDER.matcher(command.getFirst()).find(),
-                    at, "expected a fixed executable");
-            for (String required : List.of("{input}", "{output}"))
-                require(command.stream().skip(1).anyMatch(arg -> arg.contains(required)), at, "missing " + required);
-            commands.put(entry.getKey(), List.copyOf(command));
-        }
-        return commands;
+        return ExternalCommands.commands(file, PLACEHOLDER, "{input}", "{output}");
     }
 
     static void validatePart(int id, List<MidiScore.Part> parts) {
@@ -137,8 +113,7 @@ public final class ExternalTranscribers {
         Path log = scratch.resolve("stderr");
         try {
             var values = Map.of("input", input.toString(), "output", output.toString(), "role", role, "device", device);
-            var command = template.stream().map(arg -> PLACEHOLDER.matcher(arg).replaceAll(match ->
-                    java.util.regex.Matcher.quoteReplacement(values.get(match.group(1))))).toList();
+            var command = ExternalCommands.expand(template, PLACEHOLDER, values);
             var process = new ProcessBuilder(command).redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(log.toFile()).start();
             int status;

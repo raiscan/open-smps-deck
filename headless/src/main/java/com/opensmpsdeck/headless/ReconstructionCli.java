@@ -86,6 +86,8 @@ final class ReconstructionCli {
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
+        out.println("       reconstruct separate MIX OUT_DIR --separator NAME [--device auto|cpu|rocm|cuda]");
+        out.println("           [--separator-config FILE]");
         out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
@@ -135,6 +137,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("sections")) {
             ReconstructionSections.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("separate")) {
+            ExternalSeparators.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("import")) {

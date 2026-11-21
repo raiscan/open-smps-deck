@@ -37,6 +37,53 @@ class SunoImportTest {
         assertTrue(Files.readString(work.resolve("import.json")).contains("missing_mix_and_midi"));
     }
 
+    @Test void separatesAndImportsAudioWithoutMidi() throws Exception {
+        Path mix = root.resolve("original mix.wav");
+        wav(mix, 8000, 1, 1, t -> tone(t, 0));
+        Path script = root.resolve("mock separator.sh");
+        Files.writeString(script, """
+                set -eu
+                test "$3" = rocm
+                mkdir "$2/stems"
+                cp "$1" "$2/mix.wav"
+                for stem in bass drums other vocals guitar piano; do
+                    cp "$1" "$2/stems/$stem.wav"
+                done
+                cat > "$2/separation.json" <<'JSON'
+                {"tool":"mock","model":"mock","version":"1",
+                 "checkpointSha256":"0000000000000000000000000000000000000000000000000000000000000000",
+                 "stemOrder":["bass","drums","other","vocals","guitar","piano"],"settings":{}}
+                JSON
+                """);
+        Path config = root.resolve("separators.json");
+        Files.writeString(config, new com.google.gson.Gson().toJson(Map.of("mock",
+                List.of("sh", script.toString(), "{input}", "{outputDir}", "{device}"))));
+        Path separated = root.resolve("separated audio");
+        var messages = new ByteArrayOutputStream();
+        var output = new PrintStream(messages, true, StandardCharsets.UTF_8);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "separate", mix.toString(), separated.toString(),
+                "--separator", "mock", "--separator-config", config.toString(), "--device", "rocm"}, output, output),
+                () -> messages.toString(StandardCharsets.UTF_8));
+        Path work = root.resolve("import work");
+        assertEquals(0, Main.run(new String[]{"reconstruct", "import", separated.toString(), work.toString(),
+                "--run"}, output, output), () -> messages.toString(StandardCharsets.UTF_8));
+        var report = JsonParser.parseString(Files.readString(work.resolve("import.json"))).getAsJsonObject();
+        assertEquals("warning", report.get("status").getAsString());
+        assertFalse(report.has("runRequest"));
+        var families = new java.util.TreeMap<String, String>();
+        for (var value : report.getAsJsonArray("files")) {
+            var file = value.getAsJsonObject();
+            if (!file.get("role").getAsString().equals("stem")) continue;
+            families.put(file.get("file").getAsString(), file.get("family").getAsString());
+            if (file.get("family").getAsString().equals("vocals"))
+                assertTrue(file.getAsJsonObject("evidence").get("tonalLeadCandidate").getAsBoolean());
+        }
+        assertEquals(Map.of("stems/bass.wav", "bass", "stems/drums.wav", "drums",
+                "stems/other.wav", "other", "stems/vocals.wav", "vocals",
+                "stems/guitar.wav", "guitar", "stems/piano.wav", "keyboard"), families);
+        assertTrue(messages.toString(StandardCharsets.UTF_8).contains("no MIDI: needs audio-only transcription"));
+    }
+
     @Test void audioCanOverruleStemLabelsAndManifestCanIdentifyOpaqueNames() throws Exception {
         Path source = fixture();
         Path stemDir = Files.createDirectory(source.resolve("Stems"));

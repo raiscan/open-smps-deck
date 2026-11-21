@@ -706,6 +706,40 @@ mvn -B -pl headless -am verify
 python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$scratch"
 ```
 
+## External stem separation
+
+Use an optional local separator to prepare a WAV or MP3 for reconstruction.
+
+```sh
+java -jar "$CLI" reconstruct separate mix.mp3 separated --separator bs-roformer --device rocm
+java -jar "$CLI" reconstruct import separated import-work
+```
+
+The output directory must be new and its parent must exist. The CLI looks for
+`$XDG_CONFIG_HOME/opensmpsdeck/separators.json` (default
+`~/.config/opensmpsdeck/separators.json`). Set `OPENSMPSDECK_SEPARATORS` or pass
+`--separator-config FILE` to choose a different file. The JSON object maps
+separator names to trusted executable argument arrays. The CLI runs the
+command directly with `{input}`, `{outputDir}` and `{device}` substituted.
+Paths are absolute. `--device` accepts `auto` (the default), `cpu`, `rocm` and
+`cuda`.
+
+The adapter writes a WAV copy of the mix at `mix.wav`, aligned WAVs at
+`stems/NAME.wav`, and a `separation.json` object with `tool`, `model`,
+`version`, `checkpointSha256`, `stemOrder` and `settings`. Each stem must
+match the mix's sample rate, channels and frame count. The CLI publishes the
+folder after these checks pass. See the [BS-RoFormer adapter](../tools/separators/bs-roformer/)
+for setup and a configuration example.
+
+Import reports stem families and marks separated vocals as tonal lead
+candidates. A separated folder without MIDI produces an import report with
+the warning `no MIDI: needs audio-only transcription`. Reconstruction stops
+at that report, including when invoked with `--run`.
+
+For MCP, call `separators_list` and then `separate` with `input`,
+`outputDir`, `separator` and optional `device`. The server uses its own
+local configuration. Pass the output folder to `reconstruct_import`.
+
 ## External transcription
 
 Suno MIDI is the default. To try an external transcriber on selected melodic

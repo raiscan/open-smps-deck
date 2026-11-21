@@ -23,7 +23,7 @@ import java.util.TreeMap;
 
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 
-/** Detect and validate downloaded Suno files without modifying the source folder. */
+/** Detect and validate Suno downloads and separated stems without modifying the source folder. */
 public final class SunoImport {
     public static final String FILE = "import.json";
     private static final int MAX_FILES = 256;
@@ -32,6 +32,7 @@ public final class SunoImport {
     private static final double FAMILY_BONUS = .03;
     private static final double SHARED_PART_AUDIO = .30;
     private static final double SHARED_PART_MARGIN = .08;
+    private static final String AUDIO_ONLY = "needs_audio_only_transcription";
     private static final String CATALOGUE = "${CATALOGUE}";
 
     public enum Status {
@@ -165,9 +166,11 @@ public final class SunoImport {
         Path work = prepareWork(source, workDir);
         Path index = catalogue == null ? null : catalogue.toAbsolutePath().normalize();
         var inputs = discover(source);
+        boolean separated = inputs.stream().anyMatch(input -> input.file.equals(ExternalSeparators.PROVENANCE)
+                && Files.isRegularFile(input.path, NOFOLLOW_LINKS));
         int total = inputs.size() * 2 + 2;
         int done = 0;
-        progress.report(done, total, "Finding and hashing Suno files");
+        progress.report(done, total, separated ? "Finding and hashing separated files" : "Finding and hashing Suno files");
         for (var input : inputs) {
             hash(input);
             progress.report(++done, total, "Scanned " + printable(input.file));
@@ -176,9 +179,13 @@ public final class SunoImport {
         readMetadata(inputs);
         Input midi = select(inputs, "midi", List.of("suno", "suno-transcription"));
         Input mix = select(inputs, "mix", List.of("mix", "full mix", "full song", "master", "original"));
+        var provenance = separated ? readSeparation(source, inputs) : null;
         classify(inputs, midi, mix);
+        if (provenance != null) classifySeparated(inputs, provenance);
         applyExclusions(inputs, exclusions, issues);
-        missingInputs(mix, midi, issues);
+        boolean audioOnly = separated && mix != null && midi == null;
+        if (audioOnly) issues.add(new Issue(Status.warning, AUDIO_ONLY, "no MIDI: needs audio-only transcription"));
+        else missingInputs(mix, midi, issues);
 
         MidiScore score = readMidi(midi);
         progress.report(++done, total, "Checked MIDI and stem metadata");
@@ -197,8 +204,10 @@ public final class SunoImport {
                         if (sum == null) sum = new double[mixAudio == null ? audio.length : mixAudio.length];
                         for (int i = 0; i < Math.min(audio.length, sum.length); i++) sum[i] += audio[i];
                         stemCount++;
-                        input.candidates = candidates(input, parts, SunoImportAudio.matches(audio, score));
-                        input.evidence.put("candidates", input.candidates);
+                        if (!audioOnly) {
+                            input.candidates = candidates(input, parts, SunoImportAudio.matches(audio, score));
+                            input.evidence.put("candidates", input.candidates);
+                        }
                     }
                 }
             }
@@ -215,7 +224,7 @@ public final class SunoImport {
                                 : "No matching stem. A mix is needed for fallback."))
                 .toList();
         var lead = lead(parts, score, claimed);
-        for (var input : inputs) finish(input);
+        for (var input : inputs) finish(input, audioOnly);
         var files = inputs.stream().sorted(Comparator.comparing(input -> input.file)).map(Input::result).toList();
         Status status = java.util.stream.Stream.concat(files.stream().map(FileResult::status),
                         issues.stream().map(Issue::status))
@@ -292,7 +301,8 @@ public final class SunoImport {
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
-        if (run) out.println(run(report, catalogue, (a, b, message) -> out.println(message)));
+        if (run && report.issues.stream().noneMatch(issue -> issue.code.equals(AUDIO_ONLY)))
+            out.println(run(report, catalogue, (a, b, message) -> out.println(message)));
     }
 
     private static Path prepareWork(Path source, Path requested) throws IOException {
@@ -382,6 +392,37 @@ public final class SunoImport {
             } catch (IOException | IllegalArgumentException e) {
                 metadata.add(Status.warning, "invalid_metadata", "Could not read stems.json. Using file names.");
             }
+        }
+    }
+
+    private static JsonObject readSeparation(Path source, List<Input> inputs) {
+        var metadata = inputs.stream().filter(input -> input.file.equals(ExternalSeparators.PROVENANCE))
+                .findFirst().orElseThrow();
+        metadata.role = "metadata";
+        try {
+            var provenance = ExternalSeparators.readProvenance(source);
+            ExternalSeparators.validateAudio(source, provenance);
+            metadata.evidence.put("separation", provenance);
+            metadata.add(Status.ok, "separation_read", "Read separation provenance");
+            return provenance;
+        } catch (IllegalArgumentException | IOException error) {
+            metadata.add(Status.error, "invalid_separation", "Invalid separation output: " + error.getMessage());
+            return null;
+        }
+    }
+
+    private static void classifySeparated(List<Input> inputs, JsonObject provenance) {
+        var families = new TreeMap<String, String>();
+        for (var item : provenance.getAsJsonArray("stemOrder")) {
+            String name = item.getAsString();
+            String family = family(name);
+            families.put("stems/" + name + ".wav", family == null ? "other" : family);
+        }
+        for (var input : inputs) {
+            String family = families.get(input.file);
+            if (family == null || !input.role.equals("stem")) continue;
+            input.family = family;
+            if (vocals(family)) input.evidence.put("tonalLeadCandidate", true);
         }
     }
 
@@ -792,10 +833,12 @@ public final class SunoImport {
         return inputs.stream().anyMatch(input -> input.role.equals("mix") && input.seconds > 0);
     }
 
-    private static void finish(Input input) {
+    private static void finish(Input input, boolean audioOnly) {
         if (input.excluded || input.sha256 == null || input.role.equals("metadata")) return;
         if (input.role.equals("stem")) {
-            if (vocals(input.family))
+            if (Boolean.TRUE.equals(input.evidence.get("tonalLeadCandidate")))
+                input.add(Status.ok, "tonal_lead_candidate", "Vocals found. Tonal lead candidate.");
+            else if (vocals(input.family))
                 input.add(Status.warning, "vocals_present", input.part == null
                         ? "Vocals found. Left unmapped by default." : "Vocals found. Mapped by override.");
             else if ("fx".equals(input.family))
@@ -810,7 +853,7 @@ public final class SunoImport {
                     case "percussion" -> "percussion label and MIDI drum channel";
                     default -> "manual override";
                 });
-            } else if (!defaultUnmapped(input.family) && !input.error() && !input.silent) {
+            } else if (!audioOnly && !defaultUnmapped(input.family) && !input.error() && !input.silent) {
                 if (!input.evidence.containsKey("sharedPart"))
                     input.add(Status.warning, "stem_without_part", "No matching or available MIDI part");
             }
