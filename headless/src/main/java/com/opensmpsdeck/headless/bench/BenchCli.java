@@ -228,9 +228,12 @@ public final class BenchCli {
         var report = BenchFiles.read(work.resolve("report.json"), BenchReconstruction.Report.class);
         var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         var notes = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
-        var gates = notes.channels().stream().filter(channel -> channel.kind().equals("FM1"))
-                .flatMap(channel -> channel.notes().stream()).map(note -> new LeadGap.Interval(note.start(), note.end()))
-                .sorted(java.util.Comparator.comparingDouble(LeadGap.Interval::start)).toList();
+        var tones = notes.channels().stream().filter(channel -> channel.kind().equals("FM1"))
+                .flatMap(channel -> channel.notes().stream().map(note ->
+                        new BenchMetrics.Event(channel.kind(), note.start(), note.end(), note.pitch(), note.voiceHash(), null)))
+                .toList();
+        var gates = BenchRun.melodyGates(report.excludeLayers(
+                BenchReconstruction.excludeEffectCopies(tones, report.effectCopyLanes())));
         Path reference = Path.of(args[4]);
         var measurement = args[3].equals("--gold")
                 ? BenchGold.leadGap(work, BenchGold.read(reference), gates)

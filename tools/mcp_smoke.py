@@ -215,6 +215,8 @@ for stem in stems:
         import_run = rpc.call("reconstruct_run", **recipe, progress=True)
         assert Path(import_run["files"]["arrangement.smps.json"]).is_file()
         voice_work = recipe["workDir"]
+        voicing = rpc.call("artifact_read", workDir=voice_work, artifact="voicing")["value"]
+        assert voicing["lanePolicies"] == {"preset": "s3k-layering"}
         voice_list = rpc.call("reconstruct_voices", workDir=voice_work)
         original_voice = next(voice for voice in voice_list["voices"] if voice["kind"] == "tonal")
         voice_id = original_voice["id"]
@@ -243,7 +245,8 @@ for stem in stems:
         assert assignments and all(value["instrument"] == variant for value in assignments.values())
         traced = rpc.call("reconstruct_trace", workDir=voice_work, lane="FM1")["notes"]
         assert traced and traced[0]["voice"]["name"] == "Lead instrument 1"
-        files = rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)["files"]
+        files = rpc.call("reconstruct_run", workDir=work, inputs=inputs,
+                         options={"seconds": 2, "lanePolicyPreset": "off"}, progress=True)["files"]
         assert Path(files["manifest.json"]) == work / "manifest.json"
         manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]
         exported = rpc.call("project_export", workDir=work, output="output.wav", format="wav", progress=True)

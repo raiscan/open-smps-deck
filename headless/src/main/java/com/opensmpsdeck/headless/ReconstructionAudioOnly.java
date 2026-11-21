@@ -28,7 +28,8 @@ final class ReconstructionAudioOnly {
     private ReconstructionAudioOnly() {}
 
     static Input prepare(Map<String, Path> stems, Map<String, String> overrides, String transcriber,
-                         AudioDrumDetector detector, double seconds, boolean explicitLead) throws IOException {
+                         AudioDrumDetector detector, double seconds, boolean explicitLead,
+                         Path separatedDrums, Path mixFallback) throws IOException {
         if (stems.isEmpty()) throw new IllegalArgumentException("--audio-only needs labelled --stem LABEL=WAV inputs");
         if (!stems.keySet().containsAll(overrides.keySet()))
             throw new IllegalArgumentException("--stem-role must name a supplied --stem label");
@@ -57,12 +58,6 @@ final class ReconstructionAudioOnly {
                 if (drums.putIfAbsent(DRUM_PART, path) != null)
                     throw new IllegalArgumentException("Audio-only reconstruction accepts one active drums stem");
                 identities.put(DRUM_PART, new Stem(label, role, null));
-                detection = detector.detect(path, seconds);
-                for (var hit : detection.hits()) {
-                    long start = Math.round(hit.seconds() * 1e6);
-                    long end = Math.min(Math.round(seconds * 1e6), start + 60_000);
-                    if (end > start) hits.add(new MidiScore.Note(DRUM_PART, hit.pitch(), hit.velocity(), start, end));
-                }
             } else {
                 int part = nextPart++;
                 // The arrangement role is lead. Use voice conditioning for the vocals stem.
@@ -73,6 +68,19 @@ final class ReconstructionAudioOnly {
             }
         }
         if (tonal.isEmpty()) throw new IllegalArgumentException("No audible tonal stem to transcribe in the requested interval");
+        if (separatedDrums != null) {
+            drums.put(DRUM_PART, separatedDrums);
+            identities.put(DRUM_PART, new Stem("drums", "drums", null));
+        }
+        Path drumReference = drums.getOrDefault(DRUM_PART, mixFallback);
+        if (drumReference != null) {
+            detection = detector.detect(drumReference, seconds);
+            for (var hit : detection.hits()) {
+                long start = Math.round(hit.seconds() * 1e6);
+                long end = Math.min(Math.round(seconds * 1e6), start + 60_000);
+                if (end > start) hits.add(new MidiScore.Note(DRUM_PART, hit.pitch(), hit.velocity(), start, end));
+            }
+        }
         hits.sort(Comparator.comparingLong(MidiScore.Note::startUs).thenComparingInt(MidiScore.Note::pitch));
         return new Input(new Provenance(SOURCE, transcriber, new Detector(detector.id(), detection == null ? "unused" : detection.version(),
                 List.copyOf(hits), detection == null || detection.metadata().isEmpty() ? null : detection.metadata()), identities, List.copyOf(skipped), explicitLead ? true : null), tonal, drums, lead);
@@ -100,7 +108,7 @@ final class ReconstructionAudioOnly {
     }
 
     static MidiScore drumScore(Provenance provenance) {
-        return new MidiScore(provenance.stems.containsKey(DRUM_PART)
+        return new MidiScore(provenance.stems.containsKey(DRUM_PART) || !provenance.drumDetector.hits.isEmpty()
                 ? List.of(new MidiScore.Part(DRUM_PART, "Drums", 0, true)) : List.of(),
                 provenance.drumDetector.hits, List.of());
     }

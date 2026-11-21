@@ -1,11 +1,16 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,15 +37,16 @@ final class ReconstructionManifest {
                     Map<String, Input> inputs, Map<Integer, String> partToStem,
                     Map<Integer, External> externalNotes, List<String> originalArguments,
                     @Nullable Input transcriberConfig, Run lastRun, @Nullable String rolePlanSha256,
-                    @Nullable Double roleHarmonyMaxHz) {
+                    @Nullable Double roleHarmonyMaxHz, @Nullable String initialLanePolicyPreset,
+                    @Nullable JsonObject drumSeparation) {
         Manifest withLastRun(Run run) {
             return new Manifest(version, tool, durationUs, options, inputs, partToStem, externalNotes,
-                    originalArguments, transcriberConfig, run, rolePlanSha256, roleHarmonyMaxHz);
+                    originalArguments, transcriberConfig, run, rolePlanSha256, roleHarmonyMaxHz, initialLanePolicyPreset, drumSeparation);
         }
 
         Manifest withRolePlan(String hash, double rate) {
             return new Manifest(version, tool, durationUs, options, inputs, partToStem, externalNotes,
-                    originalArguments, transcriberConfig, lastRun, hash, rate);
+                    originalArguments, transcriberConfig, lastRun, hash, rate, initialLanePolicyPreset, drumSeparation);
         }
     }
 
@@ -54,6 +60,35 @@ final class ReconstructionManifest {
         private final Map<Integer, Input> external = new TreeMap<>();
         private final Map<Integer, Encoding> encodings = new TreeMap<>();
         private Input config;
+        private final Map<Integer, Input> generatedStems = new TreeMap<>();
+        private JsonObject drumSeparation;
+
+        Path separateDrums(Path mix, Path config, ReconstructionStages.Progress progress) throws IOException {
+            Path separated = ExternalSeparators.separate(mix, temporary().resolve("separated"),
+                    "bs-roformer", "auto", config, progress);
+            drumSeparation = ExternalSeparators.readProvenance(separated);
+            Path drums = separated.resolve("stems/drums.wav");
+            ReconstructionArtifacts.require(Files.isRegularFile(drums, LinkOption.NOFOLLOW_LINKS)
+                            && drumSeparation.getAsJsonArray("stemOrder").contains(new JsonPrimitive("drums")),
+                    "drum separation", "expected an aligned drums.wav");
+            return drums;
+        }
+
+        void recordDrums(Collection<Integer> parts, Path drums) throws IOException {
+            if (parts.isEmpty()) return;
+            Input input = snapshot(drums, false, ".wav");
+            for (int part : parts) generatedStems.put(part, input);
+        }
+
+        ReconstructionStages.Score relocateGeneratedStems(Path work, ReconstructionStages.Score score) {
+            if (generatedStems.isEmpty()) return score;
+            var options = score.inputs();
+            var stems = new TreeMap<>(options.stems());
+            generatedStems.forEach((part, input) -> stems.put(part, work.resolve(input.snapshot).toString()));
+            var inputs = withPaths(options, options.midi(), options.wav(), options.catalogue(),
+                    stems, options.candidates(), options.externalNotes());
+            return score.withInputs(inputs, score.bars(), score.notes(), score.tempo(), score.midiBars(), score.beatMap());
+        }
 
         Path external(int part, Path source, boolean imported) throws IOException {
             Encoding encoding = encoding(source.getFileName().toString());
@@ -83,7 +118,7 @@ final class ReconstructionManifest {
                     hash, Files.size(copy), snapshot);
         }
 
-        void write(Path work, ReconstructionStages.Score score, List<String> argv, Run run) throws IOException {
+        void write(Path work, ReconstructionStages.Score score, List<String> argv, Run run, String initialLanePolicyPreset) throws IOException {
             var inputs = score.inputs();
             var source = new LinkedHashMap<String, Input>();
             if (inputs.midi() != null) source.put("midi", evidence(Path.of(inputs.midi())));
@@ -92,7 +127,8 @@ final class ReconstructionManifest {
             var stems = new TreeMap<Integer, String>();
             for (var entry : inputs.stems().entrySet()) {
                 String key = "stem-" + entry.getKey();
-                source.put(key, evidence(Path.of(entry.getValue())));
+                var generated = generatedStems.get(entry.getKey());
+                source.put(key, generated != null ? generated : evidence(Path.of(entry.getValue())));
                 stems.put(entry.getKey(), key);
             }
             if (inputs.candidates() != null) {
@@ -116,7 +152,7 @@ final class ReconstructionManifest {
             }
             persistCopies(work);
             var manifest = new Manifest(VERSION, tool(), score.durationUs(), withPaths(inputs, inputs.midi(), inputs.wav(),
-                    inputs.catalogue(), inputs.stems(), inputs.candidates(), null), source, stems, notes, argv, config, run, rolePlanHash(work), null);
+                    inputs.catalogue(), inputs.stems(), inputs.candidates(), null), source, stems, notes, argv, config, run, rolePlanHash(work), null, initialLanePolicyPreset, drumSeparation);
             ReconstructionArtifacts.write(work.resolve(FILE), manifest);
         }
 
@@ -139,10 +175,9 @@ final class ReconstructionManifest {
 
         @Override public void close() throws IOException {
             if (temporary == null) return;
-            try (var files = Files.list(temporary)) {
-                for (Path file : files.toList()) Files.deleteIfExists(file);
+            try (var files = Files.walk(temporary)) {
+                for (Path file : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(file);
             }
-            Files.delete(temporary);
         }
     }
 
@@ -152,7 +187,7 @@ final class ReconstructionManifest {
             var manifest = ReconstructionArtifacts.read(file, Manifest.class);
             ReconstructionArtifacts.write(file, manifest.withLastRun(run));
         } else {
-            capture.write(work, score, List.of(), run);
+            capture.write(work, score, List.of(), run, null);
         }
     }
 
@@ -200,7 +235,10 @@ final class ReconstructionManifest {
         }
 
         var stems = new TreeMap<Integer, String>();
-        manifest.partToStem.forEach((part, key) -> stems.put(part, paths.get(key).toString()));
+        manifest.partToStem.forEach((part, key) -> {
+            var snapshot = manifest.inputs.get(key).snapshot;
+            stems.put(part, (snapshot == null ? paths.get(key) : newWork.resolve(snapshot)).toString());
+        });
         var notes = new TreeMap<Integer, ExternalTranscribers.PartNotes>();
         var external = new TreeMap<Integer, External>();
         for (var entry : manifest.externalNotes.entrySet()) {
@@ -233,7 +271,7 @@ final class ReconstructionManifest {
                 withPaths(inputs, inputs.midi(), inputs.wav(), inputs.catalogue(), stems, candidates, null),
                 relocated, manifest.partToStem, external, manifest.originalArguments, manifest.transcriberConfig,
                 new Run("transcribe", manifest.roleHarmonyMaxHz == null
-                        ? manifest.lastRun.harmonyMaxHz() : manifest.roleHarmonyMaxHz), rolePlanHash(work), manifest.roleHarmonyMaxHz);
+                        ? manifest.lastRun.harmonyMaxHz() : manifest.roleHarmonyMaxHz), rolePlanHash(work), manifest.roleHarmonyMaxHz, manifest.initialLanePolicyPreset, manifest.drumSeparation);
         return new Replay(replayed, inputs, copies);
     }
 
@@ -255,7 +293,8 @@ final class ReconstructionManifest {
         if (input.snapshot == null) return null;
         if (input.sha256 == null || !input.sha256.matches("[0-9a-f]{64}")
                 || !(input.snapshot.equals(SNAPSHOTS + "/" + input.sha256 + ".json")
-                || input.snapshot.equals(SNAPSHOTS + "/" + input.sha256 + ".mid")))
+                || input.snapshot.equals(SNAPSHOTS + "/" + input.sha256 + ".mid")
+                || input.snapshot.equals(SNAPSHOTS + "/" + input.sha256 + ".wav")))
             throw new IllegalArgumentException("Invalid snapshot reference for " + input.basename);
         Path root = work.resolve(SNAPSHOTS);
         if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return null;
