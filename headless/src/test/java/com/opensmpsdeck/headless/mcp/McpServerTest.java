@@ -50,11 +50,12 @@ class McpServerTest {
         assertEquals(2, old.size());
         assertEquals("2025-06-18", old.getFirst().getAsJsonObject("result").get("protocolVersion").getAsString());
         var tools = old.getLast().getAsJsonObject("result").getAsJsonArray("tools");
-        assertEquals(31, tools.size());
+        assertEquals(33, tools.size());
         var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
         assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_trace", "reconstruct_trace_diff",
                 "reconstruct_edit", "reconstruct_voices", "reconstruct_sections", "reconstruct_plan_template", "reconstruct_view",
-                "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect")));
+                "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect",
+                "rom_list", "rom_set")));
 
         var modern = exchange("""
                 {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}

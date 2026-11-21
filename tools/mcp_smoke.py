@@ -165,7 +165,7 @@ for stem in stems:
     config.write_text(json.dumps({"fixture": [sys.executable, str(adapter), "{input}", "{outputDir}", "{device}"]}))
     transcribers = root / "transcribers.json"
     transcribers.write_text("{}")
-    env = {**os.environ, "OPENSMPSDECK_SEPARATORS": str(config),
+    env = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"), "OPENSMPSDECK_SEPARATORS": str(config),
            "OPENSMPSDECK_TRANSCRIBERS": str(transcribers)}
     with Client(jar, env=env) as rpc:
         tools = rpc.request("tools/list")["tools"]
@@ -174,12 +174,17 @@ for stem in stems:
             reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect
             render_clip render_compare notes_list notes_add notes_resolve reference_add
-            catalog_search catalog_audition bench_compare
+            catalog_search catalog_audition bench_compare rom_list rom_set
         """.split())
         assert {tool["name"] for tool in tools} == expected
         for tool in tools:
             schema = tool["inputSchema"]
             assert schema["type"] == "object" and set(schema["required"]) <= schema["properties"].keys()
+        assert {entry["game"]: entry["status"] for entry in rpc.call("rom_list")["roms"]} == {
+            "s1": "missing", "s2": "missing", "s3k": "missing",
+        }
+        rpc.call("rom_set", game="s1", path=inputs["midi"], error="Unsupported ROM")
+        assert not (root / "config" / "opensmpsdeck" / "roms.json").exists()
         assert rpc.call("separators_list") == {"separators": ["fixture"]}
         separated = root / "separated"
         result = rpc.call("separate", input=inputs["wav"], outputDir=separated,
