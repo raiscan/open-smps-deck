@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -66,12 +67,18 @@ def pointer_arg(value):
     return track, lower, upper
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+def parse_args(description=__doc__, *, libretro=False):
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--profile", required=True, choices=GAMEPLAY_MODES)
     parser.add_argument("--rom", required=True, type=Path)
     parser.add_argument("--reference", type=Path, help="hash a reference WAV for the report")
-    parser.add_argument("--build", required=True, type=Path, metavar="DIR")
+    if libretro:
+        core = os.environ.get("LIBRETRO_CORE")
+        parser.add_argument("--core", required=not core, default=core, type=Path, metavar="PATH")
+        parser.add_argument("--ram-order", choices=("big", "word-native"),
+                            help="override 68K work RAM byte order")
+    else:
+        parser.add_argument("--build", required=True, type=Path, metavar="DIR")
     parser.add_argument("--out", required=True, type=Path, metavar="DIR")
     parser.add_argument("--frames", required=True, type=nonnegative)
     parser.add_argument("--press", action="append", default=[], type=press_arg, metavar="FRAME:BUTTON")
@@ -123,14 +130,14 @@ def read_log(path):
     with path.open() as log:
         fps = Fraction(log.readline().removeprefix("# fps=").strip())
         frames = [
-            {key: int(value, 10 if key == "frame" else 16)
+            {key: int(value, 10 if key == "frame" else 16) if value else None
              for key, value in row.items() if key != "buttons"}
             for row in csv.DictReader(log)
         ]
     return fps, frames
 
 
-def evaluate(args, frames, fps):
+def evaluate(args, frames, fps, unavailable=()):
     def timing(frame):
         return None if frame is None else {"frame": frame, "seconds": float(frame / fps)}
 
@@ -144,6 +151,11 @@ def evaluate(args, frames, fps):
     checks = {}
     first_song = None
     if args.title_song_from is not None:
+        identity_fields = {"bank": args.bank, "song": args.song}
+        if args.pointer:
+            identity_fields[args.pointer[0] + "_ptr"] = args.pointer
+        missing = sorted(key for key in unavailable if identity_fields.get(key) is not None)
+
         def matches(row):
             if args.bank is not None and row["bank"] != args.bank:
                 return False
@@ -151,7 +163,8 @@ def evaluate(args, frames, fps):
                 return False
             if args.pointer:
                 track, low, high = args.pointer
-                return low <= row[track + "_ptr"] <= high
+                pointer = row[track + "_ptr"]
+                return pointer is not None and low <= pointer <= high
             return True
 
         start = args.title_song_from
@@ -166,15 +179,17 @@ def evaluate(args, frames, fps):
             bad = start
             first_song = None
         checks["title_song"] = {
-            "passed": bad is None,
+            "passed": not missing and bad is None,
             "expected": {key: value for key, value in (
                 ("bank", args.bank), ("song", args.song), ("pointer", args.pointer),
             ) if value is not None},
             "from": timing(start),
             "through": timing(end - 1) if start < end else None,
             "first_match": timing(first_song),
-            "first_failure": timing(bad),
+            "first_failure": timing(bad) if not missing else None,
         }
+        if missing:
+            checks["title_song"].update(status="unavailable", unavailable_fields=missing)
 
     if args.no_demo is not None:
         idle_frames = 0
@@ -218,15 +233,11 @@ def evaluate(args, frames, fps):
     }
 
 
-def run(args):
-    exe = args.build.resolve() / "RomProbe.exe"
-    if not exe.is_file():
-        raise ValueError(f"{exe} is missing. Run build.sh first.")
+def prepare_run(args):
     output = args.out.resolve()
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise ValueError("output directory must be new or empty")
-    rom = args.rom.resolve()
-    inputs = {"rom": input_hashes(rom)}
+    inputs = {"rom": input_hashes(args.rom)}
     if args.reference is not None:
         inputs["reference"] = input_hashes(args.reference)
     ffmpeg = shutil.which("ffmpeg") if args.video else None
@@ -236,15 +247,28 @@ def run(args):
         print(notes[-1], file=sys.stderr)
 
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return output, inputs, ffmpeg, notes
+
+
+def run(args):
+    exe = args.build.resolve() / "RomProbe.exe"
+    if not exe.is_file():
+        raise ValueError(f"{exe} is missing. Run build.sh first.")
+    output, inputs, ffmpeg, notes = prepare_run(args)
+    rom = args.rom.resolve()
     presses = ",".join(f"{frame}:{button}" for frame, button in args.press)
     watches = [f"{name}:{domain}:{address}:{width}" for name, domain, address, width in args.watch]
     # Waterbox diagnostics go to stdout. Keep errors on stderr and the probe log structured.
     subprocess.run(["mono", str(exe), str(rom), str(output), args.profile, str(args.frames),
                     presses, ffmpeg or "", *watches], cwd=output, stdout=subprocess.DEVNULL, check=True)
+    return write_report(args, output, inputs, ffmpeg, notes, bizhawk_version="2.11", core="GPGX")
+
+
+def write_report(args, output, inputs, ffmpeg, notes, *, unavailable=(), **emulator):
     fps, frames = read_log(output / "probe.log")
-    checks, timings = evaluate(args, frames, fps)
+    checks, timings = evaluate(args, frames, fps, unavailable)
     report = {
-        "profile": args.profile, "bizhawk_version": "2.11", "core": "GPGX",
+        "profile": args.profile, **emulator,
         "frames": len(frames), "fps": str(fps), "inputs": inputs,
         "presses": [{"frame": frame, "button": button} for frame, button in args.press],
         "watches": [{"name": name, "domain": domain, "offset": address, "size": width}
@@ -258,7 +282,8 @@ def run(args):
         json.dump(report, stream, indent=2)
         stream.write("\n")
     for name, check in checks.items():
-        print(f"{name}: {'PASS' if check['passed'] else 'FAIL'}")
+        status = check.get("status", "PASS" if check["passed"] else "FAIL")
+        print(f"{name}: {status.upper()}")
     print(report_path)
     return 0 if all(check["passed"] for check in checks.values()) else 1
 

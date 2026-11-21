@@ -122,3 +122,66 @@ a ROM nor BizHawk. The existing Java playback workflow has no NumPy dependency.
 ```sh
 python3 -m unittest discover -s tools/rom-probe -v
 ```
+
+## Check a second emulator with libretro
+
+The headless libretro frontend runs with stock Python 3.9+ under `python3 -I`.
+Use BlastEm for an independent accuracy check, or supply a software Mega Drive
+core such as Genesis Plus GX. The core runs as native code in the probe process,
+so use a trusted build for your OS and architecture.
+
+On Arch or CachyOS, fetch the package into a private scratch directory without
+installing it. Set `scratch_root` to a writable directory outside the checkout.
+
+```sh
+scratch=$(mktemp -d "$scratch_root/rom-probe.XXXXXXXX")
+url=$(pacman -Spdd libretro-blastem)
+curl --fail --location "$url" --output "$scratch/blastem.pkg.tar.zst"
+bsdtar -xf "$scratch/blastem.pkg.tar.zst" -C "$scratch" usr/lib/libretro/blastem_libretro.so
+export LIBRETRO_CORE="$scratch/usr/lib/libretro/blastem_libretro.so"
+```
+
+The tested CachyOS package version was `20261010.190722.gab743653ed11`
+(BlastEm reports `1.0.1-pre`). On other distributions, extract the corresponding
+package (for example with `dpkg-deb -x` for a Debian package that ships the
+core), use a compatible standalone core from the Libretro buildbot, or
+[build the libretro core from source](https://github.com/libretro/blastem)
+with `make -f Makefile.libretro` from the libretro branch. Pass the extracted
+or built shared library with `--core PATH` or `LIBRETRO_CORE`.
+
+```sh
+python3 -I tools/rom-probe/libretro_probe.py --rom "$rom" --profile s3k \
+  --out "$out" --frames 11400 --no-demo 180 --reference "$reference"
+python3 -I tools/rom-probe/libretro_probe.py --rom "$rom" --profile s3k \
+  --out "$start_out" --frames 850 --press 700:Start --start-game 700 120
+```
+
+Use the same scenario flags, check semantics, and new-or-empty output directory
+rule as the BizHawk runner. This frontend accepts modified ROMs for personal
+use. Keep patched ROMs, core binaries and captures outside the checkout and
+never commit them. The probe reads the ROM from its existing path and sets the
+core's system and save directories to the output directory.
+
+The WAV is stereo 16-bit PCM at the core's reported rate rounded to the nearest
+integer Hz. `--video` adds a silent MP4 from software video frames using ffmpeg
+and libx264. `report.json` records both ROM and core hashes, plus the hashes of
+any supplied reference WAV. The `emulator` object records the library name,
+version, and SHA-256 of the library file as `path_sha256`. `core.log` records
+libretro messages and log format strings from the core.
+
+BlastEm exposes 64 KiB of 68K work RAM and cartridge save RAM where present.
+This build exposes no Z80 RAM. The probe uses a flat Z80 RAM memory-map
+descriptor if the core supplies one. Otherwise the Z80 fields in `probe.log`
+are blank and a requested check that depends on one of those fields is marked
+`unavailable` (exit 1). For S2 or S3K on BlastEm, compare the captured WAV with
+the pinned render and the BizHawk capture using `analyze.py`. S1 track pointers
+are in 68K RAM and can be checked directly. BlastEm and Genesis Plus GX use
+host-native 16-bit word storage for 68K RAM. For other cores, the default is
+big-endian bytes. Use `--ram-order` to override either choice.
+
+Run the host's synthetic tests with the standard library alone. Keep ROM and
+emulator validation local.
+
+```sh
+python3 -m unittest discover -s tools/rom-probe -p test_libretro_probe.py -v
+```
