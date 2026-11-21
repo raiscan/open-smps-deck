@@ -220,6 +220,16 @@ The adapter writes the decoded mix to `mix.wav`, aligned WAVs to
 publishes the folder after validating the files and matching sample rates,
 channel counts and frame counts.
 
+On an initial reconstruction with unmapped MIDI drums, a configured
+`bs-roformer` command automatically separates the mix on its automatic
+device and supplies the aligned drums to the DAC stem-hit fitter. Audio-only
+runs without a supplied drum stem also use those drums for onset detection.
+The work directory saves the generated drums WAV in `snapshots/` and records
+the adapter provenance and stem hash in `manifest.json`. Resumes and reruns
+reuse the saved inputs. If `bs-roformer` is unavailable in the config, the CLI
+warns and uses the mix. Pass `--separator-config FILE` on `run`, `transcribe`
+or `import`, or set `OPENSMPSDECK_SEPARATORS` for CLI and MCP.
+
 Check `import-work/import.json` for errors, nearly silent stems and the
 assigned roles. `separation.json` enables audio-only import automatically
 for this folder without MIDI. Vocals are candidates for lead and drums feed
@@ -251,6 +261,8 @@ checked `runRequest` to `reconstruct_run`.
 The [extraction bake-off](../experiments/extraction-bakeoff/RESULTS.md)
 supports starting with BS-RoFormer SW, MuScriptor Medium for bass, guitar,
 piano and other tonal material, Basic Pitch for vocals, and ADTOF for drums.
+Add [RMVPE](../tools/transcribers/rmvpe/) as a vocal candidate when its
+checkpoint is available.
 In the four-track [Suno head-to-head](../experiments/extraction-bakeoff/README.md#original-midi-render-head-to-head),
 the local Medium + ADTOF route scored 0.775 onset F1 against 0.429 for the
 per-stem Suno MIDI after delay correction. The commands above explicitly
@@ -865,10 +877,11 @@ keyboard and other keep their corresponding roles. Use
 `--stem-role LABEL=ROLE` to override a label's role, for example
 `--stem-role synth=lead` for an instrumental track.
 
-The following `transcribers.json` combines the three recommended adapters.
-Install [MuScriptor Medium](../tools/transcribers/muscriptor/),
-[Basic Pitch](../tools/transcribers/basic-pitch/) and [ADTOF](../tools/transcribers/adtof/)
-and replace the paths. Each command may choose its own device.
+The following `transcribers.json` combines
+[MuScriptor Medium](../tools/transcribers/muscriptor/),
+[Basic Pitch](../tools/transcribers/basic-pitch/),
+[RMVPE](../tools/transcribers/rmvpe/) and [ADTOF](../tools/transcribers/adtof/).
+Install the adapters and replace the paths. Each command may choose its own device.
 
 ```json
 {
@@ -880,6 +893,11 @@ and replace the paths. Each command may choose its own device.
   "basic-pitch": [
     "/path/to/basic-pitch/venv/bin/python", "/path/to/repo/tools/transcribers/basic-pitch/run.py",
     "--input", "{input}", "--output", "{output}", "--role", "{role}"
+  ],
+  "rmvpe": [
+    "/path/to/rmvpe/venv/bin/python", "/path/to/repo/tools/transcribers/rmvpe/run.py",
+    "--input", "{input}", "--output", "{output}", "--role", "{role}", "--device", "{device}",
+    "--source", "/path/to/rvc", "--weights", "/path/to/rmvpe.pt"
   ],
   "drumTranscribers": {
     "adtof": [
@@ -893,20 +911,22 @@ and replace the paths. Each command may choose its own device.
     "piano": "muscriptor-medium",
     "other": "muscriptor-medium",
     "synth": "muscriptor-medium",
-    "vocals": "muscriptor-medium,basic-pitch",
+    "vocals": "muscriptor-medium,basic-pitch,rmvpe",
     "drums": "adtof"
   }
 }
 ```
 
-For vocals, a comma-separated pair such as `muscriptor-medium,basic-pitch`
-runs both adapters and evaluates each result plus their union. Use the same
-syntax with `--transcriber-for vocals=muscriptor-medium,basic-pitch` or MCP
-`transcriberFor.vocals`. The comparison balances voiced-time coverage and
-agreement within a semitone of the stem's F0 estimate. Basic Pitch supplies
-its dominant contour when periodicity alone leaves a gap. It records the winner
-and all three scores in the vocal part's transcription provenance. A single
-name uses only that adapter.
+For vocals, pass up to three distinct comma-separated adapter names.
+The example evaluates MuScriptor, Basic Pitch, their fused notes, and the
+monophonic line from RMVPE. Use the same list with `--transcriber-for vocals=...`
+or MCP `transcriberFor.vocals`. The comparison balances coverage of audible
+vocal frames and F0 agreement within one semitone. With RMVPE in the set,
+all candidates use periodicity measured directly on the stem as the pitch
+reference. With MuScriptor and Basic Pitch alone, the Basic Pitch contour
+can fill gaps in the reference. The manifest records the winner, reference,
+and each score. A single name uses that adapter alone. RMVPE's fractional
+contour can also supply bends for held notes with smooth, sustained motion.
 
 Audio-only vocal cleanup follows a monophonic line using pitch salience,
 continuity and a range learned from the stem. It joins supported syllables,
@@ -920,7 +940,9 @@ held-note probe. When the stem supports a vibrato estimate, it is encoded
 using the usual FM modulation controls. Edit the source instrument and its
 effects in `voicing.json` to override these choices.
 
-An optional `drums` stem feeds DAC and PSG3 routing. External drum commands
+A `drums` stem feeds DAC and PSG3 routing. When the stem is absent, detection
+uses drums from local separation, or the mix if the separator is unavailable.
+External drum commands
 write `[[seconds, gmPitch, velocity], ...]` and may supply a
 `<output>.meta.json` sidecar. The built-in `spectral` detector is the default
 when no drums default is configured. Select a detector with
@@ -1004,13 +1026,16 @@ rejection history.
 
 ## Reconstruction layering
 
-`reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering` enables
-octave-up PSG doubling and a 14-frame FM echo. The echo defaults to 11
+New staged runs, including import and MCP, use the `s3k-layering` preset.
+It adds octave-up PSG doubling and a 14-frame FM echo on spare channels.
+FM-only runs use the FM echo. The echo defaults to 11
 carrier TL steps below the dry note (8.25 dB nominal), or 3 dB quieter than
 the original 7-TL echo.
 Set `lanePolicies.echoAttenuation` in `voicing.json` to override that level,
-then assemble using the saved policy. Use `off` to clear lane policies.
-Passing either preset choice replaces the saved policy configuration.
+then assemble using the saved policy. Existing work directories and their
+reruns keep the saved voicing policy. Use `--lane-policy-preset off` when
+starting a run or import, or pass it to `reconstruct assemble WORK_DIR` to
+clear an existing policy. Passing `s3k-layering` restores the preset.
 For MCP `reconstruct_stage`, pass `stage: "assemble"` and
 `options.lanePolicyPreset` to set or clear the preset. See the
 [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)

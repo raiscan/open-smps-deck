@@ -40,6 +40,13 @@ conditions per song. For a custom corpus pass `--songs 0x01,0x15` to
 `build-corpus`. IDs accept decimal and hexadecimal. `run --quick` filters
 the manifest to the preset IDs.
 
+The quick baseline now uses the S3K layering preset. Keep the original
+dry-output scorecard when comparing across this default change. The scorer
+counts all rendered note gates, including echoes and octave copies, and
+can choose a PSG octave as the highest sustained melody. Use the refreshed
+layered scorecard for subsequent zero-tolerance comparisons on the same
+corpus and catalogue.
+
 Each song has three MIDI representations and three reference conditions.
 
 | MIDI | Input |
@@ -141,10 +148,20 @@ Overall and slice values are case-level macro means. Profiles and WAV variants
 are grouped independently. `measured` reports the denominator for each mean.
 Per-case counts expose differences in coverage and make the aggregate
 interpretable when a metric is undefined. Empty truth and estimate give F1
-of 1, with exactly one empty side giving 0. Reconstructed attacks on FM copy
-lanes listed in `report.json` under `effectCopyLanes` are excluded from the
-note timeline. Reports with an empty or absent field use the original
-timeline unchanged. Audio metrics use the full render, including copies.
+of 1, with exactly one empty side giving 0.
+
+Note-based scores use the compiled attacks and gates outside copy windows
+in `report.json`. `lanePolicyCopies` identifies generated copies by lane
+and project ticks, and applied `noteLayers` entries identify authored
+copies. Original notes on shared lanes and notes routed by the pads
+policy still count. The scorecard also records the previous scoring
+view under `*WithLayers` fields, such as `melodyF1WithLayers`. Both views
+retain the existing `effectCopyLanes` exclusion for dedicated FM effect
+lanes. Absent copy provenance leaves the corresponding timeline intact.
+The regression comparison uses the unsuffixed metrics. Log-mel distance,
+onset correlation, and release energy use the full rendered audio.
+Release energy also retains the earlier pairing and cutoff timeline with
+lane-policy and per-note layers included.
 
 | Metric | Measurement |
 |---|---|
@@ -163,8 +180,8 @@ timeline unchanged. Audio metrics use the full render, including copies.
 At R0, the allocator routes the declared lead to FM1 and can split other
 native parts across several output lanes. Melody F1 chooses a predominant
 physical lane independently on each side every two seconds. The winners can
-therefore carry different source parts after allocation, including a doubled
-line or a delayed echo of the lead. The score can drop even when FM1 preserves
+therefore carry different source parts after allocation, including doubled
+lines already present in the source. The score can drop even when FM1 preserves
 the declared lead. Lead fidelity F1 uses the fixed declaration in the ladder
 manifest for the entire song and measures preservation of that route.
 

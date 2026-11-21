@@ -186,6 +186,7 @@ final class ReconstructionLanePolicies {
             var rule = rules.get(i);
             String at = "voicing.json.lanePolicies[" + i + "]";
             require(rule != null, at, "expected a policy object");
+            if (score.inputs().fmOnly() && configuration.preset() != null && rule.policy() == Kind.psgDouble) continue;
             require(!score.inputs().fmOnly() || rule.policy() == Kind.fmDouble,
                     at, "PSG policies require PSG channels");
             int start = 0, end = frames;

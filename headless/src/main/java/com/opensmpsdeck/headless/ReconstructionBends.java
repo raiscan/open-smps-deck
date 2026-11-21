@@ -175,7 +175,7 @@ final class ReconstructionBends {
         return best;
     }
 
-    private static Bend classify(Note note, List<Sample> track) {
+    static Bend classify(Note note, List<Sample> track) {
         if (track.size() < 9) return null;
         double anchor = track.getFirst().cents();
         double end = midpoint(track, track.size() - 2);

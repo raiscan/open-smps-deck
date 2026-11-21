@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
 import com.google.gson.JsonElement;
+import com.opensmpsdeck.headless.ReconstructionLayers;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
@@ -13,6 +14,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 final class BenchReconstruction {
     record Midi(List<Part> parts, List<Note> notes) {}
@@ -21,8 +24,35 @@ final class BenchReconstruction {
     record Allocation(List<Placement> notes) {}
     record Placement(SourceNote note, String role, String lane, Integer startTick) {}
     record SourceNote(int pitch) {}
+    record CopyWindow(String lane, int startTick, int endTick) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
-                  List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages) {}
+                  List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages,
+                  List<CopyWindow> lanePolicyCopies, List<ReconstructionLayers.Result> noteLayers) {
+        List<BenchMetrics.Event> excludeLayers(List<BenchMetrics.Event> events) {
+            var windows = new HashMap<String, NavigableMap<Integer, Integer>>();
+            if (lanePolicyCopies != null) for (var copy : lanePolicyCopies)
+                addWindow(windows, copy.lane(), copy.startTick(), copy.endTick());
+            if (noteLayers != null) for (var layer : noteLayers) {
+                if (layer.status() == ReconstructionLayers.Status.applied)
+                    addWindow(windows, layer.lane(), layer.startTick(), layer.endTick());
+            }
+            if (windows.isEmpty()) return events;
+            // Reconstructed projects have tempo zero and divider one. A bend
+            // may emit several attacks inside one copy's reserved lane window.
+            return events.stream().filter(event -> {
+                var lane = windows.get(event.lane());
+                if (lane == null || event.drum() != null) return true;
+                int tick = (int) Math.round(event.start() * 60);
+                var window = lane.floorEntry(tick);
+                return window == null || tick >= window.getValue();
+            }).toList();
+        }
+
+        private static void addWindow(Map<String, NavigableMap<Integer, Integer>> windows,
+                                      String lane, int start, int end) {
+            windows.computeIfAbsent(lane, ignored -> new TreeMap<>()).put(start, end);
+        }
+    }
     record Stages(Map<String, Long> leadContinuity) {}
     record TempoCurve(boolean warped) {}
     record Reduction(String change, String reason) {}
@@ -32,7 +62,8 @@ final class BenchReconstruction {
     record LaneKind(String kind, String lane) {}
     record Choice(String assetId, List<Candidate> shortlist) {}
     record Candidate(String assetId) {}
-    record Result(List<BenchMetrics.Event> events, Attribution attribution, Path audio, long referenceUs,
+    record Result(List<BenchMetrics.Event> events, List<BenchMetrics.Event> eventsWithLayers,
+                  Attribution attribution, Path audio, long referenceUs,
                   Map<String, Long> reductions, boolean warped, Map<String, byte[]> voices) {}
 
     private static final long SECTION_US = 16_000_000L;
@@ -93,7 +124,7 @@ final class BenchReconstruction {
             report.stages().leadContinuity().forEach((key, count) -> {
                 if (count > 0) reductions.put(key.startsWith("lead-") ? key : "lead-" + key, count);
             });
-        return new Result(events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
+        return new Result(report.excludeLayers(events), events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
                 output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices());
     }
 
