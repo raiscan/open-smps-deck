@@ -36,6 +36,12 @@ Pass the returned `runRequest` to `reconstruct_run` once the inputs are
 ready. In Studio use **Import Suno folder… → Override → Re-check → Start
 reconstruction**. [Import reference](../../headless/README.md#import-a-suno-download)
 
+For a standalone WAV or MP3 with no Suno download, prepare stems first with
+`reconstruct separate MIX OUT_DIR --separator NAME --device auto` (MCP
+`separators_list`, then `separate`), then import the produced folder. With no
+MIDI, import stops at the warning that audio-only transcription is needed.
+[Separation reference](../../headless/README.md#external-stem-separation)
+
 ## 2. Run and preserve a baseline
 
 Use `--run` with the checked import arguments and catalogue to build in

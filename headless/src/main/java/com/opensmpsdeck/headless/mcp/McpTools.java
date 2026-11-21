@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.Main;
 import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.ExternalSeparators;
 import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.bench.BenchCli;
@@ -52,8 +53,15 @@ final class McpTools {
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
                     (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames()))),
-            tool("reconstruct_import", "Check a Suno folder and write import.json. Returns file status, mapping evidence and run arguments.",
-                    McpReconstruction::importFolder, path("folder", "Absolute path to the Suno download folder"), WORK,
+            tool("separators_list", "List the separator names from the server owner's local configuration.",
+                    (args, progress) -> object(Map.of("separators", ExternalSeparators.configuredNames()))),
+            tool("separate", "Separate one WAV or MP3 into an importable folder using a configured local model.",
+                    McpTools::separate, path("input", "Absolute path to the mix"),
+                    path("outputDir", "Absolute path to a new output directory"),
+                    field("separator", "string", "Name returned by separators_list"),
+                    choice("device", "Device selection (default auto)", "auto", "cpu", "rocm", "cuda").optional()),
+            tool("reconstruct_import", "Check a Suno download or separated folder and write import.json with file status, mapping evidence and available run arguments.",
+                    McpReconstruction::importFolder, path("folder", "Absolute path to the input folder"), WORK,
                     CATALOGUE.optional(),
                     field("assign", object(Map.of("type", "object", "additionalProperties", Map.of("type", "integer"))),
                             "Map of folder-relative stem files to MIDI part IDs").optional(),
@@ -301,6 +309,13 @@ final class McpTools {
         var result = McpJson.parse(cli(command)).getAsJsonObject();
         result.addProperty("output", output.toString());
         return result;
+    }
+
+    private static JsonObject separate(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+        var output = ExternalSeparators.separate(McpPaths.input(string(args, "input")),
+                McpPaths.newDirectory(string(args, "outputDir")), string(args, "separator"),
+                args.has("device") ? string(args, "device") : "auto", null, progress);
+        return object(Map.of("outputDir", output.toString(), "provenance", output.resolve("separation.json").toString()));
     }
 
     private static JsonObject export(JsonObject args, ReconstructionStages.Progress progress) throws IOException {

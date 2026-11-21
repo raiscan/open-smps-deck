@@ -6,6 +6,7 @@ import hashlib
 from array import array
 import math
 import json
+import os
 import shutil
 from pathlib import Path
 import struct
@@ -16,15 +17,16 @@ import wave
 
 
 class Client:
-    def __init__(self, jar, modern=False):
+    def __init__(self, jar, modern=False, env=None):
         self.jar = jar
         self.modern = modern
+        self.env = env
         self.next_id = 0
 
     def __enter__(self):
         self.process = subprocess.Popen(
             ["java", "-jar", str(self.jar), "mcp"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8",
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", env=self.env,
         )
         try:
             if self.modern:
@@ -132,10 +134,30 @@ def smoke(jar, root):
     changed = json.loads(card.read_text())
     changed["overall"]["mean"]["noteF1"] = 0.9
     regressed.write_text(json.dumps(changed))
-    with Client(jar) as rpc:
+    adapter = root / "mock-separator.py"
+    adapter.write_text("""
+import json
+from pathlib import Path
+import shutil
+import sys
+
+source, output, device = sys.argv[1:]
+assert device == "cpu"
+folder = Path(output)
+(folder / "stems").mkdir()
+shutil.copyfile(source, folder / "mix.wav")
+shutil.copyfile(source, folder / "stems/vocals.wav")
+(folder / "separation.json").write_text(json.dumps({
+    "tool": "fixture", "model": "fixture", "version": "1",
+    "checkpointSha256": "0" * 64, "stemOrder": ["vocals"], "settings": {},
+}))
+""")
+    config = root / "separators.json"
+    config.write_text(json.dumps({"fixture": [sys.executable, str(adapter), "{input}", "{outputDir}", "{device}"]}))
+    with Client(jar, env={**os.environ, "OPENSMPSDECK_SEPARATORS": str(config)}) as rpc:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
-            transcribers_list reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
+            transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
             reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate project_export reconstruct_rerun
             render_clip render_compare notes_list notes_add notes_resolve reference_add
@@ -145,6 +167,14 @@ def smoke(jar, root):
         for tool in tools:
             schema = tool["inputSchema"]
             assert schema["type"] == "object" and set(schema["required"]) <= schema["properties"].keys()
+        assert rpc.call("separators_list") == {"separators": ["fixture"]}
+        separated = root / "separated"
+        result = rpc.call("separate", input=inputs["wav"], outputDir=separated,
+                          separator="fixture", device="cpu", progress=True)
+        assert Path(result["provenance"]).is_file()
+        checked = rpc.call("reconstruct_import", folder=separated, workDir=root / "audio-import")
+        assert checked["status"] == "warning" and "runRequest" not in checked, checked
+        assert any(issue["code"] == "needs_audio_only_transcription" for issue in checked["issues"]), checked
         assert rpc.call("bench_compare", old=card, new=card, tolerance=0)["passed"]
         comparison = rpc.call("bench_compare", old=card, new=regressed, tolerance=0)
         assert not comparison["passed"]

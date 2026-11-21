@@ -123,6 +123,19 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
         }
     }
 
+    record WaveLayout(int sampleRate, int channels, long frames) {}
+
+    static WaveLayout layout(Path path, int maxSeconds) throws IOException {
+        try (var channel = FileChannel.open(path, StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            var wave = header(channel);
+            var format = wave.format();
+            long frames = wave.dataBytes() / format.frameBytes();
+            if (frames < 1 || frames > (long) maxSeconds * format.sampleRate())
+                throw invalid("WAV duration is outside the import range");
+            return new WaveLayout(format.sampleRate(), format.channels(), frames);
+        }
+    }
+
     /** Scan every frame, averaging into a bounded, common-rate mono signal for folder import. */
     static ImportSignal importSignal(Path path, int rate, int maxSeconds) throws IOException {
         try (var channel = FileChannel.open(path, StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
