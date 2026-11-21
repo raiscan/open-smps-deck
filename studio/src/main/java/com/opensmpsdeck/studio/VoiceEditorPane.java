@@ -234,7 +234,7 @@ final class VoiceEditorPane extends BorderPane {
     private void duplicateVoice() {
         Voice current = findVoice(project, selectedId);
         if (current == null) return;
-        Voice duplicate = new Voice("voice-" + UUID.randomUUID(), current.name() + " copy", current.bytes());
+        Voice duplicate = new Voice("voice-" + UUID.randomUUID(), current.name() + " copy", current.bytes(), current.origin());
         submit(p -> ProjectEdits.addVoice(guardVoice(p, current), duplicate));
         if (findVoice(project, duplicate.id()) != null) selectVoice(duplicate.id());
     }
@@ -265,7 +265,7 @@ final class VoiceEditorPane extends BorderPane {
         try {
             Voice expected = parameterBaseline;
             guardVoice(project, expected);
-            Voice updated = new Voice(expected.id(), name.getText(), expected.bytes());
+            Voice updated = new Voice(expected.id(), name.getText(), expected.bytes(), expected.origin());
             for (var field : globals.entrySet()) updated = NativeFmVoice.with(updated, 0, field.getKey(), readControl(field.getValue(), field.getKey()));
             for (int slot = 0; slot < operators.size(); slot++)
                 for (var field : operators.get(slot).entrySet()) updated = NativeFmVoice.with(updated, slot, field.getKey(), readControl(field.getValue(), field.getKey()));
@@ -281,7 +281,10 @@ final class VoiceEditorPane extends BorderPane {
         try {
             Voice expected = rawBaseline;
             guardVoice(project, expected);
-            Voice replacement = new Voice(expected.id(), expected.name(), parseVoiceBytes(raw.getText()));
+            var bytes = parseVoiceBytes(raw.getText());
+            var origin = expected.origin();
+            Voice replacement = new Voice(expected.id(), expected.name(), bytes,
+                    origin == null ? null : origin.withPatch(expected.bytes(), bytes));
             submit(p -> ProjectEdits.updateVoice(guardVoice(p, expected), replacement));
             if (replacement.equals(findVoice(project, selectedId))) fillRaw(replacement);
             updateState();

@@ -293,3 +293,8 @@ with options to preserve the edited arrangement before rebuilding.
   correcting the transcription.
 - Agents cannot hear the render. Produce short A/B clips so the human can
   judge the change.
+
+Package exports can warn about embedded ROM assets or retail song data.
+Keep flagged packages for personal use. Check CLI stderr or the MCP
+`warnings` array. Use `stock-table build ROM OUT.json` with a verified
+locked-on S3&K image to regenerate the hashes and locators for stock detection.

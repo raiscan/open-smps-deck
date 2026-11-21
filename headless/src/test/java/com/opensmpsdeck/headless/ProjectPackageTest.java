@@ -27,6 +27,25 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProjectPackageTest {
     @TempDir Path directory;
 
+    @Test void legacyPackageFlagsDeclaredRomBytesAndKeepsOutputSuccessful() throws Exception {
+        var original = fixture();
+        var voice = original.voices().getFirst().withOrigin(AssetOrigin.stock(null));
+        var project = new StudioProject(3, original.name(), original.mode(), original.ticksPerBeat(),
+                original.tempo(), List.of(voice), original.sequences(), original.clips(), original.envelopes());
+        String source = ProjectFormat.write(project);
+        Path input = Files.writeString(directory.resolve("stock.json"), source);
+        Path archive = directory.resolve("stock.smps.zip");
+        var result = run("compile-package", input.toString(), archive.toString());
+        assertEquals(0, result.exit(), result.err());
+        assertTrue(result.err().contains("ROM_DERIVED_DATA"));
+        var entries = read(archive);
+        var provenance = JsonParser.parseString(new String(entries.get("manifest.json"), StandardCharsets.UTF_8))
+                .getAsJsonObject().getAsJsonObject("provenance");
+        assertTrue(provenance.get("containsRomDerivedData").getAsBoolean());
+        assertFalse(provenance.get("containsRetailSongData").getAsBoolean());
+        assertTrue(provenance.get("derivedFromRetailSong").isJsonNull());
+        assertArrayEquals(ProjectCompiler.compile(original), entries.get("track.bin"));
+    }
     @Test void projectAboveOneMiBSavesLoadsPackagesAndRendersIdentically() throws Exception {
         StudioProject small = fixture();
         var large = new StudioProject(3, "x".repeat(1_048_576), small.mode(), small.ticksPerBeat(),

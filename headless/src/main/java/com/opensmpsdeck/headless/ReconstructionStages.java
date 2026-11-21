@@ -235,6 +235,8 @@ public final class ReconstructionStages {
             execute(request, request.work, out, preserveReview, progress, refitChange);
             if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
+            if (request.chain || request.from == Stage.ASSEMBLE)
+                ProjectProvenance.printWarnings(packageWarnings(request.work), err);
             if (request.chain) summarizeEdits(request.work, err);
         }
     }
@@ -271,7 +273,13 @@ public final class ReconstructionStages {
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false, null), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
+        ProjectProvenance.printWarnings(packageWarnings(work), err);
         summarizeEdits(work, err);
+    }
+
+    public static List<String> packageWarnings(Path work) throws IOException {
+        var project = com.opensmpsdeck.project.ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        return ProjectProvenance.detect(project).warnings();
     }
 
     private static void summarizeEdits(Path work, PrintStream err) throws IOException {

@@ -39,7 +39,8 @@ public final class NativeFmVoice {
         if(value<0 || value>parameter.max()) throw new IllegalArgumentException(parameter.label()+" must be in 0.."+parameter.max());
         List<Integer> bytes=new ArrayList<>(voice.bytes());
         bytes.set(at,(bytes.get(at)&~parameter.mask)|(value<<parameter.shift));
-        return new Voice(voice.id(),voice.name(),bytes);
+        var origin = voice.origin();
+        return new Voice(voice.id(), voice.name(), bytes, origin == null ? null : origin.withPatch(voice.bytes(), bytes));
     }
 
     public static Voice initial(String id,String name) {

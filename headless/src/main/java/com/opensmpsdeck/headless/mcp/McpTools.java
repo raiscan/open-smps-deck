@@ -339,8 +339,10 @@ final class McpTools {
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"));
         var source = ProjectExport.open(input);
-        ProjectExport.write(source.project(), source.work(), output, options, progress);
-        return object(Map.of("output", output.toString(), "format", string(args, "format")));
+        var warnings = ProjectExport.write(source.project(), source.work(), output, options, progress);
+        var result = object(Map.of("output", output.toString(), "format", string(args, "format")));
+        if (format == ProjectExport.Format.PACKAGE) result.add("warnings", McpJson.JSON.toJsonTree(warnings));
+        return result;
     }
 
     private static Double decimal(JsonObject args, String name) {
@@ -361,7 +363,9 @@ final class McpTools {
             command.add("--search");
             command.add(McpPaths.directory(directory.getAsString()).toString());
         }
-        return object(Map.of("workDir", output.toString(), "summary", cli(command)));
+        String summary = cli(command);
+        return object(Map.of("workDir", output.toString(), "summary", summary,
+                "warnings", ReconstructionStages.packageWarnings(output)));
     }
 
     private static String cli(List<String> command) throws IOException {

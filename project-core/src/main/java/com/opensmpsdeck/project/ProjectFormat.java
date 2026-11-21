@@ -42,6 +42,7 @@ public final class ProjectFormat {
             int version=integer(tree.getAsJsonObject(),"formatVersion");
             if(version<1 || version>6) throw invalid("formatVersion", "only versions 1 through 6 are supported");
             JsonObject root = tree.getAsJsonObject();
+            var derivedFrom = root.remove("derivedFrom");
             var detached = root.remove("detachedFromReconstruction");
             if (detached != null && (!detached.isJsonPrimitive() || !detached.getAsJsonPrimitive().isBoolean()))
                 throw invalid("detachedFromReconstruction", "must be a boolean");
@@ -67,7 +68,7 @@ public final class ProjectFormat {
                     version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     arrangement>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
                     arrangement>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes,arrangement,groups,placements,
-                    detached != null && detached.getAsBoolean());
+                    detached != null && detached.getAsBoolean(), retailSongOrigin(derivedFrom));
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -155,7 +156,7 @@ public final class ProjectFormat {
         o.addProperty("ticksPerBeat",project.ticksPerBeat());
         if (project.nativeProgram()==null) o.addProperty("tempo",project.tempo());
         JsonArray voices = new JsonArray();
-        for (Voice v : project.voices()) { JsonObject x=new JsonObject(); x.addProperty("id",v.id()); x.addProperty("name",v.name()); JsonArray b=new JsonArray(); v.bytes().forEach(b::add); x.add("bytes",b); voices.add(x); }
+        for (Voice v : project.voices()) { JsonObject x=new JsonObject(); x.addProperty("id",v.id()); x.addProperty("name",v.name()); JsonArray b=new JsonArray(); v.bytes().forEach(b::add); x.add("bytes",b); addOrigin(x, v.origin()); voices.add(x); }
         o.add("voices",voices);
         JsonArray sequences = new JsonArray();
         for (Sequence s : project.sequences()) {
@@ -193,14 +194,14 @@ public final class ProjectFormat {
             JsonArray envelopes=new JsonArray();
             for(Envelope envelope:project.envelopes()) {
                 JsonObject x=new JsonObject();x.addProperty("id",envelope.id());x.addProperty("name",envelope.name());x.addProperty("type",envelope.type());
-                JsonArray bytes=new JsonArray();envelope.bytes().forEach(bytes::add);x.add("bytes",bytes);envelopes.add(x);
+                JsonArray bytes=new JsonArray();envelope.bytes().forEach(bytes::add);x.add("bytes",bytes);addOrigin(x, envelope.origin());envelopes.add(x);
             }
             o.add("envelopes",envelopes);
         }
         if(project.arrangementVersion()>=4) {
             JsonArray samples=new JsonArray();
             for(DacSample sample:project.samples()) {
-                JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());x.addProperty("pcmBase64",sample.pcmBase64());samples.add(x);
+                JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());x.addProperty("pcmBase64",sample.pcmBase64());addOrigin(x, sample.origin());samples.add(x);
             }
             o.add("samples",samples);
         }
@@ -213,6 +214,7 @@ public final class ProjectFormat {
         }
         if (!project.references().isEmpty()) o.add("references", REVIEW_GSON.toJsonTree(project.references()));
         if (!project.notes().isEmpty()) o.add("notes", REVIEW_GSON.toJsonTree(project.notes()));
+        if (project.derivedFrom() != null) o.add("derivedFrom", REVIEW_GSON.toJsonTree(project.derivedFrom()));
         String pretty = GSON.toJson(o) + "\n";
         // Keep existing canonical bytes for ordinary projects. Large documents
         // use the same schema and field order with insignificant whitespace removed.
@@ -254,6 +256,7 @@ public final class ProjectFormat {
         if (project.voices().size()>256) throw invalid("voices", "at most 256 local voices can be addressed");
         Map<String,Voice> voices = unique(project.voices(), Voice::id, "voices");
         for (Voice v : project.voices()) {
+            if (v.origin() != null) v.origin().validateKind("FM_VOICE");
             text(v.name(),"voice '"+v.id()+"'.name");
             if (v.bytes().size()!=25) throw invalid("voice '"+v.id()+"'.bytes", "exactly 25 native-order bytes are required");
             for (int b : v.bytes()) range(b,0,255,"voice '"+v.id()+"'.bytes");
@@ -262,6 +265,7 @@ public final class ProjectFormat {
         Map<String,Envelope> envelopes=unique(project.envelopes(),Envelope::id,"envelopes");
         int psgCount=0,modulationCount=0;
         for(Envelope envelope:project.envelopes()) {
+            if (envelope.origin() != null) envelope.origin().validateKind(envelope.type());
             String at="envelope '"+envelope.id()+"'";text(envelope.name(),at+".name");
             boolean psg = Envelope.PSG_VOLUME.equals(envelope.type());
             if (nativeProgram!=null) {
@@ -282,6 +286,9 @@ public final class ProjectFormat {
         if(modulationCount>127) throw invalid("envelopes","at most 127 modulation envelopes can be addressed; index 128 is reserved for custom modulation");
         if(project.arrangementVersion()<4 && !project.samples().isEmpty()) throw invalid("samples","DAC samples require formatVersion 4");
         DacSample.validateAll(project.samples());
+        for (DacSample sample : project.samples()) {
+            if (sample.origin() != null) sample.origin().validateKind("DAC_SAMPLE");
+        }
         Map<String,DacSample> samples=unique(project.samples(),DacSample::id,"samples");
         if (nativeProgram!=null) {
             Set<Integer> psgSlots = new HashSet<>();
@@ -387,17 +394,55 @@ public final class ProjectFormat {
     }
 
     private static Voice voice(JsonElement e) {
-        JsonObject o=object(e,"voice","id","name","bytes");
-        return new Voice(string(o,"id"),string(o,"name"),list(o,"bytes",x->integer(x,"voice.bytes[]")));
+        JsonObject o=reviewObject(e,"voice",Set.of("origin"),"id","name","bytes");
+        return new Voice(string(o,"id"),string(o,"name"),list(o,"bytes",x->integer(x,"voice.bytes[]")), origin(o.get("origin")));
     }
     private static Envelope envelope(JsonElement e) {
-        JsonObject o=object(e,"envelope","id","name","type","bytes");
-        return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),list(o,"bytes",x->integer(x,"envelope.bytes[]")));
+        JsonObject o=reviewObject(e,"envelope",Set.of("origin"),"id","name","type","bytes");
+        return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),list(o,"bytes",x->integer(x,"envelope.bytes[]")), origin(o.get("origin")));
     }
     private static DacSample sample(JsonElement e) {
-        JsonObject o=object(e,"sample","id","name","rate","pcmBase64");
-        return new DacSample(string(o,"id"),string(o,"name"),integer(o,"rate"),string(o,"pcmBase64"));
+        JsonObject o=reviewObject(e,"sample",Set.of("origin"),"id","name","rate","pcmBase64");
+        return new DacSample(string(o,"id"),string(o,"name"),integer(o,"rate"),string(o,"pcmBase64"), origin(o.get("origin")));
     }
+    private static void addOrigin(JsonObject asset, AssetOrigin origin) {
+        if (origin != null) asset.add("origin", REVIEW_GSON.toJsonTree(origin));
+    }
+
+    private static RetailSongOrigin retailSongOrigin(JsonElement value) {
+        if (value == null || value.isJsonNull()) return null;
+        var o = object(value, "derivedFrom", "type", "game", "songId", "bankSha256");
+        return new RetailSongOrigin(string(o, "type"), string(o, "game"),
+                integer(o, "songId"), string(o, "bankSha256"));
+    }
+
+    private static AssetOrigin origin(JsonElement value) {
+        if (value == null) return null;
+        var o = reviewObject(value, "origin", Set.of("ref", "transforms", "license", "attribution"), "type");
+        return new AssetOrigin(string(o, "type"), o.has("ref") ? stockRef(o.get("ref")) : null,
+                o.has("transforms") ? list(o, "transforms", ProjectFormat::transform) : null,
+                optionalString(o, "license"), optionalString(o, "attribution"));
+    }
+
+    public static StockRef stockRef(JsonElement value) {
+        var o = reviewObject(value, "ref", Set.of("songId", "slot", "index", "note"), "game", "table", "sha256");
+        return new StockRef(string(o, "game"), string(o, "table"), optionalInteger(o, "songId"),
+                optionalInteger(o, "slot"), optionalInteger(o, "index"), optionalInteger(o, "note"), string(o, "sha256"));
+    }
+
+    public static AssetOrigin.Transform transform(JsonElement value) {
+        var o = reviewObject(value, "transform", Set.of("factor", "start", "end", "bytes"), "op");
+        return new AssetOrigin.Transform(string(o, "op"), optionalString(o, "factor"), optionalInteger(o, "start"),
+                optionalInteger(o, "end"), o.has("bytes") ? list(o, "bytes", entry -> {
+                    var patch = object(entry, "patch byte", "offset", "value");
+                    return new AssetOrigin.PatchByte(integer(patch, "offset"), integer(patch, "value"));
+                }) : null);
+    }
+
+    private static Integer optionalInteger(JsonObject o, String key) {
+        return o.has(key) ? integer(o, key) : null;
+    }
+
     private static SampleTrigger trigger(JsonElement e) {
         JsonObject o=object(e,"trigger","id","tick","sampleId");
         return new SampleTrigger(string(o,"id"),integer(o,"tick"),string(o,"sampleId"));

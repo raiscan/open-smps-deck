@@ -364,3 +364,13 @@ Output files must not already exist. For native projects, Studio and
 `render-project` use the stored preview frame count. For arrangements, the CLI
 defaults to 120 presentations or extends DAC projects for the last sample tail.
 Studio previews the full arrangement and tail, up to 36,000 presentations.
+
+## Asset provenance
+
+All existing versions accept optional `origin` objects on asset declarations
+and `derivedFrom` at project level. These metadata extensions use the existing
+version, like review metadata. Files without either field retain their
+canonical bytes. Origin types are `original`, `source-audio`, `third-party`
+(with license and attribution), and `stock` (with an optional stock locator
+and transforms). A retail-song derivation carries the game, song ID and bank
+SHA-256. Provenance does not change compilation or playback.
