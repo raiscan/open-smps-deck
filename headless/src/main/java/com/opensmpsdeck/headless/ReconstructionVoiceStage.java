@@ -29,6 +29,14 @@ final class ReconstructionVoiceStage {
                       InstrumentCatalogue.Variant chosen) throws IOException {
         String chosenLane = chosen == null ? null : targets.iterator().next();
         var byLane = byLane(allocation);
+        var noise = byLane.getOrDefault("PSG3", List.of());
+        var cymbalGains = ReconstructionCymbals.gains(score, noise);
+        // Fit stem-backed cymbals separately. Their noise must not influence
+        // patch or gain choices for the tonal parts in a shared PSG3 lane.
+        var fitPsg3 = noise.stream().filter(n -> !ReconstructionCymbals.automatic(n.reason())
+                || !cymbalGains.containsKey(n.note().pitch())).toList();
+        if (!noise.isEmpty() && fitPsg3.isEmpty()) byLane.remove("PSG3");
+        else if (fitPsg3.size() != noise.size()) byLane.put("PSG3", fitPsg3);
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
@@ -58,15 +66,19 @@ final class ReconstructionVoiceStage {
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent) : List.<RankedPatch>of();
             incumbents.add(incumbent == null ? null : incumbent.id());
             var instruments = lane.startsWith("FM") ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
-            Role role = dominantRole(notes);
+            var toneContext = notes;
+            if (lane.equals("PSG3") && notes.stream().anyMatch(n -> n.role() != Role.drums))
+                toneContext = notes.stream().filter(n -> !ReconstructionCymbals.automatic(n.reason())).toList();
+            Role role = dominantRole(toneContext);
             var packed = windows.pack(notes);
             // A lane can carry more than one MIDI part. Use its most represented
             // stem for fitting, with only the notes belonging to that stem.
-            var stem = stemFor(notes, options.stems(), stems);
-            var stemNotes = stem == null ? null : windows.pack(notes.stream()
+            var stem = stemFor(toneContext, options.stems(), stems);
+            var stemNotes = stem == null ? null : windows.pack(toneContext.stream()
                     .filter(note -> stem.equals(options.stems().get(note.note().part()))).toList());
             models.add(new Model(lane, role, packed, stems.getOrDefault(stem, 0), stemNotes, patches, instruments));
-            initial.add(settings(role, patches.isEmpty() ? null : patches.getFirst().id(), WRITTEN, DRY, instruments));
+            var settings = settings(role, patches.isEmpty() ? null : patches.getFirst().id(), WRITTEN, DRY, instruments);
+            initial.add(lane.equals("PSG3") && !cymbalGains.isEmpty() ? settings.withDrumGains(cymbalGains) : settings);
         }
         var candidates = new ArrayList<List<VoiceFit.Candidate>>();
         for (int i = 0; i < models.size(); i++) {
@@ -129,6 +141,7 @@ final class ReconstructionVoiceStage {
                 .filter(lane -> !byLane.containsKey(lane) && !reservedCopies.contains(lane)).findFirst().orElse(null);
         var result = new LinkedHashMap<String, Lane>();
         for (int i = 0; i < models.size(); i++) {
+            var drumGains = initial.get(i).drumGains();
             var model = models.get(i);
             var role = model.role();
             String patch = patchIds.get(i);
@@ -143,7 +156,8 @@ final class ReconstructionVoiceStage {
                 articulations.put("short", new Articulation("short", .72, 0));
                 if (patch != null) articulations.put("fast-release", new Articulation("fast-release", art.gate(), 9));
                 boolean changed = choose(windows, references, source, catalogue, model, fit, i, articulations,
-                        (name, setting) -> settings(role, patch, setting, DRY, model.instruments()), ARTICULATION_MARGIN);
+                        (name, setting) -> settings(role, patch, setting, DRY, model.instruments())
+                                .withDrumGains(drumGains), ARTICULATION_MARGIN);
                 art = articulations.get(fit.selection(i).candidate().id());
                 if (changed) artReason = EVIDENCE;
 
@@ -151,7 +165,8 @@ final class ReconstructionVoiceStage {
                 final var selectedArticulation = art;
                 if (idioms.size() > 1) {
                     changed = choose(windows, references, source, catalogue, model, fit, i, idioms,
-                            (name, setting) -> settings(role, patch, selectedArticulation, setting, model.instruments()),
+                            (name, setting) -> settings(role, patch, selectedArticulation, setting, model.instruments())
+                                    .withDrumGains(drumGains),
                             EFFECT_MARGIN);
                     effects = idioms.get(fit.selection(i).candidate().id());
                     if (changed) effectReason = EVIDENCE;
@@ -171,7 +186,7 @@ final class ReconstructionVoiceStage {
                 patchReason = "previous variant (no material validated improvement)";
             }
             result.put(model.id(), new Lane(role, patch, patchScores.get(i), gain, art, effects,
-                    patchReason, artReason, effectReason, model.instruments()));
+                    patchReason, artReason, effectReason, model.instruments()).withDrumGains(drumGains));
         }
         // Refine low-register patches after the joint fit so this local timbre
         // objective cannot shift the lead's patch or articulation.
@@ -199,6 +214,8 @@ final class ReconstructionVoiceStage {
                     lane.effectReason(), lane.instruments()));
         }
         ReconstructionLevels.calibrate(score.frames(), source, catalogue, byLane, mix, options.stems(), result);
+        if (!noise.isEmpty() && fitPsg3.isEmpty())
+            result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
     }
 

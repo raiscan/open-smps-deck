@@ -256,6 +256,8 @@ final class ReconstructionCli {
             fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, targets, null));
         }
         var result = ReconstructionVoicing.keepCompatible(previous, fitted, allocated, report);
+        result = ReconstructionVoicing.withCymbalGains(result,
+                ReconstructionCymbals.gains(score, allocated.getOrDefault("PSG3", List.of())));
         ReconstructionVoicing.validate(result, allocation, catalogue, timeline.frames());
         return result;
     }

@@ -328,10 +328,11 @@ public final class ReconstructionStages {
                         var seed = savedAffinity == null ? ReconstructionAllocation.lanes(previousAllocation) : savedAffinity.seed();
                         int frames = ReconstructionTimeMap.of(score).frames();
                         boolean stems = !score.inputs.stems.isEmpty();
+                        var cymbalLevels = ReconstructionCymbals.measure(score);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems, seed);
-                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocate(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems);
+                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels);
+                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(
+                                roles, score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));

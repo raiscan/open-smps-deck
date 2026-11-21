@@ -133,11 +133,15 @@ curve. Use `--shared-db` (`sharedDb`) for a common color scale and
 `--pitch-preset drums` (`pitchPreset: "drums"`) for MIDI 35–81. The view
 draws authored bends and assembled FM pitch curves.
 
-Use `trace --lane DAC` or the view's drum rows to see simultaneous DAC
-losses next to the free PSG3 gates. Use the [PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise)
-to pin hats and move tonal spill. Check `lanes.PSG3.psgPercussion` for the
-noise and envelope settings. On DAC, use `drumGainOverrides` with `hitIds`
-or a half-open source-time `span` to replace the gain for selected hits.
+Use `trace --lane PSG3` for automatically routed cymbals and `trace --lane DAC`
+or the view's drum rows for remaining DAC losses. The
+[PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats)
+shows how to tune fitted gains or override routing with pins. Check
+`lanes.PSG3.psgPercussion` for the noise mode and automatic closed-hat
+`hatAttackPeriod`, `hatDecayPeriod` and `hatSwitchTick` (defaults 8, 16 and 1).
+On DAC, use
+`drumGainOverrides` with `hitIds` or a half-open source-time `span` to replace
+the gain for selected DAC hits.
 
 When comparing a stem with the render, pass the lanes that carry that part
 (for example `--lanes FM1,FM3`). The chip panel then solos them instead of

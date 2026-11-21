@@ -234,8 +234,12 @@ The arrangement quantizes timing to 60 Hz. FM1 carries melody and FM2 carries
 bass. Counter and harmony use the three remaining FM channels and can spill
 to PSG within its pitch range. Rapid inner chord re-attacks can be merged.
 `--harmony-max-hz 0` preserves those attacks for comparison. `--fm-only`
-disables PSG. DAC carries drums. A percussion part named `PSG3` or
-`PSG noise` can use PSG3 when PSG is enabled. The converter
+disables PSG. DAC carries the primary drum hits. Colliding cymbals and cymbals
+measured quiet in a dedicated drum stem can use PSG3 noise. Explicitly named
+`PSG3` or `PSG noise` percussion parts also use PSG3 when enabled. Automatic
+closed and pedal hats switch from 13.98 kHz to 6.99 kHz after one tick.
+See the [PSG3 hat recipe](../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats)
+for voicing fields and audition commands. The converter
 removes systematic bass octave doubles in synth lead parts. Use
 `--keep-octaves` to keep those events in the allocation. It translates note
 velocity to coarse tone volume. MIDI controllers, including sustain and
@@ -432,7 +436,7 @@ The legend also records the lane patch changes.
 - Bends available in the stage artifacts are drawn on their gates. The
   assembled curve comes from the rendered FM frequency registers.
 - When there are simultaneous DAC losses, the legend and plot show the
-  free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise).
+  free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats).
 - `--force` replaces the PNG and any requested ridge JSON with staged exports.
   `--pitch-preset drums` uses MIDI 35–81. Explicit pitch limits take precedence.
 - `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
