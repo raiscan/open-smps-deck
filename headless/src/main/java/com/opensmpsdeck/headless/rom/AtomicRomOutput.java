@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.rom;
 
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -31,8 +32,20 @@ final class AtomicRomOutput implements AutoCloseable {
         } else {
             // ATOMIC_MOVE may overwrite even without REPLACE_EXISTING. Linking the staged
             // output provides an atomic no-clobber publish even when another writer races.
-            Files.createLink(destination, staging);
+            try {
+                Files.createLink(destination, staging);
+            } catch (FileAlreadyExistsException e) {
+                throw e;
+            } catch (UnsupportedOperationException | FileSystemException e) {
+                // FAT32/exFAT flash-cart cards and some network shares have no hard links.
+                publishWithoutLink();
+            }
         }
+    }
+
+    /** Plain move without replacement: refuses an existing file, with a narrow check-then-act race. */
+    void publishWithoutLink() throws IOException {
+        Files.move(staging, destination);
     }
 
     @Override public void close() throws IOException {

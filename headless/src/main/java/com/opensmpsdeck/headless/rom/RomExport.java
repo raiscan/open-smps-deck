@@ -10,11 +10,20 @@ import java.util.List;
 public final class RomExport {
     public record Warning(String code, String message) {}
 
-    private static final List<Warning> WARNINGS = List.of(
-            new Warning("ROM_PATCHED_IMAGE", "A patched ROM contains copyrighted data from your retail ROM. "
-                    + "It is for personal use only. Do not redistribute it."),
-            new Warning("BPS_PATCH", "BPS is the shareable form and requires a supported clean retail ROM to apply. "
-                    + "Any material derived from stock assets used by the song remains subject to the original rights."));
+    private static final Warning PATCHED_IMAGE = new Warning("ROM_PATCHED_IMAGE",
+            "A patched ROM contains copyrighted data from your retail ROM. "
+                    + "It is for personal use only. Do not redistribute it.");
+    private static final Warning BPS_PATCH = new Warning("BPS_PATCH",
+            "BPS is the shareable form and requires a supported clean retail ROM to apply. "
+                    + "Any material derived from stock assets used by the song remains subject to the original rights.");
+
+    /** Warnings for the requested outputs, in a stable order. */
+    public static List<Warning> warnings(boolean rom, boolean bps) {
+        var warnings = new java.util.ArrayList<Warning>();
+        if (rom) warnings.add(PATCHED_IMAGE);
+        if (bps) warnings.add(BPS_PATCH);
+        return List.copyOf(warnings);
+    }
 
     private RomExport() {}
 
@@ -55,7 +64,8 @@ public final class RomExport {
             if (romOutput != null) romOutput.publish();
             if (bpsOutput != null) bpsOutput.publish();
         }
-        return new Result<>(clean.revision(), romDestination, bpsDestination, stats, patched.report(), WARNINGS);
+        return new Result<>(clean.revision(), romDestination, bpsDestination, stats, patched.report(),
+                warnings(romDestination != null, bpsDestination != null));
     }
 
     private static Path destination(Path requested, Path clean) throws IOException {

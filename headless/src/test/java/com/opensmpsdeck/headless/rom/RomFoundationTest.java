@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.zip.CRC32;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,6 +66,32 @@ class RomFoundationTest {
         }
     }
 
+    @Test void noLinkFallbackRefusesAnExistingFileAndPublishesOtherwise() throws Exception {
+        Path destination = scratch.resolve("card.gen");
+        try (var output = new AtomicRomOutput(destination, false)) {
+            Files.writeString(output.path(), "staged");
+            Files.writeString(destination, "other writer");
+            assertThrows(FileAlreadyExistsException.class, output::publishWithoutLink);
+            assertEquals("other writer", Files.readString(destination));
+        }
+        Files.delete(destination);
+        try (var output = new AtomicRomOutput(destination, false)) {
+            Files.writeString(output.path(), "staged");
+            output.publishWithoutLink();
+        }
+        assertEquals("staged", Files.readString(destination));
+        try (var files = Files.list(scratch)) {
+            assertEquals(1, files.count());
+        }
+    }
+
+    @Test void warningsFollowRequestedOutputs() {
+        assertEquals(List.of("ROM_PATCHED_IMAGE", "BPS_PATCH"),
+                RomExport.warnings(true, true).stream().map(RomExport.Warning::code).toList());
+        assertEquals(List.of("ROM_PATCHED_IMAGE"),
+                RomExport.warnings(true, false).stream().map(RomExport.Warning::code).toList());
+    }
+
     @ParameterizedTest
     @EnumSource(RomGame.class)
     void roundTripsRetailImageAndExercisesLibraryAndWriter(RomGame game) throws Exception {
@@ -109,7 +136,7 @@ class RomFoundationTest {
         var export = RomExport.write(clean, patched, null, patch, false);
         assertEquals("synthetic edit", export.report());
         assertEquals(encoded.stats(), export.bpsStats());
-        assertEquals(2, export.warnings().size());
+        assertEquals(List.of("BPS_PATCH"), export.warnings().stream().map(RomExport.Warning::code).toList());
         assertArrayEquals(encoded.bytes(), Files.readAllBytes(patch));
         assertThrows(FileAlreadyExistsException.class, () -> RomExport.write(clean, patched, null, patch, false));
         assertThrows(IllegalArgumentException.class, () -> RomExport.write(clean, patched, retail, null, true));
