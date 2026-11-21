@@ -485,8 +485,20 @@ final class ReconstructionVoicing {
         if (!targets.isEmpty()) for (String id : lanes.keySet())
             require(targets.contains(id) || previous.lanes().containsKey(id), "voicing.json.lanes." + id,
                     "new lane must be explicitly targeted");
-        return new Result(fitted.version(), lanes, fitted.fitWindows(), null, null,
-                targets.isEmpty() ? fitted.sourceInstruments() : previous.sourceInstruments(), previous.lanePolicies());
+        var sources = targets.isEmpty() ? fitted.sourceInstruments() : previous.sourceInstruments();
+        if (targets.isEmpty() && !refitLevels && sources != null && previous.sourceInstruments() != null) {
+            var changedSources = new HashSet<String>();
+            changedMaterial.forEach(id -> allocated.getOrDefault(id, List.of()).forEach(note ->
+                    changedSources.add(ReconstructionVoicePlan.SourceInstrument.id(note.note().part()))));
+            var retained = new java.util.LinkedHashMap<>(sources);
+            retained.replaceAll((id, sound) -> {
+                var saved = previous.sourceInstruments().get(id);
+                if (saved == null || changedSources.contains(id)) return sound;
+                return new SourceSound(sound.fm().withGain(saved.fm().gain()), sound.psgVariantId(), sound.psgVolumeOffset());
+            });
+            sources = retained;
+        }
+        return new Result(fitted.version(), lanes, fitted.fitWindows(), null, null, sources, previous.lanePolicies());
     }
 
     static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue, int frames) {

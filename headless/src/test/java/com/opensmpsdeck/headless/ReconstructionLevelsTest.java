@@ -65,6 +65,22 @@ class ReconstructionLevelsTest {
         assertEquals(0, 10 * Math.log10(actual / expected), 2);
     }
 
+    @Test void patchRefitRetainsCalibratedSourceGain() {
+        var laneDefault = lane(Role.melody, null, 1);
+        var saved = new Result(VERSION, Map.of("FM1", laneDefault), null).withSourceInstruments(
+                Map.of("part-0", new SourceSound(lane(Role.melody, "previous", 2), null, 0)));
+        var fitted = saved.withSourceInstruments(
+                Map.of("part-0", new SourceSound(lane(Role.melody, "next", .1), null, 0)));
+        var lead = new ReconstructionStages.Note("lead", 0, 1, 2, 76, 88, "test", 1);
+        var allocated = Map.of("FM1", List.of(placement(lead, "FM1", Role.melody, 180)));
+
+        var retained = preserveRefit(fitted, saved, Set.of(), false, Set.of(), allocated);
+        assertEquals("next", retained.sourceSound("FM1", 0).fm().variantId());
+        assertEquals(2, retained.sourceSound("FM1", 0).fm().gain());
+        var refitted = preserveRefit(fitted, saved, Set.of(), true, Set.of(), allocated);
+        assertEquals(.1, refitted.sourceSound("FM1", 0).fm().gain());
+    }
+
     private static Lane lane(Role role, String variant, double gain) {
         return new Lane(role, variant, List.of(), gain, WRITTEN, DRY, DEFAULT, DEFAULT, DEFAULT, List.of());
     }

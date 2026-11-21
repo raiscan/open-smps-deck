@@ -266,11 +266,16 @@ final class ReconstructionCli {
         }
         var selected = chosen;
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
+        var changedMaterial = ReconstructionVoicing.changedMaterial(previousAllocation, allocation);
         var retained = previous == null ? ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
-                : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
-                ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
-        var result = previous == null || refitLevels
-                ? ReconstructionLevels.calibrate(score, catalogue, allocation, retained, targets) : retained;
+                : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels, changedMaterial, allocated);
+        // Patch-only refits retain saved gains except on lanes with new material.
+        var levelTargets = targets;
+        if (previous != null && !refitLevels)
+            levelTargets = changedMaterial.stream().filter(id -> targets.isEmpty() || targets.contains(id))
+                    .collect(java.util.stream.Collectors.toSet());
+        var result = previous == null || refitLevels || !levelTargets.isEmpty()
+                ? ReconstructionLevels.calibrate(score, catalogue, allocation, retained, levelTargets) : retained;
         if (previous != null)
             ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
