@@ -535,7 +535,7 @@ Studio requires a resolved project. Use a ROM with the headless tools before
 rendering or compiling redacted source. A Studio ROM picker is a follow-up.
 The [disassembly kit](disassembly-kit.md) reads an embedded portable bank
 and its asset bindings. It relocates pointers and remaps DAC notes for
-skdisasm. Stock DAC note reuse checks the asset identity and the retail
+s1disasm, s2disasm or skdisasm according to the package driver. Stock DAC note reuse checks the asset identity and the retail
 playback rate byte.
 `DPCM_INEXACT` compares the decoded build output with the package PCM.
 For inexact samples, `--dpcm-closed` makes the exported WAV round-trip

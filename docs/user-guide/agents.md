@@ -150,8 +150,9 @@ tool_timeout_sec = 600
    to reject inexact conversion of either tempo. Use decimal engine
    music IDs for the mod `replace` array. Use `package_validate` on a portable
    export and supply `roms` for stock references. Check the returned
-   `warnings` before sharing. For a [skdisasm kit](../architecture/disassembly-kit.md),
-   `project` also accepts an embedded-bank portable package. Disassembly options are
+   `warnings` before sharing. For an [SMPS2ASM kit](../architecture/disassembly-kit.md),
+   `project` also accepts an embedded-bank portable package. Supply an S1 or S2
+   package to target s1disasm or s2disasm. Disassembly options are
    `roms` for personal-use stock materialisation, `dpcmClosed` to quantise
    WAVs, and `replaceDac` for unused retail note numbers. Studio **Export…**
    supports audio, VGM, raw SMPS and legacy packages. **Open as arrangement**

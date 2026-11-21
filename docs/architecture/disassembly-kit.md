@@ -1,11 +1,13 @@
-# S3K disassembly kits
+# SMPS2ASM disassembly kits
 
 `export INPUT OUTPUT --format disasm` accepts an arrangement, a
 reconstruction work directory, or an embedded-bank schema-4 `.smps.zip`. Use a new
 output directory or a `.zip`, which wraps the same files in a kit directory.
-The format dispatches by package driver. S1 and S2 kits are pending.
+Project and work-directory inputs target skdisasm. Portable packages target
+s1disasm, s2disasm or skdisasm according to their driver. For S1 and S2, see
+[Export a classic kit](#export-a-classic-kit).
 
-## Files and rights
+## skdisasm files and rights
 
 - `Sound/Music/OSD_<id>.asm` contains the SMPS2ASM header, tracks and local
   FM voices. Its relocations use labels. The kit preserves the entire bank,
@@ -144,3 +146,132 @@ private reconstruction with expanded ROM layouts. In both builds, the
 inserted 12,927-byte bank matched after relocation and note remapping.
 All four custom DAC setup rates and decoded waveforms matched. These
 checks inspected the assembled binaries.
+
+## Export a classic kit
+
+Compile the arrangement to the desired portable driver before exporting
+the kit. For example:
+
+```sh
+java -jar "$deck_jar" compile-package song.smps.json song.smps.zip --portable --driver s2 --speed-up-tempo 64
+java -jar "$deck_jar" export song.smps.zip song-kit --format disasm --dpcm-closed
+```
+
+Classic kits use lowercase `sound/music` and the matching checkout's
+`sound/_smps2asm_inc.asm`. The assembly preserves each bank's native FM
+operator storage order, including all voice bits. An identity PSG binding
+uses the retail table entry. For other PSG bindings, apply the generated
+`envelope-setup.asm` rows and append its data outside the pointer table.
+Audit other music and SFX before changing a retail slot. S2 indexes the
+PSG pointer table with an eight-bit doubled index, so slot 128 is the
+highest it can address. Use the matching game ROM with `--rom PATH` to
+materialise references, including S2 PSG data from the shared ROM extractor.
+Keep the materialised kit private. `RETAIL_SONG_DATA` also applies to
+classic packages with retail provenance.
+
+The README gives the native speed-shoes byte from
+`driverOptions.speedUpTempo`. When omitted, install the normal header
+tempo byte in the shoes table for that ID. See the
+[tempo conversion](driver-support.md#tempo-conversion) for the source clock.
+
+### Install in s1disasm
+
+1. Copy the kit's `sound/` tree into a scratch checkout. In
+   `s1.sounddriver.asm`, include the song after the SMPS2ASM macros.
+   For example, replace the `Music81` include and change `ptr_mus81`
+   in `MusicIndex` to `dc.l OSD_<id>`. Keep the alignment before the next
+   song. S1 reads the song from 68000 ROM and uses big-endian offsets
+   relative to its header. There is no music bank table.
+2. Write the speed-shoes byte to `SpeedUpIndex[music ID − $81]`. In the
+   stock checkout, only the first eight entries exist. For later IDs,
+   fill earlier missing entries through the chosen slot before
+   `MusicIndex`. Use those songs' intended native tempos. The stock
+   driver otherwise reads the adjacent pointer bytes for those IDs.
+   Apply PSG edits to `PSG_Index` using 68000 longwords.
+3. The stock Z80 DAC driver has three sample records. The 68000 driver
+   treats notes `$88–$8B` as pitch variants of timpani, writing the pitch
+   into the `$83` record. When a song uses direct `dTimpani` after any pitch
+   variant, the direct note inherits that pitch. To give `dTimpani` its
+   original pitch on each trigger, add a check for `d0.b == $83` in the
+   direct path of `DACUpdateTrack`, immediately before the write to
+   `zDAC_Sample`. On equality, write
+   `#dpcmLoopCounter(zDAC_Timpani.sample_rate)` as a byte to
+   `(z80_ram+zTimpani_Pitch).l`, then continue to the normal sample write.
+4. To use a new sample, explicitly pass `--replace-dac 81` or
+   `--replace-dac 82` for each custom binding in order. The kit replaces
+   the corresponding kick or snare include in `sound/z80.asm` and leaves
+   its metadata macro to derive the pitch from the WAV. Audit all other
+   users of those notes. The kit rejects additional custom bindings.
+   Independent new sample slots require changes to the 68000 note
+   dispatch and the Z80 sample selector, tables and available RAM.
+5. Run `lua build.lua`. Check the listing's uncompressed driver size
+   against `z80_stack=$1FFC`, including all three packed samples. Check
+   the compressed driver reservation (`Size_of_DAC_driver_guess`) and
+   validate the resulting ROM layout. The kit requires no extra 68000
+   track RAM.
+
+### Install in s2disasm
+
+1. Copy the kit's `sound/` tree into a scratch checkout. In `s2.asm`
+   select a music ID and replace that song's generated include with
+   `include "sound/music/generated/OSD_<id>.inc"`. Keep the original
+   `Mus_*` label, its `music_ptr` entry inside `MusicPoint1` or
+   `MusicPoint2`, and the matching `music_metadata` entry in
+   `zMasterPlaylist`. For example, ID `$82` uses `Mus_EHZ` and
+   `zMusIDPtr_EHZ`. The wrapper reports the compression flag to the
+   metadata macro, which also supplies the bank select bit. Keep
+   each bank within `$8000` bytes and retain the include's alignment.
+2. To build a Saxman song, replace the old filename stem with
+   `OSD_<id>` in `sound/music/list of compressed songs.txt`. The build
+   assembles at the Z80 buffer address `$1380`. Use compressed placement
+   only up to `$7C0` uncompressed bytes. For an uncompressed song, leave
+   the new stem out of that list. The SMPS2ASM macros emit little-endian
+   pointers into the active Z80 ROM window at `$8000–$FFFF`.
+3. Write the speed-shoes byte to `zSpedUpTempoTable[music ID − $81]` in
+   `s2.sounddriver.asm`. Apply PSG edits to `zPSG_EnvTbl` using Z80 words.
+4. Apply the sections of `dac-setup.asm`. Add the data before `SndDAC_End`
+   in `s2.asm`, append sample pointers to `zDACPtrTbl`, and edit or append
+   the marked note rows in `zDACMasterPlaylist`. Extensions start at
+   `$92` and end at `$DF`. Repeat `--replace-dac NN` to use audited
+   unused rows in `$81–$91` first. A replacement edits a playlist row
+   in place. Custom sample records follow the seven retail records. An
+   untransformed stock sample at a different rate uses a custom note row
+   pointing to the existing sample. For example, S2 REV01's pinned
+   portable loader reports a different rate for `$91` than s2disasm
+   assembles. The kit retains the package rate with its own row.
+   The two low-byte table lookups require the generated
+   `ensure1byteoffset` sizes. Each table must fit entirely within one
+   256-byte page. The selector can address up to 64 sample records in
+   total. ROM and Z80 RAM limits can reduce those counts.
+5. Run `lua build.lua`. Use the assembler listing to check that Z80 code
+   and tables end by `zMusicData=$1380`, including page padding.
+   If they run out of space, reduce the added data or reclaim driver space.
+   Check that the compressed Z80 driver fits its reservation
+   (`Size_of_Snd_driver_guess`). All packed samples must fit within
+   the same bank selected by `SndDAC_Start`. Increase
+   `Size_of_DAC_samples` as needed up to `$8000`, and recheck the
+   resulting driver, DAC and music ROM layout.
+
+### Classic rate and DPCM
+
+Stock DAC note reuse compares the binding's playback byte with
+`stock/s1-dac-rates.txt` or `stock/s2-dac-rates.txt`. Each row gives the
+hexadecimal note and rate bytes from the retail setup or playlist.
+
+The S1 and S2 WAV rate formulas use
+`1 + (Z80_Clock / hz − (baseCycles / 2) + (13 / 2)) / 13`
+with truncating integer division. The bases are 301 and 295 cycles per
+two samples, respectively. Every rate byte has a WAV sample rate in
+its truncation interval. S2 writes the bytes literally in the playlist,
+so several rates can share one sample. Both drivers use the S3K delta
+table. The same `DPCM_INEXACT` reporting, odd-length padding, and
+`--dpcm-closed` behaviour apply.
+
+### Classic local acceptance
+
+The Linux `lua build.lua` scripts built an original FM/PSG/DAC arrangement
+in both scratch checkouts. The S1 kick/snare replacement and S2 DAC extension matched all 487 package
+bank bytes after the applicable pointer relocation and DAC note remapping.
+The S2 build was verified with both Saxman and uncompressed ROM placement. Each finished ROM's two DAC
+rate bytes and decoded samples matched the kit. S2 needed a `$3900` DAC
+reservation for this fixture.

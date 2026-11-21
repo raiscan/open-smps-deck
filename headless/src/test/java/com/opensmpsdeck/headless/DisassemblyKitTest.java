@@ -207,8 +207,8 @@ class DisassemblyKitTest {
         }
         assertThrows(java.nio.file.FileAlreadyExistsException.class,
                 () -> ProjectExport.exportDisasm(packageFile, output, List.of(), false, List.of(), (done, total, message) -> {}));
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> DisassemblyKit.Emitter.forDriver("s2"))
-                .getMessage().contains("not yet supported for driver s2"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> DisassemblyKit.Emitter.forDriver("scd"))
+                .getMessage().contains("not yet supported for driver scd"));
     }
 
     private static PortablePackageReader.Package artifact(StudioProject project) throws Exception {

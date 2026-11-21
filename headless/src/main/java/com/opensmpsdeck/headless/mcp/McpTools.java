@@ -123,7 +123,7 @@ final class McpTools {
                     ROMS,
                     field("dpcmClosed", "boolean", "Quantise disassembly WAVs to DPCM-representable PCM").optional(),
                     field("replaceDac", object(Map.of("type", "array", "items", Map.of("type", "integer"))),
-                            "Unused retail DAC notes (129–196) to repurpose, in order").optional(),
+                            "Unused retail DAC note numbers to repurpose, in order (S1: 129–130, S2: 129–145, S3K: 129–196)").optional(),
                     choice("driver", "Portable target driver (defaults to the project target)", "s1", "s2", "s3k").optional(),
                     field("speedUpTempo", "integer", "S3K-clock speed-shoes tempo byte (0..255) for S1/S2 exports").optional(),
                     field("strictTempo", "boolean", "Reject inexact tempo conversions for portable or mod export").optional(),
