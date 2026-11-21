@@ -181,10 +181,13 @@ shortened for a pin. Earlier pinned attacks win overlapping gates, and the
 earlier intent wins ties at the same tick. The trace records the winning
 competitor when the other note is shortened or dropped.
 
-Use `reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID`
-or MCP `reconstruct_edit`. The batch file accepts an array of intents or a
-versioned edits object. MCP add takes either a single `edit` or an `edits`
-array. Entries append in order, and a malformed intent or duplicate edit ID
+Use `reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID`.
+Inline `add JSON` takes one intent object. Pass arrays through `add --file BATCH`.
+Use a string such as `"bars": "6-7"` in `roleplan.json`.
+MCP offers the same operations through `reconstruct_edit`. The batch file
+accepts an array of intents or a versioned edits object. MCP add takes
+either a single `edit` or an `edits` array. Entries append in order, and a
+malformed intent or duplicate edit ID
 rejects the whole batch before writing. Resume from the returned `from`
 stage. Use `add --dry-run JSON` or `add --dry-run --file BATCH` (MCP
 `dryRun: true`) to resolve a batch in memory. The preview lists stable IDs,
@@ -694,7 +697,17 @@ volume boosts.
 key-off. FM `minimumReleaseRate` floors the four operator RR nibbles (0
 preserves the patch). `effects.detune` is a signed frequency offset.
 Optional `effects.vibrato` holds the four native F0 parameters `delay`,
-`rate`, `delta` and `steps`. Optional `effects.copy` gives an unused FM
+`rate`, `delta` and `steps`. In [S3K's driver](../../openggf-audio/src/main/java/com/openggf/audio/smps/SmpsSequencer.java),
+`delay` counts ticks until the rate counter starts. `rate` counts ticks per
+accumulator update, and signed `delta` is a native packed-frequency increment
+per update. `steps` counts sustain ticks per direction, starting at
+`floor(steps / 2)` on attack. The sign reverses every `steps` ticks
+thereafter. At reconstruction tempo zero each tick is 1/60 s. When `rate`
+divides `steps`, a full cycle is `2 × steps` ticks and the peak-to-peak
+accumulator excursion is `abs(delta) × steps / rate` native units.
+The cents change depends on the pitch. For example, `rate: 2, steps: 12`
+cycles every 24 ticks (2.5 Hz).
+Optional `effects.copy` gives an unused FM
 `lane`, `delay` in ticks, relative `gain`, signed `detune`, and optional
 `vibrato`. Preset names and decision reasons are descriptive. The numeric
 settings control assembly.
@@ -704,7 +717,50 @@ from 0 to 4. For example, `"drumGains":{"42":0.1}` attenuates closed hi-hats.
 Missing pitches use unity gain. DAC scales the unsigned PCM around its
 midpoint. PSG3 applies gain at the nearest hardware attenuation step of
 about 2 dB, with 0 selecting mute. Drum gains persist through refits in
-the same work directory.
+the same work directory. On DAC, `drumGainOverrides` replaces that gain
+for specific hits. Each entry takes `hitIds` or a half-open `span` of
+effective onsets in source seconds, and an optional MIDI `pitch` filter.
+The last matching entry wins. For example, set the `drumGainOverrides`
+field on `lanes.DAC` to this array.
+
+```json
+[
+  {"hitIds": ["KICK_ID"], "gain": 0.75},
+  {"span": [12.5, 13.0], "pitch": 38, "gain": 0.5}
+]
+```
+
+#### Move hats to PSG3 noise
+
+1. Run `reconstruct trace WORK_DIR --lane DAC --start S --end S --json`.
+   Read `drums.simultaneousDacLosses` and `drums.psg3Free` to choose hats
+   with room for their full gates. Choose a set whose gates do not overlap
+   one another. Inspect `trace --lane PSG3` for tonal occupants. The view's
+   drum rows show the same availability and losses.
+2. Pin tonal notes in the passage to verified free tonal lanes such as
+   PSG2. Pin every retained tonal note that could fall back to PSG3 after
+   reallocation. Use a batch like this with `edit add --file`:
+
+   ```json
+   [
+     {"id":"keep-tone","op":"pinLane","reason":"Reserve PSG3 for hats",
+      "noteIds":["TONE_ID"],"lane":"PSG2"},
+     {"id":"move-hat","op":"setRole","reason":"Recover simultaneous DAC loss",
+      "noteIds":["HAT_ID"],"role":"drums","lane":"PSG3"}
+   ]
+   ```
+
+3. Run `reconstruct run --from roles WORK_DIR --keep-voicing`. Check
+   `edit list` for blocked pins and confirm with `trace --lane PSG3` that
+   every gate in the passage is a drum. For a blocked pin, choose a free
+   destination, shorten the conflicting gate, or drop the tonal note if
+   the arrangement can spare it. Pin newly spilled tonal notes and
+   recheck after each rebuild.
+4. Read `lanes.PSG3.psgPercussion` in `voicing.json` for the engine's
+   current noise and envelope settings. Byte 231 (0xE7) is white noise
+   clocked by tone 3. Envelope slot 0 uses the lane's fixed level. Set
+   `lanes.PSG3.drumGains` (for example `{"42":2}` inside that field),
+   assemble, and audition with `render-project --solo PSG3`.
 
 The existing PSG velocity curve starts with an FM-style logarithmic
 velocity conversion and then quantizes the resulting 7-bit level to the
@@ -796,6 +852,8 @@ or the saved steady WAV. Choose `.mp3` for ffmpeg encoding. Both formats contain
 the render followed by the level-matched reference, with the split point in
 the JSON result. Use `render-project --start S --end S --solo LANES --mute LANES`
 for an excerpt from a project in project seconds. Lane lists are comma-separated.
+Both CLI commands accept `--force` to replace the destination by renaming a
+completed sibling export.
 
 With MCP `render_compare`, provide the work directory, its `render.wav`, and the
 original mix or the steady reference. MCP substitutes the steady file when
@@ -816,12 +874,21 @@ into the playback bank.
 `reconstruct view --notes FILE` overlays source-time MIDI or JSON note triples
 without changing transcription. Repeat `--harmonics-at PITCH[@TIME]` for
 pitch probes independent of trace note IDs. `--ridges` writes a sibling
-`.ridges.json` with the strongest source harmonic-sum pitch per time column.
-`--time project` selects project-clock coordinates for bounds and harmonic
-probe times. The view legend gives both spans. `--db` shows spectral peak
-levels and `--shared-db` uses a common color scale.
-`--pitch-preset drums` sets MIDI 35–81. MCP `reconstruct_view` exposes these
-as `notes`, `harmonicsAt`, `ridges`, `db`, `sharedDb`, and `pitchPreset`.
+`.ridges.json` with up to three interpolated peaks per time column for
+the source and, with `--render`, the chip panel. `--ridge-count N` enables
+the export and sets the count to 1–32. With `--harmonics NOTE_ID` or
+`--harmonics-at PITCH[@TIME]`, it includes a trajectory for the fundamental
+and the two linked partials at twice and three times its frequency. Each
+point has both clocks and each measured peak has its own spectral dBFS.
+`--time project` (MCP `time: "project"`) sets the clock for bounds and
+harmonic probe times. The view legend gives both spans.
+`--db` plots the selected fundamental's level under each panel and returns
+the numerical tracks in the legend. `--shared-db` uses a common color
+scale. The view also draws authored bends and assembled FM pitch curves.
+`--pitch-preset drums` sets MIDI 35–81. `--force` replaces the PNG and
+requested sidecar from completed staged files. MCP `reconstruct_view`
+supports `notes`, `harmonicsAt`, `ridges`, `ridgeCount`, `db`,
+`sharedDb`, and `pitchPreset`.
 
 ### Audition a frozen phrase
 
@@ -838,12 +905,17 @@ The default is in-mix playback. Use `--solo` to hear just the target lane,
 or `--gain` to multiply its existing level within the phrase. Each candidate
 plays from song start, discarding the warm-up PCM before the requested range.
 
-Repeat `--variant` to write numbered files and compare the seven successive
-RMS bins. `--reference WAV` appends the aligned reference phrase after
+Repeat `--variant` for up to 32 candidates, or pass `--shortlist` to use
+the saved shortlist on the explicit or inferred lane. A batch writes
+numbered files and reports up to
+seven successive RMS bins. `--reference WAV` appends the aligned reference phrase after
 matching the two RMS levels by attenuation. If the report identifies the
 original reference for a warped run, the tool uses the saved steady WAV.
 Audition leaves the artifacts untouched. Add an override and assemble to
-publish the chosen patch. MCP `reconstruct_audition` takes a `variants` array
+publish it in a passage, or run `reconstruct voice WORK_DIR --lane FM1 --variant ID`
+to fit a specific lane-wide FM patch and its level in one step, then assemble.
+`catalog show INDEX.json ID --brief` gives occurrence counts and keeps the patch
+and variant detail. MCP `reconstruct_audition` takes a `variants` array
 and returns the candidate paths, variant IDs and pre-match RMS envelopes in
 linear units, with source and project bounds and ticks. MCP uses `note` and
 `time` for note ID and clock. Save the same fields with `--rms-json FILE` or

@@ -20,31 +20,40 @@ public final class RenderComparison {
     private RenderComparison() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
-        if (args.length < 7 || args.length % 2 == 0)
+        if (args.length < 7)
             throw new IllegalArgumentException("Expected render-compare WORK_DIR --start S --end S [options] OUT.wav|OUT.mp3");
         Path work = Path.of(args[1]);
         Path render = work.resolve("render.wav"), reference = null;
         Double start = null, end = null;
         String time = "source";
         var seen = new HashSet<String>();
-        for (int i = 2; i < args.length - 1; i += 2) {
-            if (!seen.add(args[i])) throw new IllegalArgumentException("Repeated option " + args[i]);
-            switch (args[i]) {
-                case "--start" -> start = Double.parseDouble(args[i + 1]);
-                case "--end" -> end = Double.parseDouble(args[i + 1]);
-                case "--time" -> time = args[i + 1];
-                case "--render" -> render = Path.of(args[i + 1]);
-                case "--reference" -> reference = Path.of(args[i + 1]);
-                default -> throw new IllegalArgumentException("Unknown render-compare option " + args[i]);
+        for (int i = 2; i < args.length - 1;) {
+            String key = args[i++];
+            if (!seen.add(key)) throw new IllegalArgumentException("Repeated option " + key);
+            if (key.equals("--force")) continue;
+            if (i >= args.length - 1) throw new IllegalArgumentException("Missing value for " + key);
+            String value = args[i++];
+            switch (key) {
+                case "--start" -> start = Double.parseDouble(value);
+                case "--end" -> end = Double.parseDouble(value);
+                case "--time" -> time = value;
+                case "--render" -> render = Path.of(value);
+                case "--reference" -> reference = Path.of(value);
+                default -> throw new IllegalArgumentException("Unknown render-compare option " + key);
             }
         }
         if (start == null || end == null) throw new IllegalArgumentException("Expected --start and --end");
         out.println(new Gson().toJson(run(work, render, reference, Path.of(args[args.length - 1]),
-                start, end, time, null)));
+                start, end, time, null, seen.contains("--force"))));
     }
 
     public static Result run(Path work, Path render, Path reference, Path output,
                              double start, double end, String time, Double offset) throws IOException {
+        return run(work, render, reference, output, start, end, time, offset, false);
+    }
+
+    private static Result run(Path work, Path render, Path reference, Path output,
+                              double start, double end, String time, Double offset, boolean force) throws IOException {
         Path scoreFile = work.resolve("score.json");
         var score = Files.isRegularFile(scoreFile) ? ReconstructionStages.readScore(scoreFile) : null;
         var timeline = score == null ? new ReconstructionTimeMap(null, null, 600) : ReconstructionTimeMap.of(score);
@@ -77,16 +86,29 @@ public final class RenderComparison {
         boolean mp3 = filename.endsWith(".mp3");
         if (!mp3 && !filename.endsWith(".wav"))
             throw new IllegalArgumentException("Comparison output must end in .wav or .mp3");
-        if (Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            throw new java.nio.file.FileAlreadyExistsException(output.toString());
-        long referenceStart = (long) range.start() * STEREO_FRAMES_PER_PRESENTATION
-                - (offset == null ? 0 : Math.round(offset * SAMPLE_RATE));
+        try (var target = new ExportTarget(output, force)) {
+            if (Files.exists(output) && (Files.isSameFile(output, render) || Files.isSameFile(output, reference)))
+                throw new IllegalArgumentException("Comparison output must differ from both input WAVs");
+            long referenceStart = (long) range.start() * STEREO_FRAMES_PER_PRESENTATION
+                    - (offset == null ? 0 : Math.round(offset * SAMPLE_RATE));
+            double sourceEnd = base == ReconstructionTimeMap.TimeBase.source ? end : timeline.source(end);
+            var result = export(render, reference, target.path(), range, referenceStart, timeline, sourceEnd, stretch, mp3);
+            target.publish();
+            return new Result(output.toString(), result.order(), result.splitSeconds(), result.renderGain(),
+                    result.referenceGain(), result.levelMatched(), result.sourceStart(), result.sourceEnd(),
+                    result.projectStart(), result.projectEnd(), result.startTick(), result.endTick());
+        }
+    }
+
+    private static Result export(Path render, Path reference, Path output, WaveFile.Range range, long referenceStart,
+                                 ReconstructionTimeMap timeline, double sourceEnd, boolean stretch, boolean mp3)
+            throws IOException {
         if (!stretch && !mp3) return write(render, reference, output, range, referenceStart, timeline);
         Path scratch = Files.createTempDirectory(output.toAbsolutePath().getParent(), ".render-compare-");
         Path warped = scratch.resolve("reference.wav"), wav = scratch.resolve("pair.wav"), encoded = scratch.resolve("pair.mp3");
         try {
             if (stretch) {
-                if (ReferenceAudio.durationMicros(reference) / 1e6 < (base == ReconstructionTimeMap.TimeBase.source ? end : timeline.source(end)))
+                if (ReferenceAudio.durationMicros(reference) / 1e6 < sourceEnd)
                     throw new IllegalArgumentException("Source span exceeds the reference duration");
                 ReferenceStretch.write(reference, warped, range.count(), elapsed ->
                         timeline.source(range.start() / (double) PRESENTATIONS_PER_SECOND + elapsed));
@@ -97,9 +119,6 @@ public final class RenderComparison {
             if (mp3) {
                 encodeMp3(wav, encoded);
                 Files.move(encoded, output);
-                result = new Result(output.toString(), result.order(), result.splitSeconds(), result.renderGain(),
-                        result.referenceGain(), result.levelMatched(), result.sourceStart(), result.sourceEnd(),
-                        result.projectStart(), result.projectEnd(), result.startTick(), result.endTick());
             }
             return result;
         } finally {

@@ -34,6 +34,7 @@ playback and access to driver operations outside the arrangement format.
 
 ## Instrument catalogue
 
+Use `catalog show INDEX.json ID --brief` to replace occurrence lists with counts.
 Run `catalog --help` for the local index, search, show, match, audition, and apply
 commands. `catalog match` ranks chip-rendered variants against a short WAV
 excerpt and returns the distances with stable IDs. Each successful operation writes versioned JSON. The
@@ -85,8 +86,12 @@ Omit the end to use `--frames` if supplied, or the project's presentation
 count for a bounded render. `--solo FM1,PSG1` mutes all other lanes and
 `--mute DAC,PSG3` mutes the listed lanes even when soloed.
 
-For aligned A/B listening, use `render-compare WORK_DIR --start S --end S OUT.wav`
-with source seconds. Use `--time project` for project seconds. It maps the bounds to project time and appends the
+Pass `--force` to `render-project` or `render-compare` to replace an existing
+regular file with a completed export staged in the same directory.
+
+For aligned A/B listening, use `render-compare WORK_DIR --start S --end S OUT.wav`.
+Bounds default to source seconds and are mapped to project time. Use
+`--time project` to specify project seconds directly. The export appends the
 level-matched reference after the render. A warped run uses its saved
 `reference-steady.wav`. Use `--render WAV` for a replacement project-time
 render, or `--reference WAV` for another aligned source-time reference.
@@ -246,15 +251,19 @@ one FM lane for the selected phrase. Use source seconds by default or
 span to use the assembled voiced gate and infer the FM lane. The output
 reports both clocks and project ticks. Playback warms up from the song start.
 In-mix playback is the default. `--gain` multiplies the lane's existing level
-within the phrase. With multiple variants the command writes `phrase-1.wav`,
-`phrase-2.wav`, and so on. The table shows the variant ID, filename and
+within the phrase. Repeat `--variant` for up to 32 candidates, or use
+`--shortlist` for the saved candidates on the explicit or inferred lane.
+With multiple variants the command writes `phrase-1.wav`, `phrase-2.wav`,
+and so on. The table shows the variant ID, filename and
 successive RMS bins in dBFS before optional reference level matching.
 `--rms-json FILE` saves the paths, IDs and linear RMS bins to a new JSON
 file. Warped projects can take the original mix or the saved steady reference.
 In MCP, `reconstruct_audition` takes a `variants` array and optional `rmsJson`
 path. It also returns these measurements inline and accepts `note` and `time`.
 
-To apply a candidate, add an entry in the target lane's `overrides` array in
+Set a lane-wide patch and fit its level with
+`reconstruct voice WORK_DIR --lane FM1 --variant ID`, then assemble. To
+apply a candidate to a passage, add an entry in the target lane's `overrides` array in
 `voicing.json`, then run `reconstruct assemble WORK_DIR`. Scope entries use
 project seconds, project ticks, and/or allocated note IDs, and can set a
 variant, gain, gate, release floor or vibrato. See the artifact contract for
@@ -310,7 +319,8 @@ without overwriting an existing plan. Edit the template to express musical inten
 ```
 
 Rules refer to the displayed section IDs and one-based inclusive bar
-numbers. Use `sections`, `bars`, or both to match their intersection.
+numbers. Write a bar range as a string such as `"bars": "6-7"`. Use
+`sections`, `bars`, or both to match their intersection.
 Rules match the note's attack and optional inclusive MIDI pitch bounds
 and `texture`. Each attack belongs to the nearest displayed 16th step in
 its bar, with rounding kept within that bar. An attack is `chord` if at
@@ -385,11 +395,21 @@ The legend also records the lane patch changes.
 - Repeat `--harmonics-at PITCH[@TIME]` to mark harmonics from a MIDI pitch
   or note name (for example, `D#4@35.4`). Time uses the selected clock.
   Omit it to mark the pitch's harmonics across the whole span.
-- `--ridges` writes `OUT.ridges.json` alongside `OUT.png` with the strongest
-  harmonic-sum ridge per analyzed source column. Rows give time in the
-  selected clock, fractional MIDI pitch and spectral strength in dBFS.
-- `--db` shows each panel's peak spectral dBFS. `--shared-db` also maps
-  both panels to the same 30 dB window, using the higher peak as the ceiling.
+- `--ridges` writes `OUT.ridges.json` with the top three interpolated spectral
+  peaks per column for the source and, with `--render`, the chip panel.
+  `--ridge-count N` enables the export and sets the count to 1–32. Points
+  carry both clocks, fractional MIDI pitch, and spectral dBFS. With
+  `--harmonics NOTE_ID` or `--harmonics-at PITCH[@TIME]`, the export also
+  tracks the fundamental, second and third partial separately.
+- `--db` shows each panel's peak spectral dBFS and plots the fundamental's
+  absolute level over time for any selected note or pitch. The legend gives
+  the full numerical traces. `--shared-db` maps both spectrograms to the same
+  30 dB window, using the higher peak as the ceiling.
+- Bends available in the stage artifacts are drawn on their gates. The
+  assembled curve comes from the rendered FM frequency registers.
+- When there are simultaneous DAC losses, the legend and plot show the
+  free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise).
+- `--force` replaces the PNG and any requested ridge JSON with staged exports.
   `--pitch-preset drums` uses MIDI 35–81. Explicit pitch limits take precedence.
 - `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
   source spectrum still shows the selected audio. With `--render`, `--lanes`
@@ -400,7 +420,7 @@ The legend also records the lane patch changes.
 
 MCP uses corresponding fields `time`, `stem`, `wav`, `render`, `pitchMin`,
 `pitchMax`, `lanes` (array), `parts` (array), `harmonics`, `harmonicSum`,
-`width`, `notes`, `harmonicsAt` (array), `ridges`, `db`, `sharedDb`,
+`width`, `notes`, `harmonicsAt` (array), `ridges`, `ridgeCount`, `db`, `sharedDb`,
 and `pitchPreset`.
 
 ### Persistent musical edits
@@ -413,7 +433,7 @@ java -jar "$jar" reconstruct edit "$work" list
 java -jar "$jar" reconstruct edit "$work" remove answer
 ```
 
-A batch is an ordered array of intents or a versioned edits object. The CLI
+Inline `edit add JSON` takes one intent object. A batch is an ordered array of intents or a versioned edits object. The CLI
 returns the first affected stage as `from`. MCP `reconstruct_edit` accepts
 `workDir`, `action: "add" | "list" | "remove"`, and an `edit` object or
 `edits` array for add, or an `id` for remove. Set `rerun: true` on MCP add

@@ -242,11 +242,13 @@ public final class ReconstructionTrace {
             throw new IllegalArgumentException("--lane expects FM1–FM5, PSG1–PSG3, or DAC");
         Status status = flags.containsKey("--status") ? Status.valueOf(flags.get("--status")) : null;
         var notes = new ArrayList<Row>();
-        for (var row : read(work, score).values()) {
+        var rows = read(work, score).values();
+        for (var row : rows) {
             if ((clustered ? !span.contains(writtenOnset(row)) : !overlaps(span, row)) || part != null && part != row.part()
                     || min != null && row.pitch() < min || max != null && row.pitch() > max
                     || status != null && row.status != status) continue;
-            if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane))) continue;
+            if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane)
+                    && !(lane.equals("DAC") && "simultaneous-dac-hit".equals(row.allocation.reason)))) continue;
             notes.add(row);
         }
         if (clustered) {
@@ -258,7 +260,12 @@ public final class ReconstructionTrace {
             }
             return JSON.newBuilder().serializeNulls().create().toJsonTree(Map.of("clusters", clusters)).getAsJsonObject();
         }
-        return JSON.toJsonTree(Map.of("notes", notes)).getAsJsonObject();
+        var result = JSON.toJsonTree(Map.of("notes", notes)).getAsJsonObject();
+        var drums = DrumEvidence.review(notes, rows, span.start() == null ? 0 : span.start(),
+                span.end() == null ? timeline.sourceDuration() : span.end(), timeline,
+                lane == null || lane.equals("DAC"), List.of());
+        if (drums != null) result.add("drums", JSON.toJsonTree(drums));
+        return result;
     }
 
     private static double writtenOnset(Row row) {
@@ -785,7 +792,7 @@ public final class ReconstructionTrace {
         return report.getAsJsonArray(name).asList().stream().map(value -> JSON.fromJson(value, type)).toList();
     }
 
-    private static <T> T optional(Path work, String name, Class<T> type) throws IOException {
+    static <T> T optional(Path work, String name, Class<T> type) throws IOException {
         Path file = work.resolve(name);
         return Files.notExists(file) ? null : ReconstructionArtifacts.read(file, type);
     }
@@ -908,6 +915,13 @@ public final class ReconstructionTrace {
         } else {
             for (var entry : result.getAsJsonArray("notes")) print(out, "", JSON.fromJson(entry, Row.class));
             out.printf("%d notes%n", result.getAsJsonArray("notes").size());
+            if (result.has("drums")) {
+                var drums = JSON.fromJson(result.get("drums"), DrumEvidence.Review.class);
+                for (var gap : drums.psg3Free()) out.println("PSG3 free " + format(gap));
+                for (var loss : drums.simultaneousDacLosses())
+                    out.printf("DAC loss %s %s • PSG3 %s%n", loss.noteId(), format(loss.gate()),
+                            loss.psg3CanFit() ? "free for full gate" : "occupied during gate");
+            }
         }
     }
 

@@ -75,7 +75,7 @@ public final class S3kRenderer {
         render(project, presentations, mask, sink, ChipWriteObserver.NONE);
     }
 
-    private static void render(CompiledProject project, int presentations, ChannelMask mask,
+    static void render(CompiledProject project, int presentations, ChannelMask mask,
                                PcmSink sink, ChipWriteObserver observer) throws IOException {
         validatePresentations(presentations);
         Objects.requireNonNull(sink, "sink");

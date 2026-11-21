@@ -26,7 +26,7 @@ import static com.opensmpsdeck.headless.S3kRenderer.*;
 /** Ephemeral FM patch overlays on the last assembled arrangement. */
 public final class ReconstructionAudition {
     private static final int BINS = 7;
-    private static final int MAX_VARIANTS = 16;
+    private static final int MAX_VARIANTS = 32;
     static final int FRAME_SAMPLES = STEREO_FRAMES_PER_PRESENTATION * 2;
 
     public record Candidate(String variantId, String name, String output, List<Double> rms) {}
@@ -40,10 +40,16 @@ public final class ReconstructionAudition {
         String lane = null, note = null, time = "source";
         Double start = null, end = null, gain = null;
         Boolean solo = null;
+        boolean shortlist = false;
         Path reference = null, rmsJson = null;
         var variants = new ArrayList<String>();
         for (int i = 1; i < args.length - 1; i++) {
             String key = args[i];
+            if (key.equals("--shortlist")) {
+                if (shortlist) throw new IllegalArgumentException("Repeated --shortlist");
+                shortlist = true;
+                continue;
+            }
             if (key.equals("--solo") || key.equals("--in-mix")) {
                 if (solo != null) throw new IllegalArgumentException("Choose --solo or --in-mix");
                 solo = key.equals("--solo");
@@ -64,7 +70,7 @@ public final class ReconstructionAudition {
                 default -> throw new IllegalArgumentException("Unknown audition option " + key);
             }
         }
-        var result = run(Path.of(args[0]), lane, start, end, time, note, variants, gain, Boolean.TRUE.equals(solo),
+        var result = run(Path.of(args[0]), lane, start, end, time, note, variants, gain, Boolean.TRUE.equals(solo), shortlist,
                 reference, Path.of(args[args.length - 1]), rmsJson);
         out.printf(Locale.ROOT, "%.6f–%.6f s source, %.6f–%.6f s project%n",
                 result.sourceStart(), result.sourceEnd(), result.projectStart(), result.projectEnd());
@@ -101,6 +107,13 @@ public final class ReconstructionAudition {
     public static Result run(Path work, String lane, Double startSeconds, Double endSeconds, String time, String noteId,
                              List<String> variants, Double gain, boolean solo, Path reference, Path output, Path rmsJson)
             throws IOException {
+        return run(work, lane, startSeconds, endSeconds, time, noteId, variants, gain, solo, false,
+                reference, output, rmsJson);
+    }
+
+    private static Result run(Path work, String lane, Double startSeconds, Double endSeconds, String time, String noteId,
+                              List<String> variants, Double gain, boolean solo, boolean shortlist,
+                              Path reference, Path output, Path rmsJson) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var timeline = ReconstructionTimeMap.of(score);
         var base = ReconstructionTimeMap.TimeBase.valueOf(time);
@@ -141,6 +154,14 @@ public final class ReconstructionAudition {
             throw new IllegalArgumentException("Expected 0 <= start < end <= 600 project seconds");
         if (gain != null && !(gain >= 0 && gain <= 4))
             throw new IllegalArgumentException("Audition gain must be in 0–4");
+        if (shortlist) {
+            if (!variants.isEmpty()) throw new IllegalArgumentException("Choose --shortlist or --variant");
+            var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
+            var settings = voicing.lanes().get(lane);
+            if (settings == null || settings.shortlist().isEmpty())
+                throw new IllegalArgumentException("Choose an FM lane with a saved shortlist");
+            variants = settings.shortlist().stream().map(ReconstructionVoicing.ScoredPatch::variantId).distinct().toList();
+        }
         if (variants.isEmpty() || variants.size() > MAX_VARIANTS || new HashSet<>(variants).size() != variants.size())
             throw new IllegalArgumentException("Expected 1–" + MAX_VARIANTS + " distinct variant IDs");
         int start = ReconstructionOverrides.tick(startSeconds), end = ReconstructionOverrides.tick(endSeconds);

@@ -25,7 +25,9 @@ final class ReconstructionVoiceStage {
     private ReconstructionVoiceStage() {}
 
     static Result fit(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
-                      ReconstructionAllocation.Result allocation, Result previous, java.util.Set<String> targets) throws IOException {
+                      ReconstructionAllocation.Result allocation, Result previous, java.util.Set<String> targets,
+                      InstrumentCatalogue.Variant chosen) throws IOException {
+        String chosenLane = chosen == null ? null : targets.iterator().next();
         var byLane = byLane(allocation);
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
@@ -50,7 +52,8 @@ final class ReconstructionVoiceStage {
         for (var entry : byLane.entrySet()) {
             String lane = entry.getKey();
             var notes = entry.getValue();
-            var incumbent = lane.startsWith("FM") ? incumbent(catalogue, previous, lane) : null;
+            var incumbent = lane.equals(chosenLane) ? chosen
+                    : lane.startsWith("FM") ? incumbent(catalogue, previous, lane) : null;
             var patches = lane.startsWith("FM")
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent) : List.<RankedPatch>of();
             incumbents.add(incumbent == null ? null : incumbent.id());
@@ -94,6 +97,12 @@ final class ReconstructionVoiceStage {
         // Fresh selection retains the shortlist order. Refit ties use stable variant IDs.
         var comparisons = previous == null ? candidates : candidates.stream().map(trials -> trials.stream()
                 .sorted(Comparator.comparing(VoiceFit.Candidate::id)).toList()).toList();
+        if (chosen != null) {
+            var allowed = new ArrayList<>(comparisons);
+            for (int i = 0; i < models.size(); i++)
+                if (models.get(i).id().equals(chosenLane)) allowed.set(i, List.of(startingPatches.get(i)));
+            comparisons = allowed;
+        }
         fit.patches(comparisons, incumbents);
         var patchIds = new ArrayList<String>();
         var patchScores = new ArrayList<List<ScoredPatch>>();
@@ -152,7 +161,9 @@ final class ReconstructionVoiceStage {
             double gain = role == Role.drums ? 1 : fit.selection(i).gain();
             String incumbent = incumbents.get(i);
             String patchReason = EVIDENCE;
-            if (patch == null) {
+            if (model.id().equals(chosenLane)) {
+                patchReason = "explicit variant with fitted levels";
+            } else if (patch == null) {
                 patchReason = model.instruments().isEmpty() ? "not applicable" : "catalogue matcher";
             } else if (patch.equals(initial.get(i).variantId()) && (incumbent == null || patch.equals(incumbent))) {
                 patchReason = "shortlist leader (no validated improvement)";
@@ -167,7 +178,7 @@ final class ReconstructionVoiceStage {
         for (int i = 0; i < models.size(); i++) {
             var model = models.get(i);
             var lane = result.get(model.id());
-            if (lane.variantId() == null || model.stem() == 0) continue;
+            if (model.id().equals(chosenLane) || lane.variantId() == null || model.stem() == 0) continue;
             var notes = byLane.get(model.id());
             var stem = stemFor(notes, options.stems(), stems);
             if (!LowRegisterSpectrum.lowRegister(notes)) continue;

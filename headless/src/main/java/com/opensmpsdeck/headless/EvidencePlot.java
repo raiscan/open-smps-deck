@@ -16,6 +16,7 @@ import static com.opensmpsdeck.headless.ReconstructionView.*;
 
 final class EvidencePlot {
     private static final int LEFT = 94, RIGHT = 26, TOP = 92, ROW = 30;
+    private static final int LEVEL_HEIGHT = 73;
     private static final int INK = 0xff18212a;
     private static final Color SUNO = new Color(0x75e1ff), EXTERNAL = new Color(0xf4e5ab);
     private static final Color EDIT = new Color(0xe2aaff), WARNING = new Color(0xff8377);
@@ -36,16 +37,16 @@ final class EvidencePlot {
     /** Which lanes the chip panel plays: the full mix, or the solo set from --lanes. */
     String renderLabel = "Full mix";
 
-    EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes) {
+    EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes, boolean levels, boolean drums) {
         this.span = span;
         this.lanes = lanes;
         this.minPitch = minPitch;
         this.maxPitch = maxPitch;
         int pitchHeight = Math.max(186, (maxPitch - minPitch + 1) * 14);
-        Integer renderTop = render ? TOP + pitchHeight + 39 : null;
-        int laneTop = (render ? renderTop : TOP) + pitchHeight + 44;
+        Integer renderTop = render ? TOP + pitchHeight + 39 + (levels ? LEVEL_HEIGHT : 0) : null;
+        int laneTop = (render ? renderTop : TOP) + pitchHeight + 44 + (levels ? LEVEL_HEIGHT : 0);
         geometry = new Plot(LEFT, width - LEFT - RIGHT, TOP, renderTop, pitchHeight, laneTop);
-        image = new BufferedImage(width, laneTop + lanes.size() * ROW + 66, BufferedImage.TYPE_INT_RGB);
+        image = new BufferedImage(width, laneTop + (lanes.size() + (drums ? 2 : 0)) * ROW + 66, BufferedImage.TYPE_INT_RGB);
         g = image.createGraphics();
     }
 
@@ -54,7 +55,9 @@ final class EvidencePlot {
 
     void draw(String source, EvidenceSpectrum.Spectrum audio, EvidenceSpectrum.Spectrum render,
               List<DrawnNote> notes, DrawnNote target, List<Harmonic> harmonics, List<HarmonicGuide> guides,
-              boolean emphasize, Levels levels, List<EvidenceNotes.PatchChange> patchChanges, boolean projected) {
+              boolean emphasize, Levels levels, List<EvidenceNotes.PatchChange> patchChanges, boolean projected,
+              List<EvidenceBends.Curve> bends, List<EvidenceTrajectories.Track> sourceLevels,
+              List<EvidenceTrajectories.Track> renderLevels, DrumEvidence.Review drums) {
         try {
             g.setColor(new Color(0xf2f4f6));
             g.fillRect(0, 0, image.getWidth(), image.getHeight());
@@ -82,6 +85,8 @@ final class EvidencePlot {
             spectrogram(audio.image(ceiling), TOP, ticks);
             drawHarmonics(TOP, target, harmonics, guides);
             drawOverlays(notes);
+            drawBends(TOP, bends, render == null ? null : false);
+            if (sourceLevels != null) drawLevels(TOP, sourceLevels);
             if (render != null) {
                 int top = geometry.renderTop();
                 String label = "Chip render  ·  " + renderLabel + "  ·  "
@@ -89,9 +94,12 @@ final class EvidencePlot {
                 text(label, LEFT, top - 10, INK, Font.BOLD, 14);
                 spectrogram(render.image(shared ? ceiling : render.peak()), top, ticks);
                 drawHarmonics(top, target, harmonics, guides);
+                drawBends(top, bends, true);
+                if (renderLevels != null) drawLevels(top, renderLevels);
             }
             drawLanes(notes, ticks, patchChanges, projected);
-            axis(ticks);
+            if (drums != null) drawDrums(drums);
+            axis(ticks, drums == null ? 0 : 2);
         } finally {
             g.dispose();
         }
@@ -120,12 +128,17 @@ final class EvidencePlot {
     }
 
     EvidenceSpectrum.Spectrum measure(EvidenceSpectrum.Audio audio, TimeBase base, boolean emphasize) {
+        return measure(audio, base, emphasize, minPitch, maxPitch);
+    }
+
+    EvidenceSpectrum.Spectrum measure(EvidenceSpectrum.Audio audio, TimeBase base, boolean emphasize,
+                                       int low, int high) {
         double hop = Math.clamp(span.length() / 1200, .003, .050);
         int columns = Math.min(geometry.width(), Math.max(2, 1 + (int) Math.ceil(span.length() / hop)));
         var times = new double[columns];
         for (int x = 0; x < columns; x++)
             times[x] = span.seconds(span.start() + (x + .5) * span.length() / columns, base);
-        return EvidenceSpectrum.measure(audio, times, minPitch, maxPitch, geometry.pitchHeight(), span.length(), emphasize);
+        return EvidenceSpectrum.measure(audio, times, low, high, Math.max(186, (high - low + 1) * 14), span.length(), emphasize);
     }
 
     private void spectrogram(BufferedImage spectrum, int top, List<Double> ticks) {
@@ -185,6 +198,83 @@ final class EvidencePlot {
             labeled.add(note.id());
         }
         g.setClip(null);
+    }
+
+    private void drawBends(int top, List<EvidenceBends.Curve> bends, Boolean assembledOnly) {
+        g.setClip(LEFT, top, geometry.width(), geometry.pitchHeight());
+        for (var bend : bends) {
+            boolean assembled = bend.kind().equals("assembled");
+            if (assembledOnly != null && assembledOnly != assembled) continue;
+            g.setColor(assembled ? laneColor(bend.lane()) : EDIT);
+            g.setStroke(new BasicStroke(2));
+            var previous = bend.points().getFirst();
+            for (var point : bend.points().subList(1, bend.points().size())) {
+                int x = x(previous.time()), y = y(previous.pitch(), top);
+                if (assembled) {
+                    g.drawLine(x, y, x(point.time()), y);
+                    g.drawLine(x(point.time()), y, x(point.time()), y(point.pitch(), top));
+                } else {
+                    g.drawLine(x, y, x(point.time()), y(point.pitch(), top));
+                }
+                previous = point;
+            }
+        }
+        g.setStroke(new BasicStroke(1));
+        g.setClip(null);
+    }
+
+    private void drawLevels(int top, List<EvidenceTrajectories.Track> tracks) {
+        int from = top + geometry.pitchHeight() + 10;
+        int height = LEVEL_HEIGHT - 14;
+        g.setColor(new Color(0x222c36));
+        g.fillRect(LEFT, from, geometry.width(), height);
+        for (int db : new int[]{0, -30, -60, -90}) {
+            int row = from + (int) Math.round(-db / 90.0 * (height - 1));
+            g.setColor(new Color(0x48535e));
+            g.drawLine(LEFT, row, LEFT + geometry.width(), row);
+            text(db + " dBFS", LEFT - 64, row + 4, INK, Font.PLAIN, 10);
+        }
+        g.setClip(LEFT, from, geometry.width(), height);
+        for (int i = 0; i < tracks.size(); i++) {
+            var track = tracks.get(i);
+            Color color = CHANNELS[i % CHANNELS.length];
+            EvidenceTrajectories.Sample previous = null;
+            for (var point : track.points()) {
+                var fundamental = point.fundamental();
+                if (fundamental == null) {
+                    previous = null;
+                    continue;
+                }
+                int y = from + (int) Math.round(Math.clamp(-fundamental.strength() / 90, 0, 1) * (height - 1));
+                if (previous == null) {
+                    text(ReconstructionDescribe.pitch(track.pitch()), x(point.time()) + 3,
+                            from + 13 + (i % 3) * 13, color.getRGB(), Font.BOLD, 10);
+                } else {
+                    int prior = from + (int) Math.round(Math.clamp(-previous.fundamental().strength() / 90, 0, 1) * (height - 1));
+                    g.setColor(color);
+                    g.drawLine(x(previous.time()), prior, x(point.time()), y);
+                }
+                previous = point;
+            }
+        }
+        g.setClip(null);
+    }
+
+    private void drawDrums(DrumEvidence.Review drums) {
+        int free = geometry.laneTop() + lanes.size() * ROW;
+        int lost = free + ROW;
+        g.setColor(new Color(0x222c36));
+        g.fillRect(LEFT, free, geometry.width(), ROW * 2);
+        text("PSG3 free", LEFT - 86, free + 19, INK, Font.BOLD, 11);
+        text("DAC losses", LEFT - 86, lost + 19, INK, Font.BOLD, 11);
+        g.setColor(CHANNELS[7]);
+        for (var gap : drums.psg3Free())
+            g.fillRect(x(span.start(gap)), free + 12, Math.max(1, x(span.end(gap)) - x(span.start(gap))), 7);
+        for (var loss : drums.simultaneousDacLosses()) {
+            g.setColor(loss.psg3CanFit() ? CHANNELS[7] : WARNING);
+            int x = Math.min(LEFT + geometry.width() - 2, x(span.start(loss.gate())));
+            g.drawLine(x, lost + 8, x, lost + 22);
+        }
     }
 
     private static Color outline(DrawnNote note) {
@@ -294,8 +384,8 @@ final class EvidencePlot {
         }
     }
 
-    private void axis(List<Double> ticks) {
-        int y = geometry.laneTop() + lanes.size() * ROW + 19;
+    private void axis(List<Double> ticks, int extraRows) {
+        int y = geometry.laneTop() + (lanes.size() + extraRows) * ROW + 19;
         if (span.timeline().warped()) {
             axisRow(ticks, TimeBase.source, y);
             axisRow(ticks, TimeBase.project, y + 18);

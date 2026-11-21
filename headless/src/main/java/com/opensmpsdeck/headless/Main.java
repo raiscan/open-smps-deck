@@ -157,7 +157,7 @@ public final class Main {
         boolean demo = args[0].equals("demo");
         boolean projectRender = args[0].equals("render-project");
         int positional = demo ? 2 : 3;
-        if (args.length < positional || (args.length - positional) % 2 != 0) {
+        if (args.length < positional) {
             throw new IllegalArgumentException("wrong number of arguments for " + args[0]);
         }
         int presentations = 120;
@@ -166,10 +166,15 @@ public final class Main {
         Double start = null, end = null;
         List<String> solo = List.of(), mute = List.of();
         var options = new HashSet<String>();
-        for (int at = positional; at < args.length; at += 2) {
-            String option = args[at];
-            String value = args[at + 1];
+        for (int at = positional; at < args.length;) {
+            String option = args[at++];
             if (!options.add(option)) throw new IllegalArgumentException("duplicate option " + option);
+            if (option.equals("--force")) {
+                if (!projectRender) throw new IllegalArgumentException("--force requires render-project");
+                continue;
+            }
+            if (at == args.length) throw new IllegalArgumentException("Missing value for " + option);
+            String value = args[at++];
             switch (option) {
                 case "--frames" -> presentations = parsePresentations(option, value);
                 case "--solo", "--mute", "--start", "--end" -> {
@@ -230,13 +235,16 @@ public final class Main {
         if (options.contains("--frames") && range.end() > limit)
             throw new IllegalArgumentException("Range exceeds --frames");
         var mask = ReconstructionView.laneMask(solo, mute);
-        if (previousPath == null) {
-            if (bounded || !mask.equals(S3kRenderer.ChannelMask.NONE)) WaveFile.renderRange(song, output, range, mask);
-            else WaveFile.render(song, output, presentations);
-        } else {
-            requireDifferentFiles(previousPath, output);
-            var previous = ProjectCompiler.compileWithAssets(ProjectFiles.load(previousPath).project());
-            WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, output, range, mask);
+        try (var target = new ExportTarget(output, options.contains("--force"))) {
+            if (previousPath == null) {
+                if (bounded || !mask.equals(S3kRenderer.ChannelMask.NONE)) WaveFile.renderRange(song, target.path(), range, mask);
+                else WaveFile.render(song, target.path(), presentations);
+            } else {
+                requireDifferentFiles(previousPath, output);
+                var previous = ProjectCompiler.compileWithAssets(ProjectFiles.load(previousPath).project());
+                WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, target.path(), range, mask);
+            }
+            target.publish();
         }
         out.println("Rendered " + range.count() + " presentations to " + output
                 + " (48 kHz stereo, pinned OpenGGF S3K accurate core)");
@@ -296,10 +304,10 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
-        out.println("       render-compare WORK_DIR --start S --end S [--time source|project] [--reference WAV] [--render WAV] OUT.wav|OUT.mp3");
+        out.println("       render-compare WORK_DIR --start S --end S [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
         ReconstructionCli.usage(out);
         out.println("       mcp  (stdio Model Context Protocol server)");

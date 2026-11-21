@@ -31,23 +31,29 @@ final class ReconstructionVoicing {
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
                 String effectReason, List<Instrument> instruments, @Nullable Map<Integer, Double> partGains,
                 @Nullable List<ReconstructionOverrides.Settings> overrides,
-                @Nullable Map<Integer, Double> drumGains) {
+                @Nullable Map<Integer, Double> drumGains,
+                @Nullable List<DrumGain> drumGainOverrides, @Nullable PsgPercussion psgPercussion) {
         Lane(Role role, String variantId, List<ScoredPatch> shortlist, double gain, Articulation articulation,
              Effects effects, String patchReason, String articulationReason, String effectReason,
              List<Instrument> instruments) {
             this(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, null, null, null);
+                    effectReason, instruments, null, null, null, null, null);
         }
 
         Lane withPartGains(Map<Integer, Double> gains) {
             return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides, drumGains);
+                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides, drumGains, drumGainOverrides, psgPercussion);
         }
 
         Lane withPreviousEdits(Lane previous, boolean refitLevels, List<ReconstructionAllocation.Entry> notes) {
             return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
-                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides, previous.drumGains);
+                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides, previous.drumGains, previous.drumGainOverrides, psgPercussion);
+        }
+
+        Lane withPsgPercussion(PsgPercussion percussion) {
+            return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
+                    effectReason, instruments, partGains, overrides, drumGains, drumGainOverrides, percussion);
         }
 
         double gainFor(int part, double level) {
@@ -58,6 +64,51 @@ final class ReconstructionVoicing {
 
         double drumGain(int pitch) { return drumGains == null ? 1 : drumGains.getOrDefault(pitch, 1.0); }
     }
+    record PsgPercussion(int noiseByte, String mode, String clock, int envelopeSlot) {}
+    static final PsgPercussion PSG_PERCUSSION = new PsgPercussion(0xe7, "white", "tone-3", 0);
+
+    static Result withPercussionEvidence(Result result, ReconstructionAllocation.Result allocation) {
+        var lane = result.lanes().get("PSG3");
+        if (lane == null) return result;
+        var settings = allocation.notes().stream()
+                .anyMatch(entry -> "PSG3".equals(entry.lane()) && entry.role() == Role.drums) ? PSG_PERCUSSION : null;
+        if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
+        var lanes = new java.util.LinkedHashMap<>(result.lanes());
+        lanes.put("PSG3", lane.withPsgPercussion(settings));
+        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning());
+    }
+
+    record DrumGain(@Nullable List<String> hitIds, @Nullable List<Double> span, @Nullable Integer pitch, double gain) {
+        boolean selects(ReconstructionAllocation.Entry entry, double sourceOnset) {
+            return (pitch == null || pitch == entry.note().pitch()) && (hitIds != null
+                    ? hitIds.contains(entry.note().id()) : sourceOnset >= span.getFirst() && sourceOnset < span.getLast());
+        }
+
+        void validate(String at) {
+            require((hitIds == null) != (span == null), at, "choose hitIds or a source-time span");
+            require(gain >= 0 && gain <= 4, at + ".gain", "expected 0–4");
+            require(pitch == null || pitch >= 0 && pitch <= 127, at + ".pitch", "expected MIDI pitch in 0–127");
+            if (hitIds != null) require(!hitIds.isEmpty() && hitIds.stream().noneMatch(String::isBlank)
+                            && new HashSet<>(hitIds).size() == hitIds.size(), at + ".hitIds", "expected distinct hit IDs");
+            if (span != null) require(span.size() == 2 && span.getFirst() >= 0 && Double.isFinite(span.getLast())
+                            && span.getLast() > span.getFirst(), at + ".span", "expected [start,end] in source seconds");
+        }
+    }
+
+    static Map<String, Double> scopedDrumGains(Lane lane, ReconstructionAllocation.Result allocation,
+                                              ReconstructionTimeMap timeline) {
+        if (lane == null || lane.drumGainOverrides() == null || lane.drumGainOverrides().isEmpty()) return Map.of();
+        var gains = new java.util.HashMap<String, Double>();
+        for (var entry : allocation.notes()) {
+            if (!"DAC".equals(entry.lane())) continue;
+            double onset = entry.note().start();
+            if (allocation.timeBase() == ReconstructionTimeMap.TimeBase.project) onset = timeline.source(onset);
+            for (var scope : lane.drumGainOverrides())
+                if (scope.selects(entry, onset)) gains.put(entry.note().id(), scope.gain());
+        }
+        return gains;
+    }
+
     record ScoredPatch(String variantId, double shortlistScore, double fit, double check) {}
     record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId,
                       @Nullable ReconstructionDrums.Selection drumSelection) {
@@ -121,7 +172,7 @@ final class ReconstructionVoicing {
 
     record InstrumentVariant(int part, Integer drumPitch, String variantId, String sliceId, Integer rate) {}
     record Settings(String variantId, double gain, Map<Integer, Double> partGains, List<InstrumentVariant> instruments,
-                    Map<Integer, Double> drumGains) {
+                    Map<Integer, Double> drumGains, List<DrumGain> drumGainOverrides) {
         static Settings of(Lane lane) {
             return lane == null ? null : new Settings(lane.variantId(), lane.gain(), lane.partGains(),
                     lane.instruments().stream().map(instrument -> {
@@ -129,7 +180,7 @@ final class ReconstructionVoicing {
                         return new InstrumentVariant(instrument.part(), instrument.drumPitch(), instrument.variantId(),
                                 drum == null || drum.slice() == null ? null : drum.slice().id(),
                                 drum == null ? null : drum.rate());
-                    }).toList(), lane.drumGains());
+                    }).toList(), lane.drumGains(), lane.drumGainOverrides());
         }
     }
     record Change(String lane, Settings before, Settings after) {
@@ -141,7 +192,8 @@ final class ReconstructionVoicing {
             if (settings == null) return "absent";
             return "variant " + settings.variantId + ", gain " + settings.gain + ", partGains " + settings.partGains
                     + (settings.instruments.isEmpty() ? "" : ", instruments " + settings.instruments)
-                    + (settings.drumGains == null ? "" : ", drumGains " + settings.drumGains);
+                    + (settings.drumGains == null ? "" : ", drumGains " + settings.drumGains)
+                    + (settings.drumGainOverrides == null ? "" : ", drumGainOverrides " + settings.drumGainOverrides);
         }
     }
 
@@ -239,14 +291,14 @@ final class ReconstructionVoicing {
             var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
             lanes.put(id, new Lane(role, lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(), effects,
                     lane.patchReason(), lane.articulationReason(), lane.effectReason(), List.copyOf(instruments),
-                    gains, lane.overrides(), lane.drumGains()));
+                    gains, lane.overrides(), lane.drumGains(), lane.drumGainOverrides(), lane.psgPercussion()));
         });
         if (fitted != null) fitted.lanes().forEach((id, lane) -> {
             if (lanes.containsKey(id)) return;
             var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
             lanes.put(id, new Lane(lane.role(), lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(),
                     effects, lane.patchReason(), lane.articulationReason(), lane.effectReason(), lane.instruments(),
-                    lane.partGains(), lane.overrides(), lane.drumGains()));
+                    lane.partGains(), lane.overrides(), lane.drumGains(), lane.drumGainOverrides(), lane.psgPercussion()));
         });
         return new Result(previous.version(), lanes, previous.fitWindows());
     }
@@ -284,7 +336,8 @@ final class ReconstructionVoicing {
                 require(targeted, "voicing.json.lanes." + id, "untargeted lane is missing from the new allocation");
                 require(before.overrides() == null || before.overrides().isEmpty(), "voicing.json.lanes." + id,
                         "cannot refit a removed lane with scoped overrides");
-                require(before.drumGains() == null || before.drumGains().isEmpty(), "voicing.json.lanes." + id,
+                require((before.drumGains() == null || before.drumGains().isEmpty())
+                                && (before.drumGainOverrides() == null || before.drumGainOverrides().isEmpty()), "voicing.json.lanes." + id,
                         "cannot refit a removed lane with drum gains");
             } else {
                 lanes.put(id, targeted ? after.withPreviousEdits(before, refitLevels || changedMaterial.contains(id), allocated.getOrDefault(id, List.of())) : before);
@@ -317,6 +370,13 @@ final class ReconstructionVoicing {
                     require((dac || id.equals("PSG3")) && pitch >= 0 && pitch <= 127
                                     && gain != null && gain >= 0 && gain <= 4,
                             at + ".drumGains", "expected MIDI drum pitches and gains in 0–4 on DAC or PSG3"));
+            if (lane.drumGainOverrides() != null) {
+                require(dac, at + ".drumGainOverrides", "scoped drum gains require DAC");
+                for (int i = 0; i < lane.drumGainOverrides().size(); i++)
+                    lane.drumGainOverrides().get(i).validate(at + ".drumGainOverrides[" + i + "]");
+            }
+            require(lane.psgPercussion() == null || id.equals("PSG3") && PSG_PERCUSSION.equals(lane.psgPercussion()),
+                    at + ".psgPercussion", "expected the PSG3 percussion description");
             var articulation = lane.articulation();
             require(articulation.gate() > 0 && articulation.gate() <= 1, at + ".articulation.gate", "expected (0,1]");
             require(articulation.minimumReleaseRate() >= 0 && articulation.minimumReleaseRate() <= (fm ? 15 : 0),

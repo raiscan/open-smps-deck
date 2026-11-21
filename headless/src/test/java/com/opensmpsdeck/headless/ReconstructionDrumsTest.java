@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
@@ -117,9 +118,108 @@ class ReconstructionDrumsTest {
         assertEquals(uneditedPsg.notes(), voicedPsg.notes());
     }
 
+    @Test void pinsHatsToNoiseAndScopesDacGainWithoutMovingTonalNotes() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] sample = new byte[2000];
+        for (int i = 0; i < sample.length; i++)
+            sample[i] = (byte) (128 + Math.round(110 * kick(i / DacSample.sampleRateHz(12), 90)));
+        sample[0] = 0;
+        var asset = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Kick", sample);
+        builder.variant(asset, "Kick", new InstrumentCatalogue.Recipe(12, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        var env = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope", new byte[]{0, (byte) 0x80});
+        builder.variant(env, "Test envelope", InstrumentCatalogue.Recipe.plain(), null);
+        var voice = DemoProject.create().voices().getFirst();
+        var patch = new byte[25];
+        for (int i = 0; i < patch.length; i++) patch[i] = voice.bytes().get(i).byteValue();
+        var fm = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Tone", patch);
+        builder.variant(fm, "Tone", InstrumentCatalogue.Recipe.plain(), null);
+        Path index = directory.resolve("catalogue.json");
+        builder.build().save(index);
+
+        Path wav = directory.resolve("mix.wav");
+        WaveFile.write(wav, 72, sink -> {
+            var frame = new short[1600];
+            for (int tick = 0; tick < 72; tick++) {
+                for (int i = 0; i < 800; i++) {
+                    double time = (tick * 800 + i) / 48_000.0;
+                    double level = 0;
+                    for (double onset : new double[]{.2, .5, .8}) {
+                        if (time >= onset && time < onset + .18) level += kick(time - onset, 90);
+                    }
+                    frame[2 * i] = frame[2 * i + 1] = (short) Math.round(12_000 * level);
+                }
+                sink.accept(frame);
+            }
+        });
+        Path midi = directory.resolve("notes.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        midiNote(track, 9, 36, 192);
+        midiNote(track, 9, 42, 192);
+        midiNote(track, 9, 36, 480);
+        midiNote(track, 9, 36, 768);
+        midiNote(track, 0, 69, 192);
+        MidiSystem.write(sequence, 0, midi.toFile());
+
+        Path work = directory.resolve("work");
+        command("reconstruct", "run", midi.toString(), wav.toString(), index.toString(), work.toString(),
+                "--steady-tempo", "off", "--drum-source", "catalogue");
+        var trace = ReconstructionTrace.read(work).values();
+        var hat = trace.stream().filter(row -> row.pitch() == 42).findFirst().orElseThrow();
+        var tone = trace.stream().filter(row -> row.pitch() == 69).findFirst().orElseThrow();
+        var kick = trace.stream().filter(row -> row.pitch() == 36).findFirst().orElseThrow();
+        var before = ReconstructionTrace.trace(work, "--lane", "DAC").getAsJsonObject("drums");
+        assertEquals(hat.id(), before.getAsJsonArray("simultaneousDacLosses").get(0).getAsJsonObject().get("noteId").getAsString());
+        assertTrue(before.getAsJsonArray("simultaneousDacLosses").get(0).getAsJsonObject().get("psg3CanFit").getAsBoolean());
+        var batch = directory.resolve("edits.json");
+        Files.writeString(batch, """
+                [{"id":"keep-tone","reason":"Keep tonal spill away from noise","op":"pinLane",
+                  "noteIds":["%s"],"lane":"PSG2"},
+                 {"id":"move-hat","reason":"Recover simultaneous DAC loss","op":"setRole",
+                  "noteIds":["%s"],"role":"drums","lane":"PSG3"}]
+                """.formatted(tone.id(), hat.id()));
+        command("reconstruct", "edit", work.toString(), "add", "--file", batch.toString());
+        command("reconstruct", "run", "--from", "roles", work.toString(), "--keep-voicing");
+        var moved = ReconstructionTrace.read(work);
+        assertEquals("PSG2", moved.get(tone.id()).allocation().lane());
+        assertEquals("PSG3", moved.get(hat.id()).allocation().lane());
+
+        Path voiceFile = work.resolve("voicing.json");
+        var voicing = ReconstructionArtifacts.readTree(voiceFile).getAsJsonObject();
+        var lanes = voicing.getAsJsonObject("lanes");
+        assertEquals(231, lanes.getAsJsonObject("PSG3").getAsJsonObject("psgPercussion").get("noiseByte").getAsInt());
+        assertEquals(0, lanes.getAsJsonObject("PSG3").getAsJsonObject("psgPercussion").get("envelopeSlot").getAsInt());
+        lanes.getAsJsonObject("PSG3").add("drumGains", JsonParser.parseString("{\"42\": 2}"));
+        lanes.getAsJsonObject("DAC").add("drumGainOverrides", JsonParser.parseString("""
+                [{"hitIds":["%s"],"gain":0.5},{"span":[0.49,0.51],"pitch":36,"gain":0.25}]
+                """.formatted(kick.id())));
+        ReconstructionArtifacts.write(voiceFile, voicing);
+        command("reconstruct", "assemble", work.toString());
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var noise = project.sequences().stream().filter(source -> source.id().startsWith("PSG3")).findFirst().orElseThrow();
+        assertEquals(List.of(81), noise.notes().stream().map(NoteEvent::pitch).toList());
+        assertEquals(231, noise.commands().getFirst().arguments().getFirst());
+        assertEquals(3, project.samples().size());
+        assertTrue(project.samples().stream().anyMatch(dac -> java.util.Arrays.equals(sample, dac.pcm())));
+        assertTrue(project.samples().stream().anyMatch(dac -> Byte.toUnsignedInt(dac.pcm()[0]) == 64));
+        assertTrue(project.samples().stream().anyMatch(dac -> Byte.toUnsignedInt(dac.pcm()[0]) == 96));
+    }
+
+    private static void midiNote(javax.sound.midi.Track track, int channel, int pitch, int tick) throws Exception {
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, channel, pitch, 100), tick));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, channel, pitch, 0), tick + 48));
+    }
+
+    private static void command(String... args) {
+        var diagnostics = new ByteArrayOutputStream();
+        var out = new PrintStream(diagnostics);
+        assertEquals(0, Main.run(args, out, out), diagnostics.toString());
+    }
+
     private static ReconstructionVoicing.Lane drumLane(int pitch, double gain) {
         return new ReconstructionVoicing.Lane(drums, null, List.of(), 1, ReconstructionVoicing.WRITTEN,
-                ReconstructionVoicing.DRY, "", "", "", List.of(), null, null, Map.of(pitch, gain));
+                ReconstructionVoicing.DRY, "", "", "", List.of(), null, null, Map.of(pitch, gain), null, null);
     }
 
     private static double kick(double seconds, double pitch) {

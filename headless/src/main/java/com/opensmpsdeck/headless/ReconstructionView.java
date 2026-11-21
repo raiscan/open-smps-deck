@@ -35,11 +35,13 @@ public final class ReconstructionView {
     public record Options(double start, double end, String time, Integer stem, Path wav, boolean render,
                           Integer pitchMin, Integer pitchMax, List<String> lanes, List<Integer> parts,
                           String harmonics, boolean harmonicSum, int width, Path notes, List<String> harmonicsAt,
-                          boolean ridges, boolean sharedDb, boolean db, String pitchPreset) {
+                          boolean ridges, boolean sharedDb, boolean db, String pitchPreset, int ridgeCount) {
         public Options {
             if (!(start >= 0 && end - start >= .001 - 1e-12 && end - start <= MAX_SPAN))
                 throw new IllegalArgumentException("Expected a nonnegative span of 0.001–60 seconds");
             TimeBase.valueOf(time);
+            if (ridgeCount < 1 || ridgeCount > 32)
+                throw new IllegalArgumentException("Ridge count must be 1–32");
             if (stem != null && (wav != null || stem < 0))
                 throw new IllegalArgumentException("Choose a nonnegative --stem part or --wav");
             if (width < 640 || width > 2400)
@@ -68,7 +70,9 @@ public final class ReconstructionView {
     record Harmonic(int multiple, double pitch, double hz) {}
     record HarmonicGuide(int pitch, double start, double end, Double at, List<Harmonic> partials) {}
     record Levels(Double sourcePeakDbfs, Double renderPeakDbfs, boolean shared) {}
-    record RidgeExport(String time, String source, String strengthUnit, List<EvidenceSpectrum.Ridge> ridges) {}
+    record RidgeExport(String time, String source, String strengthUnit, int peaksPerColumn,
+                       List<EvidenceTrajectories.Point> ridges, List<EvidenceTrajectories.Point> renderRidges,
+                       List<EvidenceTrajectories.Track> sourceTrajectories, List<EvidenceTrajectories.Track> renderTrajectories) {}
     record Span(double start, double end, TimeBase base, ReconstructionTimeMap timeline) {
         double start(Timing timing) { return base == TimeBase.source ? timing.sourceStart() : timing.projectStart(); }
         double end(Timing timing) { return base == TimeBase.source ? timing.sourceEnd() : timing.projectEnd(); }
@@ -87,16 +91,18 @@ public final class ReconstructionView {
                          int pitchMin, int pitchMax,
                          boolean warped, boolean harmonicSum, Plot plot, List<DrawnNote> notes,
                          List<Harmonic> harmonics, List<EvidenceNotes.PatchChange> patchChanges,
-                         List<HarmonicGuide> harmonicsAt, Levels levels, String ridgesPath) {}
+                         List<HarmonicGuide> harmonicsAt, Levels levels, String ridgesPath,
+                         List<EvidenceBends.Curve> bends, List<EvidenceTrajectories.Track> sourceLevels,
+                         List<EvidenceTrajectories.Track> renderLevels, DrumEvidence.Review drums) {}
     public record Result(Legend legend, byte[] png) {}
 
     private ReconstructionView() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("Expected view WORK_DIR --start S --end S [options] OUT.png");
-        var switches = Set.of("--render", "--harmonic-sum", "--ridges", "--shared-db", "--db");
+        var switches = Set.of("--render", "--harmonic-sum", "--ridges", "--shared-db", "--db", "--force");
         var keys = Set.of("--start", "--end", "--time", "--stem", "--wav", "--pitch-min", "--pitch-max",
-                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset");
+                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset", "--ridge-count");
         var flags = new HashMap<String, String>();
         var harmonicsAt = new ArrayList<String>();
         for (int i = 1; i < args.length - 1; i++) {
@@ -120,14 +126,15 @@ public final class ReconstructionView {
                 csv(flags.get("--parts")).stream().map(Integer::valueOf).toList(), flags.get("--harmonics"),
                 flags.containsKey("--harmonic-sum"), Integer.parseInt(flags.getOrDefault("--width", "1440")),
                 flags.containsKey("--notes") ? Path.of(flags.get("--notes")) : null, harmonicsAt,
-                flags.containsKey("--ridges"), flags.containsKey("--shared-db"), flags.containsKey("--db"),
-                flags.get("--pitch-preset"));
-        out.println(JSON.toJson(legendJson(run(Path.of(args[0]), options, Path.of(args[args.length - 1])).legend())));
+                flags.containsKey("--ridges") || flags.containsKey("--ridge-count"),
+                flags.containsKey("--shared-db"), flags.containsKey("--db"),
+                flags.get("--pitch-preset"), Integer.parseInt(flags.getOrDefault("--ridge-count", "3")));
+        out.println(JSON.toJson(legendJson(run(Path.of(args[0]), options, Path.of(args[args.length - 1]), flags.containsKey("--force")).legend())));
     }
 
     public static com.google.gson.JsonObject legendJson(Legend legend) {
         var json = JSON.toJsonTree(legend).getAsJsonObject();
-        for (String key : List.of("harmonicsAt", "levels", "ridgesPath"))
+        for (String key : List.of("harmonicsAt", "levels", "ridgesPath", "bends", "sourceLevels", "renderLevels", "drums"))
             if (json.get(key).isJsonNull()) json.remove(key);
         return json;
     }
@@ -148,12 +155,20 @@ public final class ReconstructionView {
     }
 
     public static Result run(Path work, Options options, Path output) throws IOException {
-        Path sidecar = ridgesPath(output); // Also validates the PNG extension.
-        if (Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            throw new java.nio.file.FileAlreadyExistsException(output.toString());
+        return run(work, options, output, false);
+    }
+
+    private static Result run(Path work, Options options, Path output, boolean force) throws IOException {
+        Path sidecar = ridgesPath(output);
         Path ridgeFile = options.ridges ? sidecar : null;
-        if (ridgeFile != null && Files.exists(ridgeFile, java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            throw new java.nio.file.FileAlreadyExistsException(ridgeFile.toString());
+        try (var png = new ExportTarget(output, force);
+             var ridge = ridgeFile == null ? null : new ExportTarget(ridgeFile, force)) {
+            return renderView(work, options, output, ridgeFile, png, ridge, force);
+        }
+    }
+
+    private static Result renderView(Path work, Options options, Path output, Path ridgeFile,
+                                     ExportTarget pngTarget, ExportTarget ridgeTarget, boolean force) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var timeline = ReconstructionTimeMap.of(score);
         var span = new Span(options.start, options.end, TimeBase.valueOf(options.time), timeline);
@@ -177,10 +192,24 @@ public final class ReconstructionView {
         double audioStart = span.seconds(span.start, source.base), audioEnd = span.seconds(span.end, source.base);
         var audio = ReferenceAudio.evidenceRange(source.path, audioStart - EvidenceSpectrum.CONTEXT,
                 audioEnd + EvidenceSpectrum.CONTEXT);
-        var rendered = options.render ? render(project, span, options.lanes) : null;
+        var assembledGates = project == null || project.nativeProgram() != null || project.tempo() != 0
+                ? List.<ReconstructionTrace.Voiced>of() : EvidenceBends.assembled(rows, notes);
+        var bendTrace = assembledGates.isEmpty() ? null : new EvidenceBends(ProjectRenderTiming.presentationCount(project));
+        var rendered = options.render || bendTrace != null ? render(project, span, options.lanes, bendTrace, options.render) : null;
+        var allocation = ReconstructionTrace.optional(work, "allocation.json", ReconstructionAllocation.Result.class);
+        var clock = allocation == null || allocation.timeBase() == null ? TimeBase.source : allocation.timeBase();
+        var bends = new ArrayList<>(EvidenceBends.authored(span, rows, notes, clock));
+        if (bendTrace != null) bends.addAll(bendTrace.curves(span, assembledGates));
+        var drums = DrumEvidence.review(rows.values().stream().toList(), rows.values(),
+                span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source), timeline,
+                options.lanes.isEmpty() || options.lanes.contains("DAC"), options.parts());
 
         int minPitch = notes.stream().mapToInt(DrawnNote::pitch).min().orElse(51) - 3;
         int maxPitch = notes.stream().mapToInt(DrawnNote::pitch).max().orElse(81) + 3;
+        for (var curve : bends) for (var point : curve.points()) {
+            minPitch = Math.min(minPitch, (int) Math.floor(point.pitch()) - 1);
+            maxPitch = Math.max(maxPitch, (int) Math.ceil(point.pitch()) + 1);
+        }
         var guidePitches = new ArrayList<>(targets.stream().map(HarmonicGuide::pitch).toList());
         if (target != null) guidePitches.add(target.pitch());
         for (int pitch : guidePitches) {
@@ -208,43 +237,100 @@ public final class ReconstructionView {
         boolean projected = visible.stream().anyMatch(note -> note.layer == Layer.lane
                 && ("voicing-projection".equals(note.evidence) || "allocated".equals(note.evidence)
                 || "legacy-report-and-voicing".equals(note.evidence)));
-        var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes);
+        boolean trajectories = (target != null || !targets.isEmpty()) && (options.ridges || options.db);
+        var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes, trajectories && options.db, drums != null);
         if (!options.lanes.isEmpty()) picture.renderLabel = "Solo " + String.join(", ", options.lanes);
         var sounding = lanes.stream().filter(lane -> visible.stream()
                 .anyMatch(note -> note.layer == Layer.lane && lane.equals(note.lane))).toList();
         var patchChanges = EvidenceNotes.patchChanges(project, span, sounding);
         var sourceSpectrum = picture.measure(audio, source.base, options.harmonicSum);
-        var renderSpectrum = rendered == null ? null : picture.measure(rendered, TimeBase.project, options.sharedDb && options.harmonicSum);
+        boolean renderSum = options.sharedDb && options.harmonicSum;
+        var renderSpectrum = rendered == null ? null : picture.measure(rendered, TimeBase.project, renderSum);
         var levels = options.db || options.sharedDb ? new Levels(sourceSpectrum.peakDb(),
                 renderSpectrum == null ? null : renderSpectrum.peakDb(), options.sharedDb) : null;
+        var sourceRaw = sourceSpectrum;
+        var renderRaw = renderSpectrum;
+        if (ridgeFile != null || trajectories) {
+            if (options.harmonicSum) sourceRaw = picture.measure(audio, source.base, false);
+            if (renderSum && rendered != null) renderRaw = picture.measure(rendered, TimeBase.project, false);
+        }
+        List<EvidenceTrajectories.Track> sourceTracks = null, renderTracks = null;
+        if (trajectories) {
+            var sourceTargets = trajectoryTargets(target, targets, notes, bends, span, false);
+            sourceTracks = EvidenceTrajectories.tracks(trackSpectrum(picture, sourceRaw, audio, source.base, sourceTargets, bends),
+                    span, sourceTargets);
+            if (rendered != null) {
+                var chipTargets = trajectoryTargets(target, targets, notes, bends, span, true);
+                renderTracks = EvidenceTrajectories.tracks(trackSpectrum(picture, renderRaw, rendered, TimeBase.project,
+                        chipTargets, bends), span, chipTargets);
+            }
+        }
         picture.draw(source.label, sourceSpectrum, renderSpectrum, visible, target, harmonics, guides,
-                options.harmonicSum, levels, patchChanges, projected);
+                options.harmonicSum, levels, patchChanges, projected, bends,
+                options.db ? sourceTracks : null, options.db ? renderTracks : null, drums);
         String ridgeJson = null;
         if (ridgeFile != null) {
-            var harmonicSpectrum = options.harmonicSum ? sourceSpectrum : picture.measure(audio, source.base, true);
-            ridgeJson = JSON.toJson(new RidgeExport(options.time, source.label, "spectral dBFS",
-                    harmonicSpectrum.ridges(span.start, span.length()))) + "\n";
+            ridgeJson = JSON.toJson(new RidgeExport(options.time, source.label, "spectral dBFS", options.ridgeCount,
+                    EvidenceTrajectories.ridges(sourceRaw, span, options.ridgeCount),
+                    renderRaw == null ? null : EvidenceTrajectories.ridges(renderRaw, span, options.ridgeCount),
+                    sourceTracks, renderTracks)) + "\n";
         }
         var bytes = new ByteArrayOutputStream();
         try (var stream = new MemoryCacheImageOutputStream(bytes)) {
             if (!ImageIO.write(picture.image(), "png", stream)) throw new IOException("PNG image writer is unavailable");
         }
         byte[] png = bytes.toByteArray();
-        Files.write(output, png, StandardOpenOption.CREATE_NEW);
-        if (ridgeFile != null) {
+        Files.write(pngTarget.path(), png, StandardOpenOption.CREATE_NEW);
+        if (ridgeTarget != null) {
             try {
-                Files.writeString(ridgeFile, ridgeJson, StandardOpenOption.CREATE_NEW);
+                Files.writeString(ridgeTarget.path(), ridgeJson, StandardOpenOption.CREATE_NEW);
+                ridgeTarget.publish();
             } catch (IOException failure) {
-                Files.deleteIfExists(output);
+                if (!force) Files.deleteIfExists(output);
                 throw failure;
             }
         }
+        pngTarget.publish();
         var legend = new Legend(output.toAbsolutePath().normalize().toString(), source.label, options.time,
                 span.start, span.end, span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source),
                 span.seconds(span.start, TimeBase.project), span.seconds(span.end, TimeBase.project), low, high, timeline.warped(), options.harmonicSum,
                 picture.geometry(), visible, harmonics, patchChanges, guides.isEmpty() ? null : guides, levels,
-                ridgeFile == null ? null : ridgeFile.toAbsolutePath().normalize().toString());
+                ridgeFile == null ? null : ridgeFile.toAbsolutePath().normalize().toString(),
+                bends.isEmpty() ? null : bends, options.db ? sourceTracks : null, options.db ? renderTracks : null, drums);
         return new Result(legend, png);
+    }
+
+    private static List<EvidenceTrajectories.Target> trajectoryTargets(DrawnNote selected, List<HarmonicGuide> pitches,
+            List<DrawnNote> notes, List<EvidenceBends.Curve> bends, Span span, boolean chip) {
+        var result = new ArrayList<EvidenceTrajectories.Target>();
+        if (selected != null) {
+            DrawnNote gate = chip ? notes.stream().filter(note -> note.id.equals(selected.id) && note.layer == Layer.lane)
+                    .findFirst().orElse(selected) : selected;
+            var curve = bends.stream().filter(bend -> bend.noteId().equals(gate.id)
+                    && (chip ? bend.kind().equals("assembled") && java.util.Objects.equals(gate.lane, bend.lane())
+                            : !bend.kind().equals("assembled"))).findFirst().orElse(null);
+            result.add(new EvidenceTrajectories.Target(gate.id, gate.pitch, span.start(gate.timing), span.end(gate.timing),
+                    time -> curve == null ? gate.pitch : EvidenceBends.pitchAt(curve, time)));
+        }
+        for (var pitch : pitches)
+            result.add(new EvidenceTrajectories.Target(null, pitch.pitch, pitch.start, pitch.end, time -> pitch.pitch));
+        return result;
+    }
+
+    private static EvidenceSpectrum.Spectrum trackSpectrum(EvidencePlot picture, EvidenceSpectrum.Spectrum raw,
+            EvidenceSpectrum.Audio audio, TimeBase base, List<EvidenceTrajectories.Target> targets,
+            List<EvidenceBends.Curve> bends) {
+        int low = raw.minPitch(), high = raw.maxPitch();
+        for (var target : targets) {
+            low = Math.min(low, target.pitch() - 2);
+            high = Math.max(high, (int) Math.ceil(EvidenceSpectrum.harmonicPitch(target.pitch(), 3)) + 2);
+            if (target.noteId() == null) continue;
+            for (var bend : bends) if (target.noteId().equals(bend.noteId())) for (var point : bend.points()) {
+                low = Math.min(low, (int) Math.floor(point.pitch()) - 2);
+                high = Math.max(high, (int) Math.ceil(point.pitch() + EvidenceSpectrum.harmonicPitch(0, 3)) + 2);
+            }
+        }
+        return low == raw.minPitch() && high == raw.maxPitch() ? raw : picture.measure(audio, base, false, low, high);
     }
 
     private static Source source(Path work, Options options, ReconstructionStages.Score score, Span span,
@@ -302,23 +388,26 @@ public final class ReconstructionView {
         return new ChannelMask(fm, psg);
     }
 
-    private static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo) throws IOException {
+    private static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo,
+                                                EvidenceBends bends, boolean captureAudio) throws IOException {
         if (project.nativeProgram() != null || project.tempo() != 0)
             throw new IllegalArgumentException("Render view requires an editable arrangement at 60 project ticks per second");
         int first = Math.max(0, (int) Math.floor((span.seconds(span.start, TimeBase.project) - EvidenceSpectrum.CONTEXT) * 60));
         int limit = ProjectRenderTiming.presentationCount(project);
         int end = Math.min(limit, (int) Math.ceil((span.seconds(span.end, TimeBase.project) + EvidenceSpectrum.CONTEXT) * 60));
-        if (end <= first) return new EvidenceSpectrum.Audio(new float[0], SAMPLE_RATE, 0, limit / 60.0);
-        var mono = new float[(end - first) * STEREO_FRAMES_PER_PRESENTATION];
+        if (end <= first) return !captureAudio ? null : new EvidenceSpectrum.Audio(new float[0], SAMPLE_RATE, 0, limit / 60.0);
+        var mono = captureAudio ? new float[(end - first) * STEREO_FRAMES_PER_PRESENTATION] : null;
         int[] tick = {0};
         S3kRenderer.render(ProjectCompiler.compileWithAssets(project), end, soloMask(solo), samples -> {
-            int frame = tick[0]++ - first;
-            if (frame < 0) return;
+            int current = tick[0]++;
+            if (bends != null) bends.frame(current);
+            int frame = current - first;
+            if (frame < 0 || mono == null) return;
             int offset = frame * STEREO_FRAMES_PER_PRESENTATION;
             for (int i = 0; i < STEREO_FRAMES_PER_PRESENTATION; i++)
                 mono[offset + i] = (samples[2 * i] + samples[2 * i + 1]) / 65536f;
-        });
-        return new EvidenceSpectrum.Audio(mono, SAMPLE_RATE, first / 60.0, limit / 60.0);
+        }, bends == null ? com.openggf.audio.synth.ChipWriteObserver.NONE : bends);
+        return mono == null ? null : new EvidenceSpectrum.Audio(mono, SAMPLE_RATE, first / 60.0, limit / 60.0);
     }
 
     private static HarmonicGuide harmonicGuide(String value, Span span) {

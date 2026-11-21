@@ -4,10 +4,13 @@ import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
+import com.google.gson.Gson;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -48,7 +51,7 @@ final class CatalogueCli {
         out.println("  catalog scan OUTPUT.json [--rom ROM] [--rips DIRECTORY]");
         out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--driver S3K]");
         out.println("          [--role ROLE] [--source SOURCE] [--variant ID] [--offset N] [--limit N]");
-        out.println("  catalog show INDEX.json ID");
+        out.println("  catalog show INDEX.json ID [--brief]");
         out.println("  catalog match INDEX.json REFERENCE.wav [--kind KIND] [--midi N] [--gate-ticks N]");
         out.println("          [--start SECONDS] [--duration SECONDS] [--role ROLE] [--source SOURCE] [--limit N]");
         out.println("  catalog match-effects PROJECT.json REFERENCE.wav OUTPUT.json --lead ID --double ID");
@@ -87,14 +90,27 @@ final class CatalogueCli {
     }
 
     private static void show(String[] args, PrintStream out) throws IOException {
-        options(args, 4, Set.of());
+        var options = new ArrayList<>(List.of(args));
+        boolean brief = options.subList(Math.min(4, options.size()), options.size()).remove("--brief");
+        options(options.toArray(String[]::new), 4, Set.of());
         var catalogue = InstrumentCatalogue.open(Path.of(args[2]));
         String id = args[3];
         var exact = catalogue.variants().stream().filter(variant -> variant.id().equals(id)).findFirst();
         var asset = catalogue.asset(exact.map(InstrumentCatalogue.Variant::assetId).orElse(id));
         var variants = exact.map(List::of).orElseGet(() -> catalogue.variants().stream()
                 .filter(item -> item.assetId().equals(id)).toList());
-        print(out, new Details(VERSION, PROFILE, asset, variants));
+        var details = new Details(VERSION, PROFILE, asset, variants);
+        if (!brief) {
+            print(out, details);
+            return;
+        }
+        var json = new Gson().toJsonTree(details).getAsJsonObject();
+        for (var variant : json.getAsJsonArray("variants")) {
+            var entry = variant.getAsJsonObject();
+            var occurrences = entry.remove("occurrences").getAsJsonArray();
+            entry.addProperty("occurrenceCount", occurrences.size());
+        }
+        print(out, json);
     }
 
     private static void match(String[] args, PrintStream out) throws IOException {
