@@ -12,6 +12,9 @@ class WrapperTest(unittest.TestCase):
         self.assertEqual(instrument_prompt("lead", None), ["synth_lead"])
         self.assertEqual(instrument_prompt("synth", None), ["synth_lead"])
         self.assertEqual(instrument_prompt("bass", None), ["electric_bass"])
+        self.assertEqual(instrument_prompt("vocals", None), ["voice"])
+        self.assertEqual(instrument_prompt("piano", None), ["acoustic_piano", "electric_piano"])
+        self.assertIsNone(instrument_prompt("other", None))
         self.assertEqual(instrument_prompt("keys", None),
                          ["electric_piano", "chromatic_percussion", "synth_lead", "synth_pad"])
         self.assertEqual(instrument_prompt("lead", "organ, synth_pad"), ["organ", "synth_pad"])

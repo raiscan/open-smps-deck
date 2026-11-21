@@ -1,6 +1,6 @@
 ---
 name: opensmpsdeck
-description: Use when reconstructing Mega Drive music from a Suno download or aligned MIDI and audio, inspecting SMPS note decisions, proposing arrangement edits, or preparing audio and S3K exports for review.
+description: Use when reconstructing Mega Drive music from a Suno download, separated mix, or aligned MIDI and audio, inspecting SMPS note decisions, proposing arrangement edits, or preparing audio and S3K exports for review.
 ---
 
 # Reconstruct and review an S3K arrangement
@@ -23,8 +23,8 @@ assigned stem. Compare the winning match with its runner-up. The matcher
 optimizes the assignments together and uses one reference stem per MIDI
 part. Unmapped parts can use the mix. Use repeatable `--assign FILE=PART`
 and `--exclude FILE` with download-relative paths to correct a mapping,
-and repeat the overrides on subsequent checks. Supply both MIDI and mix
-and resolve blocking errors before starting.
+and repeat the overrides on subsequent checks. For MIDI-based import, supply
+both MIDI and mix and resolve blocking errors before starting.
 An `also_correlates_with_part` warning means another stem also fits that
 part. Audition both before overriding. To transcribe aligned tonal stems
 that have no MIDI part, opt in with `--transcribe-unmapped muscriptor`
@@ -36,10 +36,13 @@ Pass the returned `runRequest` to `reconstruct_run` once the inputs are
 ready. In Studio use **Import Suno folder… → Override → Re-check → Start
 reconstruction**. [Import reference](../../headless/README.md#import-a-suno-download)
 
-For a standalone WAV or MP3 with no Suno download, prepare stems first with
+For a standalone WAV or MP3, use
 `reconstruct separate MIX OUT_DIR --separator NAME --device auto` (MCP
-`separators_list`, then `separate`), then import the produced folder. With no
-MIDI, import stops at the warning that audio-only transcription is needed.
+`separators_list`, then `separate`). Import the resulting folder with its
+`separation.json`. With no MIDI, import prepares audio-only reconstruction
+using a configured transcriber. Check that vocals map to lead and drums to
+the onset detector. If import warns that it needs audio-only transcription,
+configure a transcriber before running.
 [Separation reference](../../headless/README.md#external-stem-separation)
 
 ## 2. Run and preserve a baseline
@@ -51,6 +54,11 @@ Use `--run` with the checked import arguments and catalogue to build in
 java -jar "$jar" reconstruct run song.mid mix.wav catalogue.json "$work" \
   --seconds 60 --stem 0=lead.wav
 ```
+
+For separated audio, use the same `import --run` flow or pass the audio-only
+`runRequest` from `reconstruct_import` to `reconstruct_run`. To build from
+other aligned WAV stems without MIDI, use `reconstruct run --audio-only`.
+[Audio-only inputs](../../headless/README.md#audio-only-reconstruction)
 
 Choose a new work directory. Omit `--seconds` for the full song. MCP
 `reconstruct_run` takes `workDir`, `inputs` with `midi`, `wav`,

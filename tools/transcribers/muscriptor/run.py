@@ -11,6 +11,10 @@ import platform
 KEYS = ("electric_piano", "chromatic_percussion", "synth_lead", "synth_pad")
 PROMPTS = {
     "lead": ("synth_lead",),
+    "vocals": ("voice",),
+    "backing_vocals": ("voice",),
+    "piano": ("acoustic_piano", "electric_piano"),
+    "other": None,
     "synth": ("synth_lead",),
     "bass": ("electric_bass",),
     "keys": KEYS,
@@ -33,7 +37,8 @@ def instrument_prompt(role, override):
         return names
     if role.lower() not in PROMPTS:
         raise ValueError(f"No MuScriptor prompt for role {role!r}. Supply --prompt.")
-    return list(PROMPTS[role.lower()])
+    default = PROMPTS[role.lower()]
+    return None if default is None else list(default)
 
 
 def note_rows(events, duration):
@@ -91,7 +96,9 @@ def infer(args, prompt, tie_forcing, duration):
         with torch.inference_mode():
             events = model.transcribe(args.input, instruments=prompt, batch_size=1,
                                       prelude_forcing=tie_forcing)
-            return note_rows((event for event in events if isinstance(event, NoteEndEvent)), duration)
+            return note_rows((event for event in events if isinstance(event, NoteEndEvent)
+                              and (args.role.lower() != "other" or event.start_event.instrument != "drums")),
+                             duration)
 
     precision = "float32" if args.precision == "auto" else args.precision
     try:

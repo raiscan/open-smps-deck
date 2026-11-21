@@ -86,7 +86,7 @@ final class ReconstructionManifest {
         void write(Path work, ReconstructionStages.Score score, List<String> argv, Run run) throws IOException {
             var inputs = score.inputs();
             var source = new LinkedHashMap<String, Input>();
-            source.put("midi", evidence(Path.of(inputs.midi())));
+            if (inputs.midi() != null) source.put("midi", evidence(Path.of(inputs.midi())));
             source.put("wav", evidence(Path.of(inputs.wav())));
             source.put("catalogue", evidence(Path.of(inputs.catalogue())));
             var stems = new TreeMap<Integer, String>();
@@ -172,7 +172,7 @@ final class ReconstructionManifest {
     static Replay resolve(Path work, Path newWork, List<Path> search) throws IOException {
         var manifest = ReconstructionArtifacts.read(work.resolve(FILE), Manifest.class);
         var required = new LinkedHashMap<>(manifest.inputs);
-        for (String key : List.of("midi", "wav", "catalogue"))
+        for (String key : manifest.options.audioOnly() == null ? List.of("midi", "wav", "catalogue") : List.of("wav", "catalogue"))
             ReconstructionArtifacts.require(required.containsKey(key), FILE, "missing input entry " + key);
         for (String key : manifest.partToStem.values())
             ReconstructionArtifacts.require(required.containsKey(key), FILE, "missing stem entry " + key);
@@ -220,7 +220,7 @@ final class ReconstructionManifest {
         Input candidateInput = manifest.inputs.get("candidates");
         String candidates = candidateInput == null ? null : candidateInput.snapshot == null
                 ? paths.get("candidates").toString() : newWork.resolve(candidateInput.snapshot).toString();
-        var inputs = withPaths(manifest.options, paths.get("midi").toString(), paths.get("wav").toString(),
+        var inputs = withPaths(manifest.options, paths.containsKey("midi") ? paths.get("midi").toString() : null, paths.get("wav").toString(),
                 paths.get("catalogue").toString(), stems, candidates, notes.isEmpty() ? null : notes);
         var relocated = new LinkedHashMap<String, Input>();
         for (var entry : manifest.inputs.entrySet()) {
@@ -316,7 +316,7 @@ final class ReconstructionManifest {
         return new ReconstructionStages.Inputs(midi, wav, catalogue, options.name(), options.ticksPerBeat(),
                 options.keepOctaves(), options.fmOnly(), options.wholePartVoices(), options.audioRefine(), stems,
                 candidates, options.harmonyMaxHz(), options.grid(), options.audioRepeats(), external,
-                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff());
+                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff(), options.audioOnly());
     }
 
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {

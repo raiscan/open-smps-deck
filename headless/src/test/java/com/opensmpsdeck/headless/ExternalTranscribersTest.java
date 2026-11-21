@@ -179,6 +179,74 @@ class ExternalTranscribersTest {
         assertEquals("import", score.inputs().externalNotes().get(0).provenance().tool());
     }
 
+    @Test void audioOnlyRendersAndReplaysWithoutMidiOrTranscriberConfig() throws Exception {
+        var catalogue = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        byte[] kick = new byte[256];
+        java.util.Arrays.fill(kick, (byte) 0x80);
+        kick[0] = (byte) 0xff;
+        String sample = catalogue.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Kick", kick);
+        catalogue.variant(sample, "Kick", new InstrumentCatalogue.Recipe(0x14, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        Path index = directory.resolve("index.json");
+        catalogue.build().save(index);
+
+        Path config = directory.resolve("transcribers.json");
+        fixtureConfig(config);
+        Path drum = directory.resolve("drum.wav");
+        Path quiet = directory.resolve("quiet.wav");
+        WaveFile.write(quiet, 60, sink -> {
+            var silence = new short[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
+            for (int i = 0; i < 60; i++) sink.accept(silence);
+        });
+        WaveFile.write(drum, 60, sink -> {
+            for (int frame = 0; frame < 60; frame++) {
+                var block = new short[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
+                for (int i = 0; i < block.length / 2 && frame >= 12 && frame < 20; i++) {
+                    double t = (frame - 12) / 60.0 + i / (double) S3kRenderer.SAMPLE_RATE;
+                    block[2 * i] = block[2 * i + 1] = (short) (18000 * Math.sin(Math.TAU * 60 * t) * Math.exp(-24 * t));
+                }
+                sink.accept(block);
+            }
+        });
+        Files.delete(midi);
+        var work = directory.resolve("audio-only");
+        var args = List.of("reconstruct", "run", "--audio-only", wav.toString(), index.toString(), work.toString(),
+                "--stem", "vocals=" + wav, "--stem", "drums=" + drum, "--stem", "other=" + quiet,
+                "--tempo", "105", "--bar-offset", "0.125", "--transcriber-config", config.toString(),
+                "--transcriber-device", "cuda:0", "--fm-only");
+        run(0, args);
+
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        assertNull(score.inputs().midi());
+        assertEquals("audio-only", score.inputs().audioOnly().source());
+        assertEquals("fixture", score.inputs().audioOnly().transcriber());
+        assertEquals("spectral", score.inputs().audioOnly().drumDetector().name());
+        assertEquals(List.of("other"), score.inputs().audioOnly().skippedStems());
+        assertEquals(1, score.inputs().leadPart());
+        assertEquals("vocals", score.inputs().externalNotes().get(1).provenance().role());
+        assertEquals(List.of(78), pitches(score, 1));
+        assertEquals(List.of(36), pitches(score, 0));
+        assertEquals(105, score.tempo().selected().bpm());
+        assertEquals(.125, score.tempo().selected().barOffset());
+        var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+        assertFalse(manifest.inputs().containsKey("midi"));
+        assertEquals(score.inputs().audioOnly(), manifest.options().audioOnly());
+
+        Files.delete(config);
+        var replay = directory.resolve("replay");
+        run(0, List.of("reconstruct", "rerun", work.toString(), replay.toString()));
+        assertEquals(-1, Files.mismatch(work.resolve("render.wav"), replay.resolve("render.wav")));
+        assertEquals(-1, Files.mismatch(work.resolve("score.json"), replay.resolve("score.json")));
+        var missing = new ArrayList<>(args);
+        missing.set(5, directory.resolve("missing-config").toString());
+        assertTrue(run(2, missing).contains("needs a configured transcriber"));
+    }
+
     @Test void missingExecutableAbortsAndNamesTheTranscriber() throws Exception {
         Path work = directory.resolve("failed");
         Path config = directory.resolve("transcribers.json");
@@ -219,7 +287,7 @@ class ExternalTranscribersTest {
 
     public static class TranscriberFixture {
         public static void main(String[] args) throws Exception {
-            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard").contains(args[2]) || !args[3].equals("cuda:0"))
+            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals").contains(args[2]) || !args[3].equals("cuda:0"))
                 throw new IllegalArgumentException("Invalid substituted arguments");
             String notes = args[2].equals("keyboard") ? "[[0.01, 0.38, 72], [0.2, 0.8, 82]]"
                     : "[[0.2, 1.1, 78], [1.1, 1.2, 80]]";

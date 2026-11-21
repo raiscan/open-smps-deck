@@ -29,12 +29,14 @@ import static com.opensmpsdeck.headless.mcp.McpJson.object;
 final class McpReconstruction {
     static final String[] STAGES = {"transcribe", "structure", "roles", "voices", "allocate", "voice", "assemble"};
     static final String[] ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan"};
+    static final JsonObject STEM_ROLES = object(Map.of("type", "object", "additionalProperties", Map.of("type", "string")));
     static final JsonObject INPUTS = schema(
-            field("midi", "string", "Absolute MIDI file path"),
+            field("midi", "string", "Absolute MIDI file path, required unless audioOnly is true").optional(),
+            field("audioOnly", "boolean", "Synthesize the source score from labelled aligned stems").optional(),
             field("wav", "string", "Absolute aligned mix WAV path"),
             field("catalogue", "string", "Absolute instrument catalogue JSON path"),
             field("stems", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
-                    "Map of MIDI part IDs to absolute aligned stem WAV paths").optional());
+                    "Map of MIDI part IDs or audio-only stem labels to absolute aligned WAV paths").optional());
     static final JsonObject OPTIONS = schema(
             field("seconds", "number", "Duration from time zero, in (0, 600] seconds").optional(),
             field("name", "string", "Project title").optional(),
@@ -63,7 +65,9 @@ final class McpReconstruction {
                     "Map of melodic MIDI part IDs to transcriber roles. Each part needs an aligned stem").optional(),
             field("transcribeUnmapped", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of new aligned stem WAV paths to transcriber roles").optional(),
-            field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
+            field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional(),
+            field("drumDetector", "string", "Audio-only drum detector, default spectral").optional(),
+            field("stemRoles", STEM_ROLES, "Map of audio-only stem labels to role overrides").optional());
 
     private static final List<String> FILES = List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json",
             "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, ReconstructionProposals.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
@@ -92,7 +96,12 @@ final class McpReconstruction {
         if (args.has("exclude")) {
             for (var file : args.getAsJsonArray("exclude")) exclude.add(file.getAsString());
         }
-        return SunoImport.inspect(folder, work, catalogue, assign, exclude, optional(args, "transcribeUnmapped"), progress).json();
+        boolean audioOnly = args.has("audioOnly") && args.get("audioOnly").getAsBoolean();
+        var roles = new LinkedHashMap<String, String>();
+        if (args.has("stemRoles")) args.getAsJsonObject("stemRoles").entrySet()
+                .forEach(entry -> roles.put(entry.getKey(), entry.getValue().getAsString()));
+        return SunoImport.inspect(folder, work, catalogue, assign, exclude,
+                optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, progress).json();
     }
 
 
@@ -119,9 +128,13 @@ final class McpReconstruction {
         Path work = initial ? McpPaths.newDirectory(string(args, "workDir"))
                 : McpPaths.directory(string(args, "workDir"));
         var cli = new ArrayList<String>();
+        boolean audioOnly = false;
         if (initial) {
             var inputs = args.getAsJsonObject("inputs");
-            for (String key : List.of("midi", "wav", "catalogue")) {
+            audioOnly = inputs.has("audioOnly") && inputs.get("audioOnly").getAsBoolean();
+            if (audioOnly && inputs.has("midi")) throw new IllegalArgumentException("Audio-only inputs cannot include MIDI");
+            cli.add(audioOnly ? "--audio-only" : McpPaths.input(string(inputs, "midi")).toString());
+            for (String key : List.of("wav", "catalogue")) {
                 cli.add(McpPaths.input(string(inputs, key)).toString());
             }
         } else {
@@ -135,15 +148,22 @@ final class McpReconstruction {
         if (initial && args.getAsJsonObject("inputs").has("stems")) {
             for (var stem : args.getAsJsonObject("inputs").getAsJsonObject("stems").entrySet()) {
                 cli.add("--stem");
-                cli.add(Integer.parseInt(stem.getKey()) + "=" + McpPaths.input(stem.getValue().getAsString()));
+                String label = audioOnly ? stem.getKey() : Integer.toString(Integer.parseInt(stem.getKey()));
+                if (label.contains("=")) throw new IllegalArgumentException("Invalid stem label " + label);
+                cli.add(label + "=" + McpPaths.input(stem.getValue().getAsString()));
             }
         }
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
-                    "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice",
+                    "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
                     "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset");
+            if (options.has("stemRoles")) for (var stem : options.getAsJsonObject("stemRoles").entrySet()) {
+                if (stem.getKey().contains("=")) throw new IllegalArgumentException("Invalid stem label " + stem.getKey());
+                cli.add("--stem-role");
+                cli.add(stem.getKey() + "=" + stem.getValue().getAsString());
+            }
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");
                 cli.add(lane.getAsString());

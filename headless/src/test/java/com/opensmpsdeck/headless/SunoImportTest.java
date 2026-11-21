@@ -65,8 +65,15 @@ class SunoImportTest {
                 "--separator", "mock", "--separator-config", config.toString(), "--device", "rocm"}, output, output),
                 () -> messages.toString(StandardCharsets.UTF_8));
         Path work = root.resolve("import work");
-        assertEquals(0, Main.run(new String[]{"reconstruct", "import", separated.toString(), work.toString(),
-                "--run"}, output, output), () -> messages.toString(StandardCharsets.UTF_8));
+        Path emptyConfig = root.resolve("transcribers.json");
+        Files.writeString(emptyConfig, "{}");
+        var command = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), Main.class.getName(),
+                "reconstruct", "import", separated.toString(), work.toString(), "--run");
+        command.environment().put("OPENSMPSDECK_TRANSCRIBERS", emptyConfig.toString());
+        var process = command.redirectErrorStream(true).start();
+        String importOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), importOutput);
         var report = JsonParser.parseString(Files.readString(work.resolve("import.json"))).getAsJsonObject();
         assertEquals("warning", report.get("status").getAsString());
         assertFalse(report.has("runRequest"));
@@ -81,7 +88,7 @@ class SunoImportTest {
         assertEquals(Map.of("stems/bass.wav", "bass", "stems/drums.wav", "drums",
                 "stems/other.wav", "other", "stems/vocals.wav", "vocals",
                 "stems/guitar.wav", "guitar", "stems/piano.wav", "keyboard"), families);
-        assertTrue(messages.toString(StandardCharsets.UTF_8).contains("no MIDI: needs audio-only transcription"));
+        assertTrue(importOutput.contains("no MIDI: needs audio-only transcription"));
     }
 
     @Test void audioCanOverruleStemLabelsAndManifestCanIdentifyOpaqueNames() throws Exception {
