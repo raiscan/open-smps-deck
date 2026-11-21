@@ -29,7 +29,14 @@ final class ReconstructionVoiceStage {
                       InstrumentCatalogue.Variant chosen) throws IOException {
         String chosenLane = chosen == null ? null : targets.iterator().next();
         var byLane = byLane(allocation);
-        var cymbalGains = ReconstructionCymbals.gains(score, byLane.getOrDefault("PSG3", List.of()));
+        var noise = byLane.getOrDefault("PSG3", List.of());
+        var cymbalGains = ReconstructionCymbals.gains(score, noise);
+        // Fit stem-backed cymbals separately. Their noise must not influence
+        // patch or gain choices for the tonal parts in a shared PSG3 lane.
+        var fitPsg3 = noise.stream().filter(n -> !ReconstructionCymbals.automatic(n.reason())
+                || !cymbalGains.containsKey(n.note().pitch())).toList();
+        if (!noise.isEmpty() && fitPsg3.isEmpty()) byLane.remove("PSG3");
+        else if (fitPsg3.size() != noise.size()) byLane.put("PSG3", fitPsg3);
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
@@ -207,6 +214,8 @@ final class ReconstructionVoiceStage {
                     lane.effectReason(), lane.instruments()));
         }
         ReconstructionLevels.calibrate(score.frames(), source, catalogue, byLane, mix, options.stems(), result);
+        if (!noise.isEmpty() && fitPsg3.isEmpty())
+            result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
     }
 

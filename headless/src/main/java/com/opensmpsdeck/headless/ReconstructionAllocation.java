@@ -188,6 +188,11 @@ final class ReconstructionAllocation {
             return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise, pin, null);
         }).sorted(attackOrder()).toList();
         var allocator = new ReconstructionAllocation(fmOnly, seed, attacks);
+        var louderParts = new java.util.HashSet<Integer>();
+        cymbalLevels.keySet().forEach(key -> louderParts.add(key.partId()));
+        cymbalLevels.forEach((key, level) -> {
+            if (ReconstructionCymbals.quiet(level)) louderParts.remove(key.partId());
+        });
         var remaining = new ArrayList<Attack>();
         // Resolve the DAC first so tonal spill can avoid upcoming noise hits.
         // Both passes retain the same attack ordering within their priority tiers.
@@ -199,7 +204,7 @@ final class ReconstructionAllocation {
             } else if (attack.pin != null) {
                 allocator.placePinned(attack);
             } else {
-                var cymbal = allocator.placeDac(attack, cymbalLevels, frames);
+                var cymbal = allocator.placeDac(attack, cymbalLevels, louderParts, frames);
                 if (cymbal != null) remaining.add(cymbal);
             }
         }
@@ -339,7 +344,8 @@ final class ReconstructionAllocation {
         return lane;
     }
 
-    private Attack placeDac(Attack attack, Map<ReconstructionVoices.Key, Double> cymbalLevels, int frames) {
+    private Attack placeDac(Attack attack, Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                            java.util.Set<Integer> louderParts, int frames) {
         Entry last = tail.get("DAC");
         int pitch = attack.note().pitch();
         String blocked = null;
@@ -351,8 +357,11 @@ final class ReconstructionAllocation {
             blocked = "protect-dac-tail";
         }
         if (!fmOnly && ReconstructionCymbals.eligible(pitch)) {
-            boolean quiet = ReconstructionCymbals.quiet(cymbalLevels.get(ReconstructionCymbals.key(attack.note())));
-            if (blocked != null || quiet) {
+            Double level = cymbalLevels.get(ReconstructionCymbals.key(attack.note()));
+            boolean quiet = ReconstructionCymbals.quiet(level);
+            // Preserve the existing DAC strategy when the stem calls for a
+            // cymbal louder than a faithful PSG substitute can reproduce.
+            if (quiet || blocked != null && level == null && !louderParts.contains(attack.note().part())) {
                 var routed = attack.onNoise(blocked != null ? ReconstructionCymbals.COLLISION : ReconstructionCymbals.QUIET, frames);
                 cymbals.merge(routed.start, routed.end, Math::max);
                 return routed;

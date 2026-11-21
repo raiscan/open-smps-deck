@@ -133,11 +133,13 @@ curve. Use `--shared-db` (`sharedDb`) for a common color scale and
 `--pitch-preset drums` (`pitchPreset: "drums"`) for MIDI 35–81. The view
 draws authored bends and assembled FM pitch curves.
 
-Use `trace --lane DAC` or the view's drum rows to see simultaneous DAC
-losses next to the free PSG3 gates. Use the [PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise)
-to pin hats and move tonal spill. Check `lanes.PSG3.psgPercussion` for the
-noise and envelope settings. On DAC, use `drumGainOverrides` with `hitIds`
-or a half-open source-time `span` to replace the gain for selected hits.
+Use `trace --lane PSG3` for automatically routed cymbals and `trace --lane DAC`
+or the view's drum rows for remaining DAC losses. The
+[PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats)
+shows how to tune fitted gains or override routing with pins. Check
+`lanes.PSG3.psgPercussion` for the noise mode. On DAC, use
+`drumGainOverrides` with `hitIds` or a half-open source-time `span` to replace
+the gain for selected DAC hits.
 
 When comparing a stem with the render, pass the lanes that carry that part
 (for example `--lanes FM1,FM3`). The chip panel then solos them instead of
@@ -352,14 +354,6 @@ The journal survives reruns. Review anchor issues if the source grid changes.
 Use `"section":"chorus-1"` in a roleplan rule or
 `"span":{"section":"chorus-1"}` for an edit, then resume the consuming stage.
 See the [musical sections guide](../../docs/architecture/reconstruction-stages.md#musical-sections).
-
-## Drum collisions
-
-Use a dedicated drum stem for automatic PSG3 cymbal levels. Kick and snare
-retain DAC priority. Colliding cymbals and cymbals measured quiet in the stem
-can use short white-noise decays. Check the placement reason and lane with
-`reconstruct_trace`. Use PSG3 `drumGains` in `voicing.json` to adjust a
-fitted pitch, then assemble and audition the drum lanes.
 
 ## Studio review
 

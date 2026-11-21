@@ -109,6 +109,12 @@ class ReconstructionDrumsTest {
         var quiet = ReconstructionAllocation.allocate(roles, parts, 60, false, true, null,
                 Map.of(new ReconstructionVoices.Key(0, 42), .001));
         assertEquals(ReconstructionCymbals.QUIET, quiet.notes().getLast().reason());
+        var kit = new java.util.ArrayList<>(roles.notes());
+        kit.add(attack("unmeasured-crash", 0, 49));
+        var louder = ReconstructionAllocation.allocate(new ReconstructionRoles.Result(1, 0, kit, null),
+                parts, 60, false, true, null, Map.of(new ReconstructionVoices.Key(0, 42), .01));
+        assertEquals("simultaneous-dac-hit", louder.notes().get(2).reason());
+        assertTrue(louder.notes().stream().noneMatch(n -> "PSG3".equals(n.lane())));
         var fmOnly = ReconstructionAllocation.allocate(roles, parts, 60, true, true, null,
                 Map.of(new ReconstructionVoices.Key(0, 42), .001));
         assertEquals("DAC", fmOnly.notes().getLast().lane());

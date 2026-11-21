@@ -755,8 +755,11 @@ DAC hits appear in the allocation and the final report.
 Kick takes precedence over snare for simultaneous DAC hits. Both take
 precedence over cymbals, and their first four ticks are protected from
 lower-priority DAC retriggers. An eligible cymbal that loses the DAC can use
-a short PSG3 white-noise hit. A cymbal class with quiet isolated attacks in a
-dedicated drum stem can use noise even when the DAC is free.
+a short PSG3 white-noise hit. When a dedicated drum stem supplies calibrated
+levels, a cymbal class within the quiet PSG range can use noise even when the
+DAC is free. A louder measured class keeps its DAC allocation and collision
+priority to preserve the stem's stronger attacks. When a kit has only loud
+measurements, its unmeasured classes keep DAC priority as well.
 Harmony spill avoids those PSG3 intervals. Counter lines, sustained
 harmony with no other playable lane, and explicit lane pins can take precedence. The allocation records `psg-cymbal-dac-collision`
 or `psg-cymbal-quiet-stem` for a substitute and `psg-noise-lane-busy` when
@@ -841,37 +844,41 @@ field on `lanes.DAC` to this array.
 ]
 ```
 
-#### Move hats to PSG3 noise
+#### Tune or override PSG3 hats
 
-1. Run `reconstruct trace WORK_DIR --lane DAC --start S --end S --json`.
-   Read `drums.simultaneousDacLosses` and `drums.psg3Free` to choose hats
-   with room for their full gates. Choose a set whose gates do not overlap
-   one another. Inspect `trace --lane PSG3` for tonal occupants. The view's
-   drum rows show the same availability and losses.
-2. Pin tonal notes in the passage to verified free tonal lanes such as
-   PSG2. Pin every retained tonal note that could fall back to PSG3 after
-   reallocation. Use a batch like this with `edit add --file`:
+Colliding cymbals and cymbal classes measured quiet in a dedicated drum stem
+can use PSG3 automatically. Kick and snare retain DAC priority. Review the
+default placement and its reason with `reconstruct trace WORK_DIR --lane PSG3`.
+The drum rows in the view and `trace --lane DAC --json` show remaining
+simultaneous DAC losses and PSG3 availability.
 
-   ```json
-   [
-     {"id":"keep-tone","op":"pinLane","reason":"Reserve PSG3 for hats",
-      "noteIds":["TONE_ID"],"lane":"PSG2"},
-     {"id":"move-hat","op":"setRole","reason":"Recover simultaneous DAC loss",
-      "noteIds":["HAT_ID"],"role":"drums","lane":"PSG3"}
-   ]
-   ```
+- **Tune automatic hats.** Set a pitch gain in `lanes.PSG3.drumGains` (for
+  example `{"42":2}`), assemble, and audition with `render-project --solo PSG3`.
+  This replaces the fitted gain for that pitch. Check the trace for tonal
+  notes on PSG3 in the same passage when listening to the solo.
+- **Override routing.** Pin a hat to DAC to request the sampled hit. To
+  force PSG3, choose a passage with room for the full authored gate and pin
+  any conflicting tones to verified free tonal lanes before pinning the hat.
+  A PSG3 pin uses the authored gate and fixed-level noise. Use
+  `reconstruct edit WORK_DIR add --file BATCH` with a batch such as:
 
-3. Run `reconstruct run --from roles WORK_DIR --keep-voicing`. Check
-   `edit list` for blocked pins and confirm with `trace --lane PSG3` that
-   every gate in the passage is a drum. For a blocked pin, choose a free
-   destination, shorten the conflicting gate, or drop the tonal note if
-   the arrangement can spare it. Pin newly spilled tonal notes and
-   recheck after each rebuild.
-4. Read `lanes.PSG3.psgPercussion` in `voicing.json` for the engine's
-   current noise and envelope settings. Byte 231 (0xE7) is white noise
-   clocked by tone 3. Envelope slot 0 uses the lane's fixed level. Set
-   `lanes.PSG3.drumGains` (for example `{"42":2}` inside that field),
-   assemble, and audition with `render-project --solo PSG3`.
+  ```json
+  [
+    {"id":"keep-tone","op":"pinLane","reason":"Reserve PSG3 for hats",
+     "noteIds":["TONE_ID"],"lane":"PSG2"},
+    {"id":"move-hat","op":"pinLane","reason":"Use a fixed PSG3 noise gate",
+     "noteIds":["HAT_ID"],"lane":"PSG3"}
+  ]
+  ```
+
+  Run `reconstruct run --from roles WORK_DIR --keep-voicing`. Check
+  `edit list` for blocked pins and trace the resulting lane and gate before
+  listening. Apply scoped DAC gains only to hits still on DAC.
+
+Read `lanes.PSG3.psgPercussion` for the noise settings. Byte 231 (0xE7)
+selects white noise clocked by tone 3. `envelopeSlot: 0` is the fixed-level
+mode used for pinned and explicitly named PSG percussion. Automatic
+cymbals use the short or long decay envelope assigned in the arrangement.
 
 The existing PSG velocity curve starts with an FM-style logarithmic
 velocity conversion and then quantizes the resulting 7-bit level to the

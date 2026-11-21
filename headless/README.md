@@ -433,7 +433,7 @@ The legend also records the lane patch changes.
 - Bends available in the stage artifacts are drawn on their gates. The
   assembled curve comes from the rendered FM frequency registers.
 - When there are simultaneous DAC losses, the legend and plot show the
-  free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise).
+  free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats).
 - `--force` replaces the PNG and any requested ridge JSON with staged exports.
   `--pitch-preset drums` uses MIDI 35–81. Explicit pitch limits take precedence.
 - `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
