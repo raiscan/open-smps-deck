@@ -86,12 +86,12 @@ count for a bounded render. `--solo FM1,PSG1` mutes all other lanes and
 `--mute DAC,PSG3` mutes the listed lanes even when soloed.
 
 For aligned A/B listening, use `render-compare WORK_DIR --start S --end S OUT.wav`
-with source seconds. It maps the bounds to project time and appends the
+with source seconds. Use `--time project` for project seconds. It maps the bounds to project time and appends the
 level-matched reference after the render. A warped run uses its saved
 `reference-steady.wav`. Use `--render WAV` for a replacement project-time
 render, or `--reference WAV` for another aligned source-time reference.
 Use an `.mp3` output with ffmpeg installed. The JSON result gives the
-split point and both gains.
+split point, both gains, and the bounds on both clocks.
 
 A native cue can restore a previous project's live state. Pass
 `--previous-project prior.json --previous-frames N` together on
@@ -241,7 +241,10 @@ java -jar "$CLI" reconstruct audition "$work" --lane FM1 --start 45.3 --end 48.8
 ```
 
 Audition uses the last assembled arrangement and applies each candidate to
-one FM lane for the selected phrase. Playback warms up from the song start.
+one FM lane for the selected phrase. Use source seconds by default or
+`--time project` for project seconds. Substitute `--note TRACE_ID` for the
+span to use the assembled voiced gate and infer the FM lane. The output
+reports both clocks and project ticks. Playback warms up from the song start.
 In-mix playback is the default. `--gain` multiplies the lane's existing level
 within the phrase. With multiple variants the command writes `phrase-1.wav`,
 `phrase-2.wav`, and so on. The table shows the variant ID, filename and
@@ -249,7 +252,7 @@ successive RMS bins in dBFS before optional reference level matching.
 `--rms-json FILE` saves the paths, IDs and linear RMS bins to a new JSON
 file. Warped projects can take the original mix or the saved steady reference.
 In MCP, `reconstruct_audition` takes a `variants` array and optional `rmsJson`
-path. It also returns these measurements inline.
+path. It also returns these measurements inline and accepts `note` and `time`.
 
 To apply a candidate, add an entry in the target lane's `overrides` array in
 `voicing.json`, then run `reconstruct assemble WORK_DIR`. Scope entries use
@@ -291,7 +294,7 @@ other unmapped GM hit numbers. The grid is for inspection and does not
 change event times.
 
 `plan-template` prints a JSON template with each active section and part's
-most frequent heuristic role. Use `--out full-song/roleplan.json` to save it
+most frequent heuristic role and uses source seconds for any added time bounds. Use `--out full-song/roleplan.json` to save it
 without overwriting an existing plan. Edit the template to express musical intent. Example plan:
 
 ```json
@@ -317,8 +320,11 @@ attacks in other parts and notes already sounding do not count. All roles
 accept the filter. Use `any` or omit it to allow both textures. Texture
 and pitch filter candidates before `top` or `bottom` traces a line.
 Use `startSeconds` (inclusive) or `endSeconds` (exclusive) to place a handoff
-inside a bar. Use the same `timeBase` as `describe`, or omit the field to
-inherit it. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
+inside a bar. Set `"timeBase":"source"` for source seconds or `"timeBase":"project"`
+for project seconds. A rule with only time bounds can omit sections and bars
+and defaults to source seconds. Existing section- or bar-scoped rules without
+`timeBase` still inherit the clock in `describe`. The roles stage reports both
+time spans and the resolved tick bounds. The last matching rule wins. Roles are `melody`, `counter`, `bass`,
 `harmony`, `drums`, and `drop`. For melody, counter and bass, `top` or
 `bottom` traces one line from eligible notes, with other eligible notes
 left in harmony. Melody and counter default to `top`, bass to `bottom`.
@@ -412,7 +418,10 @@ returns the first affected stage as `from`. MCP `reconstruct_edit` accepts
 `workDir`, `action: "add" | "list" | "remove"`, and an `edit` object or
 `edits` array for add, or an `id` for remove. Set `rerun: true` on MCP add
 or remove to rebuild once and get a `traceDiff`. Check `lastRun` for invalid
-or orphaned targets and blocked pins. An upstream rebuild reapplies the
+or orphaned targets and blocked pins. Use `add --dry-run JSON` or MCP
+`dryRun: true` to see matched IDs, incoming and resulting roles, and whether
+each transition is already satisfied. Edit times default to source seconds;
+set `"timeBase":"project"` on an intent for project bounds. An upstream rebuild reapplies the
 intents, and manifest replay copies them into the new work directory.
 
 See the [operation fields](../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
@@ -422,12 +431,16 @@ for selectors, role swaps, velocity spans, extension guards and other edits.
 
 ```sh
 java -jar "$deck_jar" reconstruct trace full-song --start 45.5 --end 46 --part 0 --pitch 68
+java -jar "$deck_jar" reconstruct trace full-song --by-onset --start 45.5 --end 46 --part 0
 java -jar "$deck_jar" reconstruct trace full-song --lane FM1 --status shortened --json
 java -jar "$deck_jar" reconstruct trace-diff before after --span 45.5,46 --json
 java -jar "$deck_jar" reconstruct rerun full-song replay --search relocated-inputs
 ```
 
 Trace selects notes by source interval, zero-based part and MIDI pitch.
+`--by-onset` gives one line per part and 20 ms attack cluster with pitch,
+role, lane, fate, ID and both clocks. Use `--time project` for project
+intervals. MCP exposes the same options as `byOnset` and `time`.
 Use either `--pitch` or an inclusive range with `--pitch-min` and
 `--pitch-max`. `--lane` selects the allocated lane. Valid values for
 `--status` are `kept`, `moved`, `shortened`, `merged`, and `dropped`.

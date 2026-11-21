@@ -95,15 +95,15 @@ final class ReconstructionCli {
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
-        out.println("       reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID");
-        out.println("       reconstruct trace WORK_DIR [--start S] [--end S] [--part N] [--lane LANE]");
+        out.println("       reconstruct edit WORK_DIR add [--dry-run] JSON | add [--dry-run] --file BATCH | list | remove ID");
+        out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
         out.println("           [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--shared-db|--db] [--pitch-preset drums]");
-        out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
+        out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) --variant ID ...");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");

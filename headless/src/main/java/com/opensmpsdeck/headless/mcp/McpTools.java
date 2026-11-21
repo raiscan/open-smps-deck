@@ -35,6 +35,8 @@ final class McpTools {
     private static final Field PROJECT = field("project", "string", "Absolute project JSON path");
     private static final Field CATALOGUE = field("catalogue", "string", "Absolute catalogue JSON path");
     private static final Field OUTPUT = field("output", "string", "New WAV path relative to or inside the work/project directory");
+    private static final Field SOURCE_START = field("start", "number", "Inclusive start in the selected clock (default source)");
+    private static final Field SOURCE_END = field("end", "number", "Exclusive end in the selected clock (default source)");
     private static final Field START = field("start", "number", "Inclusive start in project seconds, rounded to 60 Hz");
     private static final Field END = field("end", "number", "Exclusive end in project seconds, rounded to 60 Hz");
     private static final Field AUTHOR = field("author", "string", "Review author display name");
@@ -96,11 +98,14 @@ final class McpTools {
                     field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove").optional(),
-                    field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional()),
+                    field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional(),
+                    field("dryRun", "boolean", "Resolve proposed edits without writing artifacts").optional()),
             tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
-                    field("start", "number", "Inclusive start in source seconds").optional(),
-                    field("end", "number", "Exclusive end in source seconds").optional(),
+                    field("start", "number", "Inclusive start in the selected time base").optional(),
+                    field("end", "number", "Exclusive end in the selected time base").optional(),
+                    choice("time", "Time base for bounds (default source)", "source", "project").optional(),
+                    field("byOnset", "boolean", "Group attacks by part and onset with roles, lanes, fates and stable IDs").optional(),
                     field("part", "integer", "Zero-based MIDI part ID").optional(),
                     field("pitch", "integer", "Exact source MIDI pitch").optional(),
                     field("pitchMin", "integer", "Inclusive minimum source MIDI pitch").optional(),
@@ -115,8 +120,10 @@ final class McpTools {
             tool("reconstruct_plan_template", "Create roleplan.json from the heuristic's dominant roles per section and part.",
                     (args, progress) -> McpReconstruction.planTemplate(args), WORK),
             tool("reconstruct_audition", "Compare FM variants on a frozen phrase from the assembled arrangement.",
-                    (args, progress) -> McpReconstruction.audition(args), WORK, START, END, OUTPUT,
-                    choice("lane", "FM lane to audition", "FM1", "FM2", "FM3", "FM4", "FM5"),
+                    (args, progress) -> McpReconstruction.audition(args), WORK, SOURCE_START.optional(), SOURCE_END.optional(), OUTPUT,
+                    choice("time", "Time base for bounds (default source)", "source", "project").optional(),
+                    field("note", "string", "Trace note ID to audition on its assembled voiced gate").optional(),
+                    choice("lane", "FM lane to audition (inferred when using note)", "FM1", "FM2", "FM3", "FM4", "FM5").optional(),
                     field("variants", object(Map.of("type", "array", "items", Map.of("type", "string"))),
                             "One or more catalogue variant IDs"),
                     field("gain", "number", "Multiplier for the existing note levels (0–4)").optional(),
@@ -137,9 +144,10 @@ final class McpTools {
                     lanes("solo", "If supplied, keep only these lanes").optional(),
                     lanes("mute", "Silence these lanes after applying solo").optional()),
             tool("render_compare", "Concatenate a level-matched rendered excerpt and aligned reference excerpt, in that order. Maximum 60 seconds per side.",
-                    (args, progress) -> McpAudio.compare(args), WORK, OUTPUT, START, END,
+                    (args, progress) -> McpAudio.compare(args), WORK, OUTPUT, SOURCE_START, SOURCE_END,
                     path("render", "Rendered WAV"), path("reference", "Reference WAV"),
-                    field("referenceOffset", "number", "Project time in seconds at which reference time zero aligns").optional()),
+                    choice("time", "Time base for bounds (default source)", "source", "project").optional(),
+                    field("referenceOffset", "number", "Project time at which a project-aligned reference begins").optional()),
             tool("notes_list", "Load persisted project review notes and replies.",
                     (args, progress) -> review(args, "notes", "list"), PROJECT,
                     field("openOnly", "boolean", "Return only unresolved feedback").optional()),

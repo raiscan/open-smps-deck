@@ -257,6 +257,52 @@ class ReconstructionEditsTest {
         assertTrue(cleared.toString().contains("\"id\":\"scoop\",\"op\":\"bend\",\"status\":\"orphaned\""));
     }
 
+    @Test void registerSelectionPreviewsPriorRolesAndGlideSurvivesReplay(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("theme.mid"), catalogue = dir.resolve("catalogue.json"), wav = dir.resolve("mix.wav");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--tempo", "120", "--steady-tempo", "80");
+
+        String from = "n-0-0-60", top = "n-0-500000-67", bottom = "n-0-500000-64";
+        add(work, """
+                {"id":"landing","reason":"separate melody attacks","op":"setRole","role":"melody","lane":"FM1",
+                 "selectors":[{"at":0,"pitch":60,"part":0},{"at":0.5,"pitch":67,"part":0}]}
+                """, false);
+        String saved = Files.readString(work.resolve("edits.json"));
+        String register = """
+                {"id":"register","reason":"bring out the chord top","op":"setRole","part":0,"span":[0.7,0.8],
+                 "timeBase":"project","voice":"top","fromRole":"counter","role":"melody","others":"harmony"}
+                """;
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", register));
+        assertEquals(saved, Files.readString(work.resolve("edits.json")));
+        assertFalse(Files.exists(work.resolve("edit-results.json")));
+        var results = preview.getAsJsonArray("notes").asList().stream().map(row -> row.getAsJsonObject()).toList();
+        assertEquals(List.of(top, bottom), results.stream().map(row -> row.get("noteId").getAsString()).toList());
+        assertTrue(results.getFirst().get("satisfied").getAsBoolean());
+        assertEquals("melody", results.getFirst().get("incomingRole").getAsString());
+        assertEquals("harmony", results.getLast().get("resultingRole").getAsString());
+        assertTrue(preview.toString().contains("\"status\":\"satisfied\""));
+        assertFalse(preview.toString().contains("orphaned"));
+
+        add(work, register, false);
+        add(work, """
+                {"id":"slide","reason":"connect two lead attacks","op":"glide","fromNoteId":"%s",
+                 "toNoteId":"%s","shape":"smooth","seconds":0.15}
+                """.formatted(from, top), true);
+        var trace = ReconstructionTrace.read(work);
+        var departure = trace.get(from);
+        var landing = trace.get(top);
+        assertEquals(.5, departure.score().note().end(), 1e-9);
+        assertEquals(700, departure.score().note().bend().points().getLast().cents());
+        assertEquals(landing.effectiveTiming().startTick(), departure.effectiveTiming().endTick());
+        assertEquals("edit:slide", departure.voiced().getFirst().bend().reason());
+        Path replay = dir.resolve("replay");
+        cli("reconstruct", "rerun", work.toString(), replay.toString());
+        assertEquals(0, ReconstructionTrace.diff(work, replay, null).getAsJsonArray("changes").size());
+    }
+
     private static Note note(String id, double start, double end, int pitch) {
         return new Note(id, 0, start, end, pitch, 90, "midi", 1);
     }

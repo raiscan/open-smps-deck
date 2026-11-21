@@ -301,11 +301,16 @@ public final class ReconstructionStages {
                     case ROLES -> {
                         var structure = readStructure(structureFile, score);
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
-                        Path planFile = work.resolve("roleplan.json");
-                        ReconstructionRolePlan plan = null;
-                        if (!Files.notExists(planFile, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                            plan = ReconstructionArtifacts.read(planFile, ReconstructionRolePlan.class);
-                            ReconstructionChecks.rolePlan(plan, structure, score);
+                        var plan = readRolePlan(work, structure, score);
+                        if (plan != null) {
+                            var timeline = ReconstructionTimeMap.of(score);
+                            for (var time : plan.resolvedTimes(timeline)) {
+                                out.printf(java.util.Locale.ROOT,
+                                        "roleplan#%d %.6f–%.6f s source, %.6f–%.6f s project, ticks [%d,%d)%n",
+                                        time.rule(), time.sourceStart(), time.sourceEnd(), time.projectStart(),
+                                        time.projectEnd(), time.startTick(), time.endTick());
+                            }
+                            plan = plan.projectBounds(timeline);
                         }
                         var continuity = ReconstructionLeadContinuity.analyze(score, structure.notes());
                         var scoreEdits = editJournal.stages().getOrDefault("transcribe", List.of());
@@ -410,6 +415,69 @@ public final class ReconstructionStages {
 
     private static String stageName(Stage stage) {
         return stage.name().toLowerCase(Locale.ROOT);
+    }
+
+    private static ReconstructionRolePlan readRolePlan(Path work, ReconstructionStructure.Result structure, Score score)
+            throws IOException {
+        Path path = work.resolve("roleplan.json");
+        if (Files.notExists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+        var plan = ReconstructionArtifacts.read(path, ReconstructionRolePlan.class);
+        ReconstructionChecks.rolePlan(plan, structure, score);
+        return plan;
+    }
+
+    public static List<?> rolePlanTimes(Path work) throws IOException {
+        if (Files.notExists(work.resolve("roleplan.json"))) return List.of();
+        var score = readScore(work.resolve("score.json"));
+        var plan = readRolePlan(work, readStructure(work.resolve("structure.json"), score), score);
+        return plan == null ? List.of() : plan.resolvedTimes(ReconstructionTimeMap.of(score));
+    }
+
+    static void previewEdits(Path work, Stage from, ReconstructionEdits edits, ReconstructionEdits.Journal prior,
+                             List<ReconstructionEdits.Outcome> outcomes, List<ReconstructionEdits.Resolution> resolutions)
+            throws IOException {
+        var score = readScore(work.resolve("score.json"));
+        var structureFile = work.resolve("structure.json");
+        Path rolesFile = work.resolve("roles.json");
+        var currentRoles = Files.isRegularFile(rolesFile)
+                ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : null;
+        List<ReconstructionEdits.Outcome> scoreEdits;
+        if (from == Stage.TRANSCRIBE) {
+            score = edits.applyScore(retranscribe(score), outcomes);
+            scoreEdits = List.copyOf(outcomes);
+        } else {
+            scoreEdits = prior.stages().getOrDefault("transcribe", List.of());
+        }
+        var structure = from == Stage.TRANSCRIBE || Files.notExists(structureFile)
+                ? structure(score, scoreEdits) : readStructure(structureFile, score);
+        var timeline = ReconstructionTimeMap.of(score);
+        var plan = readRolePlan(work, structure, score);
+        if (plan != null) plan = plan.projectBounds(timeline);
+        var continuity = ReconstructionLeadContinuity.analyze(score, structure.notes());
+        double rate = currentRoles == null ? score.inputs.harmonyMaxHz : currentRoles.harmonyMaxHz();
+        var roles = edits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes, resolutions);
+
+        if (from != Stage.TRANSCRIBE) return;
+        var previous = new HashMap<String, ReconstructionRoles.Decision>();
+        if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
+        var resulting = new HashMap<String, ReconstructionRoles.Decision>();
+        for (var row : roles.notes()) resulting.put(row.note().id(), row);
+        var written = new HashMap<String, Note>();
+        for (var note : score.notes()) written.put(note.id(), note);
+        var resolved = new java.util.HashSet<List<String>>();
+        for (var row : resolutions) resolved.add(List.of(row.editId(), row.noteId()));
+        for (var outcome : scoreEdits) {
+            if (outcome.status() != ReconstructionEdits.Status.applied) continue;
+            for (String id : outcome.noteIds()) {
+                if (!resolved.add(List.of(outcome.id(), id))) continue;
+                var before = previous.get(id);
+                var after = resulting.get(id);
+                var note = written.getOrDefault(id, outcome.original());
+                resolutions.add(new ReconstructionEdits.Resolution(outcome.id(), id,
+                        before == null ? null : before.role(), after == null ? null : after.role(), false,
+                        note == null ? null : note.start(), note == null ? null : timeline.project(note.start())));
+            }
+        }
     }
 
     public static void writeArtifact(Path file, JsonElement value) throws IOException {

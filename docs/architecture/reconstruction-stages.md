@@ -47,6 +47,13 @@ directories outside public checkouts.
 
 ## Trace and reproducible inputs
 
+Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`
+to list one line per part and attack cluster in source seconds. Attacks within
+20 ms of the first onset are grouped. Notes show their pitch, role, lane,
+fate and stable ID. Use `--json` for structured clusters or `byOnset: true` on
+MCP `reconstruct_trace`. `--time project` (MCP `time: "project"`) selects
+project-clock bounds. Clusters report both clocks.
+
 `reconstruct trace WORK_DIR` joins source, score, structure, roles,
 allocation, and voicing evidence by stable note ID. Source and project
 seconds accompany 60 Hz ticks. Ticks on allocation and voiced gates
@@ -120,8 +127,9 @@ Keep these replay artifacts with the private recipe.
 `edits.json` is a versioned object with an ordered `edits` array. Each intent
 has a unique `id`, a free-text evidence `reason`, and an `op` with the fields
 below. Order applies within each stage, with later role or lane settings
-taking precedence. All times in this file use source seconds, including
-when reconstruction warps project time. Pitch is a MIDI integer.
+taking precedence. Intents use source seconds by default. Set
+`"timeBase":"project"` on an intent to use project seconds for its span,
+selector, gate, and curve. Pitch is a MIDI integer.
 
 | Op | Fields | First stage |
 | --- | --- | --- |
@@ -129,11 +137,12 @@ when reconstruction warps project time. Pitch is a MIDI integer.
 | `deleteNote` | `noteId` or a point selector. When the score has no match, roles can remove a generated note such as a `lead-audio-added` attack. | `transcribe` |
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
 | `setVelocity` | `span`, `part`, optional `pitchMin` and `pitchMax`, and either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
-| `setRole` | A selector and `role`. A span or ID list can filter by `fromRole`, using the current role after earlier edits. Optional `lane` also pins the note. | `roles` |
+| `setRole` | A selector and `role`. A span, ID list or point list can filter by `fromRole` after earlier edits. Optional `lane` also pins the note. | `roles` |
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
 | `pinLane` | `noteIds` or a point selector, and `lane`. | `roles` |
 | `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
 | `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. A point up to one project tick past the gate clamps to the gate end. | `transcribe` |
+| `glide` | `fromNoteId` and `toNoteId` identify two pitched score attacks in the same part. The first gate ends at the later attack, which retains its own note. Optional `seconds` gives the sliding portion of the gate (default up to 0.12 seconds). `shape` is `linear` (default), `easeIn`, `easeOut`, or `smooth`. The first note needs an FM lane for the bend to play. | `transcribe` |
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
@@ -141,7 +150,22 @@ report `invalid`. For span or ID selection on `setRole` and `unmerge`,
 use a nonempty `noteIds` array or `span: [start, end]` with `part` and
 optional inclusive `pitchMin` and `pitchMax`. Span fields may be in a
 `selector` object or at the top level. Spans include attacks at the
-start and exclude attacks at the end.
+start and exclude attacks at the end. For `setRole`, `selectors` is an array
+of point selectors. A common `part` can be set on the intent. Each point must
+resolve uniquely. An ambiguous or missing point is reported with its own
+outcome while resolved points are applied once per note.
+
+Span operations also accept `voice: "top"`, `voice: "bottom"`, or a zero-based
+rank from the highest pitch. They group eligible attacks within 20 ms of
+each cluster's first attack, in the same part, in source time. Equal pitches
+sort by attack time and stable ID. A rank outside a cluster skips it.
+`setRole` can assign its remaining eligible notes a role with `others`.
+`fromRole` applies to the ranked target. For example:
+
+```json
+{"id":"top-line","reason":"lead is above the chord","op":"setRole","part":0,
+ "span":[48.9,51.7],"voice":"top","role":"melody","others":"harmony"}
+```
 
 Set `noExtension: true` to keep lead legato and stem-backed release
 extension from stretching the attack. A later `noExtension: false` clears
@@ -162,8 +186,13 @@ or MCP `reconstruct_edit`. The batch file accepts an array of intents or a
 versioned edits object. MCP add takes either a single `edit` or an `edits`
 array. Entries append in order, and a malformed intent or duplicate edit ID
 rejects the whole batch before writing. Resume from the returned `from`
-stage. MCP add and remove accept `rerun: true` to rebuild once and return a
-trace diff. The diff flags changes outside the combined range of the
+stage. Use `add --dry-run JSON` or `add --dry-run --file BATCH` (MCP
+`dryRun: true`) to resolve a batch in memory. The preview lists stable IDs,
+incoming and resulting roles, satisfaction, and both attack times. It also
+reports selector failures and leaves the work directory untouched. A
+`setRole` target already in the desired role after earlier edits can return
+`satisfied` even when `fromRole` differs. MCP add and remove accept
+`rerun: true` to rebuild once and return a trace diff. The diff flags changes outside the combined range of the
 requested spans and targeted gates. For example, a batch can contain these
 two intents:
 
@@ -195,10 +224,13 @@ The same note shape is used in every stage. Times are measured in seconds
 from the start. Confidence is in 0–1, and velocity is in 1–127.
 `score.json` always uses source seconds. `structure.json`, `roles.json` and
 `allocation.json` label their note and bar times with `timeBase`, either
-`source` or `project`. `roleplan.json` uses that same time base for
-`startSeconds` (inclusive) and `endSeconds` (exclusive), as displayed by
-`reconstruct describe`. A generated plan includes `timeBase`. A hand-written
-plan can omit it to inherit the structure time base.
+`source` or `project`. `roleplan.json` supports both with an explicit
+`timeBase`. Rules use `startSeconds` inclusive and `endSeconds` exclusive.
+New templates use source seconds. A time-only rule can omit `sections` and
+`bars` and also defaults to source seconds. An existing section- or bar-scoped rule with no `timeBase` still inherits
+the structure clock. The roles stage reports time-bounded rules as source
+and project spans with half-open project tick ranges. MCP returns them in
+`rolePlanTimes`.
 `part` refers to a MIDI part ID in `score.json`. Pitch is a MIDI number.
 S3K melodic notes span 12–106. Percussion and external candidates use MIDI
 0–127. The score can carry a coincident MIDI attack and release, which
@@ -750,8 +782,9 @@ in the Studio arrangement. The stereo stretch uses cross-correlated
 overlap-add to preserve pitch and applies the inverse project-to-source map.
 The CLI `render-compare WORK_DIR --start S --end S OUT.wav` maps source
 seconds to the assembled project clock. It uses `render.wav` and the original
-mix or saved steady reference by default. `--render WAV` selects a different
-project-time render and `--reference WAV` selects an aligned source recording
+mix or saved steady reference by default. Use `--time project` for project
+bounds. Results report both clocks and project ticks. `--render WAV` selects
+a different project-time render and `--reference WAV` selects an aligned source recording
 or the saved steady WAV. Choose `.mp3` for ffmpeg encoding. Both formats contain
 the render followed by the level-matched reference, with the split point in
 the JSON result. Use `render-project --start S --end S --solo LANES --mute LANES`
@@ -760,8 +793,9 @@ for an excerpt from a project in project seconds. Lane lists are comma-separated
 With MCP `render_compare`, provide the work directory, its `render.wav`, and the
 original mix or the steady reference. MCP substitutes the steady file when
 the original mix matches the assembly report. A/B excerpt ranges use project
-seconds. Source mix and stem excerpts for voice fitting always use source
-seconds.
+seconds with `time: "project"`; they default to source seconds. Use
+`referenceOffset` for an independently aligned project-clock reference.
+Source mix and stem excerpts for voice fitting always use source seconds.
 `effectCopyLanes` identifies dedicated FM copy lanes that actually reached
 assembly. If copies would make the bank exceed the native size limit,
 assembly retries without them and records `echoBankLimit`.
@@ -776,7 +810,9 @@ into the playback bank.
 without changing transcription. Repeat `--harmonics-at PITCH[@TIME]` for
 pitch probes independent of trace note IDs. `--ridges` writes a sibling
 `.ridges.json` with the strongest source harmonic-sum pitch per time column.
-`--db` shows spectral peak levels and `--shared-db` uses a common color scale.
+`--time project` selects project-clock coordinates for bounds and harmonic
+probe times. The view legend gives both spans. `--db` shows spectral peak
+levels and `--shared-db` uses a common color scale.
 `--pitch-preset drums` sets MIDI 35–81. MCP `reconstruct_view` exposes these
 as `notes`, `harmonicsAt`, `ridges`, `db`, `sharedDb`, and `pitchPreset`.
 
@@ -784,7 +820,10 @@ as `notes`, `harmonicsAt`, `ridges`, `db`, `sharedDb`, and `pitchPreset`.
 
 `reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID OUT.wav`
 changes only the specified lane in a temporary overlay of the assembled
-project. It keeps timing, other lanes, copy tracks and authored project edits.
+project. Bounds default to source seconds; use `--time project` for project
+seconds. Use `--note TRACE_ID` instead of a range to audition the note's
+assembled voiced gate. Its FM lane is inferred unless supplied. Audition
+keeps timing, other lanes, copy tracks and authored project edits.
 The overlay swaps FM patches on the exact rounded project interval and
 preserves a held note's envelope state. Use a range starting before a
 relevant attack to compare how each patch develops through the hold.
@@ -799,7 +838,9 @@ original reference for a warped run, the tool uses the saved steady WAV.
 Audition leaves the artifacts untouched. Add an override and assemble to
 publish the chosen patch. MCP `reconstruct_audition` takes a `variants` array
 and returns the candidate paths, variant IDs and pre-match RMS envelopes in
-linear units. Save the same fields with `--rms-json FILE` or MCP `rmsJson`.
+linear units, with source and project bounds and ticks. MCP uses `note` and
+`time` for note ID and clock. Save the same fields with `--rms-json FILE` or
+MCP `rmsJson`.
 
 Assembly probes the lane-wide FM1 patch in isolation on up to three of its
 longest allocated gates of at least one second, including with

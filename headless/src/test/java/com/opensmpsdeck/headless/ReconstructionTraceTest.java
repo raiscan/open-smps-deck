@@ -56,6 +56,27 @@ class ReconstructionTraceTest {
                 allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null);
     }
 
+    @Test void samePitchAttacksHaveDistinctStableIdsInOneCluster(@TempDir Path work) throws Exception {
+        var raw = new MidiScore.Note(0, 65, 96, 500_000, 600_000);
+        var key = ReconstructionStages.midiNoteKey(raw);
+        var alternate = ReconstructionStages.noteInstance(key, 2);
+        var source = new MidiScore(List.of(new MidiScore.Part(0, "Keys", 0, false)), List.of(raw, raw), List.of());
+        var inputs = new ReconstructionStages.Inputs("source.mid", "mix.wav", "index.json", "Fixture",
+                30, false, false, false, false, Map.of(), null, 7.5, null, null);
+        var written = List.of(new Note(key, 0, .5, .6, 65, 96, "midi", 1),
+                new Note(alternate, 0, .5, .6, 65, 96, "midi", 1));
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs, List.of(new ReconstructionStructure.Bar("b1", 0, 1, false)), source, Map.of(0, 2),
+                written, List.of(), List.of(), null, null);
+        ReconstructionArtifacts.write(work.resolve("score.json"), score);
+        var trace = ReconstructionTrace.trace(work, "--by-onset", "--start", "0.5", "--end", "0.6", "--part", "0");
+        var clusters = trace.getAsJsonArray("clusters");
+        assertEquals(1, clusters.size());
+        var notes = clusters.get(0).getAsJsonObject().getAsJsonArray("notes");
+        assertEquals(List.of(key, alternate), notes.asList().stream()
+                .map(row -> row.getAsJsonObject().get("id").getAsString()).toList());
+        assertEquals(trace, ReconstructionTrace.trace(work, "--by-onset"));
+    }
+
     @Test void tracesMergesTruncationAndUnpropagatedScoreEdits(@TempDir Path work) throws Exception {
         var held = new Note("held", 0, .1, .8, 68, 96, "midi", 1);
         var winner = new Note("winner", 0, .5, .7, 70, 96, "midi", 1);

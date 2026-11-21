@@ -159,6 +159,14 @@ def smoke(jar, root):
         assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
         trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
         assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)
+        clusters = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, part=0, byOnset=True)["clusters"]
+        assert clusters and all("sourceStart" in cluster and "projectStart" in cluster for cluster in clusters)
+        target = trace[0]["id"]
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True,
+                           edit={"id": "preview", "reason": "Confirm current role", "op": "setRole",
+                                 "noteIds": [target], "fromRole": "counter", "role": "melody"})
+        assert preview["notes"][0]["noteId"] == target and preview["notes"][0]["satisfied"]
+        assert preview["outcomes"][0]["status"] == "satisfied" and not (work / "edits.json").exists()
         artifact_hashes = {name: hashlib.sha256(Path(path).read_bytes()).digest()
                            for name, path in files.items()}
         view = rpc.request("tools/call", name="reconstruct_view", arguments={
@@ -233,6 +241,12 @@ def smoke(jar, root):
         assert audition["candidates"][0]["variantId"] == current
         assert json.loads(Path(audition.pop("rmsJson")).read_text()) == audition
         assert (work / "phrase.wav").read_bytes() == plain.read_bytes()
+        assert audition["sourceStart"] == audition["projectStart"] == 0.25
+        gate = trace[0]["voiced"][0]["gate"]
+        by_note = rpc.call("reconstruct_audition", workDir=work, note=target, variants=[current],
+                           output=work / "note.wav")
+        assert by_note["noteId"] == target and by_note["startTick"] == gate["startTick"]
+        assert by_note["endTick"] == gate["endTick"]
         clip = work / "clip.wav"
         rpc.call("render_clip", project=project, output=clip, start=0.25, end=0.75, solo=["FM1"])
         with wave.open(str(clip), "rb") as wav:
@@ -300,8 +314,12 @@ def smoke(jar, root):
         assert json.loads(Path(files["arrangement.smps.json"]).read_text())["references"][0]["path"] == steady_wav.name
         for reference, name in [(inputs["wav"], "auto-ab.wav"), (steady_wav, "explicit-ab.wav")]:
             rpc.call("render_compare", render=steady / "render.wav", reference=reference, workDir=steady,
-                     output=steady / name, start=2.1, end=2.5)
+                     output=steady / name, start=2.1, end=2.5, time="project")
+        source_ab = rpc.call("render_compare", render=steady / "render.wav", reference=inputs["wav"], workDir=steady,
+                             output=steady / "source-ab.wav", start=1.4, end=2.5 * 2 / 3)
+        assert source_ab["startTick"] == 126 and source_ab["endTick"] == 150
         assert (steady / "auto-ab.wav").read_bytes() == (steady / "explicit-ab.wav").read_bytes()
+        assert (steady / "auto-ab.wav").read_bytes() == (steady / "source-ab.wav").read_bytes()
 
     with Client(jar, modern=True) as rpc:
         assert rpc.request("tools/list")["tools"] == tools

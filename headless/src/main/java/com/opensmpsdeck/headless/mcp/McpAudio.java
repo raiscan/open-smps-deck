@@ -35,19 +35,15 @@ final class McpAudio {
     }
 
     static JsonObject compare(JsonObject args) throws IOException {
-        var range = range(args);
         var render = McpPaths.input(string(args, "render"));
         var reference = McpPaths.input(string(args, "reference"));
         var work = McpPaths.directory(string(args, "workDir"));
         var output = McpPaths.output(work, string(args, "output"));
-        if (render.equals(work.resolve("render.wav")) && ReconstructionStages.usesSteadyReference(
-                McpPaths.managed(work, "report.json"), reference)) {
-            reference = McpPaths.input(McpPaths.managed(work, ReconstructionStages.STEADY_REFERENCE).toString());
-        }
-        long start = (long) range.start() * STEREO_FRAMES_PER_PRESENTATION;
-        double offset = args.has("referenceOffset") ? args.get("referenceOffset").getAsDouble() : 0;
-        if (Math.abs(offset) > 600) throw new IllegalArgumentException("referenceOffset must be in [-600, 600]");
-        return object(RenderComparison.write(render, reference, output, range, start - Math.round(offset * SAMPLE_RATE)));
+        for (String file : List.of("score.json", "report.json", ReconstructionStages.STEADY_REFERENCE))
+            McpPaths.managed(work, file);
+        return object(RenderComparison.run(work, render, reference, output, args.get("start").getAsDouble(),
+                args.get("end").getAsDouble(), args.has("time") ? string(args, "time") : "source",
+                args.has("referenceOffset") ? args.get("referenceOffset").getAsDouble() : null));
     }
 
     private static WaveFile.Range range(JsonObject args) {

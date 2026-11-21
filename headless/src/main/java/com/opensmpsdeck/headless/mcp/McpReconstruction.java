@@ -118,6 +118,10 @@ final class McpReconstruction {
         var result = object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
         Path edits = work.resolve(ReconstructionEditCommand.RESULTS);
         if (Files.isRegularFile(edits)) result.add("editResults", read(edits).getAsJsonObject().get("stages"));
+        if (command.equals("roles") || !single && (!resume || List.of("transcribe", "structure", "roles").contains(string(args, "from")))) {
+            var times = ReconstructionStages.rolePlanTimes(work);
+            if (!times.isEmpty()) result.add("rolePlanTimes", McpJson.JSON.toJsonTree(times));
+        }
         return result;
     }
 
@@ -125,6 +129,7 @@ final class McpReconstruction {
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : List.of("score.json", "report.json", "arrangement.smps.json", ReconstructionStages.STEADY_REFERENCE))
             McpPaths.managed(work, file);
+        if (args.has("note")) for (String file : ReconstructionTrace.FILES) McpPaths.managed(work, file);
         var variants = new ArrayList<String>();
         for (var variant : args.getAsJsonArray("variants")) variants.add(variant.getAsString());
         Path requested = Path.of(string(args, "output"));
@@ -134,8 +139,10 @@ final class McpReconstruction {
             output = file.resolveSibling(requested.getFileName());
         }
         Path rmsJson = args.has("rmsJson") ? McpPaths.output(work, string(args, "rmsJson")) : null;
-        var result = ReconstructionAudition.run(work, string(args, "lane"), args.get("start").getAsDouble(),
-                args.get("end").getAsDouble(), variants, args.has("gain") ? args.get("gain").getAsDouble() : null,
+        var result = ReconstructionAudition.run(work, optional(args, "lane"),
+                args.has("start") ? args.get("start").getAsDouble() : null,
+                args.has("end") ? args.get("end").getAsDouble() : null,
+                args.has("time") ? string(args, "time") : "source", optional(args, "note"), variants, args.has("gain") ? args.get("gain").getAsDouble() : null,
                 args.has("solo") && args.get("solo").getAsBoolean(),
                 args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output, rmsJson);
         var response = object(result);
@@ -149,12 +156,14 @@ final class McpReconstruction {
         McpPaths.managed(work, ReconstructionEditCommand.LOCK);
         if (args.has("edit") && args.has("edits")) throw new IllegalArgumentException("Choose edit or edits");
         return ReconstructionEditCommand.run(work, string(args, "action"), args.get(args.has("edits") ? "edits" : "edit"),
-                optional(args, "id"), args.has("rerun") && args.get("rerun").getAsBoolean(), progress);
+                optional(args, "id"), args.has("rerun") && args.get("rerun").getAsBoolean(),
+                args.has("dryRun") && args.get("dryRun").getAsBoolean(), progress);
     }
 
     static JsonObject trace(JsonObject args) throws IOException {
         var cli = new ArrayList<String>();
-        options(cli, args, "start", "end", "part", "pitch", "pitchMin", "pitchMax", "lane", "status");
+        options(cli, args, "start", "end", "part", "pitch", "pitchMin", "pitchMax", "lane", "status", "time");
+        if (args.has("byOnset") && args.get("byOnset").getAsBoolean()) cli.add("--by-onset");
         return ReconstructionTrace.trace(traceDirectory(args, "workDir"), cli.toArray(String[]::new));
     }
 

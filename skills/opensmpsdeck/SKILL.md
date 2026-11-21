@@ -196,10 +196,11 @@ line is masked, and preserve variations supported by the local audio.
      "role": "melody", "voice": "all"}`.
    - Demote a part while another carries the tune: `{"sections": ["section-b90"],
      "part": 3, "role": "harmony", "voice": "all"}`.
-   - Use the time base from `reconstruct_describe` for plan time bounds
-     (project seconds when warped, source seconds otherwise).
-   - Use `bars` or `startSeconds`/`endSeconds` only for a mid-section
-     handoff.
+   - For a time-only rule, use `startSeconds` or `endSeconds` in source
+     seconds with no section or bar selector. Choose `timeBase: "project"`
+     for project-clock bounds. For a section or bar rule with time bounds,
+     specify the plan's time base explicitly. Check `rolePlanTimes` for the
+     resolved project ticks.
 4. Validate with `artifact_write` (artifact `roleplan`), then run from
    `roles`. Check `roles.json` reasons (`roleplan#N`) and the FM1 notes in
    `allocation.json` for a sample window. The lead lane should hold one
@@ -240,12 +241,21 @@ Limits:
 
 For example, call `reconstruct_edit` with
 `{workDir, action: "add", edit: {id: "answer", reason: "separate attack in the stem", op: "insertNote", part: 0, start: 12.5, end: 12.8, pitch: 68, role: "melody", lane: "FM1"}, rerun: true}`.
-Use a trace note ID or `selector: {at: 43.09, pitch: 80, part: 0}`
+Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`
+(MCP `reconstruct_trace` with `byOnset: true`) to see pitch, assigned role,
+lane, fate and stable ID for each attack cluster. Use a trace note ID or
+`selector: {at: 43.09, pitch: 80, part: 0}`
 for a unique attack within 20 ms. `deleteNote` also accepts generated
 roles-stage IDs. Use `edits: [...]` in MCP or
 `reconstruct edit "$work" add --file batch.json` to append an array in one
-call. Check `lastRun` for orphaned or invalid targets and inspect both the
-edited passage and any `outsideSpan` changes.
+call. For `setRole`, use a `selectors` array or apply `voice: "top"`,
+`"bottom"`, or a zero-based register index to every attack cluster in a span.
+Use `others: "harmony"` to reassign the remaining notes in each cluster.
+Preview resolved IDs and role changes with `add --dry-run` or MCP `dryRun: true`.
+Times default to source seconds; an intent can set `timeBase: "project"`.
+For a pitch slide to an existing attack, use `glide` with `fromNoteId`,
+`toNoteId`, and optional `shape` and `seconds`. Check `lastRun` for orphaned
+or invalid targets and inspect the edited passage and any `outsideSpan` changes.
 The [reconstruction stages guide](../../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
 lists the fields for every operation.
 
@@ -266,8 +276,10 @@ or work on a separate copy.
 
 1. Use `catalog_search` to find FM variant IDs. Compare the current variant
    and challengers with `reconstruct_audition {workDir, lane, start, end,
-   variants, solo, reference, output, rmsJson}`. Use the phrase's project seconds and
-   include the start of the long hold so each patch gets its own attack.
+   variants, solo, reference, output, rmsJson}`. Use source seconds by default
+   or set `time: "project"` (CLI `--time project`). Include the attack of a
+   long hold, or replace the bounds with `note: TRACE_ID` (CLI `--note`) to
+   audition its assembled voiced gate and infer the FM lane.
    Omit `solo` to retain the frozen arrangement in the mix. An optional aligned
    reference is appended after the chip phrase at a matched RMS level.
 
@@ -311,7 +323,9 @@ java -jar "$jar" render-compare "$work" --start 8 --end 20 "$work/comparison.mp3
 ```
 
 `render-project` also accepts `--mute LANES`. `render-compare` uses the
-saved steady reference for warped runs. Select another aligned recording with
+saved steady reference for warped runs. Use `--time project` (MCP `time:
+"project"`) to choose project seconds for comparisons or evidence views.
+Their results include both clocks. Select another aligned recording with
 `--reference WAV` or a replacement project-time render with `--render WAV`.
 Choose `.wav` when ffmpeg is unavailable.
 
