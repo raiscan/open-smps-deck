@@ -58,7 +58,15 @@ public final class ReconstructionTrace {
     record Allocation(NoteAt effective, ReconstructionRoles.Role role, List<String> expectedLanes, String lane,
                       Timing placement, ReconstructionAllocation.Outcome outcome, String reason, String mergedInto,
                       String competitorNoteId, List<String> blockingNoteIds, String relocatedFrom,
-                      List<ReconstructionAllocation.RunPlacement> figures) {}
+                      List<ReconstructionAllocation.RunPlacement> figures, ReconstructionEdits.LaneType laneType) {
+        Allocation(NoteAt effective, ReconstructionRoles.Role role, List<String> expectedLanes, String lane,
+                   Timing placement, ReconstructionAllocation.Outcome outcome, String reason, String mergedInto,
+                   String competitorNoteId, List<String> blockingNoteIds, String relocatedFrom,
+                   List<ReconstructionAllocation.RunPlacement> figures) {
+            this(effective, role, expectedLanes, lane, placement, outcome, reason, mergedInto, competitorNoteId,
+                    blockingNoteIds, relocatedFrom, figures, null);
+        }
+    }
     record Voiced(String id, String lane, int pitch, Timing gate, ReconstructionBendEncoding.Applied bend,
                   String evidence) {}
     record Row(String id, int part, String partName, int pitch, Timing timing, Timing effectiveTiming, Origin source, NoteAt score,
@@ -444,6 +452,10 @@ public final class ReconstructionTrace {
             if (result.status() == ReconstructionEdits.Status.applied || result.status() == ReconstructionEdits.Status.conflict)
                 for (String id : result.noteIds())
                     editReasons.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(result.tag());
+            if (result.removedNotes() != null) for (var removed : result.removedNotes()) {
+                editReasons.computeIfAbsent(removed.id(), ignored -> new LinkedHashSet<>()).add(result.tag());
+                source.putIfAbsent(removed.id(), new Raw(removed, null, result.tag()));
+            }
             if (result.op() == ReconstructionEdits.Kind.deleteNote && result.original() != null)
                 source.putIfAbsent(result.original().id(), new Raw(result.original(), null, result.tag()));
         }
@@ -475,14 +487,17 @@ public final class ReconstructionTrace {
             var part = parts.get(anchor.note.part());
             boolean noise = part != null && ReconstructionAllocation.isNoise(part.name())
                     && (score.inputs() == null || !score.inputs().fmOnly());
-            var expected = placed != null || role != null ? ReconstructionAllocation.expectedLanes(
+            var pin = roles == null || roles.lanePins() == null ? null : roles.lanePins().get(id);
+            var expected = pin != null && pin.laneType() != null ? pin.laneType().lanes()
+                    : placed != null || role != null ? ReconstructionAllocation.expectedLanes(
                     role == null ? placed.role() : role.role(), noise) : List.<String>of();
             var fixes = corrections.getOrDefault(id, List.of());
             var scoreDecision = scoreDecisions.get(id);
             var roleTrace = role == null ? null : new Roles(roleNote, role.role(), roleReason(role, score),
                     role.mergedInto(), role.preLegatoEnd(),
                     mergePartners.getOrDefault(id, List.of()).stream().map(decision -> decision.note().id()).toList());
-            var placement = placement(placed, run, played.figures.get(id), placedNote, expected, lanes, timeline);
+            var placement = placement(placed, run, played.figures.get(id), placedNote, expected, lanes, timeline,
+                    pin == null ? null : pin.laneType());
             var voiced = new ArrayList<>(played.byId.getOrDefault(id, List.of()));
             if (run != null || played.figures.containsKey(id)) voiced.addAll(played.figureGates.getOrDefault(id, List.of()));
             boolean staleScore = written != null && !matchesInput(structureInputs, timeline.projectNote(written.note));
@@ -499,8 +514,8 @@ public final class ReconstructionTrace {
                 if (placement.blockingNoteIds != null) blockers.addAll(placement.blockingNoteIds);
                 if (placement.outcome != ReconstructionAllocation.Outcome.kept)
                     for (String blocker : blockers) {
-                        var pin = roles == null || roles.lanePins() == null ? null : roles.lanePins().get(blocker);
-                        if (pin != null) edits.add(pin.tag());
+                        var blockingPin = roles == null || roles.lanePins() == null ? null : roles.lanePins().get(blocker);
+                        if (blockingPin != null) edits.add(blockingPin.tag());
                     }
             }
             String reason = edits.isEmpty() ? fate.reason : String.join(" ", edits);
@@ -619,13 +634,13 @@ public final class ReconstructionTrace {
     private static Allocation placement(ReconstructionAllocation.Entry entry, ReconstructionAllocation.RunPlacement run,
                                         List<ReconstructionAllocation.RunPlacement> retriggers, NoteAt note,
                                         List<String> expected, LaneEvidence lanes,
-                                        ReconstructionTimeMap timeline) {
+                                        ReconstructionTimeMap timeline, ReconstructionEdits.LaneType laneType) {
         if (entry == null && run == null) return null;
         var figures = new ArrayList<ReconstructionAllocation.RunPlacement>();
         if (run != null) figures.add(run);
         if (retriggers != null) figures.addAll(retriggers);
         if (entry == null) return new Allocation(null, null, expected, run.lane(), ticks(run.startTick(), run.endTick(), timeline),
-                ReconstructionAllocation.Outcome.kept, run.reason(), null, null, null, null, List.copyOf(figures));
+                ReconstructionAllocation.Outcome.kept, run.reason(), null, null, null, null, List.copyOf(figures), laneType);
         String competitor = entry.competitorNoteId();
         List<String> blockers = entry.blockingNoteIds();
         // Pre-audit artifacts can identify surviving competitors from the lane intervals.
@@ -640,7 +655,7 @@ public final class ReconstructionTrace {
         }
         return new Allocation(note, entry.role(), expected, entry.lane(), ticks(entry.startTick(), entry.endTick(), timeline),
                 entry.outcome(), entry.reason(), entry.mergedInto(), competitor, blockers, entry.relocatedFrom(),
-                List.copyOf(figures));
+                List.copyOf(figures), entry.laneType());
     }
 
     private static Map<String, Raw> origins(ReconstructionStages.Score score, Map<String, Note> written) {

@@ -293,7 +293,7 @@ public final class ReconstructionStages {
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
             if (stage == Stage.TRANSCRIBE) {
                 Score score = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
-                score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(score, outcomes);
+                score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
                 ReconstructionArtifacts.write(scoreFile, score);
             } else {
                 var score = readScore(scoreFile);
@@ -456,7 +456,7 @@ public final class ReconstructionStages {
         List<ReconstructionEdits.Outcome> scoreEdits;
         if (from == Stage.TRANSCRIBE) {
             score = retranscribe(score);
-            score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(score, outcomes);
+            score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
             scoreEdits = List.copyOf(outcomes);
         } else {
             scoreEdits = prior.stages().getOrDefault("transcribe", List.of());
@@ -471,6 +471,16 @@ public final class ReconstructionStages {
         var boundEdits = edits.bindSections(work, score, structure, Stage.ROLES, outcomes);
         var roles = boundEdits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes, resolutions);
 
+        if (roles.lanePins() != null && roles.lanePins().values().stream().anyMatch(pin -> pin.laneType() != null)) {
+            Path allocationFile = work.resolve("allocation.json");
+            var saved = Files.isRegularFile(allocationFile)
+                    ? ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class) : null;
+            var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source().parts(),
+                    timeline.frames(), score.inputs().fmOnly(), !score.inputs().stems().isEmpty(),
+                    ReconstructionAllocation.lanes(saved), ReconstructionCymbals.measure(score));
+            outcomes.addAll(boundEdits.allocationOutcomes(allocation, roles.lanePins()).stream()
+                    .filter(outcome -> roles.lanePins().get(outcome.noteIds().getFirst()).laneType() != null).toList());
+        }
         if (from != Stage.TRANSCRIBE) return;
         var previous = new HashMap<String, ReconstructionRoles.Decision>();
         if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
@@ -755,6 +765,8 @@ public final class ReconstructionStages {
             if (!edit.authorsGate()) continue;
             authoredIds.addAll(edit.noteIds());
             if (edit.original() != null) suppressed.add(timeline.projectNote(edit.original()));
+            if (edit.removedNotes() != null)
+                edit.removedNotes().forEach(note -> suppressed.add(timeline.projectNote(note)));
         }
         return ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
                 inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,

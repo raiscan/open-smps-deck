@@ -181,12 +181,15 @@ public final class ReconstructionEditCommand {
         var range = edit.explicitSpan();
         if (range != null) range = new ReconstructionEdits.Span(edit.toSource(range.start(), timeline),
                 edit.toSource(range.end(), timeline));
-        if (edit.span() != null && range != null) return range;
+        if (edit.span() != null && range != null && edit.kind() != ReconstructionEdits.Kind.mergeNotes) return range;
         var ids = new java.util.LinkedHashSet<>(edit.noteIds());
         if (edit.kind() == ReconstructionEdits.Kind.insertNote) ids.add(edit.insertedId());
         for (var outcome : journal.all())
-            if (outcome.id().equals(edit.id()) && outcome.status() == ReconstructionEdits.Status.applied)
+            if (outcome.id().equals(edit.id()) && outcome.status() == ReconstructionEdits.Status.applied) {
                 ids.addAll(outcome.noteIds());
+                if (outcome.removedNotes() != null)
+                    for (var removed : outcome.removedNotes()) ids.add(removed.id());
+            }
         if (edit.attack() != null && ids.isEmpty()) {
             double at = edit.attack().at(), tolerance = ReconstructionEdits.Attack.TOLERANCE;
             range = new ReconstructionEdits.Span(edit.toSource(Math.max(0, at - tolerance), timeline),

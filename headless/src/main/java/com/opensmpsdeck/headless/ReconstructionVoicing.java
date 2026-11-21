@@ -106,7 +106,7 @@ final class ReconstructionVoicing {
                 .filter(entry -> "PSG3".equals(entry.lane()) && entry.role() == Role.drums).toList();
         var settings = lane.psgPercussion();
         if (!drums.isEmpty() && settings == null) settings = PSG_PERCUSSION;
-        if (drums.stream().anyMatch(entry -> ReconstructionCymbals.automatic(entry.reason())
+        if (drums.stream().anyMatch(entry -> ReconstructionCymbals.voiced(entry)
                 && ReconstructionCymbals.closedHat(entry.note().pitch()))) settings = settings.withHatDefaults();
         if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
         var lanes = new java.util.LinkedHashMap<>(result.lanes());

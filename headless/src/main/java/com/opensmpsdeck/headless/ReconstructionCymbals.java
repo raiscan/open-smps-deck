@@ -54,6 +54,11 @@ final class ReconstructionCymbals {
         return COLLISION.equals(reason) || QUIET.equals(reason);
     }
 
+    static boolean voiced(ReconstructionAllocation.Entry entry) {
+        return automatic(entry.reason()) || entry.laneType() == ReconstructionEdits.LaneType.NOISE
+                && entry.role() == ReconstructionRoles.Role.drums && eligible(entry.note().pitch());
+    }
+
     static boolean closedHat(int pitch) {
         return pitch == 42 || pitch == 44;
     }

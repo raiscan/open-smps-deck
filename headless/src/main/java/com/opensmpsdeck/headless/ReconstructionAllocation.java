@@ -15,6 +15,7 @@ import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStages.VERSION;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
+import static com.opensmpsdeck.headless.ReconstructionEdits.LaneType;
 
 final class ReconstructionAllocation {
     static final List<String> FM = List.of("FM1", "FM2", "FM3", "FM4", "FM5");
@@ -27,7 +28,14 @@ final class ReconstructionAllocation {
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
                  Outcome outcome, @Nullable String reason, @Nullable String mergedInto,
                  @Nullable String competitorNoteId, @Nullable List<String> blockingNoteIds,
-                 @Nullable String relocatedFrom, @Nullable String pinnedLane) {
+                 @Nullable String relocatedFrom, @Nullable String pinnedLane, @Nullable LaneType laneType) {
+        Entry(Note note, Role role, String lane, Integer startTick, Integer endTick, Outcome outcome,
+              String reason, String mergedInto, String competitorNoteId, List<String> blockingNoteIds,
+              String relocatedFrom, String pinnedLane) {
+            this(note, role, lane, startTick, endTick, outcome, reason, mergedInto, competitorNoteId,
+                    blockingNoteIds, relocatedFrom, pinnedLane, null);
+        }
+
         Entry(Note note, Role role, String lane, Integer startTick, Integer endTick, Outcome outcome,
               String reason, String mergedInto, String competitorNoteId, List<String> blockingNoteIds,
               String relocatedFrom) {
@@ -184,8 +192,12 @@ final class ReconstructionAllocation {
             int start = note.startTick(frames);
             boolean drum = decision.role() == Role.drums;
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
-            boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part())) : pin.lane().equals("PSG3"));
-            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise, pin, null);
+            boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part()))
+                    : "PSG3".equals(pin.lane()) || pin.laneType() == LaneType.NOISE);
+            int end = drum && !noise ? start + 1 : note.endTick(frames);
+            if (noise && pin != null && pin.laneType() == LaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
+                end = Math.min(frames, start + ReconstructionCymbals.gate(note.pitch()));
+            return new Attack(decision, start, end, noise, pin, null);
         }).sorted(attackOrder()).toList();
         var allocator = new ReconstructionAllocation(fmOnly, seed, attacks);
         var louderParts = new java.util.HashSet<Integer>();
@@ -197,7 +209,8 @@ final class ReconstructionAllocation {
         // Resolve the DAC first so tonal spill can avoid upcoming noise hits.
         // Both passes retain the same attack ordering within their priority tiers.
         for (var attack : attacks) {
-            if (attack.noise || attack.role() != Role.drop && attack.pin != null && attack.pin.lane().equals("PSG3"))
+            if (attack.noise || attack.role() != Role.drop && attack.pin != null
+                    && ("PSG3".equals(attack.pin.lane()) || attack.pin.laneType() == LaneType.NOISE))
                 allocator.explicitNoise.add(attack.start);
             if (attack.role() != Role.drums || attack.noise) {
                 remaining.add(attack);
@@ -236,7 +249,7 @@ final class ReconstructionAllocation {
                         evidence.start(), evidence.end(), step.pitch(), entry.note().velocity(),
                         entry.note().source(), entry.note().confidence());
                 placed.add(new Entry(note, entry.role(), entry.lane(), step.start(), step.end(), Outcome.kept,
-                        entry.pinnedLane() == null ? reason : entry.reason(), null, null, null, null, entry.pinnedLane()));
+                        entry.pinnedLane() == null ? reason : entry.reason(), null, null, null, null, entry.pinnedLane(), entry.laneType()));
             }
         }
         return new Result(VERSION, List.copyOf(placed), roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
@@ -266,7 +279,7 @@ final class ReconstructionAllocation {
             int next = nextAttack.getOrDefault(entry.lane, frames);
             if (start >= next) continue;
             int end = entry.lane.equals("DAC") ? start + 1 : note.endTick(frames);
-            if (ReconstructionCymbals.automatic(entry.reason()))
+            if (ReconstructionCymbals.voiced(entry))
                 end = Math.min(frames, start + entry.endTick - entry.startTick);
             if (entry.outcome == Outcome.shortened) {
                 int shortened = (int) Math.round(timeline.source(entry.endTick / 60.0) * 60);
@@ -393,6 +406,10 @@ final class ReconstructionAllocation {
     }
 
     private void placePinned(Attack attack) {
+        if (attack.pin.laneType() != null) {
+            placeByType(attack);
+            return;
+        }
         String lane = attack.pin.lane();
         Entry last = tail.get(lane);
         if (last != null && last.endTick > attack.start) {
@@ -403,6 +420,30 @@ final class ReconstructionAllocation {
             entries.put(last.note.id(), last.shorten(attack.start, attack.pin.tag() + " pinned-attack", attack.note().id()));
         }
         keep(attack, lane, attack.pin.tag());
+    }
+
+    private void placeByType(Attack attack) {
+        var type = attack.pin.laneType();
+        var lanes = type.lanes();
+        String previous = previousLanes.get(attack.note().id());
+        String lane = null;
+        if (previous != null && lanes.contains(previous) && available(previous, attack)) lane = previous;
+        if (lane == null) {
+            var preferred = expectedLanes(attack.role(), attack.noise).stream().filter(lanes::contains).toList();
+            lane = free(preferred, attack);
+        }
+        if (lane == null) lane = free(lanes, attack);
+        if (lane == null) {
+            drop(attack, attack.pin.tag() + " " + type + " lanes busy",
+                    lanes.stream().map(tail::get).map(entry -> entry.note().id()).toList());
+        } else {
+            keep(attack, lane, attack.pin.tag() + " laneType=" + type);
+        }
+    }
+
+    private boolean available(String lane, Attack attack) {
+        var last = tail.get(lane);
+        return last == null || last.endTick <= attack.start;
     }
 
     static List<String> expectedLanes(Role role, boolean noise) {
@@ -429,7 +470,7 @@ final class ReconstructionAllocation {
         String previous = previousLanes.get(attack.note().id());
         // Affinity depends on the preceding attack. Let the old placement break that
         // dependency when the lane is just as playable, without bypassing FM priority.
-        return lanes.stream().filter(lane -> !tail.containsKey(lane) || tail.get(lane).endTick <= attack.start)
+        return lanes.stream().filter(lane -> available(lane, attack))
                 .min(Comparator.comparing((String lane) -> !lane.equals(previous))
                         .thenComparing(lane -> reserved(lane, attack))
                         .thenComparingInt(lane -> affinity(tail.get(lane), attack))).orElse(null);
@@ -495,7 +536,7 @@ final class ReconstructionAllocation {
 
     private void keep(Attack attack, String lane, String reason) {
         var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, reason, null,
-                null, null, null, attack.pin == null ? null : attack.pin.lane());
+                null, null, null, attack.pin == null ? null : lane, attack.pin == null ? null : attack.pin.laneType());
         entries.put(attack.note().id(), entry);
         tail.put(lane, entry);
     }
@@ -507,6 +548,7 @@ final class ReconstructionAllocation {
     private void drop(Attack attack, String reason, List<String> blockers) {
         entries.put(attack.note().id(), new Entry(attack.note(), attack.role(), null, null, null,
                 Outcome.dropped, reason, attack.decision.mergedInto(),
-                blockers.size() == 1 ? blockers.getFirst() : null, blockers.size() > 1 ? blockers : null, null));
+                blockers.size() == 1 ? blockers.getFirst() : null, blockers.size() > 1 ? blockers : null, null,
+                null, attack.pin == null ? null : attack.pin.laneType()));
     }
 }

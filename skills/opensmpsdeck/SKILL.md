@@ -282,7 +282,19 @@ call. For `setRole`, use a `selectors` array or apply `voice: "top"`,
 `"bottom"`, or a zero-based register index to every attack cluster in a span.
 Use `others: "harmony"` to reassign the remaining notes in each cluster.
 Preview resolved IDs and role changes with `add --dry-run` or MCP `dryRun: true`.
-Times default to source seconds; an intent can set `timeBase: "project"`.
+Times default to source seconds. Set `timeBase: "project"` to use the project clock.
+Use `splitNote` with `noteId` or a point selector and `at`. The two
+attacks have IDs `edit-<id>-left` and `edit-<id>-right`. Optional `pitch`
+retunes the right half. Use `mergeNotes` with `noteIds`, point `selectors`,
+or `span`, `part` and `pitch` to sustain repeated attacks. The first attack
+keeps its ID. For different pitches, use `allowDifferentPitches: true` for a
+fixed pitch or `glide: true` for an FM slide. Preview `resultNotes`,
+`removedNotes` and conflicts before writing.
+Use `pinLane` with `laneType: "FM" | "PSG" | "NOISE" | "DAC"` to route
+IDs, point selectors or a filtered span. `PSG` is tonal. `NOISE` offers
+white noise for drums and tunable periodic noise for eligible tonal pitches
+on PSG3. Drums can also use DAC. The allocator retains an available
+previous lane of the requested type and reports any dropped notes.
 For a pitch slide to an existing attack, use `glide` with `fromNoteId`,
 `toNoteId`, and optional `shape` and `seconds`. Check `lastRun` for orphaned
 or invalid targets and inspect the edited passage and any `outsideSpan` changes.
@@ -339,6 +351,11 @@ For native F0 vibrato, `delay`, `rate` and `steps` count sequencer ticks
 (1/60 s at reconstruction tempo zero). Signed `delta` is a packed-frequency
 increment. When `rate` divides `steps`, the period is `2 × steps` ticks,
 with peak-to-peak excursion `abs(delta) × steps / rate` in native units.
+For a held FM lead, use a `noteIds` scope such as
+`{"noteIds":["LEAD_ID"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}`
+for about 48 cents at 5 Hz on MIDI 65. Use the
+[Studio vibrato conversion](../../docs/architecture/reconstruction-stages.md#studio-vibrato-gesture)
+to translate other cents and Hz values to F0.
 
 ## Name and reuse musical passages
 

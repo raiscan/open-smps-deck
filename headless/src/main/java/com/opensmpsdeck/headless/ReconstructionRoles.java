@@ -75,12 +75,13 @@ final class ReconstructionRoles {
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity, Integer leadPart) {
-        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, leadPart, Set.of(), note -> false);
+        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, leadPart, Set.of(), Set.of(), note -> false);
     }
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity, Integer leadPart, Set<String> fixedGates,
+                         Set<String> separate,
                          java.util.function.Predicate<Note> suppressed) {
         var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
         var accents = continuity == null ? Map.<String, Double>of() : continuity.accents();
@@ -118,7 +119,7 @@ final class ReconstructionRoles {
         preferBendAttack(tones, roles, reasons);
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
-            if (roles.get(id) != Role.harmony) continue;
+            if (roles.get(id) != Role.harmony || separate.contains(id)) continue;
             roles.put(id, Role.drop);
             octaveDrops.add(id);
         }
@@ -130,7 +131,7 @@ final class ReconstructionRoles {
                 if (!ReconstructionMelody.isMonophonic(notes)) chordParts.add(part);
             });
         }
-        var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts);
+        var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts, separate);
         var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
         java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> !suppressed.test(note)
                 && (!fixedGates.contains(anchor.note().id()) || !anchor.note().id().equals(note.id()))
@@ -430,7 +431,8 @@ final class ReconstructionRoles {
     }
 
     private static List<Decision> thin(List<Note> notes, Map<String, Role> roles, double hz,
-                                       Map<String, String> reasons, Set<String> octaveDrops, Set<Integer> chordParts) {
+                                       Map<String, String> reasons, Set<String> octaveDrops, Set<Integer> chordParts,
+                                       Set<String> separate) {
         var decisions = new LinkedHashMap<String, Decision>();
         var latest = new HashMap<PartPitch, Note>();
         var chain = new HashMap<String, String>();
@@ -450,7 +452,8 @@ final class ReconstructionRoles {
             var key = new PartPitch(note.part(), note.pitch());
             var previous = latest.put(key, note);
             if (role != Role.harmony || !chordParts.contains(note.part())
-                    || previous == null || roles.get(previous.id()) != Role.harmony) continue;
+                    || previous == null || roles.get(previous.id()) != Role.harmony
+                    || separate.contains(note.id()) || separate.contains(previous.id())) continue;
             double delta = note.start() - previous.start();
             if (delta < .030 || delta >= 1 / hz || Math.abs(note.start() - previous.end()) > .035
                     || Math.abs(note.velocity() - previous.velocity()) > 14) continue;

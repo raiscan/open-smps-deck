@@ -232,24 +232,47 @@ selector, gate, and curve. Pitch is a MIDI integer.
 | `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |
 | `deleteNote` | `noteId` or a point selector. When the score has no match, roles can remove a generated note such as a `lead-audio-added` attack. | `transcribe` |
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
+| `splitNote` | `noteId` or a point selector and `at` strictly inside the gate. Both halves need a project tick. Optional `pitch` retunes the second attack. The source attack is replaced by `edit-<id>-left` and `edit-<id>-right`. | `transcribe` |
+| `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each pitch change needs four project ticks between attacks. The resulting slide is routed to FM. | `transcribe` |
 | `setVelocity` | `span`, `part`, optional `pitchMin` and `pitchMax`, and either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
 | `setRole` | A selector and `role`. A span, ID list or point list can filter by `fromRole` after earlier edits. Optional `lane` also pins the note. | `roles` |
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
-| `pinLane` | `noteIds` or a point selector, and `lane`. | `roles` |
+| `pinLane` | A selector and either an exact `lane` or `laneType` (`FM`, `PSG`, `NOISE`, `DAC`). | `roles` |
 | `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
 | `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. A point up to one project tick past the gate clamps to the gate end. | `transcribe` |
 | `glide` | `fromNoteId` and `toNoteId` identify two pitched score attacks in the same part. The first gate ends at the later attack, which retains its own note. Optional `seconds` gives the sliding portion of the gate (default up to 0.12 seconds). `shape` is `linear` (default), `easeIn`, `easeOut`, or `smooth`. The first note needs an FM lane for the bend to play. | `transcribe` |
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
-report `invalid`. For span or ID selection on `setRole` and `unmerge`,
+report `invalid`. For span or ID selection on `setRole`, `unmerge` and `pinLane`,
 use a nonempty `noteIds` array or `span: [start, end]` with `part` and
 optional inclusive `pitchMin` and `pitchMax`. Span fields may be in a
 `selector` object or at the top level. Spans include attacks at the
-start and exclude attacks at the end. For `setRole`, `selectors` is an array
+start and exclude attacks at the end. For `setRole`, `pinLane` and `mergeNotes`, `selectors` is an array
 of point selectors. A common `part` can be set on the intent. Each point must
 resolve uniquely. An ambiguous or missing point is reported with its own
-outcome while resolved points are applied once per note.
+outcome while resolved points are applied once per note. `mergeNotes` is
+atomic and requires every selector to resolve and at least two distinct targets.
+For a merge span, use a single exact `pitch`.
+
+```json
+[
+  {"id":"cut","reason":"separate the attacks","op":"splitNote","noteId":"held-note","at":12.85,"pitch":65},
+  {"id":"sustain","reason":"join chord fragments","op":"mergeNotes","part":0,"pitch":64,"span":[15.2,16.8]},
+  {"id":"backing","reason":"move the backing to PSG","op":"pinLane","laneType":"PSG","part":0,
+   "span":[18,20],"pitchMin":55,"pitchMax":67}
+]
+```
+
+Split and merge author new gates and clear the attacks' inferred motion.
+Assign roles and pins to the resulting IDs when needed. A split refuses to
+discard an existing authored bend or note-scoped voicing override. A merge
+reports `conflict` if another intent individually changes a removed attack,
+changes the survivor's gate or bend, or a saved voicing override targets a
+removed note. An unfiltered role or level span that covers the entire group
+can still apply to the sustain. The first applied merge wins overlapping
+merge targets. For glide merges, the pitch changes in the final 0.12 seconds
+before each successive attack, or over the available interval when shorter.
 
 Span operations also accept `voice: "top"`, `voice: "bottom"`, or a zero-based
 rank from the highest pitch. They group eligible attacks within 20 ms of
@@ -277,6 +300,26 @@ shortened for a pin. Earlier pinned attacks win overlapping gates, and the
 earlier intent wins ties at the same tick. The trace records the winning
 competitor when the other note is shortened or dropped.
 
+A type pin prefers the note's previous lane if it belongs to that type
+and is free. It then tries the role's preferred lanes within the type and
+any other free lane of that type. If all are busy, it drops the attack and
+reports the edit and blockers in allocation and trace. A kept type pin
+protects its gate just like an exact pin. PSG tone and noise share PSG3.
+
+| Requested type | Tonal parts | MIDI drum parts |
+| --- | --- | --- |
+| `FM` | FM1–FM5. Authored bends and fast figures use FM. | Unsupported by reconstruction's drum voicing, which fits DAC samples or uses PSG noise. |
+| `PSG` | PSG1–PSG3 tone. Single attacks at MIDI 45 or higher. | Invalid. |
+| `NOISE` | PSG3 periodic noise clocked by tone 3. Single attacks whose pitch can be tuned within 50 cents. | PSG3 white noise clocked by tone 3. GM hats and cymbals use the short or long cymbal voicing. |
+| `DAC` | Invalid. | DAC sample triggers. |
+
+Both PSG types are unavailable in FM-only mode. Authored bends require FM.
+For tonal `NOISE`, S3K F3 E3 selects a periodic 16-step LFSR and the
+sequencer writes PSG3's 10-bit tone period as its clock. The rate is
+`PSG tick rate / (32 × period)`. Reconstruction uses the signed detune
+range around the known period 16 and accepts periods 2–143 within the
+tuning tolerance. PSG3 cannot play a tone and noise simultaneously.
+
 Use `reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID`.
 Inline `add JSON` takes one intent object. Pass arrays through `add --file BATCH`.
 Use a string such as `"bars": "6-7"` in `roleplan.json`.
@@ -288,7 +331,10 @@ rejects the whole batch before writing. Resume from the returned `from`
 stage. Use `add --dry-run JSON` or `add --dry-run --file BATCH` (MCP
 `dryRun: true`) to resolve a batch in memory. The preview lists stable IDs,
 incoming and resulting roles, satisfaction, and both attack times. It also
-reports selector failures and leaves the work directory untouched. A
+reports selector failures and leaves the work directory untouched. Split and
+merge expose source gates and pitches as `resultNotes` and list replaced
+attacks as `removedNotes`. A lane-type preview runs allocation in memory
+and includes `laneType` and the selected `lane` in its allocation outcomes. A
 `setRole` target already in the desired role after earlier edits can return
 `satisfied` even when `fromRole` differs. MCP add and remove accept
 `rerun: true` to rebuild once and return a trace diff. The diff flags changes outside the combined range of the
@@ -308,8 +354,10 @@ any missing IDs in a partially matched list. A target that exists but is
 incompatible with the intent reports `invalid` with a field-specific detail.
 `run` and `rerun` summarize invalid and orphaned outcomes on stderr.
 An unplaceable pin reports `conflict`, with competitor IDs in the allocation
-trace. The trace includes `edit:<id>` reasons alongside the underlying fate
-detail.
+trace. A conflicting merge names the edit or voicing scope that blocked it.
+The trace includes `edit:<id>` reasons alongside the underlying fate detail.
+Consumed merge members link to the retained attack through
+`scoreDecision.successorId`.
 
 ## Artifact contract
 
@@ -933,6 +981,39 @@ Bends keep priority over custom vibrato during the moving segment. Dedicated
 copy lanes keep their original settings. Assembly deduplicates FM patches by
 their native bytes, including changes to release rates, with up to 128 local
 voices and a 32 KiB total bank.
+
+### Studio vibrato gesture
+
+Use the allocated FM note ID and its current lane. Insert or update a
+note-only override under `lanes.<lane>.overrides`. For example, this sets
+about 48 cents of depth at 5 Hz for MIDI 65:
+
+```json
+{"noteIds":["LEAD_ID"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}
+```
+
+Depth here is half the peak-to-peak pitch swing. To map a drag in cents and
+Hz to F0 on an FM note:
+
+1. Pick the even `steps` in 2–254 that minimizes the error from the requested
+   rate. Actual Hz is `30 / steps`, so the centered range is about 0.118–15 Hz.
+   Set `delay: 1` to start immediately. Pick a `rate` divisor of `steps / 2`
+   (including 1) to keep the two halves symmetric.
+2. Let `F` be the note's S3K F-number plus lane detune. The cents-to-frequency
+   conversion is local to the current octave block. The F-number table
+   from C through B is 644, 683, 723, 766, 813, 860, 911, 965, 1023, 1084,
+   1148, 1216. For desired depth `D`, compute
+   `A = F × tanh(D × ln(2) / 1200)`.
+3. With `k = steps / (2 × rate)`, choose integer `delta` nearest `A / k`
+   in 1–127, keeping `F ± k × delta` inside 1–2047. Try the divisors if
+   a finer depth step or more headroom is needed. With
+   `a = k × delta`, the achieved depth is
+   `600 × log2((F + a) / (F - a))`. The minimum nonzero and maximum
+   depth therefore depend on pitch and rate. At MIDI 65 and 5 Hz with
+   `rate:1`, the depth ranges from about 6 to 824 cents in discrete steps.
+   Very slow settings need a long gate to complete a cycle.
+4. Save `modulationOff: true` in place of `vibrato` for an explicit zero
+   depth. Move the override to the note's new lane if allocation changes.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
