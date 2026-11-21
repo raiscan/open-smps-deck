@@ -436,8 +436,11 @@ score edits awaiting a rebuild, and the reason and competing note IDs.
 The diff compares stable IDs and sets `outsideSpan` when neither version
 of the note touches the specified source-time interval. It groups contiguous
 lane moves outside that span in `lanePermutations`, with the first diverging
-IDs and suggested `pinLane` edits. `voicingChanges` lists changes to variants,
-lane gain, and part gains.
+IDs and suggested `pinLane` edits. `voicingChanges` lists lane variant,
+gain and scoped override changes. `compiledTimeline` counts changed events
+outside the span, with the first project tick and affected lanes.
+`renderedPcm` counts differing saved PCM frames, including effects carried
+over from earlier audio.
 
 MCP `reconstruct_trace` returns JSON and accepts `workDir`, `start`,
 `end`, `part`, `pitch`, `pitchMin`, `pitchMax`, `lane`, and `status`.
@@ -452,9 +455,12 @@ under `snapshots/`. Rerun checks the original path and retained copy
 against the hash, then searches any supplied directories recursively for
 matching bytes. It reports all unresolved inputs together and starts in
 a new directory using the current build. It replays the original inputs
-and options, including the saved external notes, without invoking the
-transcriber or applying later artifact edits. Keep manifests and
-snapshots with the private work directory.
+and options with the saved external notes, musical edits and role plan.
+The manifest records the plan hash. Replay also reuses the saved clip
+anchors and allocation affinity seed. Use `--keep-voicing` for accepted
+voicing settings. Keep the recipe and snapshots with the private work
+directory. Both `run` and `rerun` summarize invalid and orphaned edits
+on stderr.
 
 ## Deliberately limited input contract
 

@@ -215,7 +215,10 @@ def smoke(jar, root):
         rpc.call("artifact_write", workDir=work, artifact="voicing", value=voicing)
         rpc.call("reconstruct_stage", workDir=work, stage="assemble")
         report = rpc.call("artifact_read", workDir=work, artifact="report")["value"]
-        assert report["voicingWarnings"] == [voicing["sustainWarning"]]
+        probe = report["sustainProbe"]
+        assert probe["totalNotes"] > 0 and 0 <= probe["notesProbed"] <= 3
+        assert report["voicingWarnings"] == ([probe["warning"]] if "warning" in probe else [])
+        assert voicing["sustainWarning"] not in report["voicingWarnings"]
         assert full.read_bytes() == before_warning
         plain = work / "unmasked.wav"
         rpc.call("render_clip", project=project, output=plain, start=0.25, end=0.75)

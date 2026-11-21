@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -93,24 +96,51 @@ final class ReconstructionAllocation {
     private final Map<String, Entry> entries = new LinkedHashMap<>();
     private final Map<String, Entry> tail = new HashMap<>();
     private final boolean fmOnly;
-    private final Map<String, String> previousLanes = new HashMap<>();
+    private final Map<String, String> previousLanes;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
-    private ReconstructionAllocation(boolean fmOnly, Result previous, List<Attack> attacks) {
+    private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks) {
         this.fmOnly = fmOnly;
-        if (previous == null) return;
-        for (var entry : previous.notes()) {
-            if (entry.lane() != null) previousLanes.put(entry.note().id(), entry.lane());
-        }
-        if (previous.fastRuns() != null) for (var run : previous.fastRuns()) {
-            if (run.lane() != null) previousLanes.put(run.id(), run.lane());
-        }
+        this.previousLanes = previousLanes;
         for (var attack : attacks) {
             String lane = previousLanes.get(attack.note().id());
             if (lane == null || attack.pin != null || attack.role() == Role.drop) continue;
             if (expectedLanes(attack.role(), attack.noise).contains(lane) || spillLanes(attack).contains(lane))
                 previousAttacks.computeIfAbsent(lane, ignored -> new TreeMap<>()).put(attack.start, attack.note().id());
         }
+    }
+
+    record LaneChange(String noteId, @Nullable String previousLane, @Nullable String freshLane) {}
+
+    record Affinity(int version, Map<String, String> seed, List<LaneChange> changes, String allocationHash) {
+        static final String FILE = "allocation-affinity.json";
+
+        static Affinity read(Path work) throws IOException {
+            var path = work.resolve(FILE);
+            return Files.exists(path) ? ReconstructionArtifacts.read(path, Affinity.class) : null;
+        }
+
+        static Affinity compare(Map<String, String> seed, Result actual, Result fresh) {
+            var chosen = lanes(actual);
+            var clean = lanes(fresh);
+            var ids = new java.util.TreeSet<>(chosen.keySet());
+            ids.addAll(clean.keySet());
+            var differences = ids.stream().filter(id -> !java.util.Objects.equals(chosen.get(id), clean.get(id)))
+                    .map(id -> new LaneChange(id, chosen.get(id), clean.get(id))).toList();
+            return new Affinity(ReconstructionStages.VERSION, seed, differences, ReconstructionArtifacts.fingerprint(actual));
+        }
+    }
+
+    static Map<String, String> lanes(Result allocation) {
+        if (allocation == null) return Map.of();
+        var lanes = new TreeMap<String, String>();
+        for (var entry : allocation.notes()) {
+            if (entry.lane() != null) lanes.put(entry.note().id(), entry.lane());
+        }
+        if (allocation.fastRuns() != null) for (var run : allocation.fastRuns()) {
+            if (run.lane() != null) lanes.put(run.id(), run.lane());
+        }
+        return lanes;
     }
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly) {
@@ -124,6 +154,11 @@ final class ReconstructionAllocation {
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
                            boolean hasStems, Result previous) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, lanes(previous));
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -139,7 +174,7 @@ final class ReconstructionAllocation {
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
-        var allocator = new ReconstructionAllocation(fmOnly, previous, attacks);
+        var allocator = new ReconstructionAllocation(fmOnly, seed, attacks);
         for (var attack : attacks) allocator.place(attack);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
         var placed = new ArrayList<Entry>();

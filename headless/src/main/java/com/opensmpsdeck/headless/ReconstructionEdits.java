@@ -366,7 +366,7 @@ final class ReconstructionEdits {
                         validateNote(note, score, part(score, note.part()), at);
                         notes.put(id, note);
                     }
-                    case bend -> notes.put(id, before.withBend(bend(edit, before, at)));
+                    case bend -> notes.put(id, before.withBend(bend(edit, before, at, ReconstructionTimeMap.of(score))));
                     default -> throw new AssertionError(edit.kind);
                 }
                 boolean timingOrPitch = edit.kind != Kind.setNote || edit.changesAttack();
@@ -560,15 +560,23 @@ final class ReconstructionEdits {
         return outcomes;
     }
 
-    private static ReconstructionBends.Bend bend(Intent edit, Note note, String at) {
+    private static ReconstructionBends.Bend bend(Intent edit, Note note, String at, ReconstructionTimeMap time) {
         require(note.run() == null && !"external".equals(note.source()), at + ".noteId", "bend expects an effective single attack");
-        require(edit.points.getFirst().time() >= note.start() && edit.points.getLast().time() <= note.end(),
+        double overshoot = time.project(edit.points.getLast().time()) - time.project(note.end());
+        require(edit.points.getFirst().time() >= note.start()
+                        && overshoot <= 1.0 / S3kRenderer.PRESENTATIONS_PER_SECOND + 1e-9,
                 at + ".points", "all point times must be within the note gate [" + note.start() + ", " + note.end() + "]");
         for (var point : edit.points) {
             int pitch = note.pitch() * 100 + point.cents();
             require(pitch >= 1200 && pitch <= 10600, at + ".points", "curve must stay within S3K pitches 12–106");
         }
-        var points = new ArrayList<>(edit.points);
+        var points = new ArrayList<ReconstructionBends.Point>();
+        for (var point : edit.points) {
+            double clamped = Math.min(point.time(), note.end());
+            // Several near-gate points can land on the same endpoint. Keep the last value.
+            if (!points.isEmpty() && points.getLast().time() == clamped) points.removeLast();
+            points.add(new ReconstructionBends.Point(clamped, point.cents()));
+        }
         if (points.getFirst().time() > note.start())
             points.addFirst(new ReconstructionBends.Point(note.start(), points.getFirst().cents()));
         require(points.size() <= 512, at + ".points", "use at most 511 points when the curve starts after the note attack");

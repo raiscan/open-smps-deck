@@ -35,6 +35,34 @@ class ReconstructionStagesTest {
 
         assertNotEquals(previous.notes().subList(1, previous.notes().size()), fresh.notes());
         assertEquals(previous.notes().subList(1, previous.notes().size()), rerun.notes());
+        var affinity = ReconstructionAllocation.Affinity.compare(ReconstructionAllocation.lanes(previous), rerun, fresh);
+        assertFalse(affinity.changes().isEmpty());
+        for (var change : affinity.changes()) {
+            assertEquals(ReconstructionAllocation.lanes(rerun).get(change.noteId()), change.previousLane());
+            assertEquals(ReconstructionAllocation.lanes(fresh).get(change.noteId()), change.freshLane());
+        }
+        assertEquals(rerun, ReconstructionAllocation.allocateWithAffinity(edited, parts, 60, false, false, affinity.seed()));
+    }
+
+    @Test void keepsSavedChunkAnchorsWhenAnEarlyAttackDisappears() {
+        var original = List.of(0, 60, 470, 490, 960, 980, 1450, 1470);
+        var heuristic = ReconstructionClipLinks.from(null);
+        var old = heuristic.chunks("FM1", original.size(), original::get, i -> original.get(i) + 10,
+                i -> false, 480);
+        assertEquals(List.of(0, 490, 980, 1470), old.stream().map(ReconstructionClipLinks.Chunk::tick).toList());
+
+        var edited = original.subList(1, original.size());
+        var shifted = heuristic.chunks("FM1", edited.size(), edited::get, i -> edited.get(i) + 10,
+                i -> false, 480);
+        assertEquals(List.of(60, 960, 1450), shifted.stream().map(ReconstructionClipLinks.Chunk::tick).toList());
+
+        var layout = new ReconstructionClipLinks.Layout(1, Map.of("FM1",
+                old.stream().map(ReconstructionClipLinks.Chunk::tick).toList()));
+        var links = ReconstructionClipLinks.from(null, layout);
+        var rebuilt = links.chunks("FM1", edited.size(), edited::get, i -> edited.get(i) + 10,
+                i -> false, 480);
+        assertEquals(List.of(0, 490, 980, 1470), rebuilt.stream().map(ReconstructionClipLinks.Chunk::tick).toList());
+        assertEquals(List.of(2, 4, 6, 7), rebuilt.stream().map(ReconstructionClipLinks.Chunk::limit).toList());
     }
 
     @Test void roundTripsLegatoCountsAndGapHistograms(@TempDir Path dir) throws Exception {

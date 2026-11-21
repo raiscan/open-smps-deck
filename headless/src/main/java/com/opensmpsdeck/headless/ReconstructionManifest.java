@@ -31,10 +31,16 @@ final class ReconstructionManifest {
     record Manifest(int version, Tool tool, long durationUs, ReconstructionStages.Inputs options,
                     Map<String, Input> inputs, Map<Integer, String> partToStem,
                     Map<Integer, External> externalNotes, List<String> originalArguments,
-                    @Nullable Input transcriberConfig, Run lastRun) {
+                    @Nullable Input transcriberConfig, Run lastRun, @Nullable String rolePlanSha256,
+                    @Nullable Double roleHarmonyMaxHz) {
         Manifest withLastRun(Run run) {
             return new Manifest(version, tool, durationUs, options, inputs, partToStem, externalNotes,
-                    originalArguments, transcriberConfig, run);
+                    originalArguments, transcriberConfig, run, rolePlanSha256, roleHarmonyMaxHz);
+        }
+
+        Manifest withRolePlan(String hash, double rate) {
+            return new Manifest(version, tool, durationUs, options, inputs, partToStem, externalNotes,
+                    originalArguments, transcriberConfig, lastRun, hash, rate);
         }
     }
 
@@ -110,7 +116,7 @@ final class ReconstructionManifest {
             }
             persistCopies(work);
             var manifest = new Manifest(VERSION, tool(), score.durationUs(), withPaths(inputs, inputs.midi(), inputs.wav(),
-                    inputs.catalogue(), inputs.stems(), inputs.candidates(), null), source, stems, notes, argv, config, run);
+                    inputs.catalogue(), inputs.stems(), inputs.candidates(), null), source, stems, notes, argv, config, run, rolePlanHash(work), null);
             ReconstructionArtifacts.write(work.resolve(FILE), manifest);
         }
 
@@ -147,6 +153,19 @@ final class ReconstructionManifest {
             ReconstructionArtifacts.write(file, manifest.withLastRun(run));
         } else {
             capture.write(work, score, List.of(), run);
+        }
+    }
+
+    private static String rolePlanHash(Path work) throws IOException {
+        Path plan = work.resolve("roleplan.json");
+        return Files.exists(plan) ? ReconstructionCli.audioHash(plan) : null;
+    }
+
+    static void recordRolePlan(Path work, double rate) throws IOException {
+        Path file = work.resolve(FILE);
+        if (Files.exists(file)) {
+            var manifest = ReconstructionArtifacts.read(file, Manifest.class);
+            ReconstructionArtifacts.write(file, manifest.withRolePlan(rolePlanHash(work), rate));
         }
     }
 
@@ -213,7 +232,8 @@ final class ReconstructionManifest {
         var replayed = new Manifest(VERSION, tool(), manifest.durationUs,
                 withPaths(inputs, inputs.midi(), inputs.wav(), inputs.catalogue(), stems, candidates, null),
                 relocated, manifest.partToStem, external, manifest.originalArguments, manifest.transcriberConfig,
-                new Run("transcribe", null));
+                new Run("transcribe", manifest.roleHarmonyMaxHz == null
+                        ? manifest.lastRun.harmonyMaxHz() : manifest.roleHarmonyMaxHz), rolePlanHash(work), manifest.roleHarmonyMaxHz);
         return new Replay(replayed, inputs, copies);
     }
 
@@ -299,7 +319,7 @@ final class ReconstructionManifest {
                 options.leadPart(), options.fastRunsOff(), options.drumSource());
     }
 
-    static void run(String[] args, PrintStream out) throws IOException {
+    static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("rerun expects WORKDIR NEWWORKDIR [--search DIR ...]");
         var search = new ArrayList<Path>();
         boolean keepVoicing = false;
@@ -313,6 +333,6 @@ final class ReconstructionManifest {
             search.add(Path.of(args[i]).toAbsolutePath().normalize());
         }
         ReconstructionStages.rerun(Path.of(args[0]).toAbsolutePath().normalize(),
-                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, out);
+                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, out, err);
     }
 }

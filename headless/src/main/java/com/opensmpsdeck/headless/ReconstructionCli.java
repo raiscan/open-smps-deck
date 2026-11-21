@@ -68,7 +68,8 @@ final class ReconstructionCli {
                           List<ReconstructionBendEncoding.Applied> bends, Boolean bendSizeLimit,
                           ReconstructionDrums.Source drumSource,
                           List<S3kReconstruction.VoicedGate> voicedGates,
-                          Map<String, String> assemblyInputs) {}
+                          Map<String, String> assemblyInputs, ReconstructionSustain.Probe sustainProbe,
+                          List<String> voicingWarnings) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -110,6 +111,10 @@ final class ReconstructionCli {
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
+        run(args, out, System.err);
+    }
+
+    static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
             return;
@@ -131,7 +136,7 @@ final class ReconstructionCli {
             return;
         }
         if (args.length >= 2 && args[1].equals("rerun")) {
-            ReconstructionManifest.run(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            ReconstructionManifest.run(java.util.Arrays.copyOfRange(args, 2, args.length), out, err);
             return;
         }
         if (args.length >= 2 && args[1].equals("describe")) {
@@ -159,7 +164,7 @@ final class ReconstructionCli {
             return;
         }
         if (args.length >= 2 && ReconstructionStages.isCommand(args[1])) {
-            ReconstructionStages.run(args[1], java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            ReconstructionStages.run(args[1], java.util.Arrays.copyOfRange(args, 2, args.length), out, err);
             return;
         }
         if (args.length < 5) throw new IllegalArgumentException("reconstruct expects MIDI WAV INDEX.json OUTPUT_DIR");
@@ -263,29 +268,35 @@ final class ReconstructionCli {
         if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
         placements.addAll(playback.placements());
         var assemblyInputs = assemblyInputs(score, allocation, voicing);
+        var layout = ReconstructionClipLinks.Layout.read(work);
+        var layoutPath = work.resolve(ReconstructionClipLinks.LAYOUT);
+        var leadNotes = ordered.notes().stream().filter(entry -> "FM1".equals(entry.lane())).toList();
+        var sustain = matchQuietly(() -> ReconstructionSustain.inspect(score, catalogue, leadNotes, leadVoice));
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
             render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing, assemblyInputs);
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), layout),
+                    out, existing, assemblyInputs);
             var edits = ReconstructionEdits.Journal.read(work).all();
-            if (!edits.isEmpty() || voicing.sustainWarning() != null) {
-                Path reportFile = staging.resolve("report.json");
-                var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
-                if (!edits.isEmpty()) report.add("editResults", new com.google.gson.Gson().toJsonTree(edits));
-                if (voicing.sustainWarning() != null) {
-                    var warnings = new com.google.gson.JsonArray();
-                    warnings.add(voicing.sustainWarning());
-                    report.add("voicingWarnings", warnings);
-                }
-                ReconstructionArtifacts.write(reportFile, report);
-            }
+            Path reportFile = staging.resolve("report.json");
+            var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
+            var json = new com.google.gson.Gson();
+            if (!edits.isEmpty()) report.add("editResults", json.toJsonTree(edits));
+            report.add("sustainProbe", json.toJsonTree(sustain));
+            report.add("voicingWarnings", json.toJsonTree(sustain.warning() == null ? List.of() : List.of(sustain.warning())));
+            var affinity = ReconstructionAllocation.Affinity.read(work);
+            if (affinity != null && affinity.allocationHash().equals(assemblyInputs.get("allocation")))
+                report.add("allocationAffinityChanges", json.toJsonTree(affinity.changes()));
+            ReconstructionArtifacts.write(reportFile, report);
+            var savedProject = (preserveReview || layout == null)
+                    ? ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project() : null;
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             if (preserveReview) {
-                ProjectFiles.save(destination, ProjectFiles.load(staging.resolve(OUTPUTS.getFirst())).project(),
+                ProjectFiles.save(destination, savedProject,
                         existing == null ? null : existing.revision());
             }
             for (String name : OUTPUTS) {
@@ -293,6 +304,8 @@ final class ReconstructionCli {
                 Files.move(staging.resolve(name), work.resolve(name),
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             }
+            if (!Files.exists(layoutPath))
+                ReconstructionArtifacts.write(layoutPath, layout == null ? ReconstructionClipLinks.Layout.of(savedProject.clips()) : layout);
         } finally {
             Files.deleteIfExists(staging.resolve(STEADY_REFERENCE));
             for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
@@ -425,6 +438,8 @@ final class ReconstructionCli {
             var runEvidence = new java.util.ArrayList<>(transcription.notes().stream().filter(note -> note.run() != null).toList());
             if (transcription.retriggers() != null)
                 for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
+            var assembled = result.project();
+            var legacySustain = assemblyInputs == null ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
@@ -437,7 +452,8 @@ final class ReconstructionCli {
                     runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices(),
                     result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null,
                     drumSource(transcription, result.dacHits()),
-                    assemblyInputs == null ? null : result.voicedGates(), assemblyInputs);
+                    assemblyInputs == null ? null : result.voicedGates(), assemblyInputs, legacySustain,
+                    legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()));
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;

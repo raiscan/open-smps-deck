@@ -219,10 +219,13 @@ class ReconstructionCliTest {
                 "voicing.json", "12a1d154a475a39f676a0348a6099a3b5654e47a68a3c6a3b03d3957feea431c");
         try (var paths = Files.list(work)) {
             var files = new java.util.HashSet<>(expected.keySet());
-            files.addAll(List.of("manifest.json", "snapshots"));
+            files.addAll(List.of("manifest.json", "snapshots", "allocation-affinity.json", "assembly-layout.json"));
             assertEquals(files, paths.map(path -> path.getFileName().toString())
                     .collect(java.util.stream.Collectors.toSet()));
         }
+        var report = JsonParser.parseString(Files.readString(work.resolve("report.json"))).getAsJsonObject();
+        assertTrue(report.has("sustainProbe"));
+        assertTrue(report.getAsJsonArray("allocationAffinityChanges").isEmpty());
         var digest = java.security.MessageDigest.getInstance("SHA-256");
         for (var entry : expected.entrySet()) {
             Path path = work.resolve(entry.getKey());
@@ -407,16 +410,31 @@ class ReconstructionCliTest {
         assertEquals(.4, refitted.get("gain").getAsDouble());
         assertEquals(scopes, refitted.get("overrides"));
 
+        var prior = Files.createDirectory(directory.resolve("prior-scopes"));
+        for (String name : List.of("score.json", "structure.json", "roles.json", "allocation.json", "voicing.json",
+                "arrangement.smps.json", "report.json", "render.wav"))
+            Files.copy(work.resolve(name), prior.resolve(name));
+
         var overlapping = JsonParser.parseString("""
                 [{"startTick":10,"endTick":54,"variantId":"%s"},
                  {"startTick":12,"endTick":20,"gain":0.2},
-                 {"startTick":25,"endTick":35,"vibrato":{"delay":1,"rate":2,"delta":3,"steps":4}},
+                 {"startTick":25,"endTick":35,"vibrato":{"delay":1,"rate":2,"delta":4,"steps":4}},
                  {"startTick":37,"endTick":50,"gain":0.8}]
                 """.formatted(candidate)).getAsJsonArray();
         lane.add("overrides", overlapping);
         ReconstructionStages.writeArtifact(file, artifact);
         assertEquals(0, Main.run(new String[]{"reconstruct", "assemble", work.toString()},
                 System.out, err), errors.toString());
+        var diff = ReconstructionTrace.diff(prior, work, null);
+        var scopeChanges = diff.getAsJsonArray("voicingChanges").asList().stream()
+                .map(com.google.gson.JsonElement::getAsJsonObject).filter(entry -> entry.has("scope")).toList();
+        assertEquals(List.of("removed", "changed", "removed", "added", "added", "added"),
+                scopeChanges.stream().map(change -> change.get("change").getAsString()).toList());
+        var changed = scopeChanges.get(1);
+        assertEquals("FM1", changed.get("lane").getAsString());
+        assertEquals(25, changed.getAsJsonObject("scope").get("startTick").getAsInt());
+        assertEquals(4, changed.getAsJsonObject("after").getAsJsonObject("vibrato").get("delta").getAsInt());
+        assertTrue(diff.getAsJsonObject("renderedPcm").get("changedFrames").getAsLong() > 0);
         var held = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         var labels = EvidenceNotes.patchChanges(held,
                 new ReconstructionView.Span(0, 1, ReconstructionTimeMap.TimeBase.project, null), List.of("FM1"));

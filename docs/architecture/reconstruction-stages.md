@@ -79,7 +79,14 @@ merge partner, or applied bend can appear even if the summary category
 stays the same. `lanePermutations` summarizes contiguous lane changes
 outside the span, including the first diverging note on each original lane
 and suggested `pinLane` edits. `voicingChanges` compares lane variants,
-gain and part gains independently of note fate.
+gain and part gains independently of note fate. Scoped entries include the
+lane, selector, action, and before/after fields. `compiledTimeline` counts
+added, removed or changed compiled events, including clip reset commands,
+and gives the first affected project tick and lanes. `renderedPcm` counts
+changed sample frames in saved renders and gives the first affected frame.
+Both summaries cover the area outside `--span`, or the whole project when
+no span is supplied. They can report different results because chip and
+resampler state can carry through the edit boundary.
 
 A fresh staged run writes `manifest.json` with the build identity,
 resolved options, input paths and hashes, and references to content-addressed
@@ -90,11 +97,23 @@ snapshot and its provenance. Original bytes are retained for new runs.
 `reconstruct rerun WORK_DIR NEW_WORK_DIR` verifies input hashes at the
 stored path or snapshot and checks any repeated `--search DIR` roots for
 missing bytes. The replay starts from transcription using the saved options
-and original external notes. `edits.json` is copied into the replay. Later role plans and direct stage
-artifact changes remain in the original work directory. Rebuilt allocation
-prefers the prior lane for a matching note when it can use that lane at the
-same hardware priority and without clipping another note. This prevents
-lane affinity from carrying a local reassignment forward.
+and original external notes. Replay copies `edits.json` and `roleplan.json`.
+The manifest records the plan's `rolePlanSha256`. Use `--keep-voicing` to
+carry accepted voicing settings. Manual changes to derived stage artifacts
+must be expressed through the corresponding recipe inputs to replay.
+
+Allocation prefers prior lanes when they have the same hardware priority
+and can accommodate the attack. `allocation-affinity.json` records the lane
+seed used for the last allocation so replay can reproduce that decision.
+`allocationAffinityChanges` in the report lists each note ID whose chosen
+lane differs from a fresh allocation, with its previous-affinity lane and
+fresh lane. Replay of legacy directories uses their saved allocation as
+the seed.
+
+Assembly saves the first clip starts in `assembly-layout.json` and retains
+them on subsequent assembly and replay. A note crossing an anchor keeps its
+gate. Legacy directories seed the layout from their existing arrangement.
+Keep these replay artifacts with the private recipe.
 
 ## Persistent musical edits
 
@@ -114,7 +133,7 @@ when reconstruction warps project time. Pitch is a MIDI integer.
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
 | `pinLane` | `noteIds` or a point selector, and `lane`. | `roles` |
 | `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
-| `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. | `transcribe` |
+| `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. A point up to one project tick past the gate clamps to the gate end. | `transcribe` |
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
@@ -159,6 +178,7 @@ two intents:
 `report.json` as `editResults`. An absent target reports `orphaned`, including
 any missing IDs in a partially matched list. A target that exists but is
 incompatible with the intent reports `invalid` with a field-specific detail.
+`run` and `rerun` summarize invalid and orphaned outcomes on stderr.
 An unplaceable pin reports `conflict`, with competitor IDs in the allocation
 trace. The trace includes `edit:<id>` reasons alongside the underlying fate
 detail.
@@ -781,11 +801,13 @@ publish the chosen patch. MCP `reconstruct_audition` takes a `variants` array
 and returns the candidate paths, variant IDs and pre-match RMS envelopes in
 linear units. Save the same fields with `--rms-json FILE` or MCP `rmsJson`.
 
-During `voice`, the fitted FM1 patch is probed in isolation on up to three
-of its longest allocated gates of at least one second. A dip greater than
-6 dB from the opening to the middle RMS bins adds a warning to `voicing.json`
-and `voicingWarnings` in the next assembly report. The warning identifies the flattest audible
-shortlist patch on the affected gate. The probes are diagnostic only.
+Assembly probes the lane-wide FM1 patch in isolation on up to three of its
+longest allocated gates of at least one second, including with
+`--keep-voicing`. `sustainProbe` gives the sample count, number of gates
+longer than half a second, and worst measured dip when available. A dip
+greater than 6 dB adds `voicingWarnings` and identifies the flattest audible
+shortlist patch on that gate. The standalone `voice` stage also records its
+warning in `voicing.json`. The probe is diagnostic only.
 
 ## Benchmark
 
