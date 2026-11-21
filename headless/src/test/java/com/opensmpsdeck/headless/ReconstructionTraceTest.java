@@ -46,7 +46,7 @@ class ReconstructionTraceTest {
         var at = new ReconstructionTrace.NoteAt(note, timing);
         var allocation = new ReconstructionTrace.Allocation(at, Role.harmony, List.of("FM3", "FM4"), lane,
                 timing, ReconstructionAllocation.Outcome.kept, null, null, null, null, null, List.of());
-        return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, null, at, null, null, null,
+        return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, timing, null, at, null, null, null,
                 allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null);
     }
 
