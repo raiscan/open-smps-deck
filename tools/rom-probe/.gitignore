@@ -1,0 +1,12 @@
+*.exe
+*.dll
+*.gen
+*.md.bin
+*.bin
+*.smd
+*.wav
+*.mp4
+*.log
+report.json
+analysis.json
+__pycache__/

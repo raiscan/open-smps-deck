@@ -772,6 +772,8 @@ mvn -B -pl headless -am verify
 python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$scratch"
 ```
 
+For title-music and demo-timeout checks on personal-use patched ROMs, see the [headless ROM probe](../tools/rom-probe/README.md).
+
 ## External transcription
 
 On the MIDI route, the supplied MIDI provides the source notes by default.
