@@ -704,9 +704,10 @@ public final class ReconstructionTrace {
             if (external != null && external.provenance().replace() && !excluded)
                 decision = "external-transcriber-replacement";
             var prepared = written.get(id);
+            String source = prepared != null && "audio-refine".equals(prepared.source()) ? "audio-refine"
+                    : score.inputs() != null && score.inputs().audioOnly() != null ? ReconstructionAudioOnly.DRUM_SOURCE : "midi";
             raw.put(id, new Raw(new Note(id, note.partId(), note.startUs() / 1e6, note.endUs() / 1e6, note.pitch(),
-                    note.velocity(), prepared != null && "audio-refine".equals(prepared.source()) ? "audio-refine" : "midi",
-                    1), null, decision));
+                    note.velocity(), source, 1), null, decision));
         }
         var stemDrops = new HashMap<String, S3kReconstruction.Reduction>();
         for (var reduction : score.reductions()) {

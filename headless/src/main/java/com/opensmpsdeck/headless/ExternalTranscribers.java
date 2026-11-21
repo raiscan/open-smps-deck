@@ -50,6 +50,28 @@ public final class ExternalTranscribers {
         return List.copyOf(commands(config).keySet());
     }
 
+    static String selectForAudio(String name, Path config) throws IOException {
+        return selectForAudio(name, config, false);
+    }
+
+    static String selectForAudio(String name, Path config, boolean allowUnconfigured) throws IOException {
+        Path file = config == null ? defaultConfig() : config;
+        if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+            if (allowUnconfigured) return null;
+            throw new IllegalArgumentException("Audio-only reconstruction needs a configured transcriber. No configuration at " + file);
+        }
+        var names = commands(file).keySet();
+        if (allowUnconfigured && names.isEmpty()) return null;
+        if (name == null && names.size() == 1) return names.iterator().next();
+        if (names.isEmpty())
+            throw new IllegalArgumentException("Audio-only reconstruction needs a configured transcriber in " + file);
+        if (name == null)
+            throw new IllegalArgumentException("Select an audio-only --transcriber from " + names);
+        if (!names.contains(name))
+            throw new IllegalArgumentException("Transcriber " + name + " is not configured in " + file);
+        return name;
+    }
+
     private static Map<String, List<String>> commands(Path file) throws IOException {
         return ExternalCommands.commands(file, PLACEHOLDER, "{input}", "{output}");
     }

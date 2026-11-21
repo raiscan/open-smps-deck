@@ -90,6 +90,9 @@ final class ReconstructionCli {
         out.println("           [--separator-config FILE]");
         out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
+        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--transcriber NAME] [--stem-role FILE=ROLE] [--run]");
+        out.println("       reconstruct run|transcribe --audio-only WAV INDEX.json WORK_DIR --stem LABEL=WAV [options]");
+        out.println("         [--stem-role LABEL=ROLE ...] [--drum-detector spectral] [--transcriber NAME]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
@@ -318,7 +321,7 @@ final class ReconstructionCli {
         Path destination = work.resolve(OUTPUTS.getFirst());
         var existing = ReconstructionReview.requireAttached(work, overwriteDetached);
         var inputs = score.inputs();
-        Path midi = Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
+        Path midi = inputs.midi() == null ? null : Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var catalogue = InstrumentCatalogue.open(index);
@@ -551,7 +554,7 @@ final class ReconstructionCli {
             ProjectPackage.write(result.project(), packagePath);
             WaveFile.render(compiled, audio, frames);
             var inputEvidence = new LinkedHashMap<String, FileEvidence>();
-            inputEvidence.put("midi", evidence(midi));
+            if (midi != null) inputEvidence.put("midi", evidence(midi));
             inputEvidence.put("wav", evidence(reference));
             inputEvidence.put("catalogue", evidence(index));
             for (var stem : options.stems().entrySet()) inputEvidence.put("stem-" + stem.getKey(), evidence(stem.getValue()));

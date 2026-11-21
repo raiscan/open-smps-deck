@@ -1,6 +1,6 @@
 # Staged reconstruction
 
-Reconstruction builds an S3K arrangement from aligned MIDI and audio. Each
+Reconstruction builds an S3K arrangement from aligned MIDI and audio, or from a mix and labelled stems in audio-only mode. Each
 stage reads the preceding artifact from a work directory and writes its own
 versioned JSON. Record musical intent in `edits.json`, then resume at the
 first stage that consumes it. Keep `score.json` and `allocation.json` as
@@ -46,6 +46,21 @@ previous assembly.
 Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
+
+## Audio-only source score
+
+`run --audio-only` and `transcribe --audio-only` create the source on the
+input audio clock. The drum detector supplies a GM drum part, and tonal stems
+take the same external transcription path as `--transcribe-unmapped`.
+The beat tracker uses drum attacks when available and mix onsets otherwise.
+The downstream structure, allocation, fitting and assembly stages use the
+same score interface as a MIDI run.
+
+`score.json` and `manifest.json` retain audio-only input roles, the detector
+and its source-time hits, and the configured transcriber. The manifest
+records hashes for the mix, catalogue and participating stems, and snapshots
+each transcriber's output. Replay needs these audio and catalogue files and
+uses the saved detector output and transcription snapshots.
 
 ## Recover missed notes from stems
 

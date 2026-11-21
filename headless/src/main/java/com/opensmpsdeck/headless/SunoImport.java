@@ -113,7 +113,11 @@ public final class SunoImport {
     }
 
     public record RunRequest(String workDir, RunInputs inputs, Map<String, Object> options) {}
-    public record RunInputs(String midi, String wav, String catalogue, Map<Integer, String> stems) {}
+    public record RunInputs(String midi, String wav, String catalogue, Map<?, String> stems, Boolean audioOnly) {
+        RunInputs(String midi, String wav, String catalogue, Map<Integer, String> stems) {
+            this(midi, wav, catalogue, stems, null);
+        }
+    }
 
     public record Alignment(double offsetSeconds, double correlation, double zeroLagCorrelation, int stems) {}
 
@@ -161,6 +165,13 @@ public final class SunoImport {
 
     public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
                                  Set<String> exclusions, String transcriber, ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, transcriber, false, null, Map.of(), progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, boolean audioOnly,
+                                 String audioTranscriber, Map<String, String> stemRoles,
+                                 ReconstructionStages.Progress progress) throws IOException {
         Path source = folder.toRealPath();
         if (!Files.isDirectory(source)) throw new IOException("Expected a Suno folder: " + source);
         Path work = prepareWork(source, workDir);
@@ -168,6 +179,7 @@ public final class SunoImport {
         var inputs = discover(source);
         boolean separated = inputs.stream().anyMatch(input -> input.file.equals(ExternalSeparators.PROVENANCE)
                 && Files.isRegularFile(input.path, NOFOLLOW_LINKS));
+        if (audioOnly) inputs.removeIf(input -> extension(input, ".mid") || extension(input, ".midi"));
         int total = inputs.size() * 2 + 2;
         int done = 0;
         progress.report(done, total, separated ? "Finding and hashing separated files" : "Finding and hashing Suno files");
@@ -183,12 +195,30 @@ public final class SunoImport {
         classify(inputs, midi, mix);
         if (provenance != null) classifySeparated(inputs, provenance);
         applyExclusions(inputs, exclusions, issues);
-        boolean audioOnly = separated && mix != null && midi == null;
-        if (audioOnly) issues.add(new Issue(Status.warning, AUDIO_ONLY, "no MIDI: needs audio-only transcription"));
-        else missingInputs(mix, midi, issues);
+        boolean separatedAudio = provenance != null && mix != null && midi == null;
+        audioOnly |= separatedAudio;
+        if (audioOnly && !assignments.isEmpty()) throw new IllegalArgumentException("--assign requires MIDI");
+        if (!audioOnly && (audioTranscriber != null || !stemRoles.isEmpty()))
+            throw new IllegalArgumentException("--transcriber and --stem-role require an audio-only import");
+        if (audioOnly && transcriber != null)
+            throw new IllegalArgumentException("--transcribe-unmapped requires MIDI. Use --transcriber for audio-only import");
+        if (audioOnly) {
+            if (mix == null) issues.add(new Issue(Status.error, "missing_mix", "Add an aligned mix WAV"));
+            try {
+                transcriber = ExternalTranscribers.selectForAudio(audioTranscriber, null, separatedAudio && audioTranscriber == null);
+                if (transcriber == null)
+                    issues.add(new Issue(Status.warning, AUDIO_ONLY, "no MIDI: needs audio-only transcription. Configure a transcriber to run."));
+                else
+                    issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only reconstruction will use " + transcriber));
+            } catch (IllegalArgumentException | IOException e) {
+                issues.add(new Issue(Status.error, "transcriber_unavailable", e.getMessage()));
+            }
+        } else {
+            missingInputs(mix, midi, issues);
+        }
 
         MidiScore score = readMidi(midi);
-        progress.report(++done, total, "Checked MIDI and stem metadata");
+        progress.report(++done, total, audioOnly ? "Checked stem metadata" : "Checked MIDI and stem metadata");
         if (score == null) score = new MidiScore(List.of(), List.of(), List.of());
         var parts = score.parts().stream().map(SunoImport::part).toList();
         float[] mixAudio = null;
@@ -224,13 +254,15 @@ public final class SunoImport {
                                 : "No matching stem. A mix is needed for fallback."))
                 .toList();
         var lead = lead(parts, score, claimed);
+        var audioRequest = audioOnly && transcriber != null ? audioRequest(work, index, mix, inputs, issues, transcriber, stemRoles) : null;
         for (var input : inputs) finish(input, audioOnly);
         var files = inputs.stream().sorted(Comparator.comparing(input -> input.file)).map(Input::result).toList();
         Status status = java.util.stream.Stream.concat(files.stream().map(FileResult::status),
                         issues.stream().map(Issue::status))
                 .max(Comparator.naturalOrder()).orElse(Status.ok);
         if (!gaps.isEmpty() && status == Status.ok) status = Status.warning;
-        var request = runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
+        var request = audioOnly ? (status == Status.error ? null : audioRequest)
+                : runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
         var args = request == null ? List.<String>of() : runArguments(request);
         String command = args.isEmpty() ? null : "java -jar \"$DECK_JAR\" " + args.stream()
                 .map(arg -> arg.equals(CATALOGUE) ? "\"$CATALOGUE\"" : shellQuote(arg))
@@ -245,16 +277,19 @@ public final class SunoImport {
     }
 
     public static Path run(Report report, Path catalogue, ReconstructionStages.Progress progress) throws IOException {
-        if (!report.canRun()) throw new IllegalArgumentException("Reconstruction requires a mix, MIDI and no import errors");
+        if (!report.canRun()) throw new IllegalArgumentException("Import did not produce a runnable reconstruction request");
         var args = new ArrayList<>(report.runArguments.subList(2, report.runArguments.size()));
         if (report.catalogueRequired && catalogue == null)
             throw new IllegalArgumentException("Choose an instrument catalogue for reconstruction");
         if (catalogue != null) args.set(2, catalogue.toAbsolutePath().normalize().toString());
         Path source = Path.of(report.folder);
         var unmapped = report.runRequest.options.get("transcribeUnmapped");
+        var audioStems = Boolean.TRUE.equals(report.runRequest.inputs.audioOnly)
+                ? report.runRequest.inputs.stems.values() : List.<String>of();
         for (var file : report.files) {
             if (file.part == null && !List.of("mix", "midi").contains(file.role)
-                    && !(unmapped instanceof Map<?, ?> stems && stems.containsKey(source.resolve(file.file).toString()))) continue;
+                    && !(unmapped instanceof Map<?, ?> stems && stems.containsKey(source.resolve(file.file).toString()))
+                    && !audioStems.contains(source.resolve(file.file).toString())) continue;
             checkCancelled();
             Path path = source.resolve(file.file);
             if (!Files.isRegularFile(path, NOFOLLOW_LINKS) || !path.toRealPath().equals(path)
@@ -268,8 +303,9 @@ public final class SunoImport {
     static void cli(String[] args, PrintStream out) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("reconstruct import expects FOLDER WORK_DIR");
         Path catalogue = null;
-        boolean run = false;
-        String transcriber = null;
+        boolean run = false, audioOnly = false;
+        String transcriber = null, audioTranscriber = null;
+        var stemRoles = new LinkedHashMap<String, String>();
         var assignments = new LinkedHashMap<String, Integer>();
         var exclusions = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
@@ -278,14 +314,29 @@ public final class SunoImport {
                 run = true;
                 continue;
             }
+            if (option.equals("--audio-only")) {
+                audioOnly = true;
+                continue;
+            }
             if (i + 1 >= args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[++i];
             switch (option) {
                 case "--catalogue" -> catalogue = Path.of(value);
                 case "--exclude" -> exclusions.add(value);
                 case "--transcribe-unmapped" -> {
-                    if (transcriber != null) throw new IllegalArgumentException("Duplicate --transcribe-unmapped");
+                    if (transcriber != null) throw new IllegalArgumentException("Duplicate transcriber option");
                     transcriber = value;
+                }
+                case "--transcriber" -> {
+                    if (audioTranscriber != null) throw new IllegalArgumentException("Duplicate transcriber option");
+                    audioTranscriber = value;
+                }
+                case "--stem-role" -> {
+                    int split = value.lastIndexOf('=');
+                    if (split < 1 || split == value.length() - 1)
+                        throw new IllegalArgumentException("--stem-role expects FILE=ROLE");
+                    if (stemRoles.putIfAbsent(value.substring(0, split), value.substring(split + 1)) != null)
+                        throw new IllegalArgumentException("Duplicate stem role for " + value.substring(0, split));
                 }
                 case "--assign" -> {
                     int split = value.lastIndexOf('=');
@@ -297,7 +348,8 @@ public final class SunoImport {
                 default -> throw new IllegalArgumentException("Unknown import option " + option);
             }
         }
-        var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber, (a, b, c) -> {});
+        var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber,
+                audioOnly, audioTranscriber, stemRoles, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -836,7 +888,9 @@ public final class SunoImport {
     private static void finish(Input input, boolean audioOnly) {
         if (input.excluded || input.sha256 == null || input.role.equals("metadata")) return;
         if (input.role.equals("stem")) {
-            if (Boolean.TRUE.equals(input.evidence.get("tonalLeadCandidate")))
+            if (input.evidence.get("audioOnlyRole") instanceof String role)
+                input.add(Status.ok, "audio_only_stem", "Audio-only role: " + role);
+            else if (Boolean.TRUE.equals(input.evidence.get("tonalLeadCandidate")))
                 input.add(Status.ok, "tonal_lead_candidate", "Vocals found. Tonal lead candidate.");
             else if (vocals(input.family))
                 input.add(Status.warning, "vocals_present", input.part == null
@@ -894,6 +948,45 @@ public final class SunoImport {
         return best;
     }
 
+    private static RunRequest audioRequest(Path work, Path catalogue, Input mix, List<Input> files,
+                                           List<Issue> issues, String transcriber, Map<String, String> overrides) {
+        var stems = new TreeMap<String, String>();
+        var roles = new TreeMap<String, String>();
+        var seen = new HashSet<String>();
+        for (var file : files) {
+            if (!file.role.equals("stem") || file.excluded || file.error()) continue;
+            String role = overrides.get(file.file);
+            if (role != null) {
+                seen.add(file.file);
+                role = ReconstructionAudioOnly.label(role);
+            } else {
+                if ("fx".equals(file.family) || "percussion".equals(file.family)) {
+                    file.add(Status.ok, "ignored_non_tonal", "Use --stem-role to include this stem");
+                    continue;
+                }
+                role = "keyboard".equals(file.family) && normalize(bare(file)).equals("piano")
+                        ? "piano" : ReconstructionAudioOnly.defaultRole(file.family == null ? "other" : file.family);
+            }
+            String base = file.family == null ? "other" : file.family;
+            String label = base;
+            for (int i = 2; stems.containsKey(label); i++) label = base + "-" + i;
+            stems.put(label, file.path.toString());
+            if (!role.equals(ReconstructionAudioOnly.defaultRole(label))) roles.put(label, role);
+            file.evidence.put("audioOnlyRole", role);
+        }
+        for (String key : new java.util.TreeSet<>(overrides.keySet())) {
+            if (!seen.contains(key)) issues.add(new Issue(Status.error, "unknown_stem_role",
+                    "Role override must name an included stem: " + key));
+        }
+        if (stems.isEmpty()) issues.add(new Issue(Status.error, "missing_stems", "No labelled stems found"));
+        if (mix == null || transcriber == null || stems.isEmpty()) return null;
+        var options = new LinkedHashMap<String, Object>();
+        if (!roles.isEmpty()) options.put("stemRoles", roles);
+        options.put("transcriber", transcriber);
+        return new RunRequest(work.resolve("reconstruction").toString(), new RunInputs(null, mix.path.toString(),
+                catalogue == null ? null : catalogue.toString(), stems, true), options);
+    }
+
     private static RunRequest runRequest(Path work, Path catalogue, Input mix, Input midi, List<Input> files,
                                          Lead lead, Status status, String transcriber) {
         if (mix == null || midi == null || status == Status.error) return null;
@@ -921,12 +1014,20 @@ public final class SunoImport {
 
     private static List<String> runArguments(RunRequest request) {
         var inputs = request.inputs;
-        var args = new ArrayList<>(List.of("reconstruct", "run", inputs.midi, inputs.wav,
+        var args = new ArrayList<>(List.of("reconstruct", "run", Boolean.TRUE.equals(inputs.audioOnly) ? "--audio-only" : inputs.midi, inputs.wav,
                 inputs.catalogue == null ? CATALOGUE : inputs.catalogue, request.workDir));
         inputs.stems.forEach((part, file) -> {
             args.add("--stem");
             args.add(part + "=" + file);
         });
+        if (Boolean.TRUE.equals(inputs.audioOnly)) {
+            args.add("--transcriber");
+            args.add(request.options.get("transcriber").toString());
+            if (request.options.get("stemRoles") instanceof Map<?, ?> roles) roles.forEach((label, role) -> {
+                args.add("--stem-role");
+                args.add(label + "=" + role);
+            });
+        }
         if (request.options.containsKey("leadPart")) {
             args.add("--lead-part");
             args.add(request.options.get("leadPart").toString());

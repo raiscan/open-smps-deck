@@ -140,21 +140,34 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import wave
 
 source, output, device = sys.argv[1:]
 assert device == "cpu"
 folder = Path(output)
 (folder / "stems").mkdir()
 shutil.copyfile(source, folder / "mix.wav")
-shutil.copyfile(source, folder / "stems/vocals.wav")
+stems = ["bass", "drums", "other", "vocals", "guitar", "piano"]
+for stem in stems:
+    path = folder / "stems" / f"{stem}.wav"
+    if stem == "drums":
+        with wave.open(source, "rb") as mix, wave.open(str(path), "wb") as drums:
+            drums.setparams(mix.getparams())
+            drums.writeframes(bytes(mix.getnframes() * mix.getnchannels() * mix.getsampwidth()))
+    else:
+        shutil.copyfile(source, path)
 (folder / "separation.json").write_text(json.dumps({
     "tool": "fixture", "model": "fixture", "version": "1",
-    "checkpointSha256": "0" * 64, "stemOrder": ["vocals"], "settings": {},
+    "checkpointSha256": "0" * 64, "stemOrder": stems, "settings": {},
 }))
 """)
     config = root / "separators.json"
     config.write_text(json.dumps({"fixture": [sys.executable, str(adapter), "{input}", "{outputDir}", "{device}"]}))
-    with Client(jar, env={**os.environ, "OPENSMPSDECK_SEPARATORS": str(config)}) as rpc:
+    transcribers = root / "transcribers.json"
+    transcribers.write_text("{}")
+    env = {**os.environ, "OPENSMPSDECK_SEPARATORS": str(config),
+           "OPENSMPSDECK_TRANSCRIBERS": str(transcribers)}
+    with Client(jar, env=env) as rpc:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
@@ -492,7 +505,49 @@ shutil.copyfile(source, folder / "stems/vocals.wav")
         assert rpc.request("tools/list")["tools"] == tools
         assert rpc.call("notes_list", project=project) == notes
         assert rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice") == results
-    print(f"MCP smoke passed ({len(tools)} tools, initialize and discovery, independent processes)")
+
+    transcriber = root / "mock-transcriber.py"
+    transcriber.write_text("""
+import json
+from pathlib import Path
+import sys
+
+source, output, role = sys.argv[1:]
+pitches = {"vocals": 67, "bass": 43, "guitar": 55, "piano": 60, "other": 64}
+assert Path(source).is_file() and role == Path(source).stem
+pitch = pitches[role]
+Path(output).write_text(json.dumps([[0.25, 0.50, pitch], [0.75, 1.0, pitch + 2]]))
+""")
+    transcribers.write_text(json.dumps({
+        "fixture": [sys.executable, str(transcriber), "{input}", "{output}", "{role}"],
+    }))
+    with Client(jar, env=env) as rpc:
+        checked = rpc.call("reconstruct_import", folder=separated, workDir=root / "mcp-audio-run",
+                           catalogue=inputs["catalogue"])
+        request = checked["runRequest"]
+        assert request["inputs"]["audioOnly"] and "midi" not in request["inputs"], request
+        assert request["options"]["transcriber"] == "fixture", request
+        assert set(request["inputs"]["stems"]) == {"bass", "drums", "guitar", "keyboard", "other", "vocals"}, request
+        assert request["options"]["stemRoles"] == {"keyboard": "piano"}, request
+        roles = {entry["family"]: entry["evidence"]["audioOnlyRole"]
+                 for entry in checked["files"] if entry["role"] == "stem"}
+        assert roles == {"bass": "bass", "drums": "drums", "guitar": "guitar",
+                         "keyboard": "piano", "other": "other", "vocals": "lead"}, roles
+        rpc.call("reconstruct_run", **request)
+        arrangement = Path(request["workDir"]) / "arrangement.smps.json"
+        assert rpc.call("project_validate", project=arrangement)["valid"]
+
+    cli_work = root / "cli-audio-run"
+    subprocess.run(["java", "-jar", str(jar), "reconstruct", "import", str(separated), str(cli_work),
+                    "--catalogue", inputs["catalogue"], "--run"], env=env, check=True,
+                   stdout=subprocess.DEVNULL)
+    cli_reconstruction = cli_work / "reconstruction"
+    assert (cli_reconstruction / "render.wav").is_file()
+    subprocess.run(["java", "-jar", str(jar), "validate-project",
+                    str(cli_reconstruction / "arrangement.smps.json")], check=True,
+                   stdout=subprocess.DEVNULL)
+
+    print(f"MCP smoke passed ({len(tools)} tools, including separated audio-only run via CLI and MCP)")
 
 
 def main():

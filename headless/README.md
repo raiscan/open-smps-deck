@@ -712,7 +712,7 @@ Use an optional local separator to prepare a WAV or MP3 for reconstruction.
 
 ```sh
 java -jar "$CLI" reconstruct separate mix.mp3 separated --separator bs-roformer --device rocm
-java -jar "$CLI" reconstruct import separated import-work
+java -jar "$CLI" reconstruct import separated import-work --catalogue catalogue.json --run
 ```
 
 The output directory must be new and its parent must exist. The CLI looks for
@@ -731,14 +731,19 @@ match the mix's sample rate, channels and frame count. The CLI publishes the
 folder after these checks pass. See the [BS-RoFormer adapter](../tools/separators/bs-roformer/)
 for setup and a configuration example.
 
-Import reports stem families and marks separated vocals as tonal lead
-candidates. A separated folder without MIDI produces an import report with
-the warning `no MIDI: needs audio-only transcription`. Reconstruction stops
-at that report, including when invoked with `--run`.
+Import recognizes `separation.json` and automatically prepares audio-only
+reconstruction for a separated folder without MIDI. Vocals become the lead,
+drums feed the onset detector, and bass, guitar, piano and other use their
+respective transcriber roles. With a configured transcriber, `--run` builds
+in `import-work/reconstruction`. Select a transcriber with `--transcriber NAME`
+if several are configured. Without one, import writes the report and stops
+with `no MIDI: needs audio-only transcription`.
 
 For MCP, call `separators_list` and then `separate` with `input`,
 `outputDir`, `separator` and optional `device`. The server uses its own
-local configuration. Pass the output folder to `reconstruct_import`.
+local configuration. Pass the output folder and catalogue to
+`reconstruct_import`, with `transcriber` if you need to select one. Then
+pass the returned `runRequest` to `reconstruct_run`.
 
 ## External transcription
 
@@ -796,6 +801,55 @@ the stem in `inputs.stems`. The server uses its own local configuration.
 The score embeds the imported notes and provenance, including file hashes,
 and the report includes per-part provenance. `run --from transcribe`
 reapplies the saved notes without invoking the external command.
+
+### Audio-only reconstruction
+
+Give the CLI a mix and already aligned, labelled WAV stems:
+
+```sh
+java -jar "$CLI" reconstruct run --audio-only mix.wav catalogue.json work \
+  --stem drums=drums.wav --stem bass=bass.wav --stem vocals=vocals.wav \
+  --stem guitar=guitar.wav --stem piano=piano.wav --stem other=other.wav \
+  --transcriber muscriptor
+```
+
+Audio-only mode selects the sole configured transcriber automatically.
+When several are configured, select one with `--transcriber NAME`.
+Stems with no audible signal in the requested interval are skipped.
+Each remaining tonal stem supplies a part. Vocals default to a monophonic
+lead and use the transcriber's `vocals` prompt. Bass, guitar, piano, synth,
+keyboard and other keep their corresponding roles. Use
+`--stem-role LABEL=ROLE` to override a label's role, for example
+`--stem-role synth=lead` for an instrumental track.
+
+An optional `drums` stem supplies kick, snare and closed-hat onsets to the
+existing DAC and PSG3 routing. `--drum-detector spectral` names the built-in
+detector. Drum or mix attacks determine the beat grid, with automatic
+steady-tempo warping when the tracker finds drift. Override the grid with
+`--tempo BPM --bar-offset SECONDS` and control warping with `--steady-tempo`.
+The score and manifest save the detector version, detected attacks and
+transcriber provenance. Resume or replay uses the saved detections and
+transcription snapshots.
+
+For a folder containing `mix.wav` and labelled stems at its root or under
+`stems/`, use:
+
+```sh
+java -jar "$CLI" reconstruct import DOWNLOAD IMPORT_WORK --audio-only \
+  --catalogue catalogue.json --transcriber muscriptor --run
+```
+
+Omit `--run` to check the folder and get a runnable request. In this command,
+`--stem-role` uses the folder-relative file name, such as
+`--stem-role stems/synth.wav=lead`. Import excludes separately labelled FX
+and percussion by default. Use an explicit role override to include one.
+
+In MCP, send `inputs: {audioOnly: true, wav, catalogue, stems}` to
+`reconstruct_run`, where `stems` maps stem labels to absolute WAV paths.
+Put label-based `stemRoles` and `transcriber` in `options`. For
+`reconstruct_import`, put `audioOnly`, `transcriber` and file-based
+`stemRoles` at the top level. Its `runRequest` can be passed to
+`reconstruct_run` once a catalogue is supplied.
 
 ## Source voices
 
