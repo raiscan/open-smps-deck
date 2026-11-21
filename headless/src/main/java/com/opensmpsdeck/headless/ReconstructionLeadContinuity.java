@@ -187,7 +187,7 @@ final class ReconstructionLeadContinuity {
             if (previous >= 0) {
                 var anchor = decisions.get(previous);
                 Note prior = anchor.note();
-                Note following = next.note();
+                Note following = legatoTarget(prior, decisions.subList(previous + 1, i), next.note());
                 var stem = stems.get(prior.part());
                 // Motion-based releases and inferred attacks get first claim on the gap.
                 // Apply legato only to the remaining consecutive attacks after role promotion.
@@ -210,6 +210,17 @@ final class ReconstructionLeadContinuity {
             previous = i;
         }
         return List.copyOf(result);
+    }
+
+    static Note legatoTarget(Note prior, List<Decision> between, Note nextLead) {
+        // A written re-attack can have a different function from the lead.
+        // Its onset still ends the extension of the previous note.
+        return between.stream().filter(decision -> decision.role() != Role.drop && decision.role() != Role.drums)
+                .map(Decision::note)
+                .filter(note -> note.part() == prior.part() && note.pitch() == prior.pitch()
+                        && note.start() >= prior.end()
+                        && (note.source().equals("midi") || note.source().equals("edit")))
+                .findFirst().orElse(nextLead);
     }
 
     static boolean hasReason(Decision decision, String reason) {

@@ -411,7 +411,8 @@ See [one-channel chord voicing](../../docs/architecture/reconstruction-stages.md
 
 Fresh runs fit one sound per source instrument. Find a function voice's
 `instrumentIds` in `voices.json`. Edit that profile under
-`voicing.json.sourceInstruments` to change its sound across FM lanes.
+`voicing.json.sourceInstruments` to change its sound across FM lanes. Automatic PSG spill fits an envelope
+with an audible attack to that profile.
 Use the voice assignment journal to give just one function voice a
 different instrument.
 

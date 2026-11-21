@@ -1041,8 +1041,13 @@ pitch-aligned attack match scores (higher is better), and their contextual
 fit and held-out errors (lower is better). For a part that spills to PSG,
 `psgVariantId` and `psgVolumeOffset` approximate that FM patch's attack,
 sustain, release, and loudness using the catalogue's PSG envelopes and
-hardware level steps. For otherwise identical simultaneous harmony or
-counter attacks, allocation offers FM to the longer note first.
+hardware level steps. Automatic matching rejects muted attacks and mute pulses
+and keeps the quietest spill audible on its first frame. For otherwise
+identical simultaneous harmony or counter attacks, allocation offers FM to the
+longer note first. It folds an automatic backing unison into an already
+allocated note of the same part and pitch when that note covers its full gate.
+A fresh written attack still bounds a lead's inferred legato extension when
+it carries a backing role.
 
 The `lanes` map retains DAC and PSG3 drum settings and explicit lane
 overrides. New tonal lanes start with unity gain and inherit their source

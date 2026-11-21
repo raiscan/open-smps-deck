@@ -312,7 +312,7 @@ final class ReconstructionAllocation {
             var attack = allocator.pending.remove();
             var chord = chords.get(attack.note().id());
             if (chord == null) {
-                allocator.place(attack);
+                if (!allocator.dropCoveredUnison(attack)) allocator.place(attack);
                 continue;
             }
             String anchor = anchors.get(chord);
@@ -440,6 +440,20 @@ final class ReconstructionAllocation {
 
     private double salience(Note note) {
         return salience.getOrDefault(origin(note), 0.0);
+    }
+
+    private boolean dropCoveredUnison(Attack attack) {
+        if (!backing(attack.role()) || attack.pin != null || attack.note().run() != null
+                || continuations.containsKey(attack.note().id())) return false;
+        var cover = tail.values().stream()
+                .filter(entry -> entry.role() != Role.drums && entry.pinnedLane() == null
+                        && entry.note().run() == null && !chordAnchors.contains(entry.note().id())
+                        && entry.note().part() == attack.note().part() && entry.note().pitch() == attack.note().pitch()
+                        && entry.startTick() <= attack.start && entry.endTick() >= attack.end)
+                .min(Comparator.comparingInt(Entry::startTick).thenComparing(entry -> entry.note().id())).orElse(null);
+        if (cover == null) return false;
+        drop(attack, "covered-source-unison", List.of(cover.note().id()));
+        return true;
     }
 
     private void place(Attack attack) {

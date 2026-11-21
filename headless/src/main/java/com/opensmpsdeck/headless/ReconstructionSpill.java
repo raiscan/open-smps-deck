@@ -22,6 +22,7 @@ final class ReconstructionSpill {
     static Match match(InstrumentCatalogue catalogue, ReconstructionVoicing.Lane fm,
                        MidiScore.Part part, List<ReconstructionAllocation.Entry> notes) throws IOException {
         if (notes.isEmpty()) return new Match(null, 0);
+        int quietest = notes.stream().mapToInt(note -> psgLevel(fm, part, note)).min().orElseThrow();
         var sorted = notes.stream().sorted(Comparator.comparingInt(n -> n.endTick() - n.startTick())).toList();
         var probes = new java.util.ArrayList<Probe>();
         var patch = catalogue.match(fm.variantId()).asset();
@@ -32,7 +33,7 @@ final class ReconstructionSpill {
             int gate = Math.min(48, S3kReconstruction.voicedDuration(note, fm.articulation()));
             int raw = S3kReconstruction.volume(part, note.note().midi());
             int fmLevel = Math.max(ReconstructionEcho.fmVolumeFloor(bytes), ReconstructionEcho.scaleVolume(raw, fm.gain()));
-            int psgLevel = ReconstructionEcho.scaleVolume(Math.max(1, raw - 24), fm.gain());
+            int psgLevel = psgLevel(fm, part, note);
             if (probes.stream().anyMatch(p -> p.pitch() == pitch && p.gate() == gate && p.fmLevel() == fmLevel)) continue;
             var target = contour(catalogue, fm.variantId(), pitch, gate, fmLevel, bytes);
             probes.add(new Probe(pitch, gate, fmLevel, psgLevel, target));
@@ -41,12 +42,17 @@ final class ReconstructionSpill {
         double bestError = Double.POSITIVE_INFINITY;
         Match best = new Match(null, 0);
         for (var variant : catalogue.variants().stream().sorted(Comparator.comparing(InstrumentCatalogue.Variant::id)).toList()) {
-            if (catalogue.asset(variant.assetId()).kind() != InstrumentCatalogue.Kind.PSG_VOLUME
-                    || !seen.add(variant.assetId())) continue;
+            var asset = catalogue.asset(variant.assetId());
+            if (asset.kind() != InstrumentCatalogue.Kind.PSG_VOLUME || !seen.add(variant.assetId())) continue;
+            byte[] envelope = asset.bytes();
+            if (!ReconstructionStemParts.startsAudibly(envelope)) continue;
+            // Reserve enough level for the quietest spill's first step after PSG quantization.
+            int minOffset = fm.gain() == 0 ? -120 : 8 * (Byte.toUnsignedInt(envelope[0]) + 1) - quietest;
             var contours = new java.util.ArrayList<double[]>();
             for (var probe : probes) contours.add(contour(catalogue, variant.id(), probe.pitch(), probe.gate(), 127, null));
             // Compare only legal PSG steps. A 2 dB step multiplies amplitude by approximately 0.794.
             for (int offset = -120; offset <= 120; offset += 8) {
+                if (offset < minOffset) continue;
                 double error = 0;
                 for (int i = 0; i < probes.size(); i++) {
                     var probe = probes.get(i);
@@ -69,6 +75,12 @@ final class ReconstructionSpill {
             }
         }
         return best;
+    }
+
+    private static int psgLevel(ReconstructionVoicing.Lane fm, MidiScore.Part part,
+                                ReconstructionAllocation.Entry note) {
+        int raw = S3kReconstruction.volume(part, note.note().midi());
+        return ReconstructionEcho.scaleVolume(Math.max(1, raw - 24), fm.gainFor(part.id()));
     }
 
     private static double[] contour(InstrumentCatalogue catalogue, String variant, int pitch, int gate,

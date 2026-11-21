@@ -662,7 +662,7 @@ final class S3kReconstruction {
     private static Change allocationChange(ReconstructionAllocation.Entry entry) {
         if (entry.outcome() == ReconstructionAllocation.Outcome.shortened) return Change.SHORTENED;
         return switch (entry.reason()) {
-            case "rapid-inner-tone-reattack", "isolated-harmony-octave-double" -> Change.HARMONY_THINNED;
+            case "rapid-inner-tone-reattack", "isolated-harmony-octave-double", "covered-source-unison" -> Change.HARMONY_THINNED;
             case "absorbed-into-arpeggio", "absorbed-into-chord-instrument" -> Change.CHORD_ABSORBED;
             case "simultaneous-dac-hit" -> Change.DAC_SIMULTANEOUS;
             case "protect-dac-tail" -> Change.DAC_TAIL;

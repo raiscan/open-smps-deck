@@ -92,6 +92,64 @@ class ReconstructionInstrumentPlaybackTest {
         assertEquals(List.of(new Attack(2, first.algorithm(), first.tl(), first.pitch(), first.pan())), fm3);
     }
 
+    @Test void spillRejectsMutedEnvelopesAndKeepsTheQuietestAttackAudible() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var demo = DemoProject.create().voices().getFirst().bytes();
+        byte[] patch = new byte[demo.size()];
+        for (int i = 0; i < patch.length; i++) patch[i] = demo.get(i).byteValue();
+        String fmAsset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "FM", patch);
+        String fm = builder.variant(fmAsset, "FM", InstrumentCatalogue.Recipe.plain(), null);
+        var part = new MidiScore.Part(0, "Main", 81, false);
+        var notes = List.of(entry("spill", 0, "PSG1", 0, 8));
+        var voice = settings(fm, .001, DRY);
+        psgVariant(builder, "Delayed attack", new byte[]{15, 15, 0, 0, (byte) 0x83});
+        psgVariant(builder, "Mute pulse", new byte[]{0, 15, 0, (byte) 0x80});
+        assertNull(ReconstructionSpill.match(builder.build(), voice, part, notes).variantId());
+
+        byte[] audible = {4, 4, 4, (byte) 0x81};
+        String variant = psgVariant(builder, "Audible attack", audible);
+        var match = ReconstructionSpill.match(builder.build(), voice, part, notes);
+        assertEquals(variant, match.variantId());
+        var rawVolume = S3kReconstruction.volume(part, notes.getFirst().note().midi());
+        var level = ReconstructionEcho.scaleVolume(Math.max(1, rawVolume - 24), voice.gain());
+        assertTrue(15 - (Math.clamp(level + match.volumeOffset(), 0, 127) >> 3) + audible[0] < 15);
+    }
+
+    @Test void allocationDropsOnlyCoveredAutomaticUnisonsWithinTheSameInstrument() {
+        var voices = List.of(
+                decision("lead", 0, 0, 20, Role.melody),
+                decision("covered", 0, 4, 16, Role.counter),
+                decision("otherPart", 1, 4, 16, Role.harmony),
+                decision("extends", 0, 17, 24, Role.counter));
+        var parts = List.of(new MidiScore.Part(0, "Main", 81, false),
+                new MidiScore.Part(1, "Other", 0, false));
+        var roles = new ReconstructionRoles.Result(1, 0, voices, null);
+        var allocated = ReconstructionAllocation.allocate(roles, parts, 30, false).notes();
+        var covered = allocated.stream().filter(n -> n.note().id().equals("covered")).findFirst().orElseThrow();
+        assertNull(covered.lane());
+        assertEquals("lead", covered.competitorNoteId());
+        assertEquals(List.of("lead", "otherPart", "extends"), allocated.stream().filter(n -> n.lane() != null)
+                .map(n -> n.note().id()).toList());
+    }
+
+    @Test void legatoStopsAtAWrittenSameInstrumentReattackInAnotherRole() {
+        var prior = decision("lead", 0, 0, 4, Role.melody).note();
+        var nextLead = decision("nextLead", 0, 16, 20, Role.melody).note();
+        var otherPart = decision("otherPart", 1, 5, 10, Role.harmony);
+        var counter = decision("counter", 0, 8, 12, Role.counter);
+        assertEquals(counter.note(), ReconstructionLeadContinuity.legatoTarget(prior, List.of(otherPart, counter), nextLead));
+        assertEquals(nextLead, ReconstructionLeadContinuity.legatoTarget(prior, List.of(otherPart), nextLead));
+    }
+
+    private static ReconstructionRoles.Decision decision(String id, int part, int start, int end, Role role) {
+        return new ReconstructionRoles.Decision(entry(id, part, "FM1", start, end).note(), role, null, null);
+    }
+
+    private static String psgVariant(InstrumentCatalogue.Builder builder, String name, byte[] envelope) {
+        String asset = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, name, envelope);
+        return builder.variant(asset, name, InstrumentCatalogue.Recipe.plain(), null);
+    }
+
     private static Lane settings(String variant, double gain, Effects effects) {
         return new Lane(Role.melody, variant, List.of(), gain, WRITTEN, effects, "", "", "", List.of());
     }
