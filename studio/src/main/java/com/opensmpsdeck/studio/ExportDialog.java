@@ -49,6 +49,16 @@ final class ExportDialog {
 
             @Override public Format fromString(String value) { throw new UnsupportedOperationException(); }
         });
+        var drivers = new ChoiceBox<String>();
+        drivers.setId("export-driver");
+        drivers.getItems().setAll(nativeBank ? java.util.List.of("s3k") : java.util.List.of("s3k", "s1", "s2"));
+        drivers.setValue("s3k");
+        var driverLabel = new Label("Target driver");
+        var portableSelected = formats.valueProperty().isEqualTo(Format.PORTABLE);
+        drivers.visibleProperty().bind(portableSelected);
+        drivers.managedProperty().bind(portableSelected);
+        driverLabel.visibleProperty().bind(portableSelected);
+        driverLabel.managedProperty().bind(portableSelected);
         var span = new CheckBox("Limit to a span");
         var start = field("0", "export-start");
         var end = field("Song end", "export-end");
@@ -75,6 +85,7 @@ final class ExportDialog {
         if (nativeBank) form.addRow(5, new Label("Native loop count"), loops);
         form.add(stems, 1, 6);
         form.add(zip, 1, 7);
+        form.addRow(8, driverLabel, drivers);
         var body = new VBox(14, form, note, error);
         body.setPadding(new Insets(8, 6, 4, 6));
         dialog.getDialogPane().setContent(body);
@@ -105,7 +116,9 @@ final class ExportDialog {
                         bounded ? seconds(start) : null, bounded ? seconds(end) : null,
                         audio ? seconds(fade) : null, audio && nativeBank && !loops.getText().isBlank()
                                 ? Integer.valueOf(loops.getText().strip()) : null,
-                        split, split && zip.isSelected());
+                        split, split && zip.isSelected(),
+                        format == Format.PORTABLE ? new ProjectExport.PortableSettings(drivers.getValue(), true,
+                                null, null, null, java.util.List.of(), java.util.List.of()) : null);
             } catch (IllegalArgumentException failure) {
                 error.setText(failure instanceof NumberFormatException
                         ? "Enter seconds as numbers and loop count as a whole number." : failure.getMessage());
@@ -161,7 +174,7 @@ final class ExportDialog {
                 if (options.format() == Format.PACKAGE || options.format() == Format.PORTABLE) {
                     var warnings = options.format() == Format.PACKAGE
                             ? ProjectProvenance.detect(opened.project()).warnings()
-                            : ProjectExport.portableWarnings(opened.project());
+                            : ProjectExport.portableWarnings(opened.project(), options.portable());
                     if (!warnings.isEmpty()) {
                         var confirmation = new java.util.concurrent.FutureTask<>(() -> {
                             if (isCancelled()) return false;

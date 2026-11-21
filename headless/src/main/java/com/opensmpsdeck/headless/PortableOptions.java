@@ -7,24 +7,36 @@ import java.util.List;
 import java.util.Set;
 
 record PortableOptions(String driver, boolean includeSource, String license, String id,
-                       String version, List<String> authors, List<Integer> replacements) {
+                       String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+    PortableOptions(String driver, boolean includeSource, String license, String id,
+                    String version, List<String> authors, List<Integer> replacements) {
+        this(driver, includeSource, license, id, version, authors, replacements, null);
+    }
     PortableOptions {
         authors = List.copyOf(authors);
         replacements = List.copyOf(replacements);
-        if (!List.of("s1", "s2", "s3k").contains(driver))
-            throw new IllegalArgumentException("Unknown package driver " + driver);
+        PackageDriver.supported(driver);
+        if (speedUpTempo != null && (driver.equals("s3k") || speedUpTempo < 0 || speedUpTempo > 255))
+            throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and a byte in 0..255");
     }
     static final PortableOptions DEFAULT = new PortableOptions("s3k", true, null, null, null, List.of(), List.of());
 
+    com.google.gson.JsonObject driverOptions() {
+        var options = new com.google.gson.JsonObject();
+        if (!driver.equals("s3k")) options.addProperty("speedUpTempo", speedUpTempo);
+        return options;
+    }
+
     static final class Cli {
         private static final Set<String> OPTIONS = Set.of("--portable", "--no-source", "--driver", "--license",
-                "--package-id", "--package-version", "--author", "--replace", "--rom");
+                "--package-id", "--package-version", "--author", "--replace", "--rom", "--speed-up-tempo");
         private final Set<String> seen = new HashSet<>();
         private final List<String> authors = new ArrayList<>();
         private final List<Integer> replacements = new ArrayList<>();
         private final List<Path> roms = new ArrayList<>();
         private String driver = "s3k";
         private String license, id, version;
+        private Integer speedUpTempo;
 
         boolean recognizes(String option) { return OPTIONS.contains(option); }
         boolean portable() { return seen.contains("--portable"); }
@@ -40,6 +52,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
             String value = args[at++];
             switch (option) {
                 case "--driver" -> driver = value;
+                case "--speed-up-tempo" -> speedUpTempo = Integer.valueOf(value);
                 case "--license" -> license = value;
                 case "--package-id" -> id = value;
                 case "--package-version" -> version = value;
@@ -55,7 +68,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         }
 
         PortableOptions options() {
-            return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements);
+            return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements, speedUpTempo);
         }
     }
 }

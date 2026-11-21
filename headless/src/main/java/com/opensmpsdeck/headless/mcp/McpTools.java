@@ -101,7 +101,8 @@ final class McpTools {
                     field("output", "string", "New file or stem directory inside the project or work directory"),
                     choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod"),
                     ROMS,
-                    choice("driver", "Portable target driver", "s3k").optional(),
+                    choice("driver", "Portable target driver (default s3k)", "s1", "s2", "s3k").optional(),
+                    field("speedUpTempo", "integer", "Optional S1/S2 speed-shoes tempo byte (0..255)").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
                     field("license", "string", "SPDX license expression").optional(),
                     field("packageId", "string", "Portable package ID").optional(),
@@ -357,7 +358,7 @@ final class McpTools {
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
         boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
-        if (!portable && List.of("driver", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
+        if (!portable && List.of("driver", "speedUpTempo", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
                 .stream().anyMatch(args::has))
             throw new IllegalArgumentException("Portable metadata requires format portable or mod");
         var authors = args.has("authors") ? args.getAsJsonArray("authors").asList().stream()
@@ -366,19 +367,25 @@ final class McpTools {
                 .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
         var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
                 !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
-                optionalString(args, "packageVersion"), authors, replace);
+                optionalString(args, "packageVersion"), authors, replace,
+                args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null);
         var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"), settings);
-        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input, roms(args));
+        var warnings = new java.util.TreeSet<String>();
+        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input,
+                roms(args), warnings::add);
         JsonObject result;
         if (portable) {
             result = ProjectExport.exportPortable(project, output, options, progress);
         } else {
-            var warnings = ProjectExport.write(project, work ? input : null, output, options, progress);
+            warnings.addAll(ProjectExport.write(project, work ? input : null, output, options, progress));
             result = new JsonObject();
-            if (format == ProjectExport.Format.PACKAGE) result.add("warnings", McpJson.JSON.toJsonTree(warnings));
         }
+        if (result.has("warnings"))
+            result.getAsJsonArray("warnings").forEach(value -> warnings.add(value.getAsString()));
+        if (portable || format == ProjectExport.Format.PACKAGE || !warnings.isEmpty())
+            result.add("warnings", McpJson.JSON.toJsonTree(warnings));
         result.addProperty("output", output.toString());
         result.addProperty("format", string(args, "format"));
         return result;

@@ -215,12 +215,8 @@ class PortablePackageTest {
                     .getBytes(StandardCharsets.UTF_8));
             readPatched(entries);
         });
-        var other = openMutated(artifact, json -> {
-            json.addProperty("driver", "s2");
-            json.getAsJsonObject("driverOptions").add("speedUpTempo", com.google.gson.JsonNull.INSTANCE);
-        });
-        assertEquals("s2", other.manifest().driver());
-        assertFailure("driver not yet supported", () -> PortablePackageReader.assemble(other, List.of()));
+        assertFailure("Sonic CD FM has no music loader", () ->
+                openMutated(artifact, json -> json.addProperty("driver", "scd")));
         assertFailure("SPDX", () -> Metadata.validateLicense("MIT AND ("));
     }
 
@@ -243,7 +239,7 @@ class PortablePackageTest {
         var image = S3kPackageDriver.INSTANCE.openRom(path);
         assertTrue(image.known());
         for (var entry : StockTable.entries()) {
-            if (entry.kind().equals("BANK")) continue;  // Bank entries are checked by the regeneration test.
+            if (!entry.game().equals("s3k") || entry.kind().equals("BANK")) continue;  // Bank entries are checked by the regeneration test.
             byte[] bytes = image.assets().payload(entry.ref());
             assertNotNull(bytes, entry::toString);
             assertEquals(entry.length(), bytes.length, entry::toString);

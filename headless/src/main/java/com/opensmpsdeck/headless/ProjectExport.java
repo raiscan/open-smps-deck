@@ -48,9 +48,13 @@ public final class ProjectExport {
     }
 
     public record PortableSettings(String driver, boolean includeSource, String license, String id,
-                                   String version, List<String> authors, List<Integer> replacements) {
+                                   String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+        public PortableSettings(String driver, boolean includeSource, String license, String id,
+                                String version, List<String> authors, List<Integer> replacements) {
+            this(driver, includeSource, license, id, version, authors, replacements, null);
+        }
         PortableOptions options() {
-            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements);
+            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo);
         }
     }
 
@@ -171,7 +175,11 @@ public final class ProjectExport {
 
     /** Provenance warnings for a default portable export, computed without writing a file. */
     public static List<String> portableWarnings(StudioProject project) throws IOException {
-        return PortablePackageWriter.build(project, PortableOptions.DEFAULT).warnings();
+        return portableWarnings(project, null);
+    }
+
+    public static List<String> portableWarnings(StudioProject project, PortableSettings settings) throws IOException {
+        return PortablePackageWriter.build(project, settings == null ? PortableOptions.DEFAULT : settings.options()).warnings();
     }
 
     public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
@@ -345,7 +353,7 @@ public final class ProjectExport {
         Path input = Path.of(args[1]);
         Path work = Files.isDirectory(input) ? input : null;
         if (work != null) input = work.resolve("arrangement.smps.json");
-        var project = PortablePackages.openProject(input, flags.roms());
+        var project = PortablePackages.openProject(input, flags.roms(), err);
         var options = new Options(format, start, end, fade, loops, stems, zip);
         Path output = Path.of(args[2]);
         if (portable) {

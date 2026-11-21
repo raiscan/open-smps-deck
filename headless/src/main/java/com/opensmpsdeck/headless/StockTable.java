@@ -38,7 +38,8 @@ final class StockTable {
     private static final Comparator<Entry> ENTRY_ORDER = Comparator.comparing(Entry::game)
             .thenComparing(Entry::kind).thenComparing(entry -> entry.table() == null ? "" : entry.table())
             .thenComparingInt(entry -> number(entry.songId())).thenComparingInt(entry -> number(entry.slot()))
-            .thenComparingInt(entry -> number(entry.index())).thenComparingInt(entry -> number(entry.note()));
+            .thenComparingInt(entry -> number(entry.index())).thenComparingInt(entry -> number(entry.note()))
+            .thenComparing(Entry::sha256);
 
     record Entry(String game, String kind, String table, Integer songId, Integer slot,
                  Integer index, Integer note, int length, String sha256) {
@@ -50,7 +51,7 @@ final class StockTable {
         }
     }
 
-    private record Key(String kind, String sha256) {}
+    private record Key(String game, String kind, String sha256) {}
 
     private static final class PublicTable {
         static final List<Entry> ENTRIES = load();
@@ -62,14 +63,21 @@ final class StockTable {
                     BANKS.putIfAbsent(entry.sha256(), new RetailSongOrigin(
                             "retail-song", entry.game(), entry.songId(), entry.sha256()));
                 } else {
-                    ASSETS.merge(new Key(entry.kind(), entry.sha256()), entry.ref(), StockTable::prefer);
+                    ASSETS.merge(new Key(entry.game(), entry.kind(), entry.sha256()), entry.ref(), StockTable::prefer);
                 }
             }
         }
 
         private static List<Entry> load() {
-            var input = StockTable.class.getResourceAsStream(RESOURCE);
-            if (input == null) throw new IllegalStateException("Missing public stock table " + RESOURCE);
+            var all = new ArrayList<Entry>();
+            for (String resource : List.of(RESOURCE, "/stock/s1.json", "/stock/s2.json"))
+                all.addAll(loadResource(resource));
+            return List.copyOf(all);
+        }
+
+        private static List<Entry> loadResource(String resource) {
+            var input = StockTable.class.getResourceAsStream(resource);
+            if (input == null) throw new IllegalStateException("Missing public stock table " + resource);
             try (var reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
                 return List.copyOf(JSON.fromJson(reader, new TypeToken<List<Entry>>() {}.getType()));
             } catch (IOException error) {
@@ -85,7 +93,22 @@ final class StockTable {
     }
 
     static StockRef match(String kind, byte[] bytes) {
-        return PublicTable.ASSETS.get(new Key(kind, hash(bytes)));
+        String hash = hash(bytes);
+        for (String game : List.of("s3k", "s1", "s2")) {
+            var match = PublicTable.ASSETS.get(new Key(game, kind, hash));
+            if (match != null) return match;
+        }
+        return null;
+    }
+
+    static StockRef match(String kind, byte[] bytes, String game) {
+        return PublicTable.ASSETS.get(new Key(game, kind, hash(bytes)));
+    }
+
+    static StockRef matchProjectAsset(String kind, byte[] bytes) {
+        var direct = match(kind, bytes);
+        if (direct != null || !kind.equals("FM_VOICE")) return direct;
+        return match(kind, ClassicPackageDriver.S2.voiceBytes(bytes.clone()), "s2");
     }
 
     static RetailSongOrigin matchBank(byte[] bytes) {
@@ -101,7 +124,11 @@ final class StockTable {
     }
 
     static StockRef ref(String table, Integer song, int coordinate, String sha256) {
-        return new StockRef("s3k", table, song,
+        return ref("s3k", table, song, coordinate, sha256);
+    }
+
+    static StockRef ref(String game, String table, Integer song, int coordinate, String sha256) {
+        return new StockRef(game, table, song,
                 table.endsWith("-fm") ? coordinate : null,
                 table.equals("psg") || table.equals("mod") ? coordinate : null,
                 table.equals("dac") ? coordinate : null, sha256);
@@ -161,8 +188,45 @@ final class StockTable {
         return entries.stream().sorted(ENTRY_ORDER).toList();
     }
 
-    static void build(Path rom, Path output) throws IOException {
-        Files.writeString(output, encode(build(rom)), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+    static List<Entry> build(ClassicPackageDriver driver, Path path) throws IOException {
+        var source = (ClassicStockAssets) driver.openRom(path).assets();
+        var result = new ArrayList<Entry>();
+        String game = driver.id();
+        for (int id : driver.musicIds().stream().sorted().toList()) {
+            var song = source.song(id);
+            if (song == null) continue;
+            byte[] data = song.getData();
+            result.add(new Entry(game, "BANK", null, id, null, null, null, data.length, hash(data)));
+            int start = ClassicStockAssets.voiceOffset(song);
+            if (start < 0) continue;
+            for (int slot = 0; slot < ClassicStockAssets.voiceCount(song); slot++)
+                add(result, game, "local-fm", id, slot, Arrays.copyOfRange(data, start + slot * 25, start + (slot + 1) * 25));
+        }
+        int psgCount = driver == ClassicPackageDriver.S1 ? 9 : Sonic2RomEnvelopes.COUNT;
+        for (int i = 1; i <= psgCount; i++) add(result, source, game, "psg", i);
+        for (int note = 0x81; note <= (driver == ClassicPackageDriver.S1 ? 0x8B : 0x91); note++) {
+            if (driver == ClassicPackageDriver.S1 && note > 0x83 && note < 0x88) continue;
+            add(result, source, game, "dac", note);
+        }
+        return result.stream().sorted(ENTRY_ORDER).toList();
+    }
+
+    static void build(List<Path> roms, Path output, PackageDriver driver) throws IOException {
+        var entries = new java.util.LinkedHashSet<Entry>();
+        for (var rom : roms) {
+            entries.addAll(driver instanceof ClassicPackageDriver classic ? build(classic, rom) : build(rom));
+        }
+        Files.writeString(output, encode(List.copyOf(entries)), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+    }
+
+    private static void add(List<Entry> entries, StockAssets source, String game, String table, int index) {
+        var locator = ref(game, table, null, index, "0".repeat(64));
+        byte[] payload = source.payload(locator);
+        if (payload != null) add(entries, game, table, null, index, payload);
+    }
+
+    private static void add(List<Entry> entries, String game, String table, Integer song, int index, byte[] bytes) {
+        entries.add(Entry.of(ref(game, table, song, index, hash(bytes)), bytes.length));
     }
 
     private static void add(List<Entry> entries, String table, Integer song, int coordinate, byte[] bytes) {

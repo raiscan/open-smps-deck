@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class StockTableTest {
     @Test void publicTableContainsOnlyCanonicalHashesAndLocators() throws Exception {
         var text = resource();
-        var entries = StockTable.entries();
+        var entries = StockTable.entries().stream().filter(entry -> entry.game().equals("s3k")).toList();
         assertEquals(StockTable.encode(entries), text);
         var fields = Map.of("BANK", Set.of("songId"), "global-fm", Set.of("slot"),
                 "local-fm", Set.of("songId", "slot"), "psg", Set.of("index"),
@@ -44,6 +44,36 @@ class StockTableTest {
     @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S3K_ROM", matches = ".+")
     void lockedOnCartridgeRegeneratesPublicTable() throws Exception {
         assertEquals(resource(), StockTable.encode(StockTable.build(Path.of(System.getenv("OPENSMPSDECK_S3K_ROM")))));
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S1_ROM", matches = ".+")
+    void sonic1Rev01ResolvesTable() throws Exception { classic(ClassicPackageDriver.S1, "OPENSMPSDECK_S1_ROM"); }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S1_REV00_ROM", matches = ".+")
+    void sonic1Rev00ResolvesTable() throws Exception { classic(ClassicPackageDriver.S1, "OPENSMPSDECK_S1_REV00_ROM"); }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S2_ROM", matches = ".+")
+    void sonic2Rev01ResolvesTable() throws Exception { classic(ClassicPackageDriver.S2, "OPENSMPSDECK_S2_ROM"); }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S2_REV00_ROM", matches = ".+")
+    void sonic2Rev00ResolvesTable() throws Exception { classic(ClassicPackageDriver.S2, "OPENSMPSDECK_S2_REV00_ROM"); }
+
+    private static void classic(ClassicPackageDriver driver, String env) throws Exception {
+        var rom = Path.of(System.getenv(env));
+        var image = driver.openRom(rom);
+        assertTrue(image.known());
+        var entries = StockTable.entries().stream().filter(e -> e.game().equals(driver.id())).toList();
+        // Both verified revisions currently expose the same audio payloads.
+        assertEquals(entries, StockTable.build(driver, rom));
+        for (var entry : entries) {
+            if (entry.kind().equals("BANK")) continue;
+            byte[] payload = StockAssets.resolve(entry.kind(), entry.ref(), null, null, java.util.List.of(image.assets()));
+            assertEquals(entry.length(), payload.length);
+        }
     }
 
     private static String resource() throws Exception {

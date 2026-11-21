@@ -296,23 +296,26 @@ with options to preserve the edited arrangement before rebuilding.
 
 Package exports can warn about embedded ROM assets or retail song data.
 Keep flagged packages for personal use. Check CLI stderr or the MCP
-`warnings` array. Use `stock-table build ROM OUT.json` with a verified
-locked-on S3&K image to regenerate the hashes and locators for stock detection.
+`warnings` array. Use `stock-table build ROM OUT.json` to regenerate the
+S3&K hashes and locators. For S1 or S2, add `--driver s1|s2` and
+`--rom OTHER_REVISION.gen` to generate the revision union.
 
 Use `compile-package PROJECT OUT.smps.zip --portable` or
 `export PROJECT OUT.smps.zip --format portable` for schema 4. Use
-`--no-source` to omit the default redacted source. Set `--driver s3k`,
-`--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
+`--no-source` to omit the default redacted source. Set `--driver s1|s2|s3k`
+(default `s3k`, required for native v5 banks). S1 and S2 accept
+`--speed-up-tempo BYTE` for gameplay. Set `--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
 and repeatable `--author NAME` as needed. Use `export --format mod` with
-repeatable decimal `--replace ID` to create an OpenGGF patch mod JAR.
+repeatable decimal `--replace ID` from the target game to create an OpenGGF patch mod JAR.
 
 Run `inspect-package PKG` to read the manifest and
 `validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]` to
 verify hashes, resolve stock references and audition through the pinned
-driver. Pass `--rom PATH` to `validate-project`, `render-project`,
+driver. Use `render-package PKG OUT.wav [--rom PATH ...] [--frames N]` for
+a direct preview. Pass `--rom PATH` to `validate-project`, `render-project`,
 `compile-package` or `export` to resolve redacted source. In MCP, use
-`project_export` with `format: "portable"` or `"mod"`, then
-`package_inspect` or `package_validate`. Check the package warnings even
+`project_export` with `format: "portable"` or `"mod"`, optional `driver`
+and `speedUpTempo`, then `package_inspect` or `package_validate`. Check the package warnings even
 when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)

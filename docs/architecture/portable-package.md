@@ -126,7 +126,10 @@ The fields are:
   embedded payload. `requires.games` is the sorted unique `ref.game` values.
 - `driverOptions`: `{}` for s3k. For s1 and s2:
   `{"speedUpTempo": <0–255> | null}`, the speed-shoes tempo byte. Null means
-  speed shoes leave tempo unchanged.
+  speed shoes leave tempo unchanged. On activation with speed shoes, or when
+  the effect turns on, a host MUST use this byte in place of the song's normal
+  tempo. Turning the effect off restores the normal tempo. Hosts MUST NOT
+  index the game's retail speed table by a replacement ID.
 - `bank`: see §4.
 - `assets`, `envelopeBindings`, `dacBindings`, `globalVoices`: see §3.
 - `source`: `null`, or
@@ -176,7 +179,7 @@ Each `assets[]` entry:
 
 `ref.game` is the ROM family: `s1`, `s2` or `s3k`. In this version
 `ref.game` MUST equal the package `driver`. `ref.sha256` is the SHA-256 of
-the payload exactly as the pinned OpenGGF loader for that game returns it.
+the exact payload defined below, before transforms.
 
 | driver | `table` | Locator fields | Payload as resolved |
 |---|---|---|---|
@@ -185,12 +188,50 @@ the payload exactly as the pinned OpenGGF loader for that game returns it.
 | s3k | `psg` | `index` | `getPsgEnvelopes().get(index)` |
 | s3k | `mod` | `index` | `getPlaybackModEnvelopes().get(index)`: the playback view, with `82`/`84` operands resolved |
 | s3k | `dac` | `note` (`0x81`–`0xC4`) | decoded unsigned 8-bit PCM for that note from `loadDacData()` |
-| s1, s2 | `local-fm`, `psg`, `dac` | as above | Defined by the multi-driver PR from the pinned `Sonic1SmpsLoader` and `Sonic2SmpsLoader`. Until then, readers MUST reject s1 and s2 refs with a clear "driver not yet supported" error |
+| s1 | `local-fm` | `songId`, zero-based `slot` | Raw 25-byte slice of `Sonic1SmpsLoader.loadMusic(songId).getData()`, at the big-endian voice pointer plus `25*slot`. Do not use `getVoice(slot)`, which reorders operators |
+| s2 | `local-fm` | `songId`, zero-based `slot` | Raw 25-byte slice of `Sonic2SmpsLoader.loadMusic(songId).getData()`, at the little-endian voice pointer minus `getZ80StartAddress()` plus `25*slot` |
+| s1 | `psg` | `index` (1–9) | `Sonic1SmpsLoader.getPsgEnvelopes()[index - 1]`, including the `80` terminator |
+| s2 | `psg` | `index` (1–13) | The ROM's own decompressed Z80 `zPSG_EnvTbl` entry, including the `80` terminator, extracted as specified below |
+| s1 | `dac` | `note` (`81`–`83`, `88`–`8B` hex) | Decoded unsigned 8-bit PCM at `loadDacData().sample(mappingForNote(note).sampleId())`. Timpani aliases share PCM |
+| s2 | `dac` | `note` (`81`–`91` hex) | Same lookup through `Sonic2SmpsLoader.loadDacData()`. Pitch aliases share PCM |
 
-`songId` is the native music ID as the OpenSMPSDeck catalogue records it
-(the S3K locked-on numbering passed to `loadMusic`). A resolver given a
-standalone Sonic 3 or Sonic & Knuckles image maps the ID through
+`songId` is the **engine music ID** passed to `loadMusic`. S1 uses
+`Sonic1Music`. S2 uses `Sonic2Music.id`, including its sparse numbering.
+For example, Emerald Hill is `81` hex in the engine table.
+S3K uses the locked-on catalogue numbering. A resolver given a standalone
+Sonic 3 or Sonic & Knuckles image maps the ID through
 `Sonic3kAudioResourceProfile` and fails that asset if it is absent.
+
+An S1/S2 zero voice pointer has no local table. Count complete 25-byte
+slots to the loader view's end, except S1 `93` hex (Get Emerald, 2 slots)
+and S2 `BD` hex (Credits, 38 slots). These loader views extend beyond the
+voice table. The resolver MUST exclude the trailing bytes from the locator
+space. The `BANK` hash in §6.3 still covers the entire loader view.
+
+**S2 PSG extraction (REV00 and REV01).** Both revisions have these same
+coordinates. Offsets refer to the unheadered, linear Mega Drive ROM.
+
+| Field | REV00 | REV01 |
+|---|---:|---:|
+| `DecompressSoundDriver` (`LEA Snd_Driver(pc),A6`) | `0xEC04A` | `0xEC04A` |
+| `MOVE.W #size,D7` immediate (BE word) | `0xEC050` | `0xEC050` |
+| `Snd_Driver` payload start | `0xEC0E8` | `0xEC0E8` |
+| Payload length | `0x0F64` | `0x0F64` |
+| `zPSG_EnvTbl` after decompression | `0x1029` | `0x1029` |
+
+Verify the `4DFA` and `3E3C` instructions and their operands. The signed
+LEA displacement is relative to the address of its extension word at
+`0xEC04C`. Decompress exactly the indicated raw Saxman payload with no
+on-ROM size prefix (equivalent to `SaxmanDecompressor.decompressRaw`).
+Read 13 consecutive little-endian 16-bit offsets into decompressed Z80 RAM
+from `0x1029`. For index *i*, read the word at `0x1029 + 2*(i-1)`. Its
+target MUST be at or after `0x1043` and inside the decompressed driver.
+Starting at the target, read bytes below `0x80` until the first byte at or
+above `0x80`. That byte MUST be `0x80` and is included in the payload.
+Reject out-of-bounds pointers, missing terminators, other command bytes,
+programs longer than 256 bytes, or an unrecognized driver layout. Verify
+the resulting asset hash as usual. The pinned S2 loader's own PSG table
+is not a fallback.
 
 ### 3.2 Transforms (closed set, applied in list order)
 
@@ -209,22 +250,23 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
 
 - `envelopeBindings`: `[{"asset": "psg/0", "slot": 1}]`. PSG volume slots
   are 1–255 and modulation slots 1–127 (128 is reserved). The same
-  semantics as schema 3 `envelopeSlots`.
+  semantics as schema 3 `envelopeSlots`. S1 and S2 bind PSG volume only.
 - `dacBindings`: `[{"note": 129, "asset": "dac/0", "rate": 6}]`. One entry
   per note, sorted by note. `note` is in `0x81`–`0xDF` and `rate` is in
   0–255. A sample MAY appear in several bindings.
 - `globalVoices`: `null`, or `{"path": "voices/global.bin", "sha256": …,
   "voices": ["fm/3", …]}` for a v5 bank's ordered global table. Stock
   entries are zero-filled 25-byte holes, filled at load time like bank fills.
+  S1 and S2 MUST use null.
 
 ### 3.4 Asset validity
 
 | Kind | Rules |
 |---|---|
-| FM_VOICE | Exactly 25 bytes in native order for the driver. For s3k: algorithm/feedback, then DT·MUL, RS·AR, AM·D1R, D2R, D1L·RR and TL, each for 4 operators. No reordering |
-| PSG_VOLUME | 1–256 bytes. The existing project-core envelope profile applies |
-| MODULATION | 1–256 bytes. The existing project-core envelope profile applies |
-| DAC_SAMPLE | Unsigned 8-bit mono PCM, midpoint `0x80`, 1–65,535 bytes. At most 95 samples and 512 KiB in total. For s3k, rate *r* plays at 7,159,090 / (297 + 26·(*r*−1)) Hz (r=0 means 256) |
+| FM_VOICE | Exactly 25 bytes in native order for the driver. Algorithm/feedback, then DT·MUL, RS·AR, AM·D1R, D2R, D1L·RR and TL, each for 4 operators. S1 and S3K store each group in 4,3,2,1 order. S2 stores 4,2,3,1. The S1 data parser performs its own playback swap |
+| PSG_VOLUME | S3K uses the project-core playback profile. S1/S2 use 2–256 bytes consisting of attenuation bytes below `80` hex followed by one `80` hold terminator |
+| MODULATION | S3K only, 1–256 bytes. The existing project-core playback profile applies |
+| DAC_SAMPLE | Unsigned 8-bit mono PCM, midpoint `0x80`, 1–65,535 bytes. At most 95 samples and 512 KiB in total. Rate *r* plays nominally at 7,159,090 / (*baseCycles* + 26·(*r*−1)) Hz (r=0 means 256). Use 301 for S1, 295 for S2 and 297 for S3K. The binding rate is independent of the stock locator and its retail rate |
 
 ## 4. Bank
 
@@ -241,18 +283,27 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
   `assembledSha256` equals `sha256`.
 - `base`, `headerOffset`, `localVoiceCount` and `previewFrames` have the
   meanings of schema 3. The header lives at `base + headerOffset`. For s3k,
-  `base` is 0 (normalized) or 32768 (absolute Z80 window). Other drivers'
-  base semantics are defined by the multi-driver PR.
+  `base` is 0 (normalized) or 32768 (absolute Z80 window). For S1, both
+  `base` and `headerOffset` MUST be 0. Its 16-bit big-endian header pointers
+  are relative to the song start. For S2, `headerOffset` MUST be 0 and
+  `base` is 0 (normalized) or 32768 (absolute Z80 window). Subtract `base`
+  from its little-endian pointer words. OpenSMPSDeck compiles both to base
+  zero. S1/S2 bank tracks precede the local 25-byte voice table, if any.
+  The header is the voice pointer, FM/DAC count, PSG count, timing divisor,
+  tempo, then four-byte FM/DAC entries and six-byte PSG entries. Slot zero
+  is DAC. PSG entries end with a zero modulation byte and a PSG binding slot.
 - `relocations` is the sorted list of unique byte offsets of every 16-bit
-  little-endian bank pointer: header entries, voice pointer, and
-  call/jump/loop targets found by the traversal. `relocationsComplete` is
+  bank pointer word. Words are big-endian for S1 and little-endian for S2
+  and S3K. Include track pointers and a nonzero voice pointer. Programs
+  with control flow also list the pointer operands; native S1 branch
+  displacements are relative, so moving the whole bank does not change them. `relocationsComplete` is
   false when the traversal cannot prove that it found every pointer, for
   example in unreached bytes of an imported bank.
 
 ## 5. Playback mapping (OpenGGF and OpenSMPSDeck)
 
 1. Verify the manifest, the entries, the hashes and the limits.
-2. For each reference, get the payload from the game's loader, check
+2. For each reference, resolve the ROM payload as in §3.1 and check
    `ref.sha256`, apply the transforms, and check `resultSha256`. A missing
    ROM or a mismatch fails the whole package, with an error naming the asset
    key, the locator and the expected and actual hashes.
@@ -272,13 +323,30 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
    OpenGGF then calls `playSmps(data, dac)`. OpenSMPSDeck renders through
    `S3kRenderer`.
 
+5. For S1, construct `new Sonic1SmpsData(bank)` and install an array whose
+   index `slot - 1` contains the PSG binding bytes. For S2, construct
+   `new Sonic2SmpsData(bank, base)` and pass a map keyed by the PSG binding's
+   one-based slot to `setPsgEnvelopes`. Construct a fresh `DacData` from the
+   package PCM and bindings using that game's base cycles. Resolve all
+   stock references before constructing the data. Use the pinned game's
+   `SmpsSequencerConfig`, physical compatibility policy and normal music
+   activation, with immediate readiness for the assembled bank. The S2
+   retail Saxman load delay does not apply. The headless preview is a fresh
+   NTSC session with no preceding music, SFX or gameplay speed effects.
+
 ### 5.1 ROM acceptance
 
 Checks happen per asset. The host MAY first identify the image, using
 OpenGGF's ROM identity and header checks. A known image hash passes silently.
 An unknown hash with a valid header gives the warning `UNKNOWN_ROM_IMAGE`, and
 the per-asset hashes decide the result. Standalone S3 and S&K images work when
-they contain every referenced asset.
+they contain every referenced asset. S1 and S2 use unheadered 512 KiB and
+1 MiB images, respectively. Match the domestic or international title
+through `RomHeaderName` and check fingerprints with `RomIdentityTable`.
+REV00 and REV01 are known for both games. Both revisions of each game
+produce the same committed locators and hashes. S1 relocates ROM tables
+through `Sonic1RomProfile`. The S2 music and DAC load extents and the
+compressed driver are identical across the two tested revisions.
 
 ### 5.4 Reserved: patch form for retail-derived banks
 

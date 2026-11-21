@@ -143,7 +143,10 @@ tool_timeout_sec = 600
 5. **Output.** Call `project_export` with `workDir` or `project`, a new
    `output` and `format` of `wav`, `mp3`, `vgm`, `smps`, `package`, `portable` or `mod`.
    For WAV or MP3, use project seconds for optional span bounds and
-   `stems: true` for channel stems. Use `package_validate` on a portable
+   `stems: true` for channel stems. On portable or mod exports, set
+   `driver` to `s1`, `s2` or `s3k` (default). For S1/S2, optionally set
+   `speedUpTempo` to the native speed-shoes tempo byte. Use decimal engine
+   music IDs for the mod `replace` array. Use `package_validate` on a portable
    export and supply `roms` for stock references. Check the returned
    `warnings` before sharing. Studio **Export…** supports audio, VGM, raw
    SMPS and legacy packages. **Open as arrangement** hands the result to the timeline

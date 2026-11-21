@@ -19,9 +19,29 @@ public final class PortablePackages {
     private PortablePackages() {}
 
     public static StudioProject openProject(Path path, List<Path> roms) throws IOException {
+        return openProject(path, roms, warning -> {});
+    }
+
+    public static StudioProject openProject(Path path, List<Path> roms, java.util.function.Consumer<String> warnings)
+            throws IOException {
         if (roms.isEmpty()) return ProjectFiles.load(path).project();
         var project = ProjectFiles.loadSource(path);
-        return StockAssets.resolveProject(project, openRoms(roms, PackageDriver.supported("s3k"), new TreeSet<>()));
+        var sources = new ArrayList<StockAssets>();
+        boolean unknown = false;
+        for (Path rom : roms) {
+            long size = java.nio.file.Files.size(rom);
+            PackageDriver driver = size == 0x80000 ? ClassicPackageDriver.S1
+                    : size == 0x100000 ? ClassicPackageDriver.S2 : S3kPackageDriver.INSTANCE;
+            var image = driver.openRom(rom);
+            unknown |= !image.known();
+            sources.add(image.assets());
+        }
+        if (unknown) warnings.accept("UNKNOWN_ROM_IMAGE");
+        return StockAssets.resolveProject(project, sources);
+    }
+
+    static StudioProject openProject(Path path, List<Path> roms, PrintStream err) throws IOException {
+        return openProject(path, roms, warning -> ProjectProvenance.printWarnings(List.of(warning), err));
     }
 
     public static JsonObject inspect(Path input) throws IOException {
@@ -95,9 +115,11 @@ public final class PortablePackages {
             return 0;
         }
         var roms = new ArrayList<Path>();
-        Path output = null;
+        boolean render = args[0].equals("render-package");
+        if (render && args.length < 3) throw new IllegalArgumentException("render-package expects PKG OUT.wav");
+        Path output = render ? Path.of(args[2]) : null;
         Integer frames = null;
-        for (int i = 2; i < args.length;) {
+        for (int i = render ? 3 : 2; i < args.length;) {
             String option = args[i++];
             if (i == args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[i++];

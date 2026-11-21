@@ -8,7 +8,6 @@ import com.openggf.audio.smps.SmpsSequencer;
 import com.openggf.audio.smps.SmpsSequencerConfig;
 import com.openggf.data.Rom;
 import com.openggf.data.RomByteReader;
-import com.openggf.data.compression.SaxmanDecompressor;
 import com.openggf.game.sonic1.audio.Sonic1Music;
 import com.openggf.game.sonic1.audio.Sonic1SmpsCompatibilityPolicy;
 import com.openggf.game.sonic1.audio.Sonic1SmpsSequencerConfig;
@@ -26,8 +25,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +81,7 @@ public final class BenchCartridge implements AutoCloseable {
                 : "8bca5dcef1af3e00098666fd892dc1c2a76333f9";
         if (image.length != size || !expected.equals(sha1(image)))
             throw new IOException("Unsupported cartridge image. " + game + " requires the verified REV01 ROM");
-        sonic2Envelopes = game == Game.s2 ? sonic2Envelopes(image) : Map.of();
+        sonic2Envelopes = game == Game.s2 ? Sonic2RomEnvelopes.extract(image) : Map.of();
         rom = Rom.fromReader(RomByteReader.fromBytes(image), path.getFileName().toString());
         loader = game == Game.s1 ? new Sonic1SmpsLoader(rom) : new Sonic2SmpsLoader(rom);
         dac = loader.loadDacData();
@@ -111,28 +108,6 @@ public final class BenchCartridge implements AutoCloseable {
         return new Song(title, (file, frames, mask) -> WaveFile.write(file, frames,
                 sink -> S3kRenderer.renderMusic(data, dac, config, policy, frames, mask, sink)),
                 restore -> new SmpsSequencer(data, dac, restore, config), dac);
-    }
-
-    private static Map<Integer, byte[]> sonic2Envelopes(byte[] image) throws IOException {
-        // REV01 DecompressSoundDriver uses a raw Saxman payload with its size
-        // in the preceding MOVE.W immediate. zPSG_EnvTbl is in decompressed RAM.
-        int offset = 0xec0e8;
-        int size = ((image[0xec050] & 255) << 8) | (image[0xec051] & 255);
-        byte[] driver = new SaxmanDecompressor().decompressRaw(Arrays.copyOfRange(image, offset, offset + size), size);
-        var envelopes = new HashMap<Integer, byte[]>();
-        int table = 0x1029;
-        for (int id = 1; id <= 13; id++) {
-            int slot = table + (id - 1) * 2;
-            int start = (driver[slot] & 255) | ((driver[slot + 1] & 255) << 8);
-            if (start < table + 26 || start >= driver.length)
-                throw new IOException("Invalid S2 PSG envelope pointer " + id);
-            int end = start;
-            while (end < driver.length && (driver[end] & 255) < 0x80) end++;
-            if (end == driver.length || (driver[end] & 255) != 0x80)
-                throw new IOException("Missing S2 PSG envelope terminator " + id);
-            envelopes.put(id, Arrays.copyOfRange(driver, start, end + 1));
-        }
-        return Map.copyOf(envelopes);
     }
 
     @Override public void close() throws IOException {

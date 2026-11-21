@@ -51,7 +51,7 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
 
     private static void check(TreeSet<String> warnings, String kind, byte[] bytes, AssetOrigin origin) {
         if (origin == null) {
-            if (StockTable.match(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
+            if (StockTable.matchProjectAsset(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
         } else {
             switch (origin.type()) {
                 case "stock" -> warnings.add("ROM_DERIVED_DATA");

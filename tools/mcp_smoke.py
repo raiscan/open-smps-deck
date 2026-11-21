@@ -257,6 +257,17 @@ for stem in stems:
         verified = rpc.call("package_validate", package=portable["output"], render="verified.wav", frames=30)
         assert verified["valid"] and verified["playbackValidated"]
         assert Path(verified["render"]).is_file()
+        linked_project = root / "signal-garden.smps.json"
+        shutil.copyfile(Path(__file__).resolve().parents[1] / "examples" / linked_project.name, linked_project)
+        for driver in ("s1", "s2"):
+            classic = rpc.call("project_export", project=linked_project, output=f"{driver}.smps.zip",
+                               format="portable", driver=driver, speedUpTempo=208)
+            classic_manifest = rpc.call("package_inspect", package=classic["output"])
+            assert classic_manifest["driver"] == driver
+            assert classic_manifest["driverOptions"] == {"speedUpTempo": 208}
+            classic_render = rpc.call("package_validate", package=classic["output"],
+                                      render=f"{driver}.wav", frames=30)
+            assert classic_render["valid"] and classic_render["playbackValidated"], classic_render
         arrangement = Path(files["arrangement.smps.json"])
         attached = arrangement.read_bytes()
         detached = json.loads(attached)
