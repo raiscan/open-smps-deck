@@ -18,6 +18,7 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.function.DoubleUnaryOperator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,6 +27,11 @@ final class BenchRun {
                    BenchRolePlan.Mode rolePlan, String steadyTempo) {}
     private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
                         BenchTimeline.Truth nativeTruth) {}
+
+    private record TonalScore(BenchMetrics.F1 notes, BenchMetrics.F1 offsets, BenchMetrics.F1 melody,
+                              BenchVoice.Score voices, List<BenchMetrics.Pair> pairs) {}
+
+    private static final String WITH_LAYERS = "WithLayers";
 
     private BenchRun() {}
 
@@ -163,21 +169,21 @@ final class BenchRun {
             reductions.put(c.id(), reconstruction.reductions());
             var clock = ladder ? BenchClock.read(output) : null;
             var projectToTruth = ladder ? input.projectToTruth(clock) : null;
-            var events = ladder ? reconstruction.events().stream().map(n -> BenchLadderTrace.map(n, projectToTruth))
-                    .filter(n -> n.start() < c.ladder().frames() / 60.0).toList() : reconstruction.events();
-            var estimate = events.stream().filter(note -> note.drum() == null).toList();
+            var projectTones = tones(reconstruction.events());
+            var projectTonesWithLayers = tones(reconstruction.eventsWithLayers());
+            double seconds = ladder ? c.ladder().frames() / 60.0 : Double.POSITIVE_INFINITY;
+            var estimate = onTruthClock(projectTones, projectToTruth, seconds);
+            var estimateWithLayers = onTruthClock(projectTonesWithLayers, projectToTruth, seconds);
             var truthDrums = song.truth.stream().filter(note -> note.drum() != null).toList();
-            var estimateDrums = events.stream().filter(note -> note.drum() != null).toList();
-            var pairs = BenchMetrics.notes(truth, estimate, false);
-            var notes = counts(truth, estimate, pairs);
-            var offsets = counts(truth, estimate, BenchMetrics.notes(truth, estimate, true));
-            var leadTruth = BenchMetrics.melody(truth);
-            var leadEstimate = BenchMetrics.melody(estimate);
-            var melody = counts(leadTruth, leadEstimate, BenchMetrics.notes(leadTruth, leadEstimate, false));
+            var estimateDrums = onTruthClock(reconstruction.events().stream().filter(note -> note.drum() != null)
+                    .toList(), projectToTruth, seconds);
             var drumPairs = BenchMetrics.attacks(truthDrums, estimateDrums, .030);
             var drum = counts(truthDrums, estimateDrums, drumPairs);
-            var voices = ladder ? BenchVoice.ladder(truth, estimate, pairs, song.nativeTruth.voices(), reconstruction.voices())
-                    : new BenchVoice(catalogue).score(truth, estimate, pairs, reconstruction.attribution(), options.holdout);
+            var leadTruth = BenchMetrics.melody(truth);
+            var voiceScorer = new BenchVoice(catalogue);
+            var dry = scoreTones(truth, leadTruth, estimate, song, reconstruction, voiceScorer, ladder, options.holdout);
+            var layered = estimate.equals(estimateWithLayers) ? dry
+                    : scoreTones(truth, leadTruth, estimateWithLayers, song, reconstruction, voiceScorer, ladder, options.holdout);
             float[] audio = BenchAudio.mono(BenchAudio.read(reconstruction.audio()));
             if (c.drift() != null || ladder && audio.length != song.reference.length) {
                 // Score the same undrifted interval in both modes, including
@@ -188,11 +194,8 @@ final class BenchRun {
             var metrics = new TreeMap<String, Double>();
             if (c.grid() != null)
                 BenchStructure.measure(output, c.grid(), song.nativeTruth, reconstruction.referenceUs() / 1e6, metrics);
-            metrics.put("noteF1", notes.f1());
-            metrics.put("notePrecision", notes.precision());
-            metrics.put("noteRecall", notes.recall());
-            metrics.put("offsetF1", offsets.f1());
-            metrics.put("melodyF1", melody.f1());
+            addTonalMetrics(metrics, dry, "", options.holdout || ladder);
+            addTonalMetrics(metrics, layered, WITH_LAYERS, options.holdout || ladder);
             metrics.put("drumF1", drum.f1());
             if (drum.matched() > 0) {
                 int sameClass = BenchMetrics.drumClassAttacks(truthDrums, estimateDrums, .030).size();
@@ -201,33 +204,21 @@ final class BenchRun {
                 metrics.put("drumClassAccuracy", (double) sameClass / drum.matched());
                 metrics.put("drumClassAccuracyLegacy", (double) legacyCorrect / drum.matched());
             }
-            if (options.holdout || ladder) {
-                if (voices.distance() != null) metrics.put("voiceSpectralDistance", voices.distance());
-                if (voices.matched() > 0) metrics.put("voiceSpectralCoverage", (double) voices.compared() / voices.matched());
-            } else if (voices.matched() > 0) {
-                metrics.put("voiceTop1", (double) voices.top1() / voices.matched());
-                metrics.put("voiceTop3", (double) voices.top3() / voices.matched());
-            }
             metrics.put("logMelDistance", distance.logMel());
             metrics.put("onsetCorrelation", distance.onsetCorrelation());
-            release(truth, estimate, pairs, audio).ifPresent(value -> metrics.put("releaseEnergy", value));
+            release(truth, estimateWithLayers, layered.pairs(), audio)
+                    .ifPresent(value -> metrics.put("releaseEnergy", value));
             BenchGold.Score lead = null;
             if (ladder) {
-                double seconds = c.ladder().frames() / 60.0;
-                var projectTones = reconstruction.events().stream().filter(note -> note.drum() == null).toList();
-                if (c.ladder().leadLane() != null)
-                    metrics.put("leadFidelityF1", BenchLeadFidelity.score(truth, estimate, c.ladder().leadLane()).f1());
-                lead = BenchLadderTrace.leadScore(truth, estimate, c.ladder().leadLane(), seconds);
-                metrics.put("leadAttackF1", lead.attacks().f1());
-                if (lead.pitchAccuracy() != null) metrics.put("leadPitchAccuracy", lead.pitchAccuracy());
-                var gap = BenchLadderTrace.leadGap(output, truth, projectTones, c.ladder().leadLane(), clock, input.toInput());
-                if (gap != null) metrics.put("leadGap", gap);
-                var trace = BenchLadderTrace.read(output, truth, projectTones, c.ladder(), input.leadPart(),
-                        projectToTruth, input.toTruth());
+                lead = scoreLadderLead(metrics, "", output, truth, estimate, projectTones, c.ladder(), clock, input);
+                scoreLadderLead(metrics, WITH_LAYERS, output, truth, estimateWithLayers, projectTonesWithLayers,
+                        c.ladder(), clock, input);
+                var trace = BenchLadderTrace.read(output, truth, projectTones, projectTonesWithLayers, c.ladder(),
+                        input.leadPart(), projectToTruth, input.toTruth());
                 BenchLadderRun.save(c, root, output, results, started, metrics, trace, reconstruction.reductions(), null);
             }
-            return new BenchScorecard.Case(c.id(), c.profile(), c.variant(), metrics, notes, offsets, melody, drum,
-                    voices, lead, null);
+            return new BenchScorecard.Case(c.id(), c.profile(), c.variant(), metrics, dry.notes(), dry.offsets(),
+                    dry.melody(), drum, dry.voices(), lead, null);
         } catch (IOException | IllegalArgumentException failure) {
             if (ladder && !(failure instanceof InterruptedIOException)) {
                 String diagnostic = failure.toString().replace(output.toString(), "<work>");
@@ -237,6 +228,65 @@ final class BenchRun {
         } finally {
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
         }
+    }
+
+    private static List<BenchMetrics.Event> tones(List<BenchMetrics.Event> events) {
+        return events.stream().filter(note -> note.drum() == null).toList();
+    }
+
+    private static List<BenchMetrics.Event> onTruthClock(List<BenchMetrics.Event> events,
+                                                       DoubleUnaryOperator clock, double seconds) {
+        return clock == null ? events : events.stream().map(note -> BenchLadderTrace.map(note, clock))
+                .filter(note -> note.start() < seconds).toList();
+    }
+
+    private static TonalScore scoreTones(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> leadTruth,
+                                        List<BenchMetrics.Event> estimate, Song song,
+                                        BenchReconstruction.Result reconstruction, BenchVoice voiceScorer,
+                                        boolean ladder, boolean holdout) throws IOException {
+        var pairs = BenchMetrics.notes(truth, estimate, false);
+        var notes = counts(truth, estimate, pairs);
+        var offsets = counts(truth, estimate, BenchMetrics.notes(truth, estimate, true));
+        var leadEstimate = BenchMetrics.melody(estimate);
+        var melody = counts(leadTruth, leadEstimate, BenchMetrics.notes(leadTruth, leadEstimate, false));
+        var voices = ladder ? BenchVoice.ladder(truth, estimate, pairs, song.nativeTruth.voices(), reconstruction.voices())
+                : voiceScorer.score(truth, estimate, pairs, reconstruction.attribution(), holdout);
+        return new TonalScore(notes, offsets, melody, voices, pairs);
+    }
+
+    private static void addTonalMetrics(Map<String, Double> metrics, TonalScore score, String suffix, boolean spectral) {
+        metrics.put("noteF1" + suffix, score.notes().f1());
+        metrics.put("notePrecision" + suffix, score.notes().precision());
+        metrics.put("noteRecall" + suffix, score.notes().recall());
+        metrics.put("offsetF1" + suffix, score.offsets().f1());
+        metrics.put("melodyF1" + suffix, score.melody().f1());
+        var voices = score.voices();
+        if (spectral) {
+            if (voices.distance() != null) metrics.put("voiceSpectralDistance" + suffix, voices.distance());
+            if (voices.matched() > 0)
+                metrics.put("voiceSpectralCoverage" + suffix, (double) voices.compared() / voices.matched());
+        } else if (voices.matched() > 0) {
+            metrics.put("voiceTop1" + suffix, (double) voices.top1() / voices.matched());
+            metrics.put("voiceTop3" + suffix, (double) voices.top3() / voices.matched());
+        }
+    }
+
+    private static BenchGold.Score scoreLadderLead(Map<String, Double> metrics, String suffix, Path output,
+                                                   List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,
+                                                   List<BenchMetrics.Event> projectTones, BenchLadder.Input ladder,
+                                                   BenchClock clock, BenchLadderRun.Inputs input) throws IOException {
+        String lane = ladder.leadLane();
+        if (lane != null) metrics.put("leadFidelityF1" + suffix, BenchLeadFidelity.score(truth, estimate, lane).f1());
+        var lead = BenchLadderTrace.leadScore(truth, estimate, lane, ladder.frames() / 60.0);
+        var gap = BenchLadderTrace.leadGap(output, truth, projectTones, lane, clock, input.toInput());
+        addLeadMetrics(metrics, suffix, lead, gap);
+        return lead;
+    }
+
+    private static void addLeadMetrics(Map<String, Double> metrics, String suffix, BenchGold.Score lead, Double gap) {
+        metrics.put("leadAttackF1" + suffix, lead.attacks().f1());
+        if (lead.pitchAccuracy() != null) metrics.put("leadPitchAccuracy" + suffix, lead.pitchAccuracy());
+        if (gap != null) metrics.put("leadGap" + suffix, gap);
     }
 
     private static java.util.OptionalDouble release(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,
@@ -260,20 +310,25 @@ final class BenchRun {
             reductions.put(gold.id(), result.reductions());
             if (gold.regions().getLast().end() > result.referenceUs() / 1_000_000.0)
                 throw new IllegalArgumentException("Gold reconstruction ends before the annotations");
-            var tones = result.events().stream().filter(note -> note.drum() == null).toList();
-            var lead = gold.leadPart() == null ? BenchMetrics.melody(tones)
-                    : tones.stream().filter(note -> result.attribution().fromPart(note, gold.leadPart())).toList();
-            var score = BenchGold.score(gold.regions(), lead);
             var metrics = new TreeMap<String, Double>();
-            metrics.put("leadAttackF1", score.attacks().f1());
-            if (BenchGold.hasLeadReleases(gold))
-                metrics.put("leadGap", BenchGold.leadGap(output, gold, melodyGates(tones)).leadGap());
-            if (score.pitchAccuracy() != null) metrics.put("leadPitchAccuracy", score.pitchAccuracy());
+            var score = scoreGoldLead(metrics, "", output, gold, result.attribution(), tones(result.events()));
+            scoreGoldLead(metrics, WITH_LAYERS, output, gold, result.attribution(), tones(result.eventsWithLayers()));
             return new BenchScorecard.Case(gold.id(), null, null, metrics, null, null, null, null,
                     null, score, null);
         } finally {
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
         }
+    }
+
+    private static BenchGold.Score scoreGoldLead(Map<String, Double> metrics, String suffix, Path output,
+                                                 BenchGold.Input gold, BenchReconstruction.Attribution attribution,
+                                                 List<BenchMetrics.Event> tones) throws IOException {
+        var lead = gold.leadPart() == null ? BenchMetrics.melody(tones)
+                : tones.stream().filter(note -> attribution.fromPart(note, gold.leadPart())).toList();
+        var score = BenchGold.score(gold.regions(), lead);
+        Double gap = BenchGold.hasLeadReleases(gold) ? BenchGold.leadGap(output, gold, melodyGates(tones)).leadGap() : null;
+        addLeadMetrics(metrics, suffix, score, gap);
+        return score;
     }
 
     static List<LeadGap.Interval> melodyGates(List<BenchMetrics.Event> events) {

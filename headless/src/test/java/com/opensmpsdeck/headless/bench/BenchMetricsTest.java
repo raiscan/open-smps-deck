@@ -39,6 +39,30 @@ class BenchMetricsTest {
         assertEquals(List.of(lead), BenchReconstruction.excludeEffectCopies(events, List.of("FM5")));
     }
 
+    @Test void layerWindowsRemoveOnlyTonalCopyAttacksOnSharedLanes() {
+        var report = BenchFiles.JSON.fromJson("""
+                {
+                  "lanePolicyCopies": [{"lane":"PSG1","startTick":12,"endTick":18}],
+                  "noteLayers": [
+                    {"status":"applied","lane":"FM2","startTick":6,"endTick":12},
+                    {"status":"skipped","lane":"FM2","startTick":12,"endTick":18}
+                  ]
+                }
+                """, BenchReconstruction.Report.class);
+        var dryBefore = event("PSG1", .1, 72);
+        var octaveCopy = event("PSG1", .2, 84);
+        var copyBendStep = event("PSG1", .25, 85);
+        var dryAtEnd = event("PSG1", .3, 84);
+        var otherLane = event("PSG2", .2, 84);
+        var authoredCopy = event("FM2", .1, 60);
+        var skippedLayer = event("FM2", .2, 60);
+        var events = List.of(dryBefore, octaveCopy, copyBendStep, dryAtEnd, otherLane, authoredCopy, skippedLayer);
+
+        assertEquals(List.of(dryBefore, dryAtEnd, otherLane, skippedLayer), report.excludeLayers(events));
+        var legacy = BenchFiles.JSON.fromJson("{}", BenchReconstruction.Report.class);
+        assertEquals(events, legacy.excludeLayers(events));
+    }
+
     @Test void findsMaximumRatherThanGreedyMatching() {
         var truth = List.of(note(1.00, 1.2, 60), note(1.06, 1.2, 60), note(2.0, 2.2, 62));
         var estimate = List.of(note(1.02, 1.2, 60), note(.96, 1.2, 60), note(2.0, 2.2, 63), note(3, 3.1, 60));

@@ -33,9 +33,12 @@ with `--stem-role stems/NAME.wav=ROLE` and repeat it on subsequent checks.
 The [local extraction guide](../../headless/README.md#external-stem-separation)
 covers model setup and config paths. The bake-off recommends SW, MuScriptor
 Medium for tonal instruments, Basic Pitch for vocals and ADTOF for drums.
-The current audio-only path uses one configured tonal transcriber and the
-built-in spectral drum detector. Use the explicit Medium option above for
-the integrated baseline.
+For vocal candidate selection, configure
+`vocals: "muscriptor-medium,basic-pitch,rmvpe"` in the transcriber defaults
+and let each role select its adapter. Inspect the candidate coverage, F0
+agreement and winner in `manifest.json`. A configured `bs-roformer`
+separator supplies and snapshots aligned drums when the input has no mapped
+drum stem. Otherwise the CLI warns and fits drums against the mix.
 
 With MCP, call `separators_list` and `transcribers_list`, then `separate`
 with absolute `input` and new `outputDir`, `separator: "bs-roformer"` and
@@ -214,10 +217,13 @@ tab handles bulk roles, pins, velocity, merges and chord fitting. **Undo**,
 **Redo** and **Apply** operate on the draft. Resolve dirty-draft conflicts before
 publishing. [Studio controls](../../docs/user-guide/studio.md#review-a-reconstruction)
 
-**Layering on spare channels.** `voicing.json.lanePolicies` adds opt-in
-`pads`, `leadEcho`, `psgDouble` and `fmDouble` (chorus or echo) layers on
-free PSG and FM lanes, scoped by `voice`, `section` or `span`. The
-`s3k-layering` preset combines an octave PSG double with a 14-frame FM echo.
+**Layering on spare channels.** New reconstructions use `s3k-layering`
+for an octave PSG double and a 14-frame FM echo on spare channels.
+Existing voicing and reruns keep their saved policy. Set
+`--lane-policy-preset off` on a new run or an assemble to disable it.
+`voicing.json.lanePolicies` also accepts custom `pads`, `leadEcho`,
+`psgDouble` and `fmDouble` (chorus or echo) rules scoped by `voice`,
+`section` or `span`.
 Per-note layers and copy policies follow rendered bends, including the
 dry note's vibrato. Check the curve fit and cents RMS error in `noteLayers`
 or `lanePolicies[].bendLayers` in the report.

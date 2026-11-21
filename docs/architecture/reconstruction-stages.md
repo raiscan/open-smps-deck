@@ -58,9 +58,13 @@ Import recognizes a separator's `separation.json` and prepares an audio-only
 request when the folder has no MIDI. For other aligned stem folders, pass
 `--audio-only` explicitly. `run --audio-only` and `transcribe --audio-only`
 also accept explicit stem paths. All three entry points create the source on
-the input audio clock. The built-in spectral detector supplies a GM drum part
-from the drum stem. A single configured external transcriber handles the
-tonal stems, receiving a role for each stem.
+the input audio clock. The configured drum detector (spectral by default)
+supplies a GM drum part. When there is no aligned drum stem, a configured
+BS-RoFormer adapter supplies one from the mix. The initial work directory
+snapshots this WAV and records the separator provenance for replay. Without
+the adapter, drum detection uses the mix. Tonal adapters are selected by role.
+With RMVPE configured for vocals, the alternate monophonic candidate and
+the other candidates are measured against stem periodicity.
 The beat tracker uses drum attacks when available and mix onsets otherwise.
 Audio-only candidate ranking adds locally recurrent kick and snare patterns
 and a soft 70–180 BPM preference to the onset fit. Competing tempo hypotheses
@@ -1386,9 +1390,11 @@ voices and a 32 KiB total bank.
 
 #### Optional lane policies
 
-Opt in to an octave-up PSG double and a 14-frame FM echo with
-`"lanePolicies": {"preset": "s3k-layering"}` in `voicing.json`. Rebuild with
-`reconstruct assemble WORK_DIR`, or set the preset and rebuild in one step:
+New reconstructions save `"lanePolicies": {"preset": "s3k-layering"}` in
+`voicing.json`. The preset adds an octave-up PSG double and a 14-frame FM
+echo on spare channels. FM-only runs retain the FM echo. Existing work and
+replays reuse their saved policy. Set `--lane-policy-preset off` on a fresh
+run, or rebuild an existing work directory with a replacement preset:
 
 ```sh
 java -jar "$jar" reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering
