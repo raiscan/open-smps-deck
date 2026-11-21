@@ -242,6 +242,18 @@ final class S3kReconstruction {
                                    Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
                                    Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins)
             throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
+                matches, echoes, voicing, copies, bends, scopes, origins, null);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   ReconstructionClipLinks.Layout layout) throws java.io.IOException {
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var gates = new ArrayList<VoicedGate>();
         var parts = indexParts(score.parts());
@@ -387,7 +399,7 @@ final class S3kReconstruction {
         if (copies) echoNotes += addVoicingCopies(fm, voicing, frames);
         List<Sequence> sequences = new ArrayList<>();
         List<Clip> clips = new ArrayList<>();
-        var repeats = ReconstructionClipLinks.from(structure);
+        var repeats = ReconstructionClipLinks.from(structure, layout);
         for (int i = 0; i < fm.size(); i++)
             writeToneLane("FM", ReconstructionAllocation.FM.get(i), fm.get(i), parts, sequences, clips, repeats);
         for (int i = 0; i < psg.size(); i++)
@@ -553,17 +565,13 @@ final class S3kReconstruction {
                                       ReconstructionClipLinks links) {
         boolean fm = chip.equals("FM");
         NativeCommand selectAsset = fm ? NativeCommand.FM_VOICE : NativeCommand.PSG_ENVELOPE;
-        var spans = links.indexes(notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i));
-        int start = 0;
-        while (start < notes.size()) {
-            Event first = notes.get(start).event;
-            int from = first.start();
-            int end = start + 1;
-            var span = spans.get(start);
-            boolean noise = NOISE.equals(first.assetId());
-            while (end < notes.size() && spans.get(end) == span
-                    && (span != null || notes.get(end).event.start() - from < CLIP_TICKS)
-                    && noise == NOISE.equals(notes.get(end).event.assetId())) end++;
+        var chunks = links.chunks(lane, notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i),
+                i -> NOISE.equals(notes.get(i).event.assetId()), CLIP_TICKS);
+        for (var chunk : chunks) {
+            int start = chunk.first();
+            int end = chunk.limit();
+            int from = chunk.tick();
+            boolean noise = NOISE.equals(notes.get(start).event.assetId());
             int length = clipEnd(notes, end - 1) - from;
             String id = lane + "-" + from;
             var events = new ArrayList<NoteEvent>();
@@ -650,8 +658,7 @@ final class S3kReconstruction {
                     .map(p -> parts.get(p.event.note().partId()).name()).distinct().toList();
             var source = new Sequence(id, String.join(" / ", names), chip, length, fm ? initial.asset() : null,
                     initial.volume(), events, commands, "RESET", fm || noise ? null : initial.asset(), null);
-            links.add(source, lane, from, span, sequences, clips);
-            start = end;
+            links.add(source, lane, from, chunk.span(), sequences, clips);
         }
     }
 
@@ -681,22 +688,19 @@ final class S3kReconstruction {
 
     private static void writeDacLane(List<Event> hits, List<Sequence> sequences, List<Clip> clips,
                                      ReconstructionClipLinks links) {
-        var spans = links.indexes(hits.size(), i -> hits.get(i).start(), i -> hits.get(i).end());
-        int start = 0;
-        while (start < hits.size()) {
-            int from = hits.get(start).start();
-            int end = start + 1;
-            var span = spans.get(start);
-            while (end < hits.size() && spans.get(end) == span
-                    && (span != null || hits.get(end).start() - from < CLIP_TICKS)) end++;
+        var chunks = links.chunks("DAC", hits.size(), i -> hits.get(i).start(), i -> hits.get(i).end(),
+                i -> false, CLIP_TICKS);
+        for (var chunk : chunks) {
+            int start = chunk.first();
+            int end = chunk.limit();
+            int from = chunk.tick();
             int length = hits.get(end - 1).end() - from;
             String id = "DAC-" + from;
             var triggers = hits.subList(start, end).stream()
                     .map(hit -> new SampleTrigger("hit-" + (hit.start() - from), hit.start() - from, hit.assetId())).toList();
             var source = new Sequence(id, "Drums", "DAC", length, null, 127,
                     List.of(), List.of(), "RESET", null, null, triggers);
-            links.add(source, "DAC", from, span, sequences, clips);
-            start = end;
+            links.add(source, "DAC", from, chunk.span(), sequences, clips);
         }
     }
 

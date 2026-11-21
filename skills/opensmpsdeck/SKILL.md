@@ -63,12 +63,16 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   Use `span: "START,END"` in source seconds to flag changes outside the
   edited passage. Check `lanePermutations` for grouped swaps, the first
   affected note IDs, and suggested `pinLane` edits. Check `voicingChanges`
-  for variant and level changes.
+  for variant, level and scoped override changes. Check `compiledTimeline`
+  for changed native events and `renderedPcm` for changed audio frames.
 - Use `reconstruct rerun "$work" "$fresh" --search "$input_dir"` to replay
   the inputs and options of a historical fresh run. The private
   `manifest.json` pins input hashes and retains imported note snapshots.
-  Replay carries `edits.json` into the fresh directory. Use `run --from`
-  in the current work directory to retain its role plan and voicing.
+  Replay carries `edits.json`, `roleplan.json`, clip anchors and lane
+  affinity into the fresh directory. Add `--keep-voicing` to carry accepted
+  voicing settings. Check stderr for invalid and orphaned edits and
+  `allocationAffinityChanges` for lane choices that differ from a fresh
+  allocation.
 
 CLI examples:
 
@@ -254,7 +258,8 @@ dropped. MCP resumed runs expose `options.refitLanes`, `options.refitLevels`
 and `options.keepVoicing`. Read the variant and level changes in the result. For a fresh fit, back up and move
 `voicing.json` before running `voice`. A chained run starting at `voice` reuses
 existing voicing unless refit options are supplied. Assembly regenerates the
-arrangement. Apply direct project and group edits after the final assembly,
+arrangement with saved clip anchors. Check `sustainProbe` and
+`voicingWarnings` in the assembly report for FM1 patch dips. Apply direct project and group edits after the final assembly,
 or work on a separate copy.
 
 ## Audition a phrase

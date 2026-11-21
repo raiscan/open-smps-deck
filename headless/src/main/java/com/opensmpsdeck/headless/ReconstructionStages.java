@@ -184,8 +184,8 @@ public final class ReconstructionStages {
         return token.equals("run") || Arrays.stream(Stage.values()).anyMatch(stage -> stage.name().equalsIgnoreCase(token));
     }
 
-    static void run(String command, String[] args, PrintStream out) throws IOException {
-        run(command, args, out, false, (completed, total, message) -> {}, ignored -> {});
+    static void run(String command, String[] args, PrintStream out, PrintStream err) throws IOException {
+        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {});
     }
 
     @FunctionalInterface
@@ -197,12 +197,12 @@ public final class ReconstructionStages {
     public static List<String> runForReview(String command, String[] args, Progress progress) throws IOException {
         var changes = new java.util.ArrayList<String>();
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run(command, args, out, true, progress, changes::add);
+            run(command, args, out, out, true, progress, changes::add);
         }
         return List.copyOf(changes);
     }
 
-    private static void run(String command, String[] args, PrintStream out,
+    private static void run(String command, String[] args, PrintStream out, PrintStream err,
                             boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange)
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
@@ -215,25 +215,43 @@ public final class ReconstructionStages {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
             execute(request, request.work, out, preserveReview, progress, refitChange);
-            if (request.chain && request.initial == null) {
+            if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
-            }
+            if (request.chain) summarizeEdits(request.work, err);
         }
     }
 
-    static void rerun(Path oldWork, Path work, List<Path> search, boolean keepVoicing, PrintStream out) throws IOException {
+    static void rerun(Path oldWork, Path work, List<Path> search, boolean keepVoicing, PrintStream out, PrintStream err) throws IOException {
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var replay = ReconstructionManifest.resolve(oldWork, work, search);
         var inputs = replay.inputs();
         Files.createDirectory(work);
+        Path plan = oldWork.resolve("roleplan.json");
+        if (Files.exists(plan)) Files.copy(plan, work.resolve("roleplan.json"));
+        var layout = ReconstructionClipLinks.Layout.read(oldWork);
+        if (layout != null) ReconstructionArtifacts.write(work.resolve(ReconstructionClipLinks.LAYOUT), layout);
         ReconstructionManifest.writeReplay(work, replay);
         var edits = ReconstructionEdits.read(oldWork);
         if (!edits.isEmpty()) edits.write(work);
         var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
                 inputs.options(replay.manifest().durationUs())), inputs);
-        execute(new Request(work, Stage.TRANSCRIBE, true, score, null, java.util.Set.of(), false, keepVoicing), oldWork, out, false,
+        execute(new Request(work, Stage.TRANSCRIBE, true, score, replay.manifest().lastRun().harmonyMaxHz(),
+                        java.util.Set.of(), false, keepVoicing), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
+        summarizeEdits(work, err);
+    }
+
+    private static void summarizeEdits(Path work, PrintStream err) throws IOException {
+        var issues = ReconstructionEdits.Journal.read(work).all().stream()
+                .filter(outcome -> outcome.status() == ReconstructionEdits.Status.invalid
+                        || outcome.status() == ReconstructionEdits.Status.orphaned).toList();
+        if (issues.isEmpty()) return;
+        err.printf("%d invalid or orphaned edits%n", issues.size());
+        for (var issue : issues)
+            err.printf("  %s %s %s%s%n", issue.tag(), issue.status(), issue.detail(),
+                    issue.missingNoteIds() == null || issue.missingNoteIds().isEmpty()
+                            ? "" : " " + issue.missingNoteIds());
     }
 
     private static ReconstructionAllocation.Result previousAllocation(Path file, PrintStream out) throws IOException {
@@ -293,13 +311,22 @@ public final class ReconstructionStages {
                         var scoreEdits = editJournal.stages().getOrDefault("transcribe", List.of());
                         var roles = edits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes);
                         ReconstructionArtifacts.write(rolesFile, roles);
+                        ReconstructionManifest.recordRolePlan(work, rate);
                     }
                     case ALLOCATE -> {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
-                        var allocation = ReconstructionAllocation.allocate(roles, score.source.parts(),
-                                ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly, !score.inputs.stems.isEmpty(), previousAllocation);
+                        var savedAffinity = previousWork.equals(work) ? null : ReconstructionAllocation.Affinity.read(previousWork);
+                        var seed = savedAffinity == null ? ReconstructionAllocation.lanes(previousAllocation) : savedAffinity.seed();
+                        int frames = ReconstructionTimeMap.of(score).frames();
+                        boolean stems = !score.inputs.stems.isEmpty();
+                        var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
+                                frames, score.inputs.fmOnly, stems, seed);
+                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocate(roles, score.source.parts(),
+                                frames, score.inputs.fmOnly, stems);
                         ReconstructionArtifacts.write(allocationFile, allocation);
+                        ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
+                                ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
                         outcomes.addAll(edits.allocationOutcomes(allocation, roles.lanePins()));
                     }
                     case VOICE -> {

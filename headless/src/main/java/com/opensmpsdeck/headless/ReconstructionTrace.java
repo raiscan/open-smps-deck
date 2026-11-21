@@ -66,6 +66,64 @@ public final class ReconstructionTrace {
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced) {}
     record Change(String id, Boolean outsideSpan, List<String> changedStages, Summary old,
                   @com.google.gson.annotations.SerializedName("new") Summary updated) {}
+    private record OverrideSelector(Double startSeconds, Double endSeconds, Integer startTick, Integer endTick,
+                                    List<String> noteIds) {
+        static OverrideSelector of(ReconstructionOverrides.Settings scope) {
+            return new OverrideSelector(scope.startSeconds(), scope.endSeconds(), scope.startTick(), scope.endTick(),
+                    scope.noteIds() == null ? null : scope.noteIds().stream().sorted().toList());
+        }
+    }
+
+    private record OverrideFields(String variantId, Double gain, Double gate, Integer minimumReleaseRate,
+                                  ReconstructionVoicing.Vibrato vibrato, Boolean modulationOff) {
+        static OverrideFields of(ReconstructionOverrides.Settings scope) {
+            return new OverrideFields(scope.variantId(), scope.gain(), scope.gate(), scope.minimumReleaseRate(),
+                    scope.vibrato(), scope.modulationOff());
+        }
+    }
+
+    private record OverrideChange(String lane, String change, OverrideSelector scope,
+                                  OverrideFields before, OverrideFields after) {}
+
+    private static List<OverrideChange> overrideChanges(ReconstructionVoicing.Result before,
+                                                        ReconstructionVoicing.Result after) {
+        var lanes = new java.util.TreeSet<String>();
+        if (before != null) lanes.addAll(before.lanes().keySet());
+        if (after != null) lanes.addAll(after.lanes().keySet());
+        var changes = new ArrayList<OverrideChange>();
+        for (String lane : lanes) {
+            var oldScopes = overrides(before, lane);
+            var newScopes = overrides(after, lane);
+            for (var selector : oldScopes.keySet()) {
+                var oldFields = oldScopes.get(selector);
+                var newFields = newScopes.getOrDefault(selector, new ArrayList<>());
+                oldFields.removeIf(newFields::remove);
+                int paired = Math.min(oldFields.size(), newFields.size());
+                for (int i = 0; i < paired; i++)
+                    changes.add(new OverrideChange(lane, "changed", selector, oldFields.get(i), newFields.get(i)));
+                for (int i = paired; i < oldFields.size(); i++)
+                    changes.add(new OverrideChange(lane, "removed", selector, oldFields.get(i), null));
+                for (int i = paired; i < newFields.size(); i++)
+                    changes.add(new OverrideChange(lane, "added", selector, null, newFields.get(i)));
+                newScopes.remove(selector);
+            }
+            newScopes.forEach((selector, fields) -> fields.forEach(field ->
+                    changes.add(new OverrideChange(lane, "added", selector, null, field))));
+        }
+        return changes;
+    }
+
+    private static Map<OverrideSelector, List<OverrideFields>> overrides(ReconstructionVoicing.Result result, String lane) {
+        var scopes = new LinkedHashMap<OverrideSelector, List<OverrideFields>>();
+        var voice = result == null ? null : result.lanes().get(lane);
+        if (voice != null && voice.overrides() != null) {
+            for (var scope : voice.overrides()) {
+                scopes.computeIfAbsent(OverrideSelector.of(scope), ignored -> new ArrayList<>()).add(OverrideFields.of(scope));
+            }
+        }
+        return scopes;
+    }
+
     private record PinLane(String id, String reason, String op, List<String> noteIds, String lane) {}
     private record LanePermutation(Map<String, String> lanes, int noteCount, double startSeconds, double endSeconds,
                                    List<String> firstNoteIds, List<PinLane> pins) {}
@@ -190,7 +248,11 @@ public final class ReconstructionTrace {
         var result = diff(read(oldWork), read(newWork), span);
         var before = optional(oldWork, "voicing.json", ReconstructionVoicing.Result.class);
         var after = optional(newWork, "voicing.json", ReconstructionVoicing.Result.class);
-        result.add("voicingChanges", JSON.toJsonTree(ReconstructionVoicing.changes(before, after)));
+        var voicing = JSON.toJsonTree(ReconstructionVoicing.changes(before, after)).getAsJsonArray();
+        overrideChanges(before, after).forEach(change -> voicing.add(JSON.toJsonTree(change)));
+        result.add("voicingChanges", voicing);
+        result.add("compiledTimeline", JSON.toJsonTree(ReconstructionCompiledTimeline.diff(oldWork, newWork, span)));
+        result.add("renderedPcm", JSON.toJsonTree(ReconstructionRenderDiff.diff(oldWork, newWork, span)));
         return result;
     }
 
@@ -773,8 +835,19 @@ public final class ReconstructionTrace {
                 for (var pin : group.pins)
                     out.println("  " + JSON.toJsonTree(pin));
             }
-            for (var entry : result.getAsJsonArray("voicingChanges"))
-                out.println(JSON.fromJson(entry, ReconstructionVoicing.Change.class).describe());
+            for (var entry : result.getAsJsonArray("voicingChanges")) {
+                if (entry.getAsJsonObject().has("scope")) out.println("Scoped voicing " + entry);
+                else out.println(JSON.fromJson(entry, ReconstructionVoicing.Change.class).describe());
+            }
+            var compiled = JSON.fromJson(result.get("compiledTimeline"), ReconstructionCompiledTimeline.Difference.class);
+            if (compiled.available())
+                out.printf("%d changed compiled events%s%n", compiled.changedEvents(), compiled.firstTick() == null
+                        ? "" : " (first project tick " + compiled.firstTick() + ", lanes " + compiled.lanes() + ")");
+            else out.println("Compiled timeline unavailable");
+            var pcm = JSON.fromJson(result.get("renderedPcm"), ReconstructionRenderDiff.Difference.class);
+            if (pcm.available())
+                out.printf("%d changed PCM frames%s%n", pcm.changedFrames(),
+                        pcm.firstFrame() == null ? "" : " (first sample frame " + pcm.firstFrame() + ")");
         } else {
             for (var entry : result.getAsJsonArray("notes")) print(out, "", JSON.fromJson(entry, Row.class));
             out.printf("%d notes%n", result.getAsJsonArray("notes").size());

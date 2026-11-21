@@ -36,7 +36,7 @@ public final class Main {
                 case "catalog" -> CatalogueCli.run(args, out);
                 case "notes", "reference" -> ReviewCli.run(args, out);
                 case "group" -> GroupCli.run(args, out);
-                case "reconstruct" -> ReconstructionCli.run(args, out);
+                case "reconstruct" -> ReconstructionCli.run(args, out, err);
                 case "bench" -> {
                     return BenchCli.run(args, out, new BenchCli.Hooks(ReconstructionCli::run,
                             S3kRenderer::timelineSequencer, path -> new com.google.gson.Gson().toJsonTree(MidiScore.read(path))));

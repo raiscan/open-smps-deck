@@ -172,6 +172,10 @@ class ReconstructionEditsTest {
         Path work = dir.resolve("work");
         cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
 
+        Path plan = work.resolve("roleplan.json");
+        java.nio.file.Files.writeString(plan, """
+                {"version":1,"rules":[{"bars":"1-1","part":0,"role":"melody","voice":"top","pitchMax":60}]}
+                """);
         String kept = "n-0-500000-64";
         String removed = "n-0-1250000-62";
         String competitor = "n-0-500000-67";
@@ -195,7 +199,7 @@ class ReconstructionEditsTest {
         // These two onsets quantize to nearby presentations. The earlier pin occupies the lane through the retime.
         var rerun = add(work, """
                 {"id":"scoop","reason":"pitch contour","op":"bend","noteId":"edit-answer",
-                 "points":[[0.85,-2],[0.92,0],[1.2,0]]}
+                 "points":[[0.85,-2],[0.92,0],[1.2,1],[1.21,0]]}
                 """, true);
         assertEquals("transcribe", rerun.get("from").getAsString());
         assertTrue(rerun.getAsJsonObject("traceDiff").get("changedNotes").getAsInt() >= 4);
@@ -207,6 +211,7 @@ class ReconstructionEditsTest {
         assertEquals(87, answer.score().note().velocity());
         assertEquals("FM1", answer.allocation().lane());
         assertEquals("edit:scoop", answer.voiced().getFirst().bend().reason());
+        assertEquals(new ReconstructionBends.Point(1.2, 0), answer.score().note().bend().points().getLast());
         assertEquals("edit:deletion", trace.get(removed).reason());
         assertNull(trace.get(removed).score());
         var changed = trace.get(kept);
@@ -224,15 +229,26 @@ class ReconstructionEditsTest {
 
         Path replay = dir.resolve("replay");
         cli("reconstruct", "rerun", work.toString(), replay.toString());
+        assertEquals(-1, java.nio.file.Files.mismatch(plan, replay.resolve("roleplan.json")));
+        for (Path path : List.of(work, replay)) {
+            var manifest = ReconstructionArtifacts.read(path.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+            assertEquals(ReconstructionCli.audioHash(plan), manifest.rolePlanSha256());
+        }
         var replayTrace = ReconstructionTrace.diff(work, replay, null);
+        assertEquals(0, replayTrace.getAsJsonObject("compiledTimeline").get("changedEvents").getAsInt());
         assertEquals(0, replayTrace.getAsJsonArray("changes").size(), replayTrace.toString());
         cli("reconstruct", "run", "--from", "transcribe", work.toString());
         assertEquals(0, ReconstructionTrace.diff(work, replay, null).getAsJsonArray("changes").size());
 
         writeMidi(midi, false);
-        String output = cli("reconstruct", "run", "--from", "transcribe", work.toString());
-        assertTrue(output.contains("edit:deletion orphaned"), output);
+        var stderr = new ByteArrayOutputStream();
+        assertEquals(0, Main.run(new String[]{"reconstruct", "run", "--from", "transcribe", work.toString()},
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(stderr)), stderr.toString());
+        assertTrue(stderr.toString().contains("edit:deletion orphaned"), stderr::toString);
         var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
+        assertTrue(report.has("sustainProbe"));
+        cli("reconstruct", "assemble", work.toString());
+        assertTrue(ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject().has("sustainProbe"));
         assertTrue(report.getAsJsonArray("editResults").asList().stream().map(e -> e.getAsJsonObject()).anyMatch(
                 e -> e.get("id").getAsString().equals("deletion") && e.get("status").getAsString().equals("orphaned")));
 

@@ -1,6 +1,12 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonParser;
+import com.opensmpsdeck.project.Clip;
+import com.opensmpsdeck.project.DemoProject;
+import com.opensmpsdeck.project.NoteEvent;
+import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.Sequence;
+import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -108,6 +114,24 @@ class ReconstructionTraceTest {
         ReconstructionArtifacts.write(candidate.resolve("roles.json"), repair);
         ReconstructionArtifacts.write(candidate.resolve("allocation.json"),
                 ReconstructionAllocation.allocate(repair, parts, 60, false));
+        var voice = DemoProject.create().voices().getFirst();
+        var first = new NoteEvent("first", 0, 5, 60);
+        var later = new NoteEvent("later", 42, 5, 64);
+        var initial = new Sequence("all", "FM", "FM", 47, voice.id(), 64, List.of(first, later));
+        var early = new Sequence("early", "FM", "FM", 5, voice.id(), 64, List.of(first));
+        var late = new Sequence("late", "FM", "FM", 5, voice.id(), 64,
+                List.of(new NoteEvent("later", 0, 5, 64)));
+        var oneClip = new StudioProject(4, "Before", "S3K", 15, 0,
+                List.of(voice), List.of(initial), List.of(new Clip("a", "all", "FM1", 0, 47)));
+        var split = new StudioProject(4, "After", "S3K", 15, 0, List.of(voice),
+                List.of(early, late), List.of(new Clip("a", "early", "FM1", 0, 5),
+                        new Clip("b", "late", "FM1", 42, 5)));
+        ProjectFiles.save(work.resolve("arrangement.smps.json"), oneClip, null);
+        ProjectFiles.save(candidate.resolve("arrangement.smps.json"), split, null);
+        var timeline = ReconstructionTrace.diff(work, candidate, "0,.5").getAsJsonObject("compiledTimeline");
+        assertTrue(timeline.get("changedEvents").getAsInt() > 0, timeline::toString);
+        assertEquals(42, timeline.get("firstTick").getAsInt());
+        assertEquals(JsonParser.parseString("[\"FM1\"]"), timeline.get("lanes"));
         var changes = ReconstructionTrace.diff(work, candidate, ".8,.9").getAsJsonArray("changes").asList();
         var recovered = changes.stream().map(row -> row.getAsJsonObject())
                 .filter(row -> row.get("id").getAsString().equals("loser")).findFirst().orElseThrow();
