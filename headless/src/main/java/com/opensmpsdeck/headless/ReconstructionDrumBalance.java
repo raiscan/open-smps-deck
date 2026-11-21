@@ -29,6 +29,18 @@ final class ReconstructionDrumBalance {
 
     static ReconstructionVoicing.Result fit(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing) throws IOException {
+        try {
+            return fitBalance(score, catalogue, allocation, voicing);
+        } catch (IllegalArgumentException failure) {
+            if (score.inputs().audioOnly() == null || !ReconstructionCli.bankOverflow(failure)) throw failure;
+            // The optional level probe uses the full allocation. Assembly can
+            // still fit it into the native bank after reducing backing parts.
+            return voicing;
+        }
+    }
+
+    private static ReconstructionVoicing.Result fitBalance(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
+            ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result voicing) throws IOException {
         var stems = score.inputs().options(score.durationUs()).stems();
         if (stems.isEmpty()) return voicing;
         var matches = ReconstructionCli.voicedMatches(catalogue, allocation, voicing).byLane();

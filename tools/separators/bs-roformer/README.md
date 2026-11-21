@@ -58,6 +58,25 @@ family and gives it the piano role.
 `separation.json` records the inference package version, model, checkpoint
 hash, stem order, device, chunk size and overlap used for the run.
 
+## Vocal-first quality option
+
+Keep a local [Viperx 317 vocal checkpoint and YAML](https://github.com/ZFTurbo/Music-Source-Separation-Training/blob/main/docs/pretrained_models.md)
+outside the checkout. Copy the SW command under a new name such as
+`bs-roformer-cascade` and append these arguments.
+
+```json
+[
+  "--vocal-checkpoint", "/path/to/weights/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+  "--vocal-config", "/path/to/weights/config_bs_roformer_384_1024_2.yaml"
+]
+```
+
+Select it with `--separator bs-roformer-cascade`. The adapter subtracts the
+Viperx vocal estimate from the mix, runs SW on the instrumental residual
+and publishes the Viperx vocal stem alongside the SW instrumental stems.
+The extra pass takes longer and records its own hashes and settings in
+`separation.json`.
+
 ## Test with a mock model
 
 ```sh

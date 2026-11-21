@@ -62,11 +62,15 @@ the input audio clock. The built-in spectral detector supplies a GM drum part
 from the drum stem. A single configured external transcriber handles the
 tonal stems, receiving a role for each stem.
 The beat tracker uses drum attacks when available and mix onsets otherwise.
-The downstream structure, allocation, fitting and assembly stages use the
-same score interface as a MIDI run.
+Audio-only candidate ranking adds locally recurrent kick and snare patterns
+and a soft 70–180 BPM preference to the onset fit. Competing tempo hypotheses
+are stored with the selected grid. The downstream stages use the same score
+interface as a MIDI run. If the resulting bank overflows, audio-only assembly
+can thin automatic backing attacks and records them as `audio-only-bank-fit`
+reductions.
 
 `score.json` and `manifest.json` retain audio-only input roles, the detector
-and its source-time hits, and the configured transcriber. The manifest
+and its source-time hits. Each tonal part records its selected transcriber. The manifest
 records hashes for the mix, catalogue and participating stems, and snapshots
 each transcriber's output. Replay needs these audio and catalogue files and
 uses the saved detector output and transcription snapshots.

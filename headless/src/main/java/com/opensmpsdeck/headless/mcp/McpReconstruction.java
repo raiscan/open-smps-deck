@@ -60,6 +60,7 @@ final class McpReconstruction {
             field("barOffset", "number", "Override bar origin in seconds (with tempo)").optional(),
             field("steadyTempo", "string", "Steady output tempo: off, auto, or BPM").optional(),
             field("audioRepeats", "boolean", "Include audio chroma in repeat matching").optional(),
+            field("transcriberFor", STEM_ROLES, "Map of stem roles to locally configured transcriber names").optional(),
             field("transcriber", "string", "Name returned by transcribers_list. Fresh runs only").optional(),
             field("transcribeParts", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of melodic MIDI part IDs to transcriber roles. Each part needs an aligned stem").optional(),
@@ -100,8 +101,12 @@ final class McpReconstruction {
         var roles = new LinkedHashMap<String, String>();
         if (args.has("stemRoles")) args.getAsJsonObject("stemRoles").entrySet()
                 .forEach(entry -> roles.put(entry.getKey(), entry.getValue().getAsString()));
+        var transcriberFor = new LinkedHashMap<String, String>();
+        if (args.has("transcriberFor")) args.getAsJsonObject("transcriberFor").entrySet()
+                .forEach(entry -> transcriberFor.put(entry.getKey(), entry.getValue().getAsString()));
         return SunoImport.inspect(folder, work, catalogue, assign, exclude,
-                optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, progress).json();
+                optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, transcriberFor,
+                optional(args, "drumDetector"), optional(args, "transcriberDevice"), null, progress).json();
     }
 
 
@@ -159,6 +164,11 @@ final class McpReconstruction {
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
                     "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset");
+            if (options.has("transcriberFor")) for (var entry : options.getAsJsonObject("transcriberFor").entrySet()) {
+                if (entry.getKey().contains("=")) throw new IllegalArgumentException("Invalid transcriber role " + entry.getKey());
+                cli.add("--transcriber-for");
+                cli.add(entry.getKey() + "=" + entry.getValue().getAsString());
+            }
             if (options.has("stemRoles")) for (var stem : options.getAsJsonObject("stemRoles").entrySet()) {
                 if (stem.getKey().contains("=")) throw new IllegalArgumentException("Invalid stem label " + stem.getKey());
                 cli.add("--stem-role");

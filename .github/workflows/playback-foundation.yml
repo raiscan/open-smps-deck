@@ -26,6 +26,8 @@ jobs:
         run: |
           python3 tools/openggf_audio.py check
           python3 -m unittest discover -s tools/tests -v
+          python3 -m unittest discover -s tools/transcribers/basic-pitch -v
+          python3 -m unittest discover -s tools/transcribers/adtof -v
       - name: Ensure ffmpeg is available for export tests
         run: |
           if ! command -v ffmpeg; then

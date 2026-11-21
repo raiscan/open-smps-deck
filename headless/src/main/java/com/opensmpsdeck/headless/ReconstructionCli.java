@@ -80,7 +80,7 @@ final class ReconstructionCli {
     @FunctionalInterface
     private interface Arrangement {
         S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends,
-                                         int omitPolicy) throws IOException;
+                                         int omitPolicy, int bankPass) throws IOException;
     }
 
     private ReconstructionCli() {}
@@ -90,14 +90,15 @@ final class ReconstructionCli {
         out.println("           [--separator-config FILE]");
         out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
-        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--transcriber NAME] [--stem-role FILE=ROLE] [--run]");
+        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
+        out.println("           [--transcriber-config FILE] [--stem-role FILE=ROLE] [--run]");
         out.println("       reconstruct run|transcribe --audio-only WAV INDEX.json WORK_DIR --stem LABEL=WAV [options]");
-        out.println("         [--stem-role LABEL=ROLE ...] [--drum-detector spectral] [--transcriber NAME]");
+        out.println("         [--stem-role LABEL=ROLE ...] [--drum-detector NAME] [--transcriber NAME]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
-        out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
+        out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-for ROLE=NAME ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
@@ -238,7 +239,7 @@ final class ReconstructionCli {
         var effects = effects(score, reference, options, durationUs);
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
-                (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
+                (echoes, copies, bends, omitPolicy, bankPass) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
                         catalogue, sectionPlan.choices(), spill, echoes), out, null, null);
     }
 
@@ -426,9 +427,12 @@ final class ReconstructionCli {
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
                 null, null, null, null, allocation.chordVoicings());
         var layout = ReconstructionClipLinks.Layout.read(work);
-        Arrangement arrange = (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrangeAllocated(
+        var bankFit = score.inputs().audioOnly() == null ? List.<ReconstructionAllocation.Entry>of()
+                : bankFitCandidates(articulated, playback.origins(), authored, layers.keySet());
+        Arrangement arrange = (echoes, copies, bends, omitPolicy, bankPass) -> S3kReconstruction.arrangeAllocated(
                 options.name(), options.ticksPerBeat(), timeline.frames(),
-                new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
+                new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()),
+                compactForBank(articulated, bankFit, bankPass),
                 structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
                 authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
                 omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
@@ -448,18 +452,52 @@ final class ReconstructionCli {
         }
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes);
-        var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1);
+        var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
         for (var layer : arrangement.layers()) layer.report(outcomes);
+    }
+
+    private static List<ReconstructionAllocation.Entry> bankFitCandidates(
+            ReconstructionAllocation.Result allocation, Map<String, String> origins,
+            ReconstructionNoteVoicing.Resolved authored, java.util.Set<String> layerNotes) {
+        return allocation.notes().stream().filter(entry -> {
+            String id = entry.note().id(), origin = origins.getOrDefault(id, id);
+            return entry.lane() != null && !entry.lane().equals("FM1")
+                    && (entry.role() == ReconstructionRoles.Role.harmony || entry.role() == ReconstructionRoles.Role.counter)
+                    && entry.pinnedLane() == null && !"edit".equals(entry.note().source())
+                    && !allocation.chords().containsKey(id) && !authored.scopes().containsKey(origin)
+                    && !authored.instruments().containsKey(origin) && !layerNotes.contains(origin);
+        }).sorted(Comparator.comparing((ReconstructionAllocation.Entry entry) -> entry.role() != ReconstructionRoles.Role.harmony)
+                .thenComparingInt(entry -> (entry.endTick() - entry.startTick()) * entry.note().velocity())
+                .thenComparing(entry -> entry.note().id())).toList();
+    }
+
+    private static ReconstructionAllocation.Result compactForBank(ReconstructionAllocation.Result allocation,
+                                                                     List<ReconstructionAllocation.Entry> candidates, int pass) {
+        if (pass == 0) return allocation;
+        int count = (int) Math.ceil(candidates.size() * Math.min(1, pass * .25));
+        var removed = new java.util.HashSet<>(candidates.subList(0, count));
+        return new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream().map(entry ->
+                removed.contains(entry) ? new ReconstructionAllocation.Entry(entry.note(), entry.role(),
+                        null, null, null, ReconstructionAllocation.Outcome.dropped, "audio-only-bank-fit", null)
+                        : entry).toList(), allocation.timeBase(), allocation.leadContinuity(), allocation.melodyGapFill(),
+                allocation.fm1InterNoteGaps(), allocation.fastRuns(), allocation.chordVoicings());
+    }
+
+    static boolean bankOverflow(IllegalArgumentException failure) {
+        String message = failure.getMessage();
+        return message != null && (message.contains("32 KiB S3K bank") || message.contains("S3K local bank limit is 128"));
     }
 
     static Map<String, String> assemblyInputs(ReconstructionStages.Score score,
                                               ReconstructionAllocation.Result allocation,
                                               ReconstructionVoicing.Result voicing) {
-        return Map.of("score", ReconstructionArtifacts.fingerprint(score),
-                "allocation", ReconstructionArtifacts.fingerprint(allocation),
-                "voicing", ReconstructionArtifacts.fingerprint(
-                        new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
-                                voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies())));
+        var inputs = new java.util.TreeMap<String, String>();
+        inputs.put("score", ReconstructionArtifacts.fingerprint(score));
+        inputs.put("allocation", ReconstructionArtifacts.fingerprint(allocation));
+        inputs.put("voicing", ReconstructionArtifacts.fingerprint(
+                new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
+                        voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies())));
+        return inputs;
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
@@ -545,9 +583,11 @@ final class ReconstructionCli {
         var timeline = ReconstructionTimeMap.of(transcription);
         int frames = timeline.frames();
         MidiScore score = transcription.source();
+        boolean audioOnly = transcription.inputs() != null && transcription.inputs().audioOnly() != null;
         boolean complete = false;
         try {
             boolean echoBankLimit = false, bendSizeLimit = false;
+            int bankPass = 0;
             S3kReconstruction.Result result;
             com.opensmpsdeck.project.CompiledProject compiled;
             Path source = target.resolve(OUTPUTS.get(0));
@@ -555,7 +595,15 @@ final class ReconstructionCli {
             Path audio = target.resolve(OUTPUTS.get(2));
             Path aligned = timeline.warped() ? target.resolve(STEADY_REFERENCE) : reference;
             while (true) {
-                result = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(), !echoBankLimit, !bendSizeLimit, -1);
+                var echoes = echoBankLimit ? Map.<Integer, ReconstructionEcho.Estimate>of() : effects.echoes();
+                try {
+                    result = arrangement.arrange(echoes, !echoBankLimit, !bendSizeLimit, -1, bankPass);
+                } catch (IllegalArgumentException failure) {
+                    if (!audioOnly || bankPass == 4
+                            || !bankOverflow(failure)) throw failure;
+                    bankPass++;
+                    continue;
+                }
                 var project = result.project();
                 if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
                 if (timeline.warped() || existing != null) {
@@ -578,6 +626,7 @@ final class ReconstructionCli {
                         throw new IllegalArgumentException(failure.getMessage() + " (narrow the per-note layer scopes)", failure);
                     else if (!result.policyCoverage().isEmpty())
                         throw new IllegalArgumentException(failure.getMessage() + " (narrow voicing.json.lanePolicies scopes)", failure);
+                    else if (audioOnly && bankPass < 4) bankPass++;
                     else throw failure;
                     continue;
                 }
@@ -589,6 +638,10 @@ final class ReconstructionCli {
                     continue;
                 }
                 break;
+            }
+            if (bankPass > 0) {
+                long removed = result.reductions().stream().filter(r -> "audio-only-bank-fit".equals(r.reason())).count();
+                out.println("S3K bank fit omitted " + removed + " lower-priority backing attacks");
             }
             if (timeline.warped()) ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
             ProjectPackage.write(result.project(), packagePath);
@@ -649,7 +702,7 @@ final class ReconstructionCli {
                 for (var coverage : result.policyCoverage()) {
                     var row = json.toJsonTree(coverage).getAsJsonObject();
                     var without = arrangement.arrange(echoBankLimit ? Map.of() : effects.echoes(),
-                            !echoBankLimit, !bendSizeLimit, coverage.index());
+                            !echoBankLimit, !bendSizeLimit, coverage.index(), bankPass);
                     row.addProperty("psgEnvelopeBytesDelta", psgEnvelopeBytes(result.project()) - psgEnvelopeBytes(without.project()));
                     try {
                         int withoutBytes = ProjectCompiler.compile(without.project()).length;

@@ -52,7 +52,8 @@ final class McpTools {
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
-                    (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames()))),
+                    (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames(),
+                            "drumTranscribers", ExternalTranscribers.configuredDrums()))),
             tool("separators_list", "List the separator names from the server owner's local configuration.",
                     (args, progress) -> object(Map.of("separators", ExternalSeparators.configuredNames()))),
             tool("separate", "Separate one WAV or MP3 into an importable folder using a configured local model.",
@@ -69,6 +70,9 @@ final class McpTools {
                             "Folder-relative stem files to skip").optional(),
                     field("audioOnly", "boolean", "Prepare a reconstruction request using the mix and labelled stems").optional(),
                     field("transcriber", "string", "Configured transcriber for audio-only import").optional(),
+                    field("transcriberFor", McpReconstruction.STEM_ROLES, "Map of stem roles to configured transcriber names").optional(),
+                    field("drumDetector", "string", "Select an audio-only drum detector").optional(),
+                    field("transcriberDevice", "string", "Device passed to external transcribers").optional(),
                     field("stemRoles", McpReconstruction.STEM_ROLES, "Map of folder-relative stem files to audio-only role overrides").optional(),
                     field("transcribeUnmapped", "string", "Configured polyphonic transcriber for unmatched tonal stems").optional()),
             tool("reconstruct_run",

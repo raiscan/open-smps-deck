@@ -65,6 +65,14 @@ final class ReconstructionTempo {
                 grids.subList(1, grids.size()), "estimated");
     }
 
+    static Grid audioCandidate(MidiScore score, List<ReconstructionRhythmAudio.Onset> audio,
+                               double duration, double bpm, double evidence, int meter) {
+        var events = score.notes().stream().map(MidiScore.Note::startUs).distinct()
+                .map(time -> new ReconstructionRhythmAudio.Onset(time / 1e6, 1)).toList();
+        var grid = grid(score, candidate(events, audio, bpm), duration, meter);
+        return new Grid(grid.bpm, grid.beatPhase, grid.barOffset, grid.beatsPerBar, evidence);
+    }
+
     static Estimate override(Options options, int meter) {
         int beats = meter == 0 ? 4 : meter;
         double period = 60 / options.bpm;

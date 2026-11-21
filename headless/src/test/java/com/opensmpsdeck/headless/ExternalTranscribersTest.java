@@ -247,6 +247,31 @@ class ExternalTranscribersTest {
         assertTrue(run(2, missing).contains("needs a configured transcriber"));
     }
 
+    @Test void selectsRoleDefaultsAndOverridesIncludingAnExternalDrumDetector() throws Exception {
+        Path config = directory.resolve("transcribers.json");
+        Path fixture = Path.of(TranscriberFixture.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        var command = List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", fixture.toString(), TranscriberFixture.class.getName(), "{input}", "{output}", "{role}", "{device}");
+        Files.writeString(config, new Gson().toJson(Map.of("keys", command, "voice", command, "override", command,
+                "defaults", Map.of("vocals", "voice", "keyboard", "keys", "drums", "drum-model"),
+                "drumTranscribers", Map.of("drum-model", command))));
+        Path keyboard = Files.copy(wav, directory.resolve("keyboard.wav"));
+        Path drum = Files.copy(wav, directory.resolve("drums.wav"));
+        Path work = directory.resolve("role-routing");
+        run(0, List.of("reconstruct", "transcribe", "--audio-only", wav.toString(),
+                directory.resolve("index.json").toString(), work.toString(), "--stem", "vocals=" + wav,
+                "--stem", "keyboard=" + keyboard, "--stem", "drums=" + drum, "--transcriber-config", config.toString(),
+                "--transcriber-for", "vocals=override", "--transcriber-device", "cuda:0", "--tempo", "110"));
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        assertEquals("override", score.inputs().externalNotes().get(1).provenance().tool());
+        assertEquals("keys", score.inputs().externalNotes().get(2).provenance().tool());
+        var detector = score.inputs().audioOnly().drumDetector();
+        assertEquals("drum-model", detector.name());
+        assertEquals("example", detector.metadata().get("model"));
+        assertEquals(List.of(35, 38), pitches(score, 0));
+        assertEquals(List.of(99, 85), detector.hits().stream().map(MidiScore.Note::velocity).toList());
+    }
+
     @Test void missingExecutableAbortsAndNamesTheTranscriber() throws Exception {
         Path work = directory.resolve("failed");
         Path config = directory.resolve("transcribers.json");
@@ -287,10 +312,13 @@ class ExternalTranscribersTest {
 
     public static class TranscriberFixture {
         public static void main(String[] args) throws Exception {
-            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals").contains(args[2]) || !args[3].equals("cuda:0"))
+            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals", "drums").contains(args[2]) || !args[3].equals("cuda:0"))
                 throw new IllegalArgumentException("Invalid substituted arguments");
-            String notes = args[2].equals("keyboard") ? "[[0.01, 0.38, 72], [0.2, 0.8, 82]]"
-                    : "[[0.2, 1.1, 78], [1.1, 1.2, 80]]";
+            String notes = switch (args[2]) {
+                case "drums" -> "[[0.12, 35, 99], [0.4, 38, 85], [1.2, 42, 89]]";
+                case "keyboard" -> "[[0.01, 0.38, 72], [0.2, 0.8, 82]]";
+                default -> "[[0.2, 1.1, 78], [1.1, 1.2, 80]]";
+            };
             Files.writeString(Path.of(args[1]), notes);
             Files.writeString(Path.of(args[1] + ".meta.json"), "{\"model\":\"example\"}");
         }

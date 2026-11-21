@@ -20,8 +20,8 @@ final class ReconstructionAudioOnly {
     private static final double SILENCE_RMS = .001;
 
     record Stem(String label, String role, @Nullable String transcriberRole) {}
-    record Detector(String name, String version, List<MidiScore.Note> hits) {}
-    record Provenance(String source, String transcriber, Detector drumDetector, Map<Integer, Stem> stems,
+    record Detector(String name, String version, List<MidiScore.Note> hits, @Nullable Map<String, String> metadata) {}
+    record Provenance(String source, @Nullable String transcriber, Detector drumDetector, Map<Integer, Stem> stems,
                       List<String> skippedStems) {}
     record Input(Provenance provenance, Map<Path, String> tonal, Map<Integer, Path> drums, @Nullable Integer leadPart) {}
 
@@ -38,6 +38,7 @@ final class ReconstructionAudioOnly {
         var skipped = new ArrayList<String>();
         var hits = new ArrayList<MidiScore.Note>();
         var paths = new HashSet<Path>();
+        AudioDrumDetector.Detection detection = null;
         Integer lead = null;
         int nextPart = 1;
         for (var entry : stems.entrySet()) {
@@ -56,7 +57,8 @@ final class ReconstructionAudioOnly {
                 if (drums.putIfAbsent(DRUM_PART, path) != null)
                     throw new IllegalArgumentException("Audio-only reconstruction accepts one active drums stem");
                 identities.put(DRUM_PART, new Stem(label, role, null));
-                for (var hit : detector.detect(path, seconds)) {
+                detection = detector.detect(path, seconds);
+                for (var hit : detection.hits()) {
                     long start = Math.round(hit.seconds() * 1e6);
                     long end = Math.min(Math.round(seconds * 1e6), start + 60_000);
                     if (end > start) hits.add(new MidiScore.Note(DRUM_PART, hit.pitch(), hit.velocity(), start, end));
@@ -64,8 +66,7 @@ final class ReconstructionAudioOnly {
             } else {
                 int part = nextPart++;
                 // The arrangement role is lead. Use voice conditioning for the vocals stem.
-                String transcriberRole = role.equals("lead") && defaultRole(label).equals("lead")
-                        && !label.equals("lead") ? "vocals" : role;
+                String transcriberRole = transcriberRole(label, role);
                 identities.put(part, new Stem(label, role, transcriberRole));
                 if (lead == null && role.equals("lead")) lead = part;
                 tonal.put(path, transcriberRole);
@@ -73,8 +74,8 @@ final class ReconstructionAudioOnly {
         }
         if (tonal.isEmpty()) throw new IllegalArgumentException("No audible tonal stem to transcribe in the requested interval");
         hits.sort(Comparator.comparingLong(MidiScore.Note::startUs).thenComparingInt(MidiScore.Note::pitch));
-        return new Input(new Provenance(SOURCE, transcriber, new Detector(detector.id(), detector.version(),
-                List.copyOf(hits)), identities, List.copyOf(skipped)), tonal, drums, lead);
+        return new Input(new Provenance(SOURCE, transcriber, new Detector(detector.id(), detection == null ? "unused" : detection.version(),
+                List.copyOf(hits), detection == null || detection.metadata().isEmpty() ? null : detection.metadata()), identities, List.copyOf(skipped)), tonal, drums, lead);
     }
 
     static String label(String value) {
@@ -82,6 +83,10 @@ final class ReconstructionAudioOnly {
         if (!label.matches("[a-z0-9][a-z0-9_-]*"))
             throw new IllegalArgumentException("Expected a stem label using letters, numbers, dashes or underscores: " + value);
         return label;
+    }
+
+    static String transcriberRole(String label, String role) {
+        return role.equals("lead") && defaultRole(label).equals("lead") && !label.equals("lead") ? "vocals" : role;
     }
 
     static String defaultRole(String label) {
@@ -161,15 +166,22 @@ final class ReconstructionAudioOnly {
             attacks.sort(Comparator.comparingLong(MidiScore.Note::startUs));
             timing = new MidiScore(parts, attacks, List.of());
         }
-        var beats = ReconstructionBeatTracker.track(timing, seconds, onsets, 4);
+        var alternatives = new ArrayList<ReconstructionBeatTracker.Alternative>();
+        var beats = ReconstructionBeatTracker.track(timing, seconds, onsets, 4, alternatives);
         var estimate = ReconstructionTempo.estimate(timing, seconds, onsets, 4);
         if (beats != null && beats.confidence() >= ReconstructionTimeMap.MIN_CONFIDENCE) {
             double bpm = beats.openingBpm(), period = 60 / bpm;
             double downbeat = beats.seconds(beats.downbeat());
             var selected = new ReconstructionTempo.Grid(bpm, ReconstructionTempo.modulo(downbeat, period),
                     ReconstructionTempo.modulo(downbeat, 4 * period), 4, beats.confidence());
+            var rejected = new ArrayList<ReconstructionTempo.Grid>();
+            for (var alternative : alternatives) {
+                if (Math.abs(alternative.bpm() - alternatives.getFirst().bpm()) < 4) continue;
+                rejected.add(ReconstructionTempo.audioCandidate(timing, onsets, seconds,
+                        alternative.bpm(), alternative.score(), 4));
+            }
             var tempo = new ReconstructionTempo.Estimate(selected, beats.confidence(), 0, beats.confidence(),
-                    estimate.alternatives(), "tracked");
+                    List.copyOf(rejected), "tracked");
             return new Grid(tempo, beats, beats.bars(seconds));
         }
         var grid = estimate.selected();
@@ -179,7 +191,7 @@ final class ReconstructionAudioOnly {
         return new Grid(tempo, ReconstructionBeatMap.constant(grid, seconds), ReconstructionTempo.bars(grid, seconds));
     }
 
-    private static boolean silent(Path path, double seconds) throws IOException {
+    static boolean silent(Path path, double seconds) throws IOException {
         for (double from = 0; from < seconds; from += 1) {
             var audio = ReferenceAudio.read(path, from, Math.min(1, seconds - from));
             double squares = 0;
