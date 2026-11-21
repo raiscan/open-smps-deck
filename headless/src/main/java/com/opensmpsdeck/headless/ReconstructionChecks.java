@@ -268,16 +268,16 @@ final class ReconstructionChecks {
     static void rolePlan(ReconstructionRolePlan plan, ReconstructionStructure.Result structure,
                          ReconstructionStages.Score score) {
         var timeline = ReconstructionTimeMap.of(score);
-        require(plan.timeBase() == null || plan.timeBase() == timeline.timeBase(), "roleplan.json.timeBase",
-                "must match the structure and describe timeline (" + timeline.timeBase() + ")");
-        double duration = timeline.projectDuration();
         var sections = structure.sections().stream().map(ReconstructionStructure.Section::id)
                 .collect(java.util.stream.Collectors.toSet());
         var parts = partIndex(score);
         for (int i = 0; i < plan.rules().size(); i++) {
             var rule = plan.rules().get(i);
             String at = "roleplan.json.rules[" + i + "]";
-            require(rule.sections() != null || rule.bars() != null, at, "expected sections or bars");
+            require(rule.sections() != null || rule.bars() != null || rule.startSeconds() != null
+                    || rule.endSeconds() != null, at, "expected sections, bars or a time bound");
+            double duration = plan.timeBase(rule, timeline) == ReconstructionTimeMap.TimeBase.source
+                    ? timeline.sourceDuration() : timeline.projectDuration();
             if (rule.sections() != null) {
                 require(!rule.sections().isEmpty(), at + ".sections", "expected at least one section");
                 for (String id : rule.sections())

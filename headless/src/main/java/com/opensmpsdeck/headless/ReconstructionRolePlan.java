@@ -12,6 +12,39 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 
 record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rules,
                               @Nullable ReconstructionTimeMap.TimeBase timeBase) {
+    record ResolvedTime(int rule, double sourceStart, double sourceEnd, double projectStart,
+                        double projectEnd, long startTick, long endTick) {}
+
+    ReconstructionTimeMap.TimeBase timeBase(Rule rule, ReconstructionTimeMap timeline) {
+        if (timeBase != null) return timeBase;
+        return rule.sections == null && rule.bars == null
+                ? ReconstructionTimeMap.TimeBase.source : timeline.timeBase();
+    }
+
+    ReconstructionRolePlan projectBounds(ReconstructionTimeMap timeline) {
+        return new ReconstructionRolePlan(version, rules.stream().map(rule -> {
+            if (timeBase(rule, timeline) != ReconstructionTimeMap.TimeBase.source || !timeline.warped()) return rule;
+            return new Rule(rule.sections, rule.bars, rule.part, rule.role, rule.voice, rule.pitchMin, rule.pitchMax,
+                    rule.startSeconds == null ? null : timeline.project(rule.startSeconds),
+                    rule.endSeconds == null ? null : timeline.project(rule.endSeconds), rule.texture);
+        }).toList(), timeline.timeBase());
+    }
+
+    List<ResolvedTime> resolvedTimes(ReconstructionTimeMap timeline) {
+        var projected = projectBounds(timeline);
+        var result = new ArrayList<ResolvedTime>();
+        for (int i = 0; i < rules.size(); i++) {
+            var rule = projected.rules.get(i);
+            if (rule.startSeconds == null && rule.endSeconds == null) continue;
+            double start = rule.startSeconds == null ? 0 : rule.startSeconds;
+            double end = rule.endSeconds == null ? timeline.projectDuration() : rule.endSeconds;
+            // Rules test continuous attack time. The half-open bounds below identify the eligible tick interval.
+            result.add(new ResolvedTime(i, timeline.source(start), timeline.source(end), start, end,
+                    (long) Math.ceil(start * 60 - 1e-9), (long) Math.ceil(end * 60 - 1e-9)));
+        }
+        return result;
+    }
+
     enum Voice { top, bottom, all }
 
     record Rule(@Nullable List<String> sections, @Nullable String bars, int part, Role role,
@@ -90,7 +123,6 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
                 rules.add(new Rule(List.of(section.id()), null, part, role, defaultVoice(role), null, null, null, null, null));
             });
         }
-        var timeBase = structure.timeBase() == null ? ReconstructionTimeMap.TimeBase.source : structure.timeBase();
-        return new ReconstructionRolePlan(ReconstructionStages.VERSION, rules, timeBase);
+        return new ReconstructionRolePlan(ReconstructionStages.VERSION, rules, ReconstructionTimeMap.TimeBase.source);
     }
 }

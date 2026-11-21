@@ -36,6 +36,10 @@ public final class ReconstructionTrace {
                 throw new IllegalArgumentException("Expected a finite, nonnegative time range with start < end");
         }
 
+        boolean contains(double time) {
+            return (start == null || time >= start) && (end == null || time < end);
+        }
+
         boolean overlaps(Timing time) {
             if (time == null) return false;
             return (start == null || time.sourceEnd > start || time.sourceStart >= start)
@@ -171,6 +175,10 @@ public final class ReconstructionTrace {
         }
     }
 
+    private record ClusterNote(String id, int pitch, String name, ReconstructionRoles.Role role,
+                               String lane, Status fate) {}
+    private record AttackCluster(int part, double sourceStart, double projectStart, List<ClusterNote> notes) {}
+
     private record Fate(Status status, String stage, String reason) {}
     private record Raw(Note note, ExternalTranscribers.Evidence external, String decision) {}
     private record PartOnset(int part, long startUs) {}
@@ -212,8 +220,14 @@ public final class ReconstructionTrace {
     private ReconstructionTrace() {}
 
     public static JsonObject trace(Path work, String... options) throws IOException {
-        var flags = flags(options, "--start", "--end", "--part", "--pitch", "--pitch-min", "--pitch-max", "--lane", "--status");
+        var flags = flags(options, "--start", "--end", "--part", "--pitch", "--pitch-min", "--pitch-max", "--lane", "--status", "--by-onset", "--time");
         var span = new Span(number(flags, "--start"), number(flags, "--end"));
+        var base = TimeBase.valueOf(flags.getOrDefault("--time", "source"));
+        boolean clustered = flags.containsKey("--by-onset");
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var timeline = ReconstructionTimeMap.of(score);
+        if (base == TimeBase.project) span = new Span(span.start == null ? null : timeline.source(span.start),
+                span.end == null ? null : timeline.source(span.end));
         Integer part = integer(flags, "--part");
         Integer pitch = integer(flags, "--pitch"), min = integer(flags, "--pitch-min"), max = integer(flags, "--pitch-max");
         if (pitch != null && (min != null || max != null))
@@ -228,14 +242,37 @@ public final class ReconstructionTrace {
             throw new IllegalArgumentException("--lane expects FM1–FM5, PSG1–PSG3, or DAC");
         Status status = flags.containsKey("--status") ? Status.valueOf(flags.get("--status")) : null;
         var notes = new ArrayList<Row>();
-        for (var row : read(work).values()) {
-            if (!overlaps(span, row) || part != null && part != row.part()
+        for (var row : read(work, score).values()) {
+            if ((clustered ? !span.contains(writtenOnset(row)) : !overlaps(span, row)) || part != null && part != row.part()
                     || min != null && row.pitch() < min || max != null && row.pitch() > max
                     || status != null && row.status != status) continue;
             if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane))) continue;
             notes.add(row);
         }
+        if (clustered) {
+            var clusters = new ArrayList<AttackCluster>();
+            for (var cluster : ReconstructionOnsetClusters.group(notes, Row::part, ReconstructionTrace::writtenOnset)) {
+                var pitches = cluster.notes().stream().map(ReconstructionTrace::clusterNote)
+                        .sorted(Comparator.comparingInt(ClusterNote::pitch).reversed().thenComparing(ClusterNote::id)).toList();
+                clusters.add(new AttackCluster(cluster.part(), cluster.start(), timeline.project(cluster.start()), pitches));
+            }
+            return JSON.newBuilder().serializeNulls().create().toJsonTree(Map.of("clusters", clusters)).getAsJsonObject();
+        }
         return JSON.toJsonTree(Map.of("notes", notes)).getAsJsonObject();
+    }
+
+    private static double writtenOnset(Row row) {
+        if (row.structure != null && row.structure.effective != null) return row.structure.effective.timing.sourceStart;
+        if (row.score != null) return row.score.timing.sourceStart;
+        return row.roles == null ? row.timing.sourceStart : row.roles.effective.timing.sourceStart;
+    }
+
+    private static ClusterNote clusterNote(Row row) {
+        int pitch = row.roles != null ? row.roles.effective.note.pitch()
+                : row.structure != null && row.structure.effective != null ? row.structure.effective.note.pitch()
+                : row.score != null ? row.score.note.pitch() : row.pitch;
+        return new ClusterNote(row.id, pitch, ReconstructionDescribe.pitch(pitch), row.roles == null ? null : row.roles.role,
+                allocatedLane(row), row.status);
     }
 
     public static JsonObject diff(Path oldWork, Path newWork, String spanOption) throws IOException {
@@ -603,6 +640,9 @@ public final class ReconstructionTrace {
         var raw = new LinkedHashMap<String, Raw>();
         var reductions = group(score.reductions(), reduction -> ReconstructionStages.midiNoteKey(reduction.note()));
         var instances = new HashMap<String, Integer>();
+        var consumedDrops = new HashMap<S3kReconstruction.Reduction, Integer>();
+        var dropCounts = new HashMap<S3kReconstruction.Reduction, Integer>();
+        for (var reduction : score.reductions()) dropCounts.merge(reduction, 1, Integer::sum);
         var replacedParts = score.inputs() == null || score.inputs().externalNotes() == null
                 ? Map.<Integer, ExternalTranscribers.PartNotes>of() : score.inputs().externalNotes();
         for (var note : score.source().notes()) {
@@ -612,9 +652,16 @@ public final class ReconstructionTrace {
             String decision = null;
             for (var reduction : decisions) {
                 var cut = reduction.note();
-                if (cut.velocity() == note.velocity() && (cut.endUs() == note.endUs()
-                        || cut.endUs() == Math.min(note.endUs(), score.durationUs())))
-                    decision = reduction.change().name().toLowerCase(Locale.ROOT).replace('_', '-');
+                if (cut.velocity() != note.velocity() || cut.endUs() != Math.min(note.endUs(), score.durationUs())
+                        && cut.endUs() != note.endUs()) continue;
+                boolean drop = reduction.change() == S3kReconstruction.Change.OCTAVE_DOUBLE
+                        || reduction.change() == S3kReconstruction.Change.PITCH_OUT_OF_RANGE;
+                if (drop && consumedDrops.getOrDefault(reduction, 0) >= dropCounts.get(reduction)) continue;
+                decision = reduction.change().name().toLowerCase(Locale.ROOT).replace('_', '-');
+                if (drop) {
+                    consumedDrops.merge(reduction, 1, Integer::sum);
+                    break;
+                }
             }
             // Preparation numbers only surviving notes. Preserve those IDs when a duplicate was discarded.
             boolean excluded = "octave-double".equals(decision) || "pitch-out-of-range".equals(decision);
@@ -786,7 +833,7 @@ public final class ReconstructionTrace {
         for (int i = 0; i < args.length; i++) {
             String flag = args[i];
             if (!options.contains(flag)) throw new IllegalArgumentException("Unknown option " + flag);
-            String value = flag.equals("--json") ? "" : ++i < args.length ? args[i] : null;
+            String value = List.of("--json", "--by-onset").contains(flag) ? "" : ++i < args.length ? args[i] : null;
             if (value == null) throw new IllegalArgumentException("Missing value for " + flag);
             if (flags.putIfAbsent(flag, value) != null) throw new IllegalArgumentException("Duplicate option " + flag);
         }
@@ -848,6 +895,16 @@ public final class ReconstructionTrace {
             if (pcm.available())
                 out.printf("%d changed PCM frames%s%n", pcm.changedFrames(),
                         pcm.firstFrame() == null ? "" : " (first sample frame " + pcm.firstFrame() + ")");
+        } else if (result.has("clusters")) {
+            for (var entry : result.getAsJsonArray("clusters")) {
+                var cluster = JSON.fromJson(entry, AttackCluster.class);
+                out.printf(Locale.ROOT, "%.3f s source (%.3f s project) part %d", cluster.sourceStart,
+                        cluster.projectStart, cluster.part);
+                for (var note : cluster.notes)
+                    out.printf(" %s%s[%s %s %s %s]", note.name, "FM1".equals(note.lane) ? "*" : "",
+                            note.role == null ? "-" : note.role, note.lane == null ? "-" : note.lane, note.fate, note.id);
+                out.println();
+            }
         } else {
             for (var entry : result.getAsJsonArray("notes")) print(out, "", JSON.fromJson(entry, Row.class));
             out.printf("%d notes%n", result.getAsJsonArray("notes").size());

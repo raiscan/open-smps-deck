@@ -425,7 +425,8 @@ final class S3kReconstruction {
 
     static int voicedDuration(ReconstructionAllocation.Entry entry, ReconstructionVoicing.Articulation articulation) {
         int ticks = entry.endTick() - entry.startTick();
-        if ("DAC".equals(entry.lane()) || ("PSG3".equals(entry.lane()) && entry.role() == ReconstructionRoles.Role.drums)
+        var bend = entry.note().bend();
+        if (bend != null && Boolean.TRUE.equals(bend.glide()) || "DAC".equals(entry.lane()) || ("PSG3".equals(entry.lane()) && entry.role() == ReconstructionRoles.Role.drums)
                 || entry.note().source().equals(ReconstructionFastRuns.REASON)
                 || entry.note().source().equals(ReconstructionRetriggers.REASON)) return ticks;
         return articulation.duration(ticks);

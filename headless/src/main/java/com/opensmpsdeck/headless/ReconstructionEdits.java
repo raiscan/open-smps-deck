@@ -9,22 +9,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionStages.*;
+import static com.opensmpsdeck.headless.ReconstructionTimeMap.TimeBase;
 
 final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, setRole, pinLane, unmerge, bend, swapRoles, setVelocity }
-    enum Status { applied, orphaned, invalid, conflict }
+    enum Kind { insertNote, deleteNote, setNote, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity }
+    enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end) {
         boolean contains(double time) { return start <= time && time < end; }
@@ -41,21 +44,32 @@ final class ReconstructionEdits {
         }
     }
 
+    enum Shape { linear, easeIn, easeOut, smooth }
+
     record Intent(String id, Kind kind, JsonObject json, Integer part, Span span, Integer pitchMin, Integer pitchMax,
                   List<String> noteIds, Attack attack, Double start, Double end, Integer pitch, Integer velocity,
                   Double scale, Boolean noExtension, Role role, Role fromRole,
-                  String lane, List<ReconstructionBends.Point> points) {
+                  String lane, List<ReconstructionBends.Point> points, List<Attack> selectors,
+                  Integer voice, Role others, TimeBase timeBase, Shape shape, Double glideSeconds) {
         String insertedId() { return "edit-" + id; }
         String tag() { return "edit:" + id; }
 
         Stage firstStage() {
             return switch (kind) {
-                case insertNote, deleteNote, setNote, bend, setVelocity -> Stage.TRANSCRIBE;
+                case insertNote, deleteNote, setNote, bend, glide, setVelocity -> Stage.TRANSCRIBE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
             };
         }
 
         boolean changesAttack() { return start != null || end != null || pitch != null; }
+
+        double inBase(double source, ReconstructionTimeMap timeline) {
+            return timeBase == TimeBase.project ? timeline.project(source) : source;
+        }
+
+        double toSource(double time, ReconstructionTimeMap timeline) {
+            return timeBase == TimeBase.project ? timeline.source(time) : time;
+        }
 
         boolean matchesSpan(Note note, double sourceStart) {
             return part == note.part() && span.contains(sourceStart)
@@ -109,6 +123,9 @@ final class ReconstructionEdits {
         List<Outcome> all() { return stages.values().stream().flatMap(List::stream).toList(); }
     }
 
+    record Resolution(String editId, String noteId, Role incomingRole, Role resultingRole,
+                      boolean satisfied, Double sourceStart, Double projectStart) {}
+
     record Pin(String lane, String editId, int order) {
         String tag() { return "edit:" + editId; }
     }
@@ -161,17 +178,18 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
             case setNote -> List.of("noteId", "selector", "start", "end", "pitch", "velocity", "noExtension");
-            case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane");
-            case swapRoles -> List.of("span", "part", "from", "to");
-            case setVelocity -> List.of("span", "part", "pitchMin", "pitchMax", "velocity", "scale");
+            case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
+            case swapRoles -> List.of("span", "part", "from", "to", "voice");
+            case setVelocity -> List.of("span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "lane");
-            case unmerge -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax");
+            case unmerge -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "voice");
             case bend -> List.of("noteId", "selector", "points");
+            case glide -> List.of("fromNoteId", "toNoteId", "shape", "seconds");
         });
         fields(json, at, allowed);
 
@@ -185,11 +203,7 @@ final class ReconstructionEdits {
             for (String key : List.of("noteId", "noteIds", "span", "part", "pitchMin", "pitchMax", "fromRole"))
                 require(!json.has(key), targetAt, "cannot combine selector with " + key);
             if (target.has("at")) {
-                fields(target, targetAt, Set.of("at", "pitch", "part"));
-                Integer targetPitch = integer(target, "pitch", targetAt, 0, 127);
-                Integer targetPart = integer(target, "part", targetAt, 0, Integer.MAX_VALUE);
-                require(targetPitch != null && targetPart != null, targetAt, "expected at, pitch and part");
-                attack = new Attack(time(target.get("at"), targetAt + ".at"), targetPitch, targetPart);
+                attack = attack(target, targetAt, null);
             } else {
                 require(kind == Kind.setRole || kind == Kind.unmerge, targetAt, "expected at, pitch and part");
                 fields(target, targetAt, kind == Kind.setRole
@@ -221,6 +235,22 @@ final class ReconstructionEdits {
                 || lane.equals("DAC"), at + ".lane", "expected FM1–FM5, PSG1–PSG3 or DAC");
         require(lane == null || role != Role.drop, at + ".lane", "cannot pin a dropped role");
 
+        var selectors = new ArrayList<Attack>();
+        if (json.has("selectors")) {
+            for (String key : List.of("selector", "noteIds", "span", "pitchMin", "pitchMax"))
+                require(!json.has(key), at + ".selectors", "cannot combine selectors with " + key);
+            var values = array(json, "selectors", at);
+            require(!values.isEmpty(), at + ".selectors", "expected at least one point selector");
+            for (int i = 0; i < values.size(); i++) {
+                String where = at + ".selectors[" + i + "]";
+                require(values.get(i).isJsonObject(), where, "expected a selector object");
+                selectors.add(attack(values.get(i).getAsJsonObject(), where, part));
+            }
+        }
+        TimeBase base = json.has("timeBase") ? choice(TimeBase.class, json, "timeBase", at) : TimeBase.source;
+        Role others = json.has("others") ? choice(Role.class, json, "others", at) : null;
+        Shape shape = json.has("shape") ? choice(Shape.class, json, "shape", at) : Shape.linear;
+        Double glideSeconds = time(json, "seconds", at);
         Span span = null;
         List<String> ids = List.of();
         switch (kind) {
@@ -235,6 +265,11 @@ final class ReconstructionEdits {
                 require(kind != Kind.setNote || start != null || end != null || pitch != null
                                 || velocity != null || noExtension != null, at,
                         "setNote requires start, end, pitch, velocity or noExtension");
+            }
+            case glide -> {
+                ids = List.of(string(json, "fromNoteId", at), string(json, "toNoteId", at));
+                require(!ids.getFirst().equals(ids.getLast()), at + ".toNoteId", "expected two distinct note IDs");
+                require(glideSeconds == null || glideSeconds > 0, at + ".seconds", "expected a positive duration");
             }
             case swapRoles -> {
                 fromRole = choice(Role.class, json, "from", at);
@@ -251,7 +286,7 @@ final class ReconstructionEdits {
             case setRole, pinLane, unmerge -> {
                 require(kind != Kind.setRole || role != null, at + ".role", "required");
                 require(kind != Kind.pinLane || lane != null, at + ".lane", "required");
-                if (attack != null) break;
+                if (attack != null || !selectors.isEmpty()) break;
                 if (json.has("noteIds") || kind == Kind.pinLane) {
                     require(!json.has("span") && part == null && min == null && max == null, at + ".noteIds",
                             "use noteIds or span with part and optional pitch bounds");
@@ -286,8 +321,50 @@ final class ReconstructionEdits {
                 prior = seconds;
             }
         }
+        Integer voice = null;
+        if (json.has("voice")) {
+            require(span != null, at + ".voice", "requires a span");
+            var value = json.get("voice");
+            if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+                voice = switch (value.getAsString()) {
+                    case "top" -> 0;
+                    case "bottom" -> -1;
+                    default -> throw new IllegalArgumentException(at + ".voice: expected top, bottom or a zero-based index");
+                };
+            } else voice = integer(json, "voice", at, 0, Integer.MAX_VALUE);
+        }
+        require(others == null || voice != null, at + ".others", "requires a voice filter");
+        require(others == null || lane == null, at + ".lane", "use a separate lane pin when assigning others");
         return new Intent(id, kind, json.deepCopy(), part, span, min, max, ids, attack, start, end, pitch,
-                velocity, scale, noExtension, role, fromRole, lane, List.copyOf(points));
+                velocity, scale, noExtension, role, fromRole, lane, List.copyOf(points), List.copyOf(selectors),
+                voice, others, base, shape, glideSeconds);
+    }
+
+    private static Attack attack(JsonObject target, String at, Integer defaultPart) {
+        fields(target, at, Set.of("at", "pitch", "part"));
+        Integer pitch = integer(target, "pitch", at, 0, 127);
+        Integer part = integer(target, "part", at, 0, Integer.MAX_VALUE);
+        if (part == null) part = defaultPart;
+        require(pitch != null && part != null, at, "expected at, pitch and part");
+        return new Attack(time(target.get("at"), at + ".at"), pitch, part);
+    }
+
+    private static Map<String, Boolean> register(Intent edit, List<Note> notes,
+                                                 Predicate<String> acceptsTarget) {
+        var ranked = new LinkedHashMap<String, Boolean>();
+        if (edit.voice == null) {
+            for (var note : notes) ranked.put(note.id(), true);
+            return ranked;
+        }
+        for (var cluster : ReconstructionOnsetClusters.group(notes, Note::part, Note::start)) {
+            var ordered = cluster.notes().stream().sorted(Comparator.comparingInt(Note::pitch).reversed()
+                    .thenComparingDouble(Note::start).thenComparing(Note::id)).toList();
+            int index = edit.voice == -1 ? ordered.size() - 1 : edit.voice;
+            if (index >= ordered.size() || !acceptsTarget.test(ordered.get(index).id())) continue;
+            for (int i = 0; i < ordered.size(); i++)
+                if (i == index || edit.others != null) ranked.put(ordered.get(i).id(), i == index);
+        }
+        return ranked;
     }
 
     private static boolean tonalRole(Role role) {
@@ -309,21 +386,19 @@ final class ReconstructionEdits {
         var notes = new LinkedHashMap<String, Note>();
         for (var note : score.notes()) notes.put(note.id(), note);
         var changed = new LinkedHashSet<String>();
+        var timeline = ReconstructionTimeMap.of(score);
         for (Intent edit : intents) {
             if (edit.firstStage() != Stage.TRANSCRIBE) continue;
             if (edit.kind == Kind.setVelocity) {
-                var affected = new ArrayList<String>();
-                notes.replaceAll((id, note) -> {
-                    if (!edit.matchesSpan(note, note.start())) return note;
-                    affected.add(id);
-                    return edit.level(note);
-                });
+                var affected = List.copyOf(register(edit, notes.values().stream()
+                        .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(), id -> true).keySet());
+                for (String id : affected) notes.computeIfPresent(id, (key, note) -> edit.level(note));
                 outcomes.add(affected.isEmpty() ? orphan(edit, List.of())
                         : new Outcome(edit.id, edit.kind, Status.applied, List.copyOf(affected), null, null, null));
                 continue;
             }
             List<String> requested = edit.attack == null ? edit.noteIds
-                    : notes.values().stream().filter(note -> edit.attack.matches(note, note.start())).map(Note::id).toList();
+                    : notes.values().stream().filter(note -> edit.attack.matches(note, edit.inBase(note.start(), timeline))).map(Note::id).toList();
             if (edit.attack != null && requested.size() != 1) {
                 // Deletions can also resolve against new notes generated during roles.
                 if (edit.kind != Kind.deleteNote || !requested.isEmpty())
@@ -346,7 +421,8 @@ final class ReconstructionEdits {
                             continue;
                         }
                         require(before == null, at + ".id", "note ID already exists: " + id);
-                        var note = new Note(id, edit.part, edit.start, edit.end, edit.pitch,
+                        var note = new Note(id, edit.part, edit.toSource(edit.start, timeline),
+                                edit.toSource(edit.end, timeline), edit.pitch,
                                 edit.velocity == null ? 96 : edit.velocity, "edit", 1);
                         validateNote(note, score, part, at);
                         validateRoleLane(score, note, edit.role, edit.lane, at);
@@ -359,20 +435,32 @@ final class ReconstructionEdits {
                             break;
                         }
                         require(before.run() == null, at + ".noteId", "setNote expects a single attack");
-                        var note = new Note(id, before.part(), edit.start == null ? before.start() : edit.start,
-                                edit.end == null ? before.end() : edit.end,
+                        var note = new Note(id, before.part(), edit.start == null ? before.start() : edit.toSource(edit.start, timeline),
+                                edit.end == null ? before.end() : edit.toSource(edit.end, timeline),
                                 edit.pitch == null ? before.pitch() : edit.pitch,
                                 edit.velocity == null ? before.velocity() : edit.velocity, before.source(), before.confidence());
                         validateNote(note, score, part(score, note.part()), at);
                         notes.put(id, note);
                     }
-                    case bend -> notes.put(id, before.withBend(bend(edit, before, at, ReconstructionTimeMap.of(score))));
+                    case bend -> notes.put(id, before.withBend(bend(edit, before, at, edit.points.stream()
+                            .map(point -> new ReconstructionBends.Point(edit.toSource(point.time(), timeline), point.cents()))
+                            .toList(), timeline)));
+                    case glide -> {
+                        Note target = notes.get(requested.getLast());
+                        if (target == null) {
+                            outcomes.add(orphan(edit, List.of(requested.getLast())));
+                            continue;
+                        }
+                        require(!part(score, before.part()).drums(), at + ".fromNoteId", "glide requires a tonal part");
+                        notes.put(id, glide(edit, before, target, at, timeline));
+                    }
                     default -> throw new AssertionError(edit.kind);
                 }
                 boolean timingOrPitch = edit.kind != Kind.setNote || edit.changesAttack();
                 if (timingOrPitch) changed.add(id);
                 outcomes.add(new Outcome(edit.id, edit.kind, Status.applied, List.of(id), null, null,
-                        edit.kind == Kind.deleteNote || edit.kind == Kind.setNote && timingOrPitch ? before : null));
+                        edit.kind == Kind.deleteNote || edit.kind == Kind.glide
+                                || edit.kind == Kind.setNote && timingOrPitch ? before : null));
             } catch (IllegalArgumentException error) {
                 outcomes.add(invalid(edit, id, error));
             }
@@ -395,6 +483,13 @@ final class ReconstructionEdits {
     ReconstructionRoles.Result assignRoles(Score score, ReconstructionStructure.Result structure, double rate,
                                            ReconstructionRolePlan plan, ReconstructionLeadContinuity continuity,
                                            List<Outcome> scoreOutcomes, List<Outcome> outcomes) {
+        return assignRoles(score, structure, rate, plan, continuity, scoreOutcomes, outcomes, null);
+    }
+
+    ReconstructionRoles.Result assignRoles(Score score, ReconstructionStructure.Result structure, double rate,
+                                           ReconstructionRolePlan plan, ReconstructionLeadContinuity continuity,
+                                           List<Outcome> scoreOutcomes, List<Outcome> outcomes,
+                                           List<Resolution> resolutions) {
         var timeline = ReconstructionTimeMap.of(score);
         var written = new LinkedHashSet<String>();
         var suppressed = new ArrayList<Note>();
@@ -415,12 +510,18 @@ final class ReconstructionEdits {
         var roles = ReconstructionRoles.assign(structure, score.source().parts(), rate, plan,
                 score.usesBeatGrid() ? score.beatMap() : null, continuity, score.inputs().leadPart(), fixedGates,
                 note -> !written.contains(note.id()) && ReconstructionStructure.suppressed(suppressed, note, note.start(), .035));
-        return applyRoles(score, structure, roles, scoreOutcomes, outcomes);
+        return applyRoles(score, structure, roles, scoreOutcomes, outcomes, resolutions);
     }
 
     ReconstructionRoles.Result applyRoles(Score score, ReconstructionStructure.Result structure,
                                           ReconstructionRoles.Result roles, List<Outcome> scoreOutcomes,
                                           List<Outcome> outcomes) {
+        return applyRoles(score, structure, roles, scoreOutcomes, outcomes, null);
+    }
+
+    private ReconstructionRoles.Result applyRoles(Score score, ReconstructionStructure.Result structure,
+                                                  ReconstructionRoles.Result roles, List<Outcome> scoreOutcomes,
+                                                  List<Outcome> outcomes, List<Resolution> resolutions) {
         if (isEmpty()) return roles;
         var timeline = ReconstructionTimeMap.of(score);
         var written = new LinkedHashMap<String, Note>();
@@ -455,35 +556,53 @@ final class ReconstructionEdits {
             List<String> requested;
             if (scoreEdit) {
                 requested = edit.kind == Kind.insertNote ? List.of(edit.insertedId()) : scoreResult.noteIds;
-            } else if (edit.span != null || edit.attack != null) {
-                var matching = new ArrayList<String>();
-                var displaced = new ArrayList<String>();
+            } else if (edit.span != null || edit.attack != null || !edit.selectors.isEmpty()) {
+                var candidates = new ArrayList<Note>();
                 for (var decision : decisions.values()) {
-                    if (deleted.contains(decision.note().id())) continue;
-                    Note note = written.getOrDefault(decision.note().id(), decision.note());
-                    double sourceStart = timeline.source(note.start());
-                    if (edit.attack != null ? !edit.attack.matches(note, sourceStart) : !edit.matchesSpan(note, sourceStart))
-                        continue;
-                    if (deferredDelete && written.containsKey(note.id())) continue;
-                    if (edit.fromRole == null || edit.fromRole == decision.role()) matching.add(note.id());
-                    else if (edit.kind == Kind.swapRoles && edit.role == decision.role()) displaced.add(note.id());
+                    String id = decision.note().id();
+                    if (deleted.contains(id) || deferredDelete && written.containsKey(id)) continue;
+                    candidates.add(timeline.sourceNote(written.getOrDefault(id, decision.note())));
                 }
-                if (edit.attack != null && matching.size() != 1) {
-                    outcomes.add(invalidAttack(edit, matching));
-                    continue;
+                if (edit.span != null) {
+                    var ranked = register(edit, candidates.stream()
+                            .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(),
+                            id -> edit.kind != Kind.setRole || matchesRole(edit, decisions.get(id).role(), edit.role));
+                    var matching = new ArrayList<String>();
+                    var displaced = new ArrayList<String>();
+                    for (var entry : ranked.entrySet()) {
+                        String id = entry.getKey();
+                        Role incoming = decisions.get(id).role();
+                        Role target = entry.getValue() ? edit.role : edit.others;
+                        if (edit.kind == Kind.swapRoles && edit.role == incoming) displaced.add(id);
+                        else if (!entry.getValue() || matchesRole(edit, incoming, target)) {
+                            matching.add(id);
+                            if (target != null) selectedRoles.put(id, target);
+                        }
+                    }
+                    if (!matching.isEmpty() && edit.kind == Kind.swapRoles) {
+                        displaced.forEach(id -> selectedRoles.put(id, Role.harmony));
+                        matching.addAll(displaced);
+                    }
+                    requested = matching;
+                } else {
+                    var points = edit.attack != null ? List.of(edit.attack) : edit.selectors;
+                    var matching = new LinkedHashSet<String>();
+                    for (var point : points) {
+                        var found = candidates.stream().filter(note -> point.matches(note, edit.inBase(note.start(), timeline))
+                                && matchesRole(edit, decisions.get(note.id()).role(), edit.role)).map(Note::id).toList();
+                        if (found.size() == 1) matching.add(found.getFirst());
+                        else outcomes.add(invalidAttack(edit, found));
+                    }
+                    if (matching.isEmpty()) continue;
+                    requested = List.copyOf(matching);
                 }
-                if (!matching.isEmpty() && edit.kind == Kind.swapRoles) {
-                    matching.forEach(id -> selectedRoles.put(id, edit.role));
-                    displaced.forEach(id -> selectedRoles.put(id, Role.harmony));
-                    matching.addAll(displaced);
-                }
-                requested = matching;
             } else {
-                requested = edit.fromRole == null ? edit.noteIds : edit.noteIds.stream().filter(id ->
-                        !decisions.containsKey(id) || decisions.get(id).role() == edit.fromRole).toList();
+                requested = edit.noteIds.stream().filter(id -> !decisions.containsKey(id)
+                        || matchesRole(edit, decisions.get(id).role(), edit.role)).toList();
             }
             var affected = new LinkedHashSet<String>();
             var missing = new ArrayList<String>();
+            var satisfied = new ArrayList<String>();
             for (String id : requested) {
                 var decision = decisions.get(id);
                 if (decision == null || deleted.contains(id)) {
@@ -497,6 +616,17 @@ final class ReconstructionEdits {
                     }
                     Role role = deferredDelete ? Role.drop : selectedRoles.getOrDefault(id, edit.role);
                     validateRoleLane(score, decision.note(), role, edit.lane, FILE + "." + edit.id);
+                    Role incoming = decision.role();
+                    var pin = pins.get(id);
+                    boolean alreadySatisfied = role != null && incoming == role
+                            && decision.mergedInto() == null && !mergeGroups.containsKey(id)
+                            && !ReconstructionLeadContinuity.hasReason(decision, "isolated-harmony-octave-double")
+                            && (edit.lane == null || pin != null && edit.lane.equals(pin.lane));
+                    if (edit.kind == Kind.setRole && edit.fromRole != null && alreadySatisfied) {
+                        satisfied.add(id);
+                        resolve(resolutions, edit, written.getOrDefault(id, decision.note()), timeline, incoming, incoming, true);
+                        continue;
+                    }
                     if (edit.kind == Kind.pinLane && decision.role() == Role.drop && written.get(id) == null)
                         throw new IllegalArgumentException(FILE + "." + edit.id + ".noteIds: no written attack to pin for " + id);
                     boolean merge = decision.mergedInto() != null || mergeGroups.containsKey(id)
@@ -510,6 +640,8 @@ final class ReconstructionEdits {
                         decisions.put(id, new ReconstructionRoles.Decision(decision.note(), role, edit.tag(), null));
                     }
                     if (edit.lane != null) pins.put(id, new Pin(edit.lane, edit.id, order));
+                    resolve(resolutions, edit, written.getOrDefault(id, decision.note()), timeline, incoming,
+                            decisions.get(id).role(), alreadySatisfied);
                     affected.add(id);
                 } catch (IllegalArgumentException error) {
                     outcomes.add(invalid(edit, id, error));
@@ -517,11 +649,25 @@ final class ReconstructionEdits {
             }
             if (!affected.isEmpty() && (!scoreEdit || !affected.equals(Set.copyOf(requested))))
                 outcomes.add(new Outcome(edit.id, edit.kind, Status.applied, List.copyOf(affected), null, null, null));
+            if (!satisfied.isEmpty())
+                outcomes.add(new Outcome(edit.id, edit.kind, Status.satisfied, List.copyOf(satisfied), null,
+                        "target role is already assigned", null));
             if (!scoreEdit && (requested.isEmpty() || !missing.isEmpty())) outcomes.add(orphan(edit, missing));
         }
         return new ReconstructionRoles.Result(roles.version(), roles.harmonyMaxHz(), decisions.values().stream()
                 .sorted(java.util.Comparator.comparing(ReconstructionRoles.Decision::note, NOTE_ORDER)).toList(),
                 roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins);
+    }
+
+    private static boolean matchesRole(Intent edit, Role incoming, Role target) {
+        return edit.fromRole == null || edit.fromRole == incoming || edit.kind == Kind.setRole && incoming == target;
+    }
+
+    private static void resolve(List<Resolution> resolutions, Intent edit, Note note, ReconstructionTimeMap timeline,
+                                Role incoming, Role resulting, boolean satisfied) {
+        if (resolutions == null) return;
+        resolutions.add(new Resolution(edit.id, note.id(), incoming, resulting, satisfied,
+                timeline.source(note.start()), note.start()));
     }
 
     private static void restore(Intent edit, String id, Map<String, ReconstructionRoles.Decision> decisions,
@@ -560,18 +706,50 @@ final class ReconstructionEdits {
         return outcomes;
     }
 
-    private static ReconstructionBends.Bend bend(Intent edit, Note note, String at, ReconstructionTimeMap time) {
+    private static Note glide(Intent edit, Note from, Note to, String at, ReconstructionTimeMap timeline) {
+        require(from.part() == to.part() && from.start() < to.start() && from.pitch() != to.pitch()
+                        && to.run() == null && !"external".equals(to.source()),
+                at + ".toNoteId", "expected a later single attack of a different pitch in the same part");
+        require(ReconstructionOverrides.tick(timeline.project(to.start()))
+                        - ReconstructionOverrides.tick(timeline.project(from.start())) >= 4,
+                at + ".toNoteId", "glide requires at least four project ticks between attacks");
+        double landing = edit.inBase(to.start(), timeline);
+        double length = landing - edit.inBase(from.start(), timeline);
+        double duration = edit.glideSeconds == null ? Math.min(.12, length) : edit.glideSeconds;
+        require(duration <= length + 1e-9, at + ".seconds", "glide must fit between the two attacks");
+        double begin = Math.max(edit.inBase(from.start(), timeline), landing - duration);
+        int cents = (to.pitch() - from.pitch()) * 100;
+        var points = new ArrayList<ReconstructionBends.Point>();
+        int segments = edit.shape == Shape.linear ? 1 : 8;
+        for (int i = 0; i <= segments; i++) {
+            double t = i / (double) segments;
+            double progress = switch (edit.shape) {
+                case linear -> t;
+                case easeIn -> t * t;
+                case easeOut -> t * (2 - t);
+                case smooth -> t * t * (3 - 2 * t);
+            };
+            double time = i == segments ? to.start() : Math.max(from.start(),
+                    edit.toSource(begin + t * (landing - begin), timeline));
+            points.add(new ReconstructionBends.Point(time, (int) Math.round(progress * cents)));
+        }
+        var gate = from.withTiming(from.start(), to.start());
+        return gate.withBend(bend(edit, gate, at, points, timeline));
+    }
+
+    private static ReconstructionBends.Bend bend(Intent edit, Note note, String at,
+                                                 List<ReconstructionBends.Point> curve, ReconstructionTimeMap time) {
         require(note.run() == null && !"external".equals(note.source()), at + ".noteId", "bend expects an effective single attack");
-        double overshoot = time.project(edit.points.getLast().time()) - time.project(note.end());
-        require(edit.points.getFirst().time() >= note.start()
+        double overshoot = time.project(curve.getLast().time()) - time.project(note.end());
+        require(curve.getFirst().time() >= note.start()
                         && overshoot <= 1.0 / S3kRenderer.PRESENTATIONS_PER_SECOND + 1e-9,
                 at + ".points", "all point times must be within the note gate [" + note.start() + ", " + note.end() + "]");
-        for (var point : edit.points) {
+        for (var point : curve) {
             int pitch = note.pitch() * 100 + point.cents();
             require(pitch >= 1200 && pitch <= 10600, at + ".points", "curve must stay within S3K pitches 12–106");
         }
         var points = new ArrayList<ReconstructionBends.Point>();
-        for (var point : edit.points) {
+        for (var point : curve) {
             double clamped = Math.min(point.time(), note.end());
             // Several near-gate points can land on the same endpoint. Keep the last value.
             if (!points.isEmpty() && points.getLast().time() == clamped) points.removeLast();
@@ -584,7 +762,7 @@ final class ReconstructionEdits {
         int last = points.getLast().cents();
         double delay = points.stream().filter(p -> p.cents() != first).findFirst().map(p -> p.time() - note.start()).orElse(0.0);
         return new ReconstructionBends.Bend(last >= first ? ReconstructionBends.Kind.UP : ReconstructionBends.Kind.DOWN,
-                delay, 1, points, edit.tag());
+                delay, 1, points, edit.tag(), edit.kind == Kind.glide ? true : null);
     }
 
     private static MidiScore.Part part(Score score, int id) {

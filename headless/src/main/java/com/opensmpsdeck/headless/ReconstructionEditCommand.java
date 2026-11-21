@@ -33,6 +33,11 @@ public final class ReconstructionEditCommand {
     private ReconstructionEditCommand() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
+        var arguments = new ArrayList<>(List.of(args));
+        boolean dryRun = arguments.size() > 2 && arguments.get(2).equals("--dry-run");
+        dryRun |= arguments.size() > 3 && arguments.getLast().equals("--dry-run");
+        if (dryRun) arguments.remove("--dry-run");
+        args = arguments.toArray(String[]::new);
         if (args.length < 2 || args.length > 4)
             throw new IllegalArgumentException("reconstruct edit expects WORK_DIR add JSON | add --file BATCH | list | remove ID");
         JsonElement edit = null;
@@ -53,11 +58,18 @@ public final class ReconstructionEditCommand {
                 }
             } else throw new IllegalArgumentException("Only add or remove takes an argument");
         }
-        out.println(JSON.toJson(run(Path.of(args[0]), args[1], edit, id, false, (a, b, c) -> {})));
+        out.println(JSON.toJson(run(Path.of(args[0]), args[1], edit, id, false, dryRun, (a, b, c) -> {})));
     }
 
     public static synchronized JsonObject run(Path work, String action, JsonElement edit, String id,
                                               boolean rerun, ReconstructionStages.Progress progress) throws IOException {
+        return run(work, action, edit, id, rerun, false, progress);
+    }
+
+    public static synchronized JsonObject run(Path work, String action, JsonElement edit, String id,
+                                              boolean rerun, boolean dryRun, ReconstructionStages.Progress progress)
+            throws IOException {
+        require(!dryRun || action.equals("add") && !rerun, "dryRun", "requires add without rerun");
         require(Files.isDirectory(work), "workDir", "expected an existing directory");
         if (action.equals("list")) {
             require(edit == null && id == null && !rerun, "list", "does not take edit, id or rerun");
@@ -66,14 +78,16 @@ public final class ReconstructionEditCommand {
         require(action.equals("add") || action.equals("remove"), "action", "expected add, list or remove");
         require(action.equals("add") ? edit != null && id == null : edit == null && id != null,
                 action, action.equals("add") ? "requires edit" : "requires id");
+        // Preview publishes no artifacts, including the lock file.
+        if (dryRun) return change(work, action, edit, id, false, true, progress);
         try (var channel = FileChannel.open(work.resolve(LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
              var lock = channel.lock()) {
-            return change(work, action, edit, id, rerun, progress);
+            return change(work, action, edit, id, rerun, false, progress);
         }
     }
 
     private static JsonObject change(Path work, String action, JsonElement edit, String id, boolean rerun,
-                                     ReconstructionStages.Progress progress) throws IOException {
+                                     boolean dryRun, ReconstructionStages.Progress progress) throws IOException {
         var intents = new ArrayList<>(ReconstructionEdits.read(work).intents());
         var changed = new ArrayList<ReconstructionEdits.Intent>();
         if (action.equals("add")) {
@@ -102,6 +116,19 @@ public final class ReconstructionEditCommand {
                 ? changed.stream().map(ReconstructionEdits.Intent::firstStage).min(Comparator.naturalOrder()).orElseThrow()
                 : ReconstructionStages.Stage.TRANSCRIBE;
         String stage = from.name().toLowerCase(Locale.ROOT);
+        if (dryRun) {
+            var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+            var resolutions = new ArrayList<ReconstructionEdits.Resolution>();
+            ReconstructionStages.previewEdits(work, from, updated, prior, outcomes, resolutions);
+            var ids = new HashSet<>(changed.stream().map(ReconstructionEdits.Intent::id).toList());
+            var preview = new JsonObject();
+            preview.addProperty("dryRun", true);
+            preview.addProperty("from", stage);
+            preview.add("outcomes", JSON.toJsonTree(outcomes.stream().filter(row -> ids.contains(row.id())).toList()));
+            preview.add("notes", new GsonBuilder().serializeNulls().create()
+                    .toJsonTree(resolutions.stream().filter(row -> ids.contains(row.editId())).toList()));
+            return preview;
+        }
         var args = new ArrayList<>(List.of("--from", stage, work.toString()));
         Path rolesFile = work.resolve("roles.json");
         if (rerun && Files.isRegularFile(rolesFile)) {
@@ -119,9 +146,10 @@ public final class ReconstructionEditCommand {
         if (rerun) {
             var after = ReconstructionTrace.read(work);
             var journal = action.equals("add") ? ReconstructionEdits.Journal.read(work) : prior;
+            var timeline = ReconstructionTimeMap.of(ReconstructionStages.readScore(work.resolve("score.json")));
             ReconstructionEdits.Span span = null;
             for (var intent : changed) {
-                var range = span(intent, journal, before, after);
+                var range = span(intent, journal, before, after, timeline);
                 if (range != null) span = range.union(span);
             }
             var diff = ReconstructionTrace.diff(before, after, span == null ? null
@@ -131,7 +159,10 @@ public final class ReconstructionEditCommand {
                     && row.getAsJsonObject().get("outsideSpan").getAsBoolean()).count();
             diff.addProperty("changedNotes", changes.size());
             diff.addProperty("outsideSpanChanges", outside);
-            if (span != null) diff.add("span", JSON.toJsonTree(List.of(span.start(), span.end())));
+            if (span != null) {
+                diff.add("span", JSON.toJsonTree(List.of(span.start(), span.end())));
+                diff.add("projectSpan", JSON.toJsonTree(List.of(timeline.project(span.start()), timeline.project(span.end()))));
+            }
             result.add("traceDiff", diff);
         }
         return result;
@@ -145,9 +176,12 @@ public final class ReconstructionEditCommand {
 
     private static ReconstructionEdits.Span span(ReconstructionEdits.Intent edit, ReconstructionEdits.Journal journal,
                                                   Map<String, ReconstructionTrace.Row> before,
-                                                  Map<String, ReconstructionTrace.Row> after) {
-        if (edit.span() != null) return edit.span();
+                                                  Map<String, ReconstructionTrace.Row> after,
+                                                  ReconstructionTimeMap timeline) {
         var range = edit.explicitSpan();
+        if (range != null) range = new ReconstructionEdits.Span(edit.toSource(range.start(), timeline),
+                edit.toSource(range.end(), timeline));
+        if (edit.span() != null) return range;
         var ids = new java.util.LinkedHashSet<>(edit.noteIds());
         if (edit.kind() == ReconstructionEdits.Kind.insertNote) ids.add(edit.insertedId());
         for (var outcome : journal.all())
@@ -155,7 +189,8 @@ public final class ReconstructionEditCommand {
                 ids.addAll(outcome.noteIds());
         if (edit.attack() != null && ids.isEmpty()) {
             double at = edit.attack().at(), tolerance = ReconstructionEdits.Attack.TOLERANCE;
-            range = new ReconstructionEdits.Span(Math.max(0, at - tolerance), at + tolerance).union(range);
+            range = new ReconstructionEdits.Span(edit.toSource(Math.max(0, at - tolerance), timeline),
+                    edit.toSource(at + tolerance, timeline)).union(range);
         }
         for (var notes : List.of(before, after)) for (String id : ids) {
             var row = notes.get(id);

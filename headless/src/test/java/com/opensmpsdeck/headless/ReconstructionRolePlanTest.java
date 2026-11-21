@@ -305,7 +305,7 @@ class ReconstructionRolePlanTest {
 
         var plan = work.resolve("roleplan.json");
         run("plan-template", work.toString(), "--out", plan.toString());
-        assertEquals(ReconstructionTimeMap.TimeBase.project,
+        assertEquals(ReconstructionTimeMap.TimeBase.source,
                 ReconstructionArtifacts.read(plan, ReconstructionRolePlan.class).timeBase());
         String override = """
                 {"version":1,"timeBase":"project","rules":[
@@ -324,8 +324,17 @@ class ReconstructionRolePlanTest {
         var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
         assertEquals(ReconstructionTimeMap.TimeBase.project, allocation.timeBase());
 
+        var expected = Files.readString(work.resolve("roles.json"));
+        Files.writeString(plan, """
+                {"version":1,"rules":[
+                  {"part":0,"role":"drop","startSeconds":6,"endSeconds":6.125}
+                ]}
+                """);
+        assertTrue(run("roles", work.toString()).contains("ticks [720,735)"));
+        assertEquals(expected, Files.readString(work.resolve("roles.json")));
+
         Files.writeString(plan, override.replace("\"project\"", "\"source\""));
-        assertTrue(call("roles", work.toString()).contains("roleplan.json.timeBase"));
+        assertTrue(call("roles", work.toString()).contains("score duration"));
     }
 
     private void fixture() throws Exception {

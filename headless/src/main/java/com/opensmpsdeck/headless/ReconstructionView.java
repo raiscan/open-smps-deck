@@ -82,7 +82,9 @@ public final class ReconstructionView {
     record Source(Path path, String label, TimeBase base) {}
     record Plot(int left, int width, int sourceTop, Integer renderTop, int pitchHeight, int laneTop) {}
 
-    public record Legend(String path, String source, String time, double start, double end, int pitchMin, int pitchMax,
+    public record Legend(String path, String source, String time, double start, double end,
+                         double sourceStart, double sourceEnd, double projectStart, double projectEnd,
+                         int pitchMin, int pitchMax,
                          boolean warped, boolean harmonicSum, Plot plot, List<DrawnNote> notes,
                          List<Harmonic> harmonics, List<EvidenceNotes.PatchChange> patchChanges,
                          List<HarmonicGuide> harmonicsAt, Levels levels, String ridgesPath) {}
@@ -238,7 +240,8 @@ public final class ReconstructionView {
             }
         }
         var legend = new Legend(output.toAbsolutePath().normalize().toString(), source.label, options.time,
-                span.start, span.end, low, high, timeline.warped(), options.harmonicSum,
+                span.start, span.end, span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source),
+                span.seconds(span.start, TimeBase.project), span.seconds(span.end, TimeBase.project), low, high, timeline.warped(), options.harmonicSum,
                 picture.geometry(), visible, harmonics, patchChanges, guides.isEmpty() ? null : guides, levels,
                 ridgeFile == null ? null : ridgeFile.toAbsolutePath().normalize().toString());
         return new Result(legend, png);

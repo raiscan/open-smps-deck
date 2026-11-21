@@ -30,13 +30,14 @@ public final class ReconstructionAudition {
     static final int FRAME_SAMPLES = STEREO_FRAMES_PER_PRESENTATION * 2;
 
     public record Candidate(String variantId, String name, String output, List<Double> rms) {}
-    public record Result(int startTick, int endTick, boolean solo, List<Double> referenceRms, List<Candidate> candidates) {}
+    public record Result(int startTick, int endTick, boolean solo, List<Double> referenceRms, List<Candidate> candidates,
+                         double sourceStart, double sourceEnd, double projectStart, double projectEnd, String noteId) {}
 
     private ReconstructionAudition() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("Expected audition WORK_DIR [options] OUT.wav");
-        String lane = null;
+        String lane = null, note = null, time = "source";
         Double start = null, end = null, gain = null;
         Boolean solo = null;
         Path reference = null, rmsJson = null;
@@ -52,6 +53,8 @@ public final class ReconstructionAudition {
             String value = args[++i];
             switch (key) {
                 case "--lane" -> lane = value;
+                case "--note" -> note = value;
+                case "--time" -> time = value;
                 case "--start" -> start = Double.parseDouble(value);
                 case "--end" -> end = Double.parseDouble(value);
                 case "--variant" -> variants.add(value);
@@ -61,9 +64,10 @@ public final class ReconstructionAudition {
                 default -> throw new IllegalArgumentException("Unknown audition option " + key);
             }
         }
-        if (start == null || end == null) throw new IllegalArgumentException("Expected --start and --end");
-        var result = run(Path.of(args[0]), lane, start, end, variants, gain, Boolean.TRUE.equals(solo),
+        var result = run(Path.of(args[0]), lane, start, end, time, note, variants, gain, Boolean.TRUE.equals(solo),
                 reference, Path.of(args[args.length - 1]), rmsJson);
+        out.printf(Locale.ROOT, "%.6f–%.6f s source, %.6f–%.6f s project%n",
+                result.sourceStart(), result.sourceEnd(), result.projectStart(), result.projectEnd());
         out.printf(Locale.ROOT, "Ticks %d–%d, %d equal-width RMS bins (dBFS, before A/B matching)%n",
                 result.startTick(), result.endTick(), Math.min(BINS, result.endTick() - result.startTick()));
         for (var candidate : result.candidates()) {
@@ -91,6 +95,44 @@ public final class ReconstructionAudition {
 
     public static Result run(Path work, String lane, double startSeconds, double endSeconds, List<String> variants,
                              Double gain, boolean solo, Path reference, Path output, Path rmsJson) throws IOException {
+        return run(work, lane, startSeconds, endSeconds, "project", null, variants, gain, solo, reference, output, rmsJson);
+    }
+
+    public static Result run(Path work, String lane, Double startSeconds, Double endSeconds, String time, String noteId,
+                             List<String> variants, Double gain, boolean solo, Path reference, Path output, Path rmsJson)
+            throws IOException {
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var timeline = ReconstructionTimeMap.of(score);
+        var base = ReconstructionTimeMap.TimeBase.valueOf(time);
+        if (noteId != null) {
+            if (startSeconds != null || endSeconds != null)
+                throw new IllegalArgumentException("Choose --note or --start and --end");
+            var row = ReconstructionTrace.read(work, score).get(noteId);
+            if (row == null) throw new IllegalArgumentException("Unknown trace note ID " + noteId);
+            var voiced = row.voiced().stream().filter(gate -> gate.evidence().equals("assembled")
+                    && ReconstructionAllocation.FM.contains(gate.lane())).toList();
+            var lanes = voiced.stream().map(ReconstructionTrace.Voiced::lane).distinct().toList();
+            String allocated = row.allocation() == null ? null : row.allocation().lane();
+            String selectedLane = lane != null ? lane : allocated != null && lanes.contains(allocated) ? allocated
+                    : lanes.size() == 1 ? lanes.getFirst() : null;
+            var gates = voiced.stream().filter(gate -> gate.lane().equals(selectedLane))
+                    .map(ReconstructionTrace.Voiced::gate).toList();
+            if (gates.isEmpty())
+                throw new IllegalArgumentException("No assembled FM gate selected for " + noteId
+                        + (lanes.isEmpty() ? ". Assemble the current stages and check the note's fate." : ". FM lanes: " + lanes));
+            lane = selectedLane;
+            startSeconds = gates.stream().mapToDouble(ReconstructionTrace.Timing::projectStart).min().orElseThrow();
+            endSeconds = gates.stream().mapToDouble(ReconstructionTrace.Timing::projectEnd).max().orElseThrow();
+        } else {
+            if (startSeconds == null || endSeconds == null)
+                throw new IllegalArgumentException("Expected --start and --end or --note");
+            if (base == ReconstructionTimeMap.TimeBase.source) {
+                if (!(startSeconds >= 0 && endSeconds > startSeconds && endSeconds <= timeline.sourceDuration()))
+                    throw new IllegalArgumentException("Expected a source span within the reconstruction");
+                startSeconds = timeline.project(startSeconds);
+                endSeconds = timeline.project(endSeconds);
+            }
+        }
         if (rmsJson != null && Files.exists(rmsJson, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(rmsJson.toString());
         if (lane == null || !ReconstructionAllocation.FM.contains(lane))
@@ -112,10 +154,10 @@ public final class ReconstructionAudition {
         var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         if (project.nativeProgram() != null || project.arrangementVersion() < 4 || project.tempo() != 0)
             throw new IllegalArgumentException("Audition requires an editable reconstruction at 60 project ticks per second");
+        final String auditionLane = lane;
         var clips = project.formatVersion() == 6 ? GroupArrangement.flatten(project) : project.clips();
-        if (clips.stream().noneMatch(clip -> lane.equals(clip.lane()) && overlaps(clip, start, end)))
+        if (clips.stream().noneMatch(clip -> auditionLane.equals(clip.lane()) && overlaps(clip, start, end)))
             throw new IllegalArgumentException("No " + lane + " clip overlaps the audition range");
-        var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
         var matches = variants.stream().map(catalogue::match).toList();
         var outputs = new ArrayList<Path>();
@@ -131,7 +173,7 @@ public final class ReconstructionAudition {
         }
 
         var banks = matches.stream().map(match -> ProjectCompiler.compileWithAssets(
-                overlay(project, clips, lane, start, end, match.asset(), gain))).toList();
+                overlay(project, clips, auditionLane, start, end, match.asset(), gain))).toList();
         float[] referencePcm = null;
         if (reference != null) {
             if (ReconstructionStages.usesSteadyReference(work.resolve("report.json"), reference))
@@ -154,7 +196,9 @@ public final class ReconstructionAudition {
             PhraseAudio.write(outputs.get(i), length, pcm, referencePcm);
             results.add(new Candidate(match.variant().id(), match.variant().name(), outputs.get(i).toString(), envelope(pcm)));
         }
-        var result = new Result(start, end, solo, referencePcm == null ? null : envelope(referencePcm), List.copyOf(results));
+        var gate = ReconstructionTrace.ticks(start, end, timeline);
+        var result = new Result(start, end, solo, referencePcm == null ? null : envelope(referencePcm), List.copyOf(results),
+                gate.sourceStart(), gate.sourceEnd(), gate.projectStart(), gate.projectEnd(), noteId);
         if (rmsJson != null) {
             var json = new com.google.gson.GsonBuilder().serializeNulls().setPrettyPrinting().create();
             Files.writeString(rmsJson, json.toJson(result) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);

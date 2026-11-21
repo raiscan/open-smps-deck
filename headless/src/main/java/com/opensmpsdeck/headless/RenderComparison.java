@@ -14,7 +14,8 @@ import static com.opensmpsdeck.headless.S3kRenderer.*;
 
 public final class RenderComparison {
     public record Result(String output, List<String> order, double splitSeconds, double renderGain,
-                         double referenceGain, boolean levelMatched) {}
+                         double referenceGain, boolean levelMatched, double sourceStart, double sourceEnd,
+                         double projectStart, double projectEnd, int startTick, int endTick) {}
 
     private RenderComparison() {}
 
@@ -24,69 +25,83 @@ public final class RenderComparison {
         Path work = Path.of(args[1]);
         Path render = work.resolve("render.wav"), reference = null;
         Double start = null, end = null;
+        String time = "source";
         var seen = new HashSet<String>();
         for (int i = 2; i < args.length - 1; i += 2) {
             if (!seen.add(args[i])) throw new IllegalArgumentException("Repeated option " + args[i]);
             switch (args[i]) {
                 case "--start" -> start = Double.parseDouble(args[i + 1]);
                 case "--end" -> end = Double.parseDouble(args[i + 1]);
+                case "--time" -> time = args[i + 1];
                 case "--render" -> render = Path.of(args[i + 1]);
                 case "--reference" -> reference = Path.of(args[i + 1]);
                 default -> throw new IllegalArgumentException("Unknown render-compare option " + args[i]);
             }
         }
-        var score = ReconstructionStages.readScore(work.resolve("score.json"));
-        var timeline = ReconstructionTimeMap.of(score);
-        if (start == null || end == null || !(start >= 0 && end > start && end <= timeline.sourceDuration()
-                && end - start <= 60))
-            throw new IllegalArgumentException("Expected a nonnegative source span of at most 60 seconds within the run");
-        var range = WaveFile.Range.seconds(timeline.project(start), timeline.project(end));
+        if (start == null || end == null) throw new IllegalArgumentException("Expected --start and --end");
+        out.println(new Gson().toJson(run(work, render, reference, Path.of(args[args.length - 1]),
+                start, end, time, null)));
+    }
+
+    public static Result run(Path work, Path render, Path reference, Path output,
+                             double start, double end, String time, Double offset) throws IOException {
+        Path scoreFile = work.resolve("score.json");
+        var score = Files.isRegularFile(scoreFile) ? ReconstructionStages.readScore(scoreFile) : null;
+        var timeline = score == null ? new ReconstructionTimeMap(null, null, 600) : ReconstructionTimeMap.of(score);
+        var base = ReconstructionTimeMap.TimeBase.valueOf(time);
+        double duration = base == ReconstructionTimeMap.TimeBase.source ? timeline.sourceDuration() : timeline.frames() / 60.0;
+        if (!(start >= 0 && end > start && end <= duration && end - start <= 60))
+            throw new IllegalArgumentException("Expected a nonnegative span of at most 60 seconds within the run");
+        if (offset != null && !(Math.abs(offset) <= 600))
+            throw new IllegalArgumentException("Reference offset must be in [-600, 600] project seconds");
+        var range = base == ReconstructionTimeMap.TimeBase.source
+                ? WaveFile.Range.seconds(timeline.project(start), timeline.project(end))
+                : WaveFile.Range.seconds(start, end);
         validateRange(range);
         Path steady = work.resolve(ReconstructionStages.STEADY_REFERENCE);
         boolean customReference = reference != null;
         if (!customReference && timeline.warped()) {
             reference = steady;
         } else if (!customReference) {
+            if (score == null) throw new IllegalArgumentException("Expected a reference WAV or reconstruction score");
             reference = Path.of(score.inputs().wav());
         }
-        boolean stretch = customReference && timeline.warped()
+        boolean stretch = customReference && timeline.warped() && offset == null
                 && !(Files.isRegularFile(steady) && Files.isSameFile(reference, steady));
-        if (stretch && ReconstructionStages.usesSteadyReference(work.resolve("report.json"), reference)) {
+        if (customReference && timeline.warped() && ReconstructionStages.usesSteadyReference(work.resolve("report.json"), reference)) {
             reference = steady;
             stretch = false;
         }
 
-        Path output = Path.of(args[args.length - 1]);
         String filename = output.getFileName().toString().toLowerCase(Locale.ROOT);
         boolean mp3 = filename.endsWith(".mp3");
         if (!mp3 && !filename.endsWith(".wav"))
             throw new IllegalArgumentException("Comparison output must end in .wav or .mp3");
         if (Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(output.toString());
-        long referenceStart = (long) range.start() * STEREO_FRAMES_PER_PRESENTATION;
-        if (!stretch && !mp3) {
-            out.println(new Gson().toJson(write(render, reference, output, range, referenceStart)));
-            return;
-        }
+        long referenceStart = (long) range.start() * STEREO_FRAMES_PER_PRESENTATION
+                - (offset == null ? 0 : Math.round(offset * SAMPLE_RATE));
+        if (!stretch && !mp3) return write(render, reference, output, range, referenceStart, timeline);
         Path scratch = Files.createTempDirectory(output.toAbsolutePath().getParent(), ".render-compare-");
         Path warped = scratch.resolve("reference.wav"), wav = scratch.resolve("pair.wav"), encoded = scratch.resolve("pair.mp3");
         try {
             if (stretch) {
-                if (ReferenceAudio.durationMicros(reference) / 1e6 < end)
+                if (ReferenceAudio.durationMicros(reference) / 1e6 < (base == ReconstructionTimeMap.TimeBase.source ? end : timeline.source(end)))
                     throw new IllegalArgumentException("Source span exceeds the reference duration");
-                ReferenceStretch.write(reference, warped, range.count(), time ->
-                        timeline.source(range.start() / (double) PRESENTATIONS_PER_SECOND + time));
+                ReferenceStretch.write(reference, warped, range.count(), elapsed ->
+                        timeline.source(range.start() / (double) PRESENTATIONS_PER_SECOND + elapsed));
                 reference = warped;
                 referenceStart = 0;
             }
-            var result = write(render, reference, mp3 ? wav : output, range, referenceStart);
+            var result = write(render, reference, mp3 ? wav : output, range, referenceStart, timeline);
             if (mp3) {
                 encodeMp3(wav, encoded);
                 Files.move(encoded, output);
                 result = new Result(output.toString(), result.order(), result.splitSeconds(), result.renderGain(),
-                        result.referenceGain(), result.levelMatched());
+                        result.referenceGain(), result.levelMatched(), result.sourceStart(), result.sourceEnd(),
+                        result.projectStart(), result.projectEnd(), result.startTick(), result.endTick());
             }
-            out.println(new Gson().toJson(result));
+            return result;
         } finally {
             Files.deleteIfExists(encoded);
             Files.deleteIfExists(wav);
@@ -95,8 +110,8 @@ public final class RenderComparison {
         }
     }
 
-    public static Result write(Path render, Path reference, Path output, WaveFile.Range range, long referenceStart)
-            throws IOException {
+    private static Result write(Path render, Path reference, Path output, WaveFile.Range range, long referenceStart,
+                                ReconstructionTimeMap timeline) throws IOException {
         validateRange(range);
         if (referenceStart < 0) throw new IllegalArgumentException("Range starts before the aligned reference");
         int frames = range.count() * STEREO_FRAMES_PER_PRESENTATION;
@@ -105,7 +120,8 @@ public final class RenderComparison {
         float[] b = ReferenceAudio.stereoRange(reference, SAMPLE_RATE, referenceStart, frames);
         var match = PhraseAudio.write(output, range.count(), a, b);
         return new Result(output.toString(), List.of("render", "reference"), frames / (double) SAMPLE_RATE,
-                match.renderGain(), match.referenceGain(), match.matched());
+                match.renderGain(), match.referenceGain(), match.matched(), timeline.source(range.start() / 60.0),
+                timeline.source(range.end() / 60.0), range.start() / 60.0, range.end() / 60.0, range.start(), range.end());
     }
 
     private static void validateRange(WaveFile.Range range) {
