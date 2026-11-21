@@ -534,7 +534,14 @@ simultaneous MIDI notes do not share. Strong periodic amplitude motion
 rejects likely beating. A separate trend score estimates short glides.
 Notes with measured evidence carry optional `motion: {vibrato, glide}`
 with scores from 0 to 1. This evidence gives melody selection a bounded
-bonus.
+bonus. For a polyphonic part with a mapped stem, the upper-voice tracker
+can revisit chord conflicts in the initial contour. A competing note needs
+a clear velocity accent over the selected tone and independent energy in
+the stem. It checks the fundamental and can use unshared overtones for a
+note with strong vibrato. A pickup that overlaps the next sustained attack
+of comparable velocity is excluded. The second path search considers the
+remaining candidates alongside the initial contour and rewards the portion
+of each supported hold that can play before another lead attack cuts it.
 
 The roles stage can add a nearby, modulated tone that stays present for
 at least 150 ms and has no corresponding MIDI note. It records

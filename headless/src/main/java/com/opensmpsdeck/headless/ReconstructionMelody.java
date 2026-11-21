@@ -31,7 +31,7 @@ final class ReconstructionMelody {
 
     static Selection extract(ReconstructionStructure.Layout structure, List<Note> tones,
                                Map<Integer, Integer> programs, Map<String, ReconstructionLeadAudio.Evidence> evidence,
-                               Integer leadPart) {
+                               Map<String, Double> accents, Integer leadPart) {
         var byPart = new LinkedHashMap<Integer, List<Note>>();
         for (var note : tones) {
             if (leadPart == null || note.part() == leadPart)
@@ -46,7 +46,7 @@ final class ReconstructionMelody {
                 findOctaveCopies(notes, octaveCopies);
                 var distinct = notes.stream().filter(note -> !octaveCopies.contains(note.id())).toList();
                 if (isMonophonic(distinct)) lines.add(new Line(part, distinct));
-                else lines.add(new Line(part, track(distinct, false, evidence)));
+                else lines.add(new Line(part, track(distinct, false, evidence, accents)));
             }
         });
         var result = new HashSet<String>();
@@ -151,29 +151,68 @@ final class ReconstructionMelody {
      * Best monophonic path through the sorted attacks. A path can skip a note or
      * leave silence. When it cuts a release, only the played gate earns credit.
      */
-    static List<Note> track(List<Note> notes, boolean low, Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+    static List<Note> track(List<Note> notes, boolean low, Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                            Map<String, Double> accents) {
         if (notes.isEmpty() || isMonophonic(notes)) return notes;
+        var contour = trackPath(notes, low, evidence, Map.of(), null);
+        if (low || accents.isEmpty()) return contour;
+        var selected = new HashSet<String>();
+        for (var note : contour) selected.add(note.id());
+        int first = 0;
+        for (var note : notes) {
+            if (selected.contains(note.id()) || !accents.containsKey(note.id())) continue;
+            while (first < contour.size() && contour.get(first).end() <= note.start()) first++;
+            if (canReplace(note, contour, first)) selected.add(note.id());
+        }
+        return selected.size() == contour.size() ? contour : trackPath(notes, false, evidence, accents, selected);
+    }
+
+    private static boolean canReplace(Note note, List<Note> contour, int first) {
+        boolean replacesBacking = false;
+        for (int i = first; i < contour.size() && contour.get(i).start() < note.end(); i++) {
+            Note original = contour.get(i);
+            if (original.end() <= note.start()) continue;
+            if (note.velocity() >= original.velocity() + 18) {
+                replacesBacking = true;
+            } else if (note.start() < original.start() && original.end() - original.start() >= GATE_CAP
+                    && note.end() > original.start() + RELEASE_OVERLAP) {
+                // Keep a pickup from masking the next sustained attack of comparable velocity.
+                return false;
+            }
+        }
+        return replacesBacking;
+    }
+
+    private static List<Note> trackPath(List<Note> notes, boolean low,
+                                       Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                                       Map<String, Double> accents, Set<String> eligible) {
         int size = notes.size();
-        var releaseOrder = java.util.stream.IntStream.range(0, size).boxed()
+        var releaseOrder = java.util.stream.IntStream.range(0, size)
+                .filter(i -> eligible == null || eligible.contains(notes.get(i).id())).boxed()
                 .sorted(Comparator.comparingDouble(i -> notes.get(i).end())).toList();
         double[] scores = new double[size];
         double[] weights = new double[size];
+        double[] accentWeights = new double[size];
         int[] previous = new int[size];
         Arrays.fill(previous, -1);
         var recent = new LinkedHashSet<Integer>();
-        int expired = 0, restart = -1, best = 0;
+        int expired = 0, restart = -1, best = -1;
         int firstNeighbor = 0;
         for (int i = 0; i < size; i++) {
             Note current = notes.get(i);
+            if (eligible != null && !eligible.contains(current.id())) continue;
             double onset = current.start();
-            while (expired < size && notes.get(releaseOrder.get(expired)).end() <= onset - PATH_CONTEXT) {
+            while (expired < releaseOrder.size() && notes.get(releaseOrder.get(expired)).end() <= onset - PATH_CONTEXT) {
                 int candidate = releaseOrder.get(expired++);
                 recent.remove(candidate);
                 if (restart < 0 || scores[candidate] > scores[restart]) restart = candidate;
             }
             while (notes.get(firstNeighbor).start() < onset - REGISTER_CONTEXT) firstNeighbor++;
             weights[i] = weight(current, notes, firstNeighbor, low, evidence);
-            double reward = reward(current.end() - onset, weights[i]);
+            accentWeights[i] = low ? 0 : accents.getOrDefault(current.id(), 0.0);
+            if (accentWeights[i] > 0 && evidence.getOrDefault(current.id(), ReconstructionLeadAudio.Evidence.NONE)
+                    .vibrato() >= ReconstructionLeadAudio.MODULATED) accentWeights[i] *= 1.25;
+            double reward = reward(current.end() - onset, weights[i], accentWeights[i]);
             scores[i] = reward;
             if (restart >= 0 && scores[restart] > PHRASE_RESTART) {
                 scores[i] += scores[restart] - PHRASE_RESTART;
@@ -187,7 +226,8 @@ final class ReconstructionMelody {
                 double gate = prior.end() - prior.start();
                 double gap = onset - prior.end();
                 if (gap < -RELEASE_OVERLAP && interval < .060) continue;
-                double cut = reward(gate, weights[j]) - reward(Math.min(interval, gate), weights[j]);
+                double cut = reward(gate, weights[j], accentWeights[j])
+                        - reward(Math.min(interval, gate), weights[j], accentWeights[j]);
                 double cost = ReconstructionRoles.transition(prior, current, Math.clamp(gap, 0, .40))
                         + cut + Math.min(.08, .20 * Math.max(0, -gap));
                 double score = scores[j] + reward - cost;
@@ -196,7 +236,7 @@ final class ReconstructionMelody {
                     previous[i] = j;
                 }
             }
-            if (scores[i] > scores[best]) best = i;
+            if (best < 0 || scores[i] > scores[best]) best = i;
             recent.add(i);
         }
         var line = new ArrayList<Note>();
@@ -204,8 +244,8 @@ final class ReconstructionMelody {
         return line.reversed();
     }
 
-    private static double reward(double gate, double weight) {
-        return (.045 + Math.min(GATE_CAP, gate)) * weight;
+    private static double reward(double gate, double weight, double accent) {
+        return (.045 + Math.min(GATE_CAP, gate) + 2 * accent * Math.min(.75, .06 + gate)) * weight;
     }
 
     private static double weight(Note note, List<Note> notes, int first, boolean low,

@@ -32,6 +32,23 @@ class ReconstructionLeadAudioTest {
         assertTrue(beating.stream().allMatch(score -> score < .25), beating.toString());
     }
 
+    @Test void independentPartialLevelRejectsAnOctaveOfTheBacking() {
+        int rate = 12_000;
+        var samples = new float[rate];
+        var lower = lead("lower", 57, .1, .9);
+        var octave = lead("octave", 69, .1, .9);
+        var upper = lead("upper", 71, .1, .9);
+        for (int i = 0; i < samples.length; i++) {
+            double time = i / (double) rate;
+            samples[i] = (float) (.14 * Math.sin(Math.TAU * 220 * time)
+                    + .18 * Math.sin(Math.TAU * 440 * time)
+                    + .15 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(71) * time));
+        }
+        var track = new ReconstructionLeadAudio.Track(new ReferenceAudio(samples, rate));
+        assertTrue(track.independentLevel(upper, List.of(lower, octave), true) > .30);
+        assertTrue(track.independentLevel(octave, List.of(lower, upper), true) < .1);
+    }
+
     @Test void findsAContinuingToneAndStopsAtStaticSamePitchBacking() {
         int pitch = 69, sampleRate = 12_000;
         var samples = new float[sampleRate];

@@ -126,6 +126,31 @@ final class ReconstructionLeadAudio {
             return after >= Math.max(.006, Math.max(2 * before, .19 * at(rms, note.start() + .025)));
         }
 
+        /**
+         * Mean relative level of the fundamental and strongest independent overtone.
+         * A prominent harmonic alone can belong to the chord's lower voice.
+         */
+        double independentLevel(Note note, List<Note> overlapping, boolean modulated) {
+            int pitch = note.pitch();
+            if (pitch < LOW || pitch > HIGH) return 0;
+            int first = first(note.start() + .010), end = first(note.end() - .010);
+            if (end <= first) return 0;
+            double total = 0;
+            for (int frame = first; frame < end; frame++) {
+                if (rms[frame] < .003) continue;
+                double time = frame * HOP;
+                double fundamental = shared(pitch, 1, time, time, overlapping) ? 0 : peaks[index(pitch, 1)][frame];
+                double overtone = 0;
+                for (int h = 2; h <= HARMONICS; h++) {
+                    if (!shared(pitch, h, time, time, overlapping))
+                        overtone = Math.max(overtone, peaks[index(pitch, h)][frame]);
+                }
+                double level = modulated ? Math.max(fundamental, overtone) : fundamental;
+                total += Math.min(1, level / rms[frame]);
+            }
+            return total / (end - first);
+        }
+
         Evidence evidence(int pitch, double start, double end, List<Note> competitors) {
             if (pitch < LOW || pitch > HIGH) return Evidence.NONE;
             int first = first(start), last = first(end);

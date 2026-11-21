@@ -71,13 +71,16 @@ final class ReconstructionLeadContinuity {
     private final Map<Integer, Stem> stems;
     private final ReconstructionTimeMap timeline;
     private final Map<String, ReconstructionLeadAudio.Evidence> evidence;
+    private final Map<String, Double> accents;
     private final boolean fastRunsOff;
 
     private ReconstructionLeadContinuity(Map<Integer, Stem> stems, ReconstructionTimeMap timeline,
-                                         Map<String, ReconstructionLeadAudio.Evidence> evidence, boolean fastRunsOff) {
+                                         Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                                         Map<String, Double> accents, boolean fastRunsOff) {
         this.stems = stems;
         this.timeline = timeline;
         this.evidence = evidence;
+        this.accents = accents;
         this.fastRunsOff = fastRunsOff;
     }
 
@@ -85,6 +88,7 @@ final class ReconstructionLeadContinuity {
         var timeline = ReconstructionTimeMap.of(score);
         var evidence = new HashMap<String, ReconstructionLeadAudio.Evidence>();
         var stems = new HashMap<Integer, Stem>();
+        var accents = new HashMap<String, Double>();
         for (var part : score.source().parts()) {
             String path = score.inputs().stems().get(part.id());
             if (part.drums() || path == null) continue;
@@ -96,15 +100,30 @@ final class ReconstructionLeadContinuity {
             for (var note : local) {
                 if (note.run() != null) continue;
                 double trim = Math.clamp((note.end() - note.start() - .150) / 2, 0, .020);
+                var overlapping = stem.overlapping(note.start(), note.end());
                 var motion = track.evidence(note.pitch(), note.start() + trim, note.end() - trim,
-                        stem.overlapping(note.start(), note.end()));
+                        overlapping);
                 if (motion.confidence() > 0) evidence.put(note.id(), motion);
+                // Accent is evidence only against an actually overlapping, softer voice.
+                int softest = overlapping.stream()
+                        .filter(other -> other.pitch() != note.pitch()
+                                && Math.min(note.end(), other.end()) - Math.max(note.start(), other.start())
+                                        >= Math.min(.040, (note.end() - note.start()) / 2))
+                        .mapToInt(Note::velocity).min().orElse(note.velocity());
+                double contrast = Math.clamp((note.velocity() - softest - 20) / 20.0, 0, 1);
+                if (contrast > 0) {
+                    boolean modulated = motion.vibrato() >= ReconstructionLeadAudio.MODULATED;
+                    double level = track.independentLevel(note, overlapping, modulated);
+                    if (level >= .30) accents.put(note.id(), contrast * Math.min(1, level / .50));
+                }
             }
         }
-        return new ReconstructionLeadContinuity(stems, timeline, evidence, Boolean.TRUE.equals(score.inputs().fastRunsOff()));
+        return new ReconstructionLeadContinuity(stems, timeline, evidence, accents, Boolean.TRUE.equals(score.inputs().fastRunsOff()));
     }
 
     Map<String, ReconstructionLeadAudio.Evidence> evidence() { return evidence; }
+
+    Map<String, Double> accents() { return accents; }
 
     /**
      * Resonant leaps can make the lead path skip two attacks of a single articulated phrase.
