@@ -98,15 +98,18 @@ class BenchMetricsTest {
 
     @Test void psgSourceClassesUseOnlyPlacedDrumsAndKeepCymbalsDistinct() {
         var allocation = new BenchReconstruction.Allocation(List.of(
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(42), "drums", "PSG3", 30),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(46), "drums", "PSG3", 40),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(49), "drums", "PSG3", 50),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(51), "drums", "PSG3", 60),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(36), "drums", "DAC", 30),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(70), "harmony", "PSG3", 70),
-                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(57), "drums", null, null)));
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(42, "note-42"), "drums", "PSG3", 30),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(46, "note-46"), "drums", "PSG3", 40),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(49, "note-49"), "drums", "PSG3", 50),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(51, "note-51"), "drums", "PSG3", 60),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(36, "note-36"), "drums", "DAC", 30),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(70, "note-70"), "harmony", "PSG3", 70),
+                new BenchReconstruction.Placement(new BenchReconstruction.SourceNote(57, "note-57"), "drums", null, null)));
         assertEquals(java.util.Map.of(30, HAT, 40, OPEN_HAT, 50, CRASH, 60, RIDE),
-                BenchReconstruction.noiseClasses(allocation));
+                BenchReconstruction.noiseClasses(allocation, null));
+        assertEquals(java.util.Map.of(30, HAT, 40, OPEN_HAT, 50, CRASH, 60, RIDE, 80, KICK),
+                BenchReconstruction.noiseClasses(allocation,
+                        List.of(new BenchReconstruction.VoicedGate("note-36", "PSG3", 80))));
     }
 
     private static BenchMetrics.Event drum(double time, BenchDrums.Drum type) {

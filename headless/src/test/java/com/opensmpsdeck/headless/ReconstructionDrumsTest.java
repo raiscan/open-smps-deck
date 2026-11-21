@@ -102,6 +102,74 @@ class ReconstructionDrumsTest {
         assertFalse(reconstruct(midi, stem, index, "auto", false).id().startsWith("stem-"));
     }
 
+    @Test void tonalDacIsExcludedFromHatFitButStillAvailableAsAnOverride() throws Exception {
+        int rate = 10;
+        byte[] pcm = new byte[2_500];
+        for (int i = 0; i < pcm.length; i++)
+            pcm[i] = (byte) (128 + Math.round(100 * Math.sin(2 * Math.PI * 300 * i / DacSample.sampleRateHz(rate))));
+        var builder = new InstrumentCatalogue.Builder();
+        String asset = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "One shot", pcm);
+        String variant = builder.variant(asset, "One shot", new InstrumentCatalogue.Recipe(rate, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        byte[] noise = new byte[2_500];
+        new java.util.Random(5).nextBytes(noise);
+        String curated = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Bright hit", noise);
+        builder.variant(curated, "Bright hit", new InstrumentCatalogue.Recipe(rate, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        var catalogue = builder.build();
+        assertEquals(DacAcoustics.SampleClass.NOISE_LIKE, new DacAcoustics(catalogue).asset(curated).sampleClass());
+        Path index = directory.resolve("catalogue.json");
+        catalogue.save(index);
+        var indexJson = ReconstructionArtifacts.readTree(index).getAsJsonObject();
+        indexJson.getAsJsonArray("assets").asList().stream().map(item -> item.getAsJsonObject())
+                .filter(item -> item.get("id").getAsString().equals(curated)).findFirst().orElseThrow()
+                .addProperty("excludeFromDrumFit", true);
+        Files.writeString(index, indexJson.toString());
+        Path wav = directory.resolve("mix.wav");
+        WaveFile.write(wav, 60, sink -> {
+            var frame = new short[1600];
+            for (int tick = 0; tick < 60; tick++) {
+                for (int i = 0; i < 800; i++) {
+                    double t = (tick * 800 + i) / 48_000.0 - .2;
+                    frame[2 * i] = frame[2 * i + 1] =
+                            (short) (t >= 0 && t < .18 ? 12_000 * Math.sin(2 * Math.PI * 300 * t) : 0);
+                }
+                sink.accept(frame);
+            }
+        });
+        Path midi = directory.resolve("drums.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        midiNote(sequence.createTrack(), 9, 42, 192);
+        MidiSystem.write(sequence, 0, midi.toFile());
+
+        Path work = directory.resolve("work");
+        command("reconstruct", "run", midi.toString(), wav.toString(), index.toString(), work.toString(),
+                "--steady-tempo", "off");
+        Path arrangement = work.resolve("arrangement.smps.json");
+        var project = ProjectFiles.load(arrangement).project();
+        assertTrue(project.samples().isEmpty());
+        assertTrue(project.clips().stream().anyMatch(clip -> clip.lane().equals("PSG3")));
+        ProjectCompiler.compile(project);
+
+        Path voicing = work.resolve("voicing.json");
+        var json = ReconstructionArtifacts.readTree(voicing).getAsJsonObject();
+        var settings = json.getAsJsonObject("lanes").getAsJsonObject("DAC")
+                .getAsJsonArray("instruments").get(0).getAsJsonObject();
+        var evidence = settings.getAsJsonObject("drumSelection").getAsJsonObject("evidence");
+        assertEquals("HAT", evidence.get("drumClass").getAsString());
+        assertTrue(evidence.getAsJsonArray("exclusions").asList().stream()
+                .anyMatch(item -> item.getAsJsonObject().get("reason").getAsString().equals("pitched-tonal")));
+        assertTrue(evidence.getAsJsonArray("exclusions").asList().stream()
+                .anyMatch(item -> item.getAsJsonObject().get("reason").getAsString().equals("excludeFromDrumFit")));
+        settings.remove("drumSelection");
+        settings.addProperty("variantId", variant);
+        Files.writeString(voicing, json.toString());
+        command("reconstruct", "assemble", work.toString());
+        var overridden = ProjectFiles.load(arrangement).project();
+        assertEquals(rate, overridden.samples().getFirst().rate());
+        assertTrue(overridden.samples().getFirst().id().startsWith(asset));
+    }
+
     @Test void dacCollisionUsesPsgNoiseAndProtectsTheKickTail() {
         var parts = List.of(new MidiScore.Part(0, "Drums", 0, true));
         var roles = new ReconstructionRoles.Result(1, 0, List.of(

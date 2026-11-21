@@ -34,6 +34,10 @@ final class CatalogueCli {
                 case "scan" -> scan(args, out);
                 case "search" -> search(args, out);
                 case "show" -> show(args, out);
+                case "dac-classes" -> {
+                    options(args, 3, Set.of());
+                    print(out, new DacAcoustics(InstrumentCatalogue.open(Path.of(args[2]))).report());
+                }
                 case "match" -> match(args, out);
                 case "match-effects" -> matchEffects(args, out);
                 case "audition" -> audition(args, out);
@@ -52,6 +56,7 @@ final class CatalogueCli {
         out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--driver S3K]");
         out.println("          [--role ROLE] [--source SOURCE] [--variant ID] [--offset N] [--limit N]");
         out.println("  catalog show INDEX.json ID [--brief]");
+        out.println("  catalog dac-classes INDEX.json");
         out.println("  catalog match INDEX.json REFERENCE.wav [--kind KIND] [--midi N] [--gate-ticks N]");
         out.println("          [--start SECONDS] [--duration SECONDS] [--role ROLE] [--source SOURCE] [--limit N]");
         out.println("  catalog match-effects PROJECT.json REFERENCE.wav OUTPUT.json --lead ID --double ID");

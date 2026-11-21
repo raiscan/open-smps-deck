@@ -23,11 +23,13 @@ final class BenchReconstruction {
     record Note(int partId, int pitch, long startUs, long endUs) {}
     record Allocation(List<Placement> notes) {}
     record Placement(SourceNote note, String role, String lane, Integer startTick) {}
-    record SourceNote(int pitch) {}
+    record SourceNote(int pitch, String id) {}
+    record VoicedGate(String id, String lane, int startTick) {}
     record CopyWindow(String lane, int startTick, int endTick) {}
     record Report(int presentations, long referenceUs, List<Match> matches, List<Change> pitchChanges,
                   List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages,
-                  List<CopyWindow> lanePolicyCopies, List<ReconstructionLayers.Result> noteLayers) {
+                  List<CopyWindow> lanePolicyCopies, List<ReconstructionLayers.Result> noteLayers,
+                  List<VoicedGate> voicedGates) {
         List<BenchMetrics.Event> excludeLayers(List<BenchMetrics.Event> events) {
             var windows = new HashMap<String, NavigableMap<Integer, Integer>>();
             if (lanePolicyCopies != null) for (var copy : lanePolicyCopies)
@@ -111,7 +113,7 @@ final class BenchReconstruction {
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer(), captureVoices);
         var noiseClasses = truth.channels().stream().anyMatch(channel -> channel.kind().equals("noise"))
-                ? noiseClasses(BenchFiles.read(output.resolve("allocation.json"), Allocation.class)) : Map.<Integer, BenchDrums.Drum>of();
+                ? noiseClasses(BenchFiles.read(output.resolve("allocation.json"), Allocation.class), report.voicedGates()) : Map.<Integer, BenchDrums.Drum>of();
         var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses,
                 drums.gainAliases(project.samples())), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
@@ -128,11 +130,18 @@ final class BenchReconstruction {
                 output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices());
     }
 
-    static Map<Integer, BenchDrums.Drum> noiseClasses(Allocation allocation) {
+    static Map<Integer, BenchDrums.Drum> noiseClasses(Allocation allocation, List<VoicedGate> voiced) {
         var classes = new HashMap<Integer, BenchDrums.Drum>();
+        var dac = new HashMap<String, BenchDrums.Drum>();
         for (var placement : allocation.notes()) {
-            if ("drums".equals(placement.role()) && "PSG3".equals(placement.lane()) && placement.startTick() != null)
-                classes.put(placement.startTick(), BenchDrums.fromPitch(placement.note().pitch()));
+            if (!"drums".equals(placement.role()) || placement.startTick() == null) continue;
+            var drum = BenchDrums.fromPitch(placement.note().pitch());
+            if ("PSG3".equals(placement.lane())) classes.put(placement.startTick(), drum);
+            else if ("DAC".equals(placement.lane())) dac.put(placement.note().id(), drum);
+        }
+        if (voiced != null) for (var gate : voiced) {
+            if ("PSG3".equals(gate.lane()) && dac.containsKey(gate.id()))
+                classes.put(gate.startTick(), dac.get(gate.id()));
         }
         return classes;
     }
