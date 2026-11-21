@@ -210,6 +210,55 @@ class ReconstructionEditsTest {
         assertEquals(Role.melody, rebuilt.roles().role());
     }
 
+    @Test void studioVoiceAndNoteScopesReplayWithScoreEdits(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid");
+        Path wav = dir.resolve("mix.wav");
+        Path catalogue = dir.resolve("index.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        var asset = InstrumentCatalogue.open(catalogue);
+        String fm = asset.variants().stream().filter(v -> asset.asset(v.assetId()).kind() == InstrumentCatalogue.Kind.FM_VOICE)
+                .findFirst().orElseThrow().id();
+        var batch = JsonParser.parseString("""
+                [
+                  {"id":"lead-voice","author":"human","reason":"Identify lead","op":"voiceEdit",
+                   "voiceEdit":{"op":"create","voiceId":"lead","name":"Lead instrument 1","kind":"tonal"}},
+                  {"id":"lead-members","author":"human","reason":"Identify lead","op":"voiceEdit",
+                   "voiceEdit":{"op":"move","voiceId":"lead","noteIds":["n-0-0-60"]}},
+                  {"id":"lead-patch","author":"human","reason":"Set instrument","op":"voiceEdit",
+                   "voiceEdit":{"op":"assign","voiceId":"lead","assignment":{"laneType":"FM","instrument":"%s"}}},
+                  {"id":"level","author":"human","reason":"Scale attacks","op":"setVelocity",
+                   "noteIds":["n-0-0-60","n-0-1250000-62"],"scale":0.5}
+                ]
+                """.formatted(fm)).getAsJsonArray();
+        ReconstructionReview.apply(work, ReconstructionReview.revision(work), batch, (a, b, c) -> {});
+        var voice = ReconstructionVoicePlan.load(work).voices().stream().filter(v -> v.id().equals("lead")).findFirst().orElseThrow();
+        assertEquals(List.of("n-0-0-60"), voice.noteIds());
+        assertEquals(fm, voice.assignment().instrument());
+        assertEquals(45, ReconstructionTrace.read(work).get("n-0-0-60").score().note().velocity());
+
+        var clip = ReconstructionEditing.audition(work, java.util.Set.of("n-0-0-60"),
+                new ReconstructionEditing.Instrument(ReconstructionLaneType.FM, fm, "Test"));
+        assertEquals(1, clip.project().clips().size());
+        assertEquals(0, clip.start());
+        byte[] before = Files.readAllBytes(work.resolve("render.wav"));
+        batch.add(json("""
+                {"id":"motion","author":"human","reason":"Add vibrato","op":"noteVoicing","noteIds":["n-0-0-60"],
+                 "vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}
+                """));
+        var changed = ReconstructionReview.apply(work, ReconstructionReview.revision(work), batch, (a, b, c) -> {});
+        assertEquals("assemble", changed.get("from").getAsString());
+        byte[] after = Files.readAllBytes(work.resolve("render.wav"));
+        assertFalse(java.util.Arrays.equals(before, after));
+        cli("reconstruct", "run", "--from", "transcribe", work.toString(), "--keep-voicing");
+        assertEquals(batch, ReconstructionReview.revision(work).entries());
+        for (var results : ReconstructionReview.outcomes(work).values())
+            assertEquals("applied", results.getFirst().status(), results.toString());
+        assertArrayEquals(after, Files.readAllBytes(work.resolve("render.wav")));
+    }
+
     @Test void intentsSurviveTranscriptionAndManifestReplayAndReportOrphans(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("theme.mid");
         writeMidi(midi, true);

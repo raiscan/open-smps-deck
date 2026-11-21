@@ -1026,6 +1026,177 @@ class StudioWindowTest {
         }
     }
 
+    @Test void reconstructionBoxCutSlideAndVibratoEmitHumanIntents() throws Exception {
+        Path work = reconstructionFixture();
+        var score = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
+        var notes = score.getAsJsonArray("notes");
+        var high = notes.get(0).getAsJsonObject().deepCopy();
+        high.addProperty("id", "high-note");
+        high.addProperty("pitch", 72);
+        notes.add(high);
+        Files.writeString(work.resolve("score.json"), score.toString());
+        var allocation = new com.google.gson.JsonArray();
+        for (var note : notes) {
+            var entry = new com.google.gson.JsonObject();
+            entry.add("note", note);
+            entry.addProperty("role", "melody");
+            entry.addProperty("lane", note == high ? "FM2" : "FM1");
+            entry.addProperty("startTick", 30);
+            entry.addProperty("endTick", 90);
+            entry.addProperty("outcome", "kept");
+            allocation.add(entry);
+        }
+        var artifact = new com.google.gson.JsonObject();
+        artifact.addProperty("version", 1);
+        artifact.add("notes", allocation);
+        Files.writeString(work.resolve("allocation.json"), artifact.toString());
+
+        var model = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
+        var metadata = com.opensmpsdeck.headless.ReconstructionEditing.open(work);
+        fx(() -> {
+            var view = new ReconstructionCanvas(model, message -> fail(message));
+            var gestures = new ArrayList<com.google.gson.JsonObject>();
+            view.onEffect = gestures::add;
+            view.attack = note -> metadata.attack(note.id());
+            var host = new Stage();
+            host.setScene(new javafx.scene.Scene(view.scroll, 900, 500));
+            host.show();
+            try {
+                view.scroll.applyCss();
+                view.scroll.layout();
+                var plot = view.canvas;
+                double x = (plot.getWidth() + 76) / 2;
+                // Pitch grid covers MIDI 66–76 with one header and two lane rows underneath.
+                double row = (plot.getHeight() - 85 - 20 - view.lanes().size() * 17) / 11;
+                double lowY = 85 + 7.5 * row;
+                double highY = 85 + 4.5 * row;
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x - 20, highY - row, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, lowY + row, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, lowY + row, false);
+                assertEquals(Set.of("test-note", "high-note"), view.selectedNotes().stream()
+                        .map(com.opensmpsdeck.headless.ReconstructionInspection.Overlay::id)
+                        .collect(java.util.stream.Collectors.toSet()));
+                view.filterSelection(note -> note.lane().equals("FM1"));
+                assertEquals(1, view.selectedNotes().size());
+                modifierClick(plot, x, highY, true, false, false);
+                assertEquals(2, view.selectedNotes().size());
+                modifierClick(plot, x, highY, false, true, false);
+                assertEquals("test-note", view.selectedNotes().getFirst().id());
+
+                view.mode(ReconstructionTools.Mode.CUT);
+                modifierClick(plot, x, lowY, false, false, false);
+                assertEquals("splitNote", gestures.getLast().get("op").getAsString());
+                assertEquals(1, gestures.getLast().get("at").getAsDouble(), .01);
+                modifierClick(plot, x, lowY - 2 * row, false, false, true);
+                assertEquals(71, gestures.getLast().get("pitch").getAsInt());
+
+                view.mode(ReconstructionTools.Mode.BEND);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, lowY, true);
+                modifiedMouse(plot, MouseEvent.MOUSE_DRAGGED, x + 12, lowY - 1.7 * row, true, true, false, false);
+                modifiedMouse(plot, MouseEvent.MOUSE_RELEASED, x + 12, lowY - 1.7 * row, false, true, false, false);
+                var bend = gestures.getLast();
+                assertEquals("bend", bend.get("op").getAsString());
+                var points = bend.getAsJsonArray("points");
+                assertEquals(0, points.get(1).getAsJsonArray().get(1).getAsDouble());
+                assertEquals(2, points.get(2).getAsJsonArray().get(1).getAsDouble());
+                var curve = points.asList().stream().map(pair -> new com.opensmpsdeck.headless.ReconstructionInspection.BendPoint(
+                        pair.getAsJsonArray().get(0).getAsDouble(), 69 + pair.getAsJsonArray().get(1).getAsDouble())).toList();
+                view.attack = note -> new com.opensmpsdeck.headless.ReconstructionEditing.Attack(.5, 1.5, 69, false, true, curve);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x + 12, lowY - 2 * row, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 12, lowY - 3 * row, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 12, lowY - 3 * row, false);
+                assertEquals(3, gestures.getLast().getAsJsonArray("points").get(2).getAsJsonArray().get(1).getAsDouble(), .01);
+
+                view.mode(ReconstructionTools.Mode.VIBRATO);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, lowY, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 150, lowY - 25, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 150, lowY - 25, false);
+                var vibrato = gestures.getLast();
+                assertEquals("noteVoicing", vibrato.get("op").getAsString());
+                assertEquals("test-note", vibrato.getAsJsonArray("noteIds").get(0).getAsString());
+                assertEquals(2, vibrato.getAsJsonObject("vibrato").get("steps").getAsInt());
+                assertTrue(vibrato.getAsJsonObject("vibrato").get("delta").getAsInt() > 0);
+                var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
+                gestures.forEach(edit -> {
+                    assertEquals("human", edit.get("author").getAsString());
+                    assertNull(com.opensmpsdeck.headless.ReconstructionReview.validationIssue(edit));
+                    draft.add(edit);
+                });
+                draft.undo(false);
+                assertEquals(gestures.size() - 1, draft.entries().size());
+                draft.undo(true);
+                assertEquals(gestures.size(), draft.entries().size());
+                assertFalse(Files.exists(work.resolve("edits.json")));
+            } finally {
+                view.close();
+                host.close();
+            }
+            return null;
+        });
+    }
+
+    @Test void reconstructionBulkRoutesAndCreatesAVoiceAsOneDraftStep() throws Exception {
+        Path work = reconstructionFixture();
+        var model = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
+        var editing = com.opensmpsdeck.headless.ReconstructionEditing.open(work);
+        fx(() -> {
+            var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
+            var panel = new ReconstructionBulk(ignored -> {}, edits -> draft.change(entries -> edits.forEach(entries::add)),
+                    (ids, instrument) -> fail("Unexpected audition"), () -> {});
+            var host = new Stage();
+            host.setScene(new javafx.scene.Scene(new ScrollPane(panel), 320, 700));
+            host.show();
+            try {
+                panel.show(model.overlays(), List.of(), Map.of(), editing, model::laneType);
+                @SuppressWarnings("unchecked")
+                var type = (ComboBox<com.opensmpsdeck.headless.ReconstructionLaneType>) panel.lookup("#reconstruction-lane-type");
+                var route = (Button) panel.lookup("#reconstruction-set-lane-type");
+                type.setValue(com.opensmpsdeck.headless.ReconstructionLaneType.DAC);
+                assertTrue(route.isDisabled());
+                assertTrue(((Label) panel.lookup("#reconstruction-bulk-issue")).getText().contains("MIDI drum part"));
+                type.setValue(com.opensmpsdeck.headless.ReconstructionLaneType.FM);
+                assertFalse(route.isDisabled());
+                route.fire();
+                var pin = draft.entries().get(0).getAsJsonObject();
+                assertEquals("pinLane", pin.get("op").getAsString());
+                assertEquals("FM", pin.get("laneType").getAsString());
+                assertEquals("test-note", pin.getAsJsonArray("noteIds").get(0).getAsString());
+
+                panel.lookupAll(".text-field").stream().filter(TextField.class::isInstance).map(TextField.class::cast)
+                        .filter(field -> field.getPromptText().equals("New voice name")).findFirst().orElseThrow()
+                        .setText("Lead instrument 1");
+                panel.lookupAll(".button").stream().filter(Button.class::isInstance).map(Button.class::cast)
+                        .filter(button -> button.getText().equals("Create voice")).findFirst().orElseThrow().fire();
+                var intents = draft.entries();
+                assertEquals(3, intents.size());
+                var create = intents.get(1).getAsJsonObject().getAsJsonObject("voiceEdit");
+                var move = intents.get(2).getAsJsonObject().getAsJsonObject("voiceEdit");
+                assertEquals("Lead instrument 1", create.get("name").getAsString());
+                assertEquals(create.get("voiceId"), move.get("voiceId"));
+                assertEquals("test-note", move.getAsJsonArray("noteIds").get(0).getAsString());
+                draft.undo(false);
+                assertEquals(1, draft.entries().size());
+                draft.undo(true);
+                assertEquals(intents, draft.entries());
+                assertFalse(Files.exists(work.resolve("edits.json")));
+            } finally {
+                host.close();
+            }
+            return null;
+        });
+    }
+
+    private static void modifierClick(Node node, double x, double y, boolean shift, boolean ctrl, boolean alt) {
+        modifiedMouse(node, MouseEvent.MOUSE_PRESSED, x, y, true, shift, ctrl, alt);
+        modifiedMouse(node, MouseEvent.MOUSE_RELEASED, x, y, false, shift, ctrl, alt);
+    }
+
+    private static void modifiedMouse(Node node, javafx.event.EventType<MouseEvent> type, double x, double y,
+                                      boolean down, boolean shift, boolean ctrl, boolean alt) {
+        Event.fireEvent(node, new MouseEvent(type, x, y, x, y, MouseButton.PRIMARY, 1, shift, ctrl, alt, false,
+                down, false, false, false, false, true, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));

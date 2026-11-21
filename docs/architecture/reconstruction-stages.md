@@ -362,7 +362,7 @@ Studio writes its new intents with `"author":"human"`.
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
 | `splitNote` | `noteId` or a point selector and `at` strictly inside the gate. Both halves need a project tick. Optional `pitch` retunes the second attack. The source attack is replaced by `edit-<id>-left` and `edit-<id>-right`. | `transcribe` |
 | `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each pitch change needs four project ticks between attacks. The resulting slide is routed to FM. | `transcribe` |
-| `setVelocity` | `span`, `part`, optional `pitchMin` and `pitchMax`, and either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
+| `setVelocity` | `noteIds`, or `span` with `part` and optional `pitchMin` and `pitchMax`. Choose either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
 | `setRole` | A selector and `role`. A span, ID list or point list can filter by `fromRole` after earlier edits. Optional `lane` also pins the note. | `roles` |
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
 | `pinLane` | A selector and either an exact `lane` or `laneType` (`FM`, `PSG`, `NOISE`, `DAC`). | `roles` |
@@ -371,6 +371,14 @@ Studio writes its new intents with `"author":"human"`.
 | `glide` | `fromNoteId` and `toNoteId` identify two pitched score attacks in the same part. The first gate ends at the later attack, which retains its own note. Optional `seconds` gives the sliding portion of the gate (default up to 0.12 seconds). `shape` is `linear` (default), `easeIn`, `easeOut`, or `smooth`. The first note needs an FM lane for the bend to play. | `transcribe` |
 | `arpeggio` | `noteIds` or `span` with `part` and optional pitch bounds. `rate` is 1–127 driver ticks per step (default 2). `order` is `up`, `down`, or `up-down` (default `up`). | `allocate` |
 | `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
+| `voiceEdit` | A `voiceEdit` object with the fields of a [voice journal entry](#identify-and-assign-voices), including its own `op` and `voiceId`. The outer intent supplies `id` and `author`. The voices stage replays these after `voice-edits.json`. | `voices` |
+| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
+
+At assembly, `noteVoicing` resolves each ID on its current chip, reports
+missing or incompatible targets in the edit results, and applies the latest
+instrument and modulation independently. A compatible note-scoped instrument
+overrides the source voice instrument. A per-note lane pin can take the note
+to a different chip, where the voice's instrument is inapplicable.
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
@@ -1179,9 +1187,10 @@ voices and a 32 KiB total bank.
 
 ### Studio vibrato gesture
 
-Use the allocated FM note ID and its current lane. Insert or update a
-note-only override under `lanes.<lane>.overrides`. For example, this sets
-about 48 cents of depth at 5 Hz for MIDI 65:
+Studio writes a `noteVoicing` intent by allocated FM note ID and resolves its
+scope against the current allocation on each build. The underlying settings
+also work directly under `lanes.<lane>.overrides` in `voicing.json`. For example,
+this scope sets about 48 cents of depth at 5 Hz for MIDI 65:
 
 ```json
 {"noteIds":["LEAD_ID"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}
@@ -1208,7 +1217,8 @@ Hz to F0 on an FM note:
    `rate:1`, the depth ranges from about 6 to 824 cents in discrete steps.
    Very slow settings need a long gate to complete a cycle.
 4. Save `modulationOff: true` in place of `vibrato` for an explicit zero
-   depth. Move the override to the note's new lane if allocation changes.
+   depth. Studio resolves the lane automatically. When editing
+   `voicing.json` directly, move the override if allocation changes.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,

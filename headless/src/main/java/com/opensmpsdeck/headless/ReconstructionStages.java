@@ -328,6 +328,7 @@ public final class ReconstructionStages {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
                         voicePlan = ReconstructionVoicePlan.generate(work, score, roles);
+                        ReconstructionVoicePlan.reviewOutcomes(edits, voicePlan, outcomes);
                         for (var issue : voicePlan.issues())
                             out.printf("voice-edit:%s %s %s%n", issue.id(), issue.status(), issue.detail());
                     }
@@ -373,7 +374,10 @@ public final class ReconstructionStages {
                                         request.lanes, request.refitLevels, previousAllocation, request.variant);
                         fitted = ReconstructionVoicing.withPercussionEvidence(fitted, allocation);
                         if (voicePlan == null) voicePlan = ReconstructionVoicePlan.saved(work);
-                        if (voicePlan != null) fitted = fitted.withAssignments(voicePlan.assignments(allocation));
+                        if (voicePlan != null && !voicePlan.laneTypes().isEmpty()) {
+                            var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+                            fitted = fitted.withAssignments(voicePlan.assignments(allocation, roles.lanePins()));
+                        }
                         ReconstructionArtifacts.write(voicingFile, fitted);
                         if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
                         if (previous != null)
@@ -384,7 +388,7 @@ public final class ReconstructionStages {
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
                         var voicing = ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
-                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview);
+                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, edits, outcomes);
                     }
                     default -> throw new AssertionError(stage);
                 }
@@ -472,7 +476,12 @@ public final class ReconstructionStages {
         Path rolesFile = work.resolve("roles.json");
         var currentRoles = Files.isRegularFile(rolesFile)
                 ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : null;
-        if (from == Stage.ALLOCATE && currentRoles != null) {
+        if (from == Stage.ASSEMBLE) {
+            var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+            previewNoteVoicing(edits, score, allocation, outcomes);
+            return;
+        }
+        if (from.ordinal() >= Stage.VOICES.ordinal() && currentRoles != null) {
             previewAllocationEdits(work, edits, score, currentRoles, outcomes);
             return;
         }
@@ -524,13 +533,18 @@ public final class ReconstructionStages {
         var pins = roles.lanePins();
         var bound = edits.bindSections(work, score, null, Stage.ALLOCATE, outcomes);
         boolean hasChordEdits = bound.intents().stream().anyMatch(edit -> edit.firstStage() == Stage.ALLOCATE);
+        boolean hasVoiceEdits = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.voiceEdit);
+        boolean hasNoteVoicing = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing);
         boolean hasTypedPins = pins != null && pins.values().stream().anyMatch(pin -> pin.laneType() != null);
-        if (!hasChordEdits && !hasTypedPins) return;
-        var laneTypes = Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))
-                ? ReconstructionVoicePlan.preview(work, score, roles).laneTypes()
-                : Map.<String, ReconstructionLaneType>of();
+        if (!hasChordEdits && !hasTypedPins && !hasVoiceEdits && !hasNoteVoicing) return;
+        var laneTypes = Map.<String, ReconstructionLaneType>of();
+        if (hasVoiceEdits || Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))) {
+            var voices = ReconstructionVoicePlan.preview(work, score, roles, edits);
+            laneTypes = voices.laneTypes();
+            ReconstructionVoicePlan.reviewOutcomes(edits, voices, outcomes);
+        }
         var chords = ReconstructionChords.select(bound, score, roles, laneTypes, outcomes);
-        if (chords.isEmpty() && !hasTypedPins) return;
+        if (chords.isEmpty() && !hasTypedPins && !hasNoteVoicing) return;
         try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
@@ -541,6 +555,7 @@ public final class ReconstructionStages {
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience, chordReduction);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> outcome.laneType() != null).toList());
+            if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
         }
     }
 
@@ -574,6 +589,12 @@ public final class ReconstructionStages {
             }
         }
         ReconstructionArtifacts.write(file, value);
+    }
+
+    private static void previewNoteVoicing(ReconstructionEdits edits, Score score, ReconstructionAllocation.Result allocation,
+                                           List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs.catalogue));
+        ReconstructionNoteVoicing.resolve(edits.intents(), allocation, catalogue, Map.of(), Map.of(), outcomes);
     }
 
     private static void checkInputFiles(Inputs inputs) {

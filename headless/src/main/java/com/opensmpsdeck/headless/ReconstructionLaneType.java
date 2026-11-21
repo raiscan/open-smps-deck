@@ -17,6 +17,12 @@ public enum ReconstructionLaneType {
         };
     }
 
+    boolean accepts(ReconstructionAllocation.Entry entry) {
+        boolean drums = entry.role() == ReconstructionRoles.Role.drums;
+        return entry.lane() != null && accepts(entry.lane(), drums)
+                && (entry.laneType() != NOISE || drums);
+    }
+
     boolean accepts(String lane, boolean drums) {
         return isDrum() == drums && lanes().contains(lane);
     }

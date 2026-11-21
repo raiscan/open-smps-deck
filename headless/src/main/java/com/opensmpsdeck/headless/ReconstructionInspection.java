@@ -138,6 +138,18 @@ public final class ReconstructionInspection {
         return best;
     }
 
+    public ReconstructionLaneType laneType(Overlay overlay) {
+        String lane = overlay.lane();
+        if (lane == null) return null;
+        if (lane.startsWith("FM")) return ReconstructionLaneType.FM;
+        if (lane.equals("DAC")) return ReconstructionLaneType.DAC;
+        var row = trace.get(overlay.id());
+        var placement = row == null ? null : row.allocation();
+        return overlay.role() == Role.DRUMS || placement != null && lane.equals(placement.lane())
+                && placement.laneType() == ReconstructionLaneType.NOISE
+                ? ReconstructionLaneType.NOISE : ReconstructionLaneType.PSG;
+    }
+
     public NoteDetails noteDetails(String id) {
         var row = trace.get(id);
         if (row == null) return new NoteDetails(false, false, null, List.of());
