@@ -66,6 +66,53 @@ public final class ReconstructionTrace {
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced) {}
     record Change(String id, Boolean outsideSpan, List<String> changedStages, Summary old,
                   @com.google.gson.annotations.SerializedName("new") Summary updated) {}
+    private record PinLane(String id, String reason, String op, List<String> noteIds, String lane) {}
+    private record LanePermutation(Map<String, String> lanes, int noteCount, double startSeconds, double endSeconds,
+                                   List<String> firstNoteIds, List<PinLane> pins) {}
+
+    private static final class PermutationGroup {
+        private final Map<String, String> lanes = new java.util.TreeMap<>();
+        private final Map<String, String> firstNotes = new java.util.TreeMap<>();
+        private double start = Double.POSITIVE_INFINITY;
+        private double end;
+        private int notes;
+
+        boolean touches(String from, String to) {
+            return contains(from) || contains(to);
+        }
+
+        private boolean contains(String lane) {
+            return lane != null && (lanes.containsKey(lane) || lanes.containsValue(lane));
+        }
+
+        boolean accepts(String from, String to) {
+            return (lanes.containsKey(from) ? lanes.get(from).equals(to) : !lanes.containsValue(to));
+        }
+
+        void add(Row row, String from, String to) {
+            lanes.put(from, to);
+            firstNotes.putIfAbsent(from, row.id);
+            start = Math.min(start, row.allocation.placement.sourceStart);
+            end = Math.max(end, row.allocation.placement.sourceEnd);
+            notes++;
+        }
+
+        void merge(PermutationGroup other) {
+            lanes.putAll(other.lanes);
+            firstNotes.putAll(other.firstNotes);
+            start = Math.min(start, other.start);
+            end = Math.max(end, other.end);
+            notes += other.notes;
+        }
+
+        LanePermutation finish(int index) {
+            var pins = firstNotes.entrySet().stream().map(entry -> new PinLane(
+                    "resync-" + index + "-" + entry.getKey(), "Restore baseline lane at first divergence",
+                    "pinLane", List.of(entry.getValue()), entry.getKey())).toList();
+            return new LanePermutation(lanes, notes, start, end, List.copyOf(firstNotes.values()), pins);
+        }
+    }
+
     private record Fate(Status status, String stage, String reason) {}
     private record Raw(Note note, ExternalTranscribers.Evidence external, String decision) {}
     private record PartOnset(int part, long startUs) {}
@@ -140,7 +187,11 @@ public final class ReconstructionTrace {
             if (bounds.length != 2) throw new IllegalArgumentException("--span expects START,END in source seconds");
             span = new Span(Double.parseDouble(bounds[0]), Double.parseDouble(bounds[1]));
         }
-        return diff(read(oldWork), read(newWork), span);
+        var result = diff(read(oldWork), read(newWork), span);
+        var before = optional(oldWork, "voicing.json", ReconstructionVoicing.Result.class);
+        var after = optional(newWork, "voicing.json", ReconstructionVoicing.Result.class);
+        result.add("voicingChanges", JSON.toJsonTree(ReconstructionVoicing.changes(before, after)));
+        return result;
     }
 
     static JsonObject diff(Map<String, Row> old, Map<String, Row> updated, Span span) {
@@ -154,7 +205,54 @@ public final class ReconstructionTrace {
             changes.add(new Change(id, span == null ? null : !overlaps(span, before) && !overlaps(span, after),
                     stages, summary(before), summary(after)));
         }
-        return JSON.toJsonTree(Map.of("changes", changes)).getAsJsonObject();
+        return JSON.toJsonTree(Map.of("changes", changes, "lanePermutations", permutations(old, updated, span)))
+                .getAsJsonObject();
+    }
+
+    private static List<LanePermutation> permutations(Map<String, Row> old, Map<String, Row> updated, Span span) {
+        var active = new ArrayList<PermutationGroup>();
+        var finished = new ArrayList<PermutationGroup>();
+        var ids = new LinkedHashSet<>(old.keySet());
+        ids.addAll(updated.keySet());
+        var chronological = ids.stream().sorted(Comparator.comparingDouble(id -> attackTime(
+                old.getOrDefault(id, updated.get(id))))).toList();
+        for (String id : chronological) {
+            Row before = old.get(id), after = updated.get(id);
+            // The parent attack is the editable target for quantized figure steps.
+            if (isFigureStep(before) || isFigureStep(after)) continue;
+            String from = allocatedLane(before), to = allocatedLane(after);
+            boolean inSpan = span != null && (overlaps(span, before) || overlaps(span, after));
+            boolean moved = !inSpan && from != null && to != null && !from.equals(to);
+            var joined = new PermutationGroup();
+            for (var iterator = active.iterator(); iterator.hasNext();) {
+                var group = iterator.next();
+                if (!group.touches(from, to)) continue;
+                iterator.remove();
+                if (moved && group.accepts(from, to)) joined.merge(group);
+                else finished.add(group);
+            }
+            if (moved) {
+                joined.add(before, from, to);
+                active.add(joined);
+            }
+        }
+        finished.addAll(active);
+        finished.sort(Comparator.comparingDouble(group -> group.start));
+        var result = new ArrayList<LanePermutation>();
+        for (var group : finished) result.add(group.finish(result.size() + 1));
+        return List.copyOf(result);
+    }
+
+    private static boolean isFigureStep(Row row) {
+        return row != null && row.roles == null && row.allocation != null && row.id.contains("-step-");
+    }
+
+    private static String allocatedLane(Row row) {
+        return row == null || row.allocation == null || row.allocation.placement == null ? null : row.allocation.lane;
+    }
+
+    private static double attackTime(Row row) {
+        return allocatedLane(row) == null ? row.timing.sourceStart : row.allocation.placement.sourceStart;
     }
 
     private static List<String> changedStages(Row a, Row b) {
@@ -645,6 +743,21 @@ public final class ReconstructionTrace {
                 if (change.updated != null) printSummary(out, "new", change.updated);
             }
             out.printf("%d changed notes%n", result.getAsJsonArray("changes").size());
+            for (var entry : result.getAsJsonArray("lanePermutations")) {
+                var group = JSON.fromJson(entry, LanePermutation.class);
+                String mapping = group.lanes.entrySet().stream()
+                        .map(move -> move.getKey() + "→" + move.getValue())
+                        .collect(java.util.stream.Collectors.joining(", "));
+                if (group.lanes.size() == 2 && group.lanes.keySet().containsAll(group.lanes.values()))
+                    mapping = String.join("↔", group.lanes.keySet()) + " swapped";
+                out.printf(Locale.ROOT, "%s for %d notes, %.3f–%.3f s%n", mapping, group.noteCount,
+                        group.startSeconds, group.endSeconds);
+                out.println("  first diverging note IDs: " + group.firstNoteIds);
+                for (var pin : group.pins)
+                    out.println("  " + JSON.toJsonTree(pin));
+            }
+            for (var entry : result.getAsJsonArray("voicingChanges"))
+                out.println(JSON.fromJson(entry, ReconstructionVoicing.Change.class).describe());
         } else {
             for (var entry : result.getAsJsonArray("notes")) print(out, "", JSON.fromJson(entry, Row.class));
             out.printf("%d notes%n", result.getAsJsonArray("notes").size());

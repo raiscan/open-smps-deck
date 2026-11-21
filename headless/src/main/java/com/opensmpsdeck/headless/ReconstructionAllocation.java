@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.TreeMap;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
@@ -92,8 +93,25 @@ final class ReconstructionAllocation {
     private final Map<String, Entry> entries = new LinkedHashMap<>();
     private final Map<String, Entry> tail = new HashMap<>();
     private final boolean fmOnly;
+    private final Map<String, String> previousLanes = new HashMap<>();
+    private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
-    private ReconstructionAllocation(boolean fmOnly) { this.fmOnly = fmOnly; }
+    private ReconstructionAllocation(boolean fmOnly, Result previous, List<Attack> attacks) {
+        this.fmOnly = fmOnly;
+        if (previous == null) return;
+        for (var entry : previous.notes()) {
+            if (entry.lane() != null) previousLanes.put(entry.note().id(), entry.lane());
+        }
+        if (previous.fastRuns() != null) for (var run : previous.fastRuns()) {
+            if (run.lane() != null) previousLanes.put(run.id(), run.lane());
+        }
+        for (var attack : attacks) {
+            String lane = previousLanes.get(attack.note().id());
+            if (lane == null || attack.pin != null || attack.role() == Role.drop) continue;
+            if (expectedLanes(attack.role(), attack.noise).contains(lane) || spillLanes(attack).contains(lane))
+                previousAttacks.computeIfAbsent(lane, ignored -> new TreeMap<>()).put(attack.start, attack.note().id());
+        }
+    }
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly) {
         return allocate(roles, parts, frames, fmOnly, false);
@@ -101,7 +119,11 @@ final class ReconstructionAllocation {
 
     static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
                            boolean hasStems) {
-        var allocator = new ReconstructionAllocation(fmOnly);
+        return allocate(roles, parts, frames, fmOnly, hasStems, null);
+    }
+
+    static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
+                           boolean hasStems, Result previous) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -117,6 +139,7 @@ final class ReconstructionAllocation {
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
+        var allocator = new ReconstructionAllocation(fmOnly, previous, attacks);
         for (var attack : attacks) allocator.place(attack);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
         var placed = new ArrayList<Entry>();
@@ -212,7 +235,7 @@ final class ReconstructionAllocation {
             return;
         }
         List<String> primary = expectedLanes(attack.role(), attack.noise);
-        List<String> secondary = primary == INNER_FM && !fmOnly && attack.note().pitch() >= 45 && attack.note().run() == null ? PSG : List.of();
+        List<String> secondary = spillLanes(attack);
         String lane = free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && primary == INNER_FM && secondary.isEmpty() && !fmOnly)
@@ -255,9 +278,25 @@ final class ReconstructionAllocation {
         };
     }
 
+    private List<String> spillLanes(Attack attack) {
+        return expectedLanes(attack.role(), attack.noise) == INNER_FM && !fmOnly
+                && attack.note().pitch() >= 45 && attack.note().run() == null ? PSG : List.of();
+    }
+
     private String free(List<String> lanes, Attack attack) {
+        String previous = previousLanes.get(attack.note().id());
+        // Affinity depends on the preceding attack. Let the old placement break that
+        // dependency when the lane is just as playable, without bypassing FM priority.
         return lanes.stream().filter(lane -> !tail.containsKey(lane) || tail.get(lane).endTick <= attack.start)
-                .min(Comparator.comparingInt(lane -> affinity(tail.get(lane), attack))).orElse(null);
+                .min(Comparator.comparing((String lane) -> !lane.equals(previous))
+                        .thenComparing(lane -> reserved(lane, attack))
+                        .thenComparingInt(lane -> affinity(tail.get(lane), attack))).orElse(null);
+    }
+
+    private boolean reserved(String lane, Attack attack) {
+        var schedule = previousAttacks.get(lane);
+        var next = schedule == null ? null : schedule.ceilingEntry(attack.start);
+        return next != null && next.getKey() < attack.end && !next.getValue().equals(attack.note().id());
     }
 
     private static int affinity(Entry last, Attack attack) {
@@ -288,7 +327,8 @@ final class ReconstructionAllocation {
 
     private String shorten(List<String> lanes, Attack attack) {
         String lane = lanes.stream().filter(l -> canShorten(tail.get(l), attack))
-                .min(Comparator.comparingInt(l -> tail.get(l).endTick - attack.start)).orElse(null);
+                .min(Comparator.comparingInt((String l) -> tail.get(l).endTick - attack.start)
+                        .thenComparing(l -> !l.equals(previousLanes.get(attack.note().id())))).orElse(null);
         if (lane != null) {
             Entry earlier = tail.get(lane);
             entries.put(earlier.note.id(), earlier.shorten(attack.start,

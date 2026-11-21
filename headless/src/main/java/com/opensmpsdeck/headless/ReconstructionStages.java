@@ -170,9 +170,9 @@ public final class ReconstructionStages {
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
                                 Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart, boolean fastRunsOff,
-                                @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes, boolean refitLevels) {}
+                                @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz,
-                           java.util.Set<String> lanes, boolean refitLevels) {}
+                           java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing) {}
 
     private ReconstructionStages() {}
 
@@ -210,14 +210,14 @@ public final class ReconstructionStages {
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
-            execute(request, out, preserveReview, progress, refitChange);
+            execute(request, request.work, out, preserveReview, progress, refitChange);
             if (request.chain && request.initial == null) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
         }
     }
 
-    static void rerun(Path oldWork, Path work, List<Path> search, PrintStream out) throws IOException {
+    static void rerun(Path oldWork, Path work, List<Path> search, boolean keepVoicing, PrintStream out) throws IOException {
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var replay = ReconstructionManifest.resolve(oldWork, work, search);
@@ -228,11 +228,23 @@ public final class ReconstructionStages {
         if (!edits.isEmpty()) edits.write(work);
         var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
                 inputs.options(replay.manifest().durationUs())), inputs);
-        execute(new Request(work, Stage.TRANSCRIBE, true, score, null, java.util.Set.of(), false), out, false,
+        execute(new Request(work, Stage.TRANSCRIBE, true, score, null, java.util.Set.of(), false, keepVoicing), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
     }
 
-    private static void execute(Request request, PrintStream out, boolean preserveReview, Progress progress,
+    private static ReconstructionAllocation.Result previousAllocation(Path file, PrintStream out) throws IOException {
+        if (Files.notExists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+        try {
+            return ReconstructionArtifacts.read(file, ReconstructionAllocation.Result.class);
+        } catch (IllegalArgumentException invalid) {
+            // Allocation can be rebuilt even if the artifact it replaces is damaged.
+            out.println("Ignoring invalid previous allocation: " + invalid.getMessage());
+            return null;
+        }
+    }
+
+    private static void execute(Request request, Path previousWork, PrintStream out, boolean preserveReview,
+                                Progress progress,
                                 java.util.function.Consumer<String> refitChange) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
@@ -241,6 +253,8 @@ public final class ReconstructionStages {
         Path rolesFile = work.resolve("roles.json");
         Path allocationFile = work.resolve("allocation.json");
         Path voicingFile = work.resolve("voicing.json");
+        var previousAllocation = request.chain && request.from.ordinal() <= Stage.ALLOCATE.ordinal()
+                ? previousAllocation(previousWork.resolve("allocation.json"), out) : null;
         var edits = ReconstructionEdits.read(work);
         var previousEdits = ReconstructionEdits.Journal.read(work);
         var editJournal = previousEdits.through(request.from);
@@ -280,38 +294,30 @@ public final class ReconstructionStages {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
                         var allocation = ReconstructionAllocation.allocate(roles, score.source.parts(),
-                                ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly, !score.inputs.stems.isEmpty());
+                                ReconstructionTimeMap.of(score).frames(), score.inputs.fmOnly, !score.inputs.stems.isEmpty(), previousAllocation);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         outcomes.addAll(edits.allocationOutcomes(allocation, roles.lanePins()));
                     }
                     case VOICE -> {
-                        // Resuming an existing voicing uses the user's edits.
-                        // Refit when explicitly requested or when rebuilding from an upstream stage.
+                        // A resume at voice normally assembles the saved settings directly.
                         if (request.chain && request.from == Stage.VOICE && request.lanes.isEmpty()
-                                && !request.refitLevels && Files.exists(voicingFile)) break;
+                                && !request.refitLevels && !request.keepVoicing && Files.exists(voicingFile)) break;
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
-                        var previous = Files.notExists(voicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
-                                : ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
-                        var fitted = ReconstructionCli.fitVoicing(score, allocation, previous, request.lanes, request.refitLevels);
+                        Path oldVoicingFile = previousWork.resolve("voicing.json");
+                        var previous = Files.notExists(oldVoicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
+                                : ReconstructionArtifacts.read(oldVoicingFile, ReconstructionVoicing.Result.class);
+                        java.util.function.Consumer<String> report = change -> {
+                            out.println(change);
+                            refitChange.accept(change);
+                        };
+                        var fitted = request.keepVoicing && previous != null
+                                ? ReconstructionCli.keepVoicing(score, allocation, previous, report)
+                                : ReconstructionCli.fitVoicing(score, allocation, previousWork.equals(work) ? previous : null,
+                                        request.lanes, request.refitLevels, previousAllocation);
                         ReconstructionArtifacts.write(voicingFile, fitted);
-                        if (previous != null) {
-                            var lanes = new java.util.TreeSet<>(previous.lanes().keySet());
-                            lanes.addAll(fitted.lanes().keySet());
-                            for (String lane : lanes) {
-                                var before = previous.lanes().get(lane);
-                                var after = fitted.lanes().get(lane);
-                                if (java.util.Objects.equals(before, after)) continue;
-                                String change = "Refit changed " + lane;
-                                if (before == null) change += " (added)";
-                                else if (after == null) change += " (removed)";
-                                else if (before.gain() != after.gain() || !java.util.Objects.equals(before.partGains(), after.partGains()))
-                                    change += " (gain " + before.gain() + " → " + after.gain() + ", part gains "
-                                            + before.partGains() + " → " + after.partGains() + ")";
-                                out.println(change);
-                                refitChange.accept(change);
-                            }
-                        }
+                        if (previous != null)
+                            ReconstructionVoicing.changes(previous, fitted).forEach(change -> report.accept(change.describe()));
                     }
                     case ASSEMBLE -> {
                         var structure = readStructure(structureFile, score);
@@ -350,18 +356,24 @@ public final class ReconstructionStages {
     }
 
     public static Path planTemplate(Path work) throws IOException {
-        var score = readScore(work.resolve("score.json"));
-        var structure = readStructure(work.resolve("structure.json"), score);
-        Path path = work.resolve("roleplan.json");
+        return writePlanTemplate(work, work.resolve("roleplan.json"));
+    }
+
+    static Path writePlanTemplate(Path work, Path path) throws IOException {
         if (Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new java.nio.file.FileAlreadyExistsException(path.toString());
+        // CREATE_NEW also protects edits made concurrently after the existence check.
+        Files.writeString(path, planTemplateJson(work), java.nio.file.StandardOpenOption.CREATE_NEW);
+        return path;
+    }
+
+    static String planTemplateJson(Path work) throws IOException {
+        var score = readScore(work.resolve("score.json"));
+        var structure = readStructure(work.resolve("structure.json"), score);
         var heuristic = ReconstructionRoles.assign(structure, score.source.parts(), score.inputs.harmonyMaxHz,
                 null, null, null, score.inputs.leadPart);
         var plan = ReconstructionRolePlan.template(structure, heuristic);
-        // CREATE_NEW also protects edits made concurrently after the existence check.
-        Files.writeString(path, new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(plan) + "\n",
-                java.nio.file.StandardOpenOption.CREATE_NEW);
-        return path;
+        return new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(plan) + "\n";
     }
 
     private static String stageName(Stage stage) {
@@ -431,8 +443,8 @@ public final class ReconstructionStages {
         Path midi = absolute(args[0]), reference = absolute(args[1]), index = absolute(args[2]), work = absolute(args[3]);
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var extra = stageOptions(args, 4);
-        if (!extra.lanes.isEmpty() || extra.refitLevels)
-            throw new IllegalArgumentException("--lane and --refit-levels require an existing work directory");
+        if (!extra.lanes.isEmpty() || extra.refitLevels || extra.keepVoicing)
+            throw new IllegalArgumentException("--lane, --refit-levels and --keep-voicing require an existing work directory");
         String[] legacy = java.util.stream.Stream.concat(java.util.stream.Stream.of("reconstruct"),
                 Arrays.stream(extra.legacy)).toArray(String[]::new);
         var options = ReconstructionCli.parseOptions(legacy, midi.getFileName().toString());
@@ -447,24 +459,27 @@ public final class ReconstructionStages {
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
                 extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource);
-        return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz, extra.lanes, extra.refitLevels);
+        return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz, extra.lanes, extra.refitLevels, extra.keepVoicing);
     }
 
     private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
+        if (extra.keepVoicing && (!chain || stage.ordinal() > Stage.VOICE.ordinal()
+                || extra.refitLevels || !extra.lanes.isEmpty()))
+            throw new IllegalArgumentException("--keep-voicing requires a run through voice and cannot be combined with refit options");
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
                 || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
-        return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz, extra.lanes, extra.refitLevels);
+        return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz, extra.lanes, extra.refitLevels, extra.keepVoicing);
     }
 
     private static StageOptions stageOptions(String[] args, int firstOption) {
         var lanes = new java.util.LinkedHashSet<String>();
-        boolean refitLevels = false;
+        boolean refitLevels = false, keepVoicing = false;
         Path candidates = null;
         Double hz = null, bpm = null, offset = null;
         Integer leadPart = null;
@@ -548,6 +563,7 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("--lane expects a distinct reconstruction lane");
                 }
                 case "--refit-levels" -> refitLevels = true;
+                case "--keep-voicing" -> keepVoicing = true;
                 case "--harmony-max-hz" -> {
                     if (hz != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --harmony-max-hz RATE");
@@ -568,7 +584,7 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels);
+                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }

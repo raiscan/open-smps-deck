@@ -262,7 +262,7 @@ final class ReconstructionVoiceStage {
         return counts.entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(null);
     }
 
-    private static Role dominantRole(List<ReconstructionAllocation.Entry> entries) {
+    static Role dominantRole(List<ReconstructionAllocation.Entry> entries) {
         var counts = new EnumMap<Role, Integer>(Role.class);
         for (var note : entries) counts.merge(note.role(), 1, Integer::sum);
         return counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();

@@ -72,7 +72,10 @@ reductions, and bends they recorded.
 compares the chains by ID. The optional span uses source seconds and
 flags changes outside the interval. A change in a gate, role, lane,
 merge partner, or applied bend can appear even if the summary category
-stays the same.
+stays the same. `lanePermutations` summarizes contiguous lane changes
+outside the span, including the first diverging note on each original lane
+and suggested `pinLane` edits. `voicingChanges` compares lane variants,
+gain and part gains independently of note fate.
 
 A fresh staged run writes `manifest.json` with the build identity,
 resolved options, input paths and hashes, and references to content-addressed
@@ -84,7 +87,10 @@ snapshot and its provenance. Original bytes are retained for new runs.
 stored path or snapshot and checks any repeated `--search DIR` roots for
 missing bytes. The replay starts from transcription using the saved options
 and original external notes. `edits.json` is copied into the replay. Later role plans and direct stage
-artifact changes remain in the original work directory.
+artifact changes remain in the original work directory. Rebuilt allocation
+prefers the prior lane for a matching note when it can use that lane at the
+same hardware priority and without clipping another note. This prevents
+lane affinity from carrying a local reassignment forward.
 
 ## Persistent musical edits
 
@@ -437,6 +443,9 @@ exceed the project or bank capacity.
 
 ### Roles
 
+`reconstruct plan-template WORK_DIR` prints template JSON to stdout.
+Pass `--out FILE` to save it to a new file.
+
 `roles.json` contains `harmonyMaxHz` and a `notes` array with
 `{note, role, reason?, assignmentReason?, mergedInto?}` per corrected note. Valid roles
 are `melody`, `counter`, `bass`, `harmony`, `drums`, and `drop`.
@@ -633,12 +642,21 @@ Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
 or generates it if missing. Use `reconstruct voice WORK_DIR` to refit after
 editing allocation. A refit preserves overrides, lane gain and part gains by
-default, except on a lane whose role changed upstream, which takes the
-refitted levels. Pass `--lane LANE` repeatedly to restrict which lanes can change, and
-`--refit-levels` to recompute the targeted levels. With no lane filter, an
-explicit refit considers every lane. The CLI lists every changed lane and MCP
-returns them in `refitChanges`. The fit starts from still-available FM variants
-and favors incumbents on close scores.
+default. A rebuild from upstream recomputes levels for a lane when its
+allocated notes, gates, velocities or bends change. Role labels alone do
+not trigger releveling. Pass `--lane LANE` repeatedly to restrict which lanes
+can change, and `--refit-levels` to recompute their levels. Without a lane
+filter, an explicit refit considers every lane. The CLI reports changed
+variants, gain and part gains for standalone and chained runs. MCP returns
+them in `refitChanges`. The fit starts from still-available FM variants and
+favors incumbents on close scores.
+
+Use `--keep-voicing` on `run --from` through voice or on `rerun` to reuse
+compatible lane settings. The run reports stale part gains and instrument
+entries as it drops them. It fits any newly needed lanes or instruments and
+reports a copy effect if its destination is no longer free. It preserves
+scoped overrides on retained lanes for validation. The flag is separate from
+`--lane` and `--refit-levels`. MCP resumed runs accept `options.keepVoicing`.
 
 The optional `fitWindows` object stores the source length in 60 Hz frames
 and excerpt start ticks in time order. Refits reuse those excerpts when

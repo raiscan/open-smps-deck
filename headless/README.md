@@ -140,7 +140,9 @@ java -jar "$deck_jar" reconstruct run song.mid song.wav instruments.json full-so
 
 The command creates a new work directory with five editable stage artifacts
 and four assembly outputs. Use `reconstruct run --from STAGE WORK_DIR` to
-regenerate downstream decisions after an edit. The
+regenerate downstream decisions after an edit. Allocation prefers the prior
+lane where it can do so with the same hardware priority and without
+shortening another note. The
 [reconstruction stage guide](../docs/architecture/reconstruction-stages.md)
 documents the files, individual stage commands, and how to add external
 note candidates. Use `reconstruct voice WORK_DIR` to fit `voicing.json`.
@@ -207,9 +209,16 @@ changing playback timing. To check a render from an edited project, use
 ### Refine and audition voicing
 
 Use `reconstruct voice WORK_DIR --lane FM1` to refit only FM1. Refits preserve
-existing lane and part gains and all scoped overrides. Use `--refit-levels`
-to recalculate levels for the lanes being refitted. The command reports every
-lane it changed.
+existing gains for unchanged lane material and retain scoped overrides.
+A new role label alone does not trigger a level change. Use
+`--refit-levels` to recalculate levels for the lanes being refitted.
+Standalone voice and chained runs report changed variants and gains.
+
+For quick edits, use `reconstruct run --from roles WORK_DIR --keep-voicing`
+or add `--keep-voicing` to `reconstruct rerun`. It reuses compatible lane
+settings, lists each stale part gain or instrument it removes, and fits
+settings when a new lane or instrument needs them. MCP resumed runs accept
+`options.keepVoicing`.
 
 ```sh
 java -jar "$CLI" reconstruct audition "$work" --lane FM1 --start 45.3 --end 48.8 \
@@ -236,8 +245,9 @@ field names and boundary behavior. [Staged reconstruction](../docs/architecture/
 ```sh
 java -jar "$deck_jar" reconstruct describe full-song
 java -jar "$deck_jar" reconstruct describe full-song --section S3 --parts 0,3 --bars 17-24 --json
-java -jar "$deck_jar" reconstruct plan-template full-song
-java -jar "$deck_jar" reconstruct run --from roles full-song
+java -jar "$deck_jar" reconstruct plan-template full-song --out full-song/roleplan.json
+# Edit full-song/roleplan.json before rebuilding.
+java -jar "$deck_jar" reconstruct run --from roles full-song --keep-voicing
 ```
 
 Run these commands after the structure stage. The score view uses the
@@ -263,9 +273,9 @@ it shows the new attack. Percussion lines show hits such as `K` for kick
 other unmapped GM hit numbers. The grid is for inspection and does not
 change event times.
 
-`plan-template` creates a new `roleplan.json` with each active section and
-part's most frequent heuristic role. Edit those starting choices to express
-musical intent. The template leaves an existing plan intact. Example plan:
+`plan-template` prints a JSON template with each active section and part's
+most frequent heuristic role. Use `--out full-song/roleplan.json` to save it
+without overwriting an existing plan. Edit the template to express musical intent. Example plan:
 
 ```json
 {
@@ -393,7 +403,10 @@ Use either `--pitch` or an inclusive range with `--pitch-min` and
 The trace shows each stage's version of the note, including handwritten
 score edits awaiting a rebuild, and the reason and competing note IDs.
 The diff compares stable IDs and sets `outsideSpan` when neither version
-of the note touches the specified source-time interval.
+of the note touches the specified source-time interval. It groups contiguous
+lane moves outside that span in `lanePermutations`, with the first diverging
+IDs and suggested `pinLane` edits. `voicingChanges` lists changes to variants,
+lane gain, and part gains.
 
 MCP `reconstruct_trace` returns JSON and accepts `workDir`, `start`,
 `end`, `part`, `pitch`, `pitchMin`, `pitchMax`, `lane`, and `status`.
