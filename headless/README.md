@@ -211,8 +211,8 @@ channel counts and frame counts.
 
 Check `import-work/import.json` for errors, nearly silent stems and the
 assigned roles. `separation.json` enables audio-only import automatically
-for this folder without MIDI. Vocals map to lead and drums feed the
-onset detector. Use `--stem-role FILE=ROLE` with a folder-relative file
+for this folder without MIDI. Vocals are candidates for lead and drums feed
+the onset detector. Use `--stem-role FILE=ROLE` with a folder-relative file
 name to override a role. Repeat the checked options with `--run` to build
 in `import-work/reconstruction`. Open this directory in Studio with
 **Open reconstruction…**. It must be new for an initial build.
@@ -224,8 +224,8 @@ names to trusted executable argument arrays. The CLI substitutes
 `{input}`, `{outputDir}` and `{device}` directly. `--device` accepts
 `auto` (the default), `cpu`, `rocm` and `cuda`. Put the tonal adapter in
 [the transcriber configuration](#external-transcription). Import selects a
-sole configured transcriber automatically and requires `--transcriber NAME`
-when several are configured. With no configured transcriber and no name
+sole configured transcriber automatically. With several configured, use
+per-role defaults or explicit transcriber options. With no configured transcriber and no name
 requested, the separated-folder check writes a report and stops with
 `no MIDI: needs audio-only transcription`.
 
@@ -841,8 +841,12 @@ java -jar "$CLI" reconstruct run --audio-only mix.wav catalogue.json work \
   --transcriber muscriptor-medium
 ```
 
-Audio-only mode selects the sole configured transcriber automatically.
-When several are configured, select one with `--transcriber NAME`.
+Audio-only mode selects the sole configured tonal transcriber automatically.
+With multiple transcribers, configure a default for each active role or specify
+`--transcriber NAME` as the global override. Repeat `--transcriber-for ROLE=NAME`
+to override individual roles on `run`, `transcribe`, or audio-only `import`.
+Role overrides take precedence over the global override. MIDI-based runs
+also accept role selection for explicitly requested external parts and stems.
 Stems with no audible signal in the requested interval are skipped.
 Each remaining tonal stem supplies a part. Vocals default to a monophonic
 lead and use the transcriber's `vocals` prompt. Bass, guitar, piano, synth,
@@ -850,21 +854,83 @@ keyboard and other keep their corresponding roles. Use
 `--stem-role LABEL=ROLE` to override a label's role, for example
 `--stem-role synth=lead` for an instrumental track.
 
-An optional `drums` stem supplies kick, snare and closed-hat onsets to the
-existing DAC and PSG3 routing. `--drum-detector spectral` names the built-in
-detector. Drum or mix attacks determine the beat grid, with automatic
-steady-tempo warping when the tracker finds drift. Override the grid with
+The following `transcribers.json` combines the three recommended adapters.
+Install [MuScriptor Medium](../tools/transcribers/muscriptor/),
+[Basic Pitch](../tools/transcribers/basic-pitch/) and [ADTOF](../tools/transcribers/adtof/)
+and replace the paths. Each command may choose its own device.
+
+```json
+{
+  "muscriptor-medium": [
+    "/path/to/muscriptor/venv/bin/python", "/path/to/repo/tools/transcribers/muscriptor/run.py",
+    "--input", "{input}", "--output", "{output}", "--role", "{role}", "--device", "{device}",
+    "--model", "medium", "--weights", "/path/to/muscriptor/weights/medium/model.safetensors"
+  ],
+  "basic-pitch": [
+    "/path/to/basic-pitch/venv/bin/python", "/path/to/repo/tools/transcribers/basic-pitch/run.py",
+    "--input", "{input}", "--output", "{output}", "--role", "{role}"
+  ],
+  "drumTranscribers": {
+    "adtof": [
+      "/path/to/adtof/venv/bin/python", "/path/to/repo/tools/transcribers/adtof/run.py",
+      "--input", "{input}", "--output", "{output}", "--device", "{device}"
+    ]
+  },
+  "defaults": {
+    "bass": "muscriptor-medium",
+    "guitar": "muscriptor-medium",
+    "piano": "muscriptor-medium",
+    "other": "muscriptor-medium",
+    "synth": "muscriptor-medium",
+    "vocals": "muscriptor-medium,basic-pitch",
+    "drums": "adtof"
+  }
+}
+```
+
+For vocals, a comma-separated pair such as `muscriptor-medium,basic-pitch`
+runs both adapters and evaluates each result plus their union. Use the same
+syntax with `--transcriber-for vocals=muscriptor-medium,basic-pitch` or MCP
+`transcriberFor.vocals`. The comparison balances voiced-time coverage and
+agreement within a semitone of the stem's F0 estimate. Basic Pitch supplies
+its dominant contour when periodicity alone leaves a gap. It records the winner
+and all three scores in the vocal part's transcription provenance. A single
+name uses only that adapter.
+
+Audio-only vocal cleanup follows a monophonic line using pitch salience,
+continuity and a range learned from the stem. It joins supported syllables,
+bridges short voiced gaps and can fill sustained pitches. When other tonal stems are present, vocals need at least two seconds of
+audible periodic pitch (or 15% of a short excerpt, whichever is smaller)
+and an RMS level of at least 3.5% of the strongest other tonal stem.
+Residual vocals are skipped and normal lead selection resumes.
+Use `--lead-part` on a direct run to pin the vocal part explicitly.
+The vocal-derived FM1 part uses a bright sustained patch selected from the catalogue by a
+held-note probe. When the stem supports a vibrato estimate, it is encoded
+using the usual FM modulation controls. Edit the source instrument and its
+effects in `voicing.json` to override these choices.
+
+An optional `drums` stem feeds DAC and PSG3 routing. External drum commands
+write `[[seconds, gmPitch, velocity], ...]` and may supply a
+`<output>.meta.json` sidecar. The built-in `spectral` detector is the default
+when no drums default is configured. Select a detector with
+`--drum-detector NAME` or `--transcriber-for drums=NAME`.
+
+Drum or mix attacks determine the beat grid. Tracking ranks local onset fits,
+a kick/snare periodicity prior and a soft preference for 70–180 BPM.
+`score.json` records competing tempo hypotheses. Override the grid with
 `--tempo BPM --bar-offset SECONDS` and control warping with `--steady-tempo`.
-The score and manifest save the detector version, detected attacks and
-transcriber provenance. Resume or replay uses the saved detections and
-transcription snapshots.
+The score and manifest save detector provenance, hits and tonal transcription
+snapshots for replay. If the native bank overflows after optional bends and
+copies are removed, assembly progressively omits lower-priority automatic
+harmony and counter attacks. The report records each omission. An oversized drum-balance probe keeps
+the initial fitted levels and leaves bank fitting to assembly.
 
 For a folder containing `mix.wav` and labelled stems at its root or under
 `stems/`, use:
 
 ```sh
 java -jar "$CLI" reconstruct import STEM_FOLDER IMPORT_WORK --audio-only \
-  --catalogue catalogue.json --transcriber muscriptor-medium --run
+  --catalogue catalogue.json --run
 ```
 
 Omit `--run` to check the folder and get a runnable request. In this command,
@@ -874,9 +940,10 @@ and percussion by default. Use an explicit role override to include one.
 
 In MCP, send `inputs: {audioOnly: true, wav, catalogue, stems}` to
 `reconstruct_run`, where `stems` maps stem labels to absolute WAV paths.
-Put label-based `stemRoles` and `transcriber` in `options`. For
-`reconstruct_import`, put `audioOnly`, `transcriber` and file-based
-`stemRoles` at the top level. Its `runRequest` can be passed to
+Put label-based `stemRoles`, `transcriberFor` (for example
+`{"vocals":"basic-pitch"}`), `transcriber` and `drumDetector` in `options`.
+For `reconstruct_import`, put those options and `audioOnly` at the top level
+and use file-based `stemRoles`. The MCP server reads its own local configuration. Its `runRequest` can be passed to
 `reconstruct_run` once a catalogue is supplied.
 
 ## Source voices

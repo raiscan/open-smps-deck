@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 import java.io.IOException;
@@ -31,9 +32,14 @@ final class ExternalCommands {
     static Map<String, List<String>> commands(Path file, Pattern placeholders, String... requiredArguments) throws IOException {
         JsonElement tree = ReconstructionArtifacts.readTree(file);
         require(tree != null && tree.isJsonObject(), file.toString(), "expected an object mapping tool names to commands");
+        return commands(tree.getAsJsonObject(), file.toString(), placeholders, requiredArguments);
+    }
+
+    static Map<String, List<String>> commands(JsonObject tree, String source, Pattern placeholders,
+                                               String... requiredArguments) {
         var commands = new TreeMap<String, List<String>>();
-        for (var entry : tree.getAsJsonObject().entrySet()) {
-            String at = file + "." + entry.getKey();
+        for (var entry : tree.entrySet()) {
+            String at = source + "." + entry.getKey();
             var value = entry.getValue();
             require(LABEL.matcher(entry.getKey()).matches(), at, "invalid tool name");
             require(value.isJsonArray() && !value.getAsJsonArray().isEmpty(), at, "expected a nonempty argument array");

@@ -10,6 +10,9 @@ The gated [Large](https://huggingface.co/MuScriptor/muscriptor-large),
 CC BY-NC 4.0 with additional model-card conditions. Review and accept the
 conditions for your chosen checkpoint using your own Hugging Face account.
 
+Medium is the recommended checkpoint for tonal stems in the
+[local extraction bake-off](../../../experiments/extraction-bakeoff/RESULTS.md).
+
 ## Install locally
 
 Install [uv](https://docs.astral.sh/uv/) and authenticate with Hugging Face

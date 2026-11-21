@@ -152,7 +152,7 @@ public final class SunoImport {
         FileResult result() {
             var top = issues.reversed().stream().max(Comparator.comparing(Issue::status)).orElseThrow();
             return new FileResult(file, sha256, role, family, top.status, top.code, top.message, part, decidedBy,
-                    Map.copyOf(evidence), List.copyOf(issues));
+                    java.util.Collections.unmodifiableMap(new LinkedHashMap<>(evidence)), List.copyOf(issues));
         }
     }
 
@@ -171,6 +171,15 @@ public final class SunoImport {
     public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
                                  Set<String> exclusions, String transcriber, boolean audioOnly,
                                  String audioTranscriber, Map<String, String> stemRoles,
+                                 ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, transcriber, audioOnly, audioTranscriber,
+                stemRoles, Map.of(), null, null, null, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, boolean audioOnly,
+                                 String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
+                                 String drumDetector, String device, Path configFile,
                                  ReconstructionStages.Progress progress) throws IOException {
         Path source = folder.toRealPath();
         if (!Files.isDirectory(source)) throw new IOException("Expected a Suno folder: " + source);
@@ -198,24 +207,13 @@ public final class SunoImport {
         boolean separatedAudio = provenance != null && mix != null && midi == null;
         audioOnly |= separatedAudio;
         if (audioOnly && !assignments.isEmpty()) throw new IllegalArgumentException("--assign requires MIDI");
-        if (!audioOnly && (audioTranscriber != null || !stemRoles.isEmpty()))
-            throw new IllegalArgumentException("--transcriber and --stem-role require an audio-only import");
+        if (!audioOnly && (audioTranscriber != null || !stemRoles.isEmpty() || !transcriberFor.isEmpty()
+                || drumDetector != null || device != null || configFile != null))
+            throw new IllegalArgumentException("These transcription and stem options require an audio-only import");
         if (audioOnly && transcriber != null)
             throw new IllegalArgumentException("--transcribe-unmapped requires MIDI. Use --transcriber for audio-only import");
-        if (audioOnly) {
-            if (mix == null) issues.add(new Issue(Status.error, "missing_mix", "Add an aligned mix WAV"));
-            try {
-                transcriber = ExternalTranscribers.selectForAudio(audioTranscriber, null, separatedAudio && audioTranscriber == null);
-                if (transcriber == null)
-                    issues.add(new Issue(Status.warning, AUDIO_ONLY, "no MIDI: needs audio-only transcription. Configure a transcriber to run."));
-                else
-                    issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only reconstruction will use " + transcriber));
-            } catch (IllegalArgumentException | IOException e) {
-                issues.add(new Issue(Status.error, "transcriber_unavailable", e.getMessage()));
-            }
-        } else {
-            missingInputs(mix, midi, issues);
-        }
+        if (audioOnly && mix == null) issues.add(new Issue(Status.error, "missing_mix", "Add an aligned mix WAV"));
+        if (!audioOnly) missingInputs(mix, midi, issues);
 
         MidiScore score = readMidi(midi);
         progress.report(++done, total, audioOnly ? "Checked stem metadata" : "Checked MIDI and stem metadata");
@@ -254,7 +252,15 @@ public final class SunoImport {
                                 : "No matching stem. A mix is needed for fallback."))
                 .toList();
         var lead = lead(parts, score, claimed);
-        var audioRequest = audioOnly && transcriber != null ? audioRequest(work, index, mix, inputs, issues, transcriber, stemRoles) : null;
+        RunRequest audioRequest = null;
+        if (audioOnly) {
+            try {
+                audioRequest = audioRequest(work, index, mix, inputs, issues, audioTranscriber, stemRoles,
+                        transcriberFor, drumDetector, device, configFile, separatedAudio);
+            } catch (IllegalArgumentException | IOException e) {
+                issues.add(new Issue(Status.error, "transcriber_unavailable", e.getMessage()));
+            }
+        }
         for (var input : inputs) finish(input, audioOnly);
         var files = inputs.stream().sorted(Comparator.comparing(input -> input.file)).map(Input::result).toList();
         Status status = java.util.stream.Stream.concat(files.stream().map(FileResult::status),
@@ -306,6 +312,9 @@ public final class SunoImport {
         boolean run = false, audioOnly = false;
         String transcriber = null, audioTranscriber = null;
         var stemRoles = new LinkedHashMap<String, String>();
+        var transcriberFor = new TreeMap<String, String>();
+        String drumDetector = null, device = null;
+        Path configFile = null;
         var assignments = new LinkedHashMap<String, Integer>();
         var exclusions = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
@@ -331,6 +340,10 @@ public final class SunoImport {
                     if (audioTranscriber != null) throw new IllegalArgumentException("Duplicate transcriber option");
                     audioTranscriber = value;
                 }
+                case "--transcriber-for" -> ExternalTranscribers.putRoleOverride(transcriberFor, value);
+                case "--transcriber-config" -> configFile = Path.of(value).toAbsolutePath().normalize();
+                case "--transcriber-device" -> device = value;
+                case "--drum-detector" -> drumDetector = value;
                 case "--stem-role" -> {
                     int split = value.lastIndexOf('=');
                     if (split < 1 || split == value.length() - 1)
@@ -349,7 +362,7 @@ public final class SunoImport {
             }
         }
         var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber,
-                audioOnly, audioTranscriber, stemRoles, (a, b, c) -> {});
+                audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -949,10 +962,15 @@ public final class SunoImport {
     }
 
     private static RunRequest audioRequest(Path work, Path catalogue, Input mix, List<Input> files,
-                                           List<Issue> issues, String transcriber, Map<String, String> overrides) {
+                                           List<Issue> issues, String transcriber, Map<String, String> overrides,
+                                           Map<String, String> transcriberFor, String drumDetector, String device,
+                                           Path configFile, boolean separatedAudio) throws IOException {
         var stems = new TreeMap<String, String>();
         var roles = new TreeMap<String, String>();
         var seen = new HashSet<String>();
+        var activeRoles = new java.util.TreeSet<String>();
+        var transcribersByRole = new TreeMap<String, String>();
+        transcriberFor.forEach((role, name) -> ExternalTranscribers.putRoleOverride(transcribersByRole, role + "=" + name));
         for (var file : files) {
             if (!file.role.equals("stem") || file.excluded || file.error()) continue;
             String role = overrides.get(file.file);
@@ -973,16 +991,39 @@ public final class SunoImport {
             stems.put(label, file.path.toString());
             if (!role.equals(ReconstructionAudioOnly.defaultRole(label))) roles.put(label, role);
             file.evidence.put("audioOnlyRole", role);
+            // Metadata reports whole-file RMS. The run keeps stems with an audible local window.
+            if (!file.silent || mix != null && !ReconstructionAudioOnly.silent(file.path, Math.min(mix.seconds, file.seconds)))
+                activeRoles.add(ReconstructionAudioOnly.transcriberRole(label, role));
         }
         for (String key : new java.util.TreeSet<>(overrides.keySet())) {
             if (!seen.contains(key)) issues.add(new Issue(Status.error, "unknown_stem_role",
                     "Role override must name an included stem: " + key));
         }
         if (stems.isEmpty()) issues.add(new Issue(Status.error, "missing_stems", "No labelled stems found"));
-        if (mix == null || transcriber == null || stems.isEmpty()) return null;
+        if (mix == null || stems.isEmpty()) return null;
+        var config = ExternalTranscribers.config(configFile, true);
+        if (config.tonal().isEmpty() && separatedAudio && transcriber == null && transcribersByRole.isEmpty()) {
+            issues.add(new Issue(Status.warning, AUDIO_ONLY, "no MIDI: needs audio-only transcription. Configure a transcriber to run."));
+            return null;
+        }
+        var fallback = config.fallback(transcriber, true);
+        var selected = new TreeMap<String, String>();
+        if (transcribersByRole.containsKey("drums") && drumDetector != null)
+            throw new IllegalArgumentException("Choose either --transcriber-for drums=NAME or --drum-detector");
+        String drum = config.drumName(transcribersByRole.getOrDefault("drums", drumDetector));
+        AudioDrumDetector.select(config, drum, device == null ? "auto" : device);
+        for (String role : activeRoles) {
+            if (!role.equals("drums")) selected.put(role, config.forRole(role, fallback, transcribersByRole, transcriber != null));
+        }
+        if (activeRoles.contains("drums")) selected.put("drums", drum);
+        issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only transcribers by role " + selected));
         var options = new LinkedHashMap<String, Object>();
         if (!roles.isEmpty()) options.put("stemRoles", roles);
-        options.put("transcriber", transcriber);
+        if (fallback != null) options.put("transcriber", fallback);
+        if (!transcribersByRole.isEmpty()) options.put("transcriberFor", transcribersByRole);
+        if (drumDetector != null) options.put("drumDetector", drumDetector);
+        if (device != null) options.put("transcriberDevice", device);
+        if (configFile != null) options.put("transcriberConfig", configFile.toString());
         return new RunRequest(work.resolve("reconstruction").toString(), new RunInputs(null, mix.path.toString(),
                 catalogue == null ? null : catalogue.toString(), stems, true), options);
     }
@@ -1021,8 +1062,18 @@ public final class SunoImport {
             args.add(part + "=" + file);
         });
         if (Boolean.TRUE.equals(inputs.audioOnly)) {
-            args.add("--transcriber");
-            args.add(request.options.get("transcriber").toString());
+            for (String[] option : List.of(new String[]{"transcriber", "--transcriber"},
+                    new String[]{"transcriberConfig", "--transcriber-config"},
+                    new String[]{"transcriberDevice", "--transcriber-device"},
+                    new String[]{"drumDetector", "--drum-detector"})) {
+                if (!request.options.containsKey(option[0])) continue;
+                args.add(option[1]);
+                args.add(request.options.get(option[0]).toString());
+            }
+            if (request.options.get("transcriberFor") instanceof Map<?, ?> roles) roles.forEach((role, name) -> {
+                args.add("--transcriber-for");
+                args.add(role + "=" + name);
+            });
             if (request.options.get("stemRoles") instanceof Map<?, ?> roles) roles.forEach((label, role) -> {
                 args.add("--stem-role");
                 args.add(label + "=" + role);

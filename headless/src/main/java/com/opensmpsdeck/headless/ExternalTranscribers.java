@@ -42,38 +42,90 @@ public final class ExternalTranscribers {
         return ExternalCommands.defaultConfig(CONFIG_ENV, "transcribers.json");
     }
 
-    public static List<String> configuredNames() throws IOException {
-        Path config = defaultConfig();
-        String override = System.getenv(CONFIG_ENV);
-        if ((override == null || override.isBlank()) && Files.notExists(config, LinkOption.NOFOLLOW_LINKS))
-            return List.of();
-        return List.copyOf(commands(config).keySet());
-    }
-
-    static String selectForAudio(String name, Path config) throws IOException {
-        return selectForAudio(name, config, false);
-    }
-
-    static String selectForAudio(String name, Path config, boolean allowUnconfigured) throws IOException {
-        Path file = config == null ? defaultConfig() : config;
-        if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
-            if (allowUnconfigured) return null;
-            throw new IllegalArgumentException("Audio-only reconstruction needs a configured transcriber. No configuration at " + file);
+    record Config(Path file, Map<String, List<String>> tonal, Map<String, List<String>> drums,
+                  Map<String, String> defaults) {
+        String drumName(String override) {
+            return override == null ? defaults.getOrDefault("drums", "spectral") : override;
         }
-        var names = commands(file).keySet();
-        if (allowUnconfigured && names.isEmpty()) return null;
-        if (name == null && names.size() == 1) return names.iterator().next();
-        if (names.isEmpty())
-            throw new IllegalArgumentException("Audio-only reconstruction needs a configured transcriber in " + file);
-        if (name == null)
-            throw new IllegalArgumentException("Select an audio-only --transcriber from " + names);
-        if (!names.contains(name))
-            throw new IllegalArgumentException("Transcriber " + name + " is not configured in " + file);
-        return name;
+
+        String fallback(String override, boolean audioOnly) {
+            if (override != null) require(tonal.containsKey(override), file.toString(), "unknown transcriber " + override);
+            return override != null ? override : audioOnly && tonal.size() == 1 ? tonal.keySet().iterator().next() : null;
+        }
+
+        String forRole(String role, String fallback, Map<String, String> overrides, boolean explicitFallback) {
+            String key = role.toLowerCase(java.util.Locale.ROOT);
+            String name = overrides.get(key);
+            if (name == null && !explicitFallback) name = defaults.get(key);
+            if (name == null) name = fallback;
+            require(!tonal.isEmpty(), file.toString(), "reconstruction needs a configured transcriber");
+            require(name != null && names(key, name).stream().allMatch(tonal::containsKey), file.toString(),
+                    "select a transcriber for role " + role + " from " + tonal.keySet());
+            return name;
+        }
     }
 
-    private static Map<String, List<String>> commands(Path file) throws IOException {
-        return ExternalCommands.commands(file, PLACEHOLDER, "{input}", "{output}");
+    public static List<String> configuredNames() throws IOException {
+        return List.copyOf(config(null, true).tonal.keySet());
+    }
+
+    public static List<String> configuredDrums() throws IOException {
+        var names = new ArrayList<>(config(null, true).drums.keySet());
+        names.addFirst("spectral");
+        return List.copyOf(names);
+    }
+
+    static Config config(Path path, boolean optional) throws IOException {
+        Path file = (path == null ? defaultConfig() : path).toAbsolutePath().normalize();
+        if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
+            String override = System.getenv(CONFIG_ENV);
+            if (optional && path == null && (override == null || override.isBlank()))
+                return new Config(file, Map.of(), Map.of(), Map.of());
+            throw new IllegalArgumentException("External transcription needs a configured transcriber. No configuration at " + file);
+        }
+        JsonElement tree = ReconstructionArtifacts.readTree(file);
+        require(tree != null && tree.isJsonObject(), file.toString(), "expected a transcriber configuration object");
+        var entries = tree.getAsJsonObject();
+        var roleEntries = object(entries.remove("defaults"), file + ".defaults");
+        var drumEntries = object(entries.remove("drumTranscribers"), file + ".drumTranscribers");
+        var tonal = ExternalCommands.commands(entries, file.toString(), PLACEHOLDER, "{input}", "{output}");
+        var drums = ExternalCommands.commands(drumEntries, file + ".drumTranscribers", PLACEHOLDER, "{input}", "{output}");
+        require(!drums.containsKey("spectral"), file.toString(), "spectral is a built-in drum detector");
+        var defaults = new TreeMap<String, String>();
+        for (var entry : roleEntries.entrySet()) {
+            String role = ReconstructionAudioOnly.label(entry.getKey());
+            var value = entry.getValue();
+            require(value instanceof JsonPrimitive p && p.isString(), file.toString(), "expected a transcriber name");
+            String name = value.getAsString();
+            require(role.equals("drums") ? name.equals("spectral") || drums.containsKey(name)
+                            : names(role, name).stream().allMatch(tonal::containsKey),
+                    file.toString(), "unknown transcriber " + name + " for role " + role);
+            require(defaults.putIfAbsent(role, name) == null, file.toString(), "duplicate default for " + role);
+        }
+        return new Config(file, tonal, drums, defaults);
+    }
+
+    private static JsonObject object(JsonElement element, String at) {
+        if (element == null) return new JsonObject();
+        require(element.isJsonObject(), at, "expected an object");
+        return element.getAsJsonObject();
+    }
+
+    private static List<String> names(String role, String value) {
+        var result = List.of(value.split(",", -1));
+        require((result.size() == 1 || result.size() == 2 && role.equals("vocals")
+                        && !result.getFirst().equals(result.getLast()))
+                        && result.stream().allMatch(name -> LABEL.matcher(name).matches()),
+                "Transcribers", "expected one command name or two distinct commands for vocals");
+        return result;
+    }
+
+    static void putRoleOverride(Map<String, String> overrides, String assignment) {
+        String[] pair = assignment.split("=", -1);
+        require(pair.length == 2, "--transcriber-for", "expected ROLE=NAME");
+        String role = ReconstructionAudioOnly.label(pair[0]);
+        names(role, pair[1]);
+        require(overrides.putIfAbsent(role, pair[1]) == null, "--transcriber-for", "duplicate role " + role);
     }
 
     static void validatePart(int id, List<MidiScore.Part> parts) {
@@ -84,20 +136,23 @@ public final class ExternalTranscribers {
     static Map<Integer, PartNotes> collect(MidiScore score, Map<Integer, String> stems,
                                            String name, Path config, Map<Integer, String> roles, String device,
                                            Map<Integer, Import> imports) throws IOException {
-        return collect(score, stems, name, config, roles, device, imports, null);
+        return collect(score, stems, name, name == null ? null : config(config, false), Map.of(),
+                false, roles, device, imports, null);
     }
 
     static Map<Integer, PartNotes> collect(MidiScore score, Map<Integer, String> stems,
-                                           String name, Path config, Map<Integer, String> roles, String device,
-                                           Map<Integer, Import> imports, ReconstructionManifest.Capture capture) throws IOException {
-        if (name == null && imports.isEmpty()) return null;
+                                           String name, Config config, Map<String, String> overrides, boolean audioOnly,
+                                           Map<Integer, String> roles, String device, Map<Integer, Import> imports,
+                                           ReconstructionManifest.Capture capture) throws IOException {
+        if (roles.isEmpty() && imports.isEmpty()) return null;
+        String context = "External transcription";
         for (int id : imports.keySet()) validatePart(id, score.parts());
         for (var entry : roles.entrySet()) {
             int id = entry.getKey();
             validatePart(id, score.parts());
-            require(!imports.containsKey(id), name, "already importing notes for part " + id);
-            require(stems.containsKey(id), name, "part " + id + " requires --stem " + id + "=WAV");
-            require(LABEL.matcher(entry.getValue()).matches(), name, "invalid role for part " + id);
+            require(!imports.containsKey(id), context, "already importing notes for part " + id);
+            require(stems.containsKey(id), context, "part " + id + " requires --stem " + id + "=WAV");
+            require(LABEL.matcher(entry.getValue()).matches(), context, "invalid role for part " + id);
         }
         var result = new TreeMap<Integer, PartNotes>();
         for (var entry : imports.entrySet()) {
@@ -107,29 +162,81 @@ public final class ExternalTranscribers {
             result.put(entry.getKey(), new PartNotes(new Evidence("import", null, null, null,
                     ReconstructionCli.audioHash(recorded), null, metadata(source.file), notes.size(), source.replace), notes));
         }
-        if (name != null) {
-            Path file = config == null ? defaultConfig() : config;
-            try {
-                require(LABEL.matcher(device).matches(), name, "invalid device");
-                var template = commands(file).get(name);
-                require(template != null, name, "transcriber is not configured in " + file);
-                String configHash = ReconstructionCli.audioHash(file);
-                if (capture != null) capture.config(file);
-                for (var entry : roles.entrySet()) {
-                    int part = entry.getKey();
-                    result.put(part, run(template, name, configHash, Path.of(stems.get(part)), entry.getValue(), device, part, capture));
+        if (!roles.isEmpty()) {
+            require(LABEL.matcher(device).matches(), context, "invalid device");
+            String fallback = config.fallback(name, audioOnly);
+            for (String role : roles.values()) config.forRole(role, fallback, overrides, name != null);
+            String configHash = ReconstructionCli.audioHash(config.file);
+            if (capture != null) capture.config(config.file);
+            for (var entry : new TreeMap<>(roles).entrySet()) {
+                int part = entry.getKey();
+                String role = entry.getValue();
+                String selected = config.forRole(role, fallback, overrides, name != null);
+                try {
+                    Path input = Path.of(stems.get(part));
+                    var selectedNames = names(role.toLowerCase(java.util.Locale.ROOT), selected);
+                    if (selectedNames.size() == 1) {
+                        result.put(part, run(config.tonal.get(selected), selected, configHash, input, role, device, part, capture));
+                    } else {
+                        require(audioOnly, context, "two-command vocal selection requires audio-only mode");
+                        var contenders = new ArrayList<PartNotes>();
+                        for (String tool : selectedNames)
+                            contenders.add(run(config.tonal.get(tool), tool, configHash, input, role, device, part, null));
+                        result.put(part, combine(contenders, selected, configHash, input, device, part, capture));
+                    }
+                } catch (IllegalArgumentException | IOException error) {
+                    throw new IOException("Transcriber " + selected + " for " + role + ": " + error.getMessage(), error);
                 }
-            } catch (IllegalArgumentException | IOException error) {
-                throw new IOException("Transcriber " + name + ": " + error.getMessage(), error);
             }
         }
         return result;
+    }
+
+    private static PartNotes combine(List<PartNotes> candidates, String names, String configHash, Path input,
+                                     String device, int part, ReconstructionManifest.Capture capture) throws IOException {
+        var notes = candidates.stream().flatMap(candidate -> candidate.notes.stream()).toList();
+        var metadata = new TreeMap<String, String>();
+        var gson = new com.google.gson.Gson();
+        metadata.put("vocalFirstNoteCount", Integer.toString(candidates.getFirst().notes.size()));
+        metadata.put("vocalCandidates", gson.toJson(candidates.stream().map(PartNotes::provenance).toList()));
+        for (var candidate : candidates) {
+            var f0 = candidate.provenance.metadata().get("f0Midi10ms");
+            if (f0 != null && !f0.isBlank()) metadata.putIfAbsent("f0Midi10ms", f0);
+        }
+        Path scratch = Files.createTempDirectory("opensmpsdeck-vocals-");
+        Path combined = scratch.resolve("vocal-candidates.json");
+        try {
+            Files.writeString(combined, gson.toJson(notes.stream()
+                    .map(note -> List.of(note.start, note.end, note.pitch)).toList()));
+            Path recorded = capture == null ? combined : capture.external(part, combined, false);
+            return new PartNotes(new Evidence(names, "vocals", device, ReconstructionCli.audioHash(input),
+                    ReconstructionCli.audioHash(recorded), configHash, metadata, notes.size(), true), notes);
+        } finally {
+            Files.deleteIfExists(combined);
+            Files.deleteIfExists(scratch);
+        }
     }
 
     private static PartNotes run(List<String> template, String name, String configHash,
                                  Path input, String role, String device, int part,
                                  ReconstructionManifest.Capture capture) throws IOException {
         String inputHash = ReconstructionCli.audioHash(input);
+        return invoke(template, name, input, role, device, output -> {
+            Path recorded = capture == null ? output : capture.external(part, output, false);
+            var notes = readNotes(recorded);
+            return new PartNotes(new Evidence(name, role, device, inputHash, ReconstructionCli.audioHash(recorded),
+                    configHash, metadata(output), notes.size(), true), notes);
+        });
+    }
+
+    @FunctionalInterface
+    interface OutputReader<T> {
+        T read(Path path) throws IOException;
+    }
+
+    static <T> T invoke(List<String> template, String name, Path input, String role, String device,
+                        OutputReader<T> reader) throws IOException {
+        require(LABEL.matcher(device).matches(), name, "invalid device");
         Path scratch = Files.createTempDirectory("opensmpsdeck-transcriber-");
         Path output = scratch.resolve("notes.json");
         Path log = scratch.resolve("stderr");
@@ -154,10 +261,7 @@ public final class ExternalTranscribers {
                 }
             }
             require(Files.isRegularFile(output, LinkOption.NOFOLLOW_LINKS), name, "command did not produce notes.json");
-            Path recorded = capture == null ? output : capture.external(part, output, false);
-            var notes = readNotes(recorded);
-            return new PartNotes(new Evidence(name, role, device, inputHash, ReconstructionCli.audioHash(recorded),
-                    configHash, metadata(output), notes.size(), true), notes);
+            return reader.read(output);
         } finally {
             // The private directory also lets adapters use temporary output files.
             try (var files = Files.walk(scratch)) {
@@ -166,7 +270,7 @@ public final class ExternalTranscribers {
         }
     }
 
-    private static Map<String, String> metadata(Path output) throws IOException {
+    static Map<String, String> metadata(Path output) throws IOException {
         Path sidecar = output.resolveSibling(output.getFileName() + ".meta.json");
         if (Files.notExists(sidecar, LinkOption.NOFOLLOW_LINKS)) return Map.of();
         JsonElement tree = ReconstructionArtifacts.readTree(sidecar);
@@ -219,7 +323,7 @@ public final class ExternalTranscribers {
                 at, "invalid pitch or velocity");
     }
 
-    private static double number(JsonElement value, String at) {
+    static double number(JsonElement value, String at) {
         require(value instanceof JsonPrimitive p && p.isNumber(), at, "expected numeric note values");
         return value.getAsDouble();
     }

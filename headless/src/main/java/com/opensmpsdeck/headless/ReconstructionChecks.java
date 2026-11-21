@@ -37,7 +37,6 @@ final class ReconstructionChecks {
         require(audio == null ? inputs.midi() != null && !inputs.midi().isBlank()
                         : inputs.midi() == null && ReconstructionAudioOnly.SOURCE.equals(audio.source())
                         && inputs.stems().keySet().equals(audio.stems().keySet())
-                        && audio.transcriber() != null && !audio.transcriber().isBlank()
                         && audio.drumDetector() != null && audio.drumDetector().hits().equals(value.source().notes()),
                 at + ".inputs", "expected MIDI path or audio-only provenance matching the score");
         rate(inputs.harmonyMaxHz());

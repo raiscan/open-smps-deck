@@ -66,6 +66,22 @@ class ReconstructionBeatTrackerTest {
         assertFalse(ReconstructionTimeMap.of(score(midi, duration, map, null, "off")).warped());
     }
 
+    @Test void audioBackbeatResolvesDoubleTimeAndRetainsTheAlternative() {
+        var hits = new ArrayList<MidiScore.Note>();
+        for (int step = 0; step < 120; step++) {
+            long time = 150_000 + Math.round(step * 30e6 / 110);
+            hits.add(new MidiScore.Note(0, 42, 80, time, time + 50_000));
+            if (step % 2 == 0)
+                hits.add(new MidiScore.Note(0, step % 4 == 0 ? 36 : 38, 96, time, time + 50_000));
+        }
+        var score = new MidiScore(List.of(new MidiScore.Part(0, "Drums", 0, true)), hits, List.of());
+        var alternatives = new ArrayList<ReconstructionBeatTracker.Alternative>();
+        var map = ReconstructionBeatTracker.track(score, 33, List.of(), 4, alternatives);
+        assertNotNull(map);
+        assertEquals(110, map.openingBpm(), .2);
+        assertTrue(alternatives.stream().anyMatch(candidate -> Math.abs(candidate.bpm() - 220) < 2));
+    }
+
     @Test void warpedAudioProbesStartAtExactlyZero() {
         var beats = new ReconstructionBeatMap(List.of(-.003, .38, .77), 0, 4, 1);
         var map = new ReconstructionTimeMap(beats, 150.0, 1);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Separate one mix with an explicitly installed BS-RoFormer SW checkpoint."""
+"""Separate one mix with BS-RoFormer SW and optional Viperx vocal extraction."""
 
 import argparse
 import hashlib
@@ -16,7 +16,7 @@ STEMS = ("bass", "drums", "other", "vocals", "guitar", "piano")
 RATE = 44100
 
 
-def load_model(config_file, checkpoint, requested_device):
+def load_model(config_file, checkpoint, requested_device, stems=STEMS):
     from importlib.metadata import version
 
     import torch
@@ -32,10 +32,11 @@ def load_model(config_file, checkpoint, requested_device):
     torch_device = torch.device("cpu" if device == "cpu" else "cuda")
     # FullLoader accepts the published YAML's tuple tags.
     config = ConfigDict(yaml.load(config_file.read_text(), Loader=yaml.FullLoader))
-    if (tuple(config.training.instruments) != STEMS or config.training.target_instrument is not None
-            or config.model.num_stems != len(STEMS) or not config.model.stereo
-            or config.audio.sample_rate != RATE):
-        raise ValueError("Expected the stereo 44.1 kHz BS-RoFormer SW six-stem configuration")
+    target = config.training.target_instrument
+    configured_stems = (target,) if target is not None else tuple(config.training.instruments)
+    if (configured_stems != stems or config.model.num_stems != len(stems)
+            or not config.model.stereo or config.audio.sample_rate != RATE):
+        raise ValueError(f"Expected a stereo 44.1 kHz configuration producing {stems}")
     model = get_model_from_config("bs_roformer", config)
     # The published state dict references GELU. Keep PyTorch's restricted loader enabled.
     with torch.serialization.safe_globals([torch._C._nn.gelu]):
@@ -47,7 +48,7 @@ def load_model(config_file, checkpoint, requested_device):
 
     def demix(mix):
         estimates, _ = demix_track(config, model, torch.from_numpy(mix), torch_device)
-        return np.stack([estimates[name] for name in STEMS])
+        return np.stack([estimates[name] for name in stems])
 
     settings = {
         "device": device,
@@ -67,7 +68,6 @@ def sha256(path):
 
 def separate(args):
     checkpoint_hash = sha256(args.checkpoint)
-    demix, version, settings = load_model(args.config, args.checkpoint, args.device)
     root = args.output_dir
     stems_dir = root / "stems"
     stems_dir.mkdir(parents=True, exist_ok=False)
@@ -79,16 +79,34 @@ def separate(args):
     mix, _ = sf.read(mix_file, dtype="float32", always_2d=True)
     if not len(mix) or not np.isfinite(mix).all():
         raise ValueError("Input must contain finite audio samples")
-    estimates = demix(np.ascontiguousarray(mix.T))
-    expected = (len(STEMS), 2, len(mix))
+    mix = np.ascontiguousarray(mix.T)
+    vocals = None
+    vocal_settings = None
+    if args.vocal_checkpoint is not None:
+        extract, vocal_version, vocal_settings = load_model(args.vocal_config, args.vocal_checkpoint,
+                                                            args.device, ("vocals",))
+        vocal_output = extract(mix)
+        if vocal_output.shape != (1, *mix.shape) or not np.isfinite(vocal_output).all():
+            raise ValueError("Expected one finite, aligned vocal estimate")
+        vocals = vocal_output[0]
+        del extract
+        vocal_settings.update(version=vocal_version, model="Viperx 317",
+                              checkpointSha256=sha256(args.vocal_checkpoint),
+                              configSha256=sha256(args.vocal_config))
+    demix, version, settings = load_model(args.config, args.checkpoint, args.device)
+    estimates = demix(mix if vocals is None else mix - vocals)
+    expected = (len(STEMS), *mix.shape)
     if estimates.shape != expected or not np.isfinite(estimates).all():
         raise ValueError(f"Expected finite aligned output of shape {expected}, got {estimates.shape}")
+    if vocals is not None:
+        estimates[STEMS.index("vocals")] = vocals
+        settings["vocalPass"] = vocal_settings
     for name, audio in zip(STEMS, estimates):
         sf.write(stems_dir / f"{name}.wav", audio.T, RATE, subtype="FLOAT")
     with (root / "separation.json").open("x", encoding="utf-8") as output:
         json.dump({
             "tool": "bs-roformer-infer",
-            "model": "BS-RoFormer SW 6-stem",
+            "model": "BS-RoFormer SW 6-stem" if vocals is None else "Viperx 317 → BS-RoFormer SW 6-stem",
             "version": version,
             "checkpointSha256": checkpoint_hash,
             "stemOrder": STEMS,
@@ -103,9 +121,14 @@ def main():
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--vocal-checkpoint", type=Path)
+    parser.add_argument("--vocal-config", type=Path)
     parser.add_argument("--device", choices=("auto", "cpu", "rocm", "cuda"), default="auto")
+    args = parser.parse_args()
+    if (args.vocal_checkpoint is None) != (args.vocal_config is None):
+        parser.error("The vocal pass requires both --vocal-checkpoint and --vocal-config")
     try:
-        separate(parser.parse_args())
+        separate(args)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         sys.exit(f"BS-RoFormer: {error}")
 

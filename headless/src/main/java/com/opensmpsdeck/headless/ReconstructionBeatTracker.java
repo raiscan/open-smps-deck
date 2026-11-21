@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -22,6 +23,8 @@ final class ReconstructionBeatTracker {
         for (int i = 0; i < COS.length; i++) COS[i] = Math.cos(2 * Math.PI * i / COS.length);
     }
 
+    record Alternative(double bpm, double score) {}
+
     private record Attack(double time, double weight, double accent, double audio) {}
     private record Pulse(double strength, double phase) {}
     private record Window(double time, List<Attack> attacks, double[][] spectrum) {}
@@ -36,15 +39,24 @@ final class ReconstructionBeatTracker {
 
     static ReconstructionBeatMap track(MidiScore score, double duration,
                                        List<ReconstructionRhythmAudio.Onset> audio, int meter) {
+        return track(score, duration, audio, meter, null);
+    }
+
+    static ReconstructionBeatMap track(MidiScore score, double duration,
+                                       List<ReconstructionRhythmAudio.Onset> audio, int meter,
+                                       List<Alternative> audioAlternatives) {
         if (duration < 12) return null;
         var drums = new HashSet<Integer>();
         for (var part : score.parts()) if (part.drums()) drums.add(part.id());
         var attacks = attacks(score, duration, audio, drums);
         if (attacks.size() < 40) return null;
-        var windows = windows(attacks, duration);
+        var hits = audioAlternatives == null ? List.<MidiScore.Note>of() : score.notes().stream()
+                .filter(note -> drums.contains(note.partId())).toList();
+        var windows = windows(attacks, duration, hits);
         if (windows.size() < 4) return null;
 
-        Trend trend = bestTrend(windows, duration);
+        Trend trend = bestTrend(windows, duration, audioAlternatives);
+        if (trend == null) return null;
         if (trend.strength < .28) return null;
         var path = phases(windows, trend, duration);
         if (path == null) return null;
@@ -62,7 +74,7 @@ final class ReconstructionBeatTracker {
         int beatSlot = 0;
         for (int i = 1; i < slots.length; i++) if (slots[i] > slots[beatSlot]) beatSlot = i;
         double phase = beatSlot / (double) slots.length;
-        double confidence = (.65 * path.evidence + .35 * trend.strength) * path.coverage;
+        double confidence = (.65 * path.evidence + .35 * Math.min(1, trend.strength)) * path.coverage;
         var beats = new ArrayList<Double>();
         int first = (int) Math.floor(-offset - phase);
         for (int beat = first; ; beat++) {
@@ -100,7 +112,7 @@ final class ReconstructionBeatTracker {
         return List.copyOf(grid.values());
     }
 
-    private static List<Window> windows(List<Attack> attacks, double duration) {
+    private static List<Window> windows(List<Attack> attacks, double duration, List<MidiScore.Note> hits) {
         var windows = new ArrayList<Window>();
         int first = 0, end = 0;
         double span = Math.min(duration, WINDOW);
@@ -110,6 +122,8 @@ final class ReconstructionBeatTracker {
             while (end < attacks.size() && attacks.get(end).time < center + span / 2) end++;
             var local = attacks.subList(first, end);
             if (local.stream().filter(a -> a.weight > 0).count() < 16) continue;
+            double[] kicks = drumTimes(hits, center, span, 35, 36);
+            double[] snares = drumTimes(hits, center, span, 38, 40);
             double[][] values = new double[2][BINS];
             for (int bin = 0; bin < BINS; bin++) {
                 double bpm = MIN_BPM + bin * BPM_STEP;
@@ -117,28 +131,75 @@ final class ReconstructionBeatTracker {
                 double half = pulse(local, center, bpm, 2, false).strength;
                 values[0][bin] = .65 * pulse(local, center, bpm, 4, false).strength + .20 * half + .15 * beat;
                 values[1][bin] = .63 * pulse(local, center, bpm, 6, false).strength + .20 * half + .15 * beat;
+                if (hits.isEmpty()) continue;
+
+                double quarter = 60 / bpm;
+                // A regular snare backbeat recurs every two quarters. Reward it
+                // over candidates that interpret each snare as a quarter note.
+                double backbeat = recurrence(snares, 2 * quarter) - .55 * recurrence(snares, quarter);
+                double kick = Math.max(recurrence(kicks, quarter), recurrence(kicks, 2 * quarter));
+                double prior = .25 * backbeat + .08 * kick;
+                values[0][bin] += prior;
+                values[1][bin] += prior;
             }
             windows.add(new Window(center, local, values));
         }
         return windows;
     }
 
-    private static Trend bestTrend(List<Window> windows, double duration) {
+    private static double[] drumTimes(List<MidiScore.Note> hits, double center, double span, int low, int high) {
+        return hits.stream().filter(hit -> hit.pitch() == low || hit.pitch() == high)
+                .mapToDouble(hit -> hit.startUs() / 1e6).filter(time -> Math.abs(time - center) < span / 2)
+                .distinct().sorted().toArray();
+    }
+
+    private static double recurrence(double[] times, double period) {
+        if (times.length < 3) return 0;
+        int end = 1;
+        double total = 0;
+        for (int start = 0; start < times.length - 1; start++) {
+            double target = times[start] + period;
+            end = Math.max(end, start + 1);
+            while (end + 1 < times.length && times[end + 1] <= target) end++;
+            double distance = Math.abs(times[end] - target);
+            if (end + 1 < times.length) distance = Math.min(distance, times[end + 1] - target);
+            total += Math.max(0, 1 - distance / .055);
+        }
+        return total / (times.length - 1);
+    }
+
+    private static Trend bestTrend(List<Window> windows, double duration, List<Alternative> alternatives) {
         Trend best = new Trend(0, 0, 4, -1);
+        var peaks = new ArrayList<Alternative>();
         for (int row = 0; row < 2; row++) {
             for (double bpm = MIN_BPM; bpm <= MAX_BPM; bpm += BPM_STEP) {
+                double peak = -1;
                 for (double change = -Math.ceil(bpm * .18); change <= bpm * .18; change += .5) {
                     double strength = 0;
                     for (var window : windows) {
-                        double bin = (bpm + change * window.time / duration - MIN_BPM) / BPM_STEP;
+                        double tempo = bpm + change * window.time / duration;
+                        double bin = (tempo - MIN_BPM) / BPM_STEP;
                         if (bin < 0 || bin >= BINS - 1) continue;
                         int i = (int) bin;
                         strength += window.spectrum[row][i] * (1 - bin + i)
                                 + window.spectrum[row][i + 1] * (bin - i);
+                        if (alternatives != null && (tempo < 70 || tempo > 180))
+                            strength -= Math.min(.23, .007 * Math.max(70 - tempo, tempo - 180));
                     }
                     strength = strength / windows.size() - .015 * Math.abs(change / bpm);
                     if (strength > best.strength) best = new Trend(bpm, change, row == 0 ? 4 : 6, strength);
+                    peak = Math.max(peak, strength);
                 }
+                if (alternatives != null) peaks.add(new Alternative(bpm, peak));
+            }
+        }
+        if (alternatives != null) {
+            // Exclude neighbouring refinements of the same hypothesis.
+            peaks.sort(Comparator.comparingDouble(Alternative::score).reversed());
+            for (var peak : peaks) {
+                if (alternatives.stream().anyMatch(other -> Math.abs(other.bpm - peak.bpm) < 4)) continue;
+                alternatives.add(peak);
+                if (alternatives.size() == 6) break;
             }
         }
         return best;

@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.Set;
 
 import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
@@ -119,6 +120,12 @@ public final class ReconstructionStages {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
                     stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null, null, null, null);
         }
+        Inputs withLeadPart(Integer lead) {
+            return new Inputs(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices,
+                    audioRefine, stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, lead,
+                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly);
+        }
+
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
@@ -180,7 +187,8 @@ public final class ReconstructionStages {
                                 @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes,
                                 boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached,
                                 @Nullable String lanePolicyPreset,
-                                Map<String, Path> audioStems, Map<String, String> stemRoles, @Nullable String drumDetector) {}
+                                Map<String, Path> audioStems, Map<String, String> stemRoles, @Nullable String drumDetector,
+                                Map<String, String> transcriberFor) {}
     private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Transcription initial, @Nullable Double harmonyHz,
                            java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant,
@@ -693,8 +701,14 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("Refit and overwrite options require an existing work directory");
         String[] legacy = java.util.stream.Stream.concat(java.util.stream.Stream.of("reconstruct"),
                 Arrays.stream(extra.legacy)).toArray(String[]::new);
-        String transcriber = audioOnly ? ExternalTranscribers.selectForAudio(extra.transcriber, extra.transcriberConfig)
-                : extra.transcriber;
+        String transcriber = extra.transcriber;
+        boolean externalRequested = audioOnly || !extra.transcribeParts.isEmpty() || !extra.unmapped.isEmpty();
+        var config = externalRequested ? ExternalTranscribers.config(extra.transcriberConfig, audioOnly) : null;
+        var transcriberFor = new TreeMap<>(extra.transcriberFor);
+        String drumOverride = transcriberFor.remove("drums");
+        if (drumOverride != null && (!audioOnly || extra.drumDetector != null))
+            throw new IllegalArgumentException("A drums transcriber override requires audio-only mode and no --drum-detector");
+        String device = extra.device == null ? "auto" : extra.device;
         String filename = (audioOnly ? reference : midi).getFileName().toString();
         if (audioOnly) filename = filename.replaceFirst("(?i)\\.wav$", "");
         var options = ReconstructionCli.parseOptions(legacy, filename);
@@ -706,8 +720,9 @@ public final class ReconstructionStages {
         Score score;
         if (audioOnly) {
             long duration = duration(reference, options);
-            audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, transcriber,
-                    AudioDrumDetector.select(extra.drumDetector), duration / 1e6);
+            audio = ReconstructionAudioOnly.prepare(extra.audioStems, extra.stemRoles, config.fallback(transcriber, true),
+                    AudioDrumDetector.select(config, config.drumName(drumOverride == null ? extra.drumDetector : drumOverride),
+                            device), duration / 1e6, extra.leadPart != null);
             audio.drums().forEach((id, file) -> stems.put(id, file.toString()));
             score = prepare(ReconstructionAudioOnly.drumScore(audio.provenance()), reference, options, duration,
                     ReconstructionAudioOnly.DRUM_SOURCE);
@@ -736,8 +751,8 @@ public final class ReconstructionStages {
             for (int part : extra.transcribeParts.keySet()) ExternalTranscribers.validatePart(part, source.parts());
             source = new MidiScore(parts, source.notes(), source.warnings());
         }
-        var external = ExternalTranscribers.collect(source, stems, transcriber, extra.transcriberConfig,
-                roles, extra.device == null ? "auto" : extra.device, extra.imports, capture);
+        var external = ExternalTranscribers.collect(source, stems, transcriber, config, transcriberFor, audioOnly,
+                roles, device, extra.imports, capture);
         for (int part : newParts) {
             var result = external.get(part);
             var e = result.provenance();
@@ -769,7 +784,7 @@ public final class ReconstructionStages {
                 || extra.refitLevels || !extra.lanes.isEmpty()))
             throw new IllegalArgumentException("--keep-voicing requires a run through voice and cannot be combined with refit options");
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
-                || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
+                || extra.transcriber != null || !extra.transcriberFor.isEmpty() || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
@@ -791,6 +806,7 @@ public final class ReconstructionStages {
         var audioStems = new LinkedHashMap<String, Path>();
         var stemRoles = new java.util.TreeMap<String, String>();
         String drumDetector = null;
+        var transcriberFor = new TreeMap<String, String>();
         var parts = new java.util.TreeMap<Integer, String>();
         var imports = new java.util.TreeMap<Integer, ExternalTranscribers.Import>();
         var unmapped = new LinkedHashMap<Path, String>();
@@ -823,6 +839,10 @@ public final class ReconstructionStages {
                     if (transcriber != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --transcriber NAME");
                     transcriber = args[i];
+                }
+                case "--transcriber-for" -> {
+                    if (++i == args.length) throw new IllegalArgumentException("--transcriber-for expects ROLE=NAME");
+                    ExternalTranscribers.putRoleOverride(transcriberFor, args[i]);
                 }
                 case "--transcriber-config" -> {
                     if (transcriberConfig != null || ++i == args.length)
@@ -928,15 +948,14 @@ public final class ReconstructionStages {
         }
         if (audioOnly && (!parts.isEmpty() || !unmapped.isEmpty() || !imports.isEmpty()))
             throw new IllegalArgumentException("Use labelled --stem and --stem-role with --audio-only");
-        if (!audioOnly && transcriber == null && (!parts.isEmpty() || !unmapped.isEmpty() || transcriberConfig != null || device != null))
-            throw new IllegalArgumentException("External transcription options require --transcriber NAME");
-        if (!audioOnly && transcriber != null && parts.isEmpty() && unmapped.isEmpty())
-            throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE or --transcribe-unmapped ROLE=WAV");
+        if (!audioOnly && parts.isEmpty() && unmapped.isEmpty() &&
+                (transcriber != null || !transcriberFor.isEmpty() || transcriberConfig != null || device != null))
+            throw new IllegalArgumentException("Transcriber options require --transcribe-part PART=ROLE or --transcribe-unmapped ROLE=WAV");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
                 transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff,
                 stemTemplateNotesOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant,
-                overwriteDetached, lanePolicyPreset, audioStems, stemRoles, drumDetector);
+                overwriteDetached, lanePolicyPreset, audioStems, stemRoles, drumDetector, transcriberFor);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -1016,6 +1035,8 @@ public final class ReconstructionStages {
     private static Transcription attach(Score score, Inputs inputs) throws IOException {
         var notes = new ArrayList<>(score.notes);
         var newParts = new java.util.HashSet<Integer>();
+        Integer lead = inputs.leadPart;
+        Double otherTonalRms = null;
         if (inputs.externalNotes != null) {
             var parts = new ArrayList<>(score.source.parts());
             var sourceCounts = new LinkedHashMap<>(score.sourceCounts);
@@ -1045,13 +1066,39 @@ public final class ReconstructionStages {
                 parts.add(stem == null ? ReconstructionStemParts.part(part, imported.provenance().role())
                         : ReconstructionAudioOnly.part(part, stem));
                 newParts.add(part);
-                var spectrum = ReconstructionStemParts.Spectrum.read(Path.of(inputs.stems.get(part)), limit);
-                boolean vocalLead = stem != null && stem.transcriberRole().equals("vocals");
-                if (!vocalLead) candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
-                var joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
-                if (vocalLead) joined = ReconstructionAudioOnly.monophonic(joined);
+                Path stemPath = Path.of(inputs.stems.get(part));
+                boolean vocal = ReconstructionVocalLead.isVocal(inputs, part);
+                var spectrum = vocal ? null : ReconstructionStemParts.Spectrum.read(stemPath, limit);
+                List<Note> joined;
+                if (vocal) {
+                    var selection = ReconstructionVocalLead.select(part, imported,
+                            ReconstructionLeadAudio.Track.read(stemPath, limit), limit);
+                    joined = selection.notes();
+                    boolean pinned = Boolean.TRUE.equals(inputs.audioOnly.explicitLead())
+                            && java.util.Objects.equals(lead, part);
+                    if (!pinned) {
+                        if (otherTonalRms == null) {
+                            otherTonalRms = 0.0;
+                            for (var other : inputs.audioOnly.stems().entrySet()) {
+                                if (other.getValue().role().equals("drums")
+                                        || "vocals".equals(other.getValue().transcriberRole())) continue;
+                                otherTonalRms = Math.max(otherTonalRms, ReconstructionVocalLead.rms(
+                                        Path.of(inputs.stems.get(other.getKey())), limit));
+                            }
+                        }
+                        if (joined.isEmpty() || !selection.supportsLead(limit, otherTonalRms)) {
+                            if (java.util.Objects.equals(lead, part)) lead = null;
+                            for (var note : joined) reductions.add(new S3kReconstruction.Reduction(note.midi(),
+                                    S3kReconstruction.Change.ROLE_OVERFLOW, note.id(), "residual-vocal-stem"));
+                            continue;
+                        }
+                    }
+                } else {
+                    candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
+                    joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
+                }
                 for (var note : joined) {
-                    if (ReconstructionStemParts.doubling(note, midiByPitch, spectrum)) {
+                    if (spectrum != null && ReconstructionStemParts.doubling(note, midiByPitch, spectrum)) {
                         reductions.add(new S3kReconstruction.Reduction(note.midi(),
                                 S3kReconstruction.Change.OCTAVE_DOUBLE, note.id(), "stem-midi-doubling"));
                     } else {
@@ -1145,8 +1192,9 @@ public final class ReconstructionStages {
             stemCandidates.stream().filter(ReconstructionStemTemplates.Candidate::automatic)
                     .map(ReconstructionStemTemplates.Candidate::note).forEach(notes::add);
         if (inputs.audioOnly != null) {
-            var grid = ReconstructionAudioOnly.grid(inputs, score.source, notes, score.durationUs / 1e6);
-            var result = score.withInputs(inputs, grid.bars(), notes.stream().sorted(NOTE_ORDER).toList(),
+            var effective = inputs.withLeadPart(lead);
+            var grid = ReconstructionAudioOnly.grid(effective, score.source, notes, score.durationUs / 1e6);
+            var result = score.withInputs(effective, grid.bars(), notes.stream().sorted(NOTE_ORDER).toList(),
                     grid.tempo(), null, grid.beats());
             ReconstructionChecks.score(result);
             return new Transcription(result, List.copyOf(stemCandidates));

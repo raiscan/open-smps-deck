@@ -6,19 +6,54 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+
+import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 
 /** Source-clock GM attacks from an aligned drum stem. */
 interface AudioDrumDetector {
     String id();
-    String version();
-    List<Hit> detect(Path stem, double seconds) throws IOException;
+    Detection detect(Path stem, double seconds) throws IOException;
 
     record Hit(double seconds, int pitch, int velocity) {}
+    record Detection(String version, Map<String, String> metadata, List<Hit> hits) {}
 
-    static AudioDrumDetector select(String name) {
-        if (name == null || name.equals("spectral")) return new SpectralDrumDetector();
-        throw new IllegalArgumentException("Unknown drum detector: " + name + " (available: spectral)");
+    static AudioDrumDetector select(ExternalTranscribers.Config config, String name, String device) {
+        if (name.equals("spectral")) return new SpectralDrumDetector();
+        var command = config.drums().get(name);
+        require(command != null, "Drum detector", "unknown detector " + name + " in " + config.file());
+        return new AudioDrumDetector() {
+            @Override public String id() { return name; }
+
+            @Override public Detection detect(Path stem, double seconds) throws IOException {
+                return ExternalTranscribers.invoke(command, name, stem, "drums", device, output -> {
+                    var tree = ReconstructionArtifacts.readTree(output);
+                    require(tree != null && tree.isJsonArray(), name, "expected [[seconds, gmPitch, velocity], ...]");
+                    var hits = new ArrayList<Hit>();
+                    for (var element : tree.getAsJsonArray()) {
+                        require(element.isJsonArray() && element.getAsJsonArray().size() == 3,
+                                name, "expected [seconds, gmPitch, velocity]");
+                        var row = element.getAsJsonArray();
+                        double time = ExternalTranscribers.number(row.get(0), name);
+                        double pitch = ExternalTranscribers.number(row.get(1), name);
+                        double velocity = ExternalTranscribers.number(row.get(2), name);
+                        require(Double.isFinite(time) && time >= 0 && pitch == Math.rint(pitch)
+                                        && pitch >= 0 && pitch <= 127 && velocity == Math.rint(velocity)
+                                        && velocity >= 1 && velocity <= 127,
+                                name, "invalid drum time, GM pitch or velocity");
+                        if (time < seconds) hits.add(new Hit(time, (int) pitch, (int) velocity));
+                    }
+                    var metadata = new java.util.TreeMap<>(ExternalTranscribers.metadata(output));
+                    metadata.put("deviceRequested", device);
+                    metadata.put("inputSha256", ReconstructionCli.audioHash(stem));
+                    metadata.put("outputSha256", ReconstructionCli.audioHash(output));
+                    metadata.put("configSha256", ReconstructionCli.audioHash(config.file()));
+                    return new Detection(metadata.getOrDefault("version", "unknown"), metadata, List.copyOf(hits));
+                });
+            }
+        };
     }
+
 }
 
 final class SpectralDrumDetector implements AudioDrumDetector {
@@ -34,10 +69,8 @@ final class SpectralDrumDetector implements AudioDrumDetector {
     }
 
     @Override public String id() { return "spectral"; }
-    @Override public String version() { return "1"; }
-
-    @Override public List<Hit> detect(Path stem, double seconds) throws IOException {
-        return detect(ReconstructionLeadAudio.readMono(stem, seconds));
+    @Override public Detection detect(Path stem, double seconds) throws IOException {
+        return new Detection("1", Map.of(), detect(ReconstructionLeadAudio.readMono(stem, seconds)));
     }
 
     static List<Hit> detect(ReferenceAudio audio) throws InterruptedIOException {
