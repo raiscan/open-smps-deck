@@ -257,6 +257,12 @@ def smoke(jar, root):
         removed = rpc.call("reconstruct_edit", workDir=work, action="remove", id="answer", rerun=True)
         assert not removed["edits"]
         assert any(change["id"] == "edit-answer" for change in removed["traceDiff"]["changes"])
+        batch = [{"id": f"level-{n}", "reason": "synthetic batch", "op": "setVelocity",
+                  "part": 0, "span": [0, 2], "velocity": 90 - n} for n in range(20)]
+        added = rpc.call("reconstruct_edit", workDir=work, action="add", edits=batch, rerun=True)
+        assert added["from"] == "transcribe" and added["ids"] == [edit["id"] for edit in batch]
+        assert all(result["status"] == "applied" for result in added["lastRun"])
+        rpc.call("reconstruct_edit", workDir=work, action="add", edit=edit, edits=batch, error="Choose edit or edits")
         assert rpc.call("notes_list", project=project) == notes
         steady = root / "steady"
         files = rpc.call("reconstruct_run", workDir=steady, inputs=inputs,

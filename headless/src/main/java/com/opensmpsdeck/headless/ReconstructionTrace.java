@@ -57,7 +57,7 @@ public final class ReconstructionTrace {
                       List<ReconstructionAllocation.RunPlacement> figures) {}
     record Voiced(String id, String lane, int pitch, Timing gate, ReconstructionBendEncoding.Applied bend,
                   String evidence) {}
-    record Row(String id, int part, String partName, int pitch, Timing timing, Origin source, NoteAt score,
+    record Row(String id, int part, String partName, int pitch, Timing timing, Timing effectiveTiming, Origin source, NoteAt score,
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
                Status status, String stage, String reason, List<String> editReasons, String fateDetail) {}
@@ -305,7 +305,8 @@ public final class ReconstructionTrace {
     }
 
     private static boolean overlaps(Span span, Row row) {
-        return row != null && (span.overlaps(row.timing) || row.score != null && span.overlaps(row.score.timing));
+        return row != null && (span.overlaps(row.timing) || span.overlaps(row.effectiveTiming)
+                || row.score != null && span.overlaps(row.score.timing));
     }
 
     static Map<String, Row> read(Path work) throws IOException {
@@ -397,8 +398,10 @@ public final class ReconstructionTrace {
                     }
             }
             String reason = edits.isEmpty() ? fate.reason : String.join(" ", edits);
+            var latest = placedNote != null ? placedNote : roleNote != null ? roleNote : effective != null ? effective : written;
+            var gate = effectiveTiming(voiced, placement, latest, timeline);
             rows.add(new Row(id, anchor.note.part(), part == null ? "" : part.name(), anchor.note.pitch(), anchor.timing,
-                    origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
+                    gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
                     edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason));
@@ -406,6 +409,20 @@ public final class ReconstructionTrace {
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
         return index(rows, Row::id);
+    }
+
+    private static Timing effectiveTiming(List<Voiced> voiced, Allocation placement, NoteAt latest,
+                                          ReconstructionTimeMap timeline) {
+        if (!voiced.isEmpty()) {
+            var lane = placement == null ? voiced.getFirst().lane : placement.lane;
+            var gates = voiced.stream().filter(note -> Objects.equals(note.lane, lane)).map(Voiced::gate).toList();
+            if (gates.isEmpty()) gates = voiced.stream().map(Voiced::gate).toList();
+            int start = gates.stream().mapToInt(gate -> (int) gate.startTick).min().orElseThrow();
+            int end = gates.stream().mapToInt(gate -> (int) gate.endTick).max().orElseThrow();
+            return ticks(start, end, timeline);
+        }
+        if (placement != null && placement.placement != null) return placement.placement;
+        return latest == null ? null : latest.timing;
     }
 
     private static void addEditReason(Set<String> edits, String reason) {

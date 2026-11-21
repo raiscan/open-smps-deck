@@ -56,7 +56,8 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   missing, misplaced, or clipped note. Times filter in source seconds.
   Add `lane` or `status` to narrow the result. The trace carries source and
   project seconds, placement ticks, role decisions, merge partners,
-  allocation competitors, and the final voiced gate and bend.
+  allocation competitors, and the final voiced gate and bend. Compare
+  original `timing` with `effectiveTiming` after edits.
 - After a focused repair, compare separate baseline and candidate work
   directories with `reconstruct_trace_diff {oldWorkDir, newWorkDir, span}`.
   Use `span: "START,END"` in source seconds to flag changes outside the
@@ -217,7 +218,9 @@ Limits:
 | Absorbed chord attacks or extended merge anchors | `edits.json` via `unmerge` | `roles` |
 | A note needs an explicit pitch curve | `edits.json` via `bend` | `transcribe` |
 | Lead swaps parts, chord tones in the lead, or backing taken as melody | `roleplan.json` section and part rules. See **Plan lead and backing**. | `roles` |
-| A few individual notes have the wrong role or lane | `edits.json` via `setRole` or `pinLane`. Check the trace for competing notes. | `roles` |
+| A phrase's notes have the wrong role or lane | `edits.json` via `setRole` with `fromRole`, `swapRoles` (destination notes go to harmony), or `pinLane`. | `roles` |
+| Attacks need a velocity change or a fixed release | `setNote` with `velocity` or `noExtension: true`. Use `setVelocity` with a source span and `velocity` or `scale` to change a group. | `transcribe` |
+| Kick, snare or hat level | `voicing.json` with per-pitch `drumGains` on DAC or PSG3. For example, `{"42":0.1}` attenuates the closed hi-hat. | `assemble` |
 | Channel overflow, audible drops or clipped note lengths | `allocation.json` lane, timing and drop decisions | Run standalone `voice` to refit, then resume at `assemble` |
 | Wrong instrument, plain lead, missing vibrato, excessive ring | `voicing.json` lane variant ID, gain, gate, release rate, vibrato or copy effects. Use catalogue search and audition to check candidate variants. | `assemble`. `run --from voice` also reuses the edit. |
 | A patch fades during a held phrase, or a few notes need different gain, gate, release or vibrato | Add `overrides` to the affected lane in `voicing.json`. Use **Audition a phrase** below. | `assemble` |
@@ -225,8 +228,12 @@ Limits:
 
 For example, call `reconstruct_edit` with
 `{workDir, action: "add", edit: {id: "answer", reason: "separate attack in the stem", op: "insertNote", part: 0, start: 12.5, end: 12.8, pitch: 68, role: "melody", lane: "FM1"}, rerun: true}`.
-Use the trace note ID for an existing attack. Check `lastRun` for orphaned
-targets and inspect both the edited passage and any `outsideSpan` changes.
+Use a trace note ID or `selector: {at: 43.09, pitch: 80, part: 0}`
+for a unique attack within 20 ms. `deleteNote` also accepts generated
+roles-stage IDs. Use `edits: [...]` in MCP or
+`reconstruct edit "$work" add --file batch.json` to append an array in one
+call. Check `lastRun` for orphaned or invalid targets and inspect both the
+edited passage and any `outsideSpan` changes.
 The [reconstruction stages guide](../../docs/architecture/reconstruction-stages.md#persistent-musical-edits)
 lists the fields for every operation.
 
@@ -263,7 +270,8 @@ or work on a separate copy.
    to `lanes.FM1.overrides`. For an existing lane without an `overrides` member,
    use `artifact_write` to replace the lane object with the updated one.
    To target a specific attack, take its ID from `allocation.json` and use
-   `noteIds`. Assemble and check the passage again.
+   `noteIds`. Entries can overlap if they set different fields. Assemble
+   and check the passage again.
 
 ## Studio review
 

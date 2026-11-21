@@ -21,7 +21,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import java.util.List;
+import java.util.Map;
 
+import static com.opensmpsdeck.headless.ReconstructionRoles.Role.drums;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -84,6 +88,38 @@ class ReconstructionDrumsTest {
         assertTrue(catalogue.rate() < nativeRate, "the higher reference pitch should choose faster DAC playback");
         assertTrue(reconstruct(midi, stem, index, "sliced", true).id().startsWith("stem-"));
         assertTrue(reconstruct(midi, stem, index, "auto", false).id().startsWith(sample));
+    }
+
+    @Test void drumGainsScaleDacPcmAndPsgNoiseIndependently() throws Exception {
+        byte[] pcm = {0, 64, (byte) 128, (byte) 192, (byte) 254};
+        var builder = new InstrumentCatalogue.Builder();
+        String sample = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Snare", pcm);
+        String variant = builder.variant(sample, "Snare", new InstrumentCatalogue.Recipe(12, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        var catalogue = builder.build();
+        var snare = new ReconstructionStages.Note("snare", 0, 0, .15, 38, 100, "midi", 1);
+        var hat = new ReconstructionStages.Note("hat", 0, 0, .15, 42, 100, "midi", 1);
+        var allocation = new ReconstructionAllocation.Result(1, List.of(
+                new ReconstructionAllocation.Entry(snare, drums, "DAC", 0, 9, ReconstructionAllocation.Outcome.kept, null, null),
+                new ReconstructionAllocation.Entry(hat, drums, "PSG3", 0, 9, ReconstructionAllocation.Outcome.kept, null, null)));
+        var score = new S3kReconstruction.Score(List.of(new MidiScore.Part(0, "Drums", 0, true)), List.of(), List.of());
+        var choice = new ReconstructionVoices.Choice(sample, variant, "Snare", 12, "matched", List.of(), List.of());
+        var matches = Map.of("DAC", Map.of(new ReconstructionVoices.Key(0, 38), choice));
+        var unedited = S3kReconstruction.arrangeAllocated("Drums", 30, 60, score, allocation, null,
+                catalogue, matches, Map.of()).project();
+        var voiced = S3kReconstruction.arrangeAllocated("Drums", 30, 60, score, allocation, null,
+                catalogue, matches, Map.of(), Map.of("DAC", drumLane(38, .5), "PSG3", drumLane(42, .1)), false).project();
+        assertArrayEquals(pcm, unedited.samples().getFirst().pcm());
+        assertArrayEquals(new byte[]{64, 96, (byte) 128, (byte) 160, (byte) 191}, voiced.samples().getFirst().pcm());
+        var uneditedPsg = unedited.sequences().stream().filter(seq -> seq.type().equals("PSG")).findFirst().orElseThrow();
+        var voicedPsg = voiced.sequences().stream().filter(seq -> seq.type().equals("PSG")).findFirst().orElseThrow();
+        assertEquals(10, (uneditedPsg.volume() >> 3) - (voicedPsg.volume() >> 3));
+        assertEquals(uneditedPsg.notes(), voicedPsg.notes());
+    }
+
+    private static ReconstructionVoicing.Lane drumLane(int pitch, double gain) {
+        return new ReconstructionVoicing.Lane(drums, null, List.of(), 1, ReconstructionVoicing.WRITTEN,
+                ReconstructionVoicing.DRY, "", "", "", List.of(), null, null, Map.of(pitch, gain));
     }
 
     private static double kick(double seconds, double pitch) {

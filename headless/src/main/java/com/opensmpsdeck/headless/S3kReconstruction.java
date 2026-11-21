@@ -57,7 +57,7 @@ final class S3kReconstruction {
         int volumeFloor;
         ReconstructionVoicing.Vibrato vibrato;
         ReconstructionBendEncoding.Fit bend;
-        int restoreTick = -1;
+        java.util.NavigableMap<Integer, Tone> releaseTones = java.util.Collections.emptyNavigableMap();
         java.util.NavigableMap<Integer, Tone> scopedTones = java.util.Collections.emptyNavigableMap();
 
         Tone baseTone() { return new Tone(event.assetId(), event.volume(), vibrato); }
@@ -265,7 +265,9 @@ final class S3kReconstruction {
             int end = entry.endTick();
             if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
                 var pitched = new MidiScore.Note(note.partId(), 81, note.velocity(), note.startUs(), note.endUs());
-                psg.get(2).add(new Placement(new Event(pitched, start, end, 0, NOISE, volume(part, note))));
+                int volume = volume(part, note);
+                if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
+                psg.get(2).add(new Placement(new Event(pitched, start, end, 0, NOISE, volume)));
                 gates.add(new VoicedGate(entry.note().id(), lane, pitched.pitch(), start, end));
                 continue;
             }
@@ -279,10 +281,14 @@ final class S3kReconstruction {
             if (lane.equals("DAC")) {
                 var slice = choice.slice();
                 String id = slice == null ? choice.assetId() + "-" + choice.sampleRate() : slice.id();
-                samples.computeIfAbsent(id, key -> slice == null
-                        ? DacSample.of(key, choice.name(), choice.sampleRate(), catalogue.asset(choice.assetId()).bytes())
-                        : slice);
-                dac.add(new Event(note, start, end, drumPriority(note.pitch()), id, 0));
+                double gain = voice == null ? 1 : voice.drumGain(note.pitch());
+                String gainedId = gain == 1 ? id : id + "-gain-" + Double.toHexString(gain);
+                samples.computeIfAbsent(gainedId, key -> {
+                    if (gain == 1 && slice != null) return slice;
+                    byte[] pcm = slice == null ? catalogue.asset(choice.assetId()).bytes() : slice.pcm();
+                    return DacSample.of(key, choice.name(), choice.sampleRate(), scalePcm(pcm, gain));
+                });
+                dac.add(new Event(note, start, end, drumPriority(note.pitch()), gainedId, 0));
                 gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, end));
             } else {
                 var asset = catalogue.asset(choice.assetId());
@@ -309,19 +315,26 @@ final class S3kReconstruction {
                 String noteId = entry.note().id();
                 var spans = scopes.get(origins.getOrDefault(noteId, noteId));
                 if (spans != null) {
-                    var attack = spans.stream().filter(span -> span.start() <= start && span.end() > start)
-                            .findFirst().orElse(null);
-                    if (attack != null && attack.settings().gate() != null) {
+                    var attack = spans.stream().filter(span -> span.start() <= start && span.end() > start
+                            && span.settings().gate() != null).findFirst().orElse(null);
+                    if (attack != null) {
                         duration = new ReconstructionVoicing.Articulation("scoped", attack.settings().gate(), 0)
                                 .duration(end - start);
                         placed.end = start + duration;
                     }
                     placed.scopedTones = new java.util.TreeMap<>();
-                    for (var span : spans) {
-                        if (span.end() <= start) continue;
-                        int boundary = Math.max(span.start(), start);
-                        if (boundary >= placed.end) break;
-                        var scoped = span.settings();
+                    placed.releaseTones = new java.util.TreeMap<>();
+                    var changes = ReconstructionOverrides.changes(spans, placed.end);
+                    var active = changes.floorEntry(start);
+                    if (active != null && active.getValue() != null) changes.put(start, active.getValue());
+                    for (var change : changes.tailMap(start, true).entrySet()) {
+                        int boundary = change.getKey();
+                        var tones = boundary < placed.end ? placed.scopedTones : placed.releaseTones;
+                        var scoped = change.getValue();
+                        if (scoped == null) {
+                            tones.put(boundary, placed.baseTone());
+                            continue;
+                        }
                         var selected = scoped.variantId() == null ? asset : catalogue.match(scoped.variantId()).asset();
                         String selectedId = selected.id();
                         if (isFm) {
@@ -342,9 +355,7 @@ final class S3kReconstruction {
                             scopedVolume = Math.max(selectedFloor, ReconstructionEcho.scaleVolume(raw, voice.gainFor(part.id(), gain)));
                         }
                         var vibrato = scoped.changesModulation() ? scoped.vibrato() : placed.vibrato;
-                        placed.scopedTones.put(boundary, new Tone(selectedId, scopedVolume, vibrato));
-                        if (span.end() < placed.end) placed.scopedTones.put(span.end(), placed.baseTone());
-                        else placed.restoreTick = span.restoreTick();
+                        tones.put(boundary, new Tone(selectedId, scopedVolume, vibrato));
                     }
                 }
                 var curve = entry.note().bend();
@@ -622,15 +633,15 @@ final class S3kReconstruction {
                 if (placement.bend == null)
                     events.add(new NoteEvent("note-" + (noteStart - from), noteStart - from,
                             placement.end - noteStart, note.note().pitch()));
-                if (restoreInRest(notes, i)) {
-                    int tick = placement.restoreTick - from;
-                    var base = placement.baseTone();
-                    emitTone(commands, tick, selectAsset, activeAsset, volume, base);
-                    activeAsset = base.asset();
-                    volume = base.volume();
-                    if (bendModulation || !java.util.Objects.equals(vibrato, base.vibrato())) {
+                for (var change : releaseTones(notes, i).entrySet()) {
+                    int tick = change.getKey() - from;
+                    var next = change.getValue();
+                    emitTone(commands, tick, selectAsset, activeAsset, volume, next);
+                    activeAsset = next.asset();
+                    volume = next.volume();
+                    if (bendModulation || !java.util.Objects.equals(vibrato, next.vibrato())) {
                         bendModulation = false;
-                        vibrato = base.vibrato();
+                        vibrato = next.vibrato();
                         emitVibrato(commands, tick, vibrato);
                     }
                 }
@@ -644,15 +655,14 @@ final class S3kReconstruction {
         }
     }
 
-    private static boolean restoreInRest(List<Placement> notes, int index) {
-        var note = notes.get(index);
-        return note.restoreTick >= note.end
-                && (index + 1 == notes.size() || note.restoreTick < notes.get(index + 1).event.start());
+    private static java.util.NavigableMap<Integer, Tone> releaseTones(List<Placement> notes, int index) {
+        var changes = notes.get(index).releaseTones;
+        return index + 1 == notes.size() ? changes : changes.headMap(notes.get(index + 1).event.start(), false);
     }
 
     private static int clipEnd(List<Placement> notes, int index) {
-        var note = notes.get(index);
-        return restoreInRest(notes, index) ? note.restoreTick + 1 : note.end;
+        var release = releaseTones(notes, index);
+        return release.isEmpty() ? notes.get(index).end : release.lastKey() + 1;
     }
 
     private static void emitTone(List<CommandEvent> commands, int tick, NativeCommand selectAsset,
@@ -739,6 +749,23 @@ final class S3kReconstruction {
             case 38, 40 -> 2;
             default -> 1;
         };
+    }
+
+    private static int psgDrumVolume(int volume, double gain) {
+        if (gain == 1) return volume;
+        if (gain == 0) return 0;
+        int shift = (int) Math.round(10 * Math.log10(gain));
+        int level = Math.clamp((volume >> 3) + shift, 0, 15);
+        return level << 3;
+    }
+
+    private static byte[] scalePcm(byte[] pcm, double gain) {
+        if (gain == 1) return pcm;
+        for (int i = 0; i < pcm.length; i++) {
+            int amplitude = (pcm[i] & 0xff) - 128;
+            pcm[i] = (byte) Math.clamp(Math.round(amplitude * gain) + 128, 0, 255);
+        }
+        return pcm;
     }
 
     private static int volume(MidiScore.Part part, MidiScore.Note note) {

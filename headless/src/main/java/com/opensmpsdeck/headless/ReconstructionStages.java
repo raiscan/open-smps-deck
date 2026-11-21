@@ -59,6 +59,10 @@ public final class ReconstructionStages {
             this(id, part, start, end, pitch, velocity, source, confidence, null);
         }
 
+        Note withVelocity(int level) {
+            return new Note(id, part, start, end, pitch, level, source, confidence, motion, run, bend);
+        }
+
         Note withTiming(double from, double to) {
             return new Note(id, part, from, to, pitch, velocity, source, confidence, motion, run, bend);
         }
@@ -628,7 +632,7 @@ public final class ReconstructionStages {
         var authoredIds = new java.util.HashSet<String>();
         var suppressed = new ArrayList<Note>();
         for (var edit : edits) {
-            if (edit.status() != ReconstructionEdits.Status.applied) continue;
+            if (!edit.authorsGate()) continue;
             authoredIds.addAll(edit.noteIds());
             if (edit.original() != null) suppressed.add(timeline.projectNote(edit.original()));
         }

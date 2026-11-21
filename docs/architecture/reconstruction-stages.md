@@ -51,8 +51,12 @@ directories outside public checkouts.
 allocation, and voicing evidence by stable note ID. Source and project
 seconds accompany 60 Hz ticks. Ticks on allocation and voiced gates
 are the actual intervals. Earlier ticks are rounded views of unquantized
-notes. Repeat corrections retain their vote evidence, and a thinned
-attack links to the retained note whose gate it extended. Hardware
+notes. Top-level `timing` retains the original gate. `effectiveTiming`
+uses the primary voiced gate, spanning the voiced steps of a figure.
+It falls back to allocation and then the latest available note-stage gate.
+Trace time filters match both the original and effective intervals. Repeat
+corrections retain their vote evidence, and a thinned attack links to the
+retained note whose gate it extended. Hardware
 conflicts carry `competitorNoteId` for a single blocker and
 `blockingNoteIds` when several lanes are occupied. A shortening
 links to the incoming attack that cut the release.
@@ -103,28 +107,53 @@ when reconstruction warps project time. Pitch is a MIDI integer.
 | Op | Fields | First stage |
 | --- | --- | --- |
 | `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |
-| `deleteNote` | `noteId` from the transcription score. | `transcribe` |
-| `setNote` | `noteId` from the transcription score and one or more of `pitch`, `start`, `end`. Clears inferred motion, bends and retriggers tied to the old note. | `transcribe` |
-| `setRole` | A selector and `role`. Optional `lane` also pins the note. | `roles` |
-| `pinLane` | `noteIds` and `lane`. | `roles` |
+| `deleteNote` | `noteId` or a point selector. When the score has no match, roles can remove a generated note such as a `lead-audio-added` attack. | `transcribe` |
+| `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
+| `setVelocity` | `span`, `part`, optional `pitchMin` and `pitchMax`, and either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
+| `setRole` | A selector and `role`. A span or ID list can filter by `fromRole`, using the current role after earlier edits. Optional `lane` also pins the note. | `roles` |
+| `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
+| `pinLane` | `noteIds` or a point selector, and `lane`. | `roles` |
 | `unmerge` | A selector. Restores the written attacks and gates of the selected thinning groups, including the anchors and other members. | `roles` |
-| `bend` | `noteId` from the transcription score and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after any `setNote` for the same note. The FM encoder fits the curve to the playable gate and records the applied result. | `transcribe` |
+| `bend` | `noteId` or a point selector from the transcription score, and `points` of increasing `[seconds, semitones]` pairs inside its gate. Place after timing or pitch edits to the same note. The FM encoder fits the curve to the playable gate and records the applied result. | `transcribe` |
 
-A selector is either a nonempty `noteIds` array or `span: [start, end]` and
-`part`, with optional inclusive `pitchMin` and `pitchMax`. Spans match attacks
-in the half-open interval. Roles are `melody`, `bass`, `counter`, `harmony`,
-`drums` and `drop`. An explicit lane can route a pitched role to any FM lane
+Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
+attack within 20 ms of the source onset. Zero matches or multiple matches
+report `invalid`. For span or ID selection on `setRole` and `unmerge`,
+use a nonempty `noteIds` array or `span: [start, end]` with `part` and
+optional inclusive `pitchMin` and `pitchMax`. Span fields may be in a
+`selector` object or at the top level. Spans include attacks at the
+start and exclude attacks at the end.
+
+Set `noExtension: true` to keep lead legato and stem-backed release
+extension from stretching the attack. A later `noExtension: false` clears
+that flag. Explicit pitch and timing edits still protect their authored
+gate. Velocity-only edits preserve the attack's existing timing and
+motion evidence.
+
+Roles are `melody`, `bass`, `counter`, `harmony`, `drums` and `drop`.
+An explicit lane can route a pitched role to any FM lane
 or to an eligible PSG lane. Percussion can use DAC or PSG3. Hardware pitch
 limits and FM-only mode still apply. An overlapping unpinned gate can be
 shortened for a pin. Earlier pinned attacks win overlapping gates, and the
 earlier intent wins ties at the same tick. The trace records the winning
 competitor when the other note is shortened or dropped.
 
-Add, list and remove with `reconstruct edit WORK_DIR add JSON | list | remove ID`
-or MCP `reconstruct_edit`. Resume from the command's returned `from` stage.
-MCP add and remove accept `rerun: true` to run from that stage and return
-a trace diff. The diff flags other fates outside the requested span or the
-target notes' original and revised gates.
+Use `reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID`
+or MCP `reconstruct_edit`. The batch file accepts an array of intents or a
+versioned edits object. MCP add takes either a single `edit` or an `edits`
+array. Entries append in order, and a malformed intent or duplicate edit ID
+rejects the whole batch before writing. Resume from the returned `from`
+stage. MCP add and remove accept `rerun: true` to rebuild once and return a
+trace diff. The diff flags changes outside the combined range of the
+requested spans and targeted gates. For example, a batch can contain these
+two intents:
+
+```json
+[
+  {"id":"lead","reason":"counter line carries the phrase","op":"swapRoles","span":[43,45.6],"part":0,"from":"counter","to":"melody"},
+  {"id":"hats","reason":"closed hats dominate this phrase","op":"setVelocity","span":[43,45.6],"part":2,"pitchMin":42,"pitchMax":42,"scale":0.32}
+]
+```
 
 `edit-results.json` records outcomes by stage, and assembly includes them in
 `report.json` as `editResults`. An absent target reports `orphaned`, including
@@ -611,6 +640,19 @@ Optional `effects.vibrato` holds the four native F0 parameters `delay`,
 `vibrato`. Preset names and decision reasons are descriptive. The numeric
 settings control assembly.
 
+On `DAC` and `PSG3`, `drumGains` maps MIDI drum pitches to linear gains
+from 0 to 4. For example, `"drumGains":{"42":0.1}` attenuates closed hi-hats.
+Missing pitches use unity gain. DAC scales the unsigned PCM around its
+midpoint. PSG3 applies gain at the nearest hardware attenuation step of
+about 2 dB, with 0 selecting mute. Drum gains persist through refits in
+the same work directory.
+
+The existing PSG velocity curve starts with an FM-style logarithmic
+velocity conversion and then quantizes the resulting 7-bit level to the
+PSG's 4-bit level. A velocity scale of 0.32 typically moves just one or two
+hardware steps, about 2–4 dB. Use `drumGains` for larger percussion level
+changes. DAC sample amplitude is independent of MIDI velocity.
+
 Optional `overrides` entries change an allocated tonal lane within a passage.
 An entry may supply `startTick` and `endTick` or `startSeconds` and
 `endSeconds`. Project time uses 60 ticks per second, with seconds rounded to
@@ -627,7 +669,11 @@ Each entry must set at least one of `variantId`, `gain`, `gate`,
 lane gain before applying per-part gains. FM selects a voice and can floor its
 operator release rates. Tonal PSG can select a PSG volume envelope.
 Vibrato takes the same F0 arguments as `effects.vibrato`. Overlapping entries
-on the same note, invalid variant kinds, and stale note IDs fail validation.
+compose when they set different fields. For example, a patch override can
+cover the whole phrase while a note-level vibrato override affects two
+attacks. Overlaps that set the same field, invalid variant kinds, and stale
+note IDs fail validation. `vibrato` and `modulationOff: true` control the
+same field.
 The gate is selected at attack. Patch, level and modulation can switch while
 a note is held, then revert at the range end, including during a release
 that reaches that boundary. Note-only overrides give the selected note its

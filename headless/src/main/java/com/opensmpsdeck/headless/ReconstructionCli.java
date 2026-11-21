@@ -94,7 +94,7 @@ final class ReconstructionCli {
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
-        out.println("       reconstruct edit WORK_DIR add JSON | list | remove ID");
+        out.println("       reconstruct edit WORK_DIR add JSON | add --file BATCH | list | remove ID");
         out.println("       reconstruct trace WORK_DIR [--start S] [--end S] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");

@@ -144,7 +144,8 @@ final class McpReconstruction {
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : FILES) McpPaths.managed(work, file);
         McpPaths.managed(work, ReconstructionEditCommand.LOCK);
-        return ReconstructionEditCommand.run(work, string(args, "action"), args.getAsJsonObject("edit"),
+        if (args.has("edit") && args.has("edits")) throw new IllegalArgumentException("Choose edit or edits");
+        return ReconstructionEditCommand.run(work, string(args, "action"), args.get(args.has("edits") ? "edits" : "edit"),
                 optional(args, "id"), args.has("rerun") && args.get("rerun").getAsBoolean(), progress);
     }
 

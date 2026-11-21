@@ -13,6 +13,7 @@ import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -72,6 +73,96 @@ class ReconstructionEditsTest {
         }
     }
 
+    @Test void roleFiltersUseEarlierEditsAndDeletionCanTargetGeneratedNotes() {
+        var counter = note("counter", .1, .2, 69);
+        var melody = note("melody", .1, .2, 65);
+        var harmony = note("harmony", .16, .27, 60);
+        var generated = note("lead-audio-0-400000-70", .4, .6, 70);
+        var written = List.of(counter, melody, harmony);
+        var bars = List.of(new ReconstructionStructure.Bar("b0", 0, 1, false));
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), bars,
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false)), List.of(), List.of()),
+                Map.of(), written, List.of(), List.of(), null, null);
+        var structure = new ReconstructionStructure.Result(1, bars, List.of(), List.of(), List.of(), written);
+        var roles = new ReconstructionRoles.Result(1, 7.5, List.of(
+                new ReconstructionRoles.Decision(counter, Role.counter, null, null),
+                new ReconstructionRoles.Decision(melody, Role.melody, null, null),
+                new ReconstructionRoles.Decision(harmony, Role.harmony, null, null),
+                new ReconstructionRoles.Decision(generated, Role.melody, "lead-audio-added", null)), null);
+        var edits = new ReconstructionEdits(List.of(
+                intent("""
+                        {"id":"swap","reason":"lead handoff","op":"swapRoles",
+                         "part":0,"span":[0.1,0.3],"from":"counter","to":"melody"}
+                        """),
+                intent("""
+                        {"id":"filter","reason":"alternate role","op":"setRole","role":"counter",
+                         "selector":{"span":[0.1,0.3],"part":0,"pitchMin":68,"fromRole":"melody"}}
+                        """),
+                intent("""
+                        {"id":"delete","reason":"no such attack in the stem","op":"deleteNote",
+                         "selector":{"at":0.41,"pitch":70,"part":0}}
+                        """)));
+        var scoreOutcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        assertSame(score, edits.applyScore(score, scoreOutcomes));
+        assertTrue(scoreOutcomes.isEmpty());
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var result = edits.applyRoles(score, structure, roles, scoreOutcomes, outcomes);
+        var assigned = new java.util.HashMap<String, Role>();
+        result.notes().forEach(decision -> assigned.put(decision.note().id(), decision.role()));
+        assertEquals(Map.of("counter", Role.counter, "melody", Role.harmony, "harmony", Role.harmony,
+                generated.id(), Role.drop), assigned);
+        assertEquals(List.of("counter", "melody"), outcomes.getFirst().noteIds());
+        assertEquals(List.of("counter"), outcomes.get(1).noteIds());
+        assertEquals(List.of(generated.id()), outcomes.getLast().noteIds());
+    }
+
+    @Test void aBatchIsValidatedBeforePublishingAnyEdit(@TempDir Path work) throws Exception {
+        var batch = new com.google.gson.JsonArray();
+        for (int i = 0; i < 20; i++) batch.add(json("""
+                {"id":"level-%d","reason":"level correction","op":"setVelocity","span":[0,1],"part":0,"velocity":30}
+                """.formatted(i)));
+        var file = work.resolve("batch.json");
+        Files.writeString(file, batch.toString());
+        var result = json(cli("reconstruct", "edit", work.toString(), "add", "--file", file.toString()));
+        assertEquals(20, result.getAsJsonArray("ids").size());
+        assertEquals("transcribe", result.get("from").getAsString());
+        String saved = Files.readString(work.resolve(ReconstructionEditCommand.FILE));
+        var invalid = new com.google.gson.JsonArray();
+        var first = batch.get(0).getAsJsonObject().deepCopy();
+        first.addProperty("id", "new");
+        invalid.add(first);
+        invalid.add(batch.get(0));
+        assertThrows(IllegalArgumentException.class, () -> ReconstructionEditCommand.run(work, "add", invalid, null,
+                false, (a, b, c) -> {}));
+        assertEquals(saved, Files.readString(work.resolve(ReconstructionEditCommand.FILE)));
+    }
+
+    @Test void pointSelectorsRejectBothAmbiguityAndMissingMatches() {
+        var notes = List.of(note("a", .10, .20, 60), note("b", .13, .26, 60));
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false)), List.of(), List.of()),
+                Map.of(), notes, List.of(), List.of(), null, null);
+        var edits = new ReconstructionEdits(List.of(
+                intent("""
+                        {"id":"tie","reason":"same pitch twice","op":"setNote","velocity":30,
+                         "selector":{"at":0.115,"pitch":60,"part":0}}
+                        """),
+                intent("""
+                        {"id":"absent","reason":"missing attack","op":"setNote","velocity":30,
+                         "selector":{"at":0.3,"pitch":60,"part":0}}
+                        """),
+                intent("""
+                        {"id":"unique","reason":"first attack","op":"setNote","velocity":30,
+                         "selector":{"at":0.101,"pitch":60,"part":0}}
+                        """)));
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var result = edits.applyScore(score, outcomes);
+        assertEquals(List.of(ReconstructionEdits.Status.invalid, ReconstructionEdits.Status.invalid,
+                ReconstructionEdits.Status.applied), outcomes.stream().map(ReconstructionEdits.Outcome::status).toList());
+        assertEquals(List.of("a", "b"), outcomes.getFirst().noteIds());
+        assertEquals(List.of(30, 90), result.notes().stream().map(Note::velocity).toList());
+    }
+
     @Test void intentsSurviveTranscriptionAndManifestReplayAndReportOrphans(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("theme.mid");
         writeMidi(midi, true);
@@ -119,6 +210,9 @@ class ReconstructionEditsTest {
         assertEquals("edit:deletion", trace.get(removed).reason());
         assertNull(trace.get(removed).score());
         var changed = trace.get(kept);
+        assertEquals(.5, changed.timing().sourceStart());
+        assertNotEquals(changed.timing(), changed.effectiveTiming());
+        assertEquals(answer.voiced().getFirst().gate(), answer.effectiveTiming());
         assertEquals(.51, changed.score().note().start());
         assertEquals(.83, changed.roles().effective().note().end());
         assertNull(changed.roles().preLegatoEnd());
