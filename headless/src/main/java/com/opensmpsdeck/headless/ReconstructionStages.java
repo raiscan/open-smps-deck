@@ -177,11 +177,11 @@ public final class ReconstructionStages {
                                 Map<Integer, ExternalTranscribers.Import> imports, Map<Path, String> unmapped,
                                 @Nullable Integer leadPart, boolean fastRunsOff, boolean stemTemplateNotesOff,
                                 @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes,
-                                boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached) {}
+                                boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached, @Nullable String lanePolicyPreset) {}
     private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Transcription initial, @Nullable Double harmonyHz,
                            java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant,
-                           boolean overwriteDetached) {}
+                           boolean overwriteDetached, @Nullable String lanePolicyPreset) {}
 
     private ReconstructionStages() {}
 
@@ -258,7 +258,7 @@ public final class ReconstructionStages {
         if (Files.exists(templateReport)) Files.copy(templateReport, work.resolve(ReconstructionStemTemplates.FILE));
         var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
-                        java.util.Set.of(), false, keepVoicing, null, false), oldWork, out, false,
+                        java.util.Set.of(), false, keepVoicing, null, false, null), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
         summarizeEdits(work, err);
     }
@@ -408,7 +408,13 @@ public final class ReconstructionStages {
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
                         var voicing = ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
+                        if (request.lanePolicyPreset != null) {
+                            var preset = request.lanePolicyPreset.equals("off") ? null
+                                    : ReconstructionLanePolicies.Configuration.preset(request.lanePolicyPreset);
+                            voicing = voicing.withLanePolicies(preset);
+                        }
                         ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, request.overwriteDetached, edits, outcomes);
+                        if (request.lanePolicyPreset != null) ReconstructionArtifacts.write(voicingFile, voicing);
                     }
                     default -> throw new AssertionError(stage);
                 }
@@ -622,7 +628,7 @@ public final class ReconstructionStages {
                     var voicing = ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value);
                     ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)),
                             ReconstructionTimeMap.of(score).frames());
-                    if (voicing.lanePolicies() != null && !voicing.lanePolicies().isEmpty())
+                    if (voicing.lanePolicies() != null && !voicing.lanePolicies().rules().isEmpty())
                         ReconstructionLanePolicies.resolve(work, score, readStructure(work.resolve("structure.json"), score),
                                 voicing.lanePolicies());
                 }
@@ -669,6 +675,8 @@ public final class ReconstructionStages {
         Path midi = absolute(args[0]), reference = absolute(args[1]), index = absolute(args[2]), work = absolute(args[3]);
         if (Files.exists(work, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var extra = stageOptions(args, 4);
+        if (extra.lanePolicyPreset != null)
+            throw new IllegalArgumentException("--lane-policy-preset requires an existing work directory");
         if (!extra.lanes.isEmpty() || extra.refitLevels || extra.keepVoicing || extra.variant != null || extra.overwriteDetached)
             throw new IllegalArgumentException("Refit and overwrite options require an existing work directory");
         String[] legacy = java.util.stream.Stream.concat(java.util.stream.Stream.of("reconstruct"),
@@ -714,7 +722,7 @@ public final class ReconstructionStages {
                 extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource,
                 extra.stemTemplateNotesOff ? true : null);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz,
-                extra.lanes, extra.refitLevels, extra.keepVoicing, null, false);
+                extra.lanes, extra.refitLevels, extra.keepVoicing, null, false, null);
     }
 
     private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) throws IOException {
@@ -722,6 +730,8 @@ public final class ReconstructionStages {
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
         if (extra.overwriteDetached && !chain && stage != Stage.ASSEMBLE)
             throw new IllegalArgumentException("--overwrite-detached requires run or assemble");
+        if (extra.lanePolicyPreset != null && !chain && stage != Stage.ASSEMBLE)
+            throw new IllegalArgumentException("--lane-policy-preset requires run or assemble");
         if (extra.variant != null && (chain || stage != Stage.VOICE || extra.lanes.size() != 1
                 || !ReconstructionAllocation.FM.contains(extra.lanes.iterator().next())))
             throw new IllegalArgumentException("--variant requires reconstruct voice with one FM --lane");
@@ -735,7 +745,7 @@ public final class ReconstructionStages {
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
             throw new IllegalArgumentException("Unsupported options when resuming reconstruct " + stage.name().toLowerCase(Locale.ROOT));
         return new Request(absolute(args[workIndex]), stage, chain, null, extra.harmonyHz,
-                extra.lanes, extra.refitLevels || extra.variant != null, extra.keepVoicing, extra.variant, extra.overwriteDetached);
+                extra.lanes, extra.refitLevels || extra.variant != null, extra.keepVoicing, extra.variant, extra.overwriteDetached, extra.lanePolicyPreset);
     }
 
     private static StageOptions stageOptions(String[] args, int firstOption) throws IOException {
@@ -746,7 +756,7 @@ public final class ReconstructionStages {
         Integer leadPart = null;
         ReconstructionDrums.Source drumSource = null;
         boolean estimate = false, audioRepeats = false, fastRunsOff = false, stemTemplateNotesOff = false;
-        String steady = null, transcriber = null, device = null, variant = null;
+        String steady = null, transcriber = null, device = null, variant = null, lanePolicyPreset = null;
         Path transcriberConfig = null;
         var parts = new java.util.TreeMap<Integer, String>();
         var imports = new java.util.TreeMap<Integer, ExternalTranscribers.Import>();
@@ -842,6 +852,12 @@ public final class ReconstructionStages {
                 case "--refit-levels" -> refitLevels = true;
                 case "--keep-voicing" -> keepVoicing = true;
                 case "--overwrite-detached" -> overwriteDetached = true;
+                case "--lane-policy-preset" -> {
+                    if (lanePolicyPreset != null || ++i == args.length
+                            || !java.util.Set.of(ReconstructionLanePolicies.S3K_LAYERING, "off").contains(args[i]))
+                        throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
+                    lanePolicyPreset = args[i];
+                }
                 case "--harmony-max-hz" -> {
                     if (hz != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --harmony-max-hz RATE");
@@ -864,7 +880,7 @@ public final class ReconstructionStages {
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
                 transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff,
                 stemTemplateNotesOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant,
-                overwriteDetached);
+                overwriteDetached, lanePolicyPreset);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }

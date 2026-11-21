@@ -165,6 +165,16 @@ public final class ReconstructionReview {
      */
     public static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
                                    ReconstructionStages.Progress progress) throws IOException {
+        return apply(work, expected, entries, detachedRevision, null, progress);
+    }
+
+    public static JsonObject applyLanePolicyPreset(Path work, Revision expected, String preset, String detachedRevision,
+                                                   ReconstructionStages.Progress progress) throws IOException {
+        return apply(work, expected, expected.entries(), detachedRevision, preset, progress);
+    }
+
+    private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
+                                    String lanePolicyPreset, ReconstructionStages.Progress progress) throws IOException {
         requireRevision(work, expected);
         var arrangement = requireAttached(work, detachedRevision != null);
         if (detachedRevision != null && (arrangement == null || !detachedRevision.equals(arrangement.revision())))
@@ -190,15 +200,16 @@ public final class ReconstructionReview {
             var copied = arrangement(before);
             if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
                     copied == null ? null : copied.revision())) throw new Changed();
-            String from = stage(before, changed, updated);
+            String from = lanePolicyPreset == null ? stage(before, changed, updated) : "assemble";
             if (expected.voices() != null && ReconstructionStages.Stage.parse(from).ordinal()
                     > ReconstructionStages.Stage.VOICES.ordinal()) {
                 var voices = ReconstructionVoicePlan.saved(before);
                 if (voices == null || !voices.equals(ReconstructionVoicePlan.load(before))) from = "voices";
             }
-            updated.write(after);
+            if (lanePolicyPreset == null) updated.write(after);
             var args = new ArrayList<>(List.of("--from", from, after.toString()));
             if (detachedRevision != null) args.add("--overwrite-detached");
+            if (lanePolicyPreset != null) args.addAll(List.of("--lane-policy-preset", lanePolicyPreset));
             var fromStage = ReconstructionStages.Stage.parse(from);
             if (fromStage.ordinal() <= ReconstructionStages.Stage.VOICE.ordinal()) args.add("--keep-voicing");
             var roles = ReconstructionTrace.optional(before, "roles.json", ReconstructionRoles.Result.class);

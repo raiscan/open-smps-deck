@@ -101,6 +101,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private final List<ProjectWatcher> watchers = new ArrayList<>();
     private final ReconstructionDraft draft;
 
+    private final MenuButton lanePolicies = new MenuButton("Lane policies");
     private final Button apply = new Button("Apply");
     private final Button cancel = new Button("Cancel");
     private final Button undo = new Button("Undo");
@@ -221,7 +222,13 @@ final class ReconstructionEditor implements AutoCloseable {
         grid.setTooltip(new Tooltip("Hold Alt during placement to bypass snapping"));
         grid.valueProperty().addListener((ignored, old, next) -> view.grid(next));
         apply.setId("reconstruction-apply");
-        apply.setOnAction(event -> apply());
+        apply.setOnAction(event -> apply(null));
+        lanePolicies.setId("reconstruction-lane-policies");
+        var layering = new MenuItem("S3K layering");
+        layering.setOnAction(event -> apply("s3k-layering"));
+        var off = new MenuItem("Off");
+        off.setOnAction(event -> apply("off"));
+        lanePolicies.getItems().setAll(layering, off);
         cancel.setOnAction(event -> cancel());
         undo.setOnAction(event -> history(false));
         redo.setOnAction(event -> history(true));
@@ -229,7 +236,7 @@ final class ReconstructionEditor implements AutoCloseable {
         conflict.setOnAction(event -> resolve());
         progress.setPrefWidth(108);
         for (Control control : List.of(progress, cancel, conflict)) control.managedProperty().bind(control.visibleProperty());
-        bar.getChildren().addAll(parts, grid, apply, cancel, progress, undo, redo, pendingLabel, conflict);
+        bar.getChildren().addAll(parts, grid, apply, cancel, progress, undo, redo, lanePolicies, pendingLabel, conflict);
         return bar;
     }
 
@@ -951,6 +958,7 @@ final class ReconstructionEditor implements AutoCloseable {
         var entries = draft.entries();
         boolean unbuilt = entries.asList().stream().anyMatch(e -> !snapshot.outcomes().containsKey(text(e, "id", "")));
         apply.setDisable(!editing || !draft.pending() && !unbuilt && !externalUnbuilt);
+        lanePolicies.setDisable(!editing || snapshot.report() == null || draft.pending() || unbuilt || externalUnbuilt);
         undo.setDisable(!editing || !draft.canUndo(false));
         redo.setDisable(!editing || !draft.canUndo(true));
         cancel.setVisible(busy);
@@ -983,11 +991,11 @@ final class ReconstructionEditor implements AutoCloseable {
         return true;
     }
 
-    private void apply() {
+    private void apply(String lanePolicyPreset) {
         DetachedArrangement.Approval approval;
         try {
             var decision = DetachedArrangement.confirm(owner, work, openProject.get());
-            if (decision.isEmpty() || closed || apply.isDisabled()) return;
+            if (decision.isEmpty() || closed || (lanePolicyPreset == null ? apply : lanePolicies).isDisabled()) return;
             approval = decision.get();
         } catch (IOException | IllegalArgumentException failure) {
             status.accept("Apply blocked · " + failure.getMessage());
@@ -1005,7 +1013,9 @@ final class ReconstructionEditor implements AutoCloseable {
                     running = Thread.currentThread();
                     if (cancelling) throw new java.util.concurrent.CancellationException();
                 }
-                diff = ReconstructionReview.apply(work, expected, intents, approval.revision(), this::reportProgress);
+                diff = lanePolicyPreset == null
+                        ? ReconstructionReview.apply(work, expected, intents, approval.revision(), this::reportProgress)
+                        : ReconstructionReview.applyLanePolicyPreset(work, expected, lanePolicyPreset, approval.revision(), this::reportProgress);
                 next = Snapshot.read(work);
             } catch (Exception error) {
                 failure = error;

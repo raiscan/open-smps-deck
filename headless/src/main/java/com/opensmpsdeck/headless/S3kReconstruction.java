@@ -520,10 +520,11 @@ final class S3kReconstruction {
         int psgNotes = psg.stream().mapToInt(List::size).sum();
         if (fmNotes + psgNotes + dac.size() == 0)
             throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
+        int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
         int echoNotes = addEchoes(fm, echoes, frames, 2);
         if (copies) echoNotes += addVoicingCopies(fm, frames);
         var coverage = applyLanePolicies(policies, levels, frames, fm, psg, candidates, voices, envelopes, gates,
-                catalogue, sourceInstruments, parts);
+                catalogue, sourceInstruments, parts, overlappingTone);
         if (!coverage.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -705,7 +706,7 @@ final class S3kReconstruction {
             List<ArrayList<Placement>> fm, List<ArrayList<Placement>> psg, List<PolicySource> sources,
             Map<String, Voice> voices, Map<String, Envelope> envelopes, List<VoicedGate> gates,
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
-            Map<Integer, MidiScore.Part> parts) throws java.io.IOException {
+            Map<Integer, MidiScore.Part> parts, int[] overlappingTone) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -731,7 +732,8 @@ final class S3kReconstruction {
                 var entry = source.entry();
                 var dry = source.placed();
                 String id = entry.note().id();
-                if (moved.contains(dry) || !scoped.selects(entry, source.origin()) || !selected.add(id)) continue;
+                boolean solo = overlappingTone[dry.event.start()] == overlappingTone[dry.end];
+                if (moved.contains(dry) || !scoped.selects(entry, source.origin(), solo) || !selected.add(id)) continue;
                 eligible++;
                 boolean fromFm = entry.lane().startsWith("FM");
                 int pitch = rule.pitch(dry.event.note().pitch());
@@ -806,6 +808,26 @@ final class S3kReconstruction {
                     busy, incompatible, movedFromFm, promoted, byLane));
         }
         return List.copyOf(coverage);
+    }
+
+    // Count frames with multiple dry tonal placements. Ignore drums and generated copies.
+    private static int[] overlappingToneFrames(List<ArrayList<Placement>> fm, List<ArrayList<Placement>> psg, int frames) {
+        var changes = new int[frames + 1];
+        for (var lanes : List.of(fm, psg)) {
+            for (var lane : lanes) for (var dry : lane) {
+                if (noiseKind(dry) != PsgMode.TONE) continue;
+                changes[dry.event.start()]++;
+                changes[dry.end]--;
+            }
+        }
+        int active = 0, overlapping = 0;
+        for (int tick = 0; tick < frames; tick++) {
+            active += changes[tick];
+            changes[tick] = overlapping;
+            if (active > 1) overlapping++;
+        }
+        changes[frames] = overlapping;
+        return changes;
     }
 
     private static int promoteCounters(ReconstructionLanePolicies.Scoped scope, List<PolicySource> sources,

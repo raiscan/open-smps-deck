@@ -215,6 +215,15 @@ def smoke(jar, root):
         assert json.loads(arrangement.read_bytes()) == detached
         rpc.call("reconstruct_run", workDir=work, **{"from": "assemble"}, options={"overwriteDetached": True})
         assert arrangement.read_bytes() == attached
+        before_layers = Path(files["render.wav"]).read_bytes()
+        rpc.call("reconstruct_stage", workDir=work, stage="assemble", options={"lanePolicyPreset": "s3k-layering"})
+        layered = rpc.call("artifact_read", workDir=work, artifact="report")["value"]["lanePolicies"]
+        assert [rule["policy"] for rule in layered] == ["psgDouble", "fmDouble"]
+        assert rpc.call("artifact_read", workDir=work, artifact="voicing")["value"]["lanePolicies"] == {
+            "preset": "s3k-layering"
+        }
+        rpc.call("reconstruct_stage", workDir=work, stage="assemble", options={"lanePolicyPreset": "off"})
+        assert arrangement.read_bytes() == attached and Path(files["render.wav"]).read_bytes() == before_layers
         assert manifest["inputs"]["midi"]["sha256"] == hashlib.sha256(Path(inputs["midi"]).read_bytes()).hexdigest()
         trace = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, lane="FM1")["notes"]
         assert trace and all(row["voiced"][0]["evidence"] == "assembled" for row in trace)

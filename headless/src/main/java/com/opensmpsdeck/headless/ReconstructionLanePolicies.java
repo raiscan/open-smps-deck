@@ -1,5 +1,13 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSerializationContext;
+import com.google.gson.JsonSerializer;
+import com.google.gson.annotations.JsonAdapter;
+import com.google.gson.reflect.TypeToken;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NoteEvent;
@@ -9,6 +17,7 @@ import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +32,41 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 final class ReconstructionLanePolicies {
     enum Kind { pads, leadEcho, psgDouble, fmDouble }
     enum Mode { chorus, echo }
+
+    static final String S3K_LAYERING = "s3k-layering";
+    private static final String FIELD = "voicing.json.lanePolicies";
+
+    @JsonAdapter(ConfigurationJson.class)
+    record Configuration(@Nullable String preset, List<Rule> rules) {
+        static Configuration preset(String name) {
+            require(S3K_LAYERING.equals(name), FIELD + ".preset", "expected " + S3K_LAYERING);
+            return new Configuration(name, List.of(
+                    new Rule(Kind.psgDouble, null, null, null, null, null, 1, null, null, null, null, null),
+                    new Rule(Kind.fmDouble, null, null, null, null, null, null, null, Mode.echo, null, null, null)));
+        }
+    }
+
+    static final class ConfigurationJson implements JsonSerializer<Configuration>, JsonDeserializer<Configuration> {
+        private static final Type RULES = new TypeToken<List<Rule>>() {}.getType();
+
+        @Override public Configuration deserialize(JsonElement value, Type type, JsonDeserializationContext context) {
+            if (value.isJsonObject()) {
+                var object = value.getAsJsonObject();
+                require(object.keySet().equals(Set.of("preset")), FIELD, "expected an object with only preset");
+                ReconstructionArtifacts.shape(FIELD + ".preset", String.class, object.get("preset"));
+                return Configuration.preset(object.get("preset").getAsString());
+            }
+            ReconstructionArtifacts.shape(FIELD, RULES, value);
+            return new Configuration(null, List.copyOf(context.<List<Rule>>deserialize(value, RULES)));
+        }
+
+        @Override public JsonElement serialize(Configuration value, Type type, JsonSerializationContext context) {
+            if (value.preset() == null) return context.serialize(value.rules(), RULES);
+            var object = new JsonObject();
+            object.addProperty("preset", value.preset());
+            return object;
+        }
+    }
 
     record VolumeStep(int tick, int attenuation) {}
 
@@ -67,7 +111,7 @@ final class ReconstructionLanePolicies {
         int minimum() { return minimumTicks == null ? 18 : minimumTicks; }
         int delay() {
             if (delayTicks != null) return delayTicks;
-            return policy == Kind.leadEcho ? 7 : mode == Mode.echo ? 14 : 0;
+            return policy == Kind.leadEcho ? 7 : mode == Mode.echo ? 8 : 0;
         }
         int pitch(int sourcePitch) { return sourcePitch + 12 * (octave == null ? 0 : octave); }
         double db() {
@@ -84,17 +128,21 @@ final class ReconstructionLanePolicies {
     }
 
     record Scoped(int index, Rule rule, int start, int end, Set<String> notes) {
-        boolean selects(ReconstructionAllocation.Entry entry, String origin) {
+        boolean selects(ReconstructionAllocation.Entry entry, String origin, boolean solo) {
             if (entry.startTick() < start || entry.startTick() >= end || notes != null && !notes.contains(origin))
                 return false;
             var role = entry.role();
             boolean fm = entry.lane().startsWith("FM");
+            // A mid-register solo figure can carry the foreground even with a bass role.
+            boolean foreground = solo && role != Role.drums && (role != Role.bass || entry.note().pitch() >= 48);
             return switch (rule.policy()) {
                 case pads -> (role == Role.harmony || notes != null && role == Role.counter)
                         && entry.endTick() - entry.startTick() >= rule.minimum();
                 case leadEcho -> fm && role == Role.melody;
-                case psgDouble -> fm && (role == Role.harmony || role == Role.counter);
-                case fmDouble -> fm && (notes == null ? role == Role.melody : role != Role.drums);
+                case psgDouble -> fm && (role == Role.harmony || role == Role.counter || foreground);
+                case fmDouble -> fm && (notes == null
+                        ? role == Role.melody || rule.mode() == Mode.echo && foreground
+                        : role != Role.drums);
             };
         }
     }
@@ -105,8 +153,9 @@ final class ReconstructionLanePolicies {
     private ReconstructionLanePolicies() {}
 
     static List<Scoped> resolve(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
-                                List<Rule> rules) throws IOException {
-        if (rules == null || rules.isEmpty()) return List.of();
+                                Configuration configuration) throws IOException {
+        if (configuration == null || configuration.rules().isEmpty()) return List.of();
+        var rules = configuration.rules();
         int frames = ReconstructionTimeMap.of(score).frames();
         var sections = rules.stream().anyMatch(rule -> rule != null && rule.section() != null)
                 ? ReconstructionSections.load(work, score, structure) : null;

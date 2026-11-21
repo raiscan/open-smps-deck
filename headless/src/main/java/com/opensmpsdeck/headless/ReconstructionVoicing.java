@@ -24,7 +24,7 @@ final class ReconstructionVoicing {
                   @Nullable String sustainWarning,
                   @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,
                   @Nullable Map<String, SourceSound> sourceInstruments,
-                  @Nullable List<ReconstructionLanePolicies.Rule> lanePolicies) {
+                  @Nullable ReconstructionLanePolicies.Configuration lanePolicies) {
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
                Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments) {
             this(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, null);
@@ -39,6 +39,10 @@ final class ReconstructionVoicing {
 
         Result withSourceInstruments(Map<String, SourceSound> instruments) {
             return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies);
+        }
+
+        Result withLanePolicies(ReconstructionLanePolicies.Configuration policies) {
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies);
         }
 
         SourceSound sourceSound(String lane, int part) {

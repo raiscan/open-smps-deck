@@ -1,11 +1,13 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonParser;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectCompiler;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -81,16 +83,70 @@ class ReconstructionLanePoliciesTest {
     @Test void fmEchoUsesAFreeIntervalAndEmitsVolumeSteps() throws Exception {
         var rule = rule(Kind.fmDouble, Mode.echo, List.of(new ReconstructionLanePolicies.VolumeStep(3, 12)));
         var result = arrange(List.of(entry("lead", Role.melody, "FM1", 3, 13, 67),
-                        entry("future", Role.harmony, "FM2", 20, 28, 60),
+                        entry("future", Role.harmony, "FM2", 18, 28, 60),
                         entry("past", Role.harmony, "FM3", 0, 10, 60)),
-                scoped(rule, 0, 60, null));
+                scoped(rule, 1, 18, null));
         assertEquals(Map.of("FM3", 1), result.policyCoverage().getFirst().lanes());
         var seq = result.project().sequences().stream().filter(s -> s.id().startsWith("FM3-")).findFirst().orElseThrow();
-        assertEquals(17, seq.notes().stream().filter(n -> n.pitch() == 67).findFirst().orElseThrow().tick());
-        assertTrue(seq.commands().stream().anyMatch(c -> c.tick() == 17 && c.command() == NativeCommand.DETUNE
+        assertEquals(11, seq.notes().stream().filter(n -> n.pitch() == 67).findFirst().orElseThrow().tick());
+        assertTrue(seq.commands().stream().anyMatch(c -> c.tick() == 11 && c.command() == NativeCommand.DETUNE
                 && c.arguments().equals(List.of(2))));
-        assertTrue(seq.commands().stream().anyMatch(c -> c.tick() == 20 && c.command() == NativeCommand.VOLUME));
+        assertTrue(seq.commands().stream().anyMatch(c -> c.tick() == 14 && c.command() == NativeCommand.VOLUME));
         ProjectCompiler.compile(result.project());
+    }
+
+    @Test void presetLayersASoloOpeningWithoutPromotingDenseOrLowBass() throws Exception {
+        var preset = ReconstructionLanePolicies.Configuration.preset("s3k-layering");
+        var policies = new ArrayList<ReconstructionLanePolicies.Scoped>();
+        for (var rule : preset.rules())
+            policies.add(new ReconstructionLanePolicies.Scoped(policies.size(), rule, 0, 60, null));
+
+        var result = arrange(List.of(entry("arp-first", Role.bass, "FM2", 0, 4, 65),
+                        entry("arp-next", Role.bass, "FM2", 4, 8, 60),
+                        entry("low-bass", Role.bass, "FM2", 8, 12, 36),
+                        entry("dense-bass", Role.bass, "FM2", 30, 38, 60),
+                        entry("lead", Role.melody, "FM1", 30, 38, 72)),
+                policies);
+        var psg = result.policyCoverage().getFirst();
+        assertEquals(2, psg.applied());
+        assertEquals(2, psg.eligible());
+        assertTrue(result.project().sequences().stream()
+                .filter(seq -> ReconstructionLanePolicies.DOUBLE.id().equals(seq.psgEnvelopeId()))
+                .flatMap(seq -> seq.notes().stream()).anyMatch(note -> note.tick() == 0 && note.pitch() == 77));
+        var fm = result.policyCoverage().getLast();
+        assertEquals(3, fm.applied());
+        assertEquals(3, fm.eligible());
+        assertTrue(result.project().clips().stream().filter(clip -> clip.lane().equals("FM1"))
+                .anyMatch(clip -> result.project().sequences().stream().filter(seq -> seq.id().equals(clip.sequenceId()))
+                        .flatMap(seq -> seq.notes().stream())
+                        .anyMatch(note -> clip.startTick() + note.tick() == 8 && note.pitch() == 65)));
+        ProjectCompiler.compile(result.project());
+    }
+
+    @Test void lanePolicyConfigurationAcceptsPresetAndExplicitRules() {
+        var path = Path.of("voicing.json");
+        var base = JsonParser.parseString("""
+                {"version":1,"lanes":{},"lanePolicies":{"preset":"s3k-layering"}}
+                """).getAsJsonObject();
+        var preset = ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base).lanePolicies();
+        assertEquals("s3k-layering", preset.preset());
+        assertEquals(73, preset.rules().getFirst().pitch(61));
+        assertEquals(8, preset.rules().getLast().delay());
+        base.add("lanePolicies", JsonParser.parseString("""
+                [{"policy":"fmDouble","mode":"echo","delayTicks":14}]
+                """));
+        assertEquals(14, ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base)
+                .lanePolicies().rules().getFirst().delay());
+        base.add("lanePolicies", JsonParser.parseString("""
+                {"preset":"s3k-layering","delayTicks":14}
+                """));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base));
+        base.add("lanePolicies", JsonParser.parseString("""
+                {"preset":"unknown"}
+                """));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base));
     }
 
     private static ReconstructionLanePolicies.Rule rule(Kind kind, Mode mode, List<ReconstructionLanePolicies.VolumeStep> steps) {

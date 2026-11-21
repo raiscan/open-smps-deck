@@ -47,6 +47,7 @@ final class McpReconstruction {
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            choice("lanePolicyPreset", "Replace lane policies when rebuilding an existing work directory", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
@@ -142,7 +143,7 @@ final class McpReconstruction {
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice",
-                    "refitLevels", "keepVoicing", "overwriteDetached");
+                    "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset");
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");
                 cli.add(lane.getAsString());
