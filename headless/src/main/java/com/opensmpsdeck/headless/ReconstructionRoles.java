@@ -83,6 +83,7 @@ final class ReconstructionRoles {
                          ReconstructionLeadContinuity continuity, Integer leadPart, Set<String> fixedGates,
                          java.util.function.Predicate<Note> suppressed) {
         var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
+        var accents = continuity == null ? Map.<String, Double>of() : continuity.accents();
         var programs = new HashMap<Integer, Integer>();
         var roles = new LinkedHashMap<String, Role>();
         var tones = new ArrayList<Note>();
@@ -99,7 +100,7 @@ final class ReconstructionRoles {
                 ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
                 : structure.roleLayout();
         var byBar = byBar(layout.bars(), tones);
-        var melody = melody(layout, tones, programs, evidence, leadPart);
+        var melody = melody(layout, tones, programs, evidence, accents, leadPart);
         for (String id : melody.lead()) roles.put(id, Role.melody);
         if (leadPart != null) for (var note : tones) {
             if (note.part() == leadPart && note.run() != null) roles.put(note.id(), Role.melody);
@@ -113,7 +114,7 @@ final class ReconstructionRoles {
                 labelLine(notes, roles, programs, Role.counter);
         }
         Map<String, String> reasons = phraseReasons;
-        if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence));
+        if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence, accents));
         preferBendAttack(tones, roles, reasons);
         var octaveDrops = new HashSet<String>();
         if (harmonyHz > 0) for (String id : melody.octaveDoubles()) {
@@ -224,7 +225,8 @@ final class ReconstructionRoles {
     private static Map<String, String> applyPlan(ReconstructionStructure.Result structure, Map<String, Role> roles,
                                                   Map<Integer, Integer> programs, ReconstructionRolePlan plan,
                                                   ReconstructionBeatMap beatMap,
-                                                  Map<String, ReconstructionLeadAudio.Evidence> evidence) {
+                                                  Map<String, ReconstructionLeadAudio.Evidence> evidence,
+                                                  Map<String, Double> accents) {
         var scopes = scopes(structure, plan);
         var byPart = new HashMap<Integer, List<Scope>>();
         for (var scope : scopes)
@@ -273,7 +275,7 @@ final class ReconstructionRoles {
             candidates.forEach((scope, notes) -> {
                 boolean low = scope.rule.line() == ReconstructionRolePlan.Voice.bottom;
                 if (scope.rule.role() == Role.melody) {
-                    for (var note : ReconstructionMelody.track(notes, low, evidence)) roles.put(note.id(), Role.melody);
+                    for (var note : ReconstructionMelody.track(notes, low, evidence, accents)) roles.put(note.id(), Role.melody);
                 } else {
                     traceLine(notes, roles, programs, scope.rule.role(), low);
                 }
@@ -292,14 +294,14 @@ final class ReconstructionRoles {
 
     static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
                                                   Map<Integer, Integer> programs) {
-        return melody(layout, tones, programs, Map.of(), null);
+        return melody(layout, tones, programs, Map.of(), Map.of(), null);
     }
 
     private static ReconstructionMelody.Selection melody(ReconstructionStructure.Layout layout, List<Note> tones,
                                                           Map<Integer, Integer> programs,
                                                           Map<String, ReconstructionLeadAudio.Evidence> evidence,
-                                                          Integer leadPart) {
-        var melody = ReconstructionMelody.extract(layout, tones, programs, evidence, leadPart);
+                                                          Map<String, Double> accents, Integer leadPart) {
+        var melody = ReconstructionMelody.extract(layout, tones, programs, evidence, accents, leadPart);
         if (leadPart != null) return melody;
         var roles = new HashMap<String, Role>();
         for (var note : tones) roles.put(note.id(), melody.lead().contains(note.id()) ? Role.melody : Role.harmony);

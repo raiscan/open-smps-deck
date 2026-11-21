@@ -72,6 +72,65 @@ class ReconstructionRolePlanTest {
                 && d.role() == ReconstructionRoles.Role.melody));
     }
 
+    @Test void followsAnAccentedStemVoiceThroughQuieterChordReattacks() throws Exception {
+        int rate = 12_000;
+        var samples = new float[rate];
+        var notes = new ArrayList<Note>();
+        notes.add(new Note("first", 0, .1, .395, 74, 90, "midi", 1));
+        notes.add(new Note("second", 0, .4, 1.0, 72, 90, "midi", 1));
+        for (int i = 0; i < 9; i++) {
+            double start = .1 + .1 * i;
+            notes.add(new Note("stab-" + i, 0, start, start + .085, 65, 45, "midi", 1));
+        }
+        for (int i = 0; i < samples.length; i++) {
+            double time = i / (double) rate;
+            if (time < .1) continue;
+            int pitch = time < .4 ? 74 : 72;
+            double attack = time - .1 - Math.floor((time - .1) * 10) / 10;
+            double chord = attack < .085 ? .055 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(65) * time) : 0;
+            samples[i] = (float) (chord + .2 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(pitch) * time));
+        }
+        Path stem = work.resolve("lead.wav");
+        writeStem(stem, samples, rate);
+        notes.sort(java.util.Comparator.comparingDouble(Note::start).thenComparingInt(Note::pitch));
+        var bars = List.of(new ReconstructionStructure.Bar("b0", 0, 1, true));
+        var sections = List.of(new ReconstructionStructure.Section("S1", List.of("b0")));
+        var parts = List.of(new MidiScore.Part(0, "Synth", 81, false));
+        var inputs = new ReconstructionStages.Inputs("test.mid", "test.wav", "catalogue.json", "Synthetic", 30,
+                false, false, false, false, Map.of(0, stem.toString()), null, 0, null, false);
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs, bars,
+                new MidiScore(parts, List.of(), List.of()), Map.of(0, notes.size()), notes, List.of(), List.of(), null, null);
+        ReconstructionArtifacts.write(work.resolve("score.json"), score);
+        ReconstructionArtifacts.write(work.resolve("structure.json"),
+                new ReconstructionStructure.Result(1, bars, sections, List.of(), List.of(), notes));
+        run("roles", work.toString());
+        run("allocate", work.toString());
+        var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+        assertEquals(List.of("first", "second"), allocation.notes().stream()
+                .filter(entry -> "FM1".equals(entry.lane())).map(entry -> entry.note().id()).toList());
+    }
+
+    @Test void anAccentedPickupCannotDisplaceTheFollowingSustainedAttack() {
+        var notes = List.of(
+                new Note("lead-before", 0, .02, .28, 63, 82, "midi", 1),
+                new Note("stab", 0, .30, .65, 62, 42, "midi", 1),
+                new Note("upper-pickup", 0, .47, .72, 75, 82, "midi", 1),
+                new Note("sustain", 0, .65, 1.85, 63, 82, "midi", 1),
+                new Note("lead-after", 0, 1.86, 2.16, 62, 82, "midi", 1));
+        var line = ReconstructionMelody.track(notes, false, Map.of(), Map.of("upper-pickup", 1.0));
+        assertEquals(List.of("lead-before", "stab", "sustain", "lead-after"), line.stream().map(Note::id).toList());
+    }
+
+    private static void writeStem(Path target, float[] samples, int rate) throws Exception {
+        byte[] pcm = new byte[samples.length * 2];
+        var data = java.nio.ByteBuffer.wrap(pcm).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (float sample : samples) data.putShort((short) Math.round(sample * 32767));
+        var format = new javax.sound.sampled.AudioFormat(rate, 16, 1, true, false);
+        try (var source = new javax.sound.sampled.AudioInputStream(new java.io.ByteArrayInputStream(pcm), format, samples.length)) {
+            javax.sound.sampled.AudioSystem.write(source, javax.sound.sampled.AudioFileFormat.Type.WAVE, target.toFile());
+        }
+    }
+
     @Test void startsAndEndsAPlanInsideASection() throws Exception {
         fixture();
         Files.writeString(work.resolve("roleplan.json"), """

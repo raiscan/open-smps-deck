@@ -211,7 +211,10 @@ Limits:
   `chord`, and a `pitchMin` above them drops them from the lead, so the
   melody seems to vanish into the backing. Check a lead solo against the
   stem before raising `pitchMin` past a held note. In the stem, the lead
-  often has vibrato and the chords do not.
+  often has vibrato and the chords do not. For a mapped stem, the roles
+  pass also looks for clearly accented alternatives with independent pitch
+  energy. Check the stem and FM1 together when two notes have similar
+  accents or share overtones.
 - Suno MIDI may have no vocal part. When a vocal carries the tune, either
   write no lead for that section or ask the user which instrument should
   take the vocal line.
