@@ -230,6 +230,39 @@ requires the matching clean ROM to apply. Material derived from stock assets
 used by the song remains subject to the original rights. Test the resulting ROM
 on your own emulator or hardware. Real-hardware testing is performed by users.
 
+## Test an arrangement in Sonic 3 & Knuckles
+
+The patched ROM is derived from the player's retail ROM and contains
+copyrighted data. **Personal use only. Do not redistribute.**
+
+```sh
+java -jar "$deck_jar" rom-patch arrangement.smps.json locked-on.gen title-test.gen --no-demo
+java -jar "$deck_jar" rom-patch arrangement.smps.zip locked-on.gen title-test.gen --slot 0x24 --title-music --force
+```
+
+Use your clean 4 MiB locked-on Sonic 3 & Knuckles image with SHA-1
+`cfbf98c36c776677290a872547ac47c53d2761d6`. The exporter takes S3K project JSON
+or a legacy SMPS package with embedded source and compiled track. It writes
+a separate 4 MiB image and prints a JSON report.
+
+- `--slot ID` selects a music request from `0x01` to `0x33`. The title uses
+  `0x25` by default. Add `--title-music` to request a different slot from the
+  title. Game events that use the selected slot also play the replacement.
+- `--no-demo` disables the idle title demo. Start still enters the game.
+- `--loop` replaces each channel's final stop with a jump to its start when
+  every channel reaches its stop on the same tick.
+- `--force` stages a replacement alongside an existing output before
+  publishing it. Both inputs must be separate from the output.
+
+MCP exposes `rom_patch` with absolute `project`, `rom`, and `output` paths,
+plus the optional `slot` (integer), `titleMusic`, `noDemo`, `loop`, and
+`force` fields. The result includes cartridge hashes, patched ROM ranges,
+DAC error metrics, PSG envelope mappings, and personal-use warnings.
+
+The compiled song must fit in free fragments of one 32 KB music bank.
+Drums are encoded as the game driver's 4-bit DPCM at their original rate on
+unused note IDs. See the [ROM patch layout and limits](../docs/architecture/s3k-rom-patch.md).
+
 ## External stem separation
 
 Start with a local WAV or MP3 to build an S3K arrangement without MIDI.
