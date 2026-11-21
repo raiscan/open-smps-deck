@@ -21,6 +21,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.BiConsumer;
+
+import com.opensmpsdeck.headless.ReconstructionSections.Level;
+import com.opensmpsdeck.headless.ReconstructionSections.Section;
+import com.opensmpsdeck.studio.ReconstructionTools.Mode;
+import com.opensmpsdeck.studio.ReconstructionTools.Placement;
+import javafx.scene.Cursor;
+import javafx.scene.input.MouseEvent;
 import java.util.function.DoubleConsumer;
 
 /** Source-time viewport and hit testing. The underlying trace and score remain immutable. */
@@ -44,15 +52,36 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
     }
 
-    private final ReconstructionInspection model;
-    private final ReconstructionTiles tiles;
+    private ReconstructionInspection model;
+    private ReconstructionTiles tiles;
+    private final Consumer<String> error;
+    private List<Section> sections;
+    private Mode mode = Mode.SELECT;
+    private ReconstructionInspection.Grid grid = ReconstructionInspection.Grid.BEAT;
+    private final ReconstructionTools selection = new ReconstructionTools();
+    private List<Overlay> pending = List.of();
+    private Map<String, Overlay> pendingByNote = Map.of();
+    private boolean outline;
+    private double opacity = .34;
+    private boolean editing = true;
+    private boolean insertAvailable;
+    private NoteDrag noteDrag;
+    private SectionDrag sectionDrag;
+    private Placement preview;
+    private Double boundaryPreview;
+    private boolean dragged;
+
+    private enum Handle { MOVE, START, END }
+    private record NoteDrag(Overlay note, Handle handle, double at, int pitch) {}
+    private record SectionDrag(Section section, boolean end) {}
+    record SectionPoint(Section section, double time, double screenX, double screenY) {}
     private final Tooltip hover = new Tooltip();
     private final List<Hit> hits = new ArrayList<>();
-    private final List<String> lanes;
-    private final int low;
-    private final int high;
-    private final List<String> sectionLabels;
-    private final double[] endByIndex;
+    private List<String> lanes;
+    private int low;
+    private int high;
+    private static final List<String> SECTION_LABELS = List.of("Section", "Period", "Phrase");
+    private double[] endByIndex;
     private final Set<Role> roles = EnumSet.allOf(Role.class);
     private final Set<String> visibleLanes = new HashSet<>();
     private double pixelsPerSecond = 1;
@@ -60,7 +89,6 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private double playhead;
     private Double anchor;
     private ReviewTransport.Range range;
-    private Overlay selection;
     private String laneSelection;
     private AudioSource source;
     private Map<String, List<BendPoint>> assembledBends = Map.of();
@@ -74,9 +102,45 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     Consumer<ReviewTransport.Range> onRange = ignored -> {};
     DoubleConsumer onSeek = ignored -> {};
 
+    Consumer<Placement> onInsert = ignored -> {};
+    BiConsumer<Overlay, Placement> onPlacement = (note, place) -> {};
+    Consumer<SectionEdits.Mutation> onSectionEdit = ignored -> {};
+    Consumer<SectionPoint> onSectionMenu = ignored -> {};
+
     ReconstructionCanvas(ReconstructionInspection model, Consumer<String> error) {
-        this.model = model;
+        this.error = error;
+        refresh(model);
+        canvas.setId("reconstruction-canvas");
+        scroll.setFitToHeight(false);
+        scroll.viewportBoundsProperty().addListener((ignored, old, next) -> resizePlot());
+        canvas.setOnMouseMoved(event -> {
+            var hit = hit(event.getX(), event.getY());
+            var section = sectionAt(event.getX(), event.getY());
+            String text = hit != null ? description(hit.note()) : section != null
+                    ? section.label() + " · " + section.author() : "";
+            if (text.isEmpty()) hover.hide();
+            hover.setText(text);
+            boolean horizontal = sectionEdge(section, event.getX()) != null
+                    || hit != null && inPitch(event) && handle(hit, event.getX()) != Handle.MOVE;
+            canvas.setCursor(editing && horizontal ? Cursor.H_RESIZE
+                    : editing && insertAvailable && mode == Mode.INSERT && inPitch(event) ? Cursor.CROSSHAIR : Cursor.DEFAULT);
+        });
+        hover.setShowDelay(javafx.util.Duration.millis(250));
+        hover.setShowDuration(javafx.util.Duration.seconds(20));
+        Tooltip.install(canvas, hover);
+        canvas.setOnMousePressed(this::press);
+        canvas.setOnMouseDragged(this::drag);
+        canvas.setOnMouseReleased(this::release);
+        ready = true;
+    }
+
+    void refresh(ReconstructionInspection snapshot) {
+        cancelGesture();
+        model = snapshot;
+        sections = model.sections().sections();
+        if (tiles != null) tiles.close();
         tiles = new ReconstructionTiles(model, this::draw, error);
+        assembledBends = Map.of();
         var notes = model.overlays();
         double lowestBend = notes.stream().flatMap(note -> note.bend().stream())
                 .mapToDouble(BendPoint::pitch).min().orElse(127);
@@ -92,60 +156,217 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             priorEnd = Math.max(priorEnd, notes.get(i).interval().sourceEnd());
             endByIndex[i] = priorEnd;
         }
-        lanes = TimelineView.LANES.stream().filter(lane -> notes.stream().anyMatch(note -> lane.equals(note.lane()))).toList();
-        visibleLanes.addAll(lanes);
         visibleLanes.add(UNASSIGNED);
-        sectionLabels = model.sections().levelLabels();
+        updateLanes();
+        resizePlot();
+        draw();
+    }
 
-        canvas.setId("reconstruction-canvas");
-        scroll.setFitToHeight(false);
-        scroll.viewportBoundsProperty().addListener((ignored, old, next) -> resizePlot());
-        canvas.setOnMouseMoved(event -> {
-            var hit = hit(event.getX(), event.getY());
-            if (hit != null) {
-                hover.setText(description(hit.note()));
-            } else if (event.getX() >= AXIS && event.getY() >= rulerHeight() && event.getY() < sectionBottom()) {
-                double time = seconds(event.getX());
-                int level = (int) (event.getY() - rulerHeight()) / SECTION_HEIGHT;
-                hover.setText(model.sections().bands().stream().filter(band -> band.level() == level
-                        && band.start() <= time && time < band.end()).map(ReconstructionInspection.Band::label)
-                        .findFirst().orElse(""));
-            } else {
-                hover.hide();
-                hover.setText("");
+    void sections(List<Section> next) {
+        sections = next;
+        cancelGesture();
+        draw();
+    }
+
+    void pending(List<Overlay> overlays) {
+        pending = overlays;
+        pendingByNote = new java.util.HashMap<>();
+        for (var overlay : overlays) pendingByNote.put(overlay.id(), overlay);
+        updateLanes();
+        resizePlot();
+        var primary = overlays.stream().filter(selection::primary).findFirst().orElseGet(() -> model.overlays().stream()
+                .filter(selection::primary).findFirst().orElse(null));
+        if (primary != null && pendingByNote.containsKey(primary.id())) primary = pendingByNote.get(primary.id());
+        if (primary == null) select(null, laneSelection);
+        else {
+            laneSelection = primary.lane();
+            onNote.accept(primary);
+            onLane.accept(laneSelection);
+        }
+        draw();
+    }
+
+    void mode(Mode mode) { this.mode = mode; cancelGesture(); }
+    void grid(ReconstructionInspection.Grid grid) { this.grid = grid; }
+    void editing(boolean enabled) { editing = enabled; if (!enabled) cancelGesture(); }
+    void insertAvailable(boolean available) { insertAvailable = available; }
+    void opacity(double value) { opacity = value; draw(); }
+    void outline(boolean value) { outline = value; draw(); }
+
+    private void cancelGesture() {
+        noteDrag = null;
+        sectionDrag = null;
+        preview = null;
+        boundaryPreview = null;
+        anchor = null;
+        dragged = false;
+    }
+
+    private void press(MouseEvent event) {
+        if (event.getButton() != MouseButton.PRIMARY) return;
+        cancelGesture();
+        canvas.requestFocus();
+        if (event.isShiftDown() && event.getX() >= AXIS) {
+            anchor = seconds(event.getX());
+            return;
+        }
+        if (!editing) return;
+        var section = sectionAt(event.getX(), event.getY());
+        var edge = sectionEdge(section, event.getX());
+        if (edge != null) sectionDrag = new SectionDrag(section, edge);
+        var hit = hit(event.getX(), event.getY());
+        if (hit != null && inPitch(event)) {
+            var note = hit.note();
+            noteDrag = new NoteDrag(note, handle(hit, event.getX()), seconds(event.getX()), pitch(event.getY()));
+        }
+    }
+
+    private void drag(MouseEvent event) {
+        if (anchor != null) {
+            selectRange(seconds(event.getX()));
+            return;
+        }
+        if (sectionDrag != null) {
+            boundaryPreview = placementTime(seconds(event.getX()), event.isAltDown());
+        } else if (noteDrag != null) {
+            preview = placement(noteDrag, event);
+        }
+        dragged = true;
+        draw();
+    }
+
+    private void release(MouseEvent event) {
+        if (event.getButton() == MouseButton.SECONDARY) {
+            var section = sectionAt(event.getX(), event.getY());
+            if (section != null && editing) onSectionMenu.accept(new SectionPoint(section,
+                    placementTime(seconds(event.getX()), event.isAltDown()), event.getScreenX(), event.getScreenY()));
+            return;
+        }
+        if (event.getButton() != MouseButton.PRIMARY) return;
+        if (anchor != null) {
+            selectRange(seconds(event.getX()));
+            cancelGesture();
+            return;
+        }
+        var moving = noteDrag;
+        var boundary = sectionDrag;
+        boolean moved = dragged;
+        cancelGesture();
+        if (moved && boundary != null) {
+            double at = placementTime(seconds(event.getX()), event.isAltDown());
+            double previous = boundary.end() ? boundary.section().sourceEnd() : boundary.section().sourceStart();
+            if (Math.abs(at - previous) > 1e-6) {
+                try {
+                    onSectionEdit.accept(SectionEdits.resize(sections, boundary.section(), boundary.end(), at));
+                } catch (IllegalArgumentException failure) {
+                    error.accept(failure.getMessage());
+                }
             }
-        });
-        hover.setShowDelay(javafx.util.Duration.millis(250));
-        hover.setShowDuration(javafx.util.Duration.seconds(20));
-        Tooltip.install(canvas, hover);
-        canvas.setOnMousePressed(event -> {
-            if (event.getButton() != MouseButton.PRIMARY) return;
-            canvas.requestFocus();
-            if (event.isShiftDown() && event.getX() >= AXIS) anchor = seconds(event.getX());
-        });
-        canvas.setOnMouseDragged(event -> {
-            if (anchor != null) selectRange(seconds(event.getX()));
-        });
-        canvas.setOnMouseReleased(event -> {
-            if (event.getButton() != MouseButton.PRIMARY) return;
-            if (anchor != null) {
-                selectRange(seconds(event.getX()));
-                anchor = null;
-                return;
+            draw();
+            return;
+        }
+        if (moved && moving != null) {
+            var next = placement(moving, event);
+            select(moving.note(), moving.note().lane());
+            if (!next.equals(Placement.of(moving.note()))) onPlacement.accept(moving.note(), next);
+            return;
+        }
+        var section = sectionAt(event.getX(), event.getY());
+        var hit = hit(event.getX(), event.getY());
+        if (section != null) {
+            range = new ReviewTransport.Range(section.sourceStart(), section.sourceEnd());
+            onRange.accept(range);
+            onSeek.accept(range.start());
+        } else if (hit != null) {
+            select(hit.note(), hit.note().lane());
+            onSeek.accept(hit.note().interval().sourceStart());
+        } else if (event.getY() >= laneTop() && event.getY() < laneTop() + lanes.size() * LANE_HEIGHT) {
+            select(null, lanes.get((int) (event.getY() - laneTop()) / LANE_HEIGHT));
+            onSeek.accept(event.getX() >= AXIS ? seconds(event.getX()) : playhead);
+        } else if (event.getX() >= AXIS) {
+            if (inPitch(event)) {
+                if (editing && mode == Mode.INSERT && insertAvailable && !moved) {
+                    double limit = model.duration();
+                    double start = Math.min(placementTime(seconds(event.getX()), event.isAltDown()), Math.max(0, limit - .017));
+                    double end = Math.max(start + Math.min(.017, limit - start), model.nextBeat(start));
+                    onInsert.accept(new Placement(start, end, pitch(event.getY())));
+                    return;
+                }
+                select(null, null);
             }
-            var hit = hit(event.getX(), event.getY());
-            if (hit != null) {
-                select(hit.note(), hit.note().lane());
-                onSeek.accept(hit.note().interval().sourceStart());
-            } else if (event.getY() >= laneTop() && event.getY() < laneTop() + lanes.size() * LANE_HEIGHT) {
-                select(null, lanes.get((int) (event.getY() - laneTop()) / LANE_HEIGHT));
-                onSeek.accept(event.getX() >= AXIS ? seconds(event.getX()) : playhead);
-            } else if (event.getX() >= AXIS) {
-                if (event.getY() >= sectionBottom() && event.getY() < pitchBottom()) select(null, null);
-                onSeek.accept(seconds(event.getX()));
+            onSeek.accept(seconds(event.getX()));
+        }
+        draw();
+    }
+
+    private Placement placement(NoteDrag gesture, MouseEvent event) {
+        var original = Placement.of(gesture.note());
+        double start = Math.clamp(original.start(), 0, model.duration());
+        double end = Math.clamp(original.end(), start, model.duration());
+        int pitch = original.pitch();
+        double at = seconds(event.getX());
+        double delta = at - gesture.at();
+        double gate = Math.min(.017, end - start);
+        if (gate <= 0) return original;
+        switch (gesture.handle()) {
+            case START -> start = Math.clamp(placementTime(start + delta, event.isAltDown()), 0, end - gate);
+            case END -> end = Math.clamp(placementTime(end + delta, event.isAltDown()), start + gate, model.duration());
+            case MOVE -> {
+                if (Math.abs(delta * pixelsPerSecond) >= 1) {
+                    double next = Math.clamp(placementTime(start + delta, event.isAltDown()), 0,
+                            Math.max(0, model.duration() - (end - start)));
+                    end = Math.min(model.duration(), end + next - start);
+                    start = next;
+                }
+                pitch = Math.clamp(pitch + pitch(event.getY()) - gesture.pitch(), low, high);
             }
-        });
-        ready = true;
+        }
+        return new Placement(start, end, pitch);
+    }
+
+    private boolean inPitch(MouseEvent event) {
+        return event.getX() >= AXIS && event.getY() >= sectionBottom() && event.getY() < pitchBottom();
+    }
+
+    private int pitch(double y) {
+        return Math.clamp((int) Math.round(high + .5 - (y - sectionBottom()) / rowHeight()), low, high);
+    }
+
+    private double placementTime(double value, boolean free) {
+        return free ? Math.clamp(value, 0, model.duration()) : model.snap(value, grid);
+    }
+
+    private Handle handle(Hit hit, double x) {
+        // Very short notes need a usable body when zoomed out.
+        double edge = Math.min(6, hit.width() / 4);
+        if (hit.width() < 8) return Handle.MOVE;
+        if (x - hit.left() <= edge) return Handle.START;
+        if (hit.left() + hit.width() - x <= edge) return Handle.END;
+        return Handle.MOVE;
+    }
+
+    private Section sectionAt(double x, double y) {
+        if (x < AXIS || y < rulerHeight() || y >= sectionBottom()) return null;
+        var level = Level.values()[(int) (y - rulerHeight()) / SECTION_HEIGHT];
+        double time = seconds(x);
+        return sections.stream().filter(section -> section.level() == level
+                && section.sourceStart() <= time && time <= section.sourceEnd()).findFirst().orElse(null);
+    }
+
+    private Boolean sectionEdge(Section section, double x) {
+        if (section == null) return null;
+        double left = Math.abs(x(section.sourceStart()) - x);
+        double right = Math.abs(x(section.sourceEnd()) - x);
+        return Math.min(left, right) > 5 ? null : right <= left;
+    }
+
+    private void updateLanes() {
+        var used = new HashSet<String>();
+        for (var note : model.overlays()) if (note.lane() != null) used.add(note.lane());
+        for (var note : pending) if (note.lane() != null) used.add(note.lane());
+        var next = TimelineView.LANES.stream().filter(used::contains).toList();
+        for (var lane : next) if (lanes == null || !lanes.contains(lane)) visibleLanes.add(lane);
+        lanes = next;
     }
 
     List<String> lanes() { return lanes; }
@@ -162,6 +383,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         if (show) roles.add(role); else roles.remove(role);
         draw();
     }
+
+    boolean laneVisible(String lane) { return visibleLanes.contains(lane); }
 
     void laneVisible(String lane, boolean show) {
         if (show) visibleLanes.add(lane); else visibleLanes.remove(lane);
@@ -208,8 +431,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         draw();
     }
 
-    private void select(Overlay note, String lane) {
-        selection = note;
+    void select(Overlay note, String lane) {
+        selection.select(note == null ? List.of() : List.of(note.eventId()), note == null ? null : note.eventId());
         laneSelection = lane;
         onNote.accept(note);
         onLane.accept(lane);
@@ -226,7 +449,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private double seconds(double x) { return Math.clamp((x - AXIS + offset) / pixelsPerSecond, 0, model.duration()); }
     private double plotWidth() { return Math.max(100, scroll.getViewportBounds().getWidth() - AXIS); }
     private int rulerHeight() { return 31; }
-    private int sectionBottom() { return rulerHeight() + sectionLabels.size() * SECTION_HEIGHT; }
+    private int sectionBottom() { return rulerHeight() + SECTION_LABELS.size() * SECTION_HEIGHT; }
     private int stripHeight() { return LANE_HEADER + lanes.size() * LANE_HEIGHT; }
     private double pitchBottom() { return contentHeight - stripHeight(); }
     private double laneTop() { return pitchBottom() + LANE_HEADER; }
@@ -254,6 +477,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             g.fillRect(x(range.start()), 0, x(range.end()) - x(range.start()), contentHeight);
         }
         drawNotes(g, width);
+        if (boundaryPreview != null) {
+            g.setStroke(Color.GOLD);
+            g.strokeLine(x(boundaryPreview), rulerHeight(), x(boundaryPreview), sectionBottom());
+        }
+        if (preview != null) {
+            g.setStroke(Color.GOLD);
+            double left = x(preview.start());
+            g.strokeRect(left, y(preview.pitch()) - 3, Math.max(2, x(preview.end()) - left), 6);
+        }
         g.setStroke(CURSOR);
         g.strokeLine(x(playhead), 0, x(playhead), contentHeight);
         g.restore();
@@ -327,21 +559,24 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.setFill(PANEL);
         g.fillRect(0, rulerHeight(), width, sectionBottom() - rulerHeight());
         g.setFill(SUBTLE);
-        for (int i = 0; i < sectionLabels.size(); i++)
-            g.fillText(sectionLabels.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
+        for (int i = 0; i < SECTION_LABELS.size(); i++)
+            g.fillText(SECTION_LABELS.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
         g.save();
         clip(g, AXIS, rulerHeight(), width - AXIS, sectionBottom() - rulerHeight());
-        for (var band : model.sections().bands()) {
-            double left = x(band.start()), right = x(band.end());
+        for (var band : sections) {
+            double left = x(band.sourceStart()), right = x(band.sourceEnd());
             if (right < AXIS || left > width) continue;
-            double top = rulerHeight() + band.level() * SECTION_HEIGHT;
-            g.setFill(band.level() == 0 ? Color.web("#2b4767") : Color.web("#243147"));
+            double top = rulerHeight() + band.level().ordinal() * SECTION_HEIGHT;
+            g.setFill(switch (band.level()) {
+                case section -> Color.web("#2b4767");
+                case period -> Color.web("#304058");
+                case phrase -> Color.web("#243147");
+            });
             g.fillRect(left, top, Math.max(1, right - left - 1), SECTION_HEIGHT - 1);
             g.setFill(TEXT);
             double labelStart = Math.max(AXIS, left) + 5;
             String label = band.label();
             double space = right - labelStart - 3;
-            if (label.startsWith("section-b") && space < label.length() * 6.7) label = "§" + label.substring(9);
             drawLabel(g, label, labelStart, top + SECTION_HEIGHT / 2.0, space);
         }
         g.restore();
@@ -395,19 +630,27 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         var visible = visibleNotes(width);
         var labels = new ArrayList<LabelBounds>();
         for (var note : visible) {
-            if (note.part() < 0) continue;
+            if (note.part() < 0 || note.pitch() < low || note.pitch() > high) continue;
             double left = x(note.interval().sourceStart());
             double barWidth = Math.max(2, x(note.interval().sourceEnd()) - left);
             double height = Math.max(3, Math.min(13, rowHeight() - 1));
             double top = y(note.pitch()) - height / 2;
             var color = color(note.role());
-            g.setFill(color.deriveColor(0, 1, 1, note.style() == ReconstructionInspection.Style.DASHED ? .17 : .68));
-            g.fillRect(left, top, barWidth, height);
-            g.setStroke(note == selection ? Color.WHITE : color);
-            if (note.style() == ReconstructionInspection.Style.DASHED) g.setLineDashes(3, 2);
+            boolean draft = pendingByNote.get(note.id()) == note;
+            boolean deleted = draft && note.fate().equals("Pending deletion");
+            boolean dashed = note.style() == ReconstructionInspection.Style.DASHED;
+            if (!outline && !deleted) {
+                g.setFill(color.deriveColor(0, 1, 1, dashed ? opacity * .4 : opacity));
+                g.fillRect(left, top, barWidth, height);
+            }
+            g.setStroke(draft ? Color.GOLD : selection.contains(note) ? Color.WHITE : color);
+            g.setLineWidth(draft || selection.contains(note) ? 1.6 : 1);
+            if (dashed && !draft) g.setLineDashes(3, 2);
             g.strokeRect(left + .5, top + .5, barWidth - 1, height - 1);
+            if (deleted) g.strokeLine(left, top + height / 2, left + barWidth, top + height / 2);
+            g.setLineWidth(1);
             g.setLineDashes();
-            drawBend(g, note, left, barWidth, color);
+            if (!draft) drawBend(g, note, left, barWidth, color);
             if (pixelsPerSecond >= 24) {
                 double labelLeft = Math.max(left, AXIS) + 3;
                 double space = Math.min(left + barWidth, width) - labelLeft;
@@ -438,8 +681,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             var color = color(note.role());
             g.setFill(color.deriveColor(0, 1, 1, .45));
             g.fillRect(left, top, barWidth, LANE_HEIGHT - 4);
-            if (note == selection) {
-                g.setStroke(Color.WHITE);
+            if (selection.contains(note) || pendingByNote.get(note.id()) == note) {
+                g.setStroke(pendingByNote.get(note.id()) == note ? Color.GOLD : Color.WHITE);
                 g.strokeRect(left, top, barWidth, LANE_HEIGHT - 4);
             }
             if (barWidth > 30) {
@@ -479,9 +722,12 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int i = first; i < notes.size(); i++) {
             var note = notes.get(i);
             if (note.interval().sourceStart() > to) break;
-            if (note.interval().sourceEnd() >= from && roles.contains(note.role())
+            if (!pendingByNote.containsKey(note.id()) && note.interval().sourceEnd() >= from && roles.contains(note.role())
                     && visibleLanes.contains(note.lane() == null ? UNASSIGNED : note.lane()))
                 visible.add(note);
+        }
+        for (var note : pending) {
+            if (note.interval().sourceEnd() >= from && note.interval().sourceStart() <= to) visible.add(note);
         }
         return visible;
     }

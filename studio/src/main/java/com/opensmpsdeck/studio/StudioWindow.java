@@ -72,7 +72,7 @@ public final class StudioWindow implements AutoCloseable {
     private boolean reviewAutoOpened;
     private boolean arrangementPlaying;
     private final ExecutorService io=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"studio-files");t.setDaemon(true);return t;});
-    private final Deque<StudioProject> undo=new ArrayDeque<>(), redo=new ArrayDeque<>();
+    private final EditHistory<StudioProject> history = new EditHistory<>();
     private ResponsiveEditors editors;
     private ProjectDocument document;
     private ProjectWatcher watcher;
@@ -273,7 +273,7 @@ public final class StudioWindow implements AutoCloseable {
         setPosition(0);
         document.refresh(); // close the open/register race
         selectedClip=null;selectedSequence=document.project().sequences().isEmpty()?null:document.project().sequences().getFirst().id();selectedNote=null;
-        undo.clear();redo.clear();refreshView();
+        history.clear();refreshView();
     }
     private void watchChanged(ProjectDocument expected) {
         if(closed)return;
@@ -282,7 +282,7 @@ public final class StudioWindow implements AutoCloseable {
         Platform.runLater(()->{
             if(closed||document!=expected)return;
             boolean changed=expected.refresh();
-            if(changed){stop();undo.clear();redo.clear();refreshView();}else refreshStatus();
+            if(changed){stop();history.clear();refreshView();}else refreshStatus();
         });
     }
     private void refreshStatus(){
@@ -552,7 +552,7 @@ public final class StudioWindow implements AutoCloseable {
     }
     private Sequence source(){return document==null?null:document.project().sequences().stream().filter(s->s.id().equals(selectedSequence)).findFirst().orElse(null);}
     private boolean change(UnaryOperator<StudioProject> transform){
-        try{StudioProject before=document.project(),after=transform.apply(before);if(!after.equals(before)){document.edit(after);undo.push(before);while(undo.size()>100)undo.removeLast();redo.clear();stop();}refreshView();return true;}
+        try{StudioProject before=document.project(),after=transform.apply(before);if(!after.equals(before)){document.edit(after);history.record(before);stop();}refreshView();return true;}
         catch(IllegalArgumentException e){error(e);return false;}
     }
     private boolean placeItem(Placement item) {
@@ -624,7 +624,12 @@ public final class StudioWindow implements AutoCloseable {
         }
     }
     private void deleteNote(){if(selectedNote!=null&&source()!=null){String id=selectedNote;if(change(p->ProjectEdits.deleteNote(p,selectedSequence,id))){selectedNote=null;refreshView();}}}
-    private void undo(boolean backwards){Deque<StudioProject> from=backwards?undo:redo,to=backwards?redo:undo;if(!from.isEmpty()){StudioProject next=from.pop();to.push(document.project());document.edit(next);stop();refreshView();}}
+    private void undo(boolean backwards) {
+        if (!history.canStep(!backwards)) return;
+        document.edit(history.step(document.project(), !backwards));
+        stop();
+        refreshView();
+    }
     private void key(KeyEvent e){
         if(e.isShortcutDown()&&e.getCode()==KeyCode.S){save();e.consume();return;}
         if(e.getCode()==KeyCode.ESCAPE && !groupPath.isEmpty() && document.project().nativeProgram()==null) {
@@ -888,7 +893,7 @@ public final class StudioWindow implements AutoCloseable {
     }
     private void stop(){stopPlayback();status.setText("Stopped");}
     private boolean save(){try{document.save();refreshStatus();status.setText("Saved "+document.path().getFileName());return true;}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();return false;}}
-    private void reload(){try{Path recovery=document.reloadKeepingRecovery();stop();undo.clear();redo.clear();refreshView();status.setText(recovery==null?"Reloaded file":"Local edits preserved in "+recovery.getFileName());}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();}}
+    private void reload(){try{Path recovery=document.reloadKeepingRecovery();stop();history.clear();refreshView();status.setText(recovery==null?"Reloaded file":"Local edits preserved in "+recovery.getFileName());}catch(IOException|IllegalArgumentException e){error(e);refreshStatus();}}
     private void openReconstruction() {
         var chooser = new DirectoryChooser();
         chooser.setTitle("Open reconstruction work directory");

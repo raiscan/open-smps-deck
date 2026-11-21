@@ -284,6 +284,11 @@ public final class ReconstructionSections {
     }
 
     public static synchronized Result run(Path work, String action, JsonElement data) throws IOException {
+        return run(work, action, data, () -> {}, () -> {});
+    }
+
+    static synchronized Result run(Path work, String action, JsonElement data,
+                                   ReconstructionReview.Check check, ReconstructionReview.Check saved) throws IOException {
         require(List.of("list", "add", "set", "remove", "rename").contains(action), "action", "unknown sections operation");
         if (action.equals("list")) {
             require(data == null, "list", "takes no payload");
@@ -303,6 +308,7 @@ public final class ReconstructionSections {
 
         try (var channel = FileChannel.open(work.resolve(LOCK), CREATE, WRITE, NOFOLLOW_LINKS);
              var lock = channel.lock()) {
+            check.run();
             var model = new ReconstructionSections(ReconstructionStages.readScore(work.resolve("score.json")), savedStructure(work));
             var entries = new LinkedHashMap<String, Entry>();
             for (var entry : read(work).entries) entries.put(entry.id, entry);
@@ -345,6 +351,7 @@ public final class ReconstructionSections {
             var updated = List.copyOf(entries.values());
             var result = model.effective(updated);
             ReconstructionArtifacts.write(work.resolve(FILE), new Journal(ReconstructionStages.VERSION, updated));
+            saved.run();
             return result;
         }
     }

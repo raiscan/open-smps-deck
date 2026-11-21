@@ -163,6 +163,53 @@ class ReconstructionEditsTest {
         assertEquals(List.of(30, 90), result.notes().stream().map(Note::velocity).toList());
     }
 
+    @Test void studioApplyPublishesOnlyOnSuccessAndSharesTheCliJournal(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid");
+        Path wav = dir.resolve("mix.wav");
+        Path catalogue = dir.resolve("index.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        var revision = ReconstructionReview.revision(work);
+        byte[] score = Files.readAllBytes(work.resolve("score.json"));
+        byte[] render = Files.readAllBytes(work.resolve("render.wav"));
+        var insert = new com.google.gson.JsonArray();
+        insert.add(json("""
+                {"id":"human-answer","author":"human","reason":"Missed attack","op":"insertNote",
+                 "part":0,"start":0.85,"end":1.2,"pitch":68,"velocity":87}
+                """));
+
+        assertThrows(java.util.concurrent.CancellationException.class, () ->
+                ReconstructionReview.apply(work, revision, insert, (done, total, message) -> {
+                    if (done == 2) throw new java.util.concurrent.CancellationException();
+                }));
+        assertFalse(Files.exists(work.resolve("edits.json")));
+        assertArrayEquals(score, Files.readAllBytes(work.resolve("score.json")));
+        assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
+
+        var applied = ReconstructionReview.apply(work, revision, insert, (done, total, message) -> {});
+        assertEquals("transcribe", applied.get("from").getAsString());
+        assertTrue(applied.has("lanePermutations"));
+        assertTrue(applied.has("compiledTimeline"));
+        assertTrue(applied.has("renderedPcm"));
+        assertEquals(insert, ReconstructionReview.revision(work).entries());
+        assertEquals("applied", ReconstructionReview.outcomes(work).get("human-answer").getFirst().status());
+
+        var role = insert.deepCopy();
+        role.add(json("""
+                {"id":"human-role","author":"human","reason":"Lead","op":"setRole",
+                 "noteIds":["edit-human-answer"],"role":"melody"}
+                """));
+        var roleDiff = ReconstructionReview.apply(work, ReconstructionReview.revision(work), role, (a, b, c) -> {});
+        assertEquals("roles", roleDiff.get("from").getAsString());
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        assertEquals(role, ReconstructionReview.revision(work).entries());
+        var rebuilt = ReconstructionTrace.read(work).get("edit-human-answer");
+        assertEquals(68, rebuilt.score().note().pitch());
+        assertEquals(Role.melody, rebuilt.roles().role());
+    }
+
     @Test void intentsSurviveTranscriptionAndManifestReplayAndReportOrphans(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("theme.mid");
         writeMidi(midi, true);

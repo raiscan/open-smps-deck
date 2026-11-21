@@ -950,7 +950,7 @@ class StudioWindowTest {
                 "--at", "1.5", "--text", text, "--author", "agent"}, stream, stream), output::toString);
     }
 
-    @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
+    private Path reconstructionFixture() throws Exception {
         Path work = Files.createDirectory(folder.resolve("reconstruction"));
         Files.writeString(work.resolve("score.json"), """
                 {"version":1,"durationUs":2000000,"frames":120,"ticksPerSecond":60,
@@ -967,6 +967,67 @@ class StudioWindowTest {
         int[] pcm = new int[rate * 2];
         for (int i = 0; i < pcm.length; i++) pcm[i] = (int) (22000 * Math.sin(i * 440 * Math.TAU / rate));
         ReferenceWaveTest.wav(work.resolve("mix.wav"), 16, 1, rate, pcm);
+        return work;
+    }
+
+    @Test void reconstructionGesturesDraftNotesAndWatchBothJournals() throws Exception {
+        Path work = reconstructionFixture();
+        com.opensmpsdeck.headless.ReconstructionSections.run(work, "set", com.google.gson.JsonParser.parseString("""
+                [{"id":"p1","level":"phrase","name":"Left","author":"agent","reason":"fixture","sourceStart":0,"sourceEnd":1},
+                 {"id":"p2","level":"phrase","name":"Right","author":"agent","reason":"fixture","sourceStart":1,"sourceEnd":2}]
+                """));
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            var plot = fx(() -> (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas"));
+            double midpoint = fx(() -> 76 + (plot.getWidth() - 76) / 2);
+            fx(() -> {
+                mouse(plot, MouseEvent.MOUSE_PRESSED, midpoint - 1, 76, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, midpoint + (midpoint - 76) / 2, 76, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, midpoint + (midpoint - 76) / 2, 76, false);
+                return null;
+            });
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!Files.readString(work.resolve("sections.json")).contains("Move shared boundary in Studio")
+                    && System.nanoTime() < until) Thread.sleep(25);
+            var changed = com.opensmpsdeck.headless.ReconstructionSections.load(work);
+            assertEquals(1.5, changed.select("p1").sourceEnd());
+            assertEquals(1.5, changed.select("p2").sourceStart());
+            assertEquals("human", changed.select("p2").author().name());
+
+            var edits = work.resolve("edits.json");
+            Files.writeString(edits, """
+                    {"version":1,"edits":[{"id":"agent-edit","reason":"fixture","op":"setRole",
+                     "noteIds":["test-note"],"role":"melody"}]}
+                    """);
+            await(() -> !scene.lookup("#reconstruction-apply").isDisabled());
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-tool-insert")).fire();
+                mouse(plot, MouseEvent.MOUSE_PRESSED, 120, 103, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, 120, 103, false);
+                var summary = (Label) scene.lookup("#reconstruction-note-summary");
+                assertTrue(summary.getText().startsWith("Pending insertion"), summary::getText);
+                return null;
+            });
+            assertFalse(Files.readString(edits).contains("human"));
+            com.opensmpsdeck.headless.ReconstructionSections.run(work, "rename", com.google.gson.JsonParser.parseString("""
+                    {"id":"p1","name":"Agent phrase","author":"agent","reason":"fixture"}
+                    """));
+            await(() -> scene.lookup("#reconstruction-conflict").isVisible());
+            fx(() -> {
+                assertTrue(scene.lookup("#reconstruction-apply").isDisabled());
+                var summary = (Label) scene.lookup("#reconstruction-note-summary");
+                assertTrue(summary.getText().startsWith("Pending insertion"), summary::getText);
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
+    @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
+        Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));
         try {
             await(() -> pane.stage().getScene().getRoot().lookupAll(".status").stream()
@@ -974,7 +1035,7 @@ class StudioWindowTest {
                     .anyMatch(label -> label.getText().equals("Source mix ready")));
             var plot = fx(() -> (javafx.scene.canvas.Canvas) pane.stage().getScene().lookup("#reconstruction-canvas"));
             // The single fixture note has 4 padding semitones above and 3 below.
-            double noteY = 67 + (plot.getHeight() - 87) * 4.5 / 8;
+            double noteY = 85 + (plot.getHeight() - 105) * 4.5 / 8;
             await(() -> {
                 var pixel = plot.snapshot(null, null).getPixelReader().getColor(110, (int) noteY);
                 return pixel.getRed() > .35; // The tone ridge is visible before the note starts.
@@ -982,7 +1043,10 @@ class StudioWindowTest {
             fx(() -> {
                 mouse(plot, MouseEvent.MOUSE_RELEASED, plot.getWidth() / 2, noteY, false);
                 var trace = (TextArea) pane.stage().getScene().lookup("#reconstruction-trace");
-                assertTrue(trace.isVisible());
+                var summary = (Label) pane.stage().getScene().lookup("#reconstruction-note-summary");
+                assertTrue(summary.getText().startsWith("kept"));
+                assertTrue(summary.getText().contains("Project"));
+                assertFalse(((TitledPane) pane.stage().getScene().lookup("#reconstruction-raw-trace")).isExpanded());
                 assertTrue(trace.getText().contains("test-note"));
                 String target = System.getProperty("studio.snapshot");
                 if (target != null) {

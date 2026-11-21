@@ -18,7 +18,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.Slider;
-import javafx.scene.control.TextArea;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
@@ -43,9 +43,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
-/** Read-only reconstruction workspace with its own playback and background jobs. */
+/** Reconstruction workspace with synced playback and a separate reconstruction edit history. */
 final class ReconstructionPane implements AutoCloseable {
-    private static final String EMPTY_TRACE = "Select a note in the spectrogram or lane strip.";
     private final Stage stage = new Stage();
     private final BorderPane root = new BorderPane();
     private final Label status = new Label("Loading reconstruction…");
@@ -63,9 +62,6 @@ final class ReconstructionPane implements AutoCloseable {
     private final ToggleButton soloNote = new ToggleButton("Solo note");
     private final Button clearRange = new Button("Clear loop");
     private final Label loopLabel = new Label("Shift-drag to loop");
-    private final Label noteTitle = new Label("Note trace");
-    private final Label noteSummary = new Label(EMPTY_TRACE);
-    private final TextArea trace = new TextArea();
     private final Slider zoom = new Slider(0, 9, 0);
     private final AnimationTimer playheadTimer = new AnimationTimer() {
         @Override public void handle(long now) {
@@ -76,6 +72,9 @@ final class ReconstructionPane implements AutoCloseable {
 
     private ReconstructionInspection model;
     private ReconstructionCanvas view;
+    private ReconstructionEditor editor;
+    private MenuButton laneFilters;
+    private long sourceEpoch;
     private ReviewTransport.Range range;
     private Overlay note;
     private AudioSource lastReference;
@@ -107,19 +106,17 @@ final class ReconstructionPane implements AutoCloseable {
         root.setBottom(footer);
         var heading = new Label("Reconstruction");
         heading.getStyleClass().add("project-title");
-        var tag = new Label("READ ONLY");
-        tag.getStyleClass().add("tag");
         var project = new Label(folder);
         project.getStyleClass().add("muted");
-        var title = new HBox(14, heading, tag, spacer(), project);
+        var title = new HBox(14, heading, spacer(), project);
         title.getStyleClass().add("topbar");
         root.setTop(title);
         stage.show();
         loader.submit(() -> {
             try {
-                var inspection = ReconstructionInspection.open(work);
+                var snapshot = ReconstructionEditor.Snapshot.read(work);
                 Platform.runLater(() -> {
-                    if (!closed) initialize(inspection, title);
+                    if (!closed) initialize(work, snapshot, title);
                 });
             } catch (Exception failure) {
                 Platform.runLater(() -> {
@@ -135,10 +132,15 @@ final class ReconstructionPane implements AutoCloseable {
         return Executors.newSingleThreadExecutor(runnable -> Thread.ofPlatform().daemon().name(name).unstarted(runnable));
     }
 
-    private void initialize(ReconstructionInspection inspection, HBox title) {
-        model = inspection;
+    private void initialize(Path work, ReconstructionEditor.Snapshot snapshot, HBox title) {
+        model = snapshot.inspection();
         view = new ReconstructionCanvas(model, status::setText);
-        view.onNote = this::showNote;
+        editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh);
+        stage.setOnCloseRequest(event -> { if (!editor.allowClose()) event.consume(); });
+        view.onNote = selected -> {
+            note = selected;
+            editor.show(selected);
+        };
         view.onLane = selected -> {
             lane = selected;
             refreshSolo();
@@ -177,31 +179,23 @@ final class ReconstructionPane implements AutoCloseable {
         clearRange.setOnAction(event -> view.clearRange());
         clearRange.setDisable(true);
 
-        root.setTop(new VBox(title, playback, displayControls(), roleControls()));
-        noteTitle.getStyleClass().add("inspector-title");
-        noteTitle.setWrapText(true);
-        noteSummary.getStyleClass().add("help");
-        noteSummary.setWrapText(true);
-        trace.setId("reconstruction-trace");
-        trace.setEditable(false);
-        trace.setWrapText(true);
-        trace.setVisible(false);
-        trace.managedProperty().bind(trace.visibleProperty());
-        VBox.setVgrow(trace, Priority.ALWAYS);
-        var inspector = new VBox(12, noteTitle, noteSummary, trace);
-        inspector.setPrefWidth(310);
-        inspector.setMinWidth(250);
-        inspector.getStyleClass().add("inspector");
-        root.setRight(inspector);
+        root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls()));
+        root.setRight(editor.inspector());
         root.setCenter(view.scroll);
         stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
         updatePosition(0, false);
         refreshSolo();
+        loadBends(model);
+        if (model.sources().isEmpty()) status.setText("No recorded audio found · note trace is still available");
+        else sources.getSelectionModel().selectFirst();
+    }
+
+    private void loadBends(ReconstructionInspection inspection) {
         bendLoader.submit(() -> {
             try {
                 var bends = inspection.assembledBends();
                 if (!bends.isEmpty()) Platform.runLater(() -> {
-                    if (!closed) view.assembledBends(bends);
+                    if (!closed && model == inspection) view.assembledBends(bends);
                 });
             } catch (Exception failure) {
                 if (!Thread.currentThread().isInterrupted() && !(failure instanceof java.io.InterruptedIOException))
@@ -209,11 +203,32 @@ final class ReconstructionPane implements AutoCloseable {
                             "Could not replay assembled bend evidence", failure);
             }
         });
-        if (model.sources().isEmpty()) {
-            status.setText("No recorded audio found · note trace is still available");
-        } else {
-            sources.getSelectionModel().selectFirst();
-        }
+    }
+
+    private void refresh(ReconstructionInspection next) {
+        var previousSource = sources.getValue();
+        double sourcePosition = model.toSource(projectPosition);
+        stopPlayback();
+        model = next;
+        if (waveRead != null) waveRead.cancel(true);
+        loadedSamples = null;
+        monitorSamples = null;
+        loader.execute(waves::clear);
+        view.refresh(next);
+        refreshLaneFilters();
+        sources.getItems().setAll(model.sources());
+        sources.setDisable(model.sources().isEmpty());
+        lastReference = model.sources().stream().filter(source -> source.equals(lastReference)).findFirst()
+                .orElseGet(() -> model.sources().stream().filter(source -> source.kind() != AudioKind.CHIP)
+                        .findFirst().orElse(null));
+        var selected = model.sources().stream().filter(source -> source.equals(previousSource)).findFirst()
+                .orElseGet(() -> model.sources().stream().findFirst().orElse(null));
+        if (java.util.Objects.equals(sources.getValue(), selected)) choose(selected);
+        else sources.setValue(selected);
+        updatePosition(model.toProject(sourcePosition), false);
+        refreshSolo();
+        updateLoop();
+        loadBends(next);
     }
 
     private FlowPane displayControls() {
@@ -260,41 +275,31 @@ final class ReconstructionPane implements AutoCloseable {
             filter.selectedProperty().addListener((ignored, previous, visible) -> view.roleVisible(role, visible));
             roles.getChildren().add(filter);
         }
-        var lanes = new MenuButton("Lanes");
-        for (String channel : java.util.stream.Stream.concat(view.lanes().stream(),
-                java.util.stream.Stream.of(ReconstructionCanvas.UNASSIGNED)).toList()) {
-            var filter = new CheckMenuItem(channel);
-            filter.setSelected(true);
-            filter.setOnAction(event -> view.laneVisible(channel, filter.isSelected()));
-            lanes.getItems().add(filter);
-        }
-        roles.getChildren().add(lanes);
+        laneFilters = new MenuButton("Lanes");
+        refreshLaneFilters();
+        roles.getChildren().addAll(laneFilters, editor.visibility());
         roles.getStyleClass().addAll("panelbar", "reconstruction-controls");
         return roles;
     }
 
-    private void showNote(Overlay selected) {
-        note = selected;
-        trace.setVisible(note != null && note.part() >= 0);
-        if (note == null) {
-            noteTitle.setText("Note trace");
-            noteSummary.setText(EMPTY_TRACE);
-            trace.clear();
-            return;
+    private void refreshLaneFilters() {
+        laneFilters.getItems().clear();
+        for (String channel : java.util.stream.Stream.concat(view.lanes().stream(),
+                java.util.stream.Stream.of(ReconstructionCanvas.UNASSIGNED)).toList()) {
+            var filter = new CheckMenuItem(channel);
+            filter.setSelected(view.laneVisible(channel));
+            filter.setOnAction(event -> view.laneVisible(channel, filter.isSelected()));
+            laneFilters.getItems().add(filter);
         }
-        noteTitle.setText(ReconstructionCanvas.shortLabel(note));
-        var interval = note.interval();
-        String role = note.part() < 0 ? "Assembly event" : ReconstructionCanvas.roleName(note.role()) + " · " + note.partName();
-        noteSummary.setText(String.format(Locale.ROOT, "%s%n%.3f–%.3f s source%n%.3f–%.3f s project%n%s%s",
-                role, interval.sourceStart(), interval.sourceEnd(),
-                interval.projectStart(), interval.projectEnd(), note.fate(),
-                note.reason() == null ? "" : " · " + note.reason()));
-        trace.setText(model.trace(note.id()));
-        trace.positionCaret(0);
     }
 
     private void key(KeyEvent event) {
-        if (event.isShortcutDown() || event.isAltDown() || trace.isFocused()) return;
+        if (stage.getScene().getFocusOwner() instanceof TextInputControl || event.isAltDown()) return;
+        if (editor.key(event)) {
+            event.consume();
+            return;
+        }
+        if (event.isShortcutDown()) return;
         if (event.getCode() == KeyCode.SPACE && !(stage.getScene().getFocusOwner() instanceof javafx.scene.control.Control))
             togglePlayback();
         else if (event.getCode() == KeyCode.R) {
@@ -310,7 +315,12 @@ final class ReconstructionPane implements AutoCloseable {
     }
 
     private void choose(AudioSource source) {
-        if (source == null) return;
+        long request = ++sourceEpoch;
+        if (source == null) {
+            view.source(null);
+            play.setDisable(true);
+            return;
+        }
         if (source.kind() != AudioKind.CHIP) lastReference = source;
         view.source(source);
         loadedSamples = null;
@@ -327,7 +337,7 @@ final class ReconstructionPane implements AutoCloseable {
                 }
                 var ready = wave;
                 Platform.runLater(() -> {
-                    if (closed || !source.equals(sources.getValue())) return;
+                    if (closed || request != sourceEpoch) return;
                     loadedSamples = (seconds, channel) -> ready.sample(source.projectClock() ? seconds : model.toSource(seconds), channel);
                     updateMonitor();
                     status.setText(playing ? "Playing · " + source.label() : source.label() + " ready");
@@ -336,7 +346,7 @@ final class ReconstructionPane implements AutoCloseable {
             } catch (Exception failure) {
                 if (Thread.currentThread().isInterrupted() || failure instanceof java.io.InterruptedIOException) return;
                 Platform.runLater(() -> {
-                    if (closed || !source.equals(sources.getValue())) return;
+                    if (closed || request != sourceEpoch) return;
                     stopPlayback();
                     status.setText("Playback unavailable · " + failure.getMessage());
                 });
@@ -353,7 +363,8 @@ final class ReconstructionPane implements AutoCloseable {
     private boolean soloActive() { return soloLane.isSelected() || soloNote.isSelected(); }
 
     private void refreshSolo() {
-        boolean hasLane = model.project() != null && lane != null && chip().isPresent();
+        boolean hasLane = model.project() != null && lane != null && chip().isPresent()
+                && (note == null || !note.fate().startsWith("Pending"));
         boolean hadSolo = soloActive();
         soloLane.setDisable(!hasLane);
         soloNote.setDisable(!hasLane || note == null || !note.sounds());
@@ -459,6 +470,7 @@ final class ReconstructionPane implements AutoCloseable {
         closed = true;
         epoch++;
         playheadTimer.stop();
+        if (editor != null) editor.close();
         if (view != null) view.close();
         loader.shutdownNow();
         bendLoader.shutdownNow();
