@@ -18,6 +18,9 @@ import com.opensmpsdeck.headless.VoicePatchShortlist.RankedPatch;
 final class ReconstructionVoiceStage {
     private static final double ARTICULATION_MARGIN = .004;
     private static final double EFFECT_MARGIN = .012;
+    // Squared weighted cosine from the attack shortlist. Below this bound,
+    // no catalogue candidate explains enough of the exposed attack spectrum.
+    private static final double MIN_EXPOSED_ATTACK_MATCH = .16;
 
     private record Model(String id, Role role, ReconstructionAllocation.Result packed, int stem, ReconstructionAllocation.Result stemNotes,
                          List<RankedPatch> patches, List<Instrument> instruments, boolean shared) {}
@@ -54,10 +57,23 @@ final class ReconstructionVoiceStage {
             var line = exposedLine(notes);
             if (!line.isEmpty()) foreground.put(id, line);
         });
-        var windows = new VoiceWindows(score.frames(), byLane, previous == null ? null : previous.fitWindows(),
-                foreground.entrySet().stream().map(entry -> new VoiceWindows.Focus(entry.getValue(),
-                        fitGroups.get(entry.getKey()))).toList());
+        var savedWindows = previous == null ? null : previous.fitWindows();
+        var windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
         var screening = new VoicePatchShortlist(catalogue);
+        var leadPatches = new HashMap<String, List<RankedPatch>>();
+        var unsupported = new ArrayList<String>();
+        for (var focus : foreground.entrySet()) {
+            var candidates = screening.rank(focus.getValue(), context, mix, options.stems(), windows,
+                    incumbent(catalogue, previous, focus.getKey()), true);
+            if (candidates.stream().anyMatch(patch -> patch.score() >= MIN_EXPOSED_ATTACK_MATCH))
+                leadPatches.put(focus.getKey(), candidates);
+            else unsupported.add(focus.getKey());
+        }
+        if (!unsupported.isEmpty()) {
+            unsupported.forEach(foreground::remove);
+            windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
+            leadPatches.clear(); // The held-out windows may have moved.
+        }
         var references = new ArrayList<VoiceWindows.Reference>();
         references.add(windows.read(mix, 1));
         var stems = new LinkedHashMap<Path, Integer>();
@@ -76,8 +92,10 @@ final class ReconstructionVoiceStage {
             boolean fm = instrument || lane.startsWith("FM");
             var incumbent = lane.equals(chosenLane) ? chosen
                     : fm ? incumbent(catalogue, previous, lane) : null;
-            var patches = fm
-                    ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane)) : List.<RankedPatch>of();
+            var patches = leadPatches.get(lane);
+            if (patches == null) patches = fm
+                    ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane))
+                    : List.of();
             incumbents.add(incumbent == null ? null : incumbent.id());
             var instruments = fm ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
             var toneContext = notes;
@@ -266,6 +284,13 @@ final class ReconstructionVoiceStage {
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
+    }
+
+    private static VoiceWindows fitWindows(int frames, Map<String, List<ReconstructionAllocation.Entry>> byLane,
+                                           FitWindows previous, Map<String, List<ReconstructionAllocation.Entry>> foreground,
+                                           Map<String, List<ReconstructionAllocation.Entry>> fitGroups) {
+        return new VoiceWindows(frames, byLane, previous, foreground.entrySet().stream()
+                .map(entry -> new VoiceWindows.Focus(entry.getValue(), fitGroups.get(entry.getKey()))).toList());
     }
 
     static List<ReconstructionAllocation.Entry> exposedLine(List<ReconstructionAllocation.Entry> notes) {

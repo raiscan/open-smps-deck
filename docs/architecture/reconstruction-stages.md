@@ -1084,7 +1084,9 @@ melody and backing, its line drives the shared patch, gain and articulation.
 Excerpt selection weights sustained, higher-velocity line notes more heavily
 and discounts ticks covered by that source instrument's other notes. The
 attack shortlist also favors exposed, sustained onsets and weighs stronger
-audio probes more heavily. The same profile plays the backing voices.
+audio probes more heavily. If none of the candidates explains enough of the
+line’s attack spectrum, the fit uses the whole part as evidence. The same
+profile plays the backing voices.
 Where stems are supplied, the stem objective compares the fit notes against
 their mapped source. Separate excerpts validate patch changes. The final
 level accounts for backing that will play at the same gain. A low-register instrument on one FM lane can
