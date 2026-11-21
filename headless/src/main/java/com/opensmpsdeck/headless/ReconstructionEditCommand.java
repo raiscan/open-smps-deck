@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
@@ -11,6 +12,8 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,11 +33,15 @@ public final class ReconstructionEditCommand {
     private ReconstructionEditCommand() {}
 
     static void cli(String[] args, PrintStream out) throws IOException {
-        if (args.length < 2 || args.length > 3)
-            throw new IllegalArgumentException("reconstruct edit expects WORK_DIR add JSON | list | remove ID");
-        JsonObject edit = null;
+        if (args.length < 2 || args.length > 4)
+            throw new IllegalArgumentException("reconstruct edit expects WORK_DIR add JSON | add --file BATCH | list | remove ID");
+        JsonElement edit = null;
         String id = null;
-        if (args.length == 3) {
+        if (args.length == 4) {
+            require(args[1].equals("add") && args[2].equals("--file"), "edit", "expected add --file BATCH");
+            edit = ReconstructionArtifacts.readTree(Path.of(args[3]));
+            if (!edit.isJsonArray()) edit = ReconstructionEdits.batch(edit, "batch");
+        } else if (args.length == 3) {
             if (args[1].equals("remove")) id = args[2];
             else if (args[1].equals("add")) {
                 try {
@@ -49,7 +56,7 @@ public final class ReconstructionEditCommand {
         out.println(JSON.toJson(run(Path.of(args[0]), args[1], edit, id, false, (a, b, c) -> {})));
     }
 
-    public static synchronized JsonObject run(Path work, String action, JsonObject edit, String id,
+    public static synchronized JsonObject run(Path work, String action, JsonElement edit, String id,
                                               boolean rerun, ReconstructionStages.Progress progress) throws IOException {
         require(Files.isDirectory(work), "workDir", "expected an existing directory");
         if (action.equals("list")) {
@@ -65,25 +72,35 @@ public final class ReconstructionEditCommand {
         }
     }
 
-    private static JsonObject change(Path work, String action, JsonObject edit, String id, boolean rerun,
+    private static JsonObject change(Path work, String action, JsonElement edit, String id, boolean rerun,
                                      ReconstructionStages.Progress progress) throws IOException {
         var intents = new ArrayList<>(ReconstructionEdits.read(work).intents());
-        ReconstructionEdits.Intent changed;
+        var changed = new ArrayList<ReconstructionEdits.Intent>();
         if (action.equals("add")) {
-            changed = ReconstructionEdits.parse(edit, "edit");
-            require(intents.stream().noneMatch(intent -> intent.id().equals(changed.id())),
-                    "edit.id", "duplicate edit ID " + changed.id());
-            intents.add(changed);
+            var seen = new HashSet<>(intents.stream().map(ReconstructionEdits.Intent::id).toList());
+            var entries = edit.isJsonArray() ? edit.getAsJsonArray().asList() : List.of(edit);
+            require(!entries.isEmpty(), "edits", "expected at least one intent");
+            for (int i = 0; i < entries.size(); i++) {
+                var entry = entries.get(i);
+                String at = edit.isJsonArray() ? "edits[" + i + "]" : "edit";
+                require(entry.isJsonObject(), at, "expected an intent object");
+                var intent = ReconstructionEdits.parse(entry.getAsJsonObject(), at);
+                require(seen.add(intent.id()), at + ".id", "duplicate edit ID " + intent.id());
+                changed.add(intent);
+            }
+            intents.addAll(changed);
         } else {
-            changed = intents.stream().filter(intent -> intent.id().equals(id)).findFirst()
+            var intent = intents.stream().filter(existing -> existing.id().equals(id)).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("edit.id: no edit named " + id));
-            intents.remove(changed);
+            changed.add(intent);
+            intents.remove(intent);
         }
         var before = rerun ? ReconstructionTrace.read(work) : Map.<String, ReconstructionTrace.Row>of();
         var updated = new ReconstructionEdits(intents);
         var prior = ReconstructionEdits.Journal.read(work);
         var from = Objects.equals(prior.scoreRecipe(), updated.scoreRecipe())
-                ? changed.firstStage() : ReconstructionStages.Stage.TRANSCRIBE;
+                ? changed.stream().map(ReconstructionEdits.Intent::firstStage).min(Comparator.naturalOrder()).orElseThrow()
+                : ReconstructionStages.Stage.TRANSCRIBE;
         String stage = from.name().toLowerCase(Locale.ROOT);
         var args = new ArrayList<>(List.of("--from", stage, work.toString()));
         Path rolesFile = work.resolve("roles.json");
@@ -96,10 +113,17 @@ public final class ReconstructionEditCommand {
         if (rerun) ReconstructionStages.runForReview("run", args.toArray(String[]::new), progress);
         var result = result(work, intents);
         result.addProperty("from", stage);
-        result.addProperty("id", changed.id());
+        if (edit != null && edit.isJsonArray())
+            result.add("ids", JSON.toJsonTree(changed.stream().map(ReconstructionEdits.Intent::id).toList()));
+        else result.addProperty("id", changed.getFirst().id());
         if (rerun) {
             var after = ReconstructionTrace.read(work);
-            var span = span(changed, before, after);
+            var journal = action.equals("add") ? ReconstructionEdits.Journal.read(work) : prior;
+            ReconstructionEdits.Span span = null;
+            for (var intent : changed) {
+                var range = span(intent, journal, before, after);
+                if (range != null) span = range.union(span);
+            }
             var diff = ReconstructionTrace.diff(before, after, span == null ? null
                     : new ReconstructionTrace.Span(span.start(), span.end()));
             var changes = diff.getAsJsonArray("changes");
@@ -119,12 +143,20 @@ public final class ReconstructionEditCommand {
                 "lastRun", ReconstructionEdits.Journal.read(work).all())).getAsJsonObject();
     }
 
-    private static ReconstructionEdits.Span span(ReconstructionEdits.Intent edit,
+    private static ReconstructionEdits.Span span(ReconstructionEdits.Intent edit, ReconstructionEdits.Journal journal,
                                                   Map<String, ReconstructionTrace.Row> before,
                                                   Map<String, ReconstructionTrace.Row> after) {
         if (edit.span() != null) return edit.span();
         var range = edit.explicitSpan();
-        var ids = edit.kind() == ReconstructionEdits.Kind.insertNote ? List.of(edit.insertedId()) : edit.noteIds();
+        var ids = new java.util.LinkedHashSet<>(edit.noteIds());
+        if (edit.kind() == ReconstructionEdits.Kind.insertNote) ids.add(edit.insertedId());
+        for (var outcome : journal.all())
+            if (outcome.id().equals(edit.id()) && outcome.status() == ReconstructionEdits.Status.applied)
+                ids.addAll(outcome.noteIds());
+        if (edit.attack() != null && ids.isEmpty()) {
+            double at = edit.attack().at(), tolerance = ReconstructionEdits.Attack.TOLERANCE;
+            range = new ReconstructionEdits.Span(Math.max(0, at - tolerance), at + tolerance).union(range);
+        }
         for (var notes : List.of(before, after)) for (String id : ids) {
             var row = notes.get(id);
             if (row == null) continue;

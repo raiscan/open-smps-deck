@@ -6,6 +6,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
@@ -18,6 +21,21 @@ final class ReconstructionOverrides {
                     @Nullable Integer minimumReleaseRate, @Nullable ReconstructionVoicing.Vibrato vibrato,
                     @Nullable Boolean modulationOff) {
         boolean changesModulation() { return vibrato != null || Boolean.TRUE.equals(modulationOff); }
+
+        boolean conflicts(Settings other) {
+            return variantId != null && other.variantId != null || gain != null && other.gain != null
+                    || gate != null && other.gate != null || minimumReleaseRate != null && other.minimumReleaseRate != null
+                    || changesModulation() && other.changesModulation();
+        }
+
+        Settings combine(Settings other) {
+            return new Settings(null, null, null, null, null,
+                    variantId == null ? other.variantId : variantId, gain == null ? other.gain : gain,
+                    gate == null ? other.gate : gate,
+                    minimumReleaseRate == null ? other.minimumReleaseRate : minimumReleaseRate,
+                    vibrato == null ? other.vibrato : vibrato,
+                    changesModulation() ? modulationOff : other.modulationOff);
+        }
     }
 
     record Span(int start, int end, Settings settings, int restoreTick) {}
@@ -35,7 +53,7 @@ final class ReconstructionOverrides {
         var targets = new HashMap<String, ReconstructionAllocation.Entry>();
         for (var note : notes) targets.put(note.note().id(), note);
         var result = new HashMap<String, List<Span>>();
-        var timeRanges = new java.util.TreeMap<Integer, Integer>();
+        var timeRanges = new ArrayList<Span>();
         for (int i = 0; i < scopes.size(); i++) {
             var scope = scopes.get(i);
             String at = "voicing.json.lanes." + lane + ".overrides[" + i + "]";
@@ -58,11 +76,10 @@ final class ReconstructionOverrides {
             }
             require(start >= 0 && end <= frames && end > start, at, "expected a nonempty range within the project");
             if (scope.noteIds == null) {
-                var before = timeRanges.floorEntry(start);
-                var after = timeRanges.ceilingEntry(start);
-                require((before == null || before.getValue() <= start) && (after == null || after.getKey() >= end),
-                        at, "overlapping time ranges");
-                timeRanges.put(start, end);
+                for (var prior : timeRanges)
+                    require(end <= prior.start || start >= prior.end || !scope.conflicts(prior.settings),
+                            at, "overlapping time ranges set the same field");
+                timeRanges.add(new Span(start, end, scope, -1));
             }
             require(!lane.equals("DAC"), at, "scoped voicing requires an FM or PSG lane");
             boolean fm = lane.startsWith("FM");
@@ -95,7 +112,8 @@ final class ReconstructionOverrides {
                 require(fm || note.role() != ReconstructionRoles.Role.drums, at, "PSG noise percussion does not support scoped voicing");
                 var spans = result.computeIfAbsent(note.note().id(), ignored -> new ArrayList<>());
                 for (var prior : spans)
-                    require(from >= prior.end || to <= prior.start, at, "overlap on note " + note.note().id());
+                    require(from >= prior.end || to <= prior.start || !scope.conflicts(prior.settings),
+                            at, "overlap on note " + note.note().id() + " sets the same field");
                 spans.add(new Span(from, to, scope, scope.noteIds == null && end < frames ? end : -1));
                 matched = true;
             }
@@ -103,5 +121,30 @@ final class ReconstructionOverrides {
         }
         result.values().forEach(spans -> spans.sort(Comparator.comparingInt(Span::start)));
         return result;
+    }
+
+    static NavigableMap<Integer, Settings> changes(List<Span> spans, int voicedEnd) {
+        var activeSpans = spans.stream().filter(span -> span.start < voicedEnd).toList();
+        var boundaries = new TreeSet<Integer>();
+        for (var span : activeSpans) {
+            boundaries.add(span.start);
+            int end = activeEnd(span, voicedEnd);
+            if (end != Integer.MAX_VALUE) boundaries.add(end);
+        }
+        var changes = new TreeMap<Integer, Settings>();
+        for (int boundary : boundaries) {
+            Settings current = null;
+            for (var span : activeSpans) {
+                if (span.start <= boundary && boundary < activeEnd(span, voicedEnd))
+                    current = current == null ? span.settings : current.combine(span.settings);
+            }
+            changes.put(boundary, current);
+        }
+        return changes;
+    }
+
+    private static int activeEnd(Span span, int voicedEnd) {
+        if (span.end < voicedEnd) return span.end;
+        return span.restoreTick < 0 ? Integer.MAX_VALUE : span.restoreTick;
     }
 }

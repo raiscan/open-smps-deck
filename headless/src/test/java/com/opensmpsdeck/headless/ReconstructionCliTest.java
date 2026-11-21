@@ -407,6 +407,24 @@ class ReconstructionCliTest {
         assertEquals(.4, refitted.get("gain").getAsDouble());
         assertEquals(scopes, refitted.get("overrides"));
 
+        var overlapping = JsonParser.parseString("""
+                [{"startTick":10,"endTick":54,"variantId":"%s"},
+                 {"startTick":12,"endTick":20,"gain":0.2},
+                 {"startTick":25,"endTick":35,"vibrato":{"delay":1,"rate":2,"delta":3,"steps":4}},
+                 {"startTick":37,"endTick":50,"gain":0.8}]
+                """.formatted(candidate)).getAsJsonArray();
+        lane.add("overrides", overlapping);
+        ReconstructionStages.writeArtifact(file, artifact);
+        assertEquals(0, Main.run(new String[]{"reconstruct", "assemble", work.toString()},
+                System.out, err), errors.toString());
+        var held = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var labels = EvidenceNotes.patchChanges(held,
+                new ReconstructionView.Span(0, 1, ReconstructionTimeMap.TimeBase.project, null), List.of("FM1"));
+        assertEquals(List.of(0.0, 10 / 60.0, 54 / 60.0),
+                labels.stream().map(EvidenceNotes.PatchChange::time).toList());
+        assertEquals(labels.getFirst().name(), labels.getLast().name());
+        assertNotEquals(labels.getFirst().name(), labels.get(1).name());
+        lane.add("overrides", scopes);
         scopes.add(scopes.get(0).deepCopy());
         assertTrue(assertThrows(IllegalArgumentException.class, () -> ReconstructionStages.writeArtifact(file, artifact))
                 .getMessage().contains("overlap"));

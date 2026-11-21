@@ -25,23 +25,24 @@ final class ReconstructionVoicing {
     record Lane(Role role, @Nullable String variantId, List<ScoredPatch> shortlist, double gain,
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
                 String effectReason, List<Instrument> instruments, @Nullable Map<Integer, Double> partGains,
-                @Nullable List<ReconstructionOverrides.Settings> overrides) {
+                @Nullable List<ReconstructionOverrides.Settings> overrides,
+                @Nullable Map<Integer, Double> drumGains) {
         Lane(Role role, String variantId, List<ScoredPatch> shortlist, double gain, Articulation articulation,
              Effects effects, String patchReason, String articulationReason, String effectReason,
              List<Instrument> instruments) {
             this(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, null, null);
+                    effectReason, instruments, null, null, null);
         }
 
         Lane withPartGains(Map<Integer, Double> gains) {
             return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
-                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides);
+                    effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides, drumGains);
         }
 
         Lane withPreviousEdits(Lane previous, boolean refitLevels, List<ReconstructionAllocation.Entry> notes) {
             return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
-                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides);
+                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides, previous.drumGains);
         }
 
         double gainFor(int part, double level) {
@@ -49,6 +50,8 @@ final class ReconstructionVoicing {
         }
 
         double gainFor(int part) { return gainFor(part, gain); }
+
+        double drumGain(int pitch) { return drumGains == null ? 1 : drumGains.getOrDefault(pitch, 1.0); }
     }
     record ScoredPatch(String variantId, double shortlistScore, double fit, double check) {}
     record Instrument(int part, @Nullable Integer drumPitch, @Nullable String variantId,
@@ -112,7 +115,8 @@ final class ReconstructionVoicing {
     }
 
     record InstrumentVariant(int part, Integer drumPitch, String variantId, String sliceId, Integer rate) {}
-    record Settings(String variantId, double gain, Map<Integer, Double> partGains, List<InstrumentVariant> instruments) {
+    record Settings(String variantId, double gain, Map<Integer, Double> partGains, List<InstrumentVariant> instruments,
+                    Map<Integer, Double> drumGains) {
         static Settings of(Lane lane) {
             return lane == null ? null : new Settings(lane.variantId(), lane.gain(), lane.partGains(),
                     lane.instruments().stream().map(instrument -> {
@@ -120,7 +124,7 @@ final class ReconstructionVoicing {
                         return new InstrumentVariant(instrument.part(), instrument.drumPitch(), instrument.variantId(),
                                 drum == null || drum.slice() == null ? null : drum.slice().id(),
                                 drum == null ? null : drum.rate());
-                    }).toList());
+                    }).toList(), lane.drumGains());
         }
     }
     record Change(String lane, Settings before, Settings after) {
@@ -131,7 +135,8 @@ final class ReconstructionVoicing {
         private static String describe(Settings settings) {
             if (settings == null) return "absent";
             return "variant " + settings.variantId + ", gain " + settings.gain + ", partGains " + settings.partGains
-                    + (settings.instruments.isEmpty() ? "" : ", instruments " + settings.instruments);
+                    + (settings.instruments.isEmpty() ? "" : ", instruments " + settings.instruments)
+                    + (settings.drumGains == null ? "" : ", drumGains " + settings.drumGains);
         }
     }
 
@@ -229,14 +234,14 @@ final class ReconstructionVoicing {
             var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
             lanes.put(id, new Lane(role, lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(), effects,
                     lane.patchReason(), lane.articulationReason(), lane.effectReason(), List.copyOf(instruments),
-                    gains, lane.overrides()));
+                    gains, lane.overrides(), lane.drumGains()));
         });
         if (fitted != null) fitted.lanes().forEach((id, lane) -> {
             if (lanes.containsKey(id)) return;
             var effects = compatibleCopy(id, lane.effects(), allocated, copies, report);
             lanes.put(id, new Lane(lane.role(), lane.variantId(), lane.shortlist(), lane.gain(), lane.articulation(),
                     effects, lane.patchReason(), lane.articulationReason(), lane.effectReason(), lane.instruments(),
-                    lane.partGains(), lane.overrides()));
+                    lane.partGains(), lane.overrides(), lane.drumGains()));
         });
         return new Result(previous.version(), lanes, previous.fitWindows());
     }
@@ -274,6 +279,8 @@ final class ReconstructionVoicing {
                 require(targeted, "voicing.json.lanes." + id, "untargeted lane is missing from the new allocation");
                 require(before.overrides() == null || before.overrides().isEmpty(), "voicing.json.lanes." + id,
                         "cannot refit a removed lane with scoped overrides");
+                require(before.drumGains() == null || before.drumGains().isEmpty(), "voicing.json.lanes." + id,
+                        "cannot refit a removed lane with drum gains");
             } else {
                 lanes.put(id, targeted ? after.withPreviousEdits(before, refitLevels || changedMaterial.contains(id), allocated.getOrDefault(id, List.of())) : before);
             }
@@ -301,6 +308,10 @@ final class ReconstructionVoicing {
                                     && allocated.get(id).stream().anyMatch(entry -> entry.note().part() == part
                                             && entry.role() != Role.drums),
                             at + ".partGains", "expected allocated tonal parts and gain in 0.25–4"));
+            if (lane.drumGains() != null) lane.drumGains().forEach((pitch, gain) ->
+                    require((dac || id.equals("PSG3")) && pitch >= 0 && pitch <= 127
+                                    && gain != null && gain >= 0 && gain <= 4,
+                            at + ".drumGains", "expected MIDI drum pitches and gains in 0–4 on DAC or PSG3"));
             var articulation = lane.articulation();
             require(articulation.gate() > 0 && articulation.gate() <= 1, at + ".articulation.gate", "expected (0,1]");
             require(articulation.minimumReleaseRate() >= 0 && articulation.minimumReleaseRate() <= (fm ? 15 : 0),

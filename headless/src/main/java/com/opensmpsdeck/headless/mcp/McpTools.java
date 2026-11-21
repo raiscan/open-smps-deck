@@ -86,6 +86,8 @@ final class McpTools {
                     McpReconstruction::edit, WORK,
                     choice("action", "Edit command", "add", "list", "remove"),
                     field("edit", object(Map.of("type", "object")), "Intent object with id, reason, op and op fields").optional(),
+                    field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
+                            "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove").optional(),
                     field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional()),
             tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
