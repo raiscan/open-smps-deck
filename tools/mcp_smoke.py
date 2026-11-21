@@ -172,7 +172,7 @@ for stem in stems:
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
             reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
-            artifact_read artifact_write project_validate project_export reconstruct_rerun
+            artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
         """.split())
@@ -248,6 +248,15 @@ for stem in stems:
         manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]
         exported = rpc.call("project_export", workDir=work, output="output.wav", format="wav", progress=True)
         assert Path(exported["output"]).read_bytes() == Path(files["render.wav"]).read_bytes()
+        portable = rpc.call("project_export", workDir=work, output="portable.smps.zip",
+                            format="portable", noSource=True, packageId="smoke")
+        assert portable["warnings"] == []
+        inspected = rpc.call("package_inspect", package=portable["output"])
+        assert inspected["schemaVersion"] == 4 and inspected["package"]["id"] == "smoke"
+        assert inspected["source"] is None
+        verified = rpc.call("package_validate", package=portable["output"], render="verified.wav", frames=30)
+        assert verified["valid"] and verified["playbackValidated"]
+        assert Path(verified["render"]).is_file()
         arrangement = Path(files["arrangement.smps.json"])
         attached = arrangement.read_bytes()
         detached = json.loads(attached)

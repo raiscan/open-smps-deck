@@ -84,9 +84,10 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
     public static String warningMessage(String code) {
         return switch (code) {
             case "RETAIL_SONG_DATA" -> "This package contains copyrighted song data from the retail game. "
-                    + "It is for personal use and must not be redistributed. A shareable portable mode is planned.";
+                    + "It is for personal use and must not be redistributed.";
             case "ROM_DERIVED_DATA" -> "This package contains assets derived from the game ROM. "
-                    + "It is for personal use and must not be redistributed. A shareable portable mode is planned.";
+                    + "It is for personal use and must not be redistributed. Use portable mode to reference eligible stock assets when sharing.";
+            case "UNKNOWN_ROM_IMAGE" -> "ROM image fingerprint is unknown. The stock asset hashes decide whether it can be used.";
             case "SOURCE_AUDIO" -> "This package contains audio derived from an input recording. Check that you have the rights to it.";
             case "THIRD_PARTY" -> "This package contains third-party material. Check its license.";
             default -> code;

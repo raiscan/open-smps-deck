@@ -35,7 +35,7 @@ public final class ProjectFormat {
         if (exceedsUtf8Limit(json, limit)) throw invalid("project", ProjectFiles.sourceLimitMessage(limit));
         try (JsonReader reader = new JsonReader(new StringReader(json))) {
             reader.setLenient(false);
-            JsonElement tree = readValue(reader, 0, false);
+            JsonElement tree = readValue(reader, 0, false, true);
             if (reader.peek() != JsonToken.END_DOCUMENT) throw invalid("project", "unexpected content after document");
             if(!tree.isJsonObject()) throw invalid("project","must be an object");
             if(!tree.getAsJsonObject().has("formatVersion")) throw invalid("project.formatVersion","required field is missing");
@@ -156,7 +156,7 @@ public final class ProjectFormat {
         o.addProperty("ticksPerBeat",project.ticksPerBeat());
         if (project.nativeProgram()==null) o.addProperty("tempo",project.tempo());
         JsonArray voices = new JsonArray();
-        for (Voice v : project.voices()) { JsonObject x=new JsonObject(); x.addProperty("id",v.id()); x.addProperty("name",v.name()); JsonArray b=new JsonArray(); v.bytes().forEach(b::add); x.add("bytes",b); addOrigin(x, v.origin()); voices.add(x); }
+        for (Voice v : project.voices()) { JsonObject x=new JsonObject(); x.addProperty("id",v.id()); x.addProperty("name",v.name()); if (v.bytes() != null) x.add("bytes", GSON.toJsonTree(v.bytes())); addOrigin(x, v.origin()); voices.add(x); }
         o.add("voices",voices);
         JsonArray sequences = new JsonArray();
         for (Sequence s : project.sequences()) {
@@ -194,14 +194,14 @@ public final class ProjectFormat {
             JsonArray envelopes=new JsonArray();
             for(Envelope envelope:project.envelopes()) {
                 JsonObject x=new JsonObject();x.addProperty("id",envelope.id());x.addProperty("name",envelope.name());x.addProperty("type",envelope.type());
-                JsonArray bytes=new JsonArray();envelope.bytes().forEach(bytes::add);x.add("bytes",bytes);addOrigin(x, envelope.origin());envelopes.add(x);
+                if (envelope.bytes() != null) x.add("bytes", GSON.toJsonTree(envelope.bytes()));addOrigin(x, envelope.origin());envelopes.add(x);
             }
             o.add("envelopes",envelopes);
         }
         if(project.arrangementVersion()>=4) {
             JsonArray samples=new JsonArray();
             for(DacSample sample:project.samples()) {
-                JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());x.addProperty("pcmBase64",sample.pcmBase64());addOrigin(x, sample.origin());samples.add(x);
+                JsonObject x=new JsonObject();x.addProperty("id",sample.id());x.addProperty("name",sample.name());x.addProperty("rate",sample.rate());if (sample.pcmBase64() != null) x.addProperty("pcmBase64",sample.pcmBase64());addOrigin(x, sample.origin());samples.add(x);
             }
             o.add("samples",samples);
         }
@@ -228,10 +228,29 @@ public final class ProjectFormat {
     }
 
     public static void validate(StudioProject project) {
-        validatedClips(project);
+        validatedClips(project, true);
     }
 
     static List<Clip> validatedClips(StudioProject project) {
+        requireResolved(project);
+        return validatedClips(project, false);
+    }
+
+    public static void requireResolved(StudioProject project) {
+        if (project == null) return;
+        var missing = new ArrayList<String>();
+        for (var voice : project.voices()) if (voice.bytes() == null) missing.add(voice.id());
+        for (var envelope : project.envelopes()) if (envelope.bytes() == null) missing.add(envelope.id());
+        for (var sample : project.samples()) if (sample.pcmBase64() == null) missing.add(sample.id());
+        if (!missing.isEmpty()) throw invalid("project", "needs ROM to resolve stock assets: " + String.join(", ", missing));
+    }
+
+    private static void checkRedacted(AssetOrigin origin, String id, boolean allowRedacted) {
+        if (!allowRedacted || origin == null || origin.ref() == null)
+            throw invalid(id, "missing payload requires a stock reference");
+    }
+
+    private static List<Clip> validatedClips(StudioProject project, boolean allowRedacted) {
         if (project == null) throw invalid("project", "document is required");
         if (project.formatVersion()<1 || project.formatVersion()>6) throw invalid("formatVersion", "only versions 1 through 6 are supported");
         if (project.formatVersion() == 6) range(project.arrangementVersion(), 1, 4, "arrangementVersion");
@@ -258,6 +277,7 @@ public final class ProjectFormat {
         for (Voice v : project.voices()) {
             if (v.origin() != null) v.origin().validateKind("FM_VOICE");
             text(v.name(),"voice '"+v.id()+"'.name");
+            if (v.bytes() == null) { checkRedacted(v.origin(), v.id(), allowRedacted); continue; }
             if (v.bytes().size()!=25) throw invalid("voice '"+v.id()+"'.bytes", "exactly 25 native-order bytes are required");
             for (int b : v.bytes()) range(b,0,255,"voice '"+v.id()+"'.bytes");
         }
@@ -268,9 +288,11 @@ public final class ProjectFormat {
             if (envelope.origin() != null) envelope.origin().validateKind(envelope.type());
             String at="envelope '"+envelope.id()+"'";text(envelope.name(),at+".name");
             boolean psg = Envelope.PSG_VOLUME.equals(envelope.type());
-            if (nativeProgram!=null) {
-                if (!psg && !Envelope.MODULATION.equals(envelope.type()))
-                    throw invalid(at+".type","must be PSG_VOLUME or MODULATION");
+            if (!psg && !Envelope.MODULATION.equals(envelope.type()))
+                throw invalid(at+".type", "must be PSG_VOLUME or MODULATION");
+            if (envelope.bytes() == null) {
+                checkRedacted(envelope.origin(), envelope.id(), allowRedacted);
+            } else if (nativeProgram!=null) {
                 range(envelope.bytes().size(),1,256,at+".bytes length");
                 for (int value : envelope.bytes()) range(value,0,255,at+".bytes");
             } else {
@@ -285,9 +307,13 @@ public final class ProjectFormat {
         if(psgCount>255) throw invalid("envelopes","at most 255 PSG volume envelopes can be addressed");
         if(modulationCount>127) throw invalid("envelopes","at most 127 modulation envelopes can be addressed; index 128 is reserved for custom modulation");
         if(project.arrangementVersion()<4 && !project.samples().isEmpty()) throw invalid("samples","DAC samples require formatVersion 4");
-        DacSample.validateAll(project.samples());
+        DacSample.validateAll(project.samples().stream().filter(sample -> sample.pcmBase64() != null).toList());
+        range(project.samples().size(), 0, DacSample.MAX_SAMPLES, "samples");
         for (DacSample sample : project.samples()) {
+            text(sample.name(), "sample name");
+            DacSample.periodCycles(sample.rate());
             if (sample.origin() != null) sample.origin().validateKind("DAC_SAMPLE");
+            if (sample.pcmBase64() == null) checkRedacted(sample.origin(), sample.id(), allowRedacted);
         }
         Map<String,DacSample> samples=unique(project.samples(),DacSample::id,"samples");
         if (nativeProgram!=null) {
@@ -394,16 +420,16 @@ public final class ProjectFormat {
     }
 
     private static Voice voice(JsonElement e) {
-        JsonObject o=reviewObject(e,"voice",Set.of("origin"),"id","name","bytes");
-        return new Voice(string(o,"id"),string(o,"name"),list(o,"bytes",x->integer(x,"voice.bytes[]")), origin(o.get("origin")));
+        JsonObject o=reviewObject(e,"voice",Set.of("origin","bytes"),"id","name");
+        return new Voice(string(o,"id"),string(o,"name"),o.has("bytes") ? list(o,"bytes",x->integer(x,"voice.bytes[]")) : null, origin(o.get("origin")));
     }
     private static Envelope envelope(JsonElement e) {
-        JsonObject o=reviewObject(e,"envelope",Set.of("origin"),"id","name","type","bytes");
-        return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),list(o,"bytes",x->integer(x,"envelope.bytes[]")), origin(o.get("origin")));
+        JsonObject o=reviewObject(e,"envelope",Set.of("origin","bytes"),"id","name","type");
+        return new Envelope(string(o,"id"),string(o,"name"),string(o,"type"),o.has("bytes") ? list(o,"bytes",x->integer(x,"envelope.bytes[]")) : null, origin(o.get("origin")));
     }
     private static DacSample sample(JsonElement e) {
-        JsonObject o=reviewObject(e,"sample",Set.of("origin"),"id","name","rate","pcmBase64");
-        return new DacSample(string(o,"id"),string(o,"name"),integer(o,"rate"),string(o,"pcmBase64"), origin(o.get("origin")));
+        JsonObject o=reviewObject(e,"sample",Set.of("origin","pcmBase64"),"id","name","rate");
+        return new DacSample(string(o,"id"),string(o,"name"),integer(o,"rate"),optionalString(o,"pcmBase64"), origin(o.get("origin")));
     }
     private static void addOrigin(JsonObject asset, AssetOrigin origin) {
         if (origin != null) asset.add("origin", REVIEW_GSON.toJsonTree(origin));
@@ -544,8 +570,20 @@ public final class ProjectFormat {
     private static void range(int value,int low,int high,String at) { if (value<low || value>high) throw invalid(at,"must be in "+low+".."+high+" (was "+value+")"); }
     private static IllegalArgumentException invalid(String at,String message) { return new IllegalArgumentException(at+": "+message); }
 
+    /** Strict JSON tree for native formats whose numeric fields are all integers. */
+    public static JsonElement parseIntegerJson(String source) {
+        try (var reader = new JsonReader(new StringReader(source))) {
+            reader.setLenient(false);
+            JsonElement tree = readValue(reader, 0, false, false);
+            if (reader.peek() != JsonToken.END_DOCUMENT) throw invalid("JSON", "unexpected trailing content");
+            return tree;
+        } catch (IOException | IllegalStateException error) {
+            throw new IllegalArgumentException("Invalid JSON: " + error.getMessage(), error);
+        }
+    }
+
     /** Gson's tree parser accepts duplicate names; retain strict checks before making a tree. */
-    private static JsonElement readValue(JsonReader r,int depth,boolean reviewNumbers) throws IOException {
+    private static JsonElement readValue(JsonReader r,int depth,boolean reviewNumbers,boolean project) throws IOException {
         if (depth>32) throw invalid(r.getPath(),"JSON nesting is too deep");
         return switch(r.peek()) {
             case BEGIN_OBJECT -> {
@@ -553,12 +591,12 @@ public final class ProjectFormat {
                 while (r.hasNext()) {
                     String name = r.nextName();
                     if (!seen.add(name)) throw invalid(r.getPath(), "duplicate field '" + name + "'");
-                    boolean reviewField = depth == 0 && (name.equals("references") || name.equals("notes"));
-                    o.add(name, readValue(r, depth + 1, reviewNumbers || reviewField));
+                    boolean reviewField = project && depth == 0 && (name.equals("references") || name.equals("notes"));
+                    o.add(name, readValue(r, depth + 1, reviewNumbers || reviewField, project));
                 }
                 r.endObject(); yield o;
             }
-            case BEGIN_ARRAY -> { JsonArray a=new JsonArray(); r.beginArray(); while(r.hasNext()) a.add(readValue(r,depth+1,reviewNumbers)); r.endArray(); yield a; }
+            case BEGIN_ARRAY -> { JsonArray a=new JsonArray(); r.beginArray(); while(r.hasNext()) a.add(readValue(r,depth+1,reviewNumbers,project)); r.endArray(); yield a; }
             case STRING -> new JsonPrimitive(r.nextString());
             case BOOLEAN -> new JsonPrimitive(r.nextBoolean());
             case NULL -> { r.nextNull(); yield JsonNull.INSTANCE; }

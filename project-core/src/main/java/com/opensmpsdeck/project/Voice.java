@@ -12,5 +12,5 @@ public record Voice(String id, String name, List<Integer> bytes, AssetOrigin ori
         return new Voice(id, name, bytes, origin);
     }
 
-    public Voice { bytes = List.copyOf(bytes); }
+    public Voice { if (bytes != null) bytes = List.copyOf(bytes); }
 }

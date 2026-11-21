@@ -36,7 +36,8 @@ Playback uses the exact OpenGGF revision recorded in
 | Tempo changes, dividing timing, PAL and speed changes | v5 preserves divider and `FF00` tempo changes | Native frame-limited NTSC preview at 48 kHz; `FF04` rejected | Explicit preview length; arrangement keeps its fixed-tempo playhead | Tempo/divider and session timing support exist |
 | Fade/restore, spindash state and continuous SFX | v5 preserves context commands as bytes | Explicit CLI previous-song context for `E2 FF`; isolated preview accepts non-FF `E2`; `E9/FC/FF07` remain gated | Native bank bytes | Session resumes the saved music at the next presentation |
 | Sound dispatch, music halt and memory copy | Missing | `FF01/02/03` rejected | Missing | Syntax consumed only; semantic support absent |
-| Dependency-complete package for resolved assets | v5 bank, voices and exact bindings | Deterministic ZIP of source, exact bank, manifest and hashed resources | Export package; resource-aware preview/WAV | Adapter installs resources; in-engine ZIP loader pending |
+| Legacy package for embedded assets (schemas 1–3) | v5 bank, voices and exact bindings | Deterministic ZIP of source, exact bank, manifest and hashed resources | Export package; resource-aware preview/WAV | Adapter installs resources |
+| [Portable package (schema 4)](portable-package.md) | Stock locators, transforms, local/global fills and relocation metadata | CLI/MCP export, inspect, validate, ROM resolution and PCM render. Mod JAR contains the exploded package | Redacted source requires external ROM resolution | OpenGGF mod playback integration tracked separately |
 
 Version 1 remains readable/writable with its original field set and compilation.
 Version 2 adds ordered command events and repeat state. Version 3 adds typed envelope

@@ -374,3 +374,8 @@ canonical bytes. Origin types are `original`, `source-audio`, `third-party`
 (with license and attribution), and `stock` (with an optional stock locator
 and transforms). A retail-song derivation carries the game, song ID and bank
 SHA-256. Provenance does not change compilation or playback.
+
+Stock assets with a locator can omit `bytes` (FM and envelopes) or
+`pcmBase64` (DAC) in redacted source. An explicit null payload is invalid.
+The source reader validates the document shape. Compilation requires the
+named payloads to be resolved from a ROM first.

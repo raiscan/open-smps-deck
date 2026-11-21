@@ -298,3 +298,21 @@ Package exports can warn about embedded ROM assets or retail song data.
 Keep flagged packages for personal use. Check CLI stderr or the MCP
 `warnings` array. Use `stock-table build ROM OUT.json` with a verified
 locked-on S3&K image to regenerate the hashes and locators for stock detection.
+
+Use `compile-package PROJECT OUT.smps.zip --portable` or
+`export PROJECT OUT.smps.zip --format portable` for schema 4. Use
+`--no-source` to omit the default redacted source. Set `--driver s3k`,
+`--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
+and repeatable `--author NAME` as needed. Use `export --format mod` with
+repeatable decimal `--replace ID` to create an OpenGGF patch mod JAR.
+
+Run `inspect-package PKG` to read the manifest and
+`validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]` to
+verify hashes, resolve stock references and audition through the pinned
+driver. Pass `--rom PATH` to `validate-project`, `render-project`,
+`compile-package` or `export` to resolve redacted source. In MCP, use
+`project_export` with `format: "portable"` or `"mod"`, then
+`package_inspect` or `package_validate`. Check the package warnings even
+when validation succeeds.
+
+[Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)

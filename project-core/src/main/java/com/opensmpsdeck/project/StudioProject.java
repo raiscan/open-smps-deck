@@ -32,6 +32,12 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
                 groupPlacements, detachedFromReconstruction, null);
     }
 
+    public StudioProject withAssets(List<Voice> voices, List<Envelope> envelopes, List<DacSample> samples) {
+        return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
+                groupPlacements, detachedFromReconstruction, derivedFrom);
+    }
+
     public StudioProject withDerivedFrom(RetailSongOrigin origin) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,

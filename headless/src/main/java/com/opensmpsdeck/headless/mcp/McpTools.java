@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.Main;
 import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.PortablePackages;
 import com.opensmpsdeck.headless.ExternalSeparators;
 import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.ReconstructionStages;
@@ -12,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +46,9 @@ final class McpTools {
     private static final Field START = field("start", "number", "Inclusive start in project seconds, rounded to 60 Hz");
     private static final Field END = field("end", "number", "Exclusive end in project seconds, rounded to 60 Hz");
     private static final Field AUTHOR = field("author", "string", "Review author display name");
+    private static final Field ROMS = field("roms", object(Map.of("type", "array", "items", Map.of("type", "string"))),
+            "Absolute paths to local ROM images").optional();
+    private static final Field PACKAGE = path("package", "Absolute path to an SMPS package");
     private static final Field ARTIFACT = choice("artifact", "Stage artifact name without .json", McpReconstruction.ARTIFACTS);
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
@@ -94,7 +99,17 @@ final class McpTools {
             tool("project_export", "Export a project or reconstruction as WAV, MP3, VGM, raw S3K bytes or an SMPS package.",
                     McpTools::export, PROJECT.optional(), WORK.optional(),
                     field("output", "string", "New file or stem directory inside the project or work directory"),
-                    choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package"),
+                    choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod"),
+                    ROMS,
+                    choice("driver", "Portable target driver", "s3k").optional(),
+                    field("noSource", "boolean", "Omit portable source").optional(),
+                    field("license", "string", "SPDX license expression").optional(),
+                    field("packageId", "string", "Portable package ID").optional(),
+                    field("packageVersion", "string", "Portable package version").optional(),
+                    field("authors", object(Map.of("type", "array", "items", Map.of("type", "string"))),
+                            "Package author names").optional(),
+                    field("replace", object(Map.of("type", "array", "items", Map.of("type", "integer"))),
+                            "Stock music IDs to replace in a mod").optional(),
                     START.optional(), END.optional(),
                     field("fade", "number", "Fade-out seconds within the exported WAV or MP3 interval").optional(),
                     field("loops", "integer", "Number of loop passes for native bank WAV or MP3").optional(),
@@ -195,6 +210,12 @@ final class McpTools {
             tool("artifact_write", "Validate the entire artifact after applying an edit, then replace it atomically.",
                     (args, progress) -> McpReconstruction.artifact(args, true), WORK, ARTIFACT, SELECTION,
                     field("value", new JsonObject(), "Complete artifact object including version, or replacement at selection")),
+            tool("package_validate", "Validate a portable package and optionally resolve ROM assets and render a new WAV.",
+                    (args, progress) -> validatePackage(args), PACKAGE, ROMS,
+                    field("render", "string", "New WAV path inside the package directory").optional(),
+                    field("frames", "integer", "60 Hz presentations to render").optional()),
+            tool("package_inspect", "Inspect a portable package manifest and its provenance warnings.",
+                    (args, progress) -> PortablePackages.inspect(McpPaths.input(string(args, "package"))), PACKAGE),
             tool("project_validate", "Load the project and validate schema, arrangement and compiled S3K bank.",
                     (args, progress) -> object(Map.of("valid", true, "summary",
                             cli(List.of("validate", McpPaths.project(string(args, "project")).toString())))), PROJECT),
@@ -335,14 +356,50 @@ final class McpTools {
         }
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
+        boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
+        if (!portable && List.of("driver", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
+                .stream().anyMatch(args::has))
+            throw new IllegalArgumentException("Portable metadata requires format portable or mod");
+        var authors = args.has("authors") ? args.getAsJsonArray("authors").asList().stream()
+                .map(com.google.gson.JsonElement::getAsString).toList() : List.<String>of();
+        var replace = args.has("replace") ? args.getAsJsonArray("replace").asList().stream()
+                .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
+        var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
+                !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
+                optionalString(args, "packageVersion"), authors, replace);
         var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
-                flag(args, "stems"), flag(args, "zip"));
-        var source = ProjectExport.open(input);
-        var warnings = ProjectExport.write(source.project(), source.work(), output, options, progress);
-        var result = object(Map.of("output", output.toString(), "format", string(args, "format")));
-        if (format == ProjectExport.Format.PACKAGE) result.add("warnings", McpJson.JSON.toJsonTree(warnings));
+                flag(args, "stems"), flag(args, "zip"), settings);
+        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input, roms(args));
+        JsonObject result;
+        if (portable) {
+            result = ProjectExport.exportPortable(project, output, options, progress);
+        } else {
+            var warnings = ProjectExport.write(project, work ? input : null, output, options, progress);
+            result = new JsonObject();
+            if (format == ProjectExport.Format.PACKAGE) result.add("warnings", McpJson.JSON.toJsonTree(warnings));
+        }
+        result.addProperty("output", output.toString());
+        result.addProperty("format", string(args, "format"));
         return result;
+    }
+
+    private static JsonObject validatePackage(JsonObject args) throws IOException {
+        var input = McpPaths.input(string(args, "package"));
+        var output = args.has("render") ? McpPaths.output(input.getParent(), string(args, "render")) : null;
+        Integer frames = args.has("frames") ? args.get("frames").getAsBigDecimal().intValueExact() : null;
+        return PortablePackages.validate(input, roms(args), output, frames);
+    }
+
+    private static List<Path> roms(JsonObject args) throws IOException {
+        var roms = new ArrayList<Path>();
+        if (args.has("roms"))
+            for (var rom : args.getAsJsonArray("roms")) roms.add(McpPaths.input(rom.getAsString()));
+        return List.copyOf(roms);
+    }
+
+    private static String optionalString(JsonObject args, String name) {
+        return args.has(name) ? string(args, name) : null;
     }
 
     private static Double decimal(JsonObject args, String name) {

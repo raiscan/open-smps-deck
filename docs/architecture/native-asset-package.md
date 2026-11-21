@@ -142,3 +142,6 @@ one, then the lowest song ID and slot. PSG and playback modulation use
 their lowest index and DAC uses its lowest note. The table ships hashes and
 loader coordinates only. Regenerate it locally with
 `stock-table build ROM OUT.json` using a verified locked-on S3&K image.
+
+For packages that reference stock assets and for the exploded OpenGGF
+mod layout, see [schema 4](portable-package.md).

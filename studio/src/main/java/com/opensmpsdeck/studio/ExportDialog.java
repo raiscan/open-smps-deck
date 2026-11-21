@@ -31,7 +31,7 @@ final class ExportDialog {
         dialog.getDialogPane().getButtonTypes().addAll(export, ButtonType.CANCEL);
 
         var formats = new ChoiceBox<Format>();
-        formats.getItems().setAll(Format.values());
+        formats.getItems().setAll(Format.WAV, Format.MP3, Format.VGM, Format.SMPS, Format.PACKAGE);
         formats.setValue(Format.WAV);
         formats.setId("export-format");
         formats.setConverter(new javafx.util.StringConverter<>() {
@@ -41,7 +41,8 @@ final class ExportDialog {
                     case MP3 -> "MP3 audio";
                     case VGM -> "VGM 1.71";
                     case SMPS -> "Raw S3K SMPS (.bin)";
-                    case PACKAGE -> "SMPS package (.smps.zip)";
+                    case PACKAGE, PORTABLE -> "SMPS package (.smps.zip)";
+                    case MOD -> "OpenGGF mod (.jar)";
                 };
             }
 
@@ -132,7 +133,8 @@ final class ExportDialog {
             case MP3 -> "Encoded from the chip render using ffmpeg.";
             case VGM -> "Full song register log for YM2612 and SN76489 VGM players.";
             case SMPS -> "Standalone track for a compatible S3K SMPS driver. Requires an arrangement without external chip assets.";
-            case PACKAGE -> "Native S3K bank, bindings, resources and project source for Studio and OpenGGF integration.";
+            case PACKAGE, PORTABLE -> "Native S3K bank, bindings, resources and project source for Studio and OpenGGF integration.";
+            case MOD -> "OpenGGF music replacement mod.";
         };
     }
 

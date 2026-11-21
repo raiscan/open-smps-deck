@@ -27,11 +27,12 @@ public final class NativeBankAnalysis {
 
     public record Analysis(byte[] bank, byte[] header, int headerAddress, List<Event> events,
                            int voiceOffset, int localVoiceCount, int globalVoiceOffset,
-                           boolean requiresPreviousMusic) {
+                           boolean requiresPreviousMusic, List<Integer> relocations, boolean relocationsComplete) {
         public Analysis {
             bank = bank.clone();
             header = header.clone();
             events = List.copyOf(events);
+            relocations = List.copyOf(relocations);
         }
         @Override public byte[] bank() { return bank.clone(); }
         @Override public byte[] header() { return header.clone(); }
@@ -59,6 +60,7 @@ public final class NativeBankAnalysis {
     private final Map<Integer, Event> events = new TreeMap<>();
     private final int[] owners;
     private final Set<Integer> branchTargets = new HashSet<>();
+    private final java.util.SortedSet<Integer> relocations = new java.util.TreeSet<>();
     private int remainingStates = MAX_STATES;
     private int divider;
     private int voiceOffset = -1;
@@ -145,6 +147,7 @@ public final class NativeBankAnalysis {
         if (localVoiceCount != 0) {
             if (voicePointer == 0) throw invalid(header, "zero voice pointer selects the global table");
             voiceOffset = address(voicePointer, header);
+            relocations.add(header);
             reserve(voiceOffset, VOICE_BYTES * localVoiceCount);
         } else if (voicePointer == 0) {
             globalVoiceOffset = 0;
@@ -158,6 +161,7 @@ public final class NativeBankAnalysis {
 
         int entry = header + 6;
         for (int index = 0; index < Math.min(fm, 6); index++, entry += 4) {
+            relocations.add(entry);
             walk(address(word(entry), entry), index == 0 ? Track.DAC : Track.FM);
         }
         // In the retail layout PSG1 initialization overwrites the hypothetical
@@ -167,6 +171,7 @@ public final class NativeBankAnalysis {
             int modulation = read(entry + 4);
             requireEnvelope(modulation, entry + 4, Envelope.MODULATION);
             requireEnvelope(read(entry + 5), entry + 5, Envelope.PSG_VOLUME);
+            relocations.add(entry);
             walk(address(word(entry), entry), Track.PSG);
         }
         for (int target : branchTargets) requireExecutable(target);
@@ -175,7 +180,8 @@ public final class NativeBankAnalysis {
         }
         return new Analysis(bank, Arrays.copyOfRange(bank, header, header + headerLength),
                 base + header, List.copyOf(events.values()), voiceOffset, localVoiceCount, globalVoiceOffset,
-                restoresPreviousMusic);
+                restoresPreviousMusic, List.copyOf(relocations),
+                fm <= 6 && Arrays.stream(owners).noneMatch(owner -> owner == -1));
     }
 
     private void walk(int pc, Track track) {
@@ -229,6 +235,7 @@ public final class NativeBankAnalysis {
                 case 0xE3 -> throw invalid(pc, "silence and stop requires native E3 register writes");
                 case 0xF6 -> {
                     instruction(pc, 3, "Jump");
+                    relocations.add(pc + 1);
                     pc = address(word(pc + 1), pc);
                 }
                 case 0xF7 -> {
@@ -236,6 +243,7 @@ public final class NativeBankAnalysis {
                     int index = read(pc + 1), count = read(pc + 2);
                     if (index >= loops.length) throw invalid(pc, "music loop index must be 0, 1 or 2");
                     if (count == 0) throw invalid(pc, "zero loop count requires native 256-iteration wrap");
+                    relocations.add(pc + 3);
                     int target = address(word(pc + 3), pc);
                     branchTargets.add(target);
                     if (loops[index] == 0) loops[index] = count;
@@ -245,6 +253,7 @@ public final class NativeBankAnalysis {
                     instruction(pc, 3, "Call");
                     if (returns.size() >= 2) throw invalid(pc, "native return stack would overflow");
                     returns.add(pc + 3);
+                    relocations.add(pc + 1);
                     pc = address(word(pc + 1), pc);
                 }
                 case 0xF9 -> {

@@ -21,7 +21,7 @@ import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 
 public final class ProjectExport {
     public enum Format {
-        WAV("wav"), MP3("mp3"), VGM("vgm"), SMPS("bin"), PACKAGE("smps.zip");
+        WAV("wav"), MP3("mp3"), VGM("vgm"), SMPS("bin"), PACKAGE("smps.zip"), PORTABLE("smps.zip"), MOD("jar");
 
         private final String extension;
 
@@ -31,7 +31,11 @@ public final class ProjectExport {
     }
 
     public record Options(Format format, Double start, Double end, Double fade, Integer loops,
-                          boolean stems, boolean zip) {
+                          boolean stems, boolean zip, PortableSettings portable) {
+        public Options(Format format, Double start, Double end, Double fade, Integer loops, boolean stems, boolean zip) {
+            this(format, start, end, fade, loops, stems, zip, null);
+        }
+
         public Options {
             if (!format.audio() && (start != null || end != null || fade != null || stems || zip))
                 throw new IllegalArgumentException("Span, fade and stems require WAV or MP3");
@@ -40,6 +44,13 @@ public final class ProjectExport {
                 throw new IllegalArgumentException("Fade must be greater than zero and at most 600 seconds");
             if (loops != null && (!format.audio() || loops < 1 || loops > 99))
                 throw new IllegalArgumentException("Loop count requires WAV or MP3 and must be in 1..99");
+        }
+    }
+
+    public record PortableSettings(String driver, boolean includeSource, String license, String id,
+                                   String version, List<String> authors, List<Integer> replacements) {
+        PortableOptions options() {
+            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements);
         }
     }
 
@@ -67,6 +78,10 @@ public final class ProjectExport {
             var warnings = ProjectPackage.write(project, output);
             progress.report(1, 1, "Export complete");
             return warnings;
+        }
+        if (options.format == Format.PORTABLE || options.format == Format.MOD) {
+            var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
+            return writePortable(project, output, options.format, settings, progress).warnings();
         }
         var compiled = ProjectCompiler.compileWithAssets(project);
         if (options.format == Format.SMPS) {
@@ -136,6 +151,33 @@ public final class ProjectExport {
             }
         }
         return List.of();
+    }
+
+    private static PortablePackageWriter.Payload writePortable(StudioProject project, Path output, Format format,
+                                                                 PortableOptions options, ReconstructionStages.Progress progress)
+            throws IOException {
+        progress.report(0, 1, "Writing portable SMPS package");
+        PortablePackageWriter.Payload payload;
+        if (format == Format.MOD) {
+            payload = PortablePackageWriter.build(project, options);
+            ModPackageWriter.write(payload, output, options.replacements());
+        } else {
+            if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires --format mod");
+            payload = PortablePackageWriter.write(project, output, options);
+        }
+        progress.report(1, 1, "Export complete");
+        return payload;
+    }
+
+    public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
+                                                            ReconstructionStages.Progress progress) throws IOException {
+        var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
+        var payload = writePortable(project, output, options.format, settings, progress);
+        var result = new com.google.gson.JsonObject();
+        var json = new com.google.gson.Gson();
+        result.add("warnings", json.toJsonTree(payload.warnings()));
+        if (!payload.converted().isEmpty()) result.add("undeclaredStockConverted", json.toJsonTree(payload.converted()));
+        return result;
     }
 
     private static void publish(Path staged, Path output) throws IOException {
@@ -270,7 +312,12 @@ public final class ProjectExport {
         Integer loops = null;
         boolean stems = false, zip = false;
         var seen = new HashSet<String>();
+        var flags = new PortableOptions.Cli();
         for (int i = 3; i < args.length; i++) {
+            if (flags.recognizes(args[i])) {
+                i = flags.read(args, i) - 1;
+                continue;
+            }
             String option = args[i];
             if (!seen.add(option)) throw new IllegalArgumentException("Duplicate option " + option);
             if (option.equals("--stems")) { stems = true; continue; }
@@ -286,11 +333,23 @@ public final class ProjectExport {
                 default -> throw new IllegalArgumentException("Unknown option " + option);
             }
         }
-        if (format == null) throw new IllegalArgumentException("Choose --format wav|mp3|vgm|smps|package");
-        var source = open(Path.of(args[1]));
-        var warnings = write(source.project(), source.work(), Path.of(args[2]), new Options(format, start, end, fade, loops, stems, zip),
-                (done, total, message) -> {});
-        ProjectProvenance.printWarnings(warnings, err);
+        if (format == null) throw new IllegalArgumentException("Choose --format wav|mp3|vgm|smps|package|portable|mod");
+        boolean portable = format == Format.PORTABLE || format == Format.MOD;
+        if (flags.portable() || !portable && flags.hasPackageOptions())
+            throw new IllegalArgumentException("Use --format portable or --format mod for portable package options");
+        Path input = Path.of(args[1]);
+        Path work = Files.isDirectory(input) ? input : null;
+        if (work != null) input = work.resolve("arrangement.smps.json");
+        var project = PortablePackages.openProject(input, flags.roms());
+        var options = new Options(format, start, end, fade, loops, stems, zip);
+        Path output = Path.of(args[2]);
+        if (portable) {
+            var payload = writePortable(project, output, options.format(), flags.options(), (done, total, message) -> {});
+            PortablePackages.printWriteWarnings(payload, err);
+        } else {
+            var warnings = write(project, work, output, options, (done, total, message) -> {});
+            ProjectProvenance.printWarnings(warnings, err);
+        }
         out.println("Exported " + format + " to " + args[2]);
     }
 }
