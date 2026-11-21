@@ -46,6 +46,7 @@ final class McpReconstruction {
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
             field("refitLanes", object(Map.of("type", "array", "items", Map.of("type", "string"))),
@@ -66,6 +67,10 @@ final class McpReconstruction {
             "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, ReconstructionProposals.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
+
+    static void requireManaged(Path work) {
+        for (String file : FILES) McpPaths.managed(work, file);
+    }
 
     static JsonObject importFolder(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
         Path folder = McpPaths.directory(string(args, "folder"));
@@ -118,7 +123,7 @@ final class McpReconstruction {
                 cli.add(McpPaths.input(string(inputs, key)).toString());
             }
         } else {
-            for (String file : FILES) McpPaths.managed(work, file);
+            requireManaged(work);
             if (resume) {
                 cli.add("--from");
                 cli.add(string(args, "from"));
@@ -135,7 +140,7 @@ final class McpReconstruction {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
-                    "transcriber", "transcriberDevice", "refitLevels", "keepVoicing");
+                    "transcriber", "transcriberDevice", "refitLevels", "keepVoicing", "overwriteDetached");
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");
                 cli.add(lane.getAsString());

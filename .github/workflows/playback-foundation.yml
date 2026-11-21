@@ -26,6 +26,12 @@ jobs:
         run: |
           python3 tools/openggf_audio.py check
           python3 -m unittest discover -s tools/tests -v
+      - name: Ensure ffmpeg is available for export tests
+        run: |
+          if ! command -v ffmpeg; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y ffmpeg
+          fi
       - name: Build and test headless playback
         run: mvn -B -pl headless -am verify
       - name: Exercise the stdio MCP server

@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.LoadedProject;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -138,13 +140,35 @@ public final class ReconstructionReview {
         if (!expected.equals(revision(work))) throw new Changed();
     }
 
+    public static final String ARRANGEMENT = "arrangement.smps.json";
+
+    public static LoadedProject arrangement(Path work) throws IOException {
+        var path = work.resolve(ARRANGEMENT);
+        return Files.notExists(path, NOFOLLOW_LINKS) ? null : ProjectFiles.load(path);
+    }
+
+    static LoadedProject requireAttached(Path work, boolean overwriteDetached) throws IOException {
+        var current = arrangement(work);
+        if (current != null && current.project().detachedFromReconstruction() && !overwriteDetached)
+            throw new IOException("The arrangement has hand edits. Save a copy or use --overwrite-detached to replace it.");
+        return current;
+    }
+
+    public static JsonObject apply(Path work, Revision expected, JsonArray entries, ReconstructionStages.Progress progress)
+            throws IOException {
+        return apply(work, expected, entries, null, progress);
+    }
+
     /**
      * Rebuild and compare a private copy. Publish only after the pipeline and comparison finish,
      * and only if the source artifacts and both journals still match the starting revision.
      */
-    public static JsonObject apply(Path work, Revision expected, JsonArray entries, ReconstructionStages.Progress progress)
-            throws IOException {
+    public static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
+                                   ReconstructionStages.Progress progress) throws IOException {
         requireRevision(work, expected);
+        var arrangement = requireAttached(work, detachedRevision != null);
+        if (detachedRevision != null && (arrangement == null || !detachedRevision.equals(arrangement.revision())))
+            throw new Changed();
         var updated = parse(entries);
         var changed = changes(expected.entries(), entries);
         Path scratch = Files.createTempDirectory("reconstruction-review-");
@@ -163,6 +187,9 @@ public final class ReconstructionReview {
                 checkCancelled();
             }
             requireRevision(before, expected);
+            var copied = arrangement(before);
+            if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
+                    copied == null ? null : copied.revision())) throw new Changed();
             String from = stage(before, changed, updated);
             if (expected.voices() != null && ReconstructionStages.Stage.parse(from).ordinal()
                     > ReconstructionStages.Stage.VOICES.ordinal()) {
@@ -171,6 +198,7 @@ public final class ReconstructionReview {
             }
             updated.write(after);
             var args = new ArrayList<>(List.of("--from", from, after.toString()));
+            if (detachedRevision != null) args.add("--overwrite-detached");
             var fromStage = ReconstructionStages.Stage.parse(from);
             if (fromStage.ordinal() <= ReconstructionStages.Stage.VOICE.ordinal()) args.add("--keep-voicing");
             var roles = ReconstructionTrace.optional(before, "roles.json", ReconstructionRoles.Result.class);
@@ -261,7 +289,9 @@ public final class ReconstructionReview {
             }
             requireRevision(work, expected);
             shadow.write(target);
-            var args = new ArrayList<>(List.of("--from", from.name().toLowerCase(Locale.ROOT), target.toString()));
+            // A preview replaces only the arrangement copied into the private replay directory.
+            var args = new ArrayList<>(List.of("--from", from.name().toLowerCase(Locale.ROOT), target.toString(),
+                    "--overwrite-detached"));
             if (from.ordinal() <= ReconstructionStages.Stage.VOICE.ordinal()) args.add("--keep-voicing");
             var roles = ReconstructionTrace.optional(target, "roles.json", ReconstructionRoles.Result.class);
             if (roles != null && from.ordinal() <= ReconstructionStages.Stage.ROLES.ordinal()) {

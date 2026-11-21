@@ -220,7 +220,7 @@ ends, and Studio includes that tail in preview and WAV export.
 
 The DAC lane uses the FM6 hardware channel, with fixed stereo output and
 sample level set by the PCM. Rate controls speed and pitch together. Rate
-`01` is fastest and `00` is slowest. Use **Export package** to include the
+`01` is fastest and `00` is slowest. Use **Export… → SMPS package** to include the
 PCM and native mapping with the track. Try the original
 [DAC percussion example](../../examples/dac-percussion.smps.json).
 
@@ -370,9 +370,9 @@ composer stays available across a refresh. The
 Open the [native bank example](../../examples/native-evening-clock.smps.json)
 to inspect a v5 project. Select an event to highlight its bytes and address
 in **Native bank**. Edit the hex and use **Apply bank** to commit an
-in-place change. Use **Preview frames** to set playback and WAV length.
+in-place change. Use **Preview frames** to set playback length and the export fallback for banks with no detected end or loop.
 Edits use the usual undo, save and external refresh. An unsupported
-instruction appears as a playback diagnostic. **Export package** still
+instruction appears as a playback diagnostic. **Export… → SMPS package** still
 preserves the exact bank and asset bindings.
 
 **Play** previews from the playhead. Space toggles Play/Stop outside text fields.
@@ -383,15 +383,25 @@ resolution is in the project file. Playback and WAV export allow up to ten minut
 and use 48 kHz stereo at 60 NTSC presentations per second with upstream's hardware
 frame budget. No audio device? The app reports the problem; WAV export still works.
 
-**Export WAV** renders the complete clip arrangement plus a short tail, or the
-selected number of presentation frames for a native bank.
-**Export SMPS** writes the baked standalone binary. Choose a new output filename;
-existing files are preserved. A stopped export cleans up its incomplete WAV.
-Local voices are baked into the binary. Projects declaring envelopes or samples require
-**Assets → Export package**, which writes native track/resource bytes plus their
-manifest and source JSON into a new `.smps.zip`. This adapter package is documented
-for engine integration; OpenGGF does not yet load the ZIP directly. Bare binary
-export refuses to drop those dependencies. Preview and WAV export use them.
+Choose **Export…** in Studio or the reconstruction window. WAV and MP3 use
+ffmpeg. Enable **Limit to a span** to enter project seconds, set a fade-out
+duration, or choose separate channel stems with an optional ZIP. A looping
+native bank supports an explicit loop count. VGM captures the full native
+chip-write stream with DAC writes and a loop point when one is found. The
+export runs in the background and reports progress.
+
+For a driver-ready export choose **Raw S3K SMPS** for an arrangement with
+local voices, or **SMPS package** to keep native bank addresses, envelope
+and DAC bindings, resources and editable source. OpenGGF can use the native
+contents via an adapter. OpenGGF currently has no direct ZIP loader.
+
+In the reconstruction window, choose **Open as arrangement** to edit the
+final sequence in the Studio timeline, piano roll and command editor. The
+first hand edit marks the arrangement as **Detached from reconstruction**.
+Save the project to persist that state. Returning to Analysis and pressing
+**Apply** opens a warning for both saved and unsaved hand edits. Cancel,
+keep a sibling copy and apply, save a separate project and apply, or
+explicitly overwrite the arrangement.
 
 Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)

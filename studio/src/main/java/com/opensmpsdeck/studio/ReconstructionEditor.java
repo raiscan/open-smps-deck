@@ -19,6 +19,7 @@ import com.opensmpsdeck.headless.ReconstructionReview.EditResult;
 import com.opensmpsdeck.headless.ReconstructionReview.Revision;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.project.ProjectWatcher;
+import com.opensmpsdeck.project.ProjectDocument;
 import com.opensmpsdeck.studio.ReconstructionTools.Mode;
 import com.opensmpsdeck.studio.ReconstructionTools.Placement;
 import javafx.application.Platform;
@@ -46,6 +47,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static com.opensmpsdeck.studio.ReconstructionDraft.text;
@@ -149,9 +151,12 @@ final class ReconstructionEditor implements AutoCloseable {
     private boolean previewPlaying;
     private List<String> inspectedSelection = List.of();
 
+    private final Supplier<ProjectDocument> openProject;
+
     ReconstructionEditor(Path work, Window owner, ReconstructionCanvas view, Snapshot initial,
                          Consumer<String> status, Consumer<ReconstructionInspection> refresh,
-                         DoubleConsumer previewPosition) {
+                         DoubleConsumer previewPosition, Supplier<ProjectDocument> openProject) {
+        this.openProject = openProject;
         this.work = work;
         this.owner = owner;
         this.view = view;
@@ -979,6 +984,15 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void apply() {
+        DetachedArrangement.Approval approval;
+        try {
+            var decision = DetachedArrangement.confirm(owner, work, openProject.get());
+            if (decision.isEmpty() || closed || apply.isDisabled()) return;
+            approval = decision.get();
+        } catch (IOException | IllegalArgumentException failure) {
+            status.accept("Apply blocked · " + failure.getMessage());
+            return;
+        }
         setBusy();
         var expected = snapshot.revision();
         var intents = forApply(expected.entries(), draft.entries());
@@ -991,7 +1005,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     running = Thread.currentThread();
                     if (cancelling) throw new java.util.concurrent.CancellationException();
                 }
-                diff = ReconstructionReview.apply(work, expected, intents, this::reportProgress);
+                diff = ReconstructionReview.apply(work, expected, intents, approval.revision(), this::reportProgress);
                 next = Snapshot.read(work);
             } catch (Exception error) {
                 failure = error;

@@ -6,6 +6,9 @@ import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionView;
+import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.ReconstructionReview;
+import com.opensmpsdeck.project.ProjectDocument;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -42,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /** Reconstruction workspace with synced playback and a separate reconstruction edit history. */
 final class ReconstructionPane implements AutoCloseable {
@@ -90,6 +94,10 @@ final class ReconstructionPane implements AutoCloseable {
     private boolean closed;
 
     ReconstructionPane(Window owner, Path work) {
+        this(owner, work, null, () -> null);
+    }
+
+    ReconstructionPane(Window owner, Path work, Runnable openArrangement, Supplier<ProjectDocument> openProject) {
         if (owner != null) stage.initOwner(owner);
         var screen = Screen.getPrimary().getVisualBounds();
         var scene = new Scene(root, Math.min(1510, screen.getWidth() * .96), Math.min(920, screen.getHeight() * .93));
@@ -109,6 +117,22 @@ final class ReconstructionPane implements AutoCloseable {
         var project = new Label(folder);
         project.getStyleClass().add("muted");
         var title = new HBox(14, heading, spacer(), project);
+        var arrangement = work.resolve(ReconstructionReview.ARRANGEMENT).toAbsolutePath().normalize();
+        var output = new Button("Export…");
+        output.setId("reconstruction-export");
+        output.setOnAction(event -> {
+            var open = openProject.get();
+            var snapshot = open != null && arrangement.equals(open.path()) ? open.project() : null;
+            ExportDialog.show(stage, false, () -> snapshot == null ? ProjectExport.open(work)
+                    : new ProjectExport.Source(snapshot, work), loader, status::setText);
+        });
+        title.getChildren().add(output);
+        if (openArrangement != null) {
+            var edit = new Button("Open as arrangement");
+            edit.setId("open-as-arrangement");
+            edit.setOnAction(event -> openArrangement.run());
+            title.getChildren().add(edit);
+        }
         title.getStyleClass().add("topbar");
         root.setTop(title);
         stage.show();
@@ -116,7 +140,7 @@ final class ReconstructionPane implements AutoCloseable {
             try {
                 var snapshot = ReconstructionEditor.Snapshot.read(work);
                 Platform.runLater(() -> {
-                    if (!closed) initialize(work, snapshot, title);
+                    if (!closed) initialize(work, snapshot, title, openProject);
                 });
             } catch (Exception failure) {
                 Platform.runLater(() -> {
@@ -132,13 +156,14 @@ final class ReconstructionPane implements AutoCloseable {
         return Executors.newSingleThreadExecutor(runnable -> Thread.ofPlatform().daemon().name(name).unstarted(runnable));
     }
 
-    private void initialize(Path work, ReconstructionEditor.Snapshot snapshot, HBox title) {
+    private void initialize(Path work, ReconstructionEditor.Snapshot snapshot, HBox title,
+                            Supplier<ProjectDocument> openProject) {
         model = snapshot.inspection();
         view = new ReconstructionCanvas(model, status::setText);
         editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh, position -> {
             if (playing || playWhenLoaded) stopPlayback();
             updatePosition(position, true);
-        });
+        }, openProject);
         stage.setOnCloseRequest(event -> { if (!editor.allowClose()) event.consume(); });
         view.onNote = selected -> {
             note = selected;

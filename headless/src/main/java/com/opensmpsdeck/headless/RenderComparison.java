@@ -137,7 +137,7 @@ public final class RenderComparison {
             }
             var result = write(render, reference, mp3 ? wav : output, range, referenceStart, timeline);
             if (mp3) {
-                encodeMp3(wav, encoded);
+                FfmpegAudio.encode(wav, encoded, true);
                 Files.move(encoded, output);
             }
             return result;
@@ -166,24 +166,5 @@ public final class RenderComparison {
     private static void validateRange(WaveFile.Range range) {
         if (range.count() > 60 * PRESENTATIONS_PER_SECOND)
             throw new IllegalArgumentException("A/B comparison range may be at most 60 project seconds");
-    }
-
-    private static void encodeMp3(Path wav, Path output) throws IOException {
-        Process process;
-        try {
-            process = new ProcessBuilder("ffmpeg", "-nostdin", "-v", "error", "-n", "-i", wav.toString(),
-                    "-codec:a", "libmp3lame", "-q:a", "2", output.toString()).redirectErrorStream(true).start();
-        } catch (IOException failure) {
-            throw new IOException("MP3 output requires ffmpeg with libmp3lame on PATH", failure);
-        }
-        try {
-            String diagnostic = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            if (process.waitFor() != 0) throw new IOException("ffmpeg MP3 encoding failed: " + diagnostic.strip());
-        } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-            throw new java.io.InterruptedIOException("MP3 encoding cancelled");
-        } finally {
-            process.destroyForcibly();
-        }
     }
 }

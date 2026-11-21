@@ -173,7 +173,7 @@ public class StudioDesignCapture {
         var bar = root.lookup(".projectbar");
         var play = button(bar, "Play");
         var stop = button(bar, "Stop");
-        var export = button(bar, "Export WAV");
+        var export = button(bar, "Export");
         var actionBounds = export.localToScene(export.getBoundsInLocal());
         if (actionBounds.getMaxX() > window.scene().getWidth()) {
             throw new IllegalStateException("Export control is outside the viewport");

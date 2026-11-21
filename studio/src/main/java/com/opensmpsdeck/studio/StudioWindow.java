@@ -1,10 +1,10 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.NativeArrangement;
-import com.opensmpsdeck.headless.WaveFile;
+import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.CataloguePlayback;
-import com.opensmpsdeck.headless.ProjectPackage;
 import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.project.*;
@@ -61,7 +61,7 @@ public final class StudioWindow implements AutoCloseable {
     private StackPane arrangementSidebar;
     private ScrollPane inspectorScroll;
     private VBox assetBody;
-    private Button songSettings, binaryExport, nativePackageExport, romImport;
+    private Button songSettings, romImport;
     private VBox noteBody;
     private final StudioPlayback playback=new StudioPlayback();
     private final ReviewTransport transport = new ReviewTransport();
@@ -133,12 +133,11 @@ public final class StudioWindow implements AutoCloseable {
         top.getStyleClass().add("topbar");
         title.getStyleClass().add("project-title");title.setMinWidth(0);fileState.getStyleClass().add("file-state");
         songSettings=button("Song settings…",this::settings);
-        binaryExport=button("Export SMPS…",()->export(false));
-        nativePackageExport=button("Export package…",this::exportPackage);
+        Button export = button("Export…", this::export);
+        export.setId("export-project");
         Button playButton=button("▶  Play",this::play),stopButton=button("■  Stop",this::stop);
         playButton.getStyleClass().add("play-action");
-        HBox projectActions=new HBox(8,songSettings,playButton,stopButton,
-                button("Export WAV…",()->export(true)),binaryExport,nativePackageExport);
+        HBox projectActions=new HBox(8,songSettings,playButton,stopButton,export);
         projectActions.setMinWidth(Region.USE_PREF_SIZE);
         projectActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
         for(Node action:projectActions.getChildren()){
@@ -228,8 +227,7 @@ public final class StudioWindow implements AutoCloseable {
         catalogueTab.setId("instrument-catalogue-tab");
         assetKinds.getTabs().setAll(fmAssets,envAssets,dacAssets,catalogueTab);
         assetKinds.getTabs().forEach(tab->tab.setClosable(false));assetKinds.setId("asset-editor-tabs");
-        Button packageExport=button("Export package…",this::exportPackage);packageExport.setId("export-package");
-        HBox assetActions=new HBox(12,label("PROJECT VOICES & ASSETS","section"),spacer(),packageExport);
+        HBox assetActions=new HBox(12,label("PROJECT VOICES & ASSETS","section"));
         assetActions.visibleProperty().bind(assetKinds.getSelectionModel().selectedItemProperty().isNotEqualTo(catalogueTab));
         assetActions.managedProperty().bind(assetActions.visibleProperty());
         assetBody=new VBox(assetActions,assetKinds);VBox.setVgrow(assetKinds,Priority.ALWAYS);
@@ -290,7 +288,8 @@ public final class StudioWindow implements AutoCloseable {
         title.setText(document.project().name()+(document.dirty()?"  *":""));
         stage.setTitle(document.project().name()+(document.dirty()?" *":"")+" — OpenSMPS Studio");
         boolean invalid=document.message().startsWith("Cannot refresh:")||document.message().startsWith("Save failed:");
-        fileState.setText((document.conflicted()?"CONFLICT  ·  ":invalid?"INVALID FILE  ·  ":document.dirty()?"UNSAVED  ·  ":"LIVE  ·  ")+document.path().getFileName()+"  —  "+document.message());
+        fileState.setText((document.conflicted()?"CONFLICT  ·  ":invalid?"INVALID FILE  ·  ":document.dirty()?"UNSAVED  ·  ":"LIVE  ·  ")+document.path().getFileName()+"  —  "+document.message()
+                +(document.project().detachedFromReconstruction()?"  ·  Detached from reconstruction":""));
         fileState.setStyle(document.conflicted()||invalid?"-fx-text-fill: #ffcb77;":"");
     }
     private void refreshView(){
@@ -300,8 +299,6 @@ public final class StudioWindow implements AutoCloseable {
         boolean nativeMode=p.nativeProgram()!=null;
         catalogue.setEditable(!nativeMode);
         songSettings.setVisible(!nativeMode);
-        binaryExport.setVisible(!nativeMode);
-        nativePackageExport.setVisible(nativeMode);
         if(nativeMode&&root.getCenter()!=nativeTabs){
             assetMode.setContent(null);
             nativeAssets.setContent(assetBody);
@@ -551,10 +548,32 @@ public final class StudioWindow implements AutoCloseable {
         };
     }
     private Sequence source(){return document==null?null:document.project().sequences().stream().filter(s->s.id().equals(selectedSequence)).findFirst().orElse(null);}
-    private boolean change(UnaryOperator<StudioProject> transform){
-        try{StudioProject before=document.project(),after=transform.apply(before);if(!after.equals(before)){document.edit(after);history.record(before);stop();}refreshView();return true;}
-        catch(IllegalArgumentException e){error(e);return false;}
+    private boolean change(UnaryOperator<StudioProject> transform) {
+        try {
+            var before = document.project();
+            var after = transform.apply(before);
+            if (!after.equals(before)) {
+                boolean musical = !after.withReview(before.references(), before.notes()).equals(before);
+                if (before.detachedFromReconstruction() || musical && reconstructionWork(document.path()) != null)
+                    after = after.withDetachedFromReconstruction(true);
+                document.edit(after);
+                history.record(before);
+                stop();
+            }
+            refreshView();
+            return true;
+        } catch (IllegalArgumentException failure) {
+            error(failure);
+            return false;
+        }
     }
+
+    private static Path reconstructionWork(Path project) {
+        if (!project.getFileName().toString().equals(ReconstructionReview.ARRANGEMENT)) return null;
+        Path work = project.getParent();
+        return Files.isRegularFile(work.resolve("score.json")) ? work : null;
+    }
+
     private boolean placeItem(Placement item) {
         if (!change(p->GroupEdits.place(p,parentId(),item))) return false;
         selectedClip=item.id();selectedNote=null;
@@ -898,19 +917,40 @@ public final class StudioWindow implements AutoCloseable {
         var chooser = new DirectoryChooser();
         chooser.setTitle("Open reconstruction work directory");
         var folder = chooser.showDialog(stage);
-        if (folder == null) return;
-        if (reconstruction != null) reconstruction.close();
-        var pane = new ReconstructionPane(stage, folder.toPath());
+        if (folder != null) openReconstruction(folder.toPath());
+    }
+
+    void openReconstruction(Path work) {
+        if (reconstruction != null && reconstruction.stage().isShowing()) {
+            reconstruction.stage().close();
+            if (reconstruction != null) return;
+        }
+        var pane = new ReconstructionPane(stage, work, () -> openArrangement(work), () -> document);
         reconstruction = pane;
         pane.stage().addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> {
             if (reconstruction == pane) reconstruction = null;
         });
     }
 
+    private void openArrangement(Path work) {
+        var source = work.resolve(ReconstructionReview.ARRANGEMENT).toAbsolutePath().normalize();
+        if (!source.equals(document.path())) {
+            if (!confirmLeave()) return;
+            try {
+                load(source);
+            } catch (IOException | IllegalArgumentException failure) {
+                error(failure);
+                return;
+            }
+        }
+        stage.toFront();
+        stage.requestFocus();
+    }
+
     private FileChooser chooser(String heading,String extension){FileChooser chooser=new FileChooser();chooser.setTitle(heading);chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extension.equals("json")?"SMPS Studio project":"Export ("+extension+")","*."+extension));return chooser;}
     private void open(){if(!confirmLeave())return;var file=chooser("Open shared project","json").showOpenDialog(stage);if(file!=null)try{load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
     private void saveAs(){var chooser=chooser("Save a project copy (choose a new file)","json");chooser.setInitialFileName("project-copy.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{ProjectFiles.save(file.toPath(),relocateReview(document.project(),document.path(),file.toPath()),null);load(file.toPath());status.setText("Saved project copy");}catch(IOException|IllegalArgumentException e){error(e);}}
-    private static StudioProject relocateReview(StudioProject project, Path original, Path destination) {
+    static StudioProject relocateReview(StudioProject project, Path original, Path destination) {
         return project.withReview(project.references().stream().map(reference -> new AudioReference(reference.id(),
                 reference.label(), AudioReference.pathFor(destination, reference.resolve(original)),
                 reference.offsetSeconds(), reference.gainDb(), reference.role())).toList(), project.notes());
@@ -1110,15 +1150,11 @@ public final class StudioWindow implements AutoCloseable {
         if(document==null||!document.dirty())return true;
         ButtonType save=new ButtonType("Save"),discard=new ButtonType("Discard local edits");Alert prompt=new Alert(Alert.AlertType.CONFIRMATION,"This project has unsaved edits.",save,discard,ButtonType.CANCEL);prompt.initOwner(stage);prompt.setHeaderText("Keep your changes?");var choice=prompt.showAndWait().orElse(ButtonType.CANCEL);return choice.equals(discard)||(choice.equals(save)&&save());
     }
-    private void export(boolean wav){
-        var chooser=chooser(wav?"Export WAV (choose a new file)":"Export baked SMPS (choose a new file)",wav?"wav":"bin");chooser.setInitialFileName(wav?"track.wav":"track.bin");var file=chooser.showSaveDialog(stage);if(file==null)return;
-        StudioProject snapshot=document.project();status.setText("Exporting…");
-        io.submit(()->{try{var compiled=ProjectCompiler.compileWithAssets(snapshot);if(wav)WaveFile.render(compiled,file.toPath(),StudioPlayback.presentationCount(snapshot));else {if(compiled.requiresAssets())throw new IllegalArgumentException("Use Export package to keep this project's native bank metadata and dependencies.");Files.write(file.toPath(),compiled.song(),StandardOpenOption.CREATE_NEW);}Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
-    }
-    private void exportPackage(){
-        var chooser=chooser("Export native track and assets (choose a new file)","zip");chooser.setInitialFileName("track.smps.zip");var file=chooser.showSaveDialog(stage);if(file==null)return;
-        StudioProject snapshot=document.project();status.setText("Exporting native package…");
-        io.submit(()->{try{ProjectPackage.write(snapshot,file.toPath());Platform.runLater(()->{if(!closed)status.setText("Exported "+file.getName());});}catch(Exception e){Platform.runLater(()->{if(!closed)error(e);});}});
+    private void export() {
+        var project = document.project();
+        var work = reconstructionWork(document.path());
+        ExportDialog.show(stage, project.nativeProgram() != null, () -> new ProjectExport.Source(project, work),
+                io, status::setText);
     }
     private void error(Exception e){status.setText("Could not apply: "+e.getMessage());}
     @Override public void close(){if(closed)return;closed=true;if(reconstruction!=null)reconstruction.close();if(watcher!=null)watcher.close();playback.close();timeline.referenceLane.close();nativeArrangement.timeline.referenceLane.close();samples.close();nativeArrangement.close();catalogue.close();io.shutdownNow();}

@@ -152,7 +152,8 @@ public final class GroupEdits {
             int version = groups.isEmpty() && songGroups.isEmpty() ? project.formatVersion() : 6;
             var updated = new StudioProject(version, project.name(), project.mode(), project.ticksPerBeat(),
                     project.tempo(), project.voices(), project.sequences(), songClips, project.envelopes(),
-                    project.samples(), null, project.references(), project.notes(), project.arrangementVersion(), groups, songGroups);
+                    project.samples(), null, project.references(), project.notes(), project.arrangementVersion(), groups, songGroups,
+                    project.detachedFromReconstruction());
             ProjectFormat.validate(updated);
             return updated;
         }
