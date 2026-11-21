@@ -40,6 +40,13 @@ conditions per song. For a custom corpus pass `--songs 0x01,0x15` to
 `build-corpus`. IDs accept decimal and hexadecimal. `run --quick` filters
 the manifest to the preset IDs.
 
+The quick baseline now uses the S3K layering preset. Keep the original
+dry-output scorecard when comparing across this default change. The scorer
+counts all rendered note gates, including echoes and octave copies, and
+can choose a PSG octave as the highest sustained melody. Use the refreshed
+layered scorecard for subsequent zero-tolerance comparisons on the same
+corpus and catalogue.
+
 Each song has three MIDI representations and three reference conditions.
 
 | MIDI | Input |

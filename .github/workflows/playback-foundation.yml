@@ -28,6 +28,7 @@ jobs:
           python3 -m unittest discover -s tools/tests -v
           python3 -m unittest discover -s tools/transcribers/basic-pitch -v
           python3 -m unittest discover -s tools/transcribers/adtof -v
+          python3 -m unittest discover -s tools/transcribers/rmvpe -v
       - name: Ensure ffmpeg is available for export tests
         run: |
           if ! command -v ffmpeg; then

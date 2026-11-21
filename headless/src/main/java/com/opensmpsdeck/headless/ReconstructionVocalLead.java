@@ -58,7 +58,8 @@ final class ReconstructionVocalLead {
         return Math.min(1.3, (.70 * fundamental + harmonic) / level);
     }
 
-    record Comparison(double voicedSeconds, double coveredSeconds, double coverage, double pitchAgreement) {
+    record Comparison(double voicedSeconds, double coveredSeconds, double coverage, double pitchAgreement,
+                      double f0ComparableSeconds) {
         double score() {
             return coverage + pitchAgreement == 0 ? 0 : 2 * coverage * pitchAgreement / (coverage + pitchAgreement);
         }
@@ -85,16 +86,9 @@ final class ReconstructionVocalLead {
 
     static Selection select(int part, ExternalTranscribers.PartNotes imported, ReconstructionLeadAudio.Track track,
                              double duration) {
-        var encoded = imported.provenance().metadata().get("f0Midi10ms");
+        var metadata = imported.provenance().metadata();
         int[] rawPeriodic = periodicContour(track);
         int[] periodic = smooth(rawPeriodic);
-        int[] f0 = periodic;
-        if (encoded != null && !encoded.isBlank()) {
-            var alternate = modelContour(track, encoded);
-            for (int frame = 0; frame < rawPeriodic.length; frame++)
-                if (rawPeriodic[frame] == 0) rawPeriodic[frame] = alternate[frame];
-            f0 = smooth(rawPeriodic);
-        }
         double floor = voicedFloor(track, periodic.length);
         int voiced = 0;
         double energy = 0;
@@ -105,34 +99,82 @@ final class ReconstructionVocalLead {
         }
         double rms = periodic.length == 0 ? 0 : Math.sqrt(energy / periodic.length);
         var raw = imported.notes();
-        var metadata = imported.provenance().metadata();
-        if (!metadata.containsKey("vocalFirstNoteCount")) {
-            return new Selection(clean(part, ReconstructionStemParts.notes(part, raw, duration, true),
-                    track, f0), voiced * HOP, rms);
+        var gson = new com.google.gson.Gson();
+        var tools = metadata.containsKey("vocalCandidates")
+                ? gson.fromJson(metadata.get("vocalCandidates"), ExternalTranscribers.Evidence[].class)
+                : new ExternalTranscribers.Evidence[]{imported.provenance()};
+        int[] cleanup = periodic;
+        var encoded = metadata.get("f0Midi10ms");
+        if (encoded != null && !encoded.isBlank()) {
+            var alternate = modelContour(track, encoded);
+            for (int frame = 0; frame < rawPeriodic.length; frame++)
+                if (rawPeriodic[frame] == 0) rawPeriodic[frame] = alternate[frame];
+            cleanup = smooth(rawPeriodic);
         }
-        int split = Integer.parseInt(metadata.get("vocalFirstNoteCount"));
-        ReconstructionArtifacts.require(split >= 0 && split <= raw.size(), "vocalFirstNoteCount", "outside the note snapshot");
-        var tools = imported.provenance().tool().split(",", -1);
-        ReconstructionArtifacts.require(tools.length == 2, "vocalCandidates", "expected two transcriber names");
-        var groups = List.of(raw.subList(0, split), raw.subList(split, raw.size()), raw);
+
+        // Use the same, model-independent reference for every candidate in this comparison.
+        boolean hasSegmentedF0 = Arrays.stream(tools).anyMatch(tool -> tool.metadata().containsKey("f0Cents10ms"));
+        int[] reference = hasSegmentedF0 ? periodic : cleanup;
         var report = new java.util.LinkedHashMap<String, Comparison>();
-        var bestNotes = List.<Note>of();
-        String bestName = null;
-        double bestScore = -1;
-        for (int i = 0; i < groups.size(); i++) {
-            String name = i == 2 ? "fusion" : tools[i];
-            var notes = clean(part, ReconstructionStemParts.notes(part, groups.get(i), duration, true), track, f0);
-            var measurement = compare(track, f0, notes);
-            report.put(name, measurement);
-            if (measurement.score() > bestScore + 1e-9) {
-                bestScore = measurement.score();
-                bestNotes = notes;
-                bestName = name;
+        var candidates = new java.util.LinkedHashMap<String, List<Note>>();
+        var fusion = new ArrayList<ExternalTranscribers.RawNote>();
+        int polyphonicTools = 0;
+        int offset = 0;
+        for (var tool : tools) {
+            int end = offset + tool.noteCount();
+            ReconstructionArtifacts.require(end >= offset && end <= raw.size(), "vocalCandidates", "invalid note count");
+            var source = raw.subList(offset, end);
+            offset = end;
+            var notes = ReconstructionStemParts.notes(part, source, duration, true);
+            var f0 = tool.metadata().get("f0Cents10ms");
+            if (f0 != null) {
+                candidates.put(tool.tool(), contourNotes(notes, f0, track.frames()));
+            } else {
+                candidates.put(tool.tool(), clean(part, notes, track, cleanup));
+                fusion.addAll(source);
+                polyphonicTools++;
             }
         }
-        metadata.put("vocalSelection", bestName);
-        metadata.put("vocalComparison", new com.google.gson.Gson().toJson(report));
-        return new Selection(bestNotes, voiced * HOP, rms);
+        ReconstructionArtifacts.require(offset == raw.size(), "vocalCandidates", "note counts do not match snapshot");
+        if (polyphonicTools > 1)
+            candidates.put("fusion", clean(part, ReconstructionStemParts.notes(part, fusion, duration, true), track, cleanup));
+
+        String best = null;
+        double bestScore = -1;
+        for (var candidate : candidates.entrySet()) {
+            var measurement = compare(track, reference, candidate.getValue());
+            report.put(candidate.getKey(), measurement);
+            if (measurement.score() > bestScore + 1e-9) {
+                best = candidate.getKey();
+                bestScore = measurement.score();
+            }
+        }
+        if (tools.length > 1 || hasSegmentedF0) {
+            metadata.put("vocalSelection", best);
+            metadata.put("vocalComparison", gson.toJson(report));
+            metadata.put("vocalReference", hasSegmentedF0 ? "stem-periodicity" : "stem-periodicity-with-model-gap-fill");
+        }
+        return new Selection(candidates.getOrDefault(best, List.of()), voiced * HOP, rms);
+    }
+
+    private static List<Note> contourNotes(List<Note> notes, String encoded, int frames) {
+        byte[] bytes = java.util.Base64.getDecoder().decode(encoded);
+        ReconstructionArtifacts.require(bytes.length % 2 == 0, "f0Cents10ms", "expected 16-bit samples");
+        var contour = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer();
+        return notes.stream().sorted(ReconstructionStages.NOTE_ORDER).map(note -> {
+            if (note.end() - note.start() < .18) return note;
+            int from = Math.min(contour.limit(), (int) Math.ceil((note.start() + .02) / HOP));
+            int to = Math.min(Math.min(frames, contour.limit()), (int) Math.floor((note.end() - .02) / HOP));
+            var samples = new ArrayList<ReconstructionBends.Sample>();
+            for (int frame = from; frame < to; frame++) {
+                int pitch = Short.toUnsignedInt(contour.get(frame));
+                int cents = pitch - note.pitch() * 100;
+                if (pitch == 0 || Math.abs(cents) > 120) return note;
+                samples.add(new ReconstructionBends.Sample(frame * HOP, cents, .9));
+            }
+            var bend = ReconstructionBends.classify(note, samples);
+            return bend == null ? note : note.withBend(bend);
+        }).toList();
     }
 
     private static int[] modelContour(ReconstructionLeadAudio.Track track, String encoded) {
@@ -161,7 +203,7 @@ final class ReconstructionVocalLead {
             }
         }
         return new Comparison(voiced * HOP, covered * HOP, voiced == 0 ? 0 : covered / (double) voiced,
-                comparable == 0 ? 0 : agrees / (double) comparable);
+                comparable == 0 ? 0 : agrees / (double) comparable, comparable * HOP);
     }
 
     private static double voicedFloor(ReconstructionLeadAudio.Track track, int frames) {
