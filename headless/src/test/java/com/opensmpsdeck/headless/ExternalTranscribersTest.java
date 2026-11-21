@@ -234,6 +234,8 @@ class ExternalTranscribersTest {
 
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         assertNull(score.inputs().midi());
+        assertEquals("s3k-layering", ReconstructionArtifacts.read(work.resolve("voicing.json"),
+                ReconstructionVoicing.Result.class).lanePolicies().preset());
         assertEquals("audio-only", score.inputs().audioOnly().source());
         assertEquals("fixture", score.inputs().audioOnly().transcriber());
         assertEquals("spectral", score.inputs().audioOnly().drumDetector().name());
@@ -258,12 +260,53 @@ class ExternalTranscribersTest {
         assertTrue(run(2, missing).contains("needs a configured transcriber"));
     }
 
+    @Test void snapshotsFallbackDrumsAndKeepsLayeringOffAcrossStagedRunAndReplay() throws Exception {
+        var catalogue = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        catalogue.build().save(directory.resolve("index.json"));
+
+        Path config = directory.resolve("separators.json");
+        Path adapter = directory.resolve("separator.sh");
+        Files.writeString(adapter, """
+                set -eu
+                mkdir "$2/stems"
+                cp "$1" "$2/mix.wav"
+                cp "$1" "$2/stems/drums.wav"
+                cat > "$2/separation.json" <<'JSON'
+                {"tool":"fixture","model":"fixture","version":"1","checkpointSha256":"0000000000000000000000000000000000000000000000000000000000000000","settings":{},"stemOrder":["drums"]}
+                JSON
+                """);
+        Files.writeString(config, new Gson().toJson(Map.of("bs-roformer",
+                List.of("sh", adapter.toString(), "{input}", "{outputDir}", "{device}"))));
+        Path work = directory.resolve("separated");
+        run(0, fresh(work, "--separator-config", config.toString(), "--lane-policy-preset", "off"));
+        var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+        assertEquals("fixture", manifest.drumSeparation().get("tool").getAsString());
+        var drum = manifest.inputs().get(manifest.partToStem().get(2));
+        assertTrue(drum.snapshot().endsWith(".wav"));
+        assertEquals(-1, Files.mismatch(wav, work.resolve(drum.snapshot())));
+        Files.delete(config);
+        run(0, List.of("reconstruct", "run", "--from", "structure", work.toString()));
+        assertNull(ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class).lanePolicies());
+
+        Path replay = directory.resolve("separated-replay");
+        run(0, List.of("reconstruct", "rerun", work.toString(), replay.toString()));
+        assertEquals(-1, Files.mismatch(work.resolve("render.wav"), replay.resolve("render.wav")));
+        var replayScore = ReconstructionStages.readScore(replay.resolve("score.json"));
+        assertEquals(replay.resolve(drum.snapshot()).toString(), replayScore.inputs().stems().get(2));
+        assertNull(ReconstructionArtifacts.read(replay.resolve("voicing.json"), ReconstructionVoicing.Result.class).lanePolicies());
+    }
+
     @Test void selectsRoleDefaultsAndOverridesIncludingAnExternalDrumDetector() throws Exception {
         Path config = directory.resolve("transcribers.json");
         Path fixture = Path.of(TranscriberFixture.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         var command = List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", fixture.toString(), TranscriberFixture.class.getName(), "{input}", "{output}", "{role}", "{device}");
-        Files.writeString(config, new Gson().toJson(Map.of("keys", command, "voice", command, "override", command,
+        Files.writeString(config, new Gson().toJson(Map.of("keys", command, "voice", command, "override", command, "extra", command,
                 "defaults", Map.of("vocals", "voice", "keyboard", "keys", "drums", "drum-model"),
                 "drumTranscribers", Map.of("drum-model", command))));
         Path keyboard = Files.copy(wav, directory.resolve("keyboard.wav"));
@@ -272,13 +315,14 @@ class ExternalTranscribersTest {
         run(0, List.of("reconstruct", "transcribe", "--audio-only", wav.toString(),
                 directory.resolve("index.json").toString(), work.toString(), "--stem", "vocals=" + wav,
                 "--stem", "keyboard=" + keyboard, "--stem", "drums=" + drum, "--transcriber-config", config.toString(),
-                "--transcriber-for", "vocals=override,voice", "--transcriber-device", "cuda:0", "--tempo", "110"));
+                "--transcriber-for", "vocals=override,voice,extra", "--transcriber-device", "cuda:0", "--tempo", "110"));
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var provenance = score.inputs().externalNotes().get(1).provenance();
-        assertEquals("override,voice", provenance.tool());
+        assertEquals("override,voice,extra", provenance.tool());
         assertEquals("2", provenance.metadata().get("vocalFirstNoteCount"));
         assertEquals("override", provenance.metadata().get("vocalSelection"));
         assertTrue(provenance.metadata().get("vocalComparison").contains("fusion"));
+        assertTrue(provenance.metadata().get("vocalComparison").contains("extra"));
         var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
         assertEquals("vocal-candidates.json", manifest.externalNotes().get(1).file().basename());
         assertEquals("keys", score.inputs().externalNotes().get(2).provenance().tool());

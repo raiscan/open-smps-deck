@@ -49,7 +49,7 @@ final class McpReconstruction {
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
-            choice("lanePolicyPreset", "Replace lane policies when rebuilding an existing work directory", "s3k-layering", "off").optional(),
+            choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
@@ -106,7 +106,8 @@ final class McpReconstruction {
                 .forEach(entry -> transcriberFor.put(entry.getKey(), entry.getValue().getAsString()));
         return SunoImport.inspect(folder, work, catalogue, assign, exclude,
                 optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, transcriberFor,
-                optional(args, "drumDetector"), optional(args, "transcriberDevice"), null, progress).json();
+                optional(args, "drumDetector"), optional(args, "transcriberDevice"), null,
+                optional(args, "lanePolicyPreset"), null, progress).json();
     }
 
 

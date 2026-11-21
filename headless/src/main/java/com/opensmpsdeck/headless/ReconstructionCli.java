@@ -97,6 +97,7 @@ final class ReconstructionCli {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
+        out.println("           [--lane-policy-preset s3k-layering|off] [--separator-config FILE] (also on import)");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
         out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-for ROLE=NAME ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
@@ -698,6 +699,8 @@ final class ReconstructionCli {
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
             if (!result.layers().isEmpty()) reportJson.add("noteLayers", json.toJsonTree(result.layers()));
+            if (!result.lanePolicyCopies().isEmpty())
+                reportJson.add("lanePolicyCopies", json.toJsonTree(result.lanePolicyCopies()));
             if (!result.policyCoverage().isEmpty()) {
                 var policyReport = new com.google.gson.JsonArray();
                 for (var coverage : result.policyCoverage()) {

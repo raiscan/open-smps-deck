@@ -113,10 +113,10 @@ public final class ExternalTranscribers {
 
     private static List<String> names(String role, String value) {
         var result = List.of(value.split(",", -1));
-        require((result.size() == 1 || result.size() == 2 && role.equals("vocals")
-                        && !result.getFirst().equals(result.getLast()))
+        require((result.size() == 1 || result.size() <= 3 && role.equals("vocals")
+                        && new java.util.HashSet<>(result).size() == result.size())
                         && result.stream().allMatch(name -> LABEL.matcher(name).matches()),
-                "Transcribers", "expected one command name or two distinct commands for vocals");
+                "Transcribers", "expected one command name or up to three distinct commands for vocals");
         return result;
     }
 
@@ -178,7 +178,7 @@ public final class ExternalTranscribers {
                     if (selectedNames.size() == 1) {
                         result.put(part, run(config.tonal.get(selected), selected, configHash, input, role, device, part, capture));
                     } else {
-                        require(audioOnly, context, "two-command vocal selection requires audio-only mode");
+                        require(audioOnly, context, "multi-command vocal selection requires audio-only mode");
                         var contenders = new ArrayList<PartNotes>();
                         for (String tool : selectedNames)
                             contenders.add(run(config.tonal.get(tool), tool, configHash, input, role, device, part, null));
