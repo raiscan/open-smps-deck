@@ -303,6 +303,124 @@ class ReconstructionEditsTest {
         assertEquals(0, ReconstructionTrace.diff(work, replay, null).getAsJsonArray("changes").size());
     }
 
+    @Test void splitAndMergePreviewScoreGatesAndSurviveTranscribeReplay(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("theme.mid"), catalogue = dir.resolve("catalogue.json"), wav = dir.resolve("mix.wav");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--tempo", "120", "--steady-tempo", "80");
+        String split = """
+                {"id":"cut","op":"splitNote","reason":"re-attack","selector":{"at":0,"pitch":60,"part":0},
+                 "at":0.3,"timeBase":"project","pitch":61}
+                """;
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", split));
+        assertFalse(Files.exists(work.resolve("edits.json")));
+        assertFalse(Files.exists(work.resolve("edit-results.json")));
+        var result = preview.getAsJsonArray("outcomes").get(0).getAsJsonObject().getAsJsonArray("resultNotes");
+        assertEquals(2, result.size());
+        assertEquals(.2, result.get(1).getAsJsonObject().get("start").getAsDouble(), 1e-9);
+        assertEquals(61, result.get(1).getAsJsonObject().get("pitch").getAsInt());
+
+        add(work, split, false);
+        add(work, """
+                {"id":"join","op":"mergeNotes","reason":"sustained slide","glide":true,
+                 "selectors":[{"at":1.25,"pitch":62,"part":0},{"at":0.5,"pitch":67,"part":0}]}
+                """, false);
+        add(work, """
+                {"id":"lead","op":"setRole","reason":"keep both attacks and the slide on FM",
+                 "noteIds":["edit-cut-left","edit-cut-right","n-0-500000-67"],"role":"melody","lane":"FM1"}
+                """, false);
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        var trace = ReconstructionTrace.read(work);
+        var left = trace.get("edit-cut-left");
+        var right = trace.get("edit-cut-right");
+        assertEquals("edit:cut", trace.get("n-0-0-60").reason());
+        assertEquals("edit:cut", right.editReasons().getFirst());
+        assertEquals("FM1", left.allocation().lane());
+        assertEquals("FM1", right.allocation().lane());
+        assertEquals(left.effectiveTiming().endTick(), right.effectiveTiming().startTick());
+        var landing = trace.get("n-0-1250000-62");
+        assertEquals("edit:join", landing.reason());
+        assertEquals("n-0-500000-67", landing.scoreDecision().successorId());
+        var glide = trace.get("n-0-500000-67");
+        assertEquals(-500, glide.score().note().bend().points().getLast().cents());
+        assertEquals("edit:join", glide.voiced().getFirst().bend().reason());
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        assertEquals(trace, ReconstructionTrace.read(work));
+    }
+
+    @Test void spanMergeKeepsTheFirstAttackAndRejectsConflictsAtomically() {
+        var notes = List.of(note("first", .10, .22, 60), note("repeat", .25, .32, 60),
+                note("last", .37, .64, 60), note("neighbor", .25, .45, 64),
+                new Note("different-part", 1, .25, .64, 60, 90, "midi", 1));
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false),
+                        new MidiScore.Part(1, "Other synth", 0, false)), List.of(), List.of()), Map.of(),
+                notes, List.of(), List.of(), null, null);
+        var merge = intent("""
+                {"id":"sustain","op":"mergeNotes","reason":"collapse re-attacks","part":0,"pitch":60,"span":[0.1,0.4]}
+                """);
+        var delete = intent("""
+                {"id":"delete","op":"deleteNote","reason":"unwanted repeat","noteId":"repeat"}
+                """);
+        for (var intents : List.of(List.of(delete, merge), List.of(merge, delete))) {
+            var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+            var result = new ReconstructionEdits(intents).applyScore(score, outcomes);
+            assertEquals(.22, result.notes().stream().filter(n -> n.id().equals("first")).findFirst().orElseThrow().end());
+            var conflict = outcomes.stream().filter(o -> o.id().equals("sustain")).findFirst().orElseThrow();
+            assertEquals(ReconstructionEdits.Status.conflict, conflict.status());
+            assertTrue(conflict.detail().contains("edit:delete"));
+        }
+
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var result = new ReconstructionEdits(List.of(merge)).applyScore(score, outcomes);
+        assertEquals(List.of("first", "neighbor", "different-part"), result.notes().stream().map(Note::id).toList());
+        assertEquals(.64, result.notes().getFirst().end());
+        assertEquals(List.of("repeat", "last"), outcomes.getFirst().removedNotes().stream().map(Note::id).toList());
+
+        for (var pair : List.of(List.of("first", "different-part"), List.of("first", "neighbor"),
+                List.of("first", "missing"))) {
+            outcomes.clear();
+            var invalid = intent("""
+                    {"id":"invalid","op":"mergeNotes","reason":"invalid pair","noteIds":["%s","%s"]}
+                    """.formatted(pair.getFirst(), pair.getLast()));
+            assertSame(score, new ReconstructionEdits(List.of(invalid)).applyScore(score, outcomes));
+            assertTrue(List.of(ReconstructionEdits.Status.invalid, ReconstructionEdits.Status.orphaned)
+                    .contains(outcomes.getFirst().status()));
+        }
+    }
+
+    @Test void laneTypesRespectAffinityAndDoNotSpillWhenFull() {
+        var type = ReconstructionEdits.LaneType.PSG;
+        var pins = new java.util.LinkedHashMap<String, ReconstructionEdits.Pin>();
+        var decisions = new ArrayList<ReconstructionRoles.Decision>();
+        for (int i = 0; i < 4; i++) {
+            Note note = note("backing-" + i, .1, .4, 60 + i);
+            pins.put(note.id(), new ReconstructionEdits.Pin(null, "psg", i + 1, type));
+            decisions.add(new ReconstructionRoles.Decision(note, Role.harmony, null, null));
+        }
+        var roles = new ReconstructionRoles.Result(1, 7.5, decisions, null, null, pins);
+        var parts = List.of(new MidiScore.Part(0, "Synth", 0, false));
+        var allocation = ReconstructionAllocation.allocateWithAffinity(roles, parts, 60, false, false,
+                Map.of("backing-0", "PSG2", "backing-1", "FM4"));
+        var notes = allocation.notes();
+        assertEquals("PSG2", notes.getFirst().lane());
+        assertEquals(java.util.Set.of("PSG1", "PSG2", "PSG3"),
+                java.util.Set.copyOf(notes.subList(0, 3).stream().map(ReconstructionAllocation.Entry::lane).toList()));
+        assertEquals(ReconstructionAllocation.Outcome.dropped, notes.getLast().outcome());
+        assertEquals(type, notes.getLast().laneType());
+        assertNull(notes.getLast().lane());
+        assertTrue(notes.getLast().reason().contains("edit:psg"));
+
+        assertNull(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true,
+                ReconstructionEdits.LaneType.NOISE, false));
+        assertTrue(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true, type, false)
+                .contains("cannot voice MIDI drums"));
+        assertTrue(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true,
+                ReconstructionEdits.LaneType.FM, false).contains("FM percussion voicing"));
+    }
+
     private static Note note(String id, double start, double end, int pitch) {
         return new Note(id, 0, start, end, pitch, 90, "midi", 1);
     }

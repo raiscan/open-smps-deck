@@ -185,6 +185,23 @@ def smoke(jar, root):
                                  "noteIds": [target], "fromRole": "counter", "role": "melody"})
         assert preview["notes"][0]["noteId"] == target and preview["notes"][0]["satisfied"]
         assert preview["outcomes"][0]["status"] == "satisfied" and not (work / "edits.json").exists()
+        scored = trace[0]["score"]
+        source = scored["note"]
+        cut_at = (source["start"] + source["end"]) / 2
+        split = {"id": "split-preview", "reason": "Synthetic cut", "op": "splitNote", "noteId": target, "at": cut_at}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=split, dryRun=True)
+        assert [n["id"] for n in preview["outcomes"][0]["resultNotes"]] == [
+            "edit-split-preview-left", "edit-split-preview-right"]
+        merge = {"id": "merge-preview", "reason": "Synthetic join", "op": "mergeNotes",
+                 "noteIds": ["edit-split-preview-left", "edit-split-preview-right"]}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edits=[split, merge], dryRun=True)
+        assert preview["outcomes"][1]["resultNotes"][0]["id"] == "edit-split-preview-left"
+        assert preview["outcomes"][1]["removedNotes"][0]["id"] == "edit-split-preview-right"
+        pin = {"id": "type-preview", "reason": "Keep existing FM type", "op": "pinLane",
+               "noteIds": [target], "laneType": "FM"}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=pin, dryRun=True)
+        assert preview["outcomes"][-1]["laneType"] == "FM" and preview["outcomes"][-1]["lane"] == "FM1"
+        assert not (work / "edits.json").exists()
         artifact_hashes = {name: hashlib.sha256(Path(path).read_bytes()).digest()
                            for name, path in files.items()}
         view = rpc.request("tools/call", name="reconstruct_view", arguments={

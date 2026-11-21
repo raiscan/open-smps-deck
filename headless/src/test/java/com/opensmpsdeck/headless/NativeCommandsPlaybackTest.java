@@ -81,6 +81,54 @@ class NativeCommandsPlaybackTest {
                 .map(Write::value).distinct().count() > 1, "modulation must alter frequency before off");
     }
 
+    @Test void f0VibratoMatchesTheDocumentedRateAndDepth() throws Exception {
+        var project = project("FM", 36, List.of(new NoteEvent("note", 0, 36, 60)),
+                List.of(command("mod", 0, NativeCommand.MODULATION, 1, 1, 8, 6)), "RESET", 36);
+        var actual = observe(ProjectCompiler.compile(project), 36);
+        var fnums = new ArrayList<Integer>();
+        for (int frame = 0; frame < 24; frame++)
+            fnums.add((frequency(actual, frame, 0xA4) & 7) * 256 + frequency(actual, frame, 0xA0));
+        assertEquals(644 + 24, java.util.Collections.max(fnums));
+        assertEquals(644 - 24, java.util.Collections.min(fnums));
+        assertEquals(fnums.subList(0, 12), fnums.subList(12, 24));
+        assertEquals(1, keyOns(actual));
+    }
+
+    @Test void toneThreePeriodicNoiseSoundsAtTheRequestedPitch() throws Exception {
+        int pitch = 60;
+        assertTrue(ReconstructionPitchedNoise.playable(pitch));
+        assertFalse(ReconstructionPitchedNoise.playable(12));
+        assertFalse(ReconstructionPitchedNoise.playable(106));
+        var sequence = new Sequence("noise", "Periodic noise", "PSG", 60, null, 127,
+                List.of(new NoteEvent("clock", 0, 60, ReconstructionCymbals.PITCH)),
+                List.of(command("noise-mode", 0, NativeCommand.PSG_NOISE, ReconstructionPitchedNoise.COMMAND),
+                        command("period", 0, NativeCommand.DETUNE,
+                                ReconstructionPitchedNoise.detune(pitch) & 255)), "RESET");
+        var project = new StudioProject(4, "Periodic noise tuning", "S3K", 24, 0, List.of(),
+                List.of(sequence), List.of(new Clip("clip", "noise", "PSG3", 0, 60)));
+        var pcm = java.nio.ByteBuffer.wrap(observe(ProjectCompiler.compile(project), 60).pcm())
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        double best = -1;
+        int bestLag = 0;
+        for (int lag = 165; lag <= 200; lag++) {
+            double cross = 0, a2 = 0, b2 = 0;
+            for (int i = 4_800; i < 24_000; i++) {
+                double a = pcm.getShort(i * 4);
+                double b = pcm.getShort((i + lag) * 4);
+                cross += a * b;
+                a2 += a * a;
+                b2 += b * b;
+            }
+            double correlation = cross / Math.sqrt(a2 * b2);
+            if (correlation > best) {
+                best = correlation;
+                bestLag = lag;
+            }
+        }
+        assertTrue(best > .90);
+        assertEquals(48_000.0 / 261.626, bestLag, 5);
+    }
+
     @Test void psgModulationAndVolumeKeepTheirNativeContinuationBehavior() throws Exception {
         StudioProject project = project("PSG", 12, List.of(new NoteEvent("note", 0, 12, 60)),
                 List.of(command("mod", 0, NativeCommand.MODULATION, 1, 1, 2, 6),

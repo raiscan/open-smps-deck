@@ -317,8 +317,11 @@ final class ReconstructionChecks {
             var decision = notes.get(target.getKey());
             var pin = target.getValue();
             require(decision != null && pin.order() > 0 && nonblank(pin.editId())
-                            && ReconstructionEdits.pinCompatible(decision.note(), decision.role() == Role.drums,
-                                    pin.lane(), score.inputs().fmOnly()),
+                            && (pin.laneType() == null
+                            ? ReconstructionEdits.pinCompatible(decision.note(), decision.role() == Role.drums,
+                                    pin.lane(), score.inputs().fmOnly())
+                            : pin.lane() == null && decision.role() != Role.drop && ReconstructionEdits.laneTypeIssue(
+                                    decision.note(), decision.role() == Role.drums, pin.laneType(), score.inputs().fmOnly()) == null),
                     at + ".lanePins." + target.getKey(), "invalid pin for the assigned note");
         }
         for (var choice : roles.notes()) {
@@ -376,7 +379,11 @@ final class ReconstructionChecks {
             }
             String lane = entry.lane();
             boolean pinned = entry.pinnedLane() != null && entry.pinnedLane().equals(lane) && entry.role() != Role.drop
-                    && ReconstructionEdits.pinCompatible(entry.note(), entry.role() == Role.drums, lane, score.inputs().fmOnly());
+                    && (entry.laneType() == null
+                    ? ReconstructionEdits.pinCompatible(entry.note(), entry.role() == Role.drums, lane, score.inputs().fmOnly())
+                    : entry.laneType().lanes().contains(lane) && ReconstructionEdits.laneTypeIssue(
+                            entry.note(), entry.role() == Role.drums, entry.laneType(), score.inputs().fmOnly()) == null);
+            require(entry.laneType() == null || entry.pinnedLane() != null, where, "lane type requires a pinned placement");
             require(lane != null && (entry.pinnedLane() != null ? pinned : switch (entry.role()) {
                 case melody -> lane.equals("FM1");
                 case bass -> lane.equals("FM2");

@@ -457,6 +457,9 @@ and `pitchPreset`.
 java -jar "$jar" reconstruct edit "$work" add   '{"id":"answer","reason":"second attack audible in stem","op":"insertNote","part":0,"start":12.5,"end":12.8,"pitch":68,"lane":"FM1","role":"melody"}'
 java -jar "$jar" reconstruct run --from transcribe "$work"
 java -jar "$jar" reconstruct edit "$work" add --file batch.json
+java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"cut","reason":"mark the second attack","op":"splitNote","noteId":"NOTE_ID","at":12.75}'
+java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"sustain","reason":"join repeated attacks","op":"mergeNotes","part":0,"pitch":64,"span":[15.2,16.8]}'
+java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"backing","reason":"use PSG tone","op":"pinLane","noteIds":["NOTE_ID"],"laneType":"PSG"}'
 java -jar "$jar" reconstruct edit "$work" list
 java -jar "$jar" reconstruct edit "$work" remove answer
 ```
