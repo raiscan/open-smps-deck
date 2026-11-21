@@ -7,7 +7,9 @@ import com.google.gson.JsonPrimitive;
 import com.opensmpsdeck.headless.rom.RomExport;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.headless.rom.RomTarget;
 import com.opensmpsdeck.headless.rompatch.RomPatch;
+import com.opensmpsdeck.headless.rompatch.S1RomTarget;
 import com.opensmpsdeck.headless.rompatch.S3kRomTarget;
 import com.opensmpsdeck.project.StudioProject;
 
@@ -15,10 +17,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.Map;
 
 /** Shared Test in game export for Studio snapshots and headless project/package inputs. */
 public final class TestInGame {
     private static final Gson JSON = new Gson();
+    private static final Map<RomGame, RomTarget<?, ?, ?>> TARGETS = Map.of(
+            RomGame.S1, S1RomTarget.TARGET, RomGame.S3K, S3kRomTarget.TARGET);
 
     private TestInGame() {}
 
@@ -52,7 +57,8 @@ public final class TestInGame {
     }
 
     public static boolean available(RomGame game) {
-        return game == S3kRomTarget.TARGET.game();
+        // TODO(#81): Resolve/compile the S1 portable bank before exposing the cartridge engine.
+        return game != null && game != RomGame.S1 && TARGETS.containsKey(game);
     }
 
     static void requireAvailable(RomGame game) {
