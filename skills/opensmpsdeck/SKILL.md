@@ -11,7 +11,15 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
 
 ## Checklist
 
-- [ ] Identify the MIDI, mix WAV, optional stems and local instrument catalogue.
+- [ ] For a Suno download, call `reconstruct_import` with absolute `folder`,
+  `workDir` and your trusted `catalogue` path. Check `import.json` for
+  file status, alignment and the evidence for each mapping. Re-check with
+  `assign: {"stems/synth.wav": 0}` or `exclude: ["stems/fx.wav"]` if needed.
+  Pass the returned `runRequest` to `reconstruct_run` when it has a
+  catalogue, or use the printed CLI command. CLI equivalent:
+  `reconstruct import FOLDER WORK_DIR --catalogue INDEX.json`, with repeatable
+  `--assign FILE=PART`, `--exclude FILE`, and optional `--run`.
+- [ ] For individually supplied files, identify the MIDI, mix WAV, optional stems and local instrument catalogue.
   Check that the MIDI and audio share time zero. Map stems to zero-based MIDI
   **part IDs** from an existing reconstruction report or the transcribed
   `score.json` (`source.parts`). Use a private work directory with an existing parent.

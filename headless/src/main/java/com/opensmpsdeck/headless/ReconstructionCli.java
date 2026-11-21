@@ -84,6 +84,8 @@ final class ReconstructionCli {
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
+        out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
+        out.println("           [--catalogue INDEX.json] [--run]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
@@ -122,6 +124,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("sections")) {
             ReconstructionSections.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("import")) {
+            SunoImport.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("view")) {
@@ -565,16 +571,18 @@ final class ReconstructionCli {
         return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems);
     }
 
-    static String audioHash(Path path) throws IOException { return evidence(path).sha256(); }
+    static String audioHash(Path path, java.nio.file.OpenOption... options) throws IOException {
+        return evidence(path, options).sha256();
+    }
 
-    private static FileEvidence evidence(Path path) throws IOException {
+    private static FileEvidence evidence(Path path, java.nio.file.OpenOption... options) throws IOException {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
-        try (var input = new DigestInputStream(Files.newInputStream(path), digest)) {
+        try (var input = new DigestInputStream(Files.newInputStream(path, options), digest)) {
             input.transferTo(OutputStream.nullOutputStream());
         }
         return new FileEvidence(path.getFileName().toString(), HexFormat.of().formatHex(digest.digest()));

@@ -6,6 +6,7 @@ import hashlib
 from array import array
 import math
 import json
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -134,7 +135,7 @@ def smoke(jar, root):
     with Client(jar) as rpc:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
-            transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
+            transcribers_list reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
             reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
@@ -153,6 +154,23 @@ def smoke(jar, root):
         variant = results["items"][0]["variantId"]
         rpc.call("catalog_audition", catalogue=inputs["catalogue"], variant=variant,
                  workDir=root, output=root / "audition.wav")
+        download = root / "download"
+        download.mkdir()
+        shutil.copyfile(inputs["midi"], download / "suno.mid")
+        shutil.copyfile(inputs["wav"], download / "mix.wav")
+        imported = root / "imported"
+        report = rpc.call("reconstruct_import", folder=download, workDir=imported,
+                          catalogue=inputs["catalogue"], progress=True)
+        assert report == json.loads((imported / "import.json").read_text())
+        assert report["status"] == "warning", report
+        assert {entry["role"] for entry in report["files"]} == {"midi", "mix"}
+        assert report["runArguments"][:2] == ["reconstruct", "run"]
+        checked = rpc.call("artifact_read", workDir=imported, artifact="import")["value"]
+        assert checked == report
+        recipe = report["runRequest"]
+        assert recipe["inputs"]["catalogue"] == inputs["catalogue"]
+        import_run = rpc.call("reconstruct_run", **recipe, progress=True)
+        assert Path(import_run["files"]["arrangement.smps.json"]).is_file()
         files = rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)["files"]
         assert Path(files["manifest.json"]) == work / "manifest.json"
         manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]

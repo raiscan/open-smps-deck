@@ -146,6 +146,30 @@ Compiled output and CLI binary input are limited to one 32 KiB bank.
 The binary demo is an original finite FM/PSG phrase
 with a synthetic, deliberately asymmetric FM patch; it contains no ROM assets.
 
+## Import a Suno download
+
+```sh
+DECK_JAR=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
+java -jar "$DECK_JAR" reconstruct import "$download" "$work" --catalogue instruments.json
+java -jar "$DECK_JAR" reconstruct import "$download" "$work" --catalogue instruments.json \
+  --assign 'stems/synth.wav=0' --exclude 'Title (FX).wav' --run
+```
+
+Import checks the full mix, MIDI, root or `stems/` WAV files, and optional
+`stems.json`. It prints a status table and writes `import.json` with file
+hashes, MIDI part IDs, audio mapping scores, alignment and a reconstruction
+command. Unmapped MIDI parts use the mix. Vocals and FX stay unmapped by
+default. Use repeatable `--assign FILE=PART` and `--exclude FILE` with
+download-relative paths, including `stems/` where applicable. Supply the
+desired overrides again when re-checking. A single missing mix or MIDI
+produces a warning and needs to be supplied before reconstruction can start.
+
+With `--run`, supply a trusted catalogue via `--catalogue`. Reconstruction
+starts when the check has no errors and both the mix and MIDI are present.
+It writes into the new `WORK_DIR/reconstruction` directory. Without a
+catalogue, set `CATALOGUE` before using the printed command. Keep the
+work directory separate from the read-only download.
+
 ## Reconstruct a track from MIDI and WAV
 
 Export MIDI and a WAV from the same time origin. Build a local [instrument

@@ -123,6 +123,48 @@ public record ReferenceAudio(float[] samples, int sampleRate) {
         }
     }
 
+    /** Scan every frame, averaging into a bounded, common-rate mono signal for folder import. */
+    static ImportSignal importSignal(Path path, int rate, int maxSeconds) throws IOException {
+        try (var channel = FileChannel.open(path, StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            var wave = header(channel);
+            var format = wave.format();
+            int sourceRate = format.sampleRate();
+            long frames = wave.dataBytes() / format.frameBytes();
+            if (frames < 1 || frames > (long) maxSeconds * sourceRate)
+                throw invalid("WAV duration must be greater than zero and at most " + maxSeconds + " seconds");
+            var mono = new float[(int) Math.ceil(frames * (double) rate / sourceRate)];
+            double squares = 0;
+            double sum = 0;
+            int count = 0;
+            int bin = 0;
+            for (long first = 0; first < frames; first += sourceRate) {
+                if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Import cancelled");
+                int blockFrames = (int) Math.min(sourceRate, frames - first);
+                var data = readAt(channel, wave.dataStart() + first * format.frameBytes(),
+                        blockFrames * format.frameBytes());
+                for (int i = 0; i < blockFrames; i++) {
+                    double left = sample(data, format);
+                    double right = format.channels() == 1 ? left : sample(data, format);
+                    squares += (left * left + right * right) / 2;
+                    int next = (int) ((first + i) * rate / sourceRate);
+                    if (next != bin) {
+                        Arrays.fill(mono, bin, next, (float) (sum / count));
+                        bin = next;
+                        sum = 0;
+                        count = 0;
+                    }
+                    sum += (left + right) / 2;
+                    count++;
+                }
+            }
+            Arrays.fill(mono, bin, mono.length, (float) (sum / count));
+            return new ImportSignal(mono, frames / (double) sourceRate, sourceRate, format.channels(),
+                    Math.sqrt(squares / frames));
+        }
+    }
+
+    record ImportSignal(float[] mono, double seconds, int sampleRate, int channels, double rms) {}
+
     private record Format(int encoding, int channels, int sampleRate, int bits, int frameBytes) {}
     private record Wave(Format format, long dataStart, long dataBytes) {}
 

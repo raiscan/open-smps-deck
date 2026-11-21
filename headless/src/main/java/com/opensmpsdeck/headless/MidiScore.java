@@ -94,8 +94,12 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
         } catch (InvalidMidiDataException e) {
             throw new IOException("Invalid MIDI file: " + path, e);
         }
+        return read(sequence, ": " + path);
+    }
+
+    static MidiScore read(Sequence sequence, String source) throws IOException {
         if (sequence.getDivisionType() != Sequence.PPQ) {
-            throw new IOException("Unsupported MIDI SMPTE timing: " + path);
+            throw new IOException("Unsupported MIDI SMPTE timing" + source);
         }
         int resolution = sequence.getResolution();
         if (resolution <= 0) {
@@ -112,7 +116,7 @@ record MidiScore(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<St
                 readTrack(tracks[i], i, resolution, tempos, parts, notes, warnings);
             }
         } catch (ArithmeticException e) {
-            throw new IOException("MIDI timeline exceeds the supported microsecond range: " + path, e);
+            throw new IOException("MIDI timeline exceeds the supported microsecond range" + source, e);
         }
         notes.sort(Comparator.comparingLong(Note::startUs)
                 .thenComparingInt(Note::partId)

@@ -38,6 +38,53 @@ class StudioWindowTest {
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
 
+    @Test void sunoImportBlocksErrorsUntilAnOverrideIsChecked() throws Exception {
+        Path source = Files.createDirectory(folder.resolve("download"));
+        Path work = folder.resolve("work");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        track.add(new javax.sound.midi.MidiEvent(
+                new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_ON, 0, 69, 96), 0));
+        track.add(new javax.sound.midi.MidiEvent(
+                new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_OFF, 0, 69, 0), 480));
+        javax.sound.midi.MidiSystem.write(sequence, 0, source.resolve("suno.mid").toFile());
+        com.opensmpsdeck.headless.WaveFile.write(source.resolve("mix.wav"), 60, sink -> {
+            var samples = new short[com.opensmpsdeck.headless.S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
+            Arrays.fill(samples, (short) 1024);
+            for (int i = 0; i < 60; i++) sink.accept(samples);
+        });
+        Files.writeString(source.resolve("bass.wav"), "invalid WAV");
+
+        Stage preview = fx(() -> {
+            assertEquals("Import Suno folder…", button("import-suno").getText());
+            var window = new Stage();
+            var pane = new SunoImportPane(source, work, result -> fail("Reconstruction must not have started"));
+            window.setScene(new javafx.scene.Scene(pane, 960, 500));
+            window.show();
+            return window;
+        });
+        try {
+            var scene = preview.getScene();
+            await(() -> ((Label) scene.lookup("#suno-import-status")).getText().startsWith("✗"));
+            fx(() -> {
+                assertTrue(scene.lookup("#suno-import-start").isDisabled());
+                var table = (TableView<?>) scene.lookup("#suno-import-files");
+                table.applyCss();
+                table.layout();
+                var choices = (ComboBox<?>) table.lookupAll(".combo-box").stream()
+                        .filter(Node::isVisible).findFirst().orElseThrow();
+                choices.getSelectionModel().select(1); // Exclude
+                assertTrue(scene.lookup("#suno-import-start").isDisabled());
+                ((Button) scene.lookup("#suno-import-check")).fire();
+                return null;
+            });
+            await(() -> !scene.lookup("#suno-import-start").isDisabled());
+            assertTrue(Files.readString(work.resolve("import.json")).contains("excluded"));
+        } finally {
+            fx(() -> { ((SunoImportPane) preview.getScene().getRoot()).close(); preview.close(); return null; });
+        }
+    }
+
     @Test void groupAndUngroupAcrossLanesWithUndoAndRedo() throws Exception {
         fx(()->{
             var original=window.document().project();
