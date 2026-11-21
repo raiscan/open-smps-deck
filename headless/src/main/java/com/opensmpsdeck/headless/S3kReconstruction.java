@@ -54,6 +54,7 @@ final class S3kReconstruction {
         final Event event;
         int end;
         int detune;
+        ReconstructionVoicing.PsgPercussion hatClock;
         int volumeFloor;
         ReconstructionVoicing.Vibrato vibrato;
         ReconstructionBendEncoding.Fit bend;
@@ -266,6 +267,10 @@ final class S3kReconstruction {
         Map<String, Voice> voices = new LinkedHashMap<>();
         Map<String, DacSample> samples = new LinkedHashMap<>();
         Map<String, Envelope> envelopes = new LinkedHashMap<>();
+        var psg3 = voicing.get("PSG3");
+        var percussion = psg3 == null || psg3.psgPercussion() == null
+                ? ReconstructionVoicing.PSG_PERCUSSION : psg3.psgPercussion();
+        var hatClock = percussion.withHatDefaults();
         for (var entry : allocation.notes()) {
             var note = entry.note().midi();
             var part = parts.get(note.partId());
@@ -279,15 +284,20 @@ final class S3kReconstruction {
             int end = entry.endTick();
             if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
                 boolean automatic = ReconstructionCymbals.automatic(entry.reason());
+                boolean closedHat = automatic && ReconstructionCymbals.closedHat(note.pitch());
                 int pitch = automatic ? ReconstructionCymbals.PITCH : 81;
                 var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
-                int volume = automatic ? (ReconstructionCymbals.NATIVE_LEVEL << 3) : volume(part, note);
+                int level = closedHat ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
+                int volume = automatic ? level << 3 : volume(part, note);
                 var envelope = automatic ? ReconstructionCymbals.envelope(note.pitch()) : null;
                 String asset = envelope == null ? NOISE : envelope.id();
                 if (envelope != null) envelopes.putIfAbsent(asset, envelope);
                 if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
                 var placed = new Placement(new Event(pitched, start, end, 0, asset, volume));
-                if (envelope != null) placed.detune = ReconstructionCymbals.detune(envelope);
+                if (closedHat) {
+                    placed.detune = ReconstructionCymbals.detune(hatClock.hatAttackPeriod());
+                    placed.hatClock = hatClock;
+                }
                 psg.get(2).add(placed);
                 gates.add(new VoicedGate(entry.note().id(), lane, pitched.pitch(), start, end));
                 continue;
@@ -629,6 +639,19 @@ final class S3kReconstruction {
                     }
                 }
                 int noteStart = note.start();
+                if (placement.hatClock != null) {
+                    int boundary = noteStart + placement.hatClock.hatSwitchTick();
+                    int decayDetune = ReconstructionCymbals.detune(placement.hatClock.hatDecayPeriod());
+                    if (boundary < placement.end && decayDetune != detune) {
+                        events.add(new NoteEvent("note-" + offset, offset, boundary - noteStart, note.note().pitch()));
+                        int tail = boundary - from;
+                        detune = decayDetune;
+                        commands.add(new CommandEvent("detune-" + tail, tail, NativeCommand.DETUNE, List.of(detune & 255)));
+                        // Hold advances the envelope while updating the tone-3 clock without another attack.
+                        commands.add(new CommandEvent("hold-" + tail, tail, NativeCommand.HOLD, List.of()));
+                        noteStart = boundary;
+                    }
+                }
                 Tone current = attack;
                 for (var change : placement.scopedTones.tailMap(note.start(), false).entrySet()) {
                     int boundary = change.getKey();

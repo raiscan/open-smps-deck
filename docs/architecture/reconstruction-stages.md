@@ -776,14 +776,19 @@ retain part-level matching under `instruments`. DAC entries also specify
 rate, optional stem slice and match evidence. To use a different catalogue
 variant at its native rate, change `variantId` and remove `drumSelection`.
 Automatic PSG3 cymbals use tone-linked white noise. Closed and pedal hats
-halve the native tone-3 period to shift noise at about 14 kHz, with a
-full-level attack and steeper decay. Open hats and other cymbals use the
-native-rate clock and longer decay. For closed and pedal hats, the voice
-stage weights the drum stem toward 6 kHz and above, subtracts pre-hit bleed,
-and targets 6 dB above the median isolated attack excess. Open hats and other
-cymbals use the broader upper-band fit. The nearest PSG level is saved in
-`drumGains`. With insufficient stem evidence, the substitute uses the
-native-style base level.
+start at 13.98 kHz for one driver tick (about 16.7 ms) and switch to 6.99 kHz
+for the decay. The envelope uses attenuation offsets 0, 4 and 9 before rest.
+The clock change holds the note so the envelope continues without resetting
+the noise generator. Open hats and other cymbals use the 6.99 kHz clock and
+a longer decay.
+
+For closed and pedal hats, the voice stage weights the drum stem toward 6 kHz
+and above, subtracts pre-hit bleed, and targets 6 dB above the median isolated
+attack excess against a fixed 13.98 kHz calibration signal. Open hats and
+other cymbals use the broader upper-band fit. The fitted correction is saved
+in `drumGains`. The closed-hat voicing adds one hardware step (about 2 dB)
+to its base level, taking the audition's level change from +4 to +6 dB.
+Without enough stem evidence the substitute uses its base level.
 
 The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude
@@ -856,7 +861,8 @@ The drum rows in the view and `trace --lane DAC --json` show remaining
 simultaneous DAC losses and PSG3 availability.
 
 - **Tune automatic hats.** Set a pitch gain in `lanes.PSG3.drumGains` (for
-  example `{"42":2}`), assemble, and audition with `render-project --solo PSG3`.
+  example `{"42":2}`) or edit the clock fields in `lanes.PSG3.psgPercussion`.
+  Assemble and audition with `render-project --solo PSG3`.
   This replaces the fitted gain for that pitch. Check the trace for tonal
   notes on PSG3 in the same passage when listening to the solo.
 - **Override routing.** Pin a hat to DAC to request the sampled hit. To
@@ -882,8 +888,14 @@ Read `lanes.PSG3.psgPercussion` for the noise settings. Byte 231 (0xE7)
 selects white noise clocked by tone 3. `envelopeSlot: 0` is the fixed-level
 mode used for pinned and explicitly named PSG percussion. Automatic
 cymbals use the short or long decay envelope assigned in the arrangement.
-Automatic closed and pedal hats add a native detune command to raise the
-shift rate. Check both the envelope and the detune in the generated sequence.
+The three clock fields apply to automatic closed and pedal hats.
+`hatAttackPeriod` defaults to 8 (13.98 kHz) and `hatDecayPeriod` defaults to
+16 (6.99 kHz). Each takes a tone-3 period from 1 to 143. The NTSC noise shift
+rate is approximately 111.86 kHz divided by the period. `hatSwitchTick` is the
+offset from the hit in driver ticks, either 1 (default) or 2. Setting equal
+periods gives one constant rate. Older voicing files use the defaults for
+missing fields. The generated sequence uses detune to set the periods and a
+hold at the switch when the hit lasts that long.
 
 The existing PSG velocity curve starts with an FM-style logarithmic
 velocity conversion and then quantizes the resulting 7-bit level to the

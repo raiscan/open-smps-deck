@@ -22,7 +22,9 @@ final class ReconstructionCymbals {
     static final String COLLISION = "psg-cymbal-dac-collision";
     static final String QUIET = "psg-cymbal-quiet-stem";
     static final int PITCH = 117;
+    static final int TONE_PERIOD = 16; // S3K PSG period at pitch 117.
     static final int NATIVE_LEVEL = 11;
+    static final int HAT_LEVEL = NATIVE_LEVEL + 1;
     private static final double QUIET_RMS = .005; // −46 dBFS, near the top of the PSG cymbal range
     private static final double ATTACK_WINDOW = .060;
     private static final double ATTACK_LEAD = .012;
@@ -52,8 +54,12 @@ final class ReconstructionCymbals {
         return COLLISION.equals(reason) || QUIET.equals(reason);
     }
 
+    static boolean closedHat(int pitch) {
+        return pitch == 42 || pitch == 44;
+    }
+
     static Envelope envelope(int pitch) {
-        return pitch == 42 || pitch == 44 ? CLOSED : OPEN;
+        return closedHat(pitch) ? CLOSED : OPEN;
     }
 
     static boolean isEnvelope(String id) {
@@ -64,9 +70,8 @@ final class ReconstructionCymbals {
         return envelope(pitch).bytes().size() - 1;
     }
 
-    static int detune(Envelope envelope) {
-        // Pitch 117 has S3K period 16. Halve the period for a 14 kHz white-noise shift clock.
-        return envelope == CLOSED ? -8 : 0;
+    static int detune(int period) {
+        return period - TONE_PERIOD;
     }
 
     static ReconstructionVoices.Key key(ReconstructionStages.Note note) {
@@ -202,8 +207,11 @@ final class ReconstructionCymbals {
                 var commands = new ArrayList<CommandEvent>();
                 commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE,
                         List.of(ReconstructionVoicing.PSG_PERCUSSION.noiseByte())));
-                if (detune(envelope) != 0)
-                    commands.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(envelope) & 255)));
+                if (envelope == CLOSED) {
+                    // Keep the fixed 14 kHz fit reference so clock edits do not move the attack level.
+                    // The selected two-rate voicing adds one step to this fit in assembly.
+                    commands.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(8) & 255)));
+                }
                 sequences.add(new Sequence(id, id, "PSG", ticks, null, level << 3,
                         List.of(new NoteEvent("hit", 0, ticks, PITCH)),
                         commands,

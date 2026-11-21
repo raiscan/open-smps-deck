@@ -230,14 +230,37 @@ class ReconstructionDrumsTest {
         var initialVoice = ReconstructionArtifacts.readTree(work.resolve("voicing.json")).getAsJsonObject();
         var percussion = initialVoice.getAsJsonObject("lanes").getAsJsonObject("PSG3").getAsJsonObject("psgPercussion");
         assertEquals(231, percussion.get("noiseByte").getAsInt());
+        assertEquals(8, percussion.get("hatAttackPeriod").getAsInt());
+        assertEquals(16, percussion.get("hatDecayPeriod").getAsInt());
+        assertEquals(1, percussion.get("hatSwitchTick").getAsInt());
         var initialProject = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         var automatic = initialProject.sequences().stream().filter(source -> source.id().startsWith("PSG3"))
                 .findFirst().orElseThrow();
         assertEquals(ReconstructionCymbals.envelope(42).id(), automatic.psgEnvelopeId());
         assertEquals(231, automatic.commands().getFirst().arguments().getFirst());
-        assertTrue(automatic.commands().stream().anyMatch(event ->
-                event.command() == NativeCommand.DETUNE
-                        && event.arguments().equals(List.of(248))));
+        assertEquals(96, automatic.volume());
+        assertEquals(List.of(1, 2), automatic.notes().stream().map(NoteEvent::duration).toList());
+        int attack = automatic.notes().getFirst().tick();
+        assertEquals(List.of(NativeCommand.DETUNE, NativeCommand.HOLD),
+                automatic.commands().stream().filter(event -> event.tick() == attack + 1)
+                        .map(event -> event.command()).toList());
+        assertEquals(List.of(List.of(248), List.of(0)), automatic.commands().stream()
+                .filter(event -> event.command() == NativeCommand.DETUNE).map(event -> event.arguments()).toList());
+
+        Path voiceFile = work.resolve("voicing.json");
+        percussion.addProperty("hatAttackPeriod", 10);
+        percussion.addProperty("hatDecayPeriod", 20);
+        percussion.addProperty("hatSwitchTick", 2);
+        initialVoice.getAsJsonObject("lanes").getAsJsonObject("PSG3")
+                .add("drumGains", JsonParser.parseString("{\"42\":0}"));
+        ReconstructionArtifacts.write(voiceFile, initialVoice);
+        command("reconstruct", "run", "--from", "roles", work.toString(), "--keep-voicing");
+        var custom = ProjectFiles.load(work.resolve("arrangement.smps.json")).project().sequences().stream()
+                .filter(source -> source.id().startsWith("PSG3")).findFirst().orElseThrow();
+        assertEquals(0, custom.volume());
+        assertEquals(List.of(2, 1), custom.notes().stream().map(NoteEvent::duration).toList());
+        assertEquals(List.of(List.of(250), List.of(4)), custom.commands().stream()
+                .filter(event -> event.command() == NativeCommand.DETUNE).map(event -> event.arguments()).toList());
         var batch = directory.resolve("edits.json");
         Files.writeString(batch, """
                 [{"id":"keep-tone","reason":"Keep tonal spill away from noise","op":"pinLane",
@@ -251,7 +274,6 @@ class ReconstructionDrumsTest {
         assertEquals("PSG2", moved.get(tone.id()).allocation().lane());
         assertEquals("PSG3", moved.get(hat.id()).allocation().lane());
 
-        Path voiceFile = work.resolve("voicing.json");
         var voicing = ReconstructionArtifacts.readTree(voiceFile).getAsJsonObject();
         var lanes = voicing.getAsJsonObject("lanes");
         assertEquals(231, lanes.getAsJsonObject("PSG3").getAsJsonObject("psgPercussion").get("noiseByte").getAsInt());

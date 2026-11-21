@@ -54,7 +54,7 @@ final class ReconstructionVoicing {
             return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
                     refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides,
-                    mergeDrumGains(drumGains, previous.drumGains), previous.drumGainOverrides, psgPercussion);
+                    mergeDrumGains(drumGains, previous.drumGains), previous.drumGainOverrides, previous.psgPercussion);
         }
 
         Lane withPsgPercussion(PsgPercussion percussion) {
@@ -70,14 +70,44 @@ final class ReconstructionVoicing {
 
         double drumGain(int pitch) { return drumGains == null ? 1 : drumGains.getOrDefault(pitch, 1.0); }
     }
-    record PsgPercussion(int noiseByte, String mode, String clock, int envelopeSlot) {}
-    static final PsgPercussion PSG_PERCUSSION = new PsgPercussion(0xe7, "white", "tone-3", 0);
+    record PsgPercussion(int noiseByte, String mode, String clock, int envelopeSlot,
+                         @Nullable Integer hatAttackPeriod, @Nullable Integer hatDecayPeriod,
+                         @Nullable Integer hatSwitchTick) {
+        PsgPercussion withHatDefaults() {
+            return new PsgPercussion(noiseByte, mode, clock, envelopeSlot,
+                    hatAttackPeriod == null ? 8 : hatAttackPeriod,
+                    hatDecayPeriod == null ? ReconstructionCymbals.TONE_PERIOD : hatDecayPeriod,
+                    hatSwitchTick == null ? 1 : hatSwitchTick);
+        }
+
+        void validate(String at) {
+            require(noiseByte == PSG_PERCUSSION.noiseByte && PSG_PERCUSSION.mode.equals(mode)
+                            && PSG_PERCUSSION.clock.equals(clock) && envelopeSlot == PSG_PERCUSSION.envelopeSlot,
+                    at, "expected white tone-3 noise and fixed envelope slot 0");
+            validateHatPeriod(hatAttackPeriod, at + ".hatAttackPeriod");
+            validateHatPeriod(hatDecayPeriod, at + ".hatDecayPeriod");
+            require(hatSwitchTick == null || hatSwitchTick > 0 && hatSwitchTick < ReconstructionCymbals.gate(42),
+                    at + ".hatSwitchTick", "expected a tick inside the closed-hat gate (1 or 2)");
+        }
+
+        private static void validateHatPeriod(Integer period, String at) {
+            // These periods must be representable by a signed detune from pitch 117.
+            require(period == null || period > 0 && period <= ReconstructionCymbals.TONE_PERIOD + Byte.MAX_VALUE,
+                    at, "expected a tone-3 period in 1–143");
+        }
+    }
+
+    static final PsgPercussion PSG_PERCUSSION = new PsgPercussion(0xe7, "white", "tone-3", 0, null, null, null);
 
     static Result withPercussionEvidence(Result result, ReconstructionAllocation.Result allocation) {
         var lane = result.lanes().get("PSG3");
         if (lane == null) return result;
-        var settings = allocation.notes().stream()
-                .anyMatch(entry -> "PSG3".equals(entry.lane()) && entry.role() == Role.drums) ? PSG_PERCUSSION : null;
+        var drums = allocation.notes().stream()
+                .filter(entry -> "PSG3".equals(entry.lane()) && entry.role() == Role.drums).toList();
+        var settings = lane.psgPercussion();
+        if (!drums.isEmpty() && settings == null) settings = PSG_PERCUSSION;
+        if (drums.stream().anyMatch(entry -> ReconstructionCymbals.automatic(entry.reason())
+                && ReconstructionCymbals.closedHat(entry.note().pitch()))) settings = settings.withHatDefaults();
         if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
         var lanes = new java.util.LinkedHashMap<>(result.lanes());
         lanes.put("PSG3", lane.withPsgPercussion(settings));
@@ -395,8 +425,10 @@ final class ReconstructionVoicing {
                 for (int i = 0; i < lane.drumGainOverrides().size(); i++)
                     lane.drumGainOverrides().get(i).validate(at + ".drumGainOverrides[" + i + "]");
             }
-            require(lane.psgPercussion() == null || id.equals("PSG3") && PSG_PERCUSSION.equals(lane.psgPercussion()),
-                    at + ".psgPercussion", "expected the PSG3 percussion description");
+            if (lane.psgPercussion() != null) {
+                require(id.equals("PSG3"), at + ".psgPercussion", "requires PSG3");
+                lane.psgPercussion().validate(at + ".psgPercussion");
+            }
             var articulation = lane.articulation();
             require(articulation.gate() > 0 && articulation.gate() <= 1, at + ".articulation.gate", "expected (0,1]");
             require(articulation.minimumReleaseRate() >= 0 && articulation.minimumReleaseRate() <= (fm ? 15 : 0),
