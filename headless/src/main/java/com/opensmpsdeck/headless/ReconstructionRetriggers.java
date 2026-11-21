@@ -64,7 +64,8 @@ final class ReconstructionRetriggers {
                     List<ReconstructionAllocation.RunPlacement> placements, java.util.Map<String, String> origins) {}
 
     static Playback articulate(List<ReconstructionAllocation.Entry> notes, List<Burst> bursts,
-                               ReconstructionTimeMap timeline, ReconstructionVoicing.Articulation articulation) {
+                               ReconstructionTimeMap timeline,
+                               java.util.function.Function<ReconstructionAllocation.Entry, ReconstructionVoicing.Articulation> articulation) {
         if (bursts == null || bursts.isEmpty()) return new Playback(notes, List.of(), java.util.Map.of());
         var byAnchor = new HashMap<String, List<Note>>();
         for (var burst : bursts)
@@ -80,7 +81,7 @@ final class ReconstructionRetriggers {
             }
             var anchor = entry.note();
             int first = entry.startTick();
-            int end = first + articulation.duration(entry.endTick() - first);
+            int end = first + articulation.apply(entry).duration(entry.endTick() - first);
             var attacks = new java.util.TreeMap<Integer, String>();
             attacks.put(first, anchor.id());
             for (var figure : figures) {

@@ -83,6 +83,11 @@ class ReconstructionVoicePlanTest {
         var split = ReconstructionVoicePlan.load(work);
         assertEquals(List.of("part-0-line", "part-0-chords"),
                 split.voices().stream().map(ReconstructionVoicePlan.Voice::id).toList());
+        assertEquals(1, split.instruments().size());
+        assertEquals("part-0", split.instruments().getFirst().id());
+        assertEquals(0, split.instruments().getFirst().part());
+        assertEquals(List.of("part-0", "part-0"), split.voices().stream()
+                .map(voice -> voice.instrumentIds().getFirst()).toList());
         assertEquals(line.stream().map(item -> item.note().id()).toList(), split.voices().getFirst().noteIds());
         assertEquals(List.of(new ReconstructionVoicePlan.Issue("old", "orphaned", "voice part-0 is missing")), split.issues());
         run(work, "rename", """

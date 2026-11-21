@@ -164,7 +164,8 @@ public final class ReconstructionEditing {
         var matches = ReconstructionCli.voicedMatches(catalogue, solo, voicing);
         var result = S3kReconstruction.arrangeAllocated("Selection", score.inputs().ticksPerBeat(), timeline.frames(),
                 new S3kReconstruction.Score(score.source().parts(), List.of(), List.of()), solo, structure, catalogue,
-                matches.byLane(), Map.of(), voicing.lanes(), false, true, scopes, Map.of(), Map.of(), null, assignments);
+                matches.byLane(), Map.of(), voicing.lanes(), false, true, scopes, Map.of(), Map.of(), null, assignments,
+                voicing.sourceInstruments());
         int start = selected.stream().mapToInt(ReconstructionAllocation.Entry::startTick).min().orElseThrow();
         int end = selected.stream().mapToInt(ReconstructionAllocation.Entry::endTick).max().orElseThrow();
         return new Audition(result.project(), start / 60.0, Math.min(timeline.frames(), end + 30) / 60.0);

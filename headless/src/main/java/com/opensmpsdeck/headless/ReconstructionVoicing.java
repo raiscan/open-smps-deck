@@ -22,19 +22,62 @@ final class ReconstructionVoicing {
 
     record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows,
                   @Nullable String sustainWarning,
-                  @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments) {
+                  @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,
+                  @Nullable Map<String, SourceSound> sourceInstruments) {
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning) {
-            this(version, lanes, fitWindows, sustainWarning, null);
+            this(version, lanes, fitWindows, sustainWarning, null, null);
         }
 
         Result withAssignments(Map<String, ReconstructionVoicePlan.Assignment> assignments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments);
+            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments);
+        }
+
+        Result withSourceInstruments(Map<String, SourceSound> instruments) {
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments);
+        }
+
+        SourceSound sourceSound(String lane, int part) {
+            return ReconstructionVoicing.sourceSound(sourceInstruments, lanes.get(lane), part, lane.startsWith("FM"));
+        }
+
+        Articulation articulation(ReconstructionAllocation.Entry note) {
+            var lane = lanes.get(note.lane());
+            if (lane == null) return WRITTEN;
+            var source = note.role() == Role.drums ? null : sourceSound(note.lane(), note.note().part());
+            return source == null || !lane.articulation().equals(WRITTEN) ? lane.articulation() : source.fm().articulation();
+        }
+
+        Lane representative(String laneId, List<ReconstructionAllocation.Entry> notes) {
+            var lane = lanes.get(laneId);
+            if (notes == null || lane == null || sourceInstruments == null) return lane;
+            var counts = new java.util.TreeMap<Integer, Integer>();
+            for (var entry : notes) counts.merge(entry.note().part(), 1, Integer::sum);
+            var part = counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElse(null);
+            var instrument = part == null ? null : sourceSound(laneId, part.getKey());
+            return instrument == null ? lane : instrument.settings(lane, laneId.startsWith("FM"));
         }
 
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows) {
             this(version, lanes, fitWindows, null);
         }
     }
+    record SourceSound(Lane fm, @Nullable String psgVariantId, int psgVolumeOffset) {
+        Lane settings(Lane lane, boolean isFm) {
+            return new Lane(lane.role(), isFm ? fm.variantId() : null, fm.shortlist(),
+                    fm.gain() * lane.gain(),
+                    lane.articulation().equals(WRITTEN) ? fm.articulation() : lane.articulation(),
+                    lane.effects().equals(DRY) ? fm.effects() : lane.effects(),
+                    fm.patchReason(), fm.articulationReason(), fm.effectReason(), List.of(),
+                    lane.partGains(), lane.overrides(), null, null, null);
+        }
+    }
+
+    static SourceSound sourceSound(Map<String, SourceSound> instruments, Lane lane, int part, boolean fm) {
+        if (instruments == null || lane == null) return null;
+        if (fm ? lane.variantId() != null : lane.instruments().stream().anyMatch(i -> i.part() == part)) return null;
+        return instruments.get(ReconstructionVoicePlan.SourceInstrument.id(part));
+    }
+
     record FitWindows(int frames, List<Integer> starts) {}
     record Lane(Role role, @Nullable String variantId, List<ScoredPatch> shortlist, double gain,
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,
@@ -47,6 +90,11 @@ final class ReconstructionVoicing {
              List<Instrument> instruments) {
             this(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
                     effectReason, instruments, null, null, null, null, null);
+        }
+
+        Lane withEffects(Effects value) {
+            return new Lane(role, variantId, shortlist, gain, articulation, value, patchReason, articulationReason,
+                    effectReason, instruments, partGains, overrides, drumGains, drumGainOverrides, psgPercussion);
         }
 
         Lane withPartGains(Map<Integer, Double> gains) {
@@ -120,7 +168,7 @@ final class ReconstructionVoicing {
         if (java.util.Objects.equals(settings, lane.psgPercussion())) return result;
         var lanes = new java.util.LinkedHashMap<>(result.lanes());
         lanes.put("PSG3", lane.withPsgPercussion(settings));
-        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning());
+        return new Result(result.version(), lanes, result.fitWindows(), result.sustainWarning(), result.voiceAssignments(), result.sourceInstruments());
     }
 
     record DrumGain(@Nullable List<String> hitIds, @Nullable List<Double> span, @Nullable Integer pitch, double gain) {
@@ -296,7 +344,7 @@ final class ReconstructionVoicing {
         var targets = new HashSet<String>();
         allocated.forEach((id, notes) -> {
             var lane = previous.lanes().get(id);
-            if (lane == null || !lane.instruments().stream().map(ReconstructionVoicing::key)
+            if (lane == null || (previous.sourceInstruments() == null || id.equals("DAC")) && !lane.instruments().stream().map(ReconstructionVoicing::key)
                     .collect(java.util.stream.Collectors.toSet()).containsAll(instrumentKeys(id, notes))) targets.add(id);
         });
         return targets;
@@ -306,7 +354,7 @@ final class ReconstructionVoicing {
         if (defaults.isEmpty()) return voicing;
         var lanes = new TreeMap<>(voicing.lanes());
         lanes.computeIfPresent("PSG3", (id, lane) -> lane.withDrumGains(mergeDrumGains(defaults, lane.drumGains())));
-        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning());
+        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning(), voicing.voiceAssignments(), voicing.sourceInstruments());
     }
 
     private static Map<Integer, Double> mergeDrumGains(Map<Integer, Double> fitted, Map<Integer, Double> saved) {
@@ -342,7 +390,7 @@ final class ReconstructionVoicing {
                     reportStaleInstrument(id, instrument, report);
                 }
             }
-            if (!retained.containsAll(keys) && fitted != null)
+            if (!retained.containsAll(keys) && fitted != null && fitted.lanes().containsKey(id))
                 fitted.lanes().get(id).instruments().stream().filter(instrument -> !retained.contains(key(instrument)))
                         .forEach(instruments::add);
             Role role = notes.stream().anyMatch(entry -> entry.role() == lane.role())
@@ -359,7 +407,15 @@ final class ReconstructionVoicing {
                     effects, lane.patchReason(), lane.articulationReason(), lane.effectReason(), lane.instruments(),
                     lane.partGains(), lane.overrides(), lane.drumGains(), lane.drumGainOverrides(), lane.psgPercussion()));
         });
-        return new Result(previous.version(), lanes, previous.fitWindows());
+        var instruments = new java.util.LinkedHashMap<String, SourceSound>();
+        if (fitted != null && fitted.sourceInstruments() != null) instruments.putAll(fitted.sourceInstruments());
+        if (previous.sourceInstruments() != null) instruments.putAll(previous.sourceInstruments());
+        instruments.replaceAll((id, sound) -> {
+            var effects = compatibleCopy(id, sound.fm().effects(), allocated, copies, report);
+            return new SourceSound(sound.fm().withEffects(effects), sound.psgVariantId(), sound.psgVolumeOffset());
+        });
+        return new Result(previous.version(), lanes, previous.fitWindows(), null, null,
+                previous.sourceInstruments() == null ? null : instruments);
     }
 
     private static Effects compatibleCopy(String id, Effects effects, Map<String, ?> allocated, Set<String> copies,
@@ -405,7 +461,8 @@ final class ReconstructionVoicing {
         if (!targets.isEmpty()) for (String id : lanes.keySet())
             require(targets.contains(id) || previous.lanes().containsKey(id), "voicing.json.lanes." + id,
                     "new lane must be explicitly targeted");
-        return new Result(fitted.version(), lanes, fitted.fitWindows());
+        return new Result(fitted.version(), lanes, fitted.fitWindows(), null, null,
+                targets.isEmpty() ? fitted.sourceInstruments() : previous.sourceInstruments());
     }
 
     static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue, int frames) {
@@ -483,6 +540,36 @@ final class ReconstructionVoicing {
                 detune(copy.detune(), at);
                 vibrato(copy.vibrato(), at + ".effects.copy.vibrato");
             }
+        });
+        if (result.sourceInstruments() != null) result.sourceInstruments().forEach((id, instrument) -> {
+            String at = "voicing.json.sourceInstruments." + id;
+            var fm = instrument.fm();
+            require(fm != null && fm.variantId() != null && fm.gain() >= 0 && fm.gain() <= 4,
+                    at, "expected an FM patch and gain in 0–4");
+            kind(catalogue, fm.variantId(), Kind.FM_VOICE, at);
+            for (var patch : fm.shortlist()) kind(catalogue, patch.variantId(), Kind.FM_VOICE, at + ".shortlist");
+            var art = fm.articulation();
+            require(art.gate() > 0 && art.gate() <= 1 && art.minimumReleaseRate() >= 0
+                    && art.minimumReleaseRate() <= 15, at, "invalid articulation");
+            detune(fm.effects().detune(), at);
+            vibrato(fm.effects().vibrato(), at);
+            var copy = fm.effects().copy();
+            boolean audibleCopy = allocated.entrySet().stream().filter(entry -> entry.getKey().startsWith("FM"))
+                    .anyMatch(entry -> result.lanes().get(entry.getKey()).variantId() == null
+                            && result.lanes().get(entry.getKey()).effects().equals(DRY)
+                            && entry.getValue().stream().anyMatch(note ->
+                                    id.equals(ReconstructionVoicePlan.SourceInstrument.id(note.note().part()))));
+            if (copy != null && audibleCopy) {
+                require(ReconstructionAllocation.FM.contains(copy.lane()) && !allocated.containsKey(copy.lane())
+                        && copies.add(copy.lane()) && copy.delay() >= 0 && copy.delay() <= 60
+                        && copy.gain() > 0 && copy.gain() <= 1, at, "invalid copy or occupied copy lane");
+                detune(copy.detune(), at);
+                vibrato(copy.vibrato(), at);
+            }
+            if (instrument.psgVariantId() != null)
+                kind(catalogue, instrument.psgVariantId(), Kind.PSG_VOLUME, at + ".psgVariantId");
+            require(instrument.psgVolumeOffset() >= -127 && instrument.psgVolumeOffset() <= 127,
+                    at, "PSG volume offset must be in −127–127");
         });
         if (result.voiceAssignments() != null) {
             var notes = new java.util.HashMap<String, ReconstructionAllocation.Entry>();

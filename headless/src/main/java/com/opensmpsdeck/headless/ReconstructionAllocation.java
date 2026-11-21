@@ -379,6 +379,7 @@ final class ReconstructionAllocation {
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
+                .thenComparingInt(a -> a.role() == Role.harmony || a.role() == Role.counter ? a.start - a.end : 0)
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER);
     }
 

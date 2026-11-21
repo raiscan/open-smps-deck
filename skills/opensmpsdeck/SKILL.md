@@ -409,6 +409,12 @@ See [one-channel chord voicing](../../docs/architecture/reconstruction-stages.md
    `noteIds`. Entries can overlap if they set different fields. Assemble
    and check the passage again.
 
+Fresh runs fit one sound per source instrument. Find a function voice's
+`instrumentIds` in `voices.json`. Edit that profile under
+`voicing.json.sourceInstruments` to change its sound across FM lanes.
+Use the voice assignment journal to give just one function voice a
+different instrument.
+
 Audition up to 32 variants or pass `--shortlist` to use the saved candidates
 on the explicit or inferred lane. Run `reconstruct voice WORK_DIR --lane FM1 --variant ID` to
 set a lane-wide candidate and fit its level, then assemble. Use

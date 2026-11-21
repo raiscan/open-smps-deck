@@ -60,13 +60,17 @@ public final class ReconstructionVoicePlan {
 
     public enum Clock { source, project }
 
+    public record SourceInstrument(String id, int part, int program, @Nullable String stem) {
+        static String id(int part) { return "part-" + part; }
+    }
+
     public record Voice(String id, String name, Kind kind, Evidence evidence, double confidence,
-                        List<String> noteIds, @Nullable Assignment assignment) {}
+                        List<String> noteIds, @Nullable Assignment assignment, @Nullable List<String> instrumentIds) {}
 
     public record Identity(String id, String name) {}
     public record Issue(String id, String status, String detail) {}
 
-    public record Result(int version, List<Voice> voices, List<Issue> issues) {
+    public record Result(int version, List<Voice> voices, List<Issue> issues, @Nullable List<SourceInstrument> instruments) {
         Map<String, Voice> byNote() {
             var index = new HashMap<String, Voice>();
             for (var voice : voices) for (String id : voice.noteIds) index.put(id, voice);
@@ -516,6 +520,7 @@ public final class ReconstructionVoicePlan {
 
     private Result result(List<Issue> issues) {
         var voices = new ArrayList<Voice>();
+        var instruments = new java.util.TreeMap<Integer, SourceInstrument>();
         for (var group : groups.values()) {
             var members = group.notes.stream().map(notes::get).toList();
             var partIds = members.stream().map(ReconstructionStages.Note::part).distinct().sorted().toList();
@@ -531,10 +536,15 @@ public final class ReconstructionVoicePlan {
                     tonal ? ReconstructionVoiceProposal.counts(voiceAttacks, attack -> attack.role().name()) : null,
                     tonal ? ReconstructionVoiceProposal.counts(voiceAttacks, ReconstructionVoiceProposal.Attack::section) : null,
                     singletonCount, stackedCount, group.attributedStem);
+            if (tonal) for (int part : partIds) {
+                instruments.putIfAbsent(part, new SourceInstrument(SourceInstrument.id(part), part,
+                        parts.get(part).program(), stem(part)));
+            }
             voices.add(new Voice(group.id, group.name, group.kind, evidence, group.confidence,
-                    List.copyOf(group.notes), group.assignment));
+                    List.copyOf(group.notes), group.assignment,
+                    tonal ? partIds.stream().map(SourceInstrument::id).toList() : null));
         }
-        return new Result(VERSION, List.copyOf(voices), List.copyOf(issues));
+        return new Result(VERSION, List.copyOf(voices), List.copyOf(issues), List.copyOf(instruments.values()));
     }
 
     static Voice voiceFor(Map<String, Voice> byNote, String noteId) {

@@ -157,7 +157,12 @@ public final class ReconstructionAudition {
         if (shortlist) {
             if (!variants.isEmpty()) throw new IllegalArgumentException("Choose --shortlist or --variant");
             var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
-            var settings = voicing.lanes().get(lane);
+            var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+            int from = ReconstructionOverrides.tick(startSeconds), to = ReconstructionOverrides.tick(endSeconds);
+            String selectedLane = lane;
+            var notes = allocation.notes().stream().filter(entry -> selectedLane.equals(entry.lane())
+                    && entry.startTick() < to && entry.endTick() > from).toList();
+            var settings = voicing.representative(lane, notes);
             if (settings == null || settings.shortlist().isEmpty())
                 throw new IllegalArgumentException("Choose an FM lane with a saved shortlist");
             variants = settings.shortlist().stream().map(ReconstructionVoicing.ScoredPatch::variantId).distinct().toList();

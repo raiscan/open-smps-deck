@@ -298,7 +298,7 @@ def smoke(jar, root):
         with wave.open(str(full), "rb") as reference, wave.open(str(plain), "rb") as wav:
             reference.setpos(12000)
             assert wav.readframes(24000) == reference.readframes(24000)
-        current = read["value"]["lanes"]["FM1"]["variantId"]
+        current = read["value"]["sourceInstruments"]["part-0"]["fm"]["variantId"]
         audition = rpc.call("reconstruct_audition", workDir=work, lane="FM1", start=0.25, end=0.75,
                             variants=[current], output=work / "phrase.wav", rmsJson="phrase.rms.json")
         assert audition["startTick"] == 15 and audition["endTick"] == 45

@@ -258,6 +258,11 @@ changing playback timing. To check a render from an edited project, use
 
 ### Refine and audition voicing
 
+Fresh staged reconstructions fit one shared sound per source instrument in
+`voicing.json.sourceInstruments`. Line and chord function voices share this
+sound unless assigned explicitly. Lane overrides and scoped edits remain
+available.
+
 Use `reconstruct voice WORK_DIR --lane FM1` to refit only FM1. Refits preserve
 existing gains for unchanged lane material and retain scoped overrides.
 A new role label alone does not trigger a level change. Use

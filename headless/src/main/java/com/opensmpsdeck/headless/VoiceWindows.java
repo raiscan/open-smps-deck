@@ -142,17 +142,35 @@ final class VoiceWindows {
     }
 
     float[][] render(S3kReconstruction.Score score, InstrumentCatalogue catalogue,
-                     ReconstructionAllocation.Result allocation, String lane,
-                     ReconstructionVoicing.Lane settings) throws IOException {
+                     ReconstructionAllocation.Result allocation,
+                     ReconstructionVoicing.Lane settings, boolean shared) throws IOException {
         if (allocation.notes().isEmpty()) return silence();
-        var choices = ReconstructionVoiceStage.choices(catalogue, settings, allocation.notes());
-        if (choices.values().stream().noneMatch(choice -> choice.assetId() != null)
-                && allocation.notes().stream().noneMatch(note -> note.role() == ReconstructionRoles.Role.drums
-                        && "PSG3".equals(note.lane()))) return silence();
-        var project = S3kReconstruction.arrangeAllocated("Voicing probe", 30, frames, score, allocation,
-                null, catalogue, Map.of(lane, choices), Map.of(), Map.of(lane, settings), true).project();
-        var compiled = ProjectCompiler.compileWithAssets(project);
-        var mono = renderMono(compiled, frames);
+        float[] mono;
+        if (shared) {
+            var fm = new ArrayList<ReconstructionAllocation.Entry>();
+            var spill = new ArrayList<ReconstructionAllocation.Entry>();
+            for (var entry : allocation.notes()) {
+                if (entry.lane().startsWith("FM")) fm.add(entry);
+                else {
+                    // Probe the same patch on a surrogate FM channel for these notes.
+                    String surrogate = "FM" + entry.lane().substring(3);
+                    int pitch = Math.min(entry.note().pitch(), 106);
+                    var original = entry.note();
+                    var note = pitch == original.pitch() ? original : new ReconstructionStages.Note(original.id(),
+                            original.part(), original.start(), original.end(), pitch, original.velocity(), original.source(),
+                            original.confidence());
+                    spill.add(new ReconstructionAllocation.Entry(note, entry.role(), surrogate, entry.startTick(),
+                            entry.endTick(), entry.outcome(), null, null));
+                }
+            }
+            mono = renderNotes(score, catalogue, fm, settings);
+            if (!spill.isEmpty()) {
+                var extra = renderNotes(score, catalogue, spill, settings);
+                for (int i = 0; i < mono.length; i++) mono[i] += extra[i];
+            }
+        } else {
+            mono = renderNotes(score, catalogue, allocation.notes(), settings);
+        }
         var result = new float[windows.size()][];
         for (int i = 0; i < windows.size(); i++) {
             var window = windows.get(i);
@@ -160,6 +178,23 @@ final class VoiceWindows {
             result[i] = spectra.extract(Arrays.copyOfRange(mono, start, start + window.length() * SAMPLES_PER_TICK));
         }
         return result;
+    }
+
+    private float[] renderNotes(S3kReconstruction.Score score, InstrumentCatalogue catalogue,
+                                List<ReconstructionAllocation.Entry> notes, ReconstructionVoicing.Lane settings) throws IOException {
+        var allocation = new ReconstructionAllocation.Result(ReconstructionStages.VERSION, notes);
+        var choices = new java.util.LinkedHashMap<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>>();
+        var voicing = new java.util.LinkedHashMap<String, ReconstructionVoicing.Lane>();
+        ReconstructionVoicing.byLane(allocation).forEach((lane, entries) -> {
+            choices.put(lane, ReconstructionVoiceStage.choices(catalogue, settings, entries));
+            voicing.put(lane, settings);
+        });
+        if (choices.values().stream().flatMap(map -> map.values().stream()).noneMatch(choice -> choice.assetId() != null)
+                && notes.stream().noneMatch(note -> note.role() == ReconstructionRoles.Role.drums
+                        && "PSG3".equals(note.lane()))) return new float[frames * SAMPLES_PER_TICK];
+        var project = S3kReconstruction.arrangeAllocated("Voicing probe", 30, frames, score, allocation,
+                null, catalogue, choices, Map.of(), voicing, true).project();
+        return renderMono(ProjectCompiler.compileWithAssets(project), frames);
     }
 
     static float[] renderMono(CompiledProject project, int frames) throws IOException {
