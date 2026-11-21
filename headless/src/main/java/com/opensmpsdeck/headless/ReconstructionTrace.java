@@ -902,6 +902,10 @@ public final class ReconstructionTrace {
             if (pcm.available())
                 out.printf("%d changed PCM frames%s%n", pcm.changedFrames(),
                         pcm.firstFrame() == null ? "" : " (first sample frame " + pcm.firstFrame() + ")");
+            if (pcm.psgTail() != null)
+                for (var lane : pcm.psgTail())
+                    out.printf("  %s after span: %d changed solo PCM frames from frame %d (%s)%n",
+                            lane.lane(), lane.changedFrames(), lane.firstFrame(), lane.cause());
         } else if (result.has("clusters")) {
             for (var entry : result.getAsJsonArray("clusters")) {
                 var cluster = JSON.fromJson(entry, AttackCluster.class);

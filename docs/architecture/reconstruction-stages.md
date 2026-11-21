@@ -93,7 +93,14 @@ and gives the first affected project tick and lanes. `renderedPcm` counts
 changed sample frames in saved renders and gives the first affected frame.
 Both summaries cover the area outside `--span`, or the whole project when
 no span is supplied. They can report different results because chip and
-resampler state can carry through the edit boundary.
+resampler state can carry through the edit boundary. When matching-length
+reconstruction WAVs differ after the span, `renderedPcm.psgTail` compares
+soloed re-renders and reports affected PSG lanes and their causes. It checks
+resolved PSG writes in presentations with changed PCM and inspects the
+chip state at the first differing presentation. The PSG tone counters and
+polarities keep running during rests. Writing the next note's period sets
+the reload value without resetting its phase. S3K clip setup can restore
+driver settings, but has no command to restore the chip's oscillator phase.
 
 A fresh staged run writes `manifest.json` with the build identity,
 resolved options, input paths and hashes, and references to content-addressed

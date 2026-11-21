@@ -473,7 +473,12 @@ IDs and suggested `pinLane` edits. `voicingChanges` lists lane variant,
 gain and scoped override changes. `compiledTimeline` counts changed events
 outside the span, with the first project tick and affected lanes.
 `renderedPcm` counts differing saved PCM frames, including effects carried
-over from earlier audio.
+over from earlier audio. When matching-length reconstruction WAVs differ
+after `--span`, `renderedPcm.psgTail` re-renders the arrangements with each
+PSG lane soloed. It reports the first changed sample frame, total changed
+frames and cause for each differing PSG lane. A tonal PSG note can start in
+a different oscillator phase even when its pitch, level and compiled
+events match.
 
 MCP `reconstruct_trace` returns JSON and accepts `workDir`, `start`,
 `end`, `part`, `pitch`, `pitchMin`, `pitchMax`, `lane`, and `status`.
