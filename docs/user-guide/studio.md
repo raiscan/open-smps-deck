@@ -348,6 +348,9 @@ composer stays available across a refresh. The
   sets the instrument for the whole identified voice. **These notes only**
   applies it to the selected attacks. Search the catalogue and use **Audition
   selection** to hear the chosen instrument on the selected allocated notes.
+- In **Selection → Retrigger**, select a single tonal note, enter the interval
+  and gate in milliseconds and the number of attacks, then choose
+  **Queue retrigger** and **Apply**. The first attack keeps its note ID.
 - In **Selection → Layer**, choose **Echo**, **Chorus**, **Double** or
   **Off**. Pick a spare FM or PSG target and set the level. Echo shows the
   delay in frames and milliseconds. The default is 14 frames (233.3 ms)
@@ -357,8 +360,9 @@ composer stays available across a refresh. The
   Use **Preview A/B** to hear the built span and then the selected setting.
   Choose **Queue layer** to stage the edit, then **Apply**. The plot draws
   the copy beneath the pitch in its lane color. A small × marks a skipped
-  copy, and the **Note** tab shows the reason. **Off** suppresses layers and
-  lane policies for the selected notes.
+  copy. Hover over it to see competing note IDs and lanes, or open the
+  **Note** tab for details. With **Off**, check the policies to mask. Leave
+  them all clear to suppress every layer and policy for the selected notes.
 - **Collapse repeats** sustains same-pitch attacks from one part. Select
   two notes of different pitches for **Merge with glide**. Select
   co-attacking chord tones from one part for **Arpeggio** or **Chord instrument**.

@@ -166,6 +166,20 @@ final class ReconstructionLanePolicies {
     record BendLayer(String noteId, int startTick, int endTick, @Nullable String lane,
                      @Nullable ReconstructionLayers.Curve curve, @Nullable String skipReason) {}
 
+    record Blocker(String noteId, String lane, int startTick, int endTick) {}
+
+    enum Status { applied, skipped }
+
+    record Decision(String sourceNoteId, String noteId, int ruleIndex, Kind policy, @Nullable String lane,
+                    int pitch, int attackTick, int gate, int delay, Status status, @Nullable String reason,
+                    @Nullable List<Blocker> blockers) {
+        String detail() {
+            if (blockers == null || blockers.isEmpty()) return reason;
+            return reason + ": " + blockers.stream().map(blocker -> blocker.noteId() + " on " + blocker.lane())
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
+    }
+
     record Coverage(int index, Kind policy, @Nullable Mode mode, int eligible, int applied,
                     int busy, int incompatible, int movedFromFm, int promotedCounters, Map<String, Integer> lanes,
                     @Nullable List<BendLayer> bendLayers) {}

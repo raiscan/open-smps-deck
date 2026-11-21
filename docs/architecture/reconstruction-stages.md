@@ -647,6 +647,25 @@ The trace includes `edit:<id>` reasons alongside the underlying fate detail.
 Consumed merge members link to the retained attack through
 `scoreDecision.successorId`.
 
+### Retrigger a held note
+
+Use a single `retrigger` intent with an ordered list of `attacks`, each with an
+`offset` from the original onset and a positive `gate`. Both are in seconds
+on the edit's `timeBase` (source by default). Each attack needs its own
+non-overlapping project gate. The original ID identifies the first attack
+and dry-run lists the remaining IDs as `edit-<id>-1`, `edit-<id>-2`, and so
+on. Use those IDs for later layer or voicing edits.
+
+```json
+{"id":"pulse","reason":"Match repeated attacks","op":"retrigger","noteId":"NOTE_ID",
+ "attacks":[{"offset":0,"gate":0.06},{"offset":0.083,"gate":0.06}]}
+```
+
+For an even run, replace `attacks` with `"rate":0.083,"count":4,"gate":0.06`.
+The rate is the interval between attacks and the optional gate defaults to
+that interval. An explicit attack can override `velocity`. Optional `role`
+and `lane` route the additional attacks. Rebuild from transcribe.
+
 ### One-channel chord voicing
 
 These edits select playable tonal notes of one MIDI part that attack on the
@@ -1306,13 +1325,32 @@ field on `lanes.DAC` to this array.
 ]
 ```
 
+#### Inspect lane policy decisions
+
+Run `reconstruct assemble WORK_DIR --policy-decisions` (or pass the flag to
+`reconstruct run`, or MCP `options.policyDecisions: true`) to include
+`policyDecisions` in `report.json`. Each entry identifies the source note,
+policy, target lane when available, attack tick, gate and delay in ticks,
+and applied or skipped status. Busy skips list the competing note and
+occupied interval on each candidate lane. `reconstruct trace` reads the
+decisions from the current assembly.
+
+A note-specific layer with `"mode":"off","policies":["fmDouble"]` masks only
+the FM policy, leaving the PSG double eligible. Name any combination of
+`pads`, `leadEcho`, `psgDouble`, and `fmDouble`. Omit `policies` to disable
+all layers and lane policies for the selected notes.
+
 #### Tune or override PSG3 hats
 
 Colliding cymbals and cymbal classes measured quiet in a dedicated drum stem
 can use PSG3 automatically. Kick and snare retain DAC priority. Review the
 default placement and its reason with `reconstruct trace WORK_DIR --lane PSG3`.
 The drum rows in the view and `trace --lane DAC --json` show remaining
-simultaneous DAC losses and PSG3 availability.
+simultaneous DAC losses and PSG3 availability. Use `trace --lane DAC`
+or `trace --lane PSG3` for `drums.droppedHits`. Its competitors include
+the busy interval and a `pinLane` suggestion for each compatible lane
+that is free over the competing tone's full gate. Dry-run the chosen pin
+and rebuild from roles to confirm the revised allocation.
 
 - **Tune automatic hats.** Set a pitch gain in `lanes.PSG3.drumGains` (for
   example `{"42":2}`) or edit the clock fields in `lanes.PSG3.psgPercussion`.

@@ -49,6 +49,7 @@ final class McpReconstruction {
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            field("policyDecisions", "boolean", "Include per-note lane policy decisions and blockers in the assembly report").optional(),
             choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
@@ -164,7 +165,7 @@ final class McpReconstruction {
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
-                    "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset");
+                    "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset", "policyDecisions");
             if (options.has("transcriberFor")) for (var entry : options.getAsJsonObject("transcriberFor").entrySet()) {
                 if (entry.getKey().contains("=")) throw new IllegalArgumentException("Invalid transcriber role " + entry.getKey());
                 cli.add("--transcriber-for");

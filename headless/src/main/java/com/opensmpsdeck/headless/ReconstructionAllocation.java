@@ -516,6 +516,8 @@ final class ReconstructionAllocation {
         return lane;
     }
 
+    static final int DAC_PROTECTED_TICKS = 5;
+
     private Attack placeDac(Attack attack, Map<ReconstructionVoices.Key, Double> cymbalLevels,
                             java.util.Set<Integer> louderParts, int frames) {
         Entry last = tail.get("DAC");
@@ -523,7 +525,7 @@ final class ReconstructionAllocation {
         String blocked = null;
         if (last != null && last.startTick == attack.start) {
             blocked = "simultaneous-dac-hit";
-        } else if (last != null && attack.start - last.startTick < 5
+        } else if (last != null && attack.start - last.startTick < DAC_PROTECTED_TICKS
                 && S3kReconstruction.drumPriority(last.note.pitch()) >= 2
                 && S3kReconstruction.drumPriority(last.note.pitch()) > S3kReconstruction.drumPriority(pitch)) {
             blocked = "protect-dac-tail";

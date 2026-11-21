@@ -43,7 +43,22 @@ class ReconstructionLanePoliciesTest {
                 entry("busy1", Role.counter, "PSG1", 9, 15, 65),
                 entry("busy2", Role.counter, "PSG2", 9, 15, 69),
                 entry("drums", Role.drums, "PSG3", 11, 16, 42));
-        var result = arrange(entries, scoped(rule(Kind.leadEcho, null, null), 0, 27, null));
+        var policies = scoped(rule(Kind.leadEcho, null, null), 0, 27, null);
+        var result = arrange(entries, policies, Map.of(), null, true);
+        assertEquals(arrange(entries, policies).project(), result.project());
+        var skip = result.policyDecisions().getFirst();
+        assertEquals("lead", skip.sourceNoteId());
+        assertEquals(ReconstructionLanePolicies.Status.skipped, skip.status());
+        assertEquals(9, skip.attackTick());
+        assertEquals(6, skip.gate());
+        assertEquals(7, skip.delay());
+        assertEquals(List.of("busy1", "busy2", "drums"),
+                skip.blockers().stream().map(ReconstructionLanePolicies.Blocker::noteId).toList());
+        assertEquals(List.of("PSG1", "PSG2", "PSG3"),
+                skip.blockers().stream().map(ReconstructionLanePolicies.Blocker::lane).toList());
+        var applied = result.policyDecisions().getLast();
+        assertEquals(ReconstructionLanePolicies.Status.applied, applied.status());
+        assertEquals("PSG1", applied.lane());
         var coverage = result.policyCoverage().getFirst();
         assertEquals(2, coverage.eligible());
         assertEquals(1, coverage.busy());
@@ -216,6 +231,21 @@ class ReconstructionLanePoliciesTest {
         ProjectCompiler.compile(result.project());
     }
 
+    @Test void selectiveOffKeepsOtherPoliciesEligible() throws Exception {
+        var entries = List.of(entry("lead", Role.melody, "FM1", 4, 12, 72));
+        var policies = List.of(new ReconstructionLanePolicies.Scoped(0, rule(Kind.psgDouble, null, null), 0, 60, null),
+                new ReconstructionLanePolicies.Scoped(1, rule(Kind.fmDouble, Mode.echo, null), 0, 60, null));
+        var mask = layer("lead", """
+                "mode":"off","policies":["fmDouble"]
+                """);
+        var result = arrange(entries, policies, Map.of("lead", mask), null, true);
+        assertEquals(1, result.policyCoverage().getFirst().applied());
+        assertEquals(0, result.policyCoverage().getLast().eligible());
+        assertEquals(ReconstructionLanePolicies.Status.applied, result.policyDecisions().getFirst().status());
+        assertEquals(ReconstructionLanePolicies.Status.skipped, result.policyDecisions().getLast().status());
+        assertTrue(result.policyDecisions().getLast().reason().contains("layer-lead"));
+    }
+
     @Test void delayedFmBendKeepsItsFullContourAndVibratoAfterTheDryGate() throws Exception {
         var note = bentEntry("slide", 72, 34, -1800);
         var result = arrange(List.of(note), List.of(), Map.of("slide", layer("slide", """
@@ -377,6 +407,13 @@ class ReconstructionLanePoliciesTest {
                                                      List<ReconstructionLanePolicies.Scoped> policies,
                                                      Map<String, ReconstructionLayers.Request> layers,
                                                      ReconstructionVoicing.Vibrato vibrato) throws Exception {
+        return arrange(entries, policies, layers, vibrato, false);
+    }
+
+    private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
+                                                     List<ReconstructionLanePolicies.Scoped> policies,
+                                                     Map<String, ReconstructionLayers.Request> layers,
+                                                     ReconstructionVoicing.Vibrato vibrato, boolean decisions) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var bytes = DemoProject.create().voices().getFirst().bytes();
         byte[] patch = new byte[bytes.size()];
@@ -402,6 +439,6 @@ class ReconstructionLanePoliciesTest {
                 new S3kReconstruction.Score(parts, List.of(), List.of()), new ReconstructionAllocation.Result(1, sorted),
                 null, catalogue, choices, Map.of(), vibrato == null ? Map.of() : Map.of("FM1", settings),
                 false, true, Map.of(), Map.of(), Map.of(),
-                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(), layers, false);
+                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(), layers, false, decisions);
     }
 }

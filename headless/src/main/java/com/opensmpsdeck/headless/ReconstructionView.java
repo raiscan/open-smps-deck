@@ -228,9 +228,11 @@ public final class ReconstructionView {
         var clock = allocation == null || allocation.timeBase() == null ? TimeBase.source : allocation.timeBase();
         var bends = new ArrayList<>(EvidenceBends.authored(span, rows, notes, clock));
         if (bendTrace != null) bends.addAll(bendTrace.curves(span, assembledGates));
-        var drums = DrumEvidence.review(rows.values().stream().toList(), rows.values(),
+        var drums = DrumEvidence.review(rows.values(), rows,
                 span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source), timeline,
-                options.lanes.isEmpty() || options.lanes.contains("DAC"), options.parts());
+                options.lanes.isEmpty() || options.lanes.contains("DAC") && options.lanes.contains("PSG3") ? null
+                        : options.lanes.contains("DAC") ? "DAC" : options.lanes.contains("PSG3") ? "PSG3" : "",
+                options.parts(), score.inputs() != null && score.inputs().fmOnly());
 
         int minPitch = notes.stream().mapToInt(DrawnNote::pitch).min().orElse(51) - 3;
         int maxPitch = notes.stream().mapToInt(DrawnNote::pitch).max().orElse(81) + 3;
