@@ -58,6 +58,15 @@ final class EvidenceNotes {
                     add(notes, span, gate.id(), Layer.lane, row.part(), gate.lane(), gate.pitch(), gate.gate(),
                             row.status(), gate.evidence());
             }
+            if (row.layers() != null) for (var effect : row.layers()) {
+                if (effect.status() == ReconstructionLayers.Status.applied
+                        && (options.lanes().isEmpty() || options.lanes().contains(effect.lane())))
+                    add(notes, span, row.id(), Layer.noteLayer, row.part(), effect.lane(), effect.pitch(),
+                            ReconstructionTrace.ticks(effect.startTick(), effect.endTick(), span.timeline()), null, effect.mode());
+                else if (effect.status() == ReconstructionLayers.Status.skipped && sourceSelected)
+                    add(notes, span, row.id(), Layer.layerSkip, row.part(), lane, row.pitch(),
+                            java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing()), null, effect.reason());
+            }
             if (!hasVoicing && lane != null && (options.lanes().isEmpty() || options.lanes().contains(lane))) {
                 var own = allocation.effective();
                 add(notes, span, row.id(), Layer.lane, row.part(), lane, own == null ? row.pitch() : own.note().pitch(),
@@ -87,7 +96,7 @@ final class EvidenceNotes {
                                              List<DrawnNote> notes) {
         if (project == null || project.nativeProgram() != null || project.tempo() != 0) return;
         var covered = new HashMap<String, java.util.NavigableMap<Long, Long>>();
-        for (var note : notes) if (note.layer() == Layer.lane)
+        for (var note : notes) if (note.layer() == Layer.lane || note.layer() == Layer.noteLayer)
             covered.computeIfAbsent(note.lane(), ignored -> new java.util.TreeMap<>())
                     .merge(note.timing().startTick(), note.timing().endTick(), Math::max);
         var sequences = sequences(project);

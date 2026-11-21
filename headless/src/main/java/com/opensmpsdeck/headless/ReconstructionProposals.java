@@ -125,7 +125,7 @@ public final class ReconstructionProposals {
         return selected.stream().map(edit -> {
             var matching = byId.getOrDefault(edit.id(), List.of());
             var details = matching.stream().map(outcome -> new ReconstructionReview.EditResult(
-                    outcome.status().name(), outcome.detail(), outcome.noteIds())).toList();
+                    outcome.status().name(), outcome.detail(), outcome.noteIds(), outcome.layer())).toList();
             var markers = matching.stream().filter(outcome -> outcome.status() == ReconstructionEdits.Status.applied
                             || outcome.status() == ReconstructionEdits.Status.satisfied)
                     .flatMap(outcome -> outcome.noteIds().stream().map(id ->

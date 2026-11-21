@@ -235,6 +235,13 @@ def smoke(jar, root):
                                  "noteIds": [target], "fromRole": "counter", "role": "melody"})
         assert preview["notes"][0]["noteId"] == target and preview["notes"][0]["satisfied"]
         assert preview["outcomes"][0]["status"] == "satisfied" and not (work / "edits.json").exists()
+        echo = {"id": "echo-preview", "reason": "Echo one attack", "op": "layer",
+                "mode": "echo", "laneType": "FM", "delayFrames": 10, "levelDb": -9, "noteIds": [target]}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=echo)
+        layer = preview["outcomes"][0]["layer"]
+        assert preview["from"] == "assemble" and layer["noteId"] == target
+        assert layer["status"] == "applied" and layer["attenuation"] == 12 and layer["delayFrames"] == 10
+        assert not (work / "edits.json").exists() and Path(files["render.wav"]).read_bytes() == before_layers
         scored = trace[0]["score"]
         source = scored["note"]
         cut_at = (source["start"] + source["end"]) / 2

@@ -10,6 +10,7 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseButton;
 import javafx.scene.paint.Color;
+import com.opensmpsdeck.headless.ReconstructionLayers;
 import javafx.scene.text.Font;
 
 import java.util.ArrayList;
@@ -194,6 +195,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 notes.stream().mapToInt(Overlay::pitch).min().orElse(42)) - 3);
         builtHigh = Math.min(127, Math.max((int) Math.ceil(highestBend),
                 notes.stream().mapToInt(Overlay::pitch).max().orElse(78)) + 4);
+        for (var layer : model.layers()) {
+            builtLow = Math.min(builtLow, Math.max(0, layer.pitch() - 3));
+            builtHigh = Math.max(builtHigh, Math.min(127, layer.pitch() + 4));
+        }
         proposalPitchRange();
         endByIndex = new double[notes.size()];
         double priorEnd = 0;
@@ -568,6 +573,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         var used = new HashSet<String>();
         for (var note : model.overlays()) if (note.lane() != null) used.add(note.lane());
         for (var note : pending) if (note.lane() != null) used.add(note.lane());
+        for (var layer : model.layers()) if (layer.layer().lane() != null) used.add(layer.layer().lane());
         var next = TimelineView.LANES.stream().filter(used::contains).toList();
         for (var lane : next) if (lanes == null || !lanes.contains(lane)) visibleLanes.add(lane);
         lanes = next;
@@ -904,6 +910,25 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             }
             hits.add(new Hit(note, left, top, barWidth, height));
         }
+        var layers = model.layers().stream().filter(layer ->
+                layer.interval().sourceEnd() >= seconds(AXIS) && layer.interval().sourceStart() <= seconds(width)
+                        && roles.contains(layer.role())
+                        && (layer.layer().lane() == null || visibleLanes.contains(layer.layer().lane()))).toList();
+        for (var ghost : layers) {
+            double left = x(ghost.interval().sourceStart());
+            double barWidth = Math.max(3, x(ghost.interval().sourceEnd()) - left);
+            double top = y(ghost.pitch()) + Math.min(7, rowHeight() / 2 + 2);
+            if (ghost.layer().status() == ReconstructionLayers.Status.skipped) {
+                g.setStroke(Color.SALMON);
+                g.strokeLine(left, top, left + 5, top + 5);
+                g.strokeLine(left, top + 5, left + 5, top);
+            } else {
+                g.setFill(layerColor(ghost.layer().lane(), .36));
+                g.fillRect(left, top, barWidth, 4);
+                g.setStroke(layerColor(ghost.layer().lane(), .78));
+                g.strokeRect(left, top, barWidth, 4);
+            }
+        }
         var proposalColor = Color.web("#ef8aff");
         g.setStroke(proposalColor);
         g.setLineWidth(1.6);
@@ -967,6 +992,21 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             }
             hits.add(new Hit(note, left, top, barWidth, LANE_HEIGHT - 4));
         }
+        for (var ghost : layers) {
+            String lane = ghost.layer().lane();
+            if (lane == null) continue;
+            int row = lanes.indexOf(lane);
+            if (row < 0) continue;
+            double left = Math.max(AXIS, x(ghost.interval().sourceStart()));
+            double right = Math.min(width, x(ghost.interval().sourceEnd()));
+            g.setFill(layerColor(lane, .52));
+            g.fillRect(left, laneTop() + row * LANE_HEIGHT + 4, Math.max(2, right - left), LANE_HEIGHT - 8);
+        }
+    }
+
+    private static Color layerColor(String lane, double alpha) {
+        int rgb = ReconstructionInspection.laneRgb(lane);
+        return Color.rgb(rgb >> 16, rgb >> 8 & 255, rgb & 255, alpha);
     }
 
     private void drawBend(GraphicsContext g, Overlay note, double left, double width, Color color) {

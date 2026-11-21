@@ -447,12 +447,44 @@ removes only the selected proposals. See the
 | `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
 | `voiceEdit` | A `voiceEdit` object with the fields of a [voice journal entry](#identify-and-assign-voices), including its own `op` and `voiceId`. The outer intent supplies `id` and `author`. The voices stage replays these after `voice-edits.json`. | `voices` |
 | `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
+| `layer` | `noteIds`, point `selector` or `selectors`, or `span` with `part` and optional `pitchMin`, `pitchMax` and `fromRole` filters. Set `mode` to `echo`, `chorus`, `double` or `off`. Copies require `laneType` (`FM` or `PSG`). | `assemble` |
 
 At assembly, `noteVoicing` resolves each ID on its current chip, reports
 missing or incompatible targets in the edit results, and applies the latest
 instrument and modulation independently. A compatible note-scoped instrument
 overrides the source voice instrument. A per-note lane pin can take the note
 to a different chip, where the voice's instrument is inapplicable.
+
+A `layer` consumes a free channel for the copy's full gate. The latest
+layer intent for each selected note takes precedence over lane policies.
+`off` disables the copy and masks policies for that note. Echo delays the
+copy by `delayFrames` (1–600, default 14, at 60 frames/s). With chorus, set
+`detune` in signed FM driver units (−128 to 127, default −3). PSG chorus
+translates that offset to PSG period units. With double, set `octave` to
+−1, 0 (default), or 1.
+
+Set either `attenuation` (0–127 carrier TL steps) or `levelDb`
+(−95.25 to 0). The default is 11 TL for echo and 12 TL for chorus and
+double. The conversion rounds `-levelDb / 0.75` to the nearest TL step.
+FM uses the dry patch and clamps to its carrier volume floor. An FM
+copy of a PSG note uses its fitted FM sound when available, with a catalogue
+FM patch as fallback. PSG uses a held tone and matches the requested relative
+level in its coarser native volume steps. For echo, optional `volumeDecay`
+lists objects with increasing relative `frame` offsets (1–600) and
+nondecreasing `attenuation` targets. Each target is relative to the dry
+note, and steps at or past release are omitted.
+
+```json
+{"id":"answer-echo","op":"layer","author":"human","reason":"Echo the selected lead attacks",
+ "noteIds":["LEAD_NOTE_ID"],"mode":"echo","laneType":"FM","delayFrames":10,"levelDb":-9}
+```
+
+Dry runs and proposals report a result for each resolved note. A busy lane,
+an unsupported pitch or a source without an independently playable tonal
+gate produces a skipped result. Rendered pitch bends also report a skip.
+See `noteLayers` in `report.json` and `view`, and `layers` on the source note
+in `trace`, for the layer status, lane, delay and gate. The journal is replayed
+when rebuilding from any earlier stage.
 
 Use `"selector":{"at":43.09,"pitch":80,"part":0}` to match a single
 attack within 20 ms of the source onset. Zero matches or multiple matches
@@ -1314,7 +1346,7 @@ voices and a 32 KiB total bank.
 
 #### Optional lane policies
 
-Opt in to an octave-up PSG double and an eight-frame FM echo with
+Opt in to an octave-up PSG double and a 14-frame FM echo with
 `"lanePolicies": {"preset": "s3k-layering"}` in `voicing.json`. Rebuild with
 `reconstruct assemble WORK_DIR`, or set the preset and rebuild in one step:
 
@@ -1327,19 +1359,20 @@ In MCP, call `reconstruct_stage` with `stage: "assemble"` and
 editor, choose **Lane policies → S3K layering**. These actions replace any
 previous lane policy configuration. Use `off` or choose **Off** to clear it.
 
-The preset FM echo adds 15 carrier total-level (TL) steps to the dry attack's
-attenuation by default (11.25 dB nominal, subject to the patch's range).
+The preset FM echo adds 11 carrier total-level (TL) steps relative to the
+dry attack (8.25 dB nominal, subject to the patch's range). This is 4 steps
+or 3 dB quieter than the original 7-TL echo.
 It uses the patch's own envelope throughout the echo. To choose a different
 level, set the optional `echoAttenuation` field in `voicing.json` and run
 `reconstruct assemble WORK_DIR` to reuse the saved preset.
 
 ```json
-"lanePolicies": {"preset": "s3k-layering", "echoAttenuation": 11}
+"lanePolicies": {"preset": "s3k-layering", "echoAttenuation": 15}
 ```
 
 `echoAttenuation` is the total additional carrier TL relative to the dry note
-(0–127 integer steps, 0.75 dB per step). The example is 3 dB louder than the
-preset default. The delay is eight frames at every level.
+(0–127 integer steps, 0.75 dB per step). The example is 3 dB quieter than the
+preset default. The delay stays at 14 frames.
 
 For custom settings, set `lanePolicies` to an array of rules. Each rule
 applies to the whole song by default. Use `section` for a section ID or unique label, or `span` for

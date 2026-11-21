@@ -167,7 +167,7 @@ final class ReconstructionEditor implements AutoCloseable {
         this.previewPosition = previewPosition;
         sections = initial.inspection().sections().sections();
         draft = new ReconstructionDraft(accepted(initial.revision().entries()));
-        bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::audition, this::stopAudition);
+        bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::audition, this::stopAudition, this::previewLayer);
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
         view.attack = this::attack;
@@ -373,6 +373,11 @@ final class ReconstructionEditor implements AutoCloseable {
                 time.projectStart(), time.projectEnd(), names(note.competitors()), names(detail.edits()));
         var vibration = vibrato(note);
         if (vibration != null) body += "\n\nVibrato  " + ReconstructionCanvas.vibratoLabel(vibration);
+        for (var layer : inspection.noteLayers(note.id())) {
+            String result = layer.lane() == null ? layer.reason() : layer.lane() + " · " + layer.delayFrames()
+                    + " frames · " + layer.attenuation() + " TL";
+            body += "\n\nLayer  " + layer.mode() + " · " + layer.status() + "\n" + result;
+        }
         noteSummary.setText(body);
         rawTrace.setText(json);
         rawTrace.positionCaret(0);
@@ -860,6 +865,20 @@ final class ReconstructionEditor implements AutoCloseable {
     private record PreviewAudio(RenderComparison.Result comparison, ReferenceWave wave) {}
 
     private void previewProposal(String id) {
+        previewAB("proposal", expected -> ReconstructionReview.preview(work, id, expected, this::reportProgress));
+    }
+
+    private void previewLayer(JsonObject layer) {
+        previewAB(layer.get("mode").getAsString().equals("off") ? "layer off" : "selected layer",
+                expected -> ReconstructionReview.previewLayer(work, layer, expected, this::reportProgress));
+    }
+
+    @FunctionalInterface
+    private interface Preview {
+        ReconstructionReview.ProposalPreview run(Revision expected) throws IOException;
+    }
+
+    private void previewAB(String label, Preview preview) {
         if (busy || external != null || externalError) return;
         setBusy();
         var expected = snapshot.revision();
@@ -871,7 +890,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     running = Thread.currentThread();
                     if (cancelling) throw new java.util.concurrent.CancellationException();
                 }
-                var result = ReconstructionReview.preview(work, id, expected, this::reportProgress);
+                var result = preview.run(expected);
                 for (var comparison : result.comparisons())
                     audio.add(new PreviewAudio(comparison, ReferenceWave.read(Path.of(comparison.output()))));
             } catch (Exception error) {
@@ -888,7 +907,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     status.accept(problem == null ? "No affected span to preview" : problem);
                 else {
                     previewPlaying = true;
-                    playPreview(audio, 0, auditionEpoch);
+                    playPreview(audio, 0, auditionEpoch, label);
                 }
                 updateControls();
                 readExternal();
@@ -896,16 +915,16 @@ final class ReconstructionEditor implements AutoCloseable {
         });
     }
 
-    private void playPreview(List<PreviewAudio> audio, int index, long request) {
+    private void playPreview(List<PreviewAudio> audio, int index, long request, String label) {
         var clip = audio.get(index);
         var comparison = clip.comparison();
         previewPosition.accept(comparison.projectStart());
-        status.accept("Preview A/B · built, then proposal");
+        status.accept("Preview A/B · built, then " + label);
         audition.playMonitor(null, new ReviewTransport(), S3kRenderer.ChannelMask.NONE, clip.wave().duration(),
                 () -> clip.wave()::sample, message -> Platform.runLater(() -> {
                     if (closed || request != auditionEpoch) return;
                     if (message.equals("Playback finished") && index + 1 < audio.size()) {
-                        playPreview(audio, index + 1, request);
+                        playPreview(audio, index + 1, request, label);
                     } else if (!message.equals("Playing")) {
                         stopAudition();
                         status.accept(message);
@@ -914,7 +933,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     if (!closed && request == auditionEpoch) {
                         boolean built = position < comparison.splitSeconds();
                         previewPosition.accept(comparison.projectStart() + (built ? position : position - comparison.splitSeconds()));
-                        status.accept(built ? "Preview A · built" : "Preview B · proposal");
+                        status.accept(built ? "Preview A · built" : "Preview B · " + label);
                     }
                 }));
     }

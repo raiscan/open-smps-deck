@@ -26,7 +26,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -63,7 +63,7 @@ final class ReconstructionEdits {
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
                 case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
-                case noteVoicing -> Stage.ASSEMBLE;
+                case noteVoicing, layer -> Stage.ASSEMBLE;
             };
         }
 
@@ -111,7 +111,13 @@ final class ReconstructionEdits {
     record Outcome(String id, Kind op, Status status, List<String> noteIds,
                    @Nullable List<String> missingNoteIds, @Nullable String detail, @Nullable Note original,
                    @Nullable List<Note> removedNotes, @Nullable List<Note> resultNotes,
-                   @Nullable ReconstructionLaneType laneType, @Nullable String lane) {
+                   @Nullable ReconstructionLaneType laneType, @Nullable String lane,
+                   @Nullable ReconstructionLayers.Result layer) {
+        Outcome(String id, Kind op, Status status, List<String> noteIds,
+                List<String> missingNoteIds, String detail, Note original, List<Note> removedNotes,
+                List<Note> resultNotes, ReconstructionLaneType laneType, String lane) {
+            this(id, op, status, noteIds, missingNoteIds, detail, original, removedNotes, resultNotes, laneType, lane, null);
+        }
         Outcome(String id, Kind op, Status status, List<String> noteIds, List<String> missingNoteIds,
                 String detail, Note original, List<Note> removedNotes, List<Note> resultNotes) {
             this(id, op, status, noteIds, missingNoteIds, detail, original, removedNotes, resultNotes, null, null);
@@ -233,6 +239,8 @@ final class ReconstructionEdits {
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
+            case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
+                    "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay");
             case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "modulationOff");
             case setVelocity -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",
@@ -285,8 +293,8 @@ final class ReconstructionEdits {
             if (target.has("at")) {
                 attack = attack(target, targetAt, null);
             } else {
-                require(kind == Kind.setRole || kind == Kind.unmerge || kind == Kind.pinLane, targetAt, "expected at, pitch and part");
-                fields(target, targetAt, kind == Kind.setRole
+                require(kind == Kind.setRole || kind == Kind.unmerge || kind == Kind.pinLane || kind == Kind.layer, targetAt, "expected at, pitch and part");
+                fields(target, targetAt, kind == Kind.setRole || kind == Kind.layer
                         ? Set.of("span", "part", "pitchMin", "pitchMax", "fromRole")
                         : Set.of("span", "part", "pitchMin", "pitchMax"));
             }
@@ -391,7 +399,8 @@ final class ReconstructionEdits {
                     ids = noteIds(json, at, 1);
                 } else span = span(json, at, part);
             }
-            case setRole, pinLane, unmerge, arpeggio, chordInstrument -> {
+            case setRole, pinLane, unmerge, arpeggio, chordInstrument, layer -> {
+                if (kind == Kind.layer) ReconstructionLayers.settings(json, laneType, at);
                 require(kind != Kind.setRole || role != null, at + ".role", "required");
                 require(kind != Kind.pinLane || (lane == null) != (laneType == null), at, "choose lane or laneType");
                 if (attack != null || !selectors.isEmpty()) break;
@@ -1223,7 +1232,7 @@ final class ReconstructionEdits {
                 missing.isEmpty() ? "no matching notes or MIDI part" : "note IDs no longer exist at this stage", null);
     }
 
-    private static Outcome invalidAttack(Intent edit, List<String> matches) {
+    static Outcome invalidAttack(Intent edit, List<String> matches) {
         return new Outcome(edit.id, edit.kind, Status.invalid, matches, null,
                 matches.isEmpty() ? "selector matched no notes" : "selector matched multiple notes: " + matches, null);
     }
@@ -1232,11 +1241,11 @@ final class ReconstructionEdits {
         return new Outcome(edit.id, edit.kind, Status.invalid, List.of(id), null, error.getMessage(), null);
     }
 
-    private static void fields(JsonObject json, String at, Set<String> allowed) {
+    static void fields(JsonObject json, String at, Set<String> allowed) {
         for (String key : json.keySet()) require(allowed.contains(key), at + "." + key, "unknown field");
     }
 
-    private static JsonArray array(JsonObject json, String key, String at) {
+    static JsonArray array(JsonObject json, String key, String at) {
         var value = json.get(key);
         require(value != null && value.isJsonArray(), at + "." + key, "expected an array");
         return value.getAsJsonArray();
@@ -1259,7 +1268,7 @@ final class ReconstructionEdits {
                         + Arrays.toString(type.getEnumConstants())));
     }
 
-    private static double number(JsonElement value, String at) {
+    static double number(JsonElement value, String at) {
         require(value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()
                 && Double.isFinite(value.getAsDouble()), at, "expected a finite number");
         return value.getAsDouble();

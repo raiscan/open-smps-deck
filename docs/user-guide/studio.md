@@ -275,8 +275,8 @@ stems, and reads `render.wav` for the chip spectrogram and playback.
   selected gate. Turn it off to return to your previous loop selection.
 
 - Choose **Lane policies → S3K layering** to rebuild with octave-up PSG
-  doubling and an eight-frame FM echo on available channels. The echo uses
-  15 carrier TL steps of attenuation relative to the dry note by default.
+  doubling and a 14-frame FM echo on available channels. The echo uses
+  11 carrier TL steps of attenuation relative to the dry note by default.
   Choose **Off** to clear the lane policies. Both choices replace any
   custom lane policies. [Adjust the echo level](../architecture/reconstruction-stages.md#optional-lane-policies)
 
@@ -338,6 +338,17 @@ composer stays available across a refresh. The
   sets the instrument for the whole identified voice. **These notes only**
   applies it to the selected attacks. Search the catalogue and use **Audition
   selection** to hear the chosen instrument on the selected allocated notes.
+- In **Selection → Layer**, choose **Echo**, **Chorus**, **Double** or
+  **Off**. Pick a spare FM or PSG target and set the level. Echo shows the
+  delay in frames and milliseconds. The default is 14 frames (233.3 ms)
+  and a −3 dB trim from the original 7-TL echo, for 11 TL below dry.
+  Clear **Trim from 7 TL echo** to enter dB relative to the dry note.
+  With that setting, 10 frames is 166.7 ms and −9 dB is 12 TL.
+  Use **Preview A/B** to hear the built span and then the selected setting.
+  Choose **Queue layer** to stage the edit, then **Apply**. The plot draws
+  the copy beneath the pitch in its lane color. A small × marks a skipped
+  copy, and the **Note** tab shows the reason. **Off** suppresses layers and
+  lane policies for the selected notes.
 - **Collapse repeats** sustains same-pitch attacks from one part. Select
   two notes of different pitches for **Merge with glide**. Select
   co-attacking chord tones from one part for **Arpeggio** or **Chord instrument**.

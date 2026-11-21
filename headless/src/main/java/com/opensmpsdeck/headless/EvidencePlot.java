@@ -169,7 +169,14 @@ final class EvidencePlot {
                 int from = x(span.start(note.timing())), to = x(span.end(note.timing()));
                 int width = Math.max(1, to - from);
                 int y = y(note.pitch(), geometry.sourceTop());
-                if (layer == Layer.lane) {
+                if (layer == Layer.noteLayer) {
+                    g.setColor(laneColor(note.lane()));
+                    g.drawRect(from, y - 7, width, 4);
+                } else if (layer == Layer.layerSkip) {
+                    g.setColor(WARNING);
+                    g.drawLine(from, y - 7, from + 6, y - 13);
+                    g.drawLine(from, y - 13, from + 6, y - 7);
+                } else if (layer == Layer.lane) {
                     g.setColor(noteColor(note));
                     g.fillRect(from, y - 1, width, 3);
                 } else {
@@ -285,7 +292,7 @@ final class EvidencePlot {
     }
 
     private Color noteColor(DrawnNote note) {
-        return noteColors.getOrDefault(note.id(), outline(note));
+        return note.layer() == Layer.noteLayer ? outline(note) : noteColors.getOrDefault(note.id(), outline(note));
     }
 
     private static Color outline(DrawnNote note) {
@@ -295,7 +302,8 @@ final class EvidencePlot {
             case external -> EXTERNAL;
             case edit -> EDIT;
             case trace -> Color.LIGHT_GRAY;
-            case lane -> laneColor(note.lane());
+            case lane, noteLayer -> laneColor(note.lane());
+            case layerSkip -> WARNING;
         };
     }
 
@@ -341,7 +349,7 @@ final class EvidencePlot {
         grid(ticks, top, lanes.size() * ROW, new Color(255, 255, 255, 53));
         g.setClip(LEFT, top, geometry.width(), lanes.size() * ROW);
         for (var note : notes) {
-            if (note.layer() != Layer.lane) continue;
+            if (note.layer() != Layer.lane && note.layer() != Layer.noteLayer) continue;
             int y = top + ROW * lanes.indexOf(note.lane());
             int from = x(span.start(note.timing())), to = x(span.end(note.timing()));
             g.setColor(noteColor(note));
@@ -372,7 +380,7 @@ final class EvidencePlot {
         g.setClip(null);
     }
 
-    private static Color laneColor(String lane) { return CHANNELS[LANES.indexOf(lane)]; }
+    static Color laneColor(String lane) { return CHANNELS[LANES.indexOf(lane)]; }
 
     private List<Double> ticks() {
         double ideal = span.length() / Math.max(4, geometry.width() / 115);

@@ -316,57 +316,41 @@ final class ReconstructionCli {
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var catalogue = InstrumentCatalogue.open(index);
-        var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
-                .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
-                        ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
-        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
-        var voiceAssignments = voicing.voiceAssignments() == null
-                ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
-        var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
-        var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
-        var matched = voicedMatches(catalogue, ordered, voicing);
-        var effects = new Effects(Map.of(), Map.of(), Map.of());
-        var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
-        var policyLevels = policies.isEmpty() ? null : new ReconstructionLanePolicies.Levels();
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes);
+        var matched = assembly.matched();
         var instruments = voicing.sourceInstruments();
+        var effects = new Effects(Map.of(), Map.of(), Map.of());
         var copyLanes = java.util.stream.Stream.concat(voicing.lanes().values().stream(),
                         instruments == null ? java.util.stream.Stream.empty()
                                 : instruments.values().stream().map(ReconstructionVoicing.SourceSound::fm))
                 .map(lane -> lane.effects().copy())
                 .filter(java.util.Objects::nonNull).map(ReconstructionVoicing.Copy::lane).distinct().sorted().toList();
-        var leadNotes = ordered.notes().stream().filter(entry -> "FM1".equals(entry.lane())).toList();
+        var leadNotes = assembly.ordered.notes().stream().filter(entry -> "FM1".equals(entry.lane())).toList();
         var leadVoice = voicing.representative("FM1", leadNotes);
-        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
-        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
-                null, null, null, null, allocation.chordVoicings());
         var placements = new java.util.ArrayList<ReconstructionAllocation.RunPlacement>();
         if (allocation.fastRuns() != null) placements.addAll(allocation.fastRuns());
-        placements.addAll(playback.placements());
+        placements.addAll(assembly.playback().placements());
         var assemblyInputs = assemblyInputs(score, allocation, voicing);
-        var layout = ReconstructionClipLinks.Layout.read(work);
         var layoutPath = work.resolve(ReconstructionClipLinks.LAYOUT);
         var sustain = matchQuietly(() -> ReconstructionSustain.inspect(score, catalogue, leadNotes, leadVoice));
         var staging = Files.createTempDirectory(work, ".assemble-");
         try {
-            render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
+            var rendered = render(midi, reference, index, staging, work, options, score, matched, effects, structure, allocation.leadContinuity(),
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
-                    (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
-                            new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
-                            authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
-                            omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
-                            policyLevels),
+                    assembly.arrangement(),
                     out, preserveReview ? existing : null, assemblyInputs);
-            var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
-            edits.addAll(outcomes);
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
+            for (var layer : rendered.layers()) layer.report(outcomes);
+            var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
+            edits.addAll(outcomes);
             var losses = json.fromJson(report.getAsJsonArray("reductions"), S3kReconstruction.Reduction[].class);
             report.add("chordAudit", json.toJsonTree(ReconstructionChordReduction.audit(score, allocation,
                     ReconstructionSections.load(work, score, structure), List.of(losses))));
             if (!edits.isEmpty()) report.add("editResults", json.toJsonTree(edits));
-            if (!voiceAssignments.isEmpty()) {
+            var voiceAssignments = voicing.voiceAssignments();
+            if (voiceAssignments != null && !voiceAssignments.isEmpty()) {
                 var applied = new java.util.TreeMap<String, Long>();
                 allocation.notes().stream().filter(entry -> voiceAssignments.containsKey(entry.note().id()))
                         .forEach(entry -> applied.merge(entry.lane(), 1L, Long::sum));
@@ -397,12 +381,66 @@ final class ReconstructionCli {
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             }
             if (!Files.exists(layoutPath))
-                ReconstructionArtifacts.write(layoutPath, layout == null ? ReconstructionClipLinks.Layout.of(savedProject.clips()) : layout);
+                ReconstructionArtifacts.write(layoutPath, assembly.layout == null
+                        ? ReconstructionClipLinks.Layout.of(savedProject.clips()) : assembly.layout);
         } finally {
             Files.deleteIfExists(staging.resolve(STEADY_REFERENCE));
             for (String name : OUTPUTS) Files.deleteIfExists(staging.resolve(name));
             Files.deleteIfExists(staging);
         }
+    }
+
+    private record Assembly(Matched matched, ReconstructionAllocation.Result ordered, ReconstructionClipLinks.Layout layout,
+                            ReconstructionRetriggers.Playback playback, Arrangement arrangement) {}
+
+    private static Assembly prepareAssembly(Path work, ReconstructionStages.Score score,
+                                            ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
+                                            ReconstructionVoicing.Result voicing, InstrumentCatalogue catalogue,
+                                            ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes)
+            throws IOException {
+        var options = score.inputs().options(score.durationUs());
+        var timeline = ReconstructionTimeMap.of(score);
+        var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
+                .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
+                        ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
+        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
+        var voiceAssignments = voicing.voiceAssignments() == null
+                ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
+        var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
+        var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
+        var matched = voicedMatches(catalogue, ordered, voicing);
+        var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
+        var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
+        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels();
+        var instruments = voicing.sourceInstruments();
+        var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
+        var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
+                null, null, null, null, allocation.chordVoicings());
+        var layout = ReconstructionClipLinks.Layout.read(work);
+        Arrangement arrange = (echoes, copies, bends, omitPolicy) -> S3kReconstruction.arrangeAllocated(
+                options.name(), options.ticksPerBeat(), timeline.frames(),
+                new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
+                structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
+                authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
+                omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
+                policyLevels, layers, score.inputs().fmOnly());
+        return new Assembly(matched, ordered, layout, playback, arrange);
+    }
+
+    static void previewLayers(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
+                              ReconstructionAllocation.Result allocation, ReconstructionEdits edits,
+                              List<ReconstructionEdits.Outcome> outcomes, boolean reallocated,
+                              ReconstructionRoles.Result roles) throws IOException {
+        var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
+        if (reallocated) {
+            voicing = keepVoicing(score, allocation, voicing, ignored -> {});
+            var plan = ReconstructionVoicePlan.preview(work, score, roles, edits);
+            voicing = voicing.withAssignments(plan.assignments(allocation, roles.lanePins()));
+        }
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes);
+        var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1);
+        for (var layer : arrangement.layers()) layer.report(outcomes);
     }
 
     static Map<String, String> assemblyInputs(ReconstructionStages.Score score,
@@ -488,7 +526,7 @@ final class ReconstructionCli {
                 key.drumPitch() == null ? kind : Kind.DAC_SAMPLE, lane, key, choice.report())));
     }
 
-    private static void render(Path midi, Path reference, Path index, Path target, Path destination,
+    private static S3kReconstruction.Result render(Path midi, Path reference, Path index, Path target, Path destination,
                                Options options, ReconstructionStages.Score transcription, Matched matched,
                                Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
                                ReconstructionMelodyGapFill.Stats melodyGapFill, ReconstructionAllocation.Fm1Gaps fm1InterNoteGaps,
@@ -527,6 +565,8 @@ final class ReconstructionCli {
                     else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
                         throw new IllegalArgumentException(failure.getMessage() + " (arpeggios add "
                                 + result.arpeggioExtraNoteBytes() + " note bytes; use longer steps or a smaller scope)", failure);
+                    else if (result.layers().stream().anyMatch(layer -> layer.status() == ReconstructionLayers.Status.applied))
+                        throw new IllegalArgumentException(failure.getMessage() + " (narrow the per-note layer scopes)", failure);
                     else if (!result.policyCoverage().isEmpty())
                         throw new IllegalArgumentException(failure.getMessage() + " (narrow voicing.json.lanePolicies scopes)", failure);
                     else throw failure;
@@ -594,6 +634,7 @@ final class ReconstructionCli {
                     result.arpeggioExtraNoteBytes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
+            if (!result.layers().isEmpty()) reportJson.add("noteLayers", json.toJsonTree(result.layers()));
             if (!result.policyCoverage().isEmpty()) {
                 var policyReport = new com.google.gson.JsonArray();
                 for (var coverage : result.policyCoverage()) {
@@ -617,6 +658,7 @@ final class ReconstructionCli {
             complete = true;
             out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
                     result.fmNotes(), result.psgNotes(), result.dacHits(), frames, destination);
+            return result;
         } finally {
             if (!complete) {
                 Files.deleteIfExists(target.resolve(STEADY_REFERENCE));

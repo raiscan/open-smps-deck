@@ -7,9 +7,12 @@ import com.opensmpsdeck.headless.ReconstructionEditing.Instrument;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionLaneType;
+import com.opensmpsdeck.headless.ReconstructionLayers;
+import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.headless.ReconstructionVoicePlan;
 import com.opensmpsdeck.headless.ReconstructionVoicePlan.Kind;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
@@ -62,6 +65,16 @@ final class ReconstructionBulk extends VBox {
     private final TextField arpeggioRate = new TextField("2");
     private final ComboBox<String> arpeggioOrder = combo("Arpeggio order", List.of("up", "down", "up-down"));
     private final VBox actions = new VBox(10);
+    private final ComboBox<String> layerMode = combo("Layer mode", List.of("Echo", "Chorus", "Double", "Off"));
+    private final ComboBox<ReconstructionLaneType> layerTarget = combo("Target",
+            List.of(ReconstructionLaneType.FM, ReconstructionLaneType.PSG));
+    private final TextField layerDelay = new TextField(Integer.toString(ReconstructionLayers.DEFAULT_ECHO_DELAY_FRAMES));
+    private final TextField echoLevel = new TextField(layerDbText(
+            ReconstructionLayers.DEFAULT_ECHO_ATTENUATION - ReconstructionLayers.ECHO_REFERENCE_TL));
+    private final CheckBox echoTrim = new CheckBox("Trim from " + ReconstructionLayers.ECHO_REFERENCE_TL + " TL echo");
+    private final TextField layerLevel = new TextField("-9");
+    private final TextField layerDetune = new TextField("-3");
+    private final ComboBox<String> layerOctave = combo("Interval", List.of("Unison", "Octave up", "Octave down"));
 
     private final Consumer<List<JsonObject>> submit;
     private List<Overlay> selected = List.of();
@@ -71,7 +84,7 @@ final class ReconstructionBulk extends VBox {
     private boolean updating;
 
     ReconstructionBulk(Consumer<Predicate<Overlay>> filter, Consumer<List<JsonObject>> submit,
-                       BiConsumer<List<String>, Instrument> play, Runnable stop) {
+                       BiConsumer<List<String>, Instrument> play, Runnable stop, Consumer<JsonObject> previewLayer) {
         super(10);
         this.submit = submit;
         getStyleClass().add("inspector");
@@ -133,6 +146,7 @@ final class ReconstructionBulk extends VBox {
             if (!updating && value != null) filter.accept(note -> value.equals(laneName(note)));
         });
         actions.getChildren().addAll(
+                layerControls(previewLayer, stop),
                 row(role, button("Set role", this::setRole)),
                 row(voice, button("Move to voice", this::move)),
                 row(voiceName, button("Create voice", this::create)),
@@ -145,6 +159,118 @@ final class ReconstructionBulk extends VBox {
                 row(collapse, glide), row(arpeggioOrder, arpeggioRate),
                 row(arpeggio, chord));
         getChildren().addAll(count, row(roles, voices, lanes), issue, actions);
+    }
+
+    private VBox layerControls(Consumer<JsonObject> preview, Runnable stop) {
+        layerMode.setId("reconstruction-layer-mode");
+        layerTarget.setId("reconstruction-layer-target");
+        layerDelay.setId("reconstruction-layer-delay");
+        echoLevel.setId("reconstruction-layer-level");
+        echoTrim.setId("reconstruction-layer-echo-trim");
+        layerLevel.setId("reconstruction-layer-copy-level");
+        echoTrim.setSelected(true);
+        layerMode.setValue("Echo");
+        layerTarget.setValue(ReconstructionLaneType.FM);
+        layerOctave.setValue("Unison");
+        for (var field : List.of(layerDelay, echoLevel, layerLevel, layerDetune)) field.setPrefColumnCount(4);
+        var delayHint = new Label();
+        var echoHint = new Label();
+        var levelHint = new Label();
+        delayHint.textProperty().bind(javafx.beans.binding.Bindings.createStringBinding(
+                () -> delayReadout(layerDelay.getText()), layerDelay.textProperty()));
+        echoHint.textProperty().bind(javafx.beans.binding.Bindings.createStringBinding(
+                () -> levelReadout(echoLevel.getText(), echoReference()), echoLevel.textProperty(), echoTrim.selectedProperty()));
+        levelHint.textProperty().bind(javafx.beans.binding.Bindings.createStringBinding(
+                () -> levelReadout(layerLevel.getText(), 0), layerLevel.textProperty()));
+        echoTrim.selectedProperty().addListener((ignored, previous, selected) -> {
+            try {
+                double value = Double.parseDouble(echoLevel.getText().strip());
+                double referenceDb = ReconstructionLayers.ECHO_REFERENCE_TL * ReconstructionLayers.DB_PER_TL;
+                if (Double.isFinite(value)) echoLevel.setText(java.math.BigDecimal
+                        .valueOf(value + (selected ? referenceDb : -referenceDb)).stripTrailingZeros().toPlainString());
+            } catch (NumberFormatException ignoredValue) { }
+        });
+        var echo = new VBox(5, row(new Label("Delay (frames)"), layerDelay, delayHint),
+                row(new Label("Level (dB)"), echoLevel, echoHint), echoTrim);
+        var level = row(new Label("Level (dB)"), layerLevel, levelHint);
+        var detune = row(new Label("Detune (FM units)"), layerDetune);
+        var octave = row(new Label("Interval"), layerOctave);
+        echo.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Echo"));
+        level.visibleProperty().bind(layerMode.valueProperty().isNotEqualTo("Off")
+                .and(layerMode.valueProperty().isNotEqualTo("Echo")));
+        detune.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Chorus"));
+        octave.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Double"));
+        layerTarget.disableProperty().bind(layerMode.valueProperty().isEqualTo("Off"));
+        for (var control : List.of(echo, level, detune, octave))
+            control.managedProperty().bind(control.visibleProperty());
+        var queue = button("Queue layer", () -> layer(edit -> submit.accept(List.of(edit))));
+        queue.setId("reconstruction-queue-layer");
+        var audition = button("Preview A/B", () -> layer(preview));
+        audition.setId("reconstruction-preview-layer");
+        return new VBox(6, new SeparatorLabel("Layer"), row(layerMode, new Label("Target"), layerTarget),
+                echo, level, detune, octave, row(queue, audition, button("Stop", stop)));
+    }
+
+    private static String layerDbText(int attenuation) {
+        return java.math.BigDecimal.valueOf(-attenuation * ReconstructionLayers.DB_PER_TL)
+                .stripTrailingZeros().toPlainString();
+    }
+
+    private int echoReference() {
+        return echoTrim.isSelected() ? ReconstructionLayers.ECHO_REFERENCE_TL : 0;
+    }
+
+    private static String delayReadout(String text) {
+        try {
+            int frames = Integer.parseInt(text.strip());
+            if (frames >= 1 && frames <= 600) return String.format(Locale.ROOT, "%.1f ms", frames * 1000.0 / 60);
+        } catch (NumberFormatException ignored) { }
+        return "";
+    }
+
+    private static int attenuation(String text, int reference) {
+        double value = Double.parseDouble(text.strip());
+        double tl = reference - value / ReconstructionLayers.DB_PER_TL;
+        if (!Double.isFinite(tl) || tl < 0 || tl > 127)
+            throw new NumberFormatException("Attenuation outside 0–127 TL steps");
+        return (int) Math.round(tl);
+    }
+
+    private static String levelReadout(String text, int reference) {
+        try {
+            return attenuation(text, reference) + " TL total";
+        } catch (NumberFormatException invalid) {
+            return "";
+        }
+    }
+
+    private void layer(Consumer<JsonObject> action) {
+        if (selected.isEmpty()) return;
+        String mode = layerMode.getValue();
+        var edit = intent("layer", mode.equals("Off") ? "Disable layers on selected notes" : "Add " + mode.toLowerCase(Locale.ROOT));
+        edit.addProperty("mode", mode.toLowerCase(Locale.ROOT));
+        try {
+            if (!mode.equals("Off")) {
+                edit.addProperty("laneType", layerTarget.getValue().name());
+                if (mode.equals("Echo") && echoTrim.isSelected())
+                    edit.addProperty("attenuation", attenuation(echoLevel.getText(), echoReference()));
+                else edit.addProperty("levelDb", Double.parseDouble(
+                        (mode.equals("Echo") ? echoLevel : layerLevel).getText().strip()));
+            }
+            switch (mode) {
+                case "Echo" -> edit.addProperty("delayFrames", Integer.parseInt(layerDelay.getText().strip()));
+                case "Chorus" -> edit.addProperty("detune", Integer.parseInt(layerDetune.getText().strip()));
+                case "Double" -> edit.addProperty("octave", layerOctave.getSelectionModel().getSelectedIndex() == 2 ? -1
+                        : layerOctave.getSelectionModel().getSelectedIndex());
+                default -> { }
+            }
+        } catch (NumberFormatException invalid) {
+            showIssue("Enter a level within 0–127 total TL steps and whole numbers for delay and detune.");
+            return;
+        }
+        String invalid = ReconstructionReview.validationIssue(edit);
+        showIssue(invalid);
+        if (invalid == null) action.accept(edit);
     }
 
     private static final class SeparatorLabel extends Label {
@@ -333,7 +459,7 @@ final class ReconstructionBulk extends VBox {
 
     private JsonArray noteIds() {
         var ids = new JsonArray();
-        ids().forEach(ids::add);
+        ids().stream().distinct().forEach(ids::add);
         return ids;
     }
 

@@ -34,7 +34,6 @@ final class ReconstructionLanePolicies {
     enum Mode { chorus, echo }
 
     static final String S3K_LAYERING = "s3k-layering";
-    private static final int S3K_LAYERING_ECHO_ATTENUATION = 15;
     private static final String FIELD = "voicing.json.lanePolicies";
 
     @JsonAdapter(ConfigurationJson.class)
@@ -47,10 +46,11 @@ final class ReconstructionLanePolicies {
             require(S3K_LAYERING.equals(name), FIELD + ".preset", "expected " + S3K_LAYERING);
             require(echoAttenuation == null || echoAttenuation >= 0 && echoAttenuation <= 127,
                     FIELD + ".echoAttenuation", "expected 0–127 TL steps");
-            int attenuation = echoAttenuation == null ? S3K_LAYERING_ECHO_ATTENUATION : echoAttenuation;
+            int attenuation = echoAttenuation == null ? ReconstructionLayers.DEFAULT_ECHO_ATTENUATION : echoAttenuation;
             return new Configuration(name, echoAttenuation, List.of(
                     new Rule(Kind.psgDouble, null, null, null, null, null, 1, null, null, null, null, null),
-                    new Rule(Kind.fmDouble, null, null, null, null, null, null, null, Mode.echo, null, attenuation, null)));
+                    new Rule(Kind.fmDouble, null, null, null, null, ReconstructionLayers.DEFAULT_ECHO_DELAY_FRAMES,
+                            null, null, Mode.echo, null, attenuation, null)));
         }
     }
 
@@ -140,7 +140,7 @@ final class ReconstructionLanePolicies {
             };
         }
         int fmDetune() { return detune == null ? (mode == Mode.echo ? 2 : -2) : detune; }
-        int fmAttenuation() { return attenuation == null ? (mode == Mode.echo ? 7 : 1) : attenuation; }
+        int fmAttenuation() { return attenuation == null ? (mode == Mode.echo ? ReconstructionLayers.ECHO_REFERENCE_TL : 1) : attenuation; }
     }
 
     record Scoped(int index, Rule rule, int start, int end, Set<String> notes) {

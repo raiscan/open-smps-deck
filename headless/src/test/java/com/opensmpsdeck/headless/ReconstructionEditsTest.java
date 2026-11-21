@@ -214,6 +214,58 @@ class ReconstructionEditsTest {
         assertFalse(ReconstructionTrace.read(work).containsKey("edit-reject"));
     }
 
+    @Test void authoredLayersReplayAndSharePlacementEvidenceWithDryRunsAndProposals(@TempDir Path dir) throws Exception {
+        var midi = dir.resolve("fixture.mid");
+        var wav = dir.resolve("mix.wav");
+        var catalogue = dir.resolve("index.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav, true);
+        var work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        byte[] render = Files.readAllBytes(work.resolve("render.wav"));
+        var echo = json("""
+                {"op":"layer","id":"echo","author":"human","reason":"Echo the opening note","mode":"echo","laneType":"FM",
+                 "delayFrames":10,"levelDb":-9,"selectors":[{"at":0,"pitch":60,"part":0},{"at":0.7,"pitch":111,"part":0}]}
+                """);
+        var dryRun = ReconstructionEditCommand.run(work, "add", echo, null, false, true, (a, b, c) -> {});
+        assertEquals("assemble", dryRun.get("from").getAsString());
+        var outcomes = dryRun.getAsJsonArray("outcomes");
+        assertEquals("invalid", outcomes.get(0).getAsJsonObject().get("status").getAsString());
+        var dryLayer = outcomes.get(1).getAsJsonObject().getAsJsonObject("layer");
+        assertEquals("applied", dryLayer.get("status").getAsString());
+        assertEquals(12, dryLayer.get("attenuation").getAsInt());
+        assertEquals(10, dryLayer.get("startTick").getAsInt());
+        assertFalse(Files.exists(work.resolve("edits.json")));
+
+        var chorus = json("""
+                {"op":"layer","id":"chorus","reason":"Double a counter note","mode":"chorus","laneType":"PSG",
+                 "detune":-4,"span":[0.49,0.55],"part":0,"pitchMin":64,"pitchMax":64}
+                """);
+        var proposed = ReconstructionEditCommand.run(work, "propose", chorus, null, false, (a, b, c) -> {});
+        var proposalOutcomes = proposed.getAsJsonArray("proposals").get(0).getAsJsonObject().getAsJsonArray("outcomes");
+        assertEquals("applied", proposalOutcomes.get(0).getAsJsonObject().getAsJsonObject("layer")
+                .get("status").getAsString());
+        assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
+
+        var preview = ReconstructionReview.previewLayer(work, echo, ReconstructionReview.revision(work), (a, b, c) -> {});
+        assertEquals(1, preview.comparisons().size());
+        assertTrue(Files.isRegularFile(Path.of(preview.comparisons().getFirst().output())));
+        assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
+        ReconstructionEditCommand.run(work, "add", echo, null, true, (a, b, c) -> {});
+        cli("reconstruct", "proposals", "accept", work.toString(), "chorus");
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+        var trace = ReconstructionTrace.read(work);
+        var echoResult = trace.get("n-0-0-60").layers().getFirst();
+        assertEquals(dryLayer, new com.google.gson.Gson().toJsonTree(echoResult));
+        assertEquals("PSG1", trace.get("n-0-500000-64").layers().getFirst().lane());
+        assertFalse(java.util.Arrays.equals(render, Files.readAllBytes(work.resolve("render.wav"))));
+        var inspection = ReconstructionInspection.open(work);
+        assertEquals(2, inspection.layers().size());
+        var focused = json(cli("reconstruct", "trace", work.toString(), "--lane", echoResult.lane(), "--json"));
+        assertTrue(focused.getAsJsonArray("notes").asList().stream()
+                .map(com.google.gson.JsonElement::getAsJsonObject).anyMatch(row -> row.has("layers")));
+    }
+
     @Test void studioApplyPublishesOnlyOnSuccessAndSharesTheCliJournal(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("fixture.mid");
         Path wav = dir.resolve("mix.wav");

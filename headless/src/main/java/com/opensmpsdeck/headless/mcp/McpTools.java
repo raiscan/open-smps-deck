@@ -138,7 +138,7 @@ final class McpTools {
                     choice("action", "Edit command (defaults to list, or add with propose)", "add", "list", "remove", "proposals", "accept", "reject").optional(),
                     field("propose", "boolean", "Save as an agent proposal and dry-run it without rebuilding").optional(),
                     field("group", "string", "Select a proposal group for proposals, accept or reject").optional(),
-                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down).").optional(),
+                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down). layer uses noteIds, point selectors or a filtered span with mode echo, chorus, double or off; copies specify laneType FM or PSG and can set attenuation (TL) or levelDb.").optional(),
                     field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove or review").optional(),

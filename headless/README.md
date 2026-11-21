@@ -811,8 +811,9 @@ rejection history.
 ## Reconstruction layering
 
 `reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering` enables
-octave-up PSG doubling and an eight-frame FM echo. The echo defaults to 15
-carrier TL steps of attenuation relative to the dry note (11.25 dB nominal).
+octave-up PSG doubling and a 14-frame FM echo. The echo defaults to 11
+carrier TL steps below the dry note (8.25 dB nominal), or 3 dB quieter than
+the original 7-TL echo.
 Set `lanePolicies.echoAttenuation` in `voicing.json` to override that level,
 then assemble using the saved policy. Use `off` to clear lane policies.
 Passing either preset choice replaces the saved policy configuration.

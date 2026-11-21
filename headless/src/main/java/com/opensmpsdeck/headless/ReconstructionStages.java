@@ -516,11 +516,15 @@ public final class ReconstructionStages {
         }
         if (from == Stage.ASSEMBLE) {
             var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
-            previewNoteVoicing(edits, score, allocation, outcomes);
+            if (ReconstructionLayers.present(edits))
+                ReconstructionCli.previewLayers(work, score, readStructure(structureFile, score), allocation, edits,
+                        outcomes, false, currentRoles);
+            else previewNoteVoicing(edits, score, allocation, outcomes);
             return;
         }
         if (from.ordinal() >= Stage.VOICES.ordinal() && currentRoles != null) {
-            previewAllocationEdits(work, edits, score, currentRoles, outcomes, resolvedNotes != null);
+            var structure = ReconstructionLayers.present(edits) ? readStructure(structureFile, score) : null;
+            previewAllocationEdits(work, edits, score, structure, currentRoles, outcomes, resolvedNotes != null);
             return;
         }
         List<ReconstructionEdits.Outcome> scoreEdits;
@@ -546,7 +550,7 @@ public final class ReconstructionStages {
             for (var row : roles.notes()) resolvedNotes.put(row.note().id(), row.note().mapTime(clock::source));
             for (var note : score.notes()) resolvedNotes.put(note.id(), note);
         }
-        previewAllocationEdits(work, edits, score, roles, outcomes, resolvedNotes != null);
+        previewAllocationEdits(work, edits, score, structure, roles, outcomes, resolvedNotes != null);
         if (from != Stage.TRANSCRIBE) return;
         var previous = new HashMap<String, ReconstructionRoles.Decision>();
         if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
@@ -571,7 +575,8 @@ public final class ReconstructionStages {
     }
 
     private static void previewAllocationEdits(Path work, ReconstructionEdits edits, Score score,
-                                               ReconstructionRoles.Result roles, List<ReconstructionEdits.Outcome> outcomes,
+                                               ReconstructionStructure.Result structure, ReconstructionRoles.Result roles,
+                                               List<ReconstructionEdits.Outcome> outcomes,
                                                boolean allPins)
             throws IOException {
         var pins = roles.lanePins();
@@ -580,7 +585,8 @@ public final class ReconstructionStages {
         boolean hasVoiceEdits = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.voiceEdit);
         boolean hasNoteVoicing = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing);
         boolean checkPins = pins != null && pins.values().stream().anyMatch(pin -> allPins || pin.laneType() != null);
-        if (!hasChordEdits && !checkPins && !hasVoiceEdits && !hasNoteVoicing) return;
+        boolean hasLayers = ReconstructionLayers.present(edits);
+        if (!hasChordEdits && !checkPins && !hasVoiceEdits && !hasNoteVoicing && !hasLayers) return;
         var laneTypes = Map.<String, ReconstructionLaneType>of();
         if (hasVoiceEdits || Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))) {
             var voices = ReconstructionVoicePlan.preview(work, score, roles, edits);
@@ -588,7 +594,7 @@ public final class ReconstructionStages {
             ReconstructionVoicePlan.reviewOutcomes(edits, voices, outcomes);
         }
         var chords = ReconstructionChords.select(bound, score, roles, laneTypes, outcomes);
-        if (chords.isEmpty() && !checkPins && !hasNoteVoicing) return;
+        if (chords.isEmpty() && !checkPins && !hasNoteVoicing && !hasLayers) return;
         try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
@@ -599,7 +605,8 @@ public final class ReconstructionStages {
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience, chordReduction);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
-            if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
+            if (hasLayers) ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes, true, roles);
+            else if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
         }
     }
 
