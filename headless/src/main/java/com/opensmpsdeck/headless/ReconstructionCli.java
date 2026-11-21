@@ -89,6 +89,7 @@ final class ReconstructionCli {
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
+        out.println("           [--no-stem-template-notes]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
         out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");

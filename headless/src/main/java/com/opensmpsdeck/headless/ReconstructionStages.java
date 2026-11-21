@@ -104,19 +104,19 @@ public final class ReconstructionStages {
                   @Nullable String candidates, double harmonyMaxHz, @Nullable ReconstructionTempo.Options grid,
                   @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes,
                   @Nullable Integer leadPart, @Nullable Boolean fastRunsOff,
-                  @Nullable ReconstructionDrums.Source drumSource) {
+                  @Nullable ReconstructionDrums.Source drumSource, @Nullable Boolean stemTemplateNotesOff) {
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
-                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null, null, null, null);
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, null, null, null, null, null);
         }
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats,
                Map<Integer, ExternalTranscribers.PartNotes> externalNotes, Integer leadPart) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine,
-                    stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null, null);
+                    stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, null, null, null);
         }
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
@@ -174,10 +174,14 @@ public final class ReconstructionStages {
     private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
-                                Map<Integer, ExternalTranscribers.Import> imports, Map<Path, String> unmapped, @Nullable Integer leadPart, boolean fastRunsOff,
-                                @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached) {}
-    private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz,
-                           java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached) {}
+                                Map<Integer, ExternalTranscribers.Import> imports, Map<Path, String> unmapped,
+                                @Nullable Integer leadPart, boolean fastRunsOff, boolean stemTemplateNotesOff,
+                                @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes,
+                                boolean refitLevels, boolean keepVoicing, @Nullable String variant, boolean overwriteDetached) {}
+    private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates) {}
+    private record Request(Path work, Stage from, boolean chain, @Nullable Transcription initial, @Nullable Double harmonyHz,
+                           java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant,
+                           boolean overwriteDetached) {}
 
     private ReconstructionStages() {}
 
@@ -213,7 +217,7 @@ public final class ReconstructionStages {
             var run = new ReconstructionManifest.Run(stageName(request.from), request.harmonyHz);
             if (request.initial != null) {
                 Files.createDirectory(request.work);
-                capture.write(request.work, request.initial, List.of(args).subList(4, args.length), run);
+                capture.write(request.work, request.initial.score(), List.of(args).subList(4, args.length), run);
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
@@ -250,8 +254,10 @@ public final class ReconstructionStages {
         if (Files.exists(voiceJournal)) Files.copy(voiceJournal, work.resolve(ReconstructionVoicePlan.JOURNAL));
         var edits = ReconstructionEdits.read(oldWork);
         if (!edits.isEmpty()) edits.write(work);
-        var score = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
-        execute(new Request(work, Stage.TRANSCRIBE, true, score, replay.manifest().lastRun().harmonyMaxHz(),
+        Path templateReport = oldWork.resolve(ReconstructionStemTemplates.FILE);
+        if (Files.exists(templateReport)) Files.copy(templateReport, work.resolve(ReconstructionStemTemplates.FILE));
+        var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
+        execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
         summarizeEdits(work, err);
@@ -307,9 +313,11 @@ public final class ReconstructionStages {
             if (stage.ordinal() < request.from.ordinal()) continue;
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
             if (stage == Stage.TRANSCRIBE) {
-                Score score = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
+                var transcription = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
+                Score score = transcription.score();
                 score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
                 ReconstructionArtifacts.write(scoreFile, score);
+                journal = ReconstructionStemTemplates.publish(work, journal, transcription.candidates());
             } else {
                 var score = readScore(scoreFile);
                 switch (stage) {
@@ -511,7 +519,7 @@ public final class ReconstructionStages {
         }
         List<ReconstructionEdits.Outcome> scoreEdits;
         if (from == Stage.TRANSCRIBE) {
-            score = retranscribe(score);
+            score = retranscribe(score).score();
             score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
             scoreEdits = List.copyOf(outcomes);
         } else {
@@ -700,7 +708,8 @@ public final class ReconstructionStages {
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
-                extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource);
+                extra.grid, extra.audioRepeats, external, extra.leadPart, extra.fastRunsOff ? true : null, extra.drumSource,
+                extra.stemTemplateNotesOff ? true : null);
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz,
                 extra.lanes, extra.refitLevels, extra.keepVoicing, null, false);
     }
@@ -717,7 +726,7 @@ public final class ReconstructionStages {
                 || extra.refitLevels || !extra.lanes.isEmpty()))
             throw new IllegalArgumentException("--keep-voicing requires a run through voice and cannot be combined with refit options");
         if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
-                || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff
+                || extra.transcriber != null || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
                 || extra.harmonyHz != null && (chain ? stage.ordinal() > Stage.ROLES.ordinal() : stage != Stage.ROLES))
@@ -733,7 +742,7 @@ public final class ReconstructionStages {
         Double hz = null, bpm = null, offset = null;
         Integer leadPart = null;
         ReconstructionDrums.Source drumSource = null;
-        boolean estimate = false, audioRepeats = false, fastRunsOff = false;
+        boolean estimate = false, audioRepeats = false, fastRunsOff = false, stemTemplateNotesOff = false;
         String steady = null, transcriber = null, device = null, variant = null;
         Path transcriberConfig = null;
         var parts = new java.util.TreeMap<Integer, String>();
@@ -744,6 +753,7 @@ public final class ReconstructionStages {
             switch (args[i]) {
                 case "--estimate-tempo" -> estimate = true;
                 case "--no-fast-runs" -> fastRunsOff = true;
+                case "--no-stem-template-notes" -> stemTemplateNotesOff = true;
                 case "--audio-repeats" -> audioRepeats = true;
                 case "--tempo" -> {
                     if (bpm != null || ++i == args.length) throw new IllegalArgumentException("Expected one --tempo BPM");
@@ -849,7 +859,9 @@ public final class ReconstructionStages {
             throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE or --transcribe-unmapped ROLE=WAV");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant, overwriteDetached);
+                transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff,
+                stemTemplateNotesOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant,
+                overwriteDetached);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -909,18 +921,18 @@ public final class ReconstructionStages {
                 && beats.confidence() >= ReconstructionTimeMap.MIN_CONFIDENCE && beats.deviation() >= .006;
     }
 
-    private static Score retranscribe(Score saved) throws IOException {
+    private static Transcription retranscribe(Score saved) throws IOException {
         return transcribeWithSavedNotes(saved.inputs, saved.durationUs);
     }
 
-    private static Score transcribeWithSavedNotes(Inputs inputs, long durationUs) throws IOException {
+    private static Transcription transcribeWithSavedNotes(Inputs inputs, long durationUs) throws IOException {
         var options = inputs.options(durationUs);
         if (inputs.externalNotes != null) for (var entry : inputs.externalNotes.entrySet())
             if (Boolean.TRUE.equals(entry.getValue().provenance().addedStem())) options.stems().remove(entry.getKey());
         return attach(transcribe(Path.of(inputs.midi), Path.of(inputs.wav), options), inputs);
     }
 
-    private static Score attach(Score score, Inputs inputs) throws IOException {
+    private static Transcription attach(Score score, Inputs inputs) throws IOException {
         var notes = new ArrayList<>(score.notes);
         var newParts = new java.util.HashSet<Integer>();
         if (inputs.externalNotes != null) {
@@ -988,6 +1000,14 @@ public final class ReconstructionStages {
                 }
             }
         }
+        var stemCandidates = new ArrayList<ReconstructionStemTemplates.Candidate>();
+        var sourceNotes = new HashMap<Integer, List<Note>>();
+        for (var midiNote : score.source.notes()) {
+            if (!inputs.stems.containsKey(midiNote.partId()) || midiNote.startUs() >= score.durationUs) continue;
+            sourceNotes.computeIfAbsent(midiNote.partId(), ignored -> new ArrayList<>())
+                    .add(new Note(midiNoteKey(midiNote), midiNote.partId(), midiNote.startUs() / 1e6,
+                            Math.min(score.durationUs, midiNote.endUs()) / 1e6, midiNote.pitch(), midiNote.velocity(), "midi", 1));
+        }
         var voices = new java.util.TreeMap<String, List<ReconstructionFigureVoices.Voice>>();
         var bursts = new ArrayList<ReconstructionRetriggers.Burst>();
         var decisions = new ArrayList<ScoreDecision>();
@@ -997,8 +1017,16 @@ public final class ReconstructionStages {
             if (part.drums() || newParts.contains(part.id()) || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
             boolean leadCandidate = inputs.leadPart != null && inputs.leadPart == part.id()
                     || part.program() < 32 || part.program() > 39;
-            if (!fastRuns && !leadCandidate) continue;
+            var anchors = sourceNotes.getOrDefault(part.id(), List.of());
+            boolean learnTemplate = anchors.size() >= 4;
+            if (!fastRuns && !leadCandidate && !learnTemplate) continue;
             var audio = ReconstructionLeadAudio.readMono(Path.of(stem), score.durationUs / 1e6);
+            if (learnTemplate) {
+                var occupancy = new ArrayList<>(anchors);
+                notes.stream().filter(note -> note.part == part.id() && !note.source.equals("midi"))
+                        .forEach(occupancy::add);
+                stemCandidates.addAll(ReconstructionStemTemplates.detect(audio, anchors, occupancy));
+            }
             if (fastRuns) {
                 var local = notes.stream().filter(note -> note.part == part.id()).toList();
                 ReconstructionFastRuns.reconcile(notes, part.id(), ReconstructionFastRuns.detect(audio,
@@ -1027,6 +1055,9 @@ public final class ReconstructionStages {
                 }
             }
         }
+        if (!Boolean.TRUE.equals(inputs.stemTemplateNotesOff))
+            stemCandidates.stream().filter(ReconstructionStemTemplates.Candidate::automatic)
+                    .map(ReconstructionStemTemplates.Candidate::note).forEach(notes::add);
         Path midi = Path.of(inputs.midi);
         var metadata = MidiScore.gridMetadata(midi);
         var grid = inputs.grid == null ? new ReconstructionTempo.Options(false, null, null) : inputs.grid;
@@ -1068,7 +1099,7 @@ public final class ReconstructionStages {
                 voices.isEmpty() ? null : voices, bursts.isEmpty() ? null : List.copyOf(bursts),
                 decisions.isEmpty() ? null : List.copyOf(decisions));
         ReconstructionChecks.score(result);
-        return result;
+        return new Transcription(result, List.copyOf(stemCandidates));
     }
 
     static String midiNoteKey(MidiScore.Note note) {

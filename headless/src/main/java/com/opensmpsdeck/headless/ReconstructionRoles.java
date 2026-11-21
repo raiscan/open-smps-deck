@@ -100,13 +100,15 @@ final class ReconstructionRoles {
         var layout = structure.roleLayout() == null
                 ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
                 : structure.roleLayout();
-        var byBar = byBar(layout.bars(), tones);
+        var contourTones = tones.stream().filter(note -> !ReconstructionStemTemplates.SOURCE.equals(note.source())).toList();
+        var byBar = byBar(layout.bars(), contourTones);
         // Unmapped stems supplement the written arrangement. A dense decoded
         // chord should not replace an existing line on the reserved chip lane.
         boolean hasWrittenTones = !addedParts.isEmpty() && tones.stream()
                 .anyMatch(note -> !addedParts.contains(note.part()));
         java.util.function.Predicate<Note> writtenTone = note -> !hasWrittenTones || !addedParts.contains(note.part());
-        var leadTones = hasWrittenTones && leadPart == null ? tones.stream().filter(writtenTone).toList() : tones;
+        var leadTones = hasWrittenTones && leadPart == null
+                ? contourTones.stream().filter(writtenTone).toList() : contourTones;
         var melody = melody(layout, leadTones, programs, evidence, accents, leadPart);
         for (String id : melody.lead()) roles.put(id, Role.melody);
         if (leadPart != null) for (var note : tones) {
@@ -117,8 +119,11 @@ final class ReconstructionRoles {
         for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
             labelLine(hasWrittenTones ? notes.stream().filter(writtenTone).toList() : notes, roles, programs, Role.bass);
-            if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
+            if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass)) {
+                restoreRegularLine(notes, roles, phraseReasons, Role.bass);
                 labelLine(notes, roles, programs, Role.counter);
+                restoreRegularLine(notes, roles, phraseReasons, Role.counter);
+            }
         }
         Map<String, String> reasons = phraseReasons;
         if (plan != null) reasons.putAll(applyPlan(structure, roles, programs, plan, beatMap, evidence, accents));
@@ -133,13 +138,14 @@ final class ReconstructionRoles {
         // Only apply fragment thinning where the source part itself carries overlapping voices.
         var chordParts = new HashSet<Integer>();
         if (harmonyHz > 0) {
-            tones.stream().collect(Collectors.groupingBy(Note::part)).forEach((part, notes) -> {
+            contourTones.stream().collect(Collectors.groupingBy(Note::part)).forEach((part, notes) -> {
                 if (!ReconstructionMelody.isMonophonic(notes)) chordParts.add(part);
             });
         }
         var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts, separate);
         var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
         java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> !suppressed.test(note)
+                && !ReconstructionStemTemplates.SOURCE.equals(note.source())
                 && (writtenTone.test(note) || anchor.note().part() == note.part())
                 && (!fixedGates.contains(anchor.note().id()) || !anchor.note().id().equals(note.id()))
                 && (scopes.isEmpty() || permitsContinuation(structure, scopes, anchor, note));
@@ -359,6 +365,51 @@ final class ReconstructionRoles {
         }
     }
 
+    /**
+     * A pitch-turn penalty can make contour tracing jump past a pulse. Fill
+     * holes in an established line before a second role can claim the pulse.
+     */
+    private static void restoreRegularLine(List<Note> section, Map<String, Role> roles,
+                                           Map<String, String> reasons, Role role) {
+        var parts = section.stream().collect(Collectors.groupingBy(Note::part));
+        var established = section.stream().filter(note -> roles.get(note.id()) == role).toList();
+        var restored = new ArrayList<Note>();
+        for (var part : parts.values()) {
+            for (int i = 2; i + 2 < part.size(); i++) {
+                if (roles.get(part.get(i).id()) != Role.harmony || roles.get(part.get(i - 1).id()) != role
+                        || roles.get(part.get(i - 2).id()) != role) continue;
+                int next = i + 1;
+                if (roles.get(part.get(next).id()) == Role.harmony) next++;
+                if (next + 1 >= part.size() || roles.get(part.get(next).id()) != role
+                        || roles.get(part.get(next + 1).id()) != role) continue;
+                var window = part.subList(i - 2, next + 2);
+                if (!regularMonophonic(window, i > 2 ? part.get(i - 3) : null)) continue;
+                var first = part.get(i);
+                var last = part.get(next - 1);
+                if (established.stream().anyMatch(note -> note.part() != first.part()
+                        && note.start() < last.end() && note.end() > first.start())) continue;
+                restored.addAll(part.subList(i, next));
+            }
+        }
+        for (var note : restored) {
+            roles.put(note.id(), role);
+            reasons.put(note.id(), "regular-monophonic-line");
+        }
+    }
+
+    private static boolean regularMonophonic(List<Note> window, Note predecessor) {
+        double period = (window.getLast().start() - window.getFirst().start()) / (window.size() - 1);
+        if (period < .025 || period > .160 || predecessor != null
+                && predecessor.end() > window.getFirst().start() + .002) return false;
+        for (int i = 1; i < window.size(); i++) {
+            var prior = window.get(i - 1);
+            var next = window.get(i);
+            if (Math.abs(next.start() - prior.start() - period) > .20 * period
+                    || prior.end() > next.start() + .002 || next.start() - prior.end() > .45 * period) return false;
+        }
+        return true;
+    }
+
     private static void labelLine(List<Note> section, Map<String, Role> roles, Map<Integer, Integer> programs, Role role) {
         List<Note> notes = section.stream().filter(note -> roles.get(note.id()) == Role.harmony).toList();
         traceLine(notes, roles, programs, role, role == Role.bass);
@@ -450,7 +501,7 @@ final class ReconstructionRoles {
             decisions.put(note.id(), new Decision(note, role, reason(reasons, note.id(),
                     octaveDrops.contains(note.id()) ? "isolated-harmony-octave-double"
                             : note.run() == null ? null : note.source()), null));
-            if (note.run() != null || role == Role.drums || role == Role.drop || chordParts.isEmpty()) continue;
+            if (note.run() != null || ReconstructionStemTemplates.SOURCE.equals(note.source()) || role == Role.drums || role == Role.drop || chordParts.isEmpty()) continue;
             while (future < notes.size() && notes.get(future).start() <= note.start() + .020) {
                 Note incoming = notes.get(future++);
                 if (roles.get(incoming.id()) != Role.drums && roles.get(incoming.id()) != Role.drop) sounding.add(incoming);

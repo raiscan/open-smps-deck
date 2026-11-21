@@ -768,6 +768,23 @@ field and edit spans accept `{"section":"chorus-1"}`. See the
 [musical sections guide](../docs/architecture/reconstruction-stages.md#musical-sections)
 for payloads, split and merge, and MCP equivalents.
 
+### Recover missing notes from mapped stems
+
+Staged `reconstruct run` and `reconstruct transcribe` learn the second,
+third and fourth partial levels of isolated MIDI notes on each mapped
+tonal stem. The detector uses nearby pitches when there are too few
+examples at the exact pitch. Sustained peaks above the template are
+recorded in `stem-template-candidates.json` with source times, confidence,
+and dB measurements. A stronger excess with an independent attack on a
+held fundamental can add a harmony note with `audio-template` provenance.
+Use `--no-stem-template-notes` on a fresh run (MCP
+`options.noStemTemplateNotes`) to suppress these automatic insertions.
+
+Ambiguous peaks become agent `insertNote` proposals in the
+`audio-template` group. List, preview, accept or reject them using the
+proposal commands above. Accepting one takes effect on a rebuild from
+`transcribe`.
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then

@@ -39,6 +39,7 @@ final class EvidenceNotes {
                 var layer = origin.transcriber() != null || "external".equals(origin.provenance())
                         ? Layer.external : switch (origin.provenance()) {
                             case "midi", "audio-refine" -> Layer.suno;
+                            case ReconstructionStemTemplates.SOURCE -> Layer.external;
                             default -> Layer.trace;
                         };
                 String evidence = row.voiced().stream().map(ReconstructionTrace.Voiced::evidence)

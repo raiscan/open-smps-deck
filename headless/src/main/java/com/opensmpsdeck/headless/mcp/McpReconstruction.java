@@ -43,6 +43,7 @@ final class McpReconstruction {
             field("fmOnly", "boolean", "Disable PSG spill").optional(),
             field("wholePartVoices", "boolean", "Use one FM patch per part").optional(),
             field("audioRefine", "boolean", "Use audio pitch refinement").optional(),
+            field("noStemTemplateNotes", "boolean", "Skip automatic recovered stem notes (still report candidates). Fresh runs only").optional(),
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
@@ -63,7 +64,7 @@ final class McpReconstruction {
                     "Map of new aligned stem WAV paths to transcriber roles").optional(),
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
-    private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
+    private static final List<String> FILES = List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json",
             "voicing.json", "roleplan.json", "manifest.json", ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.JOURNAL, ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, ReconstructionProposals.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
@@ -139,8 +140,9 @@ final class McpReconstruction {
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
-                    "audioRefine", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
-                    "transcriber", "transcriberDevice", "refitLevels", "keepVoicing", "overwriteDetached");
+                    "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
+                    "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice",
+                    "refitLevels", "keepVoicing", "overwriteDetached");
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");
                 cli.add(lane.getAsString());
@@ -220,7 +222,7 @@ final class McpReconstruction {
 
     static JsonObject sections(JsonObject args) throws IOException {
         var work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "structure.json", ReconstructionSections.FILE, ReconstructionSections.LOCK))
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", ReconstructionSections.FILE, ReconstructionSections.LOCK))
             McpPaths.managed(work, file);
         return object(ReconstructionSections.run(work, args.has("action") ? string(args, "action") : "list",
                 args.get("entries")));
@@ -268,7 +270,7 @@ final class McpReconstruction {
 
     static JsonObject describe(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE)) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE)) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
                 optional(args, "parts"), optional(args, "bars"));
@@ -283,7 +285,7 @@ final class McpReconstruction {
 
     static JsonObject planTemplate(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "structure.json", "roleplan.json")) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roleplan.json")) McpPaths.managed(work, file);
         return object(Map.of("path", ReconstructionStages.planTemplate(work).toString()));
     }
 

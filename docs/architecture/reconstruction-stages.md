@@ -46,6 +46,28 @@ Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
 
+## Recover missed notes from stems
+
+The transcribe stage measures partials 2–4 against the fundamental in each
+mapped tonal stem. It learns a median and spread from isolated notes at the
+same pitch or in a nearby register. Several consecutive frames must exceed
+the learned level, with no written note or competing harmonic explaining
+the peak. A sufficiently strong excess with its own attack during the
+written note is inserted as `audio-template`. It supplements the existing
+contours as harmony. Pass `--no-stem-template-notes` on the initial run to
+disable automatic insertion while retaining detection and review proposals.
+The saved option carries into retranscription and manifest replay.
+
+`stem-template-candidates.json` records candidate confidence, source times,
+training counts, and observed and typical levels in dB. Lower-confidence
+candidates enter `edits.json` as agent `insertNote` proposals in the
+`audio-template` group. Use `reconstruct proposals list WORK_DIR --group audio-template`
+to inspect them. Rejected candidates stay in the evidence report.
+
+The automatic roles pass can restore a short skipped pulse bracketed by the
+same role in a regular monophonic run. The trace records
+`regular-monophonic-line`. Explicit role rules still take precedence.
+
 ## Processing Suno downloads
 
 `reconstruct import FOLDER WORK_DIR` checks the download before transcription

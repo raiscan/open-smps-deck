@@ -27,7 +27,7 @@ import static java.nio.file.StandardOpenOption.WRITE;
 
 /** Revision-aware journal operations for interactive reconstruction review. */
 public final class ReconstructionReview {
-    private static final List<String> OUTPUTS = List.of("score.json", "structure.json", "roles.json",
+    private static final List<String> OUTPUTS = List.of("score.json", ReconstructionStemTemplates.FILE, "structure.json", "roles.json",
             "allocation.json", "voicing.json", ReconstructionEdits.RESULTS, ReconstructionProposals.RESULTS,
             ReconstructionAllocation.Affinity.FILE, ReconstructionClipLinks.LAYOUT, ReconstructionManifest.FILE,
             "arrangement.smps.json", "arrangement.smps.zip", "render.wav", ReconstructionCli.STEADY_REFERENCE,
@@ -211,7 +211,7 @@ public final class ReconstructionReview {
                 progress.report(completed, total + 1, message);
             });
             checkCancelled();
-            if (updated.intents().stream().noneMatch(ReconstructionEdits.Intent::proposed))
+            if (ReconstructionEdits.read(after).intents().stream().noneMatch(ReconstructionEdits.Intent::proposed))
                 Files.deleteIfExists(after.resolve(ReconstructionProposals.RESULTS));
             int total = ReconstructionStages.Stage.values().length
                     - ReconstructionStages.Stage.parse(from).ordinal() + 1;
