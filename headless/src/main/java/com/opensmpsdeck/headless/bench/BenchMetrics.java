@@ -34,6 +34,11 @@ final class BenchMetrics {
 
     static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, boolean nativeSlots,
                               Map<Integer, BenchDrums.Drum> noiseClasses) {
+        return events(truth, drums, nativeSlots, noiseClasses, Map.of());
+    }
+
+    static List<Event> events(BenchTimeline.Truth truth, BenchDrums drums, boolean nativeSlots,
+                              Map<Integer, BenchDrums.Drum> noiseClasses, Map<String, String> gainAliases) {
         var result = new ArrayList<Event>();
         for (var channel : truth.channels()) {
             boolean noise = channel.kind().equals("noise");
@@ -47,9 +52,10 @@ final class BenchMetrics {
                         noise ? BenchDrums.Drum.HAT : null));
             }
             for (var hit : channel.hits()) {
-                var legacy = drums.classify(hit.sampleHash(), nativeSlots ? hit.slot() : -1);
+                String hash = gainAliases.getOrDefault(hit.sampleHash(), hit.sampleHash());
+                var legacy = drums.classify(hash, nativeSlots ? hit.slot() : -1);
                 result.add(new Event(channel.kind(), hit.time(), hit.time(), 0, hit.sampleHash(),
-                        drums.detailed(hit.sampleHash(), legacy), legacy));
+                        drums.detailed(hash, legacy), legacy));
             }
         }
         return result.stream().sorted(Comparator.comparingDouble(Event::start)

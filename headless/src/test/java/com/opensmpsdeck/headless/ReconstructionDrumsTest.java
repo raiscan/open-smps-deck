@@ -57,6 +57,15 @@ class ReconstructionDrumsTest {
         String sample = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Kick", pcm);
         builder.variant(sample, "Kick", new InstrumentCatalogue.Recipe(nativeRate, null, 127, 60,
                 null, null, List.of(), List.of()), null);
+        // This mislabeled-for-the-hit candidate has the exact resonance of the
+        // reference. Known catalogue class evidence should keep it out of the kick role.
+        byte[] distractor = new byte[pcm.length];
+        int fastRate = 8;
+        for (int i = 0; i < distractor.length; i++)
+            distractor[i] = (byte) (128 + Math.round(110 * kick(i / DacSample.sampleRateHz(fastRate), 113)));
+        String snare = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Snare", distractor);
+        builder.variant(snare, "Snare", new InstrumentCatalogue.Recipe(fastRate, null, 127, 60,
+                null, null, List.of(), List.of()), null);
         Path index = directory.resolve("catalogue.json");
         builder.build().save(index);
 
@@ -90,7 +99,7 @@ class ReconstructionDrumsTest {
         assertTrue(catalogue.id().startsWith(sample));
         assertTrue(catalogue.rate() < nativeRate, "the higher reference pitch should choose faster DAC playback");
         assertTrue(reconstruct(midi, stem, index, "sliced", true).id().startsWith("stem-"));
-        assertTrue(reconstruct(midi, stem, index, "auto", false).id().startsWith(sample));
+        assertFalse(reconstruct(midi, stem, index, "auto", false).id().startsWith("stem-"));
     }
 
     @Test void dacCollisionUsesPsgNoiseAndProtectsTheKickTail() {

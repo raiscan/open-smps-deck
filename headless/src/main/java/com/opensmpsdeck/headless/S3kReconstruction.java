@@ -373,7 +373,7 @@ final class S3kReconstruction {
                 samples.computeIfAbsent(gainedId, key -> {
                     if (gain == 1 && slice != null) return slice;
                     byte[] pcm = slice == null ? catalogue.asset(choice.assetId()).bytes() : slice.pcm();
-                    return DacSample.of(key, choice.name(), choice.sampleRate(), scalePcm(pcm, gain));
+                    return DacSample.of(key, choice.name(), choice.sampleRate(), DacSample.applyGain(pcm, gain));
                 });
                 dac.add(new Event(note, start, end, drumPriority(note.pitch()), gainedId, 0));
                 gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, end));
@@ -1008,15 +1008,6 @@ final class S3kReconstruction {
         int shift = (int) Math.round(10 * Math.log10(gain));
         int level = Math.clamp((volume >> 3) + shift, 0, 15);
         return level << 3;
-    }
-
-    private static byte[] scalePcm(byte[] pcm, double gain) {
-        if (gain == 1) return pcm;
-        for (int i = 0; i < pcm.length; i++) {
-            int amplitude = (pcm[i] & 0xff) - 128;
-            pcm[i] = (byte) Math.clamp(Math.round(amplitude * gain) + 128, 0, 255);
-        }
-        return pcm;
     }
 
     static int volume(MidiScore.Part part, MidiScore.Note note) {

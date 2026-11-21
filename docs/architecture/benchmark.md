@@ -205,6 +205,8 @@ how many cases contribute to each mean. The existing regression
 comparison continues to gate the original headline metrics.
 
 DAC classes use catalogue labels and known native kick and snare/clap slots.
+A gain-fitted DAC hit retains the original catalogue class when applying the
+saved gain to the catalogue PCM reproduces the emitted bytes exactly.
 Compiled PSG noise attacks use the GM drum pitch of the source placement on
 PSG3 at that playback tick, distinguishing closed and pedal hats, open hats,
 crash-family cymbals, rides and other percussion. Native S3K noise has no GM

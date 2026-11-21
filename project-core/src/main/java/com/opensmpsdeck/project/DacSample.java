@@ -38,6 +38,16 @@ public record DacSample(String id, String name, int rate, String pcmBase64) {
         return sample;
     }
 
+    /** Applies linear gain in place around the unsigned PCM midpoint. */
+    public static byte[] applyGain(byte[] pcm, double gain) {
+        if (gain == 1) return pcm;
+        for (int i = 0; i < pcm.length; i++) {
+            int amplitude = Byte.toUnsignedInt(pcm[i]) - 128;
+            pcm[i] = (byte) Math.clamp(Math.round(amplitude * gain) + 128, 0, 255);
+        }
+        return pcm;
+    }
+
     public double sampleRateHz() { return sampleRateHz(rate); }
 
     /** Native DJNZ rate zero means 256 loops, rather than the fastest rate. */

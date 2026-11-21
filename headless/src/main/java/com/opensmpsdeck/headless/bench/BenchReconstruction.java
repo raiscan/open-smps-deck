@@ -81,7 +81,8 @@ final class BenchReconstruction {
         var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer(), captureVoices);
         var noiseClasses = truth.channels().stream().anyMatch(channel -> channel.kind().equals("noise"))
                 ? noiseClasses(BenchFiles.read(output.resolve("allocation.json"), Allocation.class)) : Map.<Integer, BenchDrums.Drum>of();
-        var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses), report.effectCopyLanes());
+        var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses,
+                drums.gainAliases(project.samples())), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
         var reductions = new java.util.TreeMap<String, Long>();
         if (report.reductions() != null) {
