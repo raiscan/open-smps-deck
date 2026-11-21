@@ -101,15 +101,33 @@ public final class S3kRenderer {
                                        int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer)
             throws IOException {
         try (var session = newSession(observer, policy)) {
-            session.install();
-            session.queueActivation(prepared);
-            if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
+            start(session, prepared, mask);
             var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
             for (int frame = 0; frame < presentations; frame++) {
                 advance(session, pcm);
                 sink.accept(pcm);
             }
         }
+    }
+
+    static SmpsDriverSession openPlayback(CompiledProject project, ChannelMask mask, ChipWriteObserver observer) {
+        var prepared = prepare(project, 0, false, () -> {
+            throw new IllegalStateException("music restoration requires a previous project");
+        });
+        var session = newSession(observer, Sonic3kSmpsPhysicalPolicy.INSTANCE);
+        try {
+            start(session, prepared, mask);
+            return session;
+        } catch (RuntimeException | Error failure) {
+            session.close();
+            throw failure;
+        }
+    }
+
+    private static void start(SmpsDriverSession session, PreparedSmpsMusicActivation prepared, ChannelMask mask) {
+        session.install();
+        session.queueActivation(prepared);
+        if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
     }
 
     public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
@@ -172,7 +190,7 @@ public final class S3kRenderer {
         }
     }
 
-    private static void advance(SmpsDriverSession session, short[] pcm) {
+    static void advance(SmpsDriverSession session, short[] pcm) {
         session.serviceForward();
         session.advanceDacIdleLoop(pcm, STEREO_FRAMES_PER_PRESENTATION);
     }

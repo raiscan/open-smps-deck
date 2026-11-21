@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.NoteEvent;
+import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
@@ -21,6 +22,39 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionTraceTest {
+    @Test void namesPsgPhaseCarryAcrossAnUnchangedClip(@TempDir Path directory) throws Exception {
+        var before = java.nio.file.Files.createDirectory(directory.resolve("before"));
+        var after = java.nio.file.Files.createDirectory(directory.resolve("after"));
+        var inputs = new ReconstructionStages.Inputs("source.mid", "mix.wav", "index.json", "Fixture",
+                30, false, false, false, false, Map.of(), null, 7.5, null, null);
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs,
+                List.of(new ReconstructionStructure.Bar("b1", 0, 1, false)),
+                new MidiScore(List.of(), List.of(), List.of()), Map.of(), List.of(), List.of(), List.of(), null, null);
+        var late = new Sequence("late", "Late", "PSG", 10, null, 127,
+                List.of(new NoteEvent("later", 0, 10, 64)));
+        for (Path work : List.of(before, after)) {
+            var early = new Sequence("early", "Early", "PSG", 5, null, 127,
+                    List.of(new NoteEvent("changed", 0, 5, work.equals(before) ? 60 : 67)));
+            var project = new StudioProject(4, "Phase carry", "S3K", 15, 0, List.of(), List.of(early, late),
+                    List.of(new Clip("a", "early", "PSG1", 0, 5), new Clip("b", "late", "PSG1", 42, 10)));
+            ReconstructionArtifacts.write(work.resolve("score.json"), score);
+            ProjectFiles.save(work.resolve("arrangement.smps.json"), project, null);
+            WaveFile.render(ProjectCompiler.compileWithAssets(project), work.resolve("render.wav"), 60);
+        }
+        var diff = ReconstructionTrace.diff(before, after, "0,.5");
+        assertEquals(0, diff.getAsJsonObject("compiledTimeline").get("changedEvents").getAsInt());
+        var pcm = diff.getAsJsonObject("renderedPcm");
+        assertTrue(pcm.get("changedFrames").getAsLong() > 0);
+        var lanes = pcm.getAsJsonArray("psgTail");
+        assertNotNull(lanes, pcm::toString);
+        assertEquals(1, lanes.size());
+        var psg = lanes.get(0).getAsJsonObject();
+        assertEquals("PSG1", psg.get("lane").getAsString());
+        assertEquals("tone oscillator phase", psg.get("cause").getAsString());
+        assertEquals(pcm.get("changedFrames"), psg.get("changedFrames"));
+        assertEquals(pcm.get("firstFrame"), psg.get("firstFrame"));
+    }
+
     @Test void groupsSwapsOutsideTheSpanAndSuggestsPinsAtTheFirstDivergence() {
         var before = new java.util.LinkedHashMap<String, ReconstructionTrace.Row>();
         var after = new java.util.LinkedHashMap<String, ReconstructionTrace.Row>();

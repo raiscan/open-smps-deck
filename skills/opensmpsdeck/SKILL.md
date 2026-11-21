@@ -65,6 +65,8 @@ Use the local OpenSMPSDeck checkout and its packaged headless JAR. Prefer the
   affected note IDs, and suggested `pinLane` edits. Check `voicingChanges`
   for variant, level and scoped override changes. Check `compiledTimeline`
   for changed native events and `renderedPcm` for changed audio frames.
+  When PCM differs after the span, check `renderedPcm.psgTail` for
+  differing soloed PSG lanes and causes such as carried oscillator phase.
 - Use `reconstruct rerun "$work" "$fresh" --search "$input_dir"` to replay
   the inputs and options of a historical fresh run. The private
   `manifest.json` pins input hashes and retains imported note snapshots.
