@@ -163,8 +163,12 @@ final class ReconstructionLanePolicies {
         }
     }
 
+    record BendLayer(String noteId, int startTick, int endTick, @Nullable String lane,
+                     @Nullable ReconstructionLayers.Curve curve, @Nullable String skipReason) {}
+
     record Coverage(int index, Kind policy, @Nullable Mode mode, int eligible, int applied,
-                    int busy, int incompatible, int movedFromFm, int promotedCounters, Map<String, Integer> lanes) {}
+                    int busy, int incompatible, int movedFromFm, int promotedCounters, Map<String, Integer> lanes,
+                    @Nullable List<BendLayer> bendLayers) {}
 
     private ReconstructionLanePolicies() {}
 

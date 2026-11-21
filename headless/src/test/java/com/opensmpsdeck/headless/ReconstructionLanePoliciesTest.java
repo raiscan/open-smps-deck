@@ -216,6 +216,129 @@ class ReconstructionLanePoliciesTest {
         ProjectCompiler.compile(result.project());
     }
 
+    @Test void delayedFmBendKeepsItsFullContourAndVibratoAfterTheDryGate() throws Exception {
+        var note = bentEntry("slide", 72, 34, -1800);
+        var result = arrange(List.of(note), List.of(), Map.of("slide", layer("slide", """
+                "mode":"echo","laneType":"FM","delayFrames":14,"attenuation":11,
+                "volumeDecay":[{"frame":9,"attenuation":18}]
+                """)), new ReconstructionVoicing.Vibrato(1, 1, 8, 4));
+        var dry = result.bends().getFirst();
+        var echo = result.layers().getFirst();
+        assertEquals(ReconstructionBendEncoding.Mode.E7, dry.mode());
+        assertEquals(ReconstructionLayers.CurveStatus.exact, echo.curve().status());
+        assertEquals(dry.endTick() + 14, echo.endTick());
+
+        var frequencies = pitchTrace(result);
+        assertTrue(java.util.Arrays.stream(frequencies[0], 0, 6).distinct().count() > 1,
+                "Attack vibrato should be audible");
+        assertTrue(java.util.Arrays.stream(frequencies[0], 29, 34).distinct().count() > 1,
+                "Plateau vibrato should resume");
+        for (int tick = 0; tick < 34; tick++)
+            assertEquals(frequencies[0][tick], frequencies[1][tick + 14], "echo tick " + tick);
+    }
+
+    @Test void nativeFmOctaveCopyKeepsTheSlideShapeThroughAnEndOfRenderCut() throws Exception {
+        var note = bentEntry("slide", 72, 52, -210);
+        var result = arrange(List.of(note), List.of(), Map.of("slide", layer("slide", """
+                "mode":"double","laneType":"FM","octave":1
+                """)));
+        assertEquals(ReconstructionLayers.CurveStatus.exact, result.layers().getFirst().curve().status());
+        var frequencies = pitchTrace(result);
+        for (int tick = 0; tick < 52; tick++)
+            assertEquals(2 * frequencies[0][tick], frequencies[1][tick], "octave tick " + tick);
+        var truncated = arrange(List.of(note), List.of(), Map.of("slide", layer("slide", """
+                "mode":"echo","laneType":"FM","delayFrames":14
+                """)));
+        assertEquals(60, truncated.layers().getFirst().endTick());
+        var clipped = pitchTrace(truncated);
+        for (int tick = 0; tick < 46; tick++)
+            assertEquals(clipped[0][tick], clipped[1][tick + 14], "clipped echo tick " + tick);
+    }
+
+    @Test void sampledCopiesReportRenderedQuantizationAndKeepAClampedPsgBend() throws Exception {
+        var note = bentEntry("slide", 48, 34, -2300);
+        var result = arrange(List.of(note), List.of(), Map.of("slide", layer("slide", """
+                "mode":"double","laneType":"PSG","octave":1
+                """)));
+        var layer = result.layers().getFirst();
+        assertEquals(ReconstructionLayers.Status.applied, layer.status());
+        assertEquals(ReconstructionLayers.CurveStatus.approximated, layer.curve().status());
+        assertFalse(layer.curve().withinTolerance());
+        var frequencies = pitchTrace(result);
+        assertEquals(1023, frequencies[2][33]);
+        double error = 0;
+        for (int tick = 0; tick < 34; tick++) {
+            double dryHz = frequencies[0][tick] * (7_670_453.0 / (144 * (1 << 21)));
+            double wetHz = com.openggf.audio.synth.PsgChip.TICK_RATE_HZ / (2 * frequencies[2][tick]);
+            error += Math.pow(1200 * Math.log(wetHz / (2 * dryHz)) / Math.log(2), 2);
+        }
+        assertEquals(Math.sqrt(error / 34), layer.curve().rmseCents(), .001);
+    }
+
+    @Test void lanePoliciesCopyBendsAndReportPerNotePitchFidelity() throws Exception {
+        var note = bentEntry("slide", 72, 34, -240);
+        var psg = new ReconstructionLanePolicies.Rule(Kind.psgDouble, null, null, null, null, null,
+                1, null, null, null, null, null);
+        var result = arrange(List.of(note), List.of(
+                new ReconstructionLanePolicies.Scoped(0, psg, 0, 60, null),
+                new ReconstructionLanePolicies.Scoped(1, rule(Kind.fmDouble, Mode.chorus, null), 0, 60, null)));
+        var psgCopy = result.policyCoverage().getFirst().bendLayers().getFirst();
+        var chorus = result.policyCoverage().getLast().bendLayers().getFirst();
+        assertEquals("slide", psgCopy.noteId());
+        assertEquals("PSG1", psgCopy.lane());
+        assertTrue(psgCopy.curve().withinTolerance());
+        assertEquals("FM2", chorus.lane());
+        var trace = pitchTrace(result);
+        double ratio = (LeadEffectMatcher.fmFnum(72) - 2.0) / LeadEffectMatcher.fmFnum(72);
+        double error = 0;
+        for (int tick = 0; tick < 34; tick++)
+            error += Math.pow(1200 * Math.log(trace[1][tick] / (trace[0][tick] * ratio)) / Math.log(2), 2);
+        assertEquals(Math.sqrt(error / 34), chorus.curve().rmseCents(), .001);
+        assertTrue(chorus.curve().rmseCents() < 2);
+    }
+
+    private static ReconstructionAllocation.Entry bentEntry(String id, int pitch, int end, int cents) {
+        var entry = entry(id, Role.melody, "FM1", 0, end, pitch);
+        var note = entry.note().withBend(new ReconstructionBends.Bend(ReconstructionBends.Kind.DOWN, .1, 1, List.of(
+                new ReconstructionBends.Point(0, 0), new ReconstructionBends.Point(.1, 0),
+                new ReconstructionBends.Point(26 / 60.0, cents), new ReconstructionBends.Point(end / 60.0, cents)),
+                "fixture", true));
+        return new ReconstructionAllocation.Entry(note, entry.role(), entry.lane(), 0, end,
+                ReconstructionAllocation.Outcome.kept, null, null);
+    }
+
+    private static int[][] pitchTrace(S3kReconstruction.Result result) throws Exception {
+        int[][] trace = new int[3][60];
+        int[] high = new int[2];
+        int[] packed = new int[2];
+        var observer = new ChipWriteObserver() {
+            int psg, tick;
+            boolean tone;
+
+            @Override public void onYm2612Write(int port, int register, int value) {
+                if (port != 0 || (register & 3) >= 2) return;
+                int channel = register & 3;
+                if ((register & ~3) == 0xa4) high[channel] = value;
+                if ((register & ~3) == 0xa0) packed[channel] = (high[channel] << 8) | value;
+            }
+
+            @Override public void onPsgWrite(int value) {
+                if ((value & 0x80) != 0) {
+                    tone = (value & 0xf0) == 0x80;
+                    if (tone) psg = (psg & 0x3f0) | (value & 15);
+                } else if (tone) psg = (psg & 15) | ((value & 63) << 4);
+            }
+
+            void frame() {
+                for (int lane = 0; lane < 2; lane++)
+                    trace[lane][tick] = (int) ReconstructionBendEncoding.linear(packed[lane]);
+                trace[2][tick++] = psg;
+            }
+        };
+        S3kRenderer.render(ProjectCompiler.compileWithAssets(result.project()), 60, pcm -> observer.frame(), observer);
+        return trace;
+    }
+
     private static ReconstructionLayers.Request layer(String id, String fields) {
         var edit = ReconstructionEdits.parse(JsonParser.parseString("""
                 {"op":"layer","id":"layer-%s","reason":"fixture","noteIds":["%s"],%s}
@@ -247,6 +370,13 @@ class ReconstructionLanePoliciesTest {
     private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
                                                      List<ReconstructionLanePolicies.Scoped> policies,
                                                      Map<String, ReconstructionLayers.Request> layers) throws Exception {
+        return arrange(entries, policies, layers, null);
+    }
+
+    private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
+                                                     List<ReconstructionLanePolicies.Scoped> policies,
+                                                     Map<String, ReconstructionLayers.Request> layers,
+                                                     ReconstructionVoicing.Vibrato vibrato) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var bytes = DemoProject.create().voices().getFirst().bytes();
         byte[] patch = new byte[bytes.size()];
@@ -265,11 +395,13 @@ class ReconstructionLanePoliciesTest {
         var sorted = new ArrayList<>(entries);
         sorted.sort(java.util.Comparator.comparingInt(ReconstructionAllocation.Entry::startTick));
         var settings = new ReconstructionVoicing.Lane(Role.melody, fmVariant, List.of(), 1,
-                ReconstructionVoicing.WRITTEN, ReconstructionVoicing.DRY, "", "", "", List.of());
+                ReconstructionVoicing.WRITTEN, new ReconstructionVoicing.Effects("fixture", 0, vibrato, null),
+                "", "", "", List.of());
         var instruments = Map.of("part-0", new ReconstructionVoicing.SourceSound(settings, psgVariant, 0));
         return S3kReconstruction.arrangeAllocated("Fixture", 30, 60,
                 new S3kReconstruction.Score(parts, List.of(), List.of()), new ReconstructionAllocation.Result(1, sorted),
-                null, catalogue, choices, Map.of(), Map.of(), false, false, Map.of(), Map.of(), Map.of(),
+                null, catalogue, choices, Map.of(), vibrato == null ? Map.of() : Map.of("FM1", settings),
+                false, true, Map.of(), Map.of(), Map.of(),
                 null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(), layers, false);
     }
 }

@@ -33,15 +33,34 @@ public final class ReconstructionLayers {
 
     public enum Status { applied, off, skipped }
 
+    public enum CurveStatus { exact, approximated }
+
+    public record Curve(CurveStatus status, double rmseCents, boolean withinTolerance) {
+        static Curve measured(double rmseCents) {
+            return new Curve(rmseCents < .01 ? CurveStatus.exact : CurveStatus.approximated,
+                    rmseCents, rmseCents <= ReconstructionLayerPitch.TOLERANCE_CENTS);
+        }
+
+        String summary() {
+            return String.format(java.util.Locale.ROOT, "%s pitch curve (%.2f cents RMS%s)",
+                    status, rmseCents, withinTolerance ? "" : ", exceeds 15 cents");
+        }
+    }
+
     public record Result(String noteId, String editId, String mode, @Nullable ReconstructionLaneType laneType,
                          int delayFrames, int attenuation, Status status, @Nullable String reason,
                          @Nullable String lane, @Nullable Integer pitch,
-                         @Nullable Integer startTick, @Nullable Integer endTick) {
+                         @Nullable Integer startTick, @Nullable Integer endTick, @Nullable Curve curve) {
         static Result of(String id, Request request, Status status, String reason,
                          String lane, Integer pitch, Integer start, Integer end) {
+            return of(id, request, status, reason, lane, pitch, start, end, null);
+        }
+
+        static Result of(String id, Request request, Status status, String reason,
+                         String lane, Integer pitch, Integer start, Integer end, Curve curve) {
             var settings = request.settings();
             return new Result(id, request.edit().id(), modeName(settings.mode()), settings.laneType(),
-                    settings.delayFrames(), settings.attenuation(), status, reason, lane, pitch, start, end);
+                    settings.delayFrames(), settings.attenuation(), status, reason, lane, pitch, start, end, curve);
         }
 
         void report(List<Outcome> outcomes) {

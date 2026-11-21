@@ -200,19 +200,31 @@ final class ReconstructionBendEncoding {
 
     private static Fit measure(Fit fit, Voice voice, double base, double[] desired) throws IOException {
         if (fit == null) return null;
-        var sequence = new Sequence("probe", "Bend probe", "FM", desired.length, voice.id(), 100,
+        int[] packed = frequencies(fit, voice, desired.length);
+        double squaredError = 0;
+        for (int tick = 0; tick < desired.length; tick++) {
+            double cents = CENTS_PER_LOG * Math.log(linear(packed[tick]) / base);
+            double error = cents - desired[tick];
+            squaredError += error * error;
+        }
+        return new Fit(fit.mode(), fit.notes(), fit.commands(), Math.sqrt(squaredError / desired.length));
+    }
+
+    static int[] frequencies(Fit fit, Voice voice, int duration) throws IOException {
+        var sequence = new Sequence("probe", "Bend probe", "FM",
+                fit.notes().getLast().tick() + fit.notes().getLast().duration(), voice.id(), 100,
                 fit.notes(), fit.commands(), "RESET");
         var probe = new StudioProject(4, "Bend probe", "S3K", 30, 0, List.of(voice),
-                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, desired.length)));
+                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, duration)));
         var trace = new FrequencyTrace();
         var compiled = ProjectCompiler.compileWithAssets(probe);
-        S3kRenderer.render(compiled, desired.length, pcm -> trace.frame(desired, base), trace);
-        return new Fit(fit.mode(), fit.notes(), fit.commands(), Math.sqrt(trace.squaredError / desired.length));
+        int[] packed = new int[duration];
+        S3kRenderer.render(compiled, duration, pcm -> packed[trace.tick++] = trace.packed, trace);
+        return packed;
     }
 
     private static final class FrequencyTrace implements ChipWriteObserver {
         int high, packed, tick;
-        double squaredError;
 
         @Override public void onYm2612Write(int port, int register, int value) {
             if (port != 0) return;
@@ -221,12 +233,6 @@ final class ReconstructionBendEncoding {
         }
 
         @Override public void onPsgWrite(int value) {}
-
-        void frame(double[] desired, double base) {
-            double cents = CENTS_PER_LOG * Math.log(linear(packed) / base);
-            double error = cents - desired[tick++];
-            squaredError += error * error;
-        }
     }
 
     private static void append(List<NoteEvent> notes, List<CommandEvent> commands, int start, int end, Pitch pitch) {
@@ -248,7 +254,7 @@ final class ReconstructionBendEncoding {
         return (((pitch.note() - 12) / 12 << 11) | LeadEffectMatcher.fmFnum(pitch.note())) + pitch.detune();
     }
 
-    private static double linear(int packed) {
+    static double linear(int packed) {
         return (packed & 0x7ff) * (1 << ((packed >> 11) & 7));
     }
 }

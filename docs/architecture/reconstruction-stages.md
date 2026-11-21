@@ -496,8 +496,16 @@ note, and steps at or past release are omitted.
 
 Dry runs and proposals report a result for each resolved note. A busy lane,
 an unsupported pitch or a source without an independently playable tonal
-gate produces a skipped result. Rendered pitch bends also report a skip.
-See `noteLayers` in `report.json` and `view`, and `layers` on the source note
+gate produces a skipped result. Layers copy rendered bends over their
+own gates, so an echo can finish its slide after the dry note releases.
+FM echoes and octave doubles replay the native pitch and vibrato commands
+where representable. Detuned copies apply a pitch ratio derived from the
+requested offset at the dry attack pitch. Sampled copies include any vibrato
+that played on the dry bend. PSG updates the nearest playable period each
+driver tick and clamps to its 10-bit range. Each rendered bend copy reports
+`curve.status`, `curve.rmseCents` and whether it meets the 15-cent RMS tolerance.
+Quantization or range limits can produce an approximation and the layer
+still plays. See `noteLayers` in `report.json` and `view`, and `layers` on the source note
 in `trace`, for the layer status, lane, delay and gate. The journal is replayed
 when rebuilding from any earlier stage.
 
@@ -1412,7 +1420,7 @@ that interval up to the project end.
 | `pads` | Harmony, or counter material in a named voice, with an allocated gate of at least `minimumTicks` (18 by default). Move it onto PSG with one sustaining envelope. Keep the dry placement when the move fails. An unpinned counter already on PSG can reclaim a freed FM interval when its shared FM instrument is available. |
 | `leadEcho` | FM melody with a decaying PSG envelope, delayed seven ticks by default. |
 | `psgDouble` | FM harmony, counter or a solo FM tone with a sustaining PSG layer at the same attack time. |
-| `fmDouble` | FM melody by default, or notes in an explicitly scoped FM voice. Chorus has the same timing, −2 detune units and one extra TL step, with custom vibrato omitted from the copy. Echo also accepts solo FM tones and follows the source's attack vibrato with an eight-tick delay, +2 detune units and seven extra TL steps. |
+| `fmDouble` | FM melody by default, or notes in an explicitly scoped FM voice. Chorus has the same timing, −2 detune units and one extra TL step, with custom vibrato omitted for notes without a rendered bend. Echo also accepts solo FM tones and follows the source's attack vibrato with an eight-tick delay, +2 detune units and seven extra TL steps. |
 
 The three PSG policies accept `octave` (−2 to +2, default unison) and
 `levelDb` (−36 to 0, defaults −6 for pads, −12 for lead echo and −10 for
@@ -1431,14 +1439,18 @@ scope. This lets a mid-register arpeggio carry the effects through a sparse
 passage even when its role changes. Drums do not count as tonal gates.
 
 Assembly protects existing gates, including future drum gates on PSG3.
-Copies use a free lane for the complete voiced interval. Bends and
-one-channel chord figures keep their existing encoding. Pads preserve
+Copies use a free lane for the complete voiced interval. FM and PSG copy
+policies follow rendered bends using the same pitch transfer as per-note
+layers. Pads keep a bent dry gate on FM. One-channel chord figures keep
+their existing encoding. Pads preserve
 authored lane, instrument and scoped voicing decisions. Pads run first,
 then lead echo, PSG doubling and FM doubling. The first matching rule of
 each kind or FM mode owns the dry attack.
 
 `report.json.lanePolicies` records eligible and applied attacks, busy and
-incompatible skips, destination counts and pad relocations. Byte deltas
+incompatible skips, destination counts and pad relocations. For eligible
+bent notes, `bendLayers` records the destination and curve error, or a
+skip reason. Byte deltas
 compare the compiled arrangement with the indexed rule omitted while
 keeping the other rules enabled. The report gives bank bytes and PSG envelope asset bytes. An omitted or empty array leaves
 assembly behavior unchanged.
