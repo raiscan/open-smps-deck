@@ -45,6 +45,34 @@ Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
 
+## Processing Suno downloads
+
+`reconstruct import FOLDER WORK_DIR` checks the download before transcription
+and atomically writes `WORK_DIR/import.json`. The CLI, Studio and
+`reconstruct_import` MCP tool share the same report. The engine identifies
+root mix/MIDI files and root or `stems/` WAV files, reads `stems.json`
+(including Suno's `take1` mapping), and skips links and unrelated subdirectories.
+Only file names and manifest values are used for detection. Downloaded files
+are parsed as data.
+
+The report records correlations for MIDI attacks against spectral flux and
+MIDI note gates against pitch-band energy. Clear audio evidence can override
+names or General MIDI programs. Default assignments are one-to-one and
+channel 10 takes the drum stem. The engine checks whole-file levels and
+durations, reconciles supported mono/stereo sample rates on a common analysis
+grid, and cross-correlates the mix waveform with the summed stems within two
+seconds. Weak correlation produces a warning. A confident nonzero lag of
+25 ms or more blocks reconstruction. Excluded stems are left out of audio
+validation, alignment and mapping. File hashes still appear in the report.
+
+Use repeatable `--assign FILE=PART` and `--exclude FILE` to re-check with
+overrides. MCP accepts `assign` as a file-to-part object and `exclude` as a
+list of files. Pass a trusted `--catalogue INDEX.json` (`catalogue` in MCP)
+to complete the run recipe. With `--run`, the CLI starts the recipe
+after checking the input hashes. On MCP, pass the returned `runRequest` to
+`reconstruct_run` once its inputs include the catalogue. Results land in
+`WORK_DIR/reconstruction`.
+
 ## Musical sections
 
 `reconstruct sections WORK_DIR` proposes a source-time hierarchy on demand.

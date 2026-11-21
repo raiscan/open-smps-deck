@@ -9,6 +9,7 @@ import com.opensmpsdeck.headless.ReconstructionEditCommand;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.ReconstructionTrace;
+import com.opensmpsdeck.headless.SunoImport;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 
 import static com.opensmpsdeck.headless.mcp.McpArguments.*;
 import static com.opensmpsdeck.headless.mcp.McpJson.object;
@@ -39,6 +41,7 @@ final class McpReconstruction {
             field("wholePartVoices", "boolean", "Use one FM patch per part").optional(),
             field("audioRefine", "boolean", "Use audio pitch refinement").optional(),
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
+            field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
@@ -58,6 +61,28 @@ final class McpReconstruction {
             "voicing.json", "roleplan.json", "manifest.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
+
+    static JsonObject importFolder(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+        Path folder = McpPaths.directory(string(args, "folder"));
+        Path work = McpPaths.absolute(string(args, "workDir"));
+        Path catalogue = args.has("catalogue") ? McpPaths.input(string(args, "catalogue")) : null;
+        var assign = new LinkedHashMap<String, Integer>();
+        if (args.has("assign")) {
+            for (var entry : args.getAsJsonObject("assign").entrySet()) {
+                try {
+                    assign.put(entry.getKey(), entry.getValue().getAsBigDecimal().intValueExact());
+                } catch (ArithmeticException e) {
+                    throw new IllegalArgumentException("Expected a valid MIDI part ID for " + entry.getKey(), e);
+                }
+            }
+        }
+        var exclude = new HashSet<String>();
+        if (args.has("exclude")) {
+            for (var file : args.getAsJsonArray("exclude")) exclude.add(file.getAsString());
+        }
+        return SunoImport.inspect(folder, work, catalogue, assign, exclude, progress).json();
+    }
+
 
     static JsonObject run(JsonObject args, boolean single, ReconstructionStages.Progress progress) throws IOException {
         String command = single ? string(args, "stage") : "run";
@@ -93,7 +118,7 @@ final class McpReconstruction {
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
             options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
-                    "audioRefine", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
+                    "audioRefine", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo", "barOffset", "steadyTempo", "audioRepeats",
                     "transcriber", "transcriberDevice", "refitLevels", "keepVoicing");
             if (options.has("refitLanes")) for (var lane : options.getAsJsonArray("refitLanes")) {
                 cli.add("--lane");

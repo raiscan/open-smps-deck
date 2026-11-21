@@ -41,6 +41,20 @@ opened and rendered without the cartridge. **Extra Life** restores previous
 music and uses the headless renderer's `--previous-project` and
 `--previous-frames` options for that context. [CLI import and rendering](../../headless/README.md#import-locked-on-s3k-music)
 
+## Import a Suno folder
+
+Choose **Import Suno folder…**, select the download, then select a separate
+work directory. Studio lists the detected files, the mapped MIDI parts and
+any gaps. A tick marks a passing check, a warning marks a fallback or
+unmapped file, and a cross marks an error that blocks reconstruction.
+
+Use a stem's **Override** dropdown to select a MIDI part, exclude the stem,
+or restore automatic mapping. Choose **Re-check** to apply your changes and
+refresh `import.json` in the work directory. With a usable mix and MIDI and
+no import errors, choose **Start reconstruction** and select your instrument
+catalogue. Studio shows progress and opens the completed arrangement in a
+new window.
+
 ## Arrange clips
 
 The sequence browser on the left contains reusable musical sources. Drag one

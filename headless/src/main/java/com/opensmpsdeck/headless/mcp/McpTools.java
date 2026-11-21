@@ -45,11 +45,18 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest", "edits", "edit-results", "sections"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "import", "manifest", "edits", "edit-results", "sections"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
                     (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames()))),
+            tool("reconstruct_import", "Check a Suno folder and write import.json. Returns file status, mapping evidence and run arguments.",
+                    McpReconstruction::importFolder, path("folder", "Absolute path to the Suno download folder"), WORK,
+                    CATALOGUE.optional(),
+                    field("assign", object(Map.of("type", "object", "additionalProperties", Map.of("type", "integer"))),
+                            "Map of folder-relative stem files to MIDI part IDs").optional(),
+                    field("exclude", object(Map.of("type", "array", "items", Map.of("type", "string"))),
+                            "Folder-relative stem files to skip").optional()),
             tool("reconstruct_run",
                     "Run all stages in a new work directory, or resume from the first stage that consumes your edit. From voice reuses existing voicing. Assembly carries forward project reviews.",
                     (args, progress) -> McpReconstruction.run(args, false, progress), WORK,

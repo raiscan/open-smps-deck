@@ -119,7 +119,9 @@ public final class StudioWindow implements AutoCloseable {
         Label brand=label("OPEN / SMPS","brand");
         romImport=button("Import S3&K…",this::importRom);
         romImport.setId("import-s3k");
-        var fileActions=new FlowPane(8,6,button("New",this::newProject),button("Open…",this::open),romImport,
+        Button sunoImport=button("Import Suno folder…",this::importSuno);
+        sunoImport.setId("import-suno");
+        var fileActions=new FlowPane(8,6,button("New",this::newProject),button("Open…",this::open),romImport,sunoImport,
                 button("Save",this::save),button("Save as…",this::saveAs));
         fileActions.setPrefWrapLength(560);
         fileActions.setAlignment(javafx.geometry.Pos.CENTER_RIGHT);
@@ -929,6 +931,32 @@ public final class StudioWindow implements AutoCloseable {
             status.setText("Could not save editable copy: " + saveCopy.getException().getMessage());
         });
         io.execute(saveCopy);
+    }
+
+    private void importSuno() {
+        var chooser = new javafx.stage.DirectoryChooser();
+        chooser.setTitle("Choose the Suno download folder");
+        var folder = chooser.showDialog(stage);
+        if (folder == null) return;
+        chooser.setTitle("Choose a separate reconstruction work directory");
+        var work = chooser.showDialog(stage);
+        if (work == null) return;
+        var window = new Stage();
+        window.initOwner(stage);
+        window.setTitle("Import Suno folder");
+        var pane = new SunoImportPane(folder.toPath(), work.toPath(), output -> {
+            try {
+                openSavedProject(output, "Reconstructed from Suno");
+                window.close();
+            } catch (IOException | IllegalArgumentException failure) {
+                error(failure);
+            }
+        });
+        var scene = new Scene(pane, 970, 520);
+        scene.getStylesheets().setAll(stage.getScene().getStylesheets());
+        window.setScene(scene);
+        window.setOnHidden(event -> pane.close());
+        window.show();
     }
 
     private void importRom() {
