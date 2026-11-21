@@ -22,7 +22,9 @@ java -jar studio/target/opensmpsdeck-studio-0.1.0-SNAPSHOT.jar examples/lantern-
 - [Studio user guide](docs/user-guide/studio.md) covers editing, live refresh,
   S3&K import and export.
 - [Headless CLI guide](headless/README.md) covers commands and examples for
-  validation, compilation, rendering and import.
+  reconstruction, validation, compilation and export.
+- [External-agent guide](docs/user-guide/agents.md) covers installing the skill,
+  connecting MCP and reviewing proposed edits.
 
 Staged reconstruction can recover fast scale passages and same-pitch
 retriggers from mapped stems. Read the ordered pitches and timing with

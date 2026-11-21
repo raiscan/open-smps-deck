@@ -1,49 +1,50 @@
 # Studio review loop
 
-Studio and external agents share one `.smps.json` file. The human saves
-time-coded feedback in the project, and the agent records a resolution there.
-The [project format](../../project-core/README.md#review-metadata-in-versions-15)
-defines the fields. The [Studio guide](../user-guide/studio.md#review-a-reconstruction)
-covers the audition and editing controls.
+Studio and external agents share a reconstruction work directory and its
+`arrangement.smps.json`. The human can save time-coded feedback in the
+project. Musical proposals live in the work directory's `edits.json`.
+See the [project format](../../project-core/README.md#review-metadata-in-versions-16)
+and [Studio guide](../user-guide/studio.md#inspect-and-edit-a-reconstruction).
 
 ## Agent workflow
 
-Run the following subcommands with the packaged headless JAR.
+Run these subcommands with the packaged headless JAR. Use the
+[external-agent guide](../user-guide/agents.md#drive-the-product-loop) for MCP.
 
-1. Read `notes list song.smps.json --open`. Use `startSeconds` and optional
-   `endSeconds` to target the passage. A `laneId` or `clipId` can identify the
-   part. Keep the note ID for the response.
-2. For a staged reconstruction, use
-   `reconstruct view WORK_DIR --time project --start S --end E --render OUT.png`
-   at the review note's project times. The source spectrum, transcription
-   outlines, voiced gates and lane rows share the same time axis. If two
-   attacks share a score-grid cell, inspect their exact spacing and use the
-   legend IDs with `reconstruct trace` to locate the affected stage. To check
-   whether an upper ridge is a partial, add `--harmonics NOTE_ID` and compare
-   its attack and movement with the annotated fundamental. Keep the PNG and
-   its source artifacts private.
-3. Read the current project and update the arrangement while preserving the
-   `notes` and `references` arrays and existing IDs. Use a revision-checked
-   write for changes to the shared file. Reread and reconcile if another writer
-   changed the project before the write.
-4. Validate with `validate-project song.smps.json` and listen to the result of
-   `render-project song.smps.json revision.wav`. Compare the passage against
-   its reference using the declared offset. The renderer exports the SMPS mix.
-5. Once the change is verified, run
-   `notes resolve song.smps.json NOTE-ID --reply "Shortened the FM1 attack" --author agent`.
-   The original request and its timestamp are retained alongside the reply.
-   Leave the note open if it still needs investigation. To flag a new passage,
-   use `notes add` with `--author agent`.
+1. Read `notes list WORK_DIR/arrangement.smps.json --open`. Use `startSeconds` and optional
+   `endSeconds` to target the passage. A `laneId` or `clipId` can identify
+   the part. Keep the note ID for the response.
+2. Run `reconstruct view WORK_DIR --time project --start S --end E --render OUT.png`
+   at the review note's project times. The spectrum, note outlines and lane
+   gates share the same time axis. Add `--harmonics NOTE_ID` to compare a
+   suspected partial with its fundamental. Use legend IDs with
+   `reconstruct trace` to find the affected stage.
+3. Write a scoped proposal with
+   `reconstruct edit propose WORK_DIR --file batch.json`. Preview it with
+   `reconstruct run WORK_DIR --with-proposals`. Compare the sibling preview
+   to the built baseline with `reconstruct trace-diff`, using a source-time
+   `--span` to check out-of-span notes, lanes, voicing and compiled events.
+   The human reviews the A/B clips or opens **Proposals** in Studio.
+4. After approval, accept the selected proposal and rebuild from its
+   reported stage, or use **Accept** then **Apply** in Studio. Validate the
+   rebuilt project with `validate-project`. Use `render-compare` for an
+   aligned clip and reference. In Studio use a loop and **R** to switch
+   between the reference and chip at the same playhead position.
+5. Once the reviewer confirms the change, run
+   `notes resolve WORK_DIR/arrangement.smps.json NOTE-ID --reply "Shortened the FM1 attack" --author agent`.
+   The original request and its timestamp stay with the reply. Use
+   `notes add` with `--author agent` to flag a new passage.
 
-Studio watches atomic replacements. A clean session adopts the new revision
-and updates the markers and open list. An unsaved edit remains in memory if a
-new disk revision arrives. **Reload file + keep local recovery** writes a sibling
-copy of the local edits and then adopts disk. CLI writes also require a matching
-revision. This keeps stale saves from silently overwriting feedback.
+Assembly carries forward saved references and notes. Studio watches atomic
+replacements. A clean session adopts a new revision and updates the markers
+and open list. Unsaved edits remain in memory if disk changes. **Reload file
++ keep local recovery** writes a sibling copy and then adopts disk. For an
+Analysis draft conflict, use **Resolve conflict…** to reconcile with the
+latest journal. Revision checks protect both files from stale writes.
 
 References are local WAV paths. Share the audio separately and use relative
-paths when sharing a project directory. Studio decodes the selected WAV on a
-worker, draws its cached per-column peaks, and resamples it to the 48 kHz
-stereo audition clock. Render and reference share the same project-time
-cursor through source switches and loop wraps. Render lane masks mute
-hardware output during audition while the sequencer continues to advance.
+paths when sharing a project directory. Keep all audio, evidence PNGs and
+private source paths out of the public checkout. Studio resamples the
+selected reference to its 48 kHz stereo audition clock. Rendered and
+reference audio share project time through source switches and loop wraps.
+Render lane masks mute hardware output while the sequencer advances.
