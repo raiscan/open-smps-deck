@@ -323,7 +323,8 @@ The [reconstruction stages guide](../../docs/architecture/reconstruction-stages.
 lists the fields for every operation.
 
 Standalone `voice` refits lane-wide choices and preserves scoped overrides
-and compatible gains. A rebuild from an upstream stage can relevel lanes
+and compatible gains. Fresh voicing uses mapped stems to fit the rendered
+drum-to-tonal balance with gated K-weighted loudness. A rebuild from an upstream stage can relevel lanes
 whose allocated material changed. Pass `--lane FM1` to limit a refit and
 `--refit-levels` to recalculate levels. Use `--keep-voicing` with `run --from roles`
 or `rerun` to reuse accepted settings and see which stale part entries were

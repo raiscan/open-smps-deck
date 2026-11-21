@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 
 import java.io.IOException;
@@ -18,12 +19,12 @@ import static com.opensmpsdeck.headless.ReconstructionVoicing.Lane;
 /** Match the relative output levels of independently mapped stems. */
 final class ReconstructionLevels {
     private static final int RATE = S3kRenderer.SAMPLE_RATE;
-    private static final double AUDIO_FLOOR = 1e-8;
+    private static final double AUDIO_FLOOR = KWeightedLevel.ABSOLUTE_GATE;
     private static final double HALF_FM_STEP = Math.pow(10, .375 / 20);
     private static final double BALANCE_TOLERANCE = Math.pow(10, 2.0 / 20);
     private static final double PEAK_LIMIT = Math.pow(10, -1.0 / 20);
 
-    private record Level(double power, double peak) {}
+    record Level(double power, double peak) {}
 
     private ReconstructionLevels() {}
 
@@ -64,11 +65,11 @@ final class ReconstructionLevels {
         int samples = Math.min(frames * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION, samples(mix));
         var gains = new TreeMap<String, Map<Integer, Double>>();
         if (drumStem != null && !tonal.containsKey(drumStem) && samples(drumStem) >= samples && !tonal.isEmpty()) {
-            double drumPower = referencePower(drumStem, List.of(), samples).power();
+            double drumPower = referenceLevel(List.of(drumStem), List.of(), samples).power();
             double renderedDrums = renderLevel(frames, samples, source, catalogue, drums, original).power();
             for (var group : tonal.entrySet()) {
                 if (samples(group.getKey()) < samples || Math.min(drumPower, renderedDrums) < AUDIO_FLOOR) continue;
-                double target = referencePower(group.getKey(), List.of(), samples).power();
+                double target = referenceLevel(List.of(group.getKey()), List.of(), samples).power();
                 double rendered = renderLevel(frames, samples, source, catalogue, group.getValue(), original).power();
                 double gain = adjustment(target, rendered, drumPower, renderedDrums);
                 if (gain < 1 / BALANCE_TOLERANCE || gain > BALANCE_TOLERANCE)
@@ -80,8 +81,8 @@ final class ReconstructionLevels {
         int common = samples;
         for (var stem : bassStems) common = Math.min(common, samples(stem));
         if (!bass.isEmpty() && !rest.isEmpty() && common >= samples * .95) {
-            var referenceBass = referencePower(null, List.copyOf(bassStems), common);
-            var referenceRest = referencePower(mix, List.copyOf(bassStems), common);
+            var referenceBass = referenceLevel(bassStems, List.of(), common);
+            var referenceRest = referenceLevel(List.of(mix), bassStems, common);
             var nativeRest = renderLevel(frames, common, source, catalogue, rest, settings);
             var nativeBass = renderLevel(frames, common, source, catalogue, bass, settings);
             double gain = adjustment(referenceBass.power(), nativeBass.power(), referenceRest.power(), nativeRest.power());
@@ -124,7 +125,7 @@ final class ReconstructionLevels {
         return null;
     }
 
-    private static int samples(Path wav) throws IOException {
+    static int samples(Path wav) throws IOException {
         return (int) Math.min(Integer.MAX_VALUE, ReferenceAudio.durationMicros(wav) * RATE / 1_000_000);
     }
 
@@ -149,18 +150,23 @@ final class ReconstructionLevels {
         });
     }
 
-    private static Level referencePower(Path mix, List<Path> subtract, int samples) throws IOException {
-        double energy = 0;
+    static Level referenceLevel(Iterable<Path> stems, Iterable<Path> subtract, int samples) throws IOException {
+        var loudness = new KWeightedLevel();
         for (int start = 0; start < samples; start += RATE) {
+            checkCancelled();
             int length = Math.min(RATE, samples - start);
-            var stereo = mix == null ? new float[length * 2] : ReferenceAudio.stereoRange(mix, RATE, start, length);
+            var stereo = new double[length * 2];
+            for (var stem : stems) {
+                var audio = ReferenceAudio.stereoRange(stem, RATE, start, length);
+                for (int i = 0; i < stereo.length; i++) stereo[i] += audio[i];
+            }
             for (var stem : subtract) {
                 var audio = ReferenceAudio.stereoRange(stem, RATE, start, length);
                 for (int i = 0; i < stereo.length; i++) stereo[i] -= audio[i];
             }
-            for (float sample : stereo) energy += (double) sample * sample;
+            for (int i = 0; i < stereo.length; i += 2) loudness.add(stereo[i], stereo[i + 1]);
         }
-        return new Level(energy / Math.max(1, 2 * samples), 0);
+        return new Level(loudness.power(), 0);
     }
 
     private static Level renderLevel(int frames, int samples, S3kReconstruction.Score source,
@@ -177,20 +183,27 @@ final class ReconstructionLevels {
         if (!playable || samples == 0) return new Level(0, 0);
         var project = S3kReconstruction.arrangeAllocated("Level probe", 30, frames, source, allocation,
                 null, catalogue, choices, Map.of(), settings, true).project();
-        var compiled = ProjectCompiler.compileWithAssets(project);
-        double[] energy = {0};
+        return renderLevel(ProjectCompiler.compileWithAssets(project), samples);
+    }
+
+    static Level renderLevel(CompiledProject compiled, int samples) throws IOException {
+        var loudness = new KWeightedLevel();
         int[] peak = {0};
         int[] remaining = {samples * 2};
         int presentations = Math.ceilDiv(samples, S3kRenderer.STEREO_FRAMES_PER_PRESENTATION);
         S3kRenderer.render(compiled, presentations, pcm -> {
-            if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("level fit cancelled");
+            checkCancelled();
             int length = Math.min(pcm.length, remaining[0]);
-            for (int i = 0; i < length; i++) {
-                energy[0] += (double) pcm[i] * pcm[i];
-                peak[0] = Math.max(peak[0], Math.abs((int) pcm[i]));
+            for (int i = 0; i < length; i += 2) {
+                loudness.add(pcm[i] / 32768.0, pcm[i + 1] / 32768.0);
+                peak[0] = Math.max(peak[0], Math.max(Math.abs((int) pcm[i]), Math.abs((int) pcm[i + 1])));
             }
             remaining[0] -= length;
         });
-        return new Level(energy[0] / (samples * 2.0 * 32768 * 32768), peak[0] / 32768.0);
+        return new Level(loudness.power(), peak[0] / 32768.0);
+    }
+
+    private static void checkCancelled() throws java.io.InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("level fit cancelled");
     }
 }

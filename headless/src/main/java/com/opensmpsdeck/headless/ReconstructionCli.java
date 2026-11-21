@@ -251,7 +251,8 @@ final class ReconstructionCli {
         }
         var selected = chosen;
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
-        var result = previous == null ? fitted : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
+        var result = previous == null ? ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
+                : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
                 ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
         if (previous != null)
             ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
