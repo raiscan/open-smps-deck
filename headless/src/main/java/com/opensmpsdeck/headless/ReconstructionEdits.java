@@ -830,7 +830,8 @@ final class ReconstructionEdits {
         extension.forEach((id, blocked) -> { if (blocked) fixedGates.add(id); });
         var roles = ReconstructionRoles.assign(structure, score.source().parts(), rate, plan,
                 score.usesBeatGrid() ? score.beatMap() : null, continuity, score.inputs().leadPart(), fixedGates, separate,
-                note -> !written.contains(note.id()) && ReconstructionStructure.suppressed(suppressed, note, note.start(), .035));
+                note -> !written.contains(note.id()) && ReconstructionStructure.suppressed(suppressed, note, note.start(), .035),
+                ReconstructionStemParts.addedParts(score.inputs()));
         return applyRoles(score, structure, roles, scoreOutcomes, outcomes, resolutions);
     }
 

@@ -708,20 +708,40 @@ public final class ReconstructionTrace {
                     note.velocity(), prepared != null && "audio-refine".equals(prepared.source()) ? "audio-refine" : "midi",
                     1), null, decision));
         }
+        var stemDrops = new HashMap<String, S3kReconstruction.Reduction>();
+        for (var reduction : score.reductions()) {
+            if ("stem-midi-doubling".equals(reduction.reason()) || "stem-hold-fragment".equals(reduction.reason()))
+                stemDrops.put(reduction.id(), reduction);
+        }
         for (var entry : replacedParts.entrySet()) {
             var external = entry.getValue();
+            String source = Boolean.TRUE.equals(external.provenance().addedStem()) ? "audio-transcribed" : "transcriber";
             for (int i = 0; i < external.notes().size(); i++) {
                 var note = external.notes().get(i);
                 if (note.start() >= score.durationUs() / 1e6) continue;
                 String id = "transcriber-" + entry.getKey() + "-" + i;
-                String decision = note.pitch() < 12 || note.pitch() > 106 ? "pitch-out-of-range"
+                String decision = stemDrops.containsKey(id) ? stemDrops.get(id).reason()
+                        : note.pitch() < 12 || note.pitch() > 106 ? "pitch-out-of-range"
                         : note.end() > score.durationUs() / 1e6 ? "cut-at-end" : null;
                 raw.put(id, new Raw(new Note(id, entry.getKey(), note.start(), note.end(), note.pitch(),
-                        note.velocity(), "transcriber", 1), external.provenance(), decision));
+                        note.velocity(), source, 1), external.provenance(), decision));
             }
         }
-        for (var note : score.notes()) if ("external".equals(note.source()) || "edit".equals(note.source()))
-            raw.putIfAbsent(note.id(), new Raw(note, null, null));
+        for (var reduction : stemDrops.values()) {
+            var note = reduction.note();
+            var id = reduction.id();
+            var provenance = replacedParts.get(note.partId()).provenance();
+            raw.putIfAbsent(id, new Raw(new Note(id, note.partId(), note.startUs() / 1e6, note.endUs() / 1e6,
+                    note.pitch(), note.velocity(), "audio-transcribed", .8), provenance, reduction.reason()));
+        }
+        for (var note : score.notes()) {
+            switch (note.source()) {
+                case "external", "edit" -> raw.putIfAbsent(note.id(), new Raw(note, null, null));
+                case "audio-transcribed" -> raw.putIfAbsent(note.id(),
+                        new Raw(note, replacedParts.get(note.part()).provenance(), null));
+                default -> {}
+            }
+        }
         if (score.scoreDecisions() != null) for (var record : score.scoreDecisions())
             raw.putIfAbsent(record.note().id(), new Raw(record.note(), null, record.reason()));
         return raw;

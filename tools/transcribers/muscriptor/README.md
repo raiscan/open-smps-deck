@@ -69,6 +69,7 @@ tie forcing on. Override this with `--tie-forcing` or `--no-tie-forcing`.
 | `lead`, `synth` | `synth_lead` |
 | `bass` | `electric_bass` |
 | `keys`, `keyboard`, `backing` | `electric_piano, chromatic_percussion, synth_lead, synth_pad` |
+| `guitar`, `strings`, `brass`, `woodwinds` | Corresponding instrument families |
 
 Override with `--prompt GROUP,GROUP` or `--prompt none` in the command
 template. Use separate named entries for different fixed prompt overrides.

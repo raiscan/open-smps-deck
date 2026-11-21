@@ -40,12 +40,7 @@ class ExternalTranscribersTest {
     @Test void runsConfiguredCommandAndReplaysItsSnapshotWithoutTheConfig() throws Exception {
         Path work = directory.resolve("external");
         Path config = directory.resolve("transcribers.json");
-        // Launch the fixture with Java to exercise argv substitution without a shell or Python.
-        var fixture = TranscriberFixture.class.getProtectionDomain().getCodeSource().getLocation().toURI();
-        var command = List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-cp", Path.of(fixture).toString(), TranscriberFixture.class.getName(),
-                "{input}", "{output}", "{role}", "{device}");
-        Files.writeString(config, new Gson().toJson(Map.of("fixture", command)));
+        fixtureConfig(config);
         run(0, fresh(work, "--stem", "0=" + wav, "--transcriber-config", config.toString(),
                 "--transcriber", "fixture", "--transcribe-part", "0=lead", "--transcriber-device", "cuda:0"));
         Path scorePath = work.resolve("score.json");
@@ -76,6 +71,51 @@ class ExternalTranscribersTest {
         assertTrue(run(2, List.of("reconstruct", "run", "--from", "transcribe", work.toString()))
                 .contains("index.json"));
         assertEquals(saved, Files.readString(scorePath));
+    }
+
+    @Test void addsAnUnmappedPartAndRestoresItFromSavedNotes() throws Exception {
+        Path work = directory.resolve("added");
+        Path config = directory.resolve("transcribers.json");
+        fixtureConfig(config);
+        Path stem = directory.resolve("keyboard.wav");
+        WaveFile.write(stem, 60, sink -> {
+            var silence = new short[S3kRenderer.STEREO_FRAMES_PER_PRESENTATION * 2];
+            for (int i = 0; i < 60; i++) sink.accept(silence);
+        });
+        run(0, fresh(work, "--transcriber-config", config.toString(), "--transcriber", "fixture",
+                "--transcribe-unmapped", "keyboard=" + stem, "--transcriber-device", "cuda:0"));
+
+        var scorePath = work.resolve("score.json");
+        var score = ReconstructionStages.readScore(scorePath);
+        assertEquals(List.of(72), pitches(score, 0));
+        assertEquals(List.of(82), pitches(score, 3));
+        assertEquals("keyboard", score.source().parts().getLast().name());
+        assertEquals("audio-transcribed", score.notes().getLast().source());
+        assertTrue(score.reductions().stream().anyMatch(r -> "stem-midi-doubling".equals(r.reason())));
+        var saved = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
+        var provenance = saved.externalNotes().get(3).provenance();
+        assertEquals(true, provenance.addedStem());
+        assertEquals("fixture", provenance.tool());
+        assertEquals(ReconstructionCli.audioHash(stem), provenance.inputSha256());
+        assertEquals(2, provenance.noteCount());
+        var trace = ReconstructionTrace.read(work, score);
+        assertEquals("stem-midi-doubling", trace.get("transcriber-3-0").reason());
+        assertEquals("audio-transcribed", trace.get("transcriber-3-1").source().note().note().source());
+
+        String before = Files.readString(scorePath);
+        Files.delete(config);
+        assertTrue(run(2, List.of("reconstruct", "run", "--from", "transcribe", work.toString()))
+                .contains("index.json"));
+        assertEquals(before, Files.readString(scorePath));
+    }
+
+    private static void fixtureConfig(Path config) throws Exception {
+        // Launch the fixture with Java to exercise argv substitution without a shell or Python.
+        var fixture = TranscriberFixture.class.getProtectionDomain().getCodeSource().getLocation().toURI();
+        var command = List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", Path.of(fixture).toString(), TranscriberFixture.class.getName(),
+                "{input}", "{output}", "{role}", "{device}");
+        Files.writeString(config, new Gson().toJson(Map.of("fixture", command)));
     }
 
     @Test void importsMidiOrJsonAndRejectsDrumReplacement() throws Exception {
@@ -179,9 +219,11 @@ class ExternalTranscribersTest {
 
     public static class TranscriberFixture {
         public static void main(String[] args) throws Exception {
-            if (!Files.isRegularFile(Path.of(args[0])) || !args[2].equals("lead") || !args[3].equals("cuda:0"))
+            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard").contains(args[2]) || !args[3].equals("cuda:0"))
                 throw new IllegalArgumentException("Invalid substituted arguments");
-            Files.writeString(Path.of(args[1]), "[[0.2, 1.1, 78], [1.1, 1.2, 80]]");
+            String notes = args[2].equals("keyboard") ? "[[0.01, 0.38, 72], [0.2, 0.8, 82]]"
+                    : "[[0.2, 1.1, 78], [1.1, 1.2, 80]]";
+            Files.writeString(Path.of(args[1]), notes);
             Files.writeString(Path.of(args[1] + ".meta.json"), "{\"model\":\"example\"}");
         }
     }

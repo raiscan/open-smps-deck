@@ -75,14 +75,14 @@ final class ReconstructionRoles {
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity, Integer leadPart) {
-        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, leadPart, Set.of(), Set.of(), note -> false);
+        return assign(structure, parts, harmonyHz, plan, beatMap, continuity, leadPart, Set.of(), Set.of(), note -> false, Set.of());
     }
 
     static Result assign(ReconstructionStructure.Result structure, List<MidiScore.Part> parts, double harmonyHz,
                          ReconstructionRolePlan plan, ReconstructionBeatMap beatMap,
                          ReconstructionLeadContinuity continuity, Integer leadPart, Set<String> fixedGates,
                          Set<String> separate,
-                         java.util.function.Predicate<Note> suppressed) {
+                         java.util.function.Predicate<Note> suppressed, Set<Integer> addedParts) {
         var evidence = continuity == null ? Map.<String, ReconstructionLeadAudio.Evidence>of() : continuity.evidence();
         var accents = continuity == null ? Map.<String, Double>of() : continuity.accents();
         var programs = new HashMap<Integer, Integer>();
@@ -101,7 +101,13 @@ final class ReconstructionRoles {
                 ? new ReconstructionStructure.Layout(structure.bars(), structure.sections(), structure.repeats())
                 : structure.roleLayout();
         var byBar = byBar(layout.bars(), tones);
-        var melody = melody(layout, tones, programs, evidence, accents, leadPart);
+        // Unmapped stems supplement the written arrangement. A dense decoded
+        // chord should not replace an existing line on the reserved chip lane.
+        boolean hasWrittenTones = !addedParts.isEmpty() && tones.stream()
+                .anyMatch(note -> !addedParts.contains(note.part()));
+        java.util.function.Predicate<Note> writtenTone = note -> !hasWrittenTones || !addedParts.contains(note.part());
+        var leadTones = hasWrittenTones && leadPart == null ? tones.stream().filter(writtenTone).toList() : tones;
+        var melody = melody(layout, leadTones, programs, evidence, accents, leadPart);
         for (String id : melody.lead()) roles.put(id, Role.melody);
         if (leadPart != null) for (var note : tones) {
             if (note.part() == leadPart && note.run() != null) roles.put(note.id(), Role.melody);
@@ -110,7 +116,7 @@ final class ReconstructionRoles {
         if (continuity != null) continuity.restoreArticulatedPhrases(leadPart, tones, roles, phraseReasons);
         for (var section : layout.sections()) {
             var notes = section.bars().stream().flatMap(id -> byBar.get(id).stream()).toList();
-            labelLine(notes, roles, programs, Role.bass);
+            labelLine(hasWrittenTones ? notes.stream().filter(writtenTone).toList() : notes, roles, programs, Role.bass);
             if (notes.stream().anyMatch(n -> roles.get(n.id()) == Role.bass))
                 labelLine(notes, roles, programs, Role.counter);
         }
@@ -134,6 +140,7 @@ final class ReconstructionRoles {
         var decisions = thin(structure.notes(), roles, harmonyHz, reasons, octaveDrops, chordParts, separate);
         var scopes = plan == null ? List.<Scope>of() : scopes(structure, plan);
         java.util.function.BiPredicate<Decision, Note> permitted = (anchor, note) -> !suppressed.test(note)
+                && (writtenTone.test(note) || anchor.note().part() == note.part())
                 && (!fixedGates.contains(anchor.note().id()) || !anchor.note().id().equals(note.id()))
                 && (scopes.isEmpty() || permitsContinuation(structure, scopes, anchor, note));
         if (continuity != null) decisions = continuity.repair(decisions, permitted, fixedGates);

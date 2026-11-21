@@ -119,6 +119,17 @@ final class ReconstructionVoices {
 
     static Map<Key, Choice> select(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems, MidiScore sourceScore,
                                    List<MidiScore.Note> notes, long limitUs, Kind toneKind) throws IOException {
+        return select(catalogue, mix, stems, sourceScore, notes, limitUs, toneKind, Set.of());
+    }
+
+    static Map<Key, Choice> select(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems, MidiScore sourceScore,
+                                   List<MidiScore.Note> notes, long limitUs, Kind toneKind,
+                                   Set<Integer> addedParts) throws IOException {
+        Set<String> sustainedPsg = addedParts.isEmpty() ? Set.of() : catalogue.variants().stream()
+                .filter(variant -> {
+                    var asset = catalogue.asset(variant.assetId());
+                    return asset.kind() == Kind.PSG_VOLUME && ReconstructionStemParts.startsAudibly(asset.bytes());
+                }).map(InstrumentCatalogue.Variant::id).collect(java.util.stream.Collectors.toUnmodifiableSet());
         var byPart = new LinkedHashMap<Integer, List<MidiScore.Note>>();
         for (var note : notes) {
             if (note.endUs() > note.startUs())
@@ -145,21 +156,24 @@ final class ReconstructionVoices {
                     byPitch.computeIfAbsent(note.pitch(), ignored -> new ArrayList<>()).add(note);
                 for (var entry : byPitch.entrySet())
                     result.put(new Key(part.id(), entry.getKey()),
-                            choose(catalogue, audio, audioEndUs, source, timeline, entry.getValue(), Kind.DAC_SAMPLE));
+                            choose(catalogue, audio, audioEndUs, source, timeline, entry.getValue(), Kind.DAC_SAMPLE, Set.of()));
             } else {
-                result.put(new Key(part.id(), null), choose(catalogue, audio, audioEndUs, source, timeline, partNotes, toneKind));
+                boolean added = addedParts.contains(part.id());
+                if (added && stem != null) timeline = new Timeline(partNotes);
+                result.put(new Key(part.id(), null), choose(catalogue, audio, audioEndUs, source, timeline, partNotes,
+                        toneKind, added ? sustainedPsg : Set.of()));
             }
         }
         return Collections.unmodifiableMap(result);
     }
 
     private static Choice choose(InstrumentCatalogue catalogue, Path audio, long audioEndUs, String source, Timeline timeline,
-                                 List<MidiScore.Note> notes, Kind kind) throws IOException {
+                                 List<MidiScore.Note> notes, Kind kind, Set<String> variants) throws IOException {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var windows = windows(notes, timeline, audioEndUs, kind);
         long spacing = drums ? 180_000 : INDEPENDENT_US;
         return rank(catalogue, audio, source, timeline, kind,
-                pickWindows(windows, drums ? 3 : 4, spacing, drums));
+                pickWindows(windows, drums ? 3 : 4, spacing, drums), variants);
     }
 
     private static List<Window> windows(List<MidiScore.Note> notes, Timeline timeline, long audioEndUs, Kind kind) {
@@ -205,13 +219,13 @@ final class ReconstructionVoices {
     }
 
     private static Choice rank(InstrumentCatalogue catalogue, Path audio, String source, Timeline timeline,
-                               Kind kind, List<Window> windows) throws IOException {
+                               Kind kind, List<Window> windows, Set<String> variants) throws IOException {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var probes = new ArrayList<Probe>();
         var evidence = new LinkedHashMap<String, Evidence>();
         Set<String> kicks = drums ? corroboratedKicks(catalogue, audio, windows) : Set.of();
         for (Window window : windows) {
-            Probe probe = probe(catalogue, audio, source, kind, window, timeline, kicks);
+            Probe probe = probe(catalogue, audio, source, kind, window, timeline, drums ? kicks : variants);
             probes.add(probe);
             double weight = 1.0 / (1.0 + probe.overlappingNotes() * 0.25);
             for (int rank = 0; rank < probe.matches().size(); rank++) {
@@ -274,7 +288,7 @@ final class ReconstructionVoices {
             var selected = pickWindows(available, 4, INDEPENDENT_US, false);
             if (selected.size() < 4) continue;
             Choice candidate = rank(catalogue, audio, stems.containsKey(key.partId()) ? "stem" : "mix",
-                    timeline, Kind.FM_VOICE, List.of(selected.get(0), selected.get(2)));
+                    timeline, Kind.FM_VOICE, List.of(selected.get(0), selected.get(2)), Set.of());
             if (candidate.assetId() == null || candidate.assetId().equals(fallback.assetId())) continue;
             var validation = new ArrayList<Check>();
             for (Window window : List.of(selected.get(1), selected.get(3))) {
@@ -374,7 +388,7 @@ final class ReconstructionVoices {
     }
 
     private static Probe probe(InstrumentCatalogue catalogue, Path path, String source, Kind kind, Window window,
-                               Timeline timeline, Set<String> kicks) throws IOException {
+                               Timeline timeline, Set<String> variants) throws IOException {
         var note = window.note();
         long start = note.startUs();
         int midi = kind == Kind.DAC_SAMPLE ? Math.clamp(note.pitch(), 12, 117) : note.pitch();
@@ -389,8 +403,8 @@ final class ReconstructionVoices {
         try {
             var options = new CatalogueMatcher.Options(kind, null, null, midi, gateTicks,
                     kind == Kind.DAC_SAMPLE ? SHORTLIST_SIZE : InstrumentCatalogue.PAGE_LIMIT);
-            var report = CatalogueMatcher.matchAssets(catalogue, audio, options, kicks);
-            if (!kicks.isEmpty() && report.matches().isEmpty())
+            var report = CatalogueMatcher.matchAssets(catalogue, audio, options, variants);
+            if (kind == Kind.DAC_SAMPLE && !variants.isEmpty() && report.matches().isEmpty())
                 report = CatalogueMatcher.matchAssets(catalogue, audio, options);
             var seenAssets = new HashSet<String>();
             var hits = report.matches().stream()

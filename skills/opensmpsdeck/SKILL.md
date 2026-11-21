@@ -155,6 +155,22 @@ inputs and the aligned melodic stems. For example, pass
 `options: {transcriber: "muscriptor", transcribeParts: {"0": "lead"}}` and
 include part 0 in `inputs.stems`. The CLI equivalent is
 `--transcriber muscriptor --transcribe-part 0=lead --stem "0=$lead"`.
+For an aligned tonal stem listed as `stem_without_part`, opt in at import
+with `--transcribe-unmapped muscriptor` (MCP `transcribeUnmapped: "muscriptor"`).
+On a fresh run use `--transcriber muscriptor --transcribe-unmapped keyboard=keyboard.wav`
+(MCP `options.transcribeUnmapped` maps absolute WAV paths to roles). The added
+part and its audio and note provenance are saved for replay. Vocals and FX
+stay out of automatic transcription. The importer joins same-pitch holds
+when the stem sustains through the boundary and removes unisons mostly
+covered by MIDI. Automatic PSG fitting prefers envelopes with an audible
+attack and no silent pulses. The added stem defaults to backing when the
+MIDI already has tonal notes. Use a role edit to assign it the lead or bass.
+
+Use `chordAudit` in the JSON description (CLI `reconstruct describe WORK_DIR --json`,
+MCP `reconstruct_describe` with `json: true`) or the assembly report to locate
+dropped upper voices and guide a targeted repair. The audit is song-wide
+and uses the effective musical section boundaries even when the note view is filtered.
+
 Use `reconstruct_describe` for the same part and bars in both runs, then
 `render_clip` with `solo: ["FM1"]` and `render_compare` to audition each lead
 against the aligned stem. Use each run's source-to-project timing if it was

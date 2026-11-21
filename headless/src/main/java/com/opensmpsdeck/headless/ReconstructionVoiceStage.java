@@ -303,7 +303,7 @@ final class ReconstructionVoiceStage {
                 .filter(e -> e.role() != Role.drums).map(e -> e.note().part()).collect(java.util.stream.Collectors.toSet());
         var notes = score.notes().stream().filter(note -> psg.contains(note.part())).map(ReconstructionStages.Note::midi).toList();
         return ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
-                score.durationUs(), Kind.PSG_VOLUME);
+                score.durationUs(), Kind.PSG_VOLUME, ReconstructionStemParts.addedParts(score.inputs()));
     }
 
     private static List<Instrument> fixedInstruments(String lane, List<ReconstructionAllocation.Entry> notes,

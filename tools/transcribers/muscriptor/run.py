@@ -16,6 +16,10 @@ PROMPTS = {
     "keys": KEYS,
     "keyboard": KEYS,
     "backing": KEYS,
+    "guitar": ("acoustic_guitar", "clean_electric_guitar", "distorted_electric_guitar"),
+    "strings": ("violin", "viola", "cello", "contrabass", "string_ensemble", "synth_strings"),
+    "brass": ("trumpet", "trombone", "tuba", "french_horn", "brass_section", "soprano_and_alto_sax"),
+    "woodwinds": ("oboe", "bassoon", "clarinet", "flutes", "soprano_and_alto_sax"),
 }
 
 

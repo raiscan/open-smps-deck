@@ -197,7 +197,9 @@ then use `reconstruct run --from assemble WORK_DIR` to render the changes.
 - `arrangement.smps.zip` contains the compiled S3&K bank and its resource tables.
 - `render.wav` contains the 48 kHz stereo output from the pinned OpenGGF chips.
 - `report.json` records input and output hashes, source part IDs, instrument
-  shortlists, effect-copy lanes, and allocation drops and shortenings. Ten-second
+  shortlists, effect-copy lanes, and allocation drops and shortenings.
+  `chordAudit` classifies unallocated tonal notes by song and effective musical
+  section. The same allocation audit appears in `describe`. Ten-second
   audio sections report mono RMS and pair volume rises within 100 ms. The
   audio statistics measure level and timing, with no estimate of timbre fidelity.
 
@@ -607,6 +609,23 @@ parts, supply an aligned WAV stem and a role for each part ID.
 java -jar "$CLI" reconstruct run song.mid mix.wav catalogue.json external-work \
   --stem 0=lead.wav --transcriber muscriptor --transcribe-part 0=lead
 ```
+
+To add an aligned tonal stem that has no MIDI part, use a configured
+polyphonic transcriber and repeat `--transcribe-unmapped ROLE=WAV`:
+
+```sh
+java -jar "$CLI" reconstruct run song.mid mix.wav catalogue.json work \
+  --transcriber muscriptor --transcribe-unmapped keyboard=keyboard.wav
+java -jar "$CLI" reconstruct import DOWNLOAD IMPORT_WORK --catalogue catalogue.json \
+  --transcribe-unmapped muscriptor --run
+```
+
+Import selects tonal stems reported as `stem_without_part`. It leaves vocals,
+FX, drums, percussion, and nearly silent stems out of automatic transcription.
+For MCP, pass `transcribeUnmapped: "muscriptor"` on `reconstruct_import`, or
+`options: {transcriber: "muscriptor", transcribeUnmapped: {"/path/to/keys.wav": "keyboard"}}`
+on a fresh `reconstruct_run`. The import response includes the options in its
+`runRequest`.
 
 The CLI reads `$XDG_CONFIG_HOME/opensmpsdeck/transcribers.json` (default
 `~/.config/opensmpsdeck/transcribers.json`). Set `OPENSMPSDECK_TRANSCRIBERS`

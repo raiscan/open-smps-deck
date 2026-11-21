@@ -47,7 +47,8 @@ public final class ReconstructionDescribe {
     private record View(double bpm, double barSeconds, String tempoSource, String grid,
                         ReconstructionTimeMap.TimeBase timeBase, List<Part> parts,
                         List<Section> sections, ReconstructionBeatMap.Summary tempoCurve,
-                        ReconstructionLeadContinuity.Stats leadContinuity, List<Run> fastRuns) {}
+                        ReconstructionLeadContinuity.Stats leadContinuity, List<Run> fastRuns,
+                        ReconstructionChordReduction.Audit chordAudit) {}
     private record Run(String kind, int part, double start, double end, Role role, double confidence,
                        List<ReconstructionFastRuns.Step> steps, List<ReconstructionFigureVoices.Voice> voices) {}
 
@@ -112,8 +113,12 @@ public final class ReconstructionDescribe {
                 : ReconstructionRolePlan.BarRange.parse(bars, structure.bars().size(), "--bars");
         if (section != null && structure.sections().stream().noneMatch(s -> s.id().equals(section)))
             throw new IllegalArgumentException("Unknown section " + section);
+        var allocationFile = work.resolve("allocation.json");
+        var audit = !Files.isRegularFile(allocationFile) ? null : ReconstructionChordReduction.audit(score,
+                ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class),
+                ReconstructionSections.load(work, score, structure), List.of());
         var view = build(score, structure, effectiveNotes, roles, section, filter, span,
-                section == null && bars == null, continuity);
+                section == null && bars == null, continuity, audit);
         return json ? new GsonBuilder().disableHtmlEscaping().create().toJson(view) + "\n" : text(view);
     }
 
@@ -133,7 +138,7 @@ public final class ReconstructionDescribe {
     private static View build(ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                               List<Note> effectiveNotes, Map<String, Role> roles, String onlySection, Set<Integer> filter,
                               ReconstructionRolePlan.BarRange range, boolean collapse,
-                              ReconstructionLeadContinuity.Stats continuity) {
+                              ReconstructionLeadContinuity.Stats continuity, ReconstructionChordReduction.Audit audit) {
         var notes = new HashMap<Integer, List<Note>>();
         for (var note : effectiveNotes)
             notes.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
@@ -200,7 +205,7 @@ public final class ReconstructionDescribe {
                         roles == null ? null : roles.get(figures.get(note)), note.confidence(), note.run(),
                         score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
-                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs);
+                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs, audit);
     }
 
     private static Section repeat(List<Section> earlier, Section current, List<ReconstructionStructure.Bar> bars,
@@ -329,6 +334,11 @@ public final class ReconstructionDescribe {
                         .collect(java.util.stream.Collectors.joining(" "));
                 out.append("  ").append(voice.role()).append(" evidence ").append(pitches).append('\n');
             }
+        }
+        if (view.chordAudit != null) {
+            out.append("Unallocated tonal notes (whole song) ").append(view.chordAudit.song()).append('\n');
+            view.chordAudit.sections().forEach((id, section) -> out.append("  ").append(id).append(' ')
+                    .append(section.label().replaceAll("\\p{Cntrl}", " ")).append(' ').append(section.counts()).append('\n'));
         }
         for (var part : view.parts)
             out.append(String.format(Locale.ROOT, "P%d %s | program %d | drums %s | %d notes%n",

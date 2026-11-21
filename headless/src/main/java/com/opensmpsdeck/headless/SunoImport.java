@@ -96,7 +96,7 @@ public final class SunoImport {
         }
     }
 
-    public record RunRequest(String workDir, RunInputs inputs, Map<String, Integer> options) {}
+    public record RunRequest(String workDir, RunInputs inputs, Map<String, Object> options) {}
     public record RunInputs(String midi, String wav, String catalogue, Map<Integer, String> stems) {}
 
     public record Alignment(double offsetSeconds, double correlation, double zeroLagCorrelation, int stems) {}
@@ -140,6 +140,11 @@ public final class SunoImport {
 
     public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
                                  Set<String> exclusions, ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, null, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, ReconstructionStages.Progress progress) throws IOException {
         Path source = folder.toRealPath();
         if (!Files.isDirectory(source)) throw new IOException("Expected a Suno folder: " + source);
         Path work = prepareWork(source, workDir);
@@ -201,7 +206,7 @@ public final class SunoImport {
                         issues.stream().map(Issue::status))
                 .max(Comparator.naturalOrder()).orElse(Status.ok);
         if (!gaps.isEmpty() && status == Status.ok) status = Status.warning;
-        var request = runRequest(work, index, mix, midi, inputs, lead, status);
+        var request = runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
         var args = request == null ? List.<String>of() : runArguments(request);
         String command = args.isEmpty() ? null : "java -jar \"$DECK_JAR\" " + args.stream()
                 .map(arg -> arg.equals(CATALOGUE) ? "\"$CATALOGUE\"" : shellQuote(arg))
@@ -222,8 +227,10 @@ public final class SunoImport {
             throw new IllegalArgumentException("Choose an instrument catalogue for reconstruction");
         if (catalogue != null) args.set(2, catalogue.toAbsolutePath().normalize().toString());
         Path source = Path.of(report.folder);
+        var unmapped = report.runRequest.options.get("transcribeUnmapped");
         for (var file : report.files) {
-            if (file.part == null && !List.of("mix", "midi").contains(file.role)) continue;
+            if (file.part == null && !List.of("mix", "midi").contains(file.role)
+                    && !(unmapped instanceof Map<?, ?> stems && stems.containsKey(source.resolve(file.file).toString()))) continue;
             checkCancelled();
             Path path = source.resolve(file.file);
             if (!Files.isRegularFile(path, NOFOLLOW_LINKS) || !path.toRealPath().equals(path)
@@ -238,6 +245,7 @@ public final class SunoImport {
         if (args.length < 2) throw new IllegalArgumentException("reconstruct import expects FOLDER WORK_DIR");
         Path catalogue = null;
         boolean run = false;
+        String transcriber = null;
         var assignments = new LinkedHashMap<String, Integer>();
         var exclusions = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
@@ -251,6 +259,10 @@ public final class SunoImport {
             switch (option) {
                 case "--catalogue" -> catalogue = Path.of(value);
                 case "--exclude" -> exclusions.add(value);
+                case "--transcribe-unmapped" -> {
+                    if (transcriber != null) throw new IllegalArgumentException("Duplicate --transcribe-unmapped");
+                    transcriber = value;
+                }
                 case "--assign" -> {
                     int split = value.lastIndexOf('=');
                     if (split < 1 || split == value.length() - 1)
@@ -261,7 +273,7 @@ public final class SunoImport {
                 default -> throw new IllegalArgumentException("Unknown import option " + option);
             }
         }
-        var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, (a, b, c) -> {});
+        var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -755,13 +767,26 @@ public final class SunoImport {
     }
 
     private static RunRequest runRequest(Path work, Path catalogue, Input mix, Input midi, List<Input> files,
-                                         Lead lead, Status status) {
+                                         Lead lead, Status status, String transcriber) {
         if (mix == null || midi == null || status == Status.error) return null;
         var stems = new TreeMap<Integer, String>();
         for (var file : files) if (file.part != null) stems.put(file.part, file.path.toString());
         var inputs = new RunInputs(midi.path.toString(), mix.path.toString(),
                 catalogue == null ? null : catalogue.toString(), java.util.Collections.unmodifiableSortedMap(stems));
-        Map<String, Integer> options = lead != null && lead.priority >= 2 ? Map.of("leadPart", lead.part) : Map.of();
+        var options = new LinkedHashMap<String, Object>();
+        if (lead != null && lead.priority >= 2) options.put("leadPart", lead.part);
+        if (transcriber != null) {
+            var unmapped = new TreeMap<String, String>();
+            for (var file : files) {
+                if (ReconstructionStemParts.tonalFamily(file.family)
+                        && file.issues.stream().anyMatch(issue -> issue.code.equals("stem_without_part")))
+                    unmapped.put(file.path.toString(), file.family);
+            }
+            if (!unmapped.isEmpty()) {
+                options.put("transcriber", transcriber);
+                options.put("transcribeUnmapped", unmapped);
+            }
+        }
         return new RunRequest(work.resolve("reconstruction").toString(), inputs, options);
     }
 
@@ -776,6 +801,14 @@ public final class SunoImport {
         if (request.options.containsKey("leadPart")) {
             args.add("--lead-part");
             args.add(request.options.get("leadPart").toString());
+        }
+        if (request.options.get("transcribeUnmapped") instanceof Map<?, ?> unmapped) {
+            args.add("--transcriber");
+            args.add(request.options.get("transcriber").toString());
+            unmapped.forEach((path, role) -> {
+                args.add("--transcribe-unmapped");
+                args.add(role + "=" + path);
+            });
         }
         return List.copyOf(args);
     }

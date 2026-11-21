@@ -85,11 +85,11 @@ final class ReconstructionCli {
 
     static void usage(PrintStream out) {
         out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
-        out.println("           [--catalogue INDEX.json] [--run]");
+        out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
-        out.println("           [--transcriber-device DEVICE] [--transcriber-config FILE]");
+        out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
@@ -314,6 +314,9 @@ final class ReconstructionCli {
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
+            var losses = json.fromJson(report.getAsJsonArray("reductions"), S3kReconstruction.Reduction[].class);
+            report.add("chordAudit", json.toJsonTree(ReconstructionChordReduction.audit(score, allocation,
+                    ReconstructionSections.load(work, score, structure), List.of(losses))));
             if (!edits.isEmpty()) report.add("editResults", json.toJsonTree(edits));
             if (!voiceAssignments.isEmpty()) {
                 var applied = new java.util.TreeMap<String, Long>();

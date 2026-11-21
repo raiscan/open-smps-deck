@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
@@ -173,7 +174,7 @@ public final class ReconstructionStages {
     private record StageOptions(String[] legacy, @Nullable Path candidates, @Nullable Double harmonyHz,
                                 ReconstructionTempo.Options grid, boolean audioRepeats, @Nullable String transcriber,
                                 @Nullable Path transcriberConfig, @Nullable String device, Map<Integer, String> transcribeParts,
-                                Map<Integer, ExternalTranscribers.Import> imports, @Nullable Integer leadPart, boolean fastRunsOff,
+                                Map<Integer, ExternalTranscribers.Import> imports, Map<Path, String> unmapped, @Nullable Integer leadPart, boolean fastRunsOff,
                                 @Nullable ReconstructionDrums.Source drumSource, java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Score initial, @Nullable Double harmonyHz,
                            java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant) {}
@@ -238,8 +239,7 @@ public final class ReconstructionStages {
         if (Files.exists(voiceJournal)) Files.copy(voiceJournal, work.resolve(ReconstructionVoicePlan.JOURNAL));
         var edits = ReconstructionEdits.read(oldWork);
         if (!edits.isEmpty()) edits.write(work);
-        var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
-                inputs.options(replay.manifest().durationUs())), inputs);
+        var score = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, score, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null), oldWork, out, false,
                 (completed, total, message) -> {}, ignored -> {});
@@ -341,12 +341,14 @@ public final class ReconstructionStages {
                         int frames = ReconstructionTimeMap.of(score).frames();
                         boolean stems = !score.inputs.stems.isEmpty();
                         var cymbalLevels = ReconstructionCymbals.measure(score);
+                        boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
+                        var salience = chordReduction ? ReconstructionStemParts.salience(score, roles) : Map.<String, Double>of();
                         var chords = ReconstructionChords.select(edits.bindSections(work, score, null, stage, outcomes),
                                 score, roles, laneTypes, outcomes);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes);
+                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience, chordReduction);
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
-                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null);
+                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience, chordReduction);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -431,7 +433,8 @@ public final class ReconstructionStages {
         var score = readScore(work.resolve("score.json"));
         var structure = readStructure(work.resolve("structure.json"), score);
         var heuristic = ReconstructionRoles.assign(structure, score.source.parts(), score.inputs.harmonyMaxHz,
-                null, null, null, score.inputs.leadPart);
+                null, null, null, score.inputs.leadPart, Set.of(), Set.of(), note -> false,
+                ReconstructionStemParts.addedParts(score.inputs()));
         var plan = ReconstructionRolePlan.template(structure, heuristic);
         return new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(plan) + "\n";
     }
@@ -530,10 +533,12 @@ public final class ReconstructionStages {
         if (chords.isEmpty() && !hasTypedPins) return;
         try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
+            boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
+            var salience = chordReduction ? ReconstructionStemParts.salience(score, roles) : Map.<String, Double>of();
             var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                     ReconstructionTimeMap.of(score).frames(),
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
-                    ReconstructionCymbals.measure(score), laneTypes, chords, outcomes);
+                    ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience, chordReduction);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> outcome.laneType() != null).toList());
         }
@@ -612,8 +617,35 @@ public final class ReconstructionStages {
         options.stems().forEach((id, file) -> stems.put(id, file.toAbsolutePath().normalize().toString()));
         progress.report(0, chain ? Stage.values().length : 1, "Starting transcribe");
         var score = transcribe(midi, reference, options);
-        var external = ExternalTranscribers.collect(score.source, stems, extra.transcriber, extra.transcriberConfig,
-                extra.transcribeParts, extra.device == null ? "auto" : extra.device, extra.imports, capture);
+        var source = score.source;
+        var roles = new java.util.TreeMap<>(extra.transcribeParts);
+        var newParts = new ArrayList<Integer>();
+        if (!extra.unmapped.isEmpty()) {
+            int id = source.parts().stream().mapToInt(MidiScore.Part::id).max().orElse(-1) + 1;
+            var parts = new ArrayList<>(source.parts());
+            var claimed = new java.util.HashSet<String>();
+            for (String path : stems.values()) claimed.add(Path.of(path).toRealPath().toString());
+            for (var stem : extra.unmapped.entrySet()) {
+                String path = stem.getKey().toString();
+                if (!claimed.add(path)) throw new IllegalArgumentException("Stem already mapped: " + path);
+                newParts.add(id);
+                parts.add(ReconstructionStemParts.part(id, stem.getValue()));
+                stems.put(id, path);
+                roles.put(id++, stem.getValue());
+            }
+            for (int part : extra.imports.keySet()) ExternalTranscribers.validatePart(part, source.parts());
+            for (int part : extra.transcribeParts.keySet()) ExternalTranscribers.validatePart(part, source.parts());
+            source = new MidiScore(parts, source.notes(), source.warnings());
+        }
+        var external = ExternalTranscribers.collect(source, stems, extra.transcriber, extra.transcriberConfig,
+                roles, extra.device == null ? "auto" : extra.device, extra.imports, capture);
+        for (int part : newParts) {
+            var result = external.get(part);
+            var e = result.provenance();
+            external.put(part, new ExternalTranscribers.PartNotes(new ExternalTranscribers.Evidence(e.tool(),
+                    e.role(), e.device(), e.inputSha256(), e.outputSha256(), e.configSha256(),
+                    e.metadata(), e.noteCount(), false, true), result.notes()));
+        }
         var inputs = new Inputs(midi.toString(), reference.toString(), index.toString(), options.name(),
                 options.ticksPerBeat(), options.keepOctaves(), options.fmOnly(), options.wholePartVoices(),
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
@@ -622,7 +654,7 @@ public final class ReconstructionStages {
                 extra.lanes, extra.refitLevels, extra.keepVoicing, null);
     }
 
-    private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) {
+    private static Request resume(String[] args, int workIndex, Stage stage, boolean chain) throws IOException {
         if (args.length <= workIndex) throw new IllegalArgumentException("Expected a reconstruction WORK_DIR");
         var extra = stageOptions(Arrays.copyOfRange(args, workIndex + 1, args.length), 0);
         if (extra.variant != null && (chain || stage != Stage.VOICE || extra.lanes.size() != 1
@@ -641,7 +673,7 @@ public final class ReconstructionStages {
                 extra.lanes, extra.refitLevels || extra.variant != null, extra.keepVoicing, extra.variant);
     }
 
-    private static StageOptions stageOptions(String[] args, int firstOption) {
+    private static StageOptions stageOptions(String[] args, int firstOption) throws IOException {
         var lanes = new java.util.LinkedHashSet<String>();
         boolean refitLevels = false, keepVoicing = false;
         Path candidates = null;
@@ -653,6 +685,7 @@ public final class ReconstructionStages {
         Path transcriberConfig = null;
         var parts = new java.util.TreeMap<Integer, String>();
         var imports = new java.util.TreeMap<Integer, ExternalTranscribers.Import>();
+        var unmapped = new LinkedHashMap<Path, String>();
         var legacy = new ArrayList<>(Arrays.asList(args).subList(0, firstOption));
         for (int i = firstOption; i < args.length; i++) {
             switch (args[i]) {
@@ -691,6 +724,15 @@ public final class ReconstructionStages {
                     if (device != null || ++i == args.length)
                         throw new IllegalArgumentException("Expected one --transcriber-device DEVICE");
                     device = args[i];
+                }
+                case "--transcribe-unmapped" -> {
+                    if (++i == args.length) throw new IllegalArgumentException("Expected --transcribe-unmapped ROLE=WAV");
+                    int split = args[i].indexOf('=');
+                    if (split <= 0 || split == args[i].length() - 1)
+                        throw new IllegalArgumentException("Expected --transcribe-unmapped ROLE=WAV");
+                    var file = absolute(args[i].substring(split + 1)).toRealPath();
+                    if (unmapped.putIfAbsent(file, args[i].substring(0, split)) != null)
+                        throw new IllegalArgumentException("Duplicate transcription stem: " + file);
                 }
                 case "--transcribe-part", "--replace-notes", "--add-notes" -> {
                     String flag = args[i];
@@ -747,13 +789,13 @@ public final class ReconstructionStages {
                 default -> legacy.add(args[i]);
             }
         }
-        if (transcriber == null && (!parts.isEmpty() || transcriberConfig != null || device != null))
+        if (transcriber == null && (!parts.isEmpty() || !unmapped.isEmpty() || transcriberConfig != null || device != null))
             throw new IllegalArgumentException("External transcription options require --transcriber NAME");
-        if (transcriber != null && parts.isEmpty())
-            throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE");
+        if (transcriber != null && parts.isEmpty() && unmapped.isEmpty())
+            throw new IllegalArgumentException("--transcriber " + transcriber + " requires --transcribe-part PART=ROLE or --transcribe-unmapped ROLE=WAV");
         return new StageOptions(legacy.toArray(String[]::new), candidates, hz,
                 new ReconstructionTempo.Options(estimate, bpm, offset, steady), audioRepeats,
-                transcriber, transcriberConfig, device, parts, imports, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant);
+                transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant);
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -814,28 +856,62 @@ public final class ReconstructionStages {
     }
 
     private static Score retranscribe(Score saved) throws IOException {
-        var inputs = saved.inputs;
-        var score = transcribe(Path.of(inputs.midi), Path.of(inputs.wav), inputs.options(saved.durationUs));
-        return attach(score, inputs);
+        return transcribeWithSavedNotes(saved.inputs, saved.durationUs);
+    }
+
+    private static Score transcribeWithSavedNotes(Inputs inputs, long durationUs) throws IOException {
+        var options = inputs.options(durationUs);
+        if (inputs.externalNotes != null) for (var entry : inputs.externalNotes.entrySet())
+            if (Boolean.TRUE.equals(entry.getValue().provenance().addedStem())) options.stems().remove(entry.getKey());
+        return attach(transcribe(Path.of(inputs.midi), Path.of(inputs.wav), options), inputs);
     }
 
     private static Score attach(Score score, Inputs inputs) throws IOException {
         var notes = new ArrayList<>(score.notes);
+        var newParts = new java.util.HashSet<Integer>();
         if (inputs.externalNotes != null) {
+            var parts = new ArrayList<>(score.source.parts());
+            var sourceCounts = new LinkedHashMap<>(score.sourceCounts);
+            var reductions = new ArrayList<>(score.reductions);
+            var tonalParts = score.source.parts().stream().filter(p -> !p.drums()).map(MidiScore.Part::id)
+                    .collect(java.util.stream.Collectors.toSet());
+            var midiByPitch = new HashMap<Integer, List<MidiScore.Note>>();
+            for (var midi : score.source.notes()) {
+                if (tonalParts.contains(midi.partId()))
+                    midiByPitch.computeIfAbsent(midi.pitch(), ignored -> new ArrayList<>()).add(midi);
+            }
             double limit = score.durationUs / (double) MICROS_PER_SECOND;
             for (var entry : inputs.externalNotes.entrySet()) {
                 int part = entry.getKey();
-                ExternalTranscribers.validatePart(part, score.source.parts());
                 var imported = entry.getValue();
-                if (imported.provenance().replace()) notes.removeIf(note -> note.part == part);
-                int index = 0;
-                for (var raw : imported.notes()) {
-                    if (raw.start() < limit && raw.pitch() >= 12 && raw.pitch() <= 106) {
-                        notes.add(new Note("transcriber-" + part + "-" + index, part, raw.start(),
-                                Math.min(limit, raw.end()), raw.pitch(), raw.velocity(), "transcriber", 1));
-                    }
-                    index++;
+                boolean added = Boolean.TRUE.equals(imported.provenance().addedStem());
+                var candidates = ReconstructionStemParts.notes(part, imported.notes(), limit, added);
+                if (!added) {
+                    ExternalTranscribers.validatePart(part, score.source.parts());
+                    if (imported.provenance().replace()) notes.removeIf(note -> note.part == part);
+                    notes.addAll(candidates);
+                    continue;
                 }
+                if (parts.stream().anyMatch(p -> p.id() == part) || !inputs.stems.containsKey(part))
+                    throw new IllegalArgumentException("Expected a new part and aligned stem for " + part);
+                parts.add(ReconstructionStemParts.part(part, imported.provenance().role()));
+                newParts.add(part);
+                var spectrum = ReconstructionStemParts.Spectrum.read(Path.of(inputs.stems.get(part)), limit);
+                candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
+                for (var note : ReconstructionStemParts.joinHolds(candidates, spectrum, reductions)) {
+                    if (ReconstructionStemParts.doubling(note, midiByPitch, spectrum)) {
+                        reductions.add(new S3kReconstruction.Reduction(note.midi(),
+                                S3kReconstruction.Change.OCTAVE_DOUBLE, note.id(), "stem-midi-doubling"));
+                    } else {
+                        notes.add(note);
+                        sourceCounts.merge(part, 1, Integer::sum);
+                    }
+                }
+            }
+            if (!newParts.isEmpty()) {
+                var source = new MidiScore(List.copyOf(parts), score.source.notes(), score.source.warnings());
+                score = new Score(score.version, score.durationUs, score.frames, score.ticksPerSecond, null,
+                        score.bars, source, sourceCounts, score.notes, reductions, score.pitchChanges, null, null);
             }
         }
         if (inputs.candidates != null) {
@@ -864,7 +940,7 @@ public final class ReconstructionStages {
         boolean fastRuns = !Boolean.TRUE.equals(inputs.fastRunsOff);
         for (var part : score.source.parts()) {
             String stem = inputs.stems.get(part.id());
-            if (part.drums() || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
+            if (part.drums() || newParts.contains(part.id()) || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
             boolean leadCandidate = inputs.leadPart != null && inputs.leadPart == part.id()
                     || part.program() < 32 || part.program() > 39;
             if (!fastRuns && !leadCandidate) continue;
