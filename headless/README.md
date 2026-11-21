@@ -234,8 +234,9 @@ The arrangement quantizes timing to 60 Hz. FM1 carries melody and FM2 carries
 bass. Counter and harmony use the three remaining FM channels and can spill
 to PSG within its pitch range. Rapid inner chord re-attacks can be merged.
 `--harmony-max-hz 0` preserves those attacks for comparison. `--fm-only`
-disables PSG. DAC carries drums. A percussion part named `PSG3` or
-`PSG noise` can use PSG3 when PSG is enabled. The converter
+disables PSG. DAC carries the primary drum hits. Colliding cymbals and cymbals
+measured quiet in a dedicated drum stem can use PSG3 noise. Explicitly named
+`PSG3` or `PSG noise` percussion parts also use PSG3 when enabled. The converter
 removes systematic bass octave doubles in synth lead parts. Use
 `--keep-octaves` to keep those events in the allocation. It translates note
 velocity to coarse tone volume. MIDI controllers, including sustain and

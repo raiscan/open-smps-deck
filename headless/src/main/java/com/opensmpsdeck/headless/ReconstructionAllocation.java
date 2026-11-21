@@ -6,7 +6,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -22,6 +21,7 @@ final class ReconstructionAllocation {
     static final List<String> PSG = List.of("PSG1", "PSG2", "PSG3");
     static final List<String> INNER_FM = FM.subList(2, FM.size());
     private static final int RELEASE_TICKS = 2;
+    private static final int SUSTAINED_SPILL_TICKS = 6;
 
     enum Outcome { kept, shortened, dropped }
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
@@ -88,14 +88,21 @@ final class ReconstructionAllocation {
         }
     }
     private record Attack(ReconstructionRoles.Decision decision, int start, int end, boolean noise,
-                          ReconstructionEdits.Pin pin) {
+                          ReconstructionEdits.Pin pin, String cymbalRoute) {
         Note note() { return decision.note(); }
         Role role() { return decision.role(); }
+
+        Attack onNoise(String reason, int frames) {
+            return new Attack(decision, start, Math.min(frames, start + ReconstructionCymbals.gate(note().pitch())),
+                    true, null, reason);
+        }
     }
 
-    private final Map<String, Entry> entries = new LinkedHashMap<>();
+    private final Map<String, Entry> entries = new HashMap<>();
     private final Map<String, Entry> tail = new HashMap<>();
     private final boolean fmOnly;
+    private final NavigableMap<Integer, Integer> cymbals = new TreeMap<>();
+    private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
     private final Map<String, String> previousLanes;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
@@ -157,8 +164,19 @@ final class ReconstructionAllocation {
         return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, lanes(previous));
     }
 
+    static Result allocate(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames, boolean fmOnly,
+                           boolean hasStems, Result previous, Map<ReconstructionVoices.Key, Double> cymbalLevels) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, lanes(previous), cymbalLevels);
+    }
+
     static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
                                        boolean fmOnly, boolean hasStems, Map<String, String> seed) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, Map.of());
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -167,19 +185,31 @@ final class ReconstructionAllocation {
             boolean drum = decision.role() == Role.drums;
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
             boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part())) : pin.lane().equals("PSG3"));
-            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise, pin);
-        }).sorted(Comparator.comparingInt(Attack::start)
-                .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
-                .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
-                .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
-                .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
-                .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER)).toList();
+            return new Attack(decision, start, drum && !noise ? start + 1 : note.endTick(frames), noise, pin, null);
+        }).sorted(attackOrder()).toList();
         var allocator = new ReconstructionAllocation(fmOnly, seed, attacks);
-        for (var attack : attacks) allocator.place(attack);
+        var remaining = new ArrayList<Attack>();
+        // Resolve the DAC first so tonal spill can avoid upcoming noise hits.
+        // Both passes retain the same attack ordering within their priority tiers.
+        for (var attack : attacks) {
+            if (attack.noise || attack.role() != Role.drop && attack.pin != null && attack.pin.lane().equals("PSG3"))
+                allocator.explicitNoise.add(attack.start);
+            if (attack.role() != Role.drums || attack.noise) {
+                remaining.add(attack);
+            } else if (attack.pin != null) {
+                allocator.placePinned(attack);
+            } else {
+                var cymbal = allocator.placeDac(attack, cymbalLevels, frames);
+                if (cymbal != null) remaining.add(cymbal);
+            }
+        }
+        remaining.sort(attackOrder());
+        for (var attack : remaining) allocator.place(attack);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
         var placed = new ArrayList<Entry>();
         var runs = new ArrayList<RunPlacement>();
-        for (var entry : allocator.entries.values()) {
+        for (var attack : attacks) {
+            var entry = allocator.entries.get(attack.note().id());
             var figure = entry.note().run();
             if (figure == null) {
                 placed.add(entry);
@@ -209,6 +239,15 @@ final class ReconstructionAllocation {
                 hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null, runs.isEmpty() ? null : List.copyOf(runs));
     }
 
+    private static Comparator<Attack> attackOrder() {
+        return Comparator.comparingInt(Attack::start)
+                .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
+                .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
+                .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
+                .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
+                .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER);
+    }
+
     /** Project a kept lane layout back into source time for the existing voice probes. */
     static Result sourcePlacement(Result allocation, int frames, ReconstructionTimeMap timeline) {
         if (!timeline.warped()) return allocation;
@@ -222,6 +261,8 @@ final class ReconstructionAllocation {
             int next = nextAttack.getOrDefault(entry.lane, frames);
             if (start >= next) continue;
             int end = entry.lane.equals("DAC") ? start + 1 : note.endTick(frames);
+            if (ReconstructionCymbals.automatic(entry.reason()))
+                end = Math.min(frames, start + entry.endTick - entry.startTick);
             if (entry.outcome == Outcome.shortened) {
                 int shortened = (int) Math.round(timeline.source(entry.endTick / 60.0) * 60);
                 end = Math.min(end, Math.max(start + 1, shortened));
@@ -240,7 +281,8 @@ final class ReconstructionAllocation {
     private static int priority(Attack attack) {
         return switch (attack.role()) {
             case melody, bass -> attack.note().run() == null ? 12 : 13;
-            case drums -> 8 + S3kReconstruction.drumPriority(attack.note().pitch());
+            case drums -> attack.cymbalRoute != null ? 4
+                    : 8 + S3kReconstruction.drumPriority(attack.note().pitch());
             case counter -> 5;
             case harmony -> 3;
             case drop -> 0;
@@ -256,17 +298,8 @@ final class ReconstructionAllocation {
             placePinned(attack);
             return;
         }
-        if (attack.role() == Role.drums && !attack.noise) {
-            Entry last = tail.get("DAC");
-            if (last != null && last.startTick == attack.start) {
-                drop(attack, "simultaneous-dac-hit", List.of(last.note.id()));
-            } else if (last != null && attack.start - last.startTick < 5
-                    && S3kReconstruction.drumPriority(last.note.pitch()) >= 2
-                    && S3kReconstruction.drumPriority(last.note.pitch()) > S3kReconstruction.drumPriority(attack.note().pitch())) {
-                drop(attack, "protect-dac-tail", List.of(last.note.id()));
-            } else {
-                keep(attack, "DAC", null);
-            }
+        if (attack.cymbalRoute != null) {
+            placeCymbal(attack);
             return;
         }
         List<String> primary = expectedLanes(attack.role(), attack.noise);
@@ -277,6 +310,8 @@ final class ReconstructionAllocation {
             lane = freeFmForLowAttack(attack);
         if (lane == null) lane = shorten(primary, attack);
         if (lane == null) lane = shorten(secondary, attack);
+        if (lane == null && secondary.size() == 2 && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
+            lane = sustainedSpill(attack);
         if (lane == null) {
             drop(attack, switch (attack.role()) {
                 case melody -> "melody-lane-busy";
@@ -284,10 +319,68 @@ final class ReconstructionAllocation {
                 case drums -> "psg-noise-lane-busy";
                 default -> secondary.isEmpty() ? "fm-lanes-busy" : "fm-and-psg-lanes-busy";
             }, java.util.stream.Stream.concat(primary.stream(), secondary.stream())
-                    .map(tail::get).map(entry -> entry.note.id()).toList());
+                    .map(tail::get).filter(java.util.Objects::nonNull).map(entry -> entry.note.id()).toList());
         } else {
-            keep(attack, lane, secondary.contains(lane) ? "psg-spill" : null);
+            keep(attack, lane, PSG.contains(lane) && !attack.noise ? "psg-spill" : null);
         }
+    }
+
+    private String sustainedSpill(Attack attack) {
+        String lane = "PSG3";
+        Entry active = tail.get(lane);
+        if (active == null || active.endTick <= attack.start) return lane;
+        if (!ReconstructionCymbals.automatic(active.reason)) return null;
+        if (active.startTick == attack.start) {
+            entries.put(active.note.id(), new Entry(active.note, active.role, null, null, null, Outcome.dropped,
+                    "psg-noise-lane-busy", null, attack.note().id(), null, null));
+        } else {
+            shortenCymbal(active, attack);
+        }
+        return lane;
+    }
+
+    private Attack placeDac(Attack attack, Map<ReconstructionVoices.Key, Double> cymbalLevels, int frames) {
+        Entry last = tail.get("DAC");
+        int pitch = attack.note().pitch();
+        String blocked = null;
+        if (last != null && last.startTick == attack.start) {
+            blocked = "simultaneous-dac-hit";
+        } else if (last != null && attack.start - last.startTick < 5
+                && S3kReconstruction.drumPriority(last.note.pitch()) >= 2
+                && S3kReconstruction.drumPriority(last.note.pitch()) > S3kReconstruction.drumPriority(pitch)) {
+            blocked = "protect-dac-tail";
+        }
+        if (!fmOnly && ReconstructionCymbals.eligible(pitch)) {
+            boolean quiet = ReconstructionCymbals.quiet(cymbalLevels.get(ReconstructionCymbals.key(attack.note())));
+            if (blocked != null || quiet) {
+                var routed = attack.onNoise(blocked != null ? ReconstructionCymbals.COLLISION : ReconstructionCymbals.QUIET, frames);
+                cymbals.merge(routed.start, routed.end, Math::max);
+                return routed;
+            }
+        }
+        if (blocked == null) keep(attack, "DAC", null);
+        else drop(attack, blocked, List.of(last.note.id()));
+        return null;
+    }
+
+    private void placeCymbal(Attack attack) {
+        Entry active = tail.get("PSG3");
+        if (active != null && active.endTick > attack.start) {
+            if (!ReconstructionCymbals.automatic(active.reason) || active.startTick == attack.start) {
+                drop(attack, "psg-noise-lane-busy", List.of(active.note.id()));
+                return;
+            }
+            shortenCymbal(active, attack);
+        }
+        var next = explicitNoise.higher(attack.start);
+        int end = next == null ? attack.end : Math.min(attack.end, next);
+        keep(new Attack(attack.decision, attack.start, end, true, null, attack.cymbalRoute),
+                "PSG3", attack.cymbalRoute);
+    }
+
+    private void shortenCymbal(Entry earlier, Attack next) {
+        entries.put(earlier.note.id(), new Entry(earlier.note, earlier.role, earlier.lane, earlier.startTick,
+                next.start, Outcome.shortened, earlier.reason, null, next.note().id(), null, null));
     }
 
     private void placePinned(Attack attack) {
@@ -314,8 +407,13 @@ final class ReconstructionAllocation {
     }
 
     private List<String> spillLanes(Attack attack) {
-        return expectedLanes(attack.role(), attack.noise) == INNER_FM && !fmOnly
-                && attack.note().pitch() >= 45 && attack.note().run() == null ? PSG : List.of();
+        if (expectedLanes(attack.role(), attack.noise) != INNER_FM || fmOnly
+                || attack.note().pitch() < 45 || attack.note().run() != null) return List.of();
+        return attack.role() == Role.harmony && overlapsCymbal(attack.start, attack.end) ? PSG.subList(0, 2) : PSG;
+    }
+
+    private boolean overlapsCymbal(int start, int end) {
+        return cymbals.subMap(Math.max(0, start - ReconstructionCymbals.MAX_GATE + 1), true, end, false).values().stream().anyMatch(tail -> tail > start);
     }
 
     private String free(List<String> lanes, Attack attack) {
@@ -347,6 +445,7 @@ final class ReconstructionAllocation {
             Entry prior = tail.get(lane);
             if (prior == null || prior.pinnedLane != null || prior.note.pitch() < 45 || prior.note.run() != null) continue;
             for (String destination : PSG) {
+                if (destination.equals("PSG3") && prior.role == Role.harmony && overlapsCymbal(prior.startTick, prior.endTick)) continue;
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;
                 var moved = new Entry(prior.note, prior.role, destination, prior.startTick, prior.endTick,
@@ -366,6 +465,10 @@ final class ReconstructionAllocation {
                         .thenComparing(l -> !l.equals(previousLanes.get(attack.note().id())))).orElse(null);
         if (lane != null) {
             Entry earlier = tail.get(lane);
+            if (ReconstructionCymbals.automatic(earlier.reason)) {
+                shortenCymbal(earlier, attack);
+                return lane;
+            }
             entries.put(earlier.note.id(), earlier.shorten(attack.start,
                     earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack",
                     attack.note().id()));
@@ -374,7 +477,9 @@ final class ReconstructionAllocation {
     }
 
     private static boolean canShorten(Entry last, Attack next) {
-        if (last == null || last.pinnedLane != null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start || last.role == Role.drums) return false;
+        if (last == null || last.pinnedLane != null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start) return false;
+        if (last.role == Role.drums)
+            return next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
         return last.endTick - next.start <= RELEASE_TICKS || next.role() == Role.melody || next.role() == Role.bass
                 || next.role() == Role.drums || next.role() == Role.counter && last.role == Role.harmony;
     }

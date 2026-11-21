@@ -29,6 +29,7 @@ import static com.opensmpsdeck.headless.ReconstructionRoles.Role.drums;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReconstructionDrumsTest {
@@ -89,6 +90,55 @@ class ReconstructionDrumsTest {
         assertTrue(catalogue.rate() < nativeRate, "the higher reference pitch should choose faster DAC playback");
         assertTrue(reconstruct(midi, stem, index, "sliced", true).id().startsWith("stem-"));
         assertTrue(reconstruct(midi, stem, index, "auto", false).id().startsWith(sample));
+    }
+
+    @Test void dacCollisionUsesPsgNoiseAndProtectsTheKickTail() {
+        var parts = List.of(new MidiScore.Part(0, "Drums", 0, true));
+        var roles = new ReconstructionRoles.Result(1, 0, List.of(
+                attack("kick", 0, 36), attack("snare", 0, 38), attack("hat", 0, 42),
+                attack("tail-hat", .05, 42), attack("free-hat", .2, 42)), null);
+
+        var allocated = ReconstructionAllocation.allocate(roles, parts, 60, false);
+        var notes = allocated.notes().stream().collect(java.util.stream.Collectors.toMap(n -> n.note().id(), n -> n));
+        assertEquals("DAC", notes.get("kick").lane());
+        assertEquals("simultaneous-dac-hit", notes.get("snare").reason());
+        assertEquals("PSG3", notes.get("hat").lane());
+        assertEquals(ReconstructionCymbals.COLLISION, notes.get("tail-hat").reason());
+        assertEquals("DAC", notes.get("free-hat").lane());
+
+        var quiet = ReconstructionAllocation.allocate(roles, parts, 60, false, true, null,
+                Map.of(new ReconstructionVoices.Key(0, 42), .001));
+        assertEquals(ReconstructionCymbals.QUIET, quiet.notes().getLast().reason());
+        var fmOnly = ReconstructionAllocation.allocate(roles, parts, 60, true, true, null,
+                Map.of(new ReconstructionVoices.Key(0, 42), .001));
+        assertEquals("DAC", fmOnly.notes().getLast().lane());
+        assertTrue(fmOnly.notes().stream().noneMatch(n -> "PSG3".equals(n.lane())));
+    }
+
+    @Test void aSustainedSpillKeepsTheLastToneLane() {
+        var parts = List.of(new MidiScore.Part(0, "Drums", 0, true),
+                new MidiScore.Part(1, "Backing", 0, false));
+        var attacks = new java.util.ArrayList<ReconstructionRoles.Decision>();
+        for (int pitch = 55; pitch < 60; pitch++) {
+            var held = new ReconstructionStages.Note("tone-" + pitch, 1, 0, .3, pitch, 100, "midi", 1);
+            attacks.add(new ReconstructionRoles.Decision(held, ReconstructionRoles.Role.harmony, null, null));
+        }
+        attacks.add(attack("kick", .1, 36));
+        attacks.add(attack("hat", .1, 42));
+        var sustained = new ReconstructionStages.Note("sustained", 1, .1, .3, 60, 100, "midi", 1);
+        attacks.add(new ReconstructionRoles.Decision(sustained, ReconstructionRoles.Role.harmony, null, null));
+        var roles = new ReconstructionRoles.Result(1, 0, attacks, null);
+
+        var allocated = ReconstructionAllocation.allocate(roles, parts, 60, false);
+        var notes = allocated.notes().stream().collect(java.util.stream.Collectors.toMap(n -> n.note().id(), n -> n));
+        assertEquals("PSG3", notes.get("sustained").lane());
+        assertEquals("psg-noise-lane-busy", notes.get("hat").reason());
+        assertEquals("sustained", notes.get("hat").competitorNoteId());
+    }
+
+    private static ReconstructionRoles.Decision attack(String id, double start, int pitch) {
+        var note = new ReconstructionStages.Note(id, 0, start, start + .2, pitch, 100, "midi", 1);
+        return new ReconstructionRoles.Decision(note, drums, null, null);
     }
 
     @Test void drumGainsScaleDacPcmAndPsgNoiseIndependently() throws Exception {
@@ -169,14 +219,20 @@ class ReconstructionDrumsTest {
         var hat = trace.stream().filter(row -> row.pitch() == 42).findFirst().orElseThrow();
         var tone = trace.stream().filter(row -> row.pitch() == 69).findFirst().orElseThrow();
         var kick = trace.stream().filter(row -> row.pitch() == 36).findFirst().orElseThrow();
-        var before = ReconstructionTrace.trace(work, "--lane", "DAC").getAsJsonObject("drums");
-        assertEquals(hat.id(), before.getAsJsonArray("simultaneousDacLosses").get(0).getAsJsonObject().get("noteId").getAsString());
-        assertTrue(before.getAsJsonArray("simultaneousDacLosses").get(0).getAsJsonObject().get("psg3CanFit").getAsBoolean());
+        assertEquals("PSG3", hat.allocation().lane());
+        var initialVoice = ReconstructionArtifacts.readTree(work.resolve("voicing.json")).getAsJsonObject();
+        var percussion = initialVoice.getAsJsonObject("lanes").getAsJsonObject("PSG3").getAsJsonObject("psgPercussion");
+        assertEquals(231, percussion.get("noiseByte").getAsInt());
+        var initialProject = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        var automatic = initialProject.sequences().stream().filter(source -> source.id().startsWith("PSG3"))
+                .findFirst().orElseThrow();
+        assertEquals(ReconstructionCymbals.envelope(42).id(), automatic.psgEnvelopeId());
+        assertEquals(231, automatic.commands().getFirst().arguments().getFirst());
         var batch = directory.resolve("edits.json");
         Files.writeString(batch, """
                 [{"id":"keep-tone","reason":"Keep tonal spill away from noise","op":"pinLane",
                   "noteIds":["%s"],"lane":"PSG2"},
-                 {"id":"move-hat","reason":"Recover simultaneous DAC loss","op":"setRole",
+                 {"id":"move-hat","reason":"Use a fixed PSG3 noise gate","op":"setRole",
                   "noteIds":["%s"],"role":"drums","lane":"PSG3"}]
                 """.formatted(tone.id(), hat.id()));
         command("reconstruct", "edit", work.toString(), "add", "--file", batch.toString());
@@ -198,6 +254,8 @@ class ReconstructionDrumsTest {
         command("reconstruct", "assemble", work.toString());
         var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         var noise = project.sequences().stream().filter(source -> source.id().startsWith("PSG3")).findFirst().orElseThrow();
+        assertEquals(automatic.id(), noise.id());
+        assertNull(noise.psgEnvelopeId());
         assertEquals(List.of(81), noise.notes().stream().map(NoteEvent::pitch).toList());
         assertEquals(231, noise.commands().getFirst().arguments().getFirst());
         assertEquals(3, project.samples().size());

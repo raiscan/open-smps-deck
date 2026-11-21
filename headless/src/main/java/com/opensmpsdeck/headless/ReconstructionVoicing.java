@@ -45,10 +45,16 @@ final class ReconstructionVoicing {
                     effectReason, instruments, Collections.unmodifiableMap(new TreeMap<>(gains)), overrides, drumGains, drumGainOverrides, psgPercussion);
         }
 
+        Lane withDrumGains(Map<Integer, Double> gains) {
+            return new Lane(role, variantId, shortlist, gain, articulation, effects, patchReason, articulationReason,
+                    effectReason, instruments, partGains, overrides, gains, drumGainOverrides, psgPercussion);
+        }
+
         Lane withPreviousEdits(Lane previous, boolean refitLevels, List<ReconstructionAllocation.Entry> notes) {
             return new Lane(role, variantId, shortlist, refitLevels ? gain : previous.gain, articulation, effects,
                     patchReason, articulationReason, effectReason, instruments,
-                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides, previous.drumGains, previous.drumGainOverrides, psgPercussion);
+                    refitLevels ? partGains : compatibleGains(previous.partGains, notes), previous.overrides,
+                    mergeDrumGains(drumGains, previous.drumGains), previous.drumGainOverrides, psgPercussion);
         }
 
         Lane withPsgPercussion(PsgPercussion percussion) {
@@ -255,6 +261,20 @@ final class ReconstructionVoicing {
                     .collect(java.util.stream.Collectors.toSet()).containsAll(instrumentKeys(id, notes))) targets.add(id);
         });
         return targets;
+    }
+
+    static Result withCymbalGains(Result voicing, Map<Integer, Double> defaults) {
+        if (defaults.isEmpty()) return voicing;
+        var lanes = new TreeMap<>(voicing.lanes());
+        lanes.computeIfPresent("PSG3", (id, lane) -> lane.withDrumGains(mergeDrumGains(defaults, lane.drumGains())));
+        return new Result(voicing.version(), lanes, voicing.fitWindows(), voicing.sustainWarning());
+    }
+
+    private static Map<Integer, Double> mergeDrumGains(Map<Integer, Double> fitted, Map<Integer, Double> saved) {
+        if (fitted == null || saved == null) return fitted == null ? saved : fitted;
+        var merged = new TreeMap<>(fitted);
+        merged.putAll(saved);
+        return merged;
     }
 
     static Result keepCompatible(Result previous, Result fitted, Map<String, List<ReconstructionAllocation.Entry>> allocated,

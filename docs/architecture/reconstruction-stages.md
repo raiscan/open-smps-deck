@@ -744,13 +744,23 @@ authoritative for assembly. Drops carry neither lane nor interval.
 | Melody | FM1 for the whole song |
 | Bass | FM2 for the whole song |
 | Counter and harmony | FM3–FM5 first, then PSG1–PSG3 for eligible pitches |
-| Drums | DAC, with explicitly labelled `PSG3` or `PSG noise` percussion parts on PSG3 when enabled |
+| Drums | DAC for kick, snare and other primary hits. PSG3 for explicitly labelled noise parts and cymbals that collide with DAC hits or are quiet in the drum stem. |
 
 The shared project format exposes five FM tone lanes, three PSG lanes
 and DAC. The sixth FM channel and DAC share hardware. The arrangement
 compiler exposes that slot as DAC. `--fm-only` disables PSG placement
 while keeping DAC. Release collisions, unavailable lanes and simultaneous
 DAC hits appear in the allocation and the final report.
+
+Kick takes precedence over snare for simultaneous DAC hits. Both take
+precedence over cymbals, and their first four ticks are protected from
+lower-priority DAC retriggers. An eligible cymbal that loses the DAC can use
+a short PSG3 white-noise hit. A cymbal class with quiet isolated attacks in a
+dedicated drum stem can use noise even when the DAC is free.
+Harmony spill avoids those PSG3 intervals. Counter lines, sustained
+harmony with no other playable lane, and explicit lane pins can take precedence. The allocation records `psg-cymbal-dac-collision`
+or `psg-cymbal-quiet-stem` for a substitute and `psg-noise-lane-busy` when
+the substitute cannot play.
 
 ### Voice
 
@@ -762,7 +772,12 @@ retain part-level matching under `instruments`. DAC entries also specify
 `drumPitch`. A fitted DAC entry also has a `drumSelection` with the chosen
 rate, optional stem slice and match evidence. To use a different catalogue
 variant at its native rate, change `variantId` and remove `drumSelection`.
-The PSG3 noise allocation supplies its native noise command.
+Automatic PSG3 cymbals use tone-linked white noise with short closed-hat
+decays and longer open-hat and cymbal decays. The voice stage measures the
+median upper-band attack energy above bleed in isolated drum-stem excerpts
+and selects the nearest audible PSG attenuation. The fitted correction is
+saved in PSG3 `drumGains`. With insufficient stem evidence, the substitute
+uses a native-style fixed level.
 
 The fit renders the allocated phrases through the pinned S3K chips over up to
 eight excerpts spread across the song. It models the reference magnitude

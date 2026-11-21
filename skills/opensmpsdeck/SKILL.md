@@ -353,6 +353,14 @@ Use `"section":"chorus-1"` in a roleplan rule or
 `"span":{"section":"chorus-1"}` for an edit, then resume the consuming stage.
 See the [musical sections guide](../../docs/architecture/reconstruction-stages.md#musical-sections).
 
+## Drum collisions
+
+Use a dedicated drum stem for automatic PSG3 cymbal levels. Kick and snare
+retain DAC priority. Colliding cymbals and cymbals measured quiet in the stem
+can use short white-noise decays. Check the placement reason and lane with
+`reconstruct_trace`. Use PSG3 `drumGains` in `voicing.json` to adjust a
+fitted pitch, then assemble and audition the drum lanes.
+
 ## Studio review
 
 1. Open the same `arrangement.smps.json` in Studio. Attach the mix with

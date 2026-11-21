@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.IntPredicate;
+import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 
 final class ReconstructionClipLinks {
@@ -81,7 +81,7 @@ final class ReconstructionClipLinks {
     record Chunk(int first, int limit, int tick, Span span) {}
 
     List<Chunk> chunks(String lane, int count, IntUnaryOperator start, IntUnaryOperator end,
-                       IntPredicate noise, int maxTicks) {
+                       IntFunction<?> mode, int maxTicks) {
         var linked = indexes(count, start, end);
         var saved = layout == null ? List.<Integer>of() : layout.anchors().getOrDefault(lane, List.of());
         var anchors = saved.stream().mapToInt(Integer::intValue).toArray();
@@ -100,7 +100,7 @@ final class ReconstructionClipLinks {
             int next = boundary < anchors.length ? anchors[boundary] : Integer.MAX_VALUE;
             var span = linked.get(first);
             int limit = first + 1;
-            while (limit < count && noise.test(limit) == noise.test(first)) {
+            while (limit < count && java.util.Objects.equals(mode.apply(limit), mode.apply(first))) {
                 int attack = start.applyAsInt(limit);
                 // A gate or release command can overrun an anchor after a timing edit.
                 // Keep the whole placement and resume using the next reachable anchor.
