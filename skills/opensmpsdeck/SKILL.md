@@ -114,10 +114,20 @@ java -jar "$jar" reconstruct view "$work" --start 45.3 --end 48.8 \
 Use `--notes FILE` (`notes` in MCP) to overlay aligned MIDI or JSON note
 triples without rebuilding. Repeat `--harmonics-at PITCH[@TIME]`
 (`harmonicsAt` array) to probe pitches without trace IDs. `--ridges`
-(`ridges`) exports source time or project time, pitch and spectral strength
-to a sibling JSON file. Use `--db` (`db`) for per-panel spectral peaks,
-`--shared-db` (`sharedDb`) to compare levels, and `--pitch-preset drums`
-(`pitchPreset: "drums"`) for MIDI 35–81.
+(`ridges`) exports the top three interpolated peaks per column in both
+clocks, including the chip panel when rendered. Use `--ridge-count N`
+(`ridgeCount`, 1–32) to change the count. A selected note or pitch adds
+fundamental, second and third partial trajectories. Use `--db` (`db`)
+for per-panel spectral peaks and a selected fundamental's absolute dBFS
+curve. Use `--shared-db` (`sharedDb`) for a common color scale and
+`--pitch-preset drums` (`pitchPreset: "drums"`) for MIDI 35–81. The view
+draws authored bends and assembled FM pitch curves.
+
+Use `trace --lane DAC` or the view's drum rows to see simultaneous DAC
+losses next to the free PSG3 gates. Use the [PSG3 hat recipe](../../docs/architecture/reconstruction-stages.md#move-hats-to-psg3-noise)
+to pin hats and move tonal spill. Check `lanes.PSG3.psgPercussion` for the
+noise and envelope settings. On DAC, use `drumGainOverrides` with `hitIds`
+or a half-open source-time `span` to replace the gain for selected hits.
 
 When comparing a stem with the render, pass the lanes that carry that part
 (for example `--lanes FM1,FM3`). The chip panel then solos them instead of
@@ -138,6 +148,8 @@ warped. Compare pitch, attack, release and dropped phrases before choosing.
 The score and report identify the external note input and its provenance.
 
 ## Plan lead and backing
+
+Write `bars` in `roleplan.json` as a string such as `"6-7"`.
 
 The default role pass decides note by note. On merged Suno parts it can
 hand the lead between instruments mid-phrase, or promote chord tops and
@@ -249,7 +261,8 @@ Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`
 lane, fate and stable ID for each attack cluster. Use a trace note ID or
 `selector: {at: 43.09, pitch: 80, part: 0}`
 for a unique attack within 20 ms. `deleteNote` also accepts generated
-roles-stage IDs. Use `edits: [...]` in MCP or
+roles-stage IDs. Inline CLI `edit add JSON` takes one intent object. Use
+`edits: [...]` in MCP or
 `reconstruct edit "$work" add --file batch.json` to append an array in one
 call. For `setRole`, use a `selectors` array or apply `voice: "top"`,
 `"bottom"`, or a zero-based register index to every attack cluster in a span.
@@ -303,6 +316,16 @@ or work on a separate copy.
    `noteIds`. Entries can overlap if they set different fields. Assemble
    and check the passage again.
 
+Audition up to 32 variants or pass `--shortlist` to use the saved candidates
+on the explicit or inferred lane. Run `reconstruct voice WORK_DIR --lane FM1 --variant ID` to
+set a lane-wide candidate and fit its level, then assemble. Use
+`catalog show INDEX.json ID --brief` for occurrence counts.
+
+For native F0 vibrato, `delay`, `rate` and `steps` count sequencer ticks
+(1/60 s at reconstruction tempo zero). Signed `delta` is a packed-frequency
+increment. When `rate` divides `steps`, the period is `2 × steps` ticks,
+with peak-to-peak excursion `abs(delta) × steps / rate` in native units.
+
 ## Studio review
 
 1. Open the same `arrangement.smps.json` in Studio. Attach the mix with
@@ -325,9 +348,11 @@ java -jar "$jar" render-project "$project" "$work/review.wav" --start 8 --end 20
 java -jar "$jar" render-compare "$work" --start 8 --end 20 "$work/comparison.mp3"
 ```
 
-`render-project` also accepts `--mute LANES`. `render-compare` uses the
-saved steady reference for warped runs. Use `--time project` (MCP `time:
-"project"`) to choose project seconds for comparisons or evidence views.
+`render-project` also accepts `--mute LANES`. Pass `--force` to CLI
+`view`, `render-project` or `render-compare` to replace completed exports.
+`render-compare` uses the saved steady reference for warped runs. Use
+`--time project` (MCP `time: "project"`) to choose project seconds for
+comparisons or evidence views.
 Their results include both clocks. Select another aligned recording with
 `--reference WAV` or a replacement project-time render with `--render WAV`.
 Choose `.wav` when ffmpeg is unavailable.

@@ -93,7 +93,7 @@ final class ReconstructionCli {
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
-        out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels]");
+        out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct edit WORK_DIR add [--dry-run] JSON | add [--dry-run] --file BATCH | list | remove ID");
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
@@ -102,8 +102,8 @@ final class ReconstructionCli {
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
-        out.println("           [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--shared-db|--db] [--pitch-preset drums]");
-        out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) --variant ID ...");
+        out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
+        out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
@@ -205,7 +205,7 @@ final class ReconstructionCli {
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
-            java.util.Set<String> targets, boolean refitLevels, ReconstructionAllocation.Result previousAllocation)
+            java.util.Set<String> targets, boolean refitLevels, ReconstructionAllocation.Result previousAllocation, String variant)
             throws IOException {
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
         var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
@@ -214,7 +214,15 @@ final class ReconstructionCli {
             if (!allocated.containsKey(target)) throw new IllegalArgumentException("Refit lane is not allocated: " + target);
         if (!targets.isEmpty() && previous == null && !targets.equals(allocated.keySet()))
             throw new IllegalArgumentException("A lane-targeted refit needs existing voicing for the other lanes");
-        var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets));
+        InstrumentCatalogue.Variant chosen = null;
+        if (variant != null) {
+            var match = catalogue.match(variant);
+            if (match.asset().kind() != InstrumentCatalogue.Kind.FM_VOICE)
+                throw new IllegalArgumentException("--variant requires an FM voice");
+            chosen = match.variant();
+        }
+        var selected = chosen;
+        var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
         var result = previous == null ? fitted : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
                 ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
         if (previous != null)
@@ -234,7 +242,7 @@ final class ReconstructionCli {
         ReconstructionVoicing.Result fitted = null;
         if (!targets.isEmpty()) {
             var source = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), timeline);
-            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, targets));
+            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, targets, null));
         }
         var result = ReconstructionVoicing.keepCompatible(previous, fitted, allocated, report);
         ReconstructionVoicing.validate(result, allocation, catalogue, timeline.frames());
@@ -256,6 +264,7 @@ final class ReconstructionCli {
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
                         ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
         var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
+        var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
         var copyLanes = voicing.lanes().values().stream().map(lane -> lane.effects().copy())
@@ -278,7 +287,7 @@ final class ReconstructionCli {
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), layout),
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), drumGains, layout),
                     out, existing, assemblyInputs);
             var edits = ReconstructionEdits.Journal.read(work).all();
             Path reportFile = staging.resolve("report.json");

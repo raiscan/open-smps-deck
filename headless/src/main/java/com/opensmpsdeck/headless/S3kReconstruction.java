@@ -231,19 +231,7 @@ final class S3kReconstruction {
                                    Map<Integer, ReconstructionEcho.Estimate> echoes,
                                    Map<String, ReconstructionVoicing.Lane> voicing, boolean copies) throws java.io.IOException {
         return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
-                matches, echoes, voicing, copies, false, Map.of(), Map.of());
-    }
-
-    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
-                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
-                                   InstrumentCatalogue catalogue,
-                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
-                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
-                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
-                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins)
-            throws java.io.IOException {
-        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
-                matches, echoes, voicing, copies, bends, scopes, origins, null);
+                matches, echoes, voicing, copies, false, Map.of(), Map.of(), Map.of());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
@@ -253,7 +241,21 @@ final class S3kReconstruction {
                                    Map<Integer, ReconstructionEcho.Estimate> echoes,
                                    Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
                                    Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
-                                   ReconstructionClipLinks.Layout layout) throws java.io.IOException {
+                                   Map<String, Double> scopedDrumGains)
+            throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
+                matches, echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, null);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout)
+            throws java.io.IOException {
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var gates = new ArrayList<VoicedGate>();
         var parts = indexParts(score.parts());
@@ -293,7 +295,8 @@ final class S3kReconstruction {
             if (lane.equals("DAC")) {
                 var slice = choice.slice();
                 String id = slice == null ? choice.assetId() + "-" + choice.sampleRate() : slice.id();
-                double gain = voice == null ? 1 : voice.drumGain(note.pitch());
+                double gain = scopedDrumGains.getOrDefault(entry.note().id(),
+                        voice == null ? 1 : voice.drumGain(note.pitch()));
                 String gainedId = gain == 1 ? id : id + "-gain-" + Double.toHexString(gain);
                 samples.computeIfAbsent(gainedId, key -> {
                     if (gain == 1 && slice != null) return slice;
@@ -583,7 +586,7 @@ final class S3kReconstruction {
             int detune = 0;
             ReconstructionVoicing.Vibrato vibrato = null;
             boolean bendModulation = false;
-            if (noise) commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(0xe7)));
+            if (noise) commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(ReconstructionVoicing.PSG_PERCUSSION.noiseByte())));
             for (int i = start; i < end; i++) {
                 Placement placement = notes.get(i);
                 Event note = placement.event;

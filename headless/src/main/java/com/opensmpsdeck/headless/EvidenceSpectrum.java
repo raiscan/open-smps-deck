@@ -42,7 +42,7 @@ final class EvidenceSpectrum {
         return pitch + 12 * Math.log(multiple) / LOG_2;
     }
 
-    record Ridge(double time, double pitch, double strength) {}
+    record Peak(double pitch, double strength) {}
     record Spectrum(float[] powers, int columns, int height, int minPitch, int maxPitch, double peak) {
         Double peakDb() { return peak > 0 ? db(peak) : null; }
 
@@ -61,22 +61,62 @@ final class EvidenceSpectrum {
             return image;
         }
 
-        List<Ridge> ridges(double start, double span) {
-            var result = new ArrayList<Ridge>();
-            for (int x = 0; x < columns; x++) {
-                float best = 0;
-                int row = 0;
-                for (int y = 0; y < height; y++) {
-                    float power = powers[y * columns + x];
-                    if (power > best) {
-                        row = y;
-                        best = power;
-                    }
-                }
-                if (best > 0) result.add(new Ridge(start + (x + .5) * span / columns,
-                        pitch(minPitch, maxPitch, row, height), db(best)));
+        List<Peak> peaks(int column, int count) {
+            var peaks = new ArrayList<Peak>();
+            for (int row = 0; row < height; row++) {
+                var peak = peak(column, row);
+                if (peak != null) peaks.add(peak);
             }
-            return List.copyOf(result);
+            return peaks.stream().sorted(java.util.Comparator.comparingDouble(Peak::strength).reversed())
+                    .limit(count).toList();
+        }
+
+        Peak near(int column, double expected, double tolerance) {
+            int first = Math.max(0, (int) Math.floor(row(expected + tolerance)));
+            int last = Math.min(height - 1, (int) Math.ceil(row(expected - tolerance)));
+            Peak best = null;
+            for (int row = first; row <= last; row++) {
+                var peak = peak(column, row);
+                if (peak != null && Math.abs(peak.pitch - expected) <= tolerance
+                        && (best == null || peak.strength > best.strength)) best = peak;
+            }
+            return best;
+        }
+
+        Peak at(int column, double pitch) {
+            double row = row(pitch);
+            if (row < 0 || row > height - 1) return null;
+            int lower = (int) row;
+            double a = value(column, lower);
+            double b = value(column, Math.min(lower + 1, height - 1));
+            double power = a + (row - lower) * (b - a);
+            return power > 0 ? new Peak(pitch, db(power)) : null;
+        }
+
+        private double row(double pitch) {
+            return (maxPitch + .5 - pitch) * height / (maxPitch - minPitch + 1) - .5;
+        }
+
+        private float value(int column, int row) { return powers[row * columns + column]; }
+
+        private Peak peak(int column, int row) {
+            double center = value(column, row);
+            if (center <= 0) return null;
+            double left = row == 0 ? 0 : value(column, row - 1);
+            double right = row == height - 1 ? 0 : value(column, row + 1);
+            if (center <= left || center < right) return null;
+            double offset = 0;
+            double level = db(center);
+            if (left > 0 && right > 0) {
+                double a = db(left), b = db(right);
+                double curvature = a - 2 * level + b;
+                if (curvature < 0) {
+                    offset = (a - b) / (2 * curvature);
+                    level -= (a - b) * offset / 4;
+                }
+            }
+            double pitch = pitch(minPitch, maxPitch, row, height) - offset * (maxPitch - minPitch + 1.0) / height;
+            return new Peak(pitch, level);
         }
 
         // The Hann window has unit coherent gain. The positive-frequency FFT

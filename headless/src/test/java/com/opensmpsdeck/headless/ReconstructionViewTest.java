@@ -37,6 +37,29 @@ class ReconstructionViewTest {
         assertTrue(emphasized.getRaster().getSample(0, 125, 0) > raw.getRaster().getSample(0, 125, 0));
     }
 
+    @Test void interpolatesTopThreePeaksAndTracksAnIndependentMidNoteDip() {
+        int rate = 48_000;
+        var pcm = new float[rate];
+        double pitch = 69.32;
+        for (int i = 0; i < pcm.length; i++) {
+            double phase = Math.TAU * EvidenceSpectrum.hz(pitch) * i / rate;
+            double fundamental = i > rate * .4 && i < rate * .6 ? .05 : .2;
+            pcm[i] = (float) (fundamental * Math.sin(phase) + .4 * Math.sin(2 * phase) + .12 * Math.sin(3 * phase));
+        }
+        var spectrum = EvidenceSpectrum.measure(new EvidenceSpectrum.Audio(pcm, rate, 0, 1),
+                new double[]{.25, .5, .75}, 65, 94, 420, 1, false);
+        var peaks = spectrum.peaks(0, 3);
+        assertEquals(3, peaks.size());
+        assertEquals(pitch + 12, peaks.get(0).pitch(), .12);
+        assertEquals(pitch, peaks.get(1).pitch(), .12);
+        assertEquals(-14, peaks.get(1).strength(), .9);
+        assertEquals(pitch + EvidenceSpectrum.harmonicPitch(0, 3), peaks.get(2).pitch(), .12);
+        var first = spectrum.near(0, pitch, .6);
+        var middle = spectrum.near(1, pitch, .6);
+        assertTrue(first.strength() - middle.strength() > 11);
+        assertEquals(peaks.get(0).strength(), spectrum.near(1, pitch + 12, .6).strength(), .15);
+    }
+
     @Test void mapsWarpedOverlaysAndHarmonicsToPixelsAndReturnsLegend(@TempDir Path work) throws Exception {
         Path wav = work.resolve("tone.wav");
         short[] silence = new short[1600];
