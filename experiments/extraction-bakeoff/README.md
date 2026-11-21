@@ -147,15 +147,27 @@ separator output directories as desired.
   --separator sw="$LOCAL_STEMS" > "$PRIVATE_RESULTS/head-to-head.json"
 ```
 
-Save exported MIDI as `suno/suno.mid` and name each WAV by part and take.
-The scorer accepts `suno/stems/bass_take1.wav` or WAVs directly inside the
-`suno` folder named like `Bass take 1.wav` or `Bass_1.wav`. It also accepts
-`suno/stems.json` with take IDs mapping to objects of part name to WAV
-filename arrays. Write `DONE` only when both takes and MIDI are present.
-The scorer reports pending IDs and paired aggregates. One common transport
-delay per stem take is estimated from the reference mix and the summed Suno
-stems. It is applied to all of that take's stems and reported in samples.
-The MIDI uses its supplied sample-zero clock.
+Put take-1 per-stem MIDI in `suno/midi/PART.mid`. The scorer pools every
+exported event on the common timeline, preserving the MIDI programs and drum
+flags. Repeated detections from different stems remain separate predictions.
+Each file also gets a diagnostic against the matching reference class.
+Keyboard maps to piano, drums and percussion map to drums, and synth, brass,
+woodwinds and other remaining families map to the merged lead/other class.
+Bass and guitar keep their own classes. Legacy whole-mix exports can use
+`suno/suno.mid` when the per-stem directory has no MIDI.
+
+Place audio at `suno/stems/bass_take1.wav` or directly in `suno` with names
+like `Bass take 1.wav`. An optional `suno/stems.json` maps each take to part
+names and arrays of relative WAV paths. Write `DONE` when the two audio takes
+and MIDI exports are complete. Pass `--rejected SONG_ID` for an upload
+rejection to retain its local measurements while excluding it from the
+paired comparison.
+
+The scorer reports each fixed take and an oracle best-of-two SDR computed
+per track and stem class before aggregation. It uses the input mix and
+summed Suno audio to estimate one transport shift per take. This shift is
+applied only to the audio and reported in samples. MIDI timestamps remain
+on the supplied sample-zero clock.
 
 ## Metrics
 

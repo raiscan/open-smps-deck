@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score finished Suno downloads against full, aligned Slakh references."""
+"""Score finished Suno downloads against full, aligned references."""
 import argparse
 from collections import defaultdict
 import json
@@ -11,7 +11,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import correlate, resample_poly
 
-from evaluate import note_cases, sdr
+from evaluate import family, inside, note_cases, read_notes, scores, sdr, totals
 
 RATE = 44100
 
@@ -131,8 +131,50 @@ def summarize_stems(by_track):
             "trackCounts": {key: len(v) for key, v in by_role.items()}, "tracks": by_track}
 
 
-def evaluate(root, local, separators):
-    pending, all_suno, all_local = [], [], []
+def suno_midi(folder, reference, span):
+    files = sorted((folder / "midi").glob("*.mid"))
+    ref = inside(read_notes(reference), span)
+    if not files:
+        return scores(ref, inside(read_notes(folder / "suno.mid"), span)), {}
+
+    import pretty_midi
+
+    by_class = defaultdict(list)
+    midi = pretty_midi.PrettyMIDI(str(reference))
+    for track in midi.instruments:
+        label = track.name.lower()
+        if label not in {"bass", "drums", "guitar", "piano", "lead", "other"}:
+            label = family(track.program)
+        role = "drums" if track.is_drum else group(label)
+        by_class[role].extend((n.start, n.end, n.pitch, int(track.program), track.is_drum)
+                              for n in track.notes)
+
+    predictions, details = [], {}
+    for path in files:
+        role = group(path.stem)
+        predicted = inside(read_notes(path), span)
+        predictions.extend(predicted)
+        details[path.stem] = {"referenceClass": role,
+                              "counts": scores(inside(by_class[role], span), predicted)}
+    return scores(ref, predictions), details
+
+
+def best_stems(sep_scores, kind):
+    takes = [rows for name, rows in sorted(sep_scores.items())
+             if name.startswith("Suno-") and name.endswith("/" + kind)]
+    best = {}
+    for song in sorted({song for rows in takes for song in rows}):
+        by_take = [rows[song]["dB"] for rows in takes if song in rows]
+        best[song] = {"dB": {
+            role: max((row[role] for row in by_take if row[role] is not None), default=None)
+            for role in by_take[0]
+        }}
+    return best
+
+
+def evaluate(root, local, separators, rejected=()):
+    pending, rejected_suno, all_local = [], [], []
+    all_suno, suno_parts = {}, {}
     sep_scores = defaultdict(dict)
     for meta in sorted(root.glob("*/source.json")):
         record = json.loads(meta.read_text())
@@ -158,10 +200,13 @@ def evaluate(root, local, separators):
         local_midi = local / song.name / "local.mid"
         if local_midi.is_file():
             all_local.append(dict(case, estimate=local_midi))
+        if song.name in rejected:
+            rejected_suno.append(song.name)
+            continue
         if not (suno / "DONE").is_file():
             pending.append(song.name)
             continue
-        all_suno.append(dict(case, estimate=suno / "suno.mid"))
+        all_suno[song.name], suno_parts[song.name] = suno_midi(suno, case["reference"], span)
         for take, files in takes(suno).items():
             # Keep the transport search allowance at the tail until after alignment.
             estimated = grouped(files, length + RATE // 2)
@@ -171,14 +216,21 @@ def evaluate(root, local, separators):
                 kind = "fine" if fine else "common"
                 sep_scores[f"Suno-{take}/{kind}"][song.name] = {
                     **alignment, "dB": score_stems(ref, estimated, length, shift, span, fine)}
-    paired = {case["id"] for case in all_suno} & {case["id"] for case in all_local}
-    suno_stem_tracks = {case["id"] for case in all_suno}
-    paired_stems = set.intersection(suno_stem_tracks, *(set(rows) for rows in sep_scores.values()))
-    return {"pendingSuno": pending, "pairedTracks": sorted(paired),
+    for kind in ("common", "fine"):
+        best = best_stems(sep_scores, kind)
+        if best:
+            sep_scores[f"Suno-best/{kind}"] = best
+    paired = all_suno.keys() & {case["id"] for case in all_local}
+    paired_stems = set.intersection(set(all_suno), *(set(rows) for rows in sep_scores.values()))
+    local_notes = note_cases(all_local)
+    paired_local = {ident: local_notes["cases"][ident] for ident in sorted(paired)}
+    paired_suno = {ident: all_suno[ident] for ident in sorted(paired)}
+    return {"pendingSuno": pending, "rejectedSuno": rejected_suno, "pairedTracks": sorted(paired),
             "pairedStemTracks": sorted(paired_stems),
-            "local": note_cases(all_local), "suno": note_cases(all_suno),
-            "pairedLocal": note_cases([case for case in all_local if case["id"] in paired]),
-            "pairedSuno": note_cases([case for case in all_suno if case["id"] in paired]),
+            "local": local_notes, "suno": {"micro": totals(all_suno.values()), "cases": all_suno},
+            "sunoPerStemMidi": suno_parts,
+            "pairedLocal": {"micro": totals(paired_local.values()), "cases": paired_local},
+            "pairedSuno": {"micro": totals(paired_suno.values()), "cases": paired_suno},
             "separation": {name: summarize_stems(rows) for name, rows in sep_scores.items()},
             "pairedSeparation": {name: summarize_stems({
                 song_id: row for song_id, row in rows.items() if song_id in paired_stems
@@ -195,8 +247,9 @@ def main():
     parser.add_argument("root", type=Path)
     parser.add_argument("local", type=Path, help="Directory of track folders with local.mid")
     parser.add_argument("--separator", action="append", type=separator, default=[])
+    parser.add_argument("--rejected", action="append", default=[], metavar="SONG_ID")
     args = parser.parse_args()
-    print(json.dumps(evaluate(args.root, args.local, args.separator), indent=2, allow_nan=False))
+    print(json.dumps(evaluate(args.root, args.local, args.separator, args.rejected), indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":

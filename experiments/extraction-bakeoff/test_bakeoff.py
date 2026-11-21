@@ -8,7 +8,7 @@ import numpy as np
 from evaluate import counts, inside, scores, sdr, totals
 from listen import disagreements, overlay_notes
 from matrix import write_midi
-from suno_h2h import RATE, aligned, delay, evaluate, takes
+from suno_h2h import RATE, aligned, delay, evaluate, suno_midi, takes
 
 
 class EvaluationTest(unittest.TestCase):
@@ -70,6 +70,10 @@ class EvaluationTest(unittest.TestCase):
             local = root / "local"
             write_midi(note, local / "song" / "local.mid")
             self.assertEqual(evaluate(root / "slakh", local, [])["pendingSuno"], ["song"])
+            rejected = evaluate(root / "slakh", local, [], rejected=["song"])
+            self.assertEqual(rejected["rejectedSuno"], ["song"])
+            self.assertEqual(rejected["pendingSuno"], [])
+            self.assertEqual(rejected["local"]["micro"]["note"]["f1"], 1.)
             (suno / "DONE").touch()
             result = evaluate(root / "slakh", local, [])
             self.assertEqual(result["pairedSuno"]["micro"]["note+offset"]["f1"], 1.)
@@ -77,6 +81,22 @@ class EvaluationTest(unittest.TestCase):
             self.assertGreater(result["separation"]["Suno-2/common"]["medianDb"]["bass"], 60)
             self.assertGreater(result["separation"]["Suno-2/common"]["medianDb"]["other"], 60)
             self.assertEqual(set(takes(suno)), {"1", "2"})
+            self.assertEqual(result["separation"]["Suno-best/common"]["medianDb"],
+                             result["separation"]["Suno-2/common"]["medianDb"])
+
+    def test_per_stem_midi_keeps_cross_stem_duplicates_and_scores_matching_class(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            ref = root / "reference.mid"
+            bass = (.1, .3, 40, 33, False)
+            lead = (.2, .4, 60, 80, False)
+            write_midi([bass, lead], ref)
+            write_midi([bass], root / "midi" / "bass.mid")
+            write_midi([bass, lead], root / "midi" / "synth.mid")
+            union, parts = suno_midi(root, ref, (0., 1.))
+            self.assertEqual(union["note"], (2, 2, 3))
+            self.assertEqual(parts["bass"]["counts"]["note"], (1, 1, 1))
+            self.assertEqual(parts["synth"]["counts"]["note"], (1, 1, 2))
 
     def test_nested_stems_with_underscore_take_suffix(self):
         with tempfile.TemporaryDirectory() as scratch:
