@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.DemoProject;
@@ -132,11 +133,14 @@ class ReconstructionLanePoliciesTest {
         assertEquals("s3k-layering", preset.preset());
         assertEquals(73, preset.rules().getFirst().pitch(61));
         assertEquals(8, preset.rules().getLast().delay());
+        assertEquals(15, preset.rules().getLast().fmAttenuation());
         base.add("lanePolicies", JsonParser.parseString("""
                 [{"policy":"fmDouble","mode":"echo","delayTicks":14}]
                 """));
-        assertEquals(14, ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base)
-                .lanePolicies().rules().getFirst().delay());
+        var explicitEcho = ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base)
+                .lanePolicies().rules().getFirst();
+        assertEquals(14, explicitEcho.delay());
+        assertEquals(7, explicitEcho.fmAttenuation());
         base.add("lanePolicies", JsonParser.parseString("""
                 {"preset":"s3k-layering","delayTicks":14}
                 """));
@@ -147,6 +151,26 @@ class ReconstructionLanePoliciesTest {
                 """));
         assertThrows(IllegalArgumentException.class,
                 () -> ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base));
+    }
+
+    @Test void presetEchoAttenuationRoundTripsAndValidatesTlSteps() {
+        var path = Path.of("voicing.json");
+        var base = JsonParser.parseString("""
+                {"version":1,"lanes":{},"lanePolicies":{"preset":"s3k-layering","echoAttenuation":11}}
+                """).getAsJsonObject();
+        var voicing = ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base);
+        var echo = voicing.lanePolicies().rules().getLast();
+        assertEquals(11, echo.fmAttenuation());
+        assertEquals(8, echo.delay());
+        assertEquals(73, voicing.lanePolicies().rules().getFirst().pitch(61));
+        assertEquals(base.get("lanePolicies"), new Gson().toJsonTree(voicing).getAsJsonObject().get("lanePolicies"));
+
+        var policy = base.getAsJsonObject("lanePolicies");
+        for (String invalid : List.of("-1", "128", "1.5", "\"11\"", "null")) {
+            policy.add("echoAttenuation", JsonParser.parseString(invalid));
+            assertThrows(IllegalArgumentException.class,
+                    () -> ReconstructionArtifacts.decode(path, ReconstructionVoicing.Result.class, base), invalid);
+        }
     }
 
     private static ReconstructionLanePolicies.Rule rule(Kind kind, Mode mode, List<ReconstructionLanePolicies.VolumeStep> steps) {

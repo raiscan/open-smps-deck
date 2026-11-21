@@ -275,8 +275,10 @@ stems, and reads `render.wav` for the chip spectrogram and playback.
   selected gate. Turn it off to return to your previous loop selection.
 
 - Choose **Lane policies → S3K layering** to rebuild with octave-up PSG
-  doubling and a short FM echo on available channels. Choose **Off** to
-  clear the lane policies. Both choices replace any custom lane policies.
+  doubling and an eight-frame FM echo on available channels. The echo uses
+  15 carrier TL steps of attenuation relative to the dry note by default.
+  Choose **Off** to clear the lane policies. Both choices replace any
+  custom lane policies. [Adjust the echo level](../architecture/reconstruction-stages.md#optional-lane-policies)
 
 ### Review agent proposals
 
