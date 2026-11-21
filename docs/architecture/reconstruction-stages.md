@@ -1327,6 +1327,20 @@ In MCP, call `reconstruct_stage` with `stage: "assemble"` and
 editor, choose **Lane policies → S3K layering**. These actions replace any
 previous lane policy configuration. Use `off` or choose **Off** to clear it.
 
+The preset FM echo adds 15 carrier total-level (TL) steps to the dry attack's
+attenuation by default (11.25 dB nominal, subject to the patch's range).
+It uses the patch's own envelope throughout the echo. To choose a different
+level, set the optional `echoAttenuation` field in `voicing.json` and run
+`reconstruct assemble WORK_DIR` to reuse the saved preset.
+
+```json
+"lanePolicies": {"preset": "s3k-layering", "echoAttenuation": 11}
+```
+
+`echoAttenuation` is the total additional carrier TL relative to the dry note
+(0–127 integer steps, 0.75 dB per step). The example is 3 dB louder than the
+preset default. The delay is eight frames at every level.
+
 For custom settings, set `lanePolicies` to an array of rules. Each rule
 applies to the whole song by default. Use `section` for a section ID or unique label, or `span` for
 `[startTick, endTick]` in 60 Hz project time. Use `voice` with an ID from

@@ -34,15 +34,23 @@ final class ReconstructionLanePolicies {
     enum Mode { chorus, echo }
 
     static final String S3K_LAYERING = "s3k-layering";
+    private static final int S3K_LAYERING_ECHO_ATTENUATION = 15;
     private static final String FIELD = "voicing.json.lanePolicies";
 
     @JsonAdapter(ConfigurationJson.class)
-    record Configuration(@Nullable String preset, List<Rule> rules) {
+    record Configuration(@Nullable String preset, @Nullable Integer echoAttenuation, List<Rule> rules) {
         static Configuration preset(String name) {
+            return preset(name, null);
+        }
+
+        private static Configuration preset(String name, Integer echoAttenuation) {
             require(S3K_LAYERING.equals(name), FIELD + ".preset", "expected " + S3K_LAYERING);
-            return new Configuration(name, List.of(
+            require(echoAttenuation == null || echoAttenuation >= 0 && echoAttenuation <= 127,
+                    FIELD + ".echoAttenuation", "expected 0–127 TL steps");
+            int attenuation = echoAttenuation == null ? S3K_LAYERING_ECHO_ATTENUATION : echoAttenuation;
+            return new Configuration(name, echoAttenuation, List.of(
                     new Rule(Kind.psgDouble, null, null, null, null, null, 1, null, null, null, null, null),
-                    new Rule(Kind.fmDouble, null, null, null, null, null, null, null, Mode.echo, null, null, null)));
+                    new Rule(Kind.fmDouble, null, null, null, null, null, null, null, Mode.echo, null, attenuation, null)));
         }
     }
 
@@ -52,18 +60,26 @@ final class ReconstructionLanePolicies {
         @Override public Configuration deserialize(JsonElement value, Type type, JsonDeserializationContext context) {
             if (value.isJsonObject()) {
                 var object = value.getAsJsonObject();
-                require(object.keySet().equals(Set.of("preset")), FIELD, "expected an object with only preset");
+                require(Set.of("preset", "echoAttenuation").containsAll(object.keySet()), FIELD,
+                        "expected preset and optional echoAttenuation");
                 ReconstructionArtifacts.shape(FIELD + ".preset", String.class, object.get("preset"));
-                return Configuration.preset(object.get("preset").getAsString());
+                Integer attenuation = null;
+                if (object.has("echoAttenuation")) {
+                    var field = object.get("echoAttenuation");
+                    ReconstructionArtifacts.shape(FIELD + ".echoAttenuation", Integer.class, field);
+                    attenuation = field.getAsInt();
+                }
+                return Configuration.preset(object.get("preset").getAsString(), attenuation);
             }
             ReconstructionArtifacts.shape(FIELD, RULES, value);
-            return new Configuration(null, List.copyOf(context.<List<Rule>>deserialize(value, RULES)));
+            return new Configuration(null, null, List.copyOf(context.<List<Rule>>deserialize(value, RULES)));
         }
 
         @Override public JsonElement serialize(Configuration value, Type type, JsonSerializationContext context) {
             if (value.preset() == null) return context.serialize(value.rules(), RULES);
             var object = new JsonObject();
             object.addProperty("preset", value.preset());
+            if (value.echoAttenuation() != null) object.addProperty("echoAttenuation", value.echoAttenuation());
             return object;
         }
     }

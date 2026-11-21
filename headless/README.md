@@ -811,11 +811,15 @@ rejection history.
 ## Reconstruction layering
 
 `reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering` enables
-octave-up PSG doubling and an eight-frame FM echo. Use `off` to clear lane
-policies. Both choices replace the previous policy configuration in
-`voicing.json`. For MCP `reconstruct_stage`, pass `stage: "assemble"` and
-`options.lanePolicyPreset`. See the [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)
-for custom scopes.
+octave-up PSG doubling and an eight-frame FM echo. The echo defaults to 15
+carrier TL steps of attenuation relative to the dry note (11.25 dB nominal).
+Set `lanePolicies.echoAttenuation` in `voicing.json` to override that level,
+then assemble using the saved policy. Use `off` to clear lane policies.
+Passing either preset choice replaces the saved policy configuration.
+For MCP `reconstruct_stage`, pass `stage: "assemble"` and
+`options.lanePolicyPreset` to set or clear the preset. See the
+[lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)
+for the override and custom scopes.
 
 ## Reconstruction benchmark
 

@@ -184,6 +184,10 @@ free PSG and FM lanes, scoped by `voice`, `section` or `span`. The
 `s3k-layering` preset combines an octave PSG double with an 8-frame FM echo:
 `reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering`, MCP
 `options.lanePolicyPreset`, or Studio **Lane policies → S3K layering**.
+The echo defaults to 15 carrier TL steps below the dry note (11.25 dB
+nominal). To audition a different level, set `lanePolicies.echoAttenuation`
+in `voicing.json` to an integer from 0 to 127 (0.75 dB per step) and
+rebuild with `reconstruct assemble WORK_DIR` using the saved preset.
 Check `report.json.lanePolicies` for coverage and skips before auditioning.
 [Lane policies](../../docs/architecture/reconstruction-stages.md#optional-lane-policies)
 
