@@ -23,6 +23,9 @@ final class ReconstructionAllocation {
     private static final String VOICE_ASSIGNMENT = "voice:assignment";
     private static final int RELEASE_TICKS = 2;
     private static final int SUSTAINED_SPILL_TICKS = 6;
+    private static final int MAX_STAB_TICKS = 18;
+    private static final int MIN_PAD_TICKS = 18;
+    private static final int MIN_RESUMED_TICKS = 6;
 
     enum Outcome { kept, shortened, dropped }
     record Entry(Note note, Role role, @Nullable String lane, @Nullable Integer startTick, @Nullable Integer endTick,
@@ -126,13 +129,28 @@ final class ReconstructionAllocation {
     private final boolean fmOnly;
     private final NavigableMap<Integer, Integer> cymbals = new TreeMap<>();
     private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
+    private final Map<String, ReconstructionChordReduction.Tone> tones;
+    private final Map<String, Double> salience;
     private final Map<String, String> previousLanes;
+    private final java.util.Set<String> chordAnchors = new java.util.HashSet<>();
     private final java.util.Set<String> fmChordAnchors = new java.util.HashSet<>();
+    private final Map<String, String> continuations = new HashMap<>();
+    private final java.util.PriorityQueue<Attack> pending;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
-    private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks) {
+    private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
+                                     Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience) {
         this.fmOnly = fmOnly;
         this.previousLanes = previousLanes;
+        this.tones = tones;
+        this.salience = salience;
+        var ordinal = new HashMap<String, Integer>();
+        for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
+        pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
+                .thenComparing(a -> continuations.containsKey(a.note().id()))
+                .thenComparing(attackOrder())
+                .thenComparingInt(a -> ordinal.getOrDefault(a.note().id(), Integer.MAX_VALUE))
+                .thenComparing(a -> a.note().id()));
         for (var attack : attacks) {
             String lane = previousLanes.get(attack.note().id());
             if (lane == null || attack.pin != null || attack.role() == Role.drop) continue;
@@ -209,7 +227,7 @@ final class ReconstructionAllocation {
                                        Map<ReconstructionVoices.Key, Double> cymbalLevels,
                                        Map<String, ReconstructionLaneType> voiceTypes) {
         return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels,
-                voiceTypes, Map.of(), null);
+                voiceTypes, Map.of(), null, Map.of(), false);
     }
 
     static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
@@ -217,7 +235,7 @@ final class ReconstructionAllocation {
                                        Map<ReconstructionVoices.Key, Double> cymbalLevels,
                                        Map<String, ReconstructionLaneType> voiceTypes,
                                        Map<String, ReconstructionChords.Group> chords,
-                                       List<ReconstructionEdits.Outcome> outcomes) {
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience, boolean chordReduction) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -251,7 +269,9 @@ final class ReconstructionAllocation {
             var chord = anchorChords.get(attack.note().id());
             return chord == null ? attack : attack.withChord(chord);
         }).toList();
-        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled);
+        var tones = chordReduction ? ReconstructionChordReduction.classify(attacks.stream().filter(a -> a.role() != Role.drums && a.role() != Role.drop)
+                .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList()) : Map.<String, ReconstructionChordReduction.Tone>of();
+        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience);
         var louderParts = new java.util.HashSet<Integer>();
         cymbalLevels.keySet().forEach(key -> louderParts.add(key.partId()));
         cymbalLevels.forEach((key, level) -> {
@@ -287,7 +307,9 @@ final class ReconstructionAllocation {
         }
         remaining.sort(attackOrder());
         var placedChords = new TreeMap<String, ReconstructionChords.Group>();
-        for (var attack : remaining) {
+        allocator.pending.addAll(remaining);
+        while (!allocator.pending.isEmpty()) {
+            var attack = allocator.pending.remove();
             var chord = chords.get(attack.note().id());
             if (chord == null) {
                 allocator.place(attack);
@@ -299,6 +321,7 @@ final class ReconstructionAllocation {
                 boolean placed = allocator.entries.get(anchor).lane() != null;
                 if (placed) {
                     placedChords.put(anchor, chord);
+                    allocator.chordAnchors.add(anchor);
                     if (chord.fmOnly()) allocator.fmChordAnchors.add(anchor);
                 } else allocator.place(attack);
                 if (outcomes != null) outcomes.add(new ReconstructionEdits.Outcome(chord.editId(),
@@ -342,6 +365,8 @@ final class ReconstructionAllocation {
                         entry.pinnedLane() == null ? reason : entry.reason(), null, null, null, null, entry.pinnedLane(), entry.laneType()));
             }
         }
+        allocator.continuations.keySet().stream().map(allocator.entries::get).filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparingInt(Entry::startTick).thenComparing(e -> e.note.id())).forEach(placed::add);
         return new Result(VERSION, List.copyOf(placed), roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
                 ReconstructionMelodyGapFill.Stats.of(roles.notes()),
                 hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null, runs.isEmpty() ? null : List.copyOf(runs),
@@ -400,6 +425,22 @@ final class ReconstructionAllocation {
         };
     }
 
+    private static boolean backing(Role role) {
+        return role == Role.harmony || role == Role.counter;
+    }
+
+    private String origin(Note note) {
+        return continuations.getOrDefault(note.id(), note.id());
+    }
+
+    private int tonePriority(Note note) {
+        return tones.getOrDefault(origin(note), ReconstructionChordReduction.Tone.extension).priority;
+    }
+
+    private double salience(Note note) {
+        return salience.getOrDefault(origin(note), 0.0);
+    }
+
     private void place(Attack attack) {
         if (attack.role() == Role.drop) {
             drop(attack, attack.decision.reason());
@@ -419,8 +460,14 @@ final class ReconstructionAllocation {
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && primary == INNER_FM && secondary.isEmpty() && !fmOnly)
             lane = freeFmForLowAttack(attack);
-        if (lane == null) lane = shorten(primary, attack);
-        if (lane == null) lane = shorten(secondary, attack);
+        if (lane == null && backing(attack.role()) && !tones.isEmpty()) {
+            var eligible = new ArrayList<>(primary);
+            eligible.addAll(secondary);
+            lane = shorten(eligible, attack);
+        } else if (lane == null) {
+            lane = shorten(primary, attack);
+            if (lane == null) lane = shorten(secondary, attack);
+        }
         if (lane == null && secondary.size() == 2 && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
             lane = sustainedSpill(attack);
         if (lane == null) {
@@ -432,7 +479,9 @@ final class ReconstructionAllocation {
             }, java.util.stream.Stream.concat(primary.stream(), secondary.stream())
                     .map(tail::get).filter(java.util.Objects::nonNull).map(entry -> entry.note.id()).toList());
         } else {
-            keep(attack, lane, PSG.contains(lane) && !attack.noise ? "psg-spill" : null);
+            String reason = continuations.containsKey(attack.note().id()) ? "pad-resumed"
+                    : PSG.contains(lane) && !attack.noise ? "psg-spill" : null;
+            keep(attack, lane, reason);
         }
     }
 
@@ -568,7 +617,8 @@ final class ReconstructionAllocation {
     }
 
     private String free(List<String> lanes, Attack attack) {
-        String previous = previousLanes.get(attack.note().id());
+        var original = entries.get(continuations.get(attack.note().id()));
+        String previous = original == null ? previousLanes.get(attack.note().id()) : original.lane();
         // Affinity depends on the preceding attack. Let the old placement break that
         // dependency when the lane is just as playable, without bypassing FM priority.
         return lanes.stream().filter(lane -> available(lane, attack))
@@ -613,7 +663,9 @@ final class ReconstructionAllocation {
 
     private String shorten(List<String> lanes, Attack attack) {
         String lane = lanes.stream().filter(l -> canShorten(tail.get(l), attack))
-                .min(Comparator.comparingInt((String l) -> tail.get(l).endTick - attack.start)
+                .min(Comparator.comparingInt((String l) -> backing(attack.role()) ? tonePriority(tail.get(l).note()) : 0)
+                        .thenComparingDouble(l -> backing(attack.role()) ? salience(tail.get(l).note()) : 0)
+                        .thenComparingInt(l -> tail.get(l).endTick - attack.start)
                         .thenComparing(l -> !l.equals(previousLanes.get(attack.note().id())))).orElse(null);
         if (lane != null) {
             Entry earlier = tail.get(lane);
@@ -621,24 +673,51 @@ final class ReconstructionAllocation {
                 shortenCymbal(earlier, attack);
                 return lane;
             }
-            entries.put(earlier.note.id(), earlier.shorten(attack.start,
-                    earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack",
-                    attack.note().id()));
+            if (earlier.startTick == attack.start) {
+                if (continuations.containsKey(earlier.note.id())) entries.remove(earlier.note.id());
+                else entries.put(earlier.note.id(), new Entry(earlier.note, earlier.role, null, null, null,
+                        Outcome.dropped, "higher-priority-chord-tone", null, attack.note().id(), null, null));
+                return lane;
+            }
+            scheduleResume(earlier, attack);
+            String reason = earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack";
+            entries.put(earlier.note.id(), earlier.shorten(attack.start, reason, attack.note().id()));
         }
         return lane;
     }
 
-    private static boolean canShorten(Entry last, Attack next) {
-        if (last == null || last.note.run() != null || last.startTick >= next.start || last.endTick <= next.start)
-            return false;
+    private boolean canShorten(Entry last, Attack next) {
+        if (last == null || last.note.run() != null || last.endTick <= next.start) return false;
+        if (last.startTick >= next.start && (tones.isEmpty() || chordAnchors.contains(last.note.id()))) return false;
         if (last.pinnedLane != null && !(last.laneType == ReconstructionLaneType.FM
                 && last.role == Role.melody && next.role() == Role.melody
                 && (VOICE_ASSIGNMENT + " laneType=FM").equals(last.reason)))
             return false;
         if (last.role == Role.drums)
-            return next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
-        return last.endTick - next.start <= RELEASE_TICKS || next.role() == Role.melody || next.role() == Role.bass
-                || next.role() == Role.drums || next.role() == Role.counter && last.role == Role.harmony;
+            return last.startTick < next.start && next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
+        if (last.startTick < next.start && (last.endTick - next.start <= RELEASE_TICKS
+                || next.role() == Role.melody || next.role() == Role.bass || next.role() == Role.drums)) return true;
+        if (tones.isEmpty()) return next.role() == Role.counter && last.role == Role.harmony;
+        if (chordAnchors.contains(last.note.id())
+                || !backing(last.role) || !backing(next.role()) || continuations.containsKey(next.note().id())) return false;
+        int byTone = Integer.compare(tonePriority(next.note()), tonePriority(last.note()));
+        return byTone > 0 || byTone == 0 && (salience(next.note()) > salience(last.note())
+                || last.startTick < next.start && next.role() == Role.counter && last.role == Role.harmony
+                && salience(next.note()) == salience(last.note()));
+    }
+
+    private void scheduleResume(Entry pad, Attack stab) {
+        if (tones.isEmpty() || chordAnchors.contains(pad.note.id()) || !backing(pad.role) || !backing(stab.role()) || pad.note.bend() != null
+                || pad.note.motion() != null || pad.endTick - pad.startTick < MIN_PAD_TICKS
+                || stab.end - stab.start > MAX_STAB_TICKS || pad.endTick - stab.end < MIN_RESUMED_TICKS
+                || continuations.containsKey(pad.note.id())) return;
+        var original = pad.note;
+        String id = original.id() + "-resume-" + stab.end;
+        var resumed = new Note(id, original.part(), stab.end / 60.0, original.end(),
+                original.pitch(), original.velocity(), original.source(), original.confidence());
+        continuations.put(id, original.id());
+        pending.add(new Attack(new ReconstructionRoles.Decision(resumed, pad.role, "pad-resumed", null),
+                stab.end, pad.endTick, false, null, null, false));
     }
 
     private void keep(Attack attack, String lane, String reason) {
@@ -646,6 +725,11 @@ final class ReconstructionAllocation {
                 null, null, null, attack.pin == null ? null : lane, attack.pin == null ? null : attack.pin.laneType());
         entries.put(attack.note().id(), entry);
         tail.put(lane, entry);
+        String parent = continuations.get(attack.note().id());
+        if (parent != null) {
+            var head = entries.get(parent);
+            entries.put(parent, head.shorten(head.endTick(), "pad-yield", head.competitorNoteId()));
+        }
     }
 
     private void drop(Attack attack, String reason) {
@@ -653,6 +737,7 @@ final class ReconstructionAllocation {
     }
 
     private void drop(Attack attack, String reason, List<String> blockers) {
+        if (continuations.containsKey(attack.note().id())) return;
         entries.put(attack.note().id(), new Entry(attack.note(), attack.role(), null, null, null,
                 Outcome.dropped, reason, attack.decision.mergedInto(),
                 blockers.size() == 1 ? blockers.getFirst() : null, blockers.size() > 1 ? blockers : null, null,

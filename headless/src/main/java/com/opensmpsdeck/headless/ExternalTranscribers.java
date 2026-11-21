@@ -27,7 +27,12 @@ public final class ExternalTranscribers {
     record RawNote(double start, double end, int pitch, int velocity) {}
     record Evidence(String tool, @Nullable String role, @Nullable String device,
                     @Nullable String inputSha256, String outputSha256, @Nullable String configSha256,
-                    Map<String, String> metadata, int noteCount, boolean replace) {}
+                    Map<String, String> metadata, int noteCount, boolean replace, @Nullable Boolean addedStem) {
+        Evidence(String tool, String role, String device, String inputSha256, String outputSha256, String configSha256,
+                 Map<String, String> metadata, int noteCount, boolean replace) {
+            this(tool, role, device, inputSha256, outputSha256, configSha256, metadata, noteCount, replace, null);
+        }
+    }
     record PartNotes(Evidence provenance, List<RawNote> notes) {}
     record Import(Path file, boolean replace) {}
 

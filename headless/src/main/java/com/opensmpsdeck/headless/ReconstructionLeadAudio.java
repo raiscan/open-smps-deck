@@ -19,6 +19,7 @@ final class ReconstructionLeadAudio {
     private static final double LEGATO_RELATIVE_LEVEL = .35;
     private static final double LEGATO_SUPPORT = .70;
     private static final double CENTS = 1200 / Math.log(2);
+    private static final int[] LOWER_HARMONICS = {12, 19, 24, 28, 31};
     private static final double[] HARMONIC_OFFSETS = {0, 0, 12, 12 * Math.log(3) / Math.log(2), 24};
     private static final Model[][] MODELS = models();
 
@@ -116,6 +117,33 @@ final class ReconstructionLeadAudio {
                 cents[index][frame] = (float) (100 * (fundamental - pitch));
             }
         }
+
+        /**
+         * Strong independent upper partials in a frame seeded by a polyphonic transcription.
+         * A candidate must have a local spectral peak and outrank plausible lower fundamentals.
+         */
+        void upperPitches(int frame, int highestDecoded, boolean[] result) {
+            java.util.Arrays.fill(result, false);
+            float strongest = 0;
+            for (int pitch = LOW; pitch <= HIGH; pitch++)
+                strongest = Math.max(strongest, peaks[index(pitch, 1)][frame]);
+            float floor = Math.max(.003f, .42f * strongest);
+            for (int pitch = Math.max(LOW + 12, highestDecoded + 1); pitch <= HIGH; pitch++) {
+                int band = index(pitch, 1);
+                float level = peaks[band][frame];
+                if (level < floor || Math.abs(cents[band][frame]) > 35) continue;
+                boolean harmonic = false;
+                for (int interval : LOWER_HARMONICS) {
+                    if (pitch - interval >= LOW && .8 * peaks[index(pitch - interval, 1)][frame] >= level) {
+                        harmonic = true;
+                        break;
+                    }
+                }
+                result[pitch] = !harmonic;
+            }
+        }
+
+        int frames() { return rms.length; }
 
         boolean clearAttack(Note note) {
             if (note.pitch() < LOW || note.pitch() > HIGH || note.end() - note.start() < .048

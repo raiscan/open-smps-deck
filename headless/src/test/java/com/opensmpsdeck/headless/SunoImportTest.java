@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.DoubleUnaryOperator;
@@ -76,6 +77,21 @@ class SunoImportTest {
         assertEquals(1, file(report, "bass.wav").part());
         assertEquals(0, report.gaps().getFirst().part());
         assertTrue(report.gaps().getFirst().message().contains("use the mix"));
+    }
+
+    @Test void importQueuesOnlyUnmappedTonalStems() throws Exception {
+        Path source = fixture();
+        for (String family : List.of("bass", "synth", "keyboard", "vocals", "fx", "percussion"))
+            wav(source.resolve(family + ".wav"), 16000, 1, 4.5,
+                    t -> family.equals("bass") ? tone(t, 0) : tone(t, 1));
+        var assign = Map.of("bass.wav", 0, "synth.wav", 1);
+        var report = SunoImport.inspect(source, root.resolve("work"), null, assign, Set.of(),
+                "fixture", (a, b, c) -> {});
+        assertTrue(report.canRun(), report::toString);
+        assertEquals("stem_without_part", file(report, "keyboard.wav").code());
+        assertEquals(Map.of(source.resolve("keyboard.wav").toString(), "keyboard"),
+                report.runRequest().options().get("transcribeUnmapped"));
+        assertTrue(report.runArguments().contains("keyboard=" + source.resolve("keyboard.wav")));
     }
 
     @Test void detectsShiftAgainstTheWaveformSum() throws Exception {

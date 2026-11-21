@@ -300,6 +300,47 @@ them on subsequent assembly and replay. A note crossing an anchor keeps its
 gate. Legacy directories seed the layout from their existing arrangement.
 Keep these replay artifacts with the private recipe.
 
+## Transcribe unmatched tonal stems
+
+On a fresh `run` or `transcribe`, pass `--transcriber NAME` with repeatable
+`--transcribe-unmapped ROLE=WAV`. This creates part IDs after the MIDI IDs and
+keeps the WAV associated with its new part for voice fitting and salience.
+`import --transcribe-unmapped NAME` adds the corresponding run options for
+unmatched keyboard, synth, bass, guitar, strings, brass, and woodwind stems.
+Use a polyphonic adapter that supports the selected roles.
+
+Same-pitch stem fragments are joined when pitch-band energy remains continuous
+across the boundary. Unisons mostly covered by tonal MIDI are deduplicated,
+including across MIDI re-attacks. Octave removal also requires weak energy
+at the added pitch relative to the other octave. Automatic PSG matching for
+added stems prefers envelopes that sound at note-on and avoid silent pulses.
+When tonal MIDI is present, the added notes supplement the automatic lead
+and bass as backing. Explicit role choices can promote them.
+Strong sustained upper pitches can supplement polyphonic transcriber output
+where a local spectral peak dominates plausible lower fundamentals. New
+notes are marked `audio-transcribed`. The part's manifest entry records
+`addedStem`, the adapter and role, the stem SHA-256 and the saved transcriber
+output. Replay uses that snapshot with the verified aligned stem.
+
+## Chord audit and channel contention
+
+`describe` reports `chordAudit` after allocation. Assembly adds the audit to
+`report.json`, including losses from unavailable catalogue matches. Each
+loss has a reason, part, pitch, and source-clock onset. Song counts and
+section counts use the effective section-level spans from `ReconstructionSections`.
+The categories are doubling, root in bass, fifth, extension, third, seventh,
+and onset-cluster top voice. Root and chord intervals are inferred from
+sounding pitches with a preference for the assigned bass.
+
+When a run includes an added stem and backing lanes are full, the allocator
+preserves top voices, then thirds
+and sevenths, then other tones. Bass roots, unison and octave doubles, and
+fifths are lower priority. Pitch-band level in aligned stems breaks musical
+ties when available. Explicit pins, lead and bass lanes, and DAC rules retain
+their authority. A short higher-priority attack can interrupt a sustained
+backing gate and leave room for a separate re-attack. The allocation records
+the prefix as `pad-yield` and the new gate as `pad-resumed` when it fits.
+
 ## Persistent musical edits
 
 `edits.json` is a versioned object with an ordered `edits` array. Each intent

@@ -77,7 +77,7 @@ class ReconstructionChordsTest {
                         new ReconstructionChords.Member("third", 64, 60),
                         new ReconstructionChords.Member("fifth", 67, 60)));
         var result = ReconstructionAllocation.allocateWithAffinity(roles, parts, 60, true, false, Map.of(),
-                Map.of(), Map.of(), Map.of("root", group, "third", group, "fifth", group), null);
+                Map.of(), Map.of(), Map.of("root", group, "third", group, "fifth", group), null, Map.of(), false);
         assertEquals(3, result.notes().stream().filter(note -> note.lane() != null).count());
         assertNotNull(result.notes().get(3).lane());
         assertNotNull(result.notes().get(4).lane());

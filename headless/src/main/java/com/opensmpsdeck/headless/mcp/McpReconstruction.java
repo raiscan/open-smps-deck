@@ -56,6 +56,8 @@ final class McpReconstruction {
             field("transcriber", "string", "Name returned by transcribers_list. Fresh runs only").optional(),
             field("transcribeParts", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of melodic MIDI part IDs to transcriber roles. Each part needs an aligned stem").optional(),
+            field("transcribeUnmapped", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
+                    "Map of new aligned stem WAV paths to transcriber roles").optional(),
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
@@ -81,7 +83,7 @@ final class McpReconstruction {
         if (args.has("exclude")) {
             for (var file : args.getAsJsonArray("exclude")) exclude.add(file.getAsString());
         }
-        return SunoImport.inspect(folder, work, catalogue, assign, exclude, progress).json();
+        return SunoImport.inspect(folder, work, catalogue, assign, exclude, optional(args, "transcribeUnmapped"), progress).json();
     }
 
 
@@ -129,6 +131,12 @@ final class McpReconstruction {
                 for (var part : options.getAsJsonObject("transcribeParts").entrySet()) {
                     cli.add("--transcribe-part");
                     cli.add(Integer.parseInt(part.getKey()) + "=" + part.getValue().getAsString());
+                }
+            }
+            if (options.has("transcribeUnmapped")) {
+                for (var stem : options.getAsJsonObject("transcribeUnmapped").entrySet()) {
+                    cli.add("--transcribe-unmapped");
+                    cli.add(stem.getValue().getAsString() + "=" + McpPaths.input(stem.getKey()));
                 }
             }
             if (options.has("candidates")) {
@@ -230,7 +238,7 @@ final class McpReconstruction {
 
     static JsonObject describe(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "structure.json", "roles.json")) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE)) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
                 optional(args, "parts"), optional(args, "bars"));

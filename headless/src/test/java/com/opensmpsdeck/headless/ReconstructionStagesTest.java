@@ -137,6 +137,21 @@ class ReconstructionStagesTest {
         assertTrue(allocation.notes().stream().filter(n -> n.role() == Role.bass).allMatch(n -> "FM2".equals(n.lane())));
     }
 
+    @Test void addedStemHoldsDoNotCompeteForTheAutomaticLeadOrBassLanes() {
+        var notes = List.of(note("midi-lead", 0, 0, 1.0, 75), note("midi-bass", 0, 0, 1.0, 45),
+                note("stem-high", 1, 0, 1.0, 91), note("stem-low", 1, 0, 1.0, 31))
+                .stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
+        var parts = List.of(part(0), part(1));
+        var structure = ReconstructionStructure.analyze(bars(1), notes, parts);
+        var roles = ReconstructionRoles.assign(structure, parts, 0, null, null, null, null,
+                java.util.Set.of(), java.util.Set.of(), n -> false, java.util.Set.of(1));
+        assertTrue(roles.notes().stream().noneMatch(n -> n.note().part() == 1
+                && (n.role() == Role.melody || n.role() == Role.bass)));
+        var explicitLead = ReconstructionRoles.assign(structure, parts, 0, null, null, null, 1,
+                java.util.Set.of(), java.util.Set.of(), n -> false, java.util.Set.of(1));
+        assertTrue(explicitLead.notes().stream().anyMatch(n -> n.note().part() == 1 && n.role() == Role.melody));
+    }
+
     @Test void preservesInnerReattacksOnAnIndependentPart() {
         var notes = List.of(note("lead", 0, 0, 1.08, 77), note("bass", 1, 0, 1.08, 42),
                 note("counter", 2, 0, 1.08, 68),
