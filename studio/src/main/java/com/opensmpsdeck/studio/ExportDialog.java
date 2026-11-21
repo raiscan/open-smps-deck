@@ -26,7 +26,7 @@ final class ExportDialog {
         dialog.setHeaderText("Export arrangement");
         dialog.getDialogPane().setId("export-dialog");
         dialog.getDialogPane().setPrefWidth(465);
-        var export = new ButtonType("Choose destination…", ButtonBar.ButtonData.OK_DONE);
+        var export = new ButtonType("Choose output…", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(export, ButtonType.CANCEL);
 
         var formats = new ChoiceBox<Format>();
@@ -172,7 +172,7 @@ final class ExportDialog {
         bar.progressProperty().bind(job.progressProperty());
         progress.getDialogPane().setContent(new VBox(12, message, bar));
         progress.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
-        progress.setOnCloseRequest(event -> { if (job.isRunning()) job.cancel(); });
+        progress.setOnCloseRequest(event -> { if (!job.isDone()) job.cancel(); });
         job.setOnSucceeded(event -> {
             progress.close();
             status.accept("Exported " + output.getFileName());
