@@ -90,7 +90,8 @@ final class ExportDialog {
 
         var result = new ProjectExport.Options[1];
         var confirm = (Region) dialog.getDialogPane().lookupButton(export);
-        confirm.setMinWidth(Region.USE_PREF_SIZE);
+        ButtonBar.setButtonUniformSize(confirm, false);
+        confirm.setMinWidth(172);
         confirm.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
             Format format = formats.getValue();
             boolean audio = format.audio();
