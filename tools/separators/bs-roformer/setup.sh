@@ -39,7 +39,8 @@ if sys.argv[1] != backend:
     sys.exit(f"Expected a {sys.argv[1]} PyTorch build, got {backend}. Check your wheel index.")
 print(f"torch=={torch.__version__}")
 PY
-uv pip install --python "$venv/bin/python" --index "$torch_index" \
+# Keep the installed Torch build, and use PyPI for the adapter's other dependencies.
+uv pip install --python "$venv/bin/python" \
     --constraint "$install_dir/torch-constraints.txt" \
     "bs-roformer-infer @ git+https://github.com/openmirlab/bs-roformer-infer.git@e3ad851fb24333ae36ae4bfd5ec327dbbf764bea"
 
