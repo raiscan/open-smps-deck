@@ -221,9 +221,8 @@ snapshot. `RomExport.write(clean, patched, romPath, bpsPath, force)` takes
 either output path or both. Suggested names are `song.s3k.gen` and
 `song.s3k.bps`. The writer reapplies the staged BPS to the clean ROM and
 compares the result byte for byte before publication. Each destination is
-published atomically. No-overwrite publication requires a filesystem that
-supports file hard links. Export to a local disk first when using removable
-media without that support.
+published atomically where the filesystem supports hard links. On FAT32 or
+exFAT cards, it falls back to a plain move that still refuses an existing file.
 
 A patched ROM contains copyrighted data from the retail ROM. Keep it for
 personal use and do not redistribute it. BPS is the shareable form and
