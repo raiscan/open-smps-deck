@@ -133,11 +133,14 @@ final class McpReconstruction {
             var file = McpPaths.output(work, ReconstructionAudition.outputPath(requested, i, variants.size()).toString());
             output = file.resolveSibling(requested.getFileName());
         }
+        Path rmsJson = args.has("rmsJson") ? McpPaths.output(work, string(args, "rmsJson")) : null;
         var result = ReconstructionAudition.run(work, string(args, "lane"), args.get("start").getAsDouble(),
                 args.get("end").getAsDouble(), variants, args.has("gain") ? args.get("gain").getAsDouble() : null,
                 args.has("solo") && args.get("solo").getAsBoolean(),
-                args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output);
-        return object(result);
+                args.has("reference") ? McpPaths.input(string(args, "reference")) : null, output, rmsJson);
+        var response = object(result);
+        if (rmsJson != null) response.addProperty("rmsJson", rmsJson.toString());
+        return response;
     }
 
     static JsonObject edit(JsonObject args, ReconstructionStages.Progress progress) throws IOException {

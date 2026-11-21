@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.CompiledProject;
+import com.openggf.audio.synth.ChipWriteObserver;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -24,15 +25,51 @@ public final class WaveFile {
         write(output, presentations, sink -> S3kRenderer.render(project, presentations, sink));
     }
 
+    public record Range(int start, int end) {
+        public Range {
+            S3kRenderer.validatePresentations(end);
+            if (start < 0 || start >= end) throw new IllegalArgumentException("Range is empty at 60 Hz");
+        }
+
+        public int count() { return end - start; }
+
+        public static Range seconds(double start, double end) {
+            int rate = S3kRenderer.PRESENTATIONS_PER_SECOND;
+            if (!(start >= 0 && end > start && end <= S3kRenderer.MAX_PRESENTATIONS / (double) rate))
+                throw new IllegalArgumentException("Expected 0 <= start < end <= 600 seconds");
+            return new Range((int) Math.round(start * rate), (int) Math.round(end * rate));
+        }
+    }
+
+    public static void renderRange(CompiledProject project, Path output, Range range, S3kRenderer.ChannelMask mask)
+            throws IOException {
+        S3kBinary.validateAndCopy(project);
+        writeRange(output, range, sink -> S3kRenderer.render(project, range.end(), mask, sink));
+    }
+
     public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
                                                CompiledProject cue, Path output, int presentations) throws IOException {
-        S3kRenderer.validatePresentations(presentations);
+        renderWithPreviousMusic(previous, previousPresentations, cue, output, new Range(0, presentations),
+                S3kRenderer.ChannelMask.NONE);
+    }
+
+    static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations, CompiledProject cue,
+                                        Path output, Range range, S3kRenderer.ChannelMask mask) throws IOException {
         S3kRenderer.validatePreviousPresentations(previousPresentations);
         S3kBinary.validateAndCopy(previous);
         if (cue.nativeProgram() == null) S3kBinary.validateAndCopy(cue);
         else S3kBinary.inspectNative(cue, true);
-        write(output, presentations, sink ->
-                S3kRenderer.renderWithPreviousMusic(previous, previousPresentations, cue, presentations, sink));
+        writeRange(output, range, sink -> S3kRenderer.renderWithPreviousMusic(previous, previousPresentations, cue,
+                range.end(), mask, sink, ChipWriteObserver.NONE));
+    }
+
+    private static void writeRange(Path output, Range range, Renderer renderer) throws IOException {
+        write(output, range.count(), sink -> {
+            int[] frame = {0};
+            renderer.render(samples -> {
+                if (frame[0]++ >= range.start()) sink.accept(samples);
+            });
+        });
     }
 
     @FunctionalInterface

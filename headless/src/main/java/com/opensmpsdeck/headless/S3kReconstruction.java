@@ -768,7 +768,7 @@ final class S3kReconstruction {
         return pcm;
     }
 
-    private static int volume(MidiScore.Part part, MidiScore.Note note) {
+    static int volume(MidiScore.Part part, MidiScore.Note note) {
         int attenuation = (int) Math.round(-20.0 * Math.log10(note.velocity() / 127.0) / 1.5) * 2;
         int headroom = isBass(part) ? 4 : isLead(part) ? 6 : 10;
         return Math.max(1, 127 - attenuation - headroom);

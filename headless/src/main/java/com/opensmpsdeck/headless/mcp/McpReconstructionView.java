@@ -21,6 +21,7 @@ final class McpReconstructionView {
         for (String file : List.of("arrangement.smps.json", "edits.json", ReconstructionStages.STEADY_REFERENCE))
             McpPaths.managed(work, file);
         var output = McpPaths.output(work, string(args, "output"));
+        if (flag(args, "ridges")) McpPaths.output(work, ReconstructionView.ridgesPath(output).toString());
         var options = new ReconstructionView.Options(args.get("start").getAsDouble(), args.get("end").getAsDouble(),
                 args.has("time") ? string(args, "time") : "source", integer(args, "stem"),
                 args.has("wav") ? McpPaths.input(string(args, "wav")) : null,
@@ -30,9 +31,14 @@ final class McpReconstructionView {
                 args.has("parts") ? args.getAsJsonArray("parts").asList().stream()
                         .map(McpReconstructionView::exactInteger).toList() : List.of(),
                 args.has("harmonics") ? string(args, "harmonics") : null, flag(args, "harmonicSum"),
-                args.has("width") ? exactInteger(args.get("width")) : 1440);
+                args.has("width") ? exactInteger(args.get("width")) : 1440,
+                args.has("notes") ? McpPaths.input(string(args, "notes")) : null,
+                args.has("harmonicsAt") ? args.getAsJsonArray("harmonicsAt").asList().stream()
+                        .map(JsonElement::getAsString).toList() : List.of(),
+                flag(args, "ridges"), flag(args, "sharedDb"), flag(args, "db"),
+                args.has("pitchPreset") ? string(args, "pitchPreset") : null);
         var result = ReconstructionView.run(work, options, output);
-        return new McpTools.Result(McpJson.object(result.legend()), result.png());
+        return new McpTools.Result(ReconstructionView.legendJson(result.legend()), result.png());
     }
 
     private static Integer integer(JsonObject args, String key) {

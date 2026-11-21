@@ -175,6 +175,21 @@ def smoke(jar, root):
         assert base64.b64decode(png["data"]).startswith(b"\x89PNG\r\n\x1a\n")
         assert base64.b64decode(png["data"]) == Path(legend["path"]).read_bytes()
         assert json.loads(body["text"]) == legend
+        notes = root / "evidence-notes.json"
+        notes.write_text("[[0.3, 0.5, 69]]\n")
+        expanded = rpc.request("tools/call", name="reconstruct_view", arguments={
+            "workDir": str(work), "start": 0.25, "end": 0.75, "render": True, "output": "expanded.png",
+            "width": 800, "notes": str(notes), "harmonicsAt": ["A4@0.4", "72"],
+            "ridges": True, "sharedDb": True, "pitchPreset": "drums",
+        })
+        assert not expanded["isError"], expanded
+        details = expanded["structuredContent"]
+        assert any(note["evidence"] == notes.name and note["pitch"] == 69 for note in details["notes"])
+        assert [target["pitch"] for target in details["harmonicsAt"]] == [69, 72]
+        assert details["pitchMin"] == 35 and details["pitchMax"] == 81
+        assert details["levels"]["shared"] and details["levels"]["renderPeakDbfs"] is not None
+        ridges = json.loads(Path(details["ridgesPath"]).read_text())["ridges"]
+        assert ridges and all(0.25 < ridge["time"] < 0.75 and math.isfinite(ridge["strength"]) for ridge in ridges)
         assert all(hashlib.sha256(Path(files[name]).read_bytes()).digest() == digest
                    for name, digest in artifact_hashes.items())
         assert not rpc.call("reconstruct_trace_diff", oldWorkDir=work, newWorkDir=work, span="0,2")["changes"]
@@ -194,6 +209,14 @@ def smoke(jar, root):
         rpc.call("reconstruct_run", workDir=work, **{"from": "voice"})
         assert rpc.call("project_validate", project=project)["valid"]
         full = work / "render.wav"
+        before_warning = full.read_bytes()
+        voicing = rpc.call("artifact_read", workDir=work, artifact="voicing")["value"]
+        voicing["sustainWarning"] = "Synthetic FM1 sustain warning."
+        rpc.call("artifact_write", workDir=work, artifact="voicing", value=voicing)
+        rpc.call("reconstruct_stage", workDir=work, stage="assemble")
+        report = rpc.call("artifact_read", workDir=work, artifact="report")["value"]
+        assert report["voicingWarnings"] == [voicing["sustainWarning"]]
+        assert full.read_bytes() == before_warning
         plain = work / "unmasked.wav"
         rpc.call("render_clip", project=project, output=plain, start=0.25, end=0.75)
         with wave.open(str(full), "rb") as reference, wave.open(str(plain), "rb") as wav:
@@ -201,9 +224,11 @@ def smoke(jar, root):
             assert wav.readframes(24000) == reference.readframes(24000)
         current = read["value"]["lanes"]["FM1"]["variantId"]
         audition = rpc.call("reconstruct_audition", workDir=work, lane="FM1", start=0.25, end=0.75,
-                            variants=[current], output=work / "phrase.wav")
+                            variants=[current], output=work / "phrase.wav", rmsJson="phrase.rms.json")
         assert audition["startTick"] == 15 and audition["endTick"] == 45
         assert len(audition["candidates"][0]["rms"]) == 7
+        assert audition["candidates"][0]["variantId"] == current
+        assert json.loads(Path(audition.pop("rmsJson")).read_text()) == audition
         assert (work / "phrase.wav").read_bytes() == plain.read_bytes()
         clip = work / "clip.wav"
         rpc.call("render_clip", project=project, output=clip, start=0.25, end=0.75, solo=["FM1"])

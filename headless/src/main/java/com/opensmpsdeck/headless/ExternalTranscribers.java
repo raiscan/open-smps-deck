@@ -177,7 +177,7 @@ public final class ExternalTranscribers {
         return metadata;
     }
 
-    private static List<RawNote> readNotes(Path file) throws IOException {
+    static List<RawNote> readNotes(Path file) throws IOException {
         String filename = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
         return readNotes(file, filename.endsWith(".mid") || filename.endsWith(".midi"));
     }

@@ -728,7 +728,16 @@ phrases and `stages.repeatGroups` counts exact bar candidates for clip reuse.
 Warped runs also write `reference-steady.wav` and attach it at offset zero
 in the Studio arrangement. The stereo stretch uses cross-correlated
 overlap-add to preserve pitch and applies the inverse project-to-source map.
-With `render_compare`, provide the work directory, its `render.wav`, and the
+The CLI `render-compare WORK_DIR --start S --end S OUT.wav` maps source
+seconds to the assembled project clock. It uses `render.wav` and the original
+mix or saved steady reference by default. `--render WAV` selects a different
+project-time render and `--reference WAV` selects an aligned source recording
+or the saved steady WAV. Choose `.mp3` for ffmpeg encoding. Both formats contain
+the render followed by the level-matched reference, with the split point in
+the JSON result. Use `render-project --start S --end S --solo LANES --mute LANES`
+for an excerpt from a project in project seconds. Lane lists are comma-separated.
+
+With MCP `render_compare`, provide the work directory, its `render.wav`, and the
 original mix or the steady reference. MCP substitutes the steady file when
 the original mix matches the assembly report. A/B excerpt ranges use project
 seconds. Source mix and stem excerpts for voice fitting always use source
@@ -740,6 +749,16 @@ Repeat clips for a lane share one sequence ID when the relative note timing,
 pitch, articulation and instrument commands agree. Releases crossing a
 bar edge keep their continuity. The package compiler bakes source reuse
 into the playback bank.
+
+### Inspect external evidence
+
+`reconstruct view --notes FILE` overlays source-time MIDI or JSON note triples
+without changing transcription. Repeat `--harmonics-at PITCH[@TIME]` for
+pitch probes independent of trace note IDs. `--ridges` writes a sibling
+`.ridges.json` with the strongest source harmonic-sum pitch per time column.
+`--db` shows spectral peak levels and `--shared-db` uses a common color scale.
+`--pitch-preset drums` sets MIDI 35–81. MCP `reconstruct_view` exposes these
+as `notes`, `harmonicsAt`, `ridges`, `db`, `sharedDb`, and `pitchPreset`.
 
 ### Audition a frozen phrase
 
@@ -759,7 +778,14 @@ matching the two RMS levels by attenuation. If the report identifies the
 original reference for a warped run, the tool uses the saved steady WAV.
 Audition leaves the artifacts untouched. Add an override and assemble to
 publish the chosen patch. MCP `reconstruct_audition` takes a `variants` array
-and returns the candidate paths and pre-match RMS envelopes in linear units.
+and returns the candidate paths, variant IDs and pre-match RMS envelopes in
+linear units. Save the same fields with `--rms-json FILE` or MCP `rmsJson`.
+
+During `voice`, the fitted FM1 patch is probed in isolation on up to three
+of its longest allocated gates of at least one second. A dip greater than
+6 dB from the opening to the middle RMS bins adds a warning to `voicing.json`
+and `voicingWarnings` in the next assembly report. The warning identifies the flattest audible
+shortlist patch on the affected gate. The probes are diagnostic only.
 
 ## Benchmark
 

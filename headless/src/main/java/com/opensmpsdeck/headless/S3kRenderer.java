@@ -124,6 +124,12 @@ public final class S3kRenderer {
     public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
                                                CompiledProject cue, int presentations, PcmSink sink,
                                                ChipWriteObserver observer) throws IOException {
+        renderWithPreviousMusic(previous, previousPresentations, cue, presentations, ChannelMask.NONE, sink, observer);
+    }
+
+    static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
+                                        CompiledProject cue, int presentations, ChannelMask mask, PcmSink sink,
+                                        ChipWriteObserver observer) throws IOException {
         validatePreviousPresentations(previousPresentations);
         validatePresentations(presentations);
         Objects.requireNonNull(sink, "sink");
@@ -150,12 +156,14 @@ public final class S3kRenderer {
             }
             session.setChipWriteObserver(observer);
             session.applyCommand(new SmpsSessionCommand.PushOverride(cueActivation));
+            if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
             for (int frame = 0; frame < presentations; frame++) {
                 // E2 stores a flag during track traversal. Apply it at the next
                 // presentation boundary, after the cue's service and DAC idle loop.
                 if (restoreRequested[0]) {
                     restoreRequested[0] = false;
                     session.applyCommand(new SmpsSessionCommand.RestoreOverride());
+                    if (!mask.equals(ChannelMask.NONE)) session.applyChannelMasks(mask.fm(), mask.psg());
                     session.fadeInRestoredMusic();
                 }
                 advance(session, pcm);

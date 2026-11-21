@@ -52,9 +52,9 @@ final class EvidencePlot {
     BufferedImage image() { return image; }
     Plot geometry() { return geometry; }
 
-    void draw(String source, TimeBase sourceTime, EvidenceSpectrum.Audio audio, EvidenceSpectrum.Audio render,
-              List<DrawnNote> notes, DrawnNote target, List<Harmonic> harmonics, boolean emphasize,
-              List<EvidenceNotes.PatchChange> patchChanges, boolean projected) {
+    void draw(String source, EvidenceSpectrum.Spectrum audio, EvidenceSpectrum.Spectrum render,
+              List<DrawnNote> notes, DrawnNote target, List<Harmonic> harmonics, List<HarmonicGuide> guides,
+              boolean emphasize, Levels levels, List<EvidenceNotes.PatchChange> patchChanges, boolean projected) {
         try {
             g.setColor(new Color(0xf2f4f6));
             g.fillRect(0, 0, image.getWidth(), image.getHeight());
@@ -63,26 +63,32 @@ final class EvidencePlot {
             key();
             String analysis = emphasize ? "  ·  Harmonic sum" : "";
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
-            String sourceLabel = fit("Source  ·  " + source, geometry.width() - 210);
+            String scale = levels == null ? "Top 30 dB" + analysis : levelLabel(levels.sourcePeakDbfs(), levels.shared());
+            int scaleWidth = g.getFontMetrics().stringWidth(scale);
+            int reserve = levels == null ? 210 : scaleWidth + 18;
+            String sourceLabel = fit("Source  ·  " + source + (levels == null ? "" : analysis), geometry.width() - reserve);
             text(sourceLabel, LEFT, TOP - 10, INK, Font.BOLD, 14);
             if (target != null) {
                 String label = "Harmonics of " + target.pitchName() + " (" + target.label() + ")";
                 int width = g.getFontMetrics().stringWidth(label);
                 text(label, LEFT + geometry.width() - width, 28, INK, Font.BOLD, 14);
             }
-            String scale = "Top 30 dB" + analysis;
             var metrics = g.getFontMetrics();
             text(scale, LEFT + geometry.width() - metrics.stringWidth(scale), TOP - 10, INK, Font.PLAIN, 14);
 
             var ticks = ticks();
-            spectrogram(audio, sourceTime, TOP, ticks, emphasize);
-            if (target != null) harmonics(TOP, target, harmonics);
+            boolean shared = levels != null && levels.shared() && render != null;
+            double ceiling = shared ? Math.max(audio.peak(), render.peak()) : audio.peak();
+            spectrogram(audio.image(ceiling), TOP, ticks);
+            drawHarmonics(TOP, target, harmonics, guides);
             drawOverlays(notes);
             if (render != null) {
                 int top = geometry.renderTop();
-                text("Chip render  ·  " + renderLabel + "  ·  Top 30 dB", LEFT, top - 10, INK, Font.BOLD, 14);
-                spectrogram(render, TimeBase.project, top, ticks, false);
-                if (target != null) harmonics(top, target, harmonics);
+                String label = "Chip render  ·  " + renderLabel + "  ·  "
+                        + (levels == null ? "Top 30 dB" : levelLabel(levels.renderPeakDbfs(), levels.shared()));
+                text(label, LEFT, top - 10, INK, Font.BOLD, 14);
+                spectrogram(render.image(shared ? ceiling : render.peak()), top, ticks);
+                drawHarmonics(top, target, harmonics, guides);
             }
             drawLanes(notes, ticks, patchChanges, projected);
             axis(ticks);
@@ -108,13 +114,21 @@ final class EvidencePlot {
         }
     }
 
-    private void spectrogram(EvidenceSpectrum.Audio audio, TimeBase base, int top, List<Double> ticks, boolean emphasize) {
+    private static String levelLabel(Double peakDbfs, boolean shared) {
+        String peak = peakDbfs == null ? "silent" : String.format(Locale.ROOT, "%.1f dBFS", peakDbfs);
+        return (shared ? "Shared 30 dB" : "Top 30 dB") + "  ·  Peak " + peak;
+    }
+
+    EvidenceSpectrum.Spectrum measure(EvidenceSpectrum.Audio audio, TimeBase base, boolean emphasize) {
         double hop = Math.clamp(span.length() / 1200, .003, .050);
         int columns = Math.min(geometry.width(), Math.max(2, 1 + (int) Math.ceil(span.length() / hop)));
         var times = new double[columns];
         for (int x = 0; x < columns; x++)
             times[x] = span.seconds(span.start() + (x + .5) * span.length() / columns, base);
-        var spectrum = EvidenceSpectrum.analyze(audio, times, minPitch, maxPitch, geometry.pitchHeight(), span.length(), emphasize);
+        return EvidenceSpectrum.measure(audio, times, minPitch, maxPitch, geometry.pitchHeight(), span.length(), emphasize);
+    }
+
+    private void spectrogram(BufferedImage spectrum, int top, List<Double> ticks) {
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.drawImage(spectrum, LEFT, top, geometry.width(), geometry.pitchHeight(), null);
         grid(ticks, top, geometry.pitchHeight(), new Color(255, 255, 255, 43));
@@ -184,8 +198,14 @@ final class EvidencePlot {
         };
     }
 
-    private void harmonics(int top, DrawnNote target, List<Harmonic> harmonics) {
-        int from = x(span.start(target.timing())), to = x(span.end(target.timing()));
+    private void drawHarmonics(int top, DrawnNote target, List<Harmonic> harmonics, List<HarmonicGuide> guides) {
+        if (target != null)
+            harmonics(top, x(span.start(target.timing())), x(span.end(target.timing())), null, harmonics);
+        for (var guide : guides)
+            harmonics(top, x(guide.start()), x(guide.end()), guide.at() == null ? null : x(guide.at()), guide.partials());
+    }
+
+    private void harmonics(int top, int from, int to, Integer marker, List<Harmonic> harmonics) {
         g.setClip(LEFT, top, geometry.width(), geometry.pitchHeight());
         for (var harmonic : harmonics) {
             int y = y(harmonic.pitch(), top);
@@ -193,7 +213,8 @@ final class EvidencePlot {
             g.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, new float[]{5, 4}, 0));
             g.drawLine(from, y, to, y);
             g.setStroke(new BasicStroke(1));
-            g.drawLine(from, y - 3, from, y + 3);
+            int tick = marker == null ? from : marker;
+            g.drawLine(tick, y - 3, tick, y + 3);
             if (to - from > 64 && (harmonic.multiple() == 1 || harmonics.size() <= 12)) {
                 String label = harmonic.multiple() + "×";
                 g.setColor(new Color(0x2c2419));

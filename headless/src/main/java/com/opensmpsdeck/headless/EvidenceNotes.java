@@ -62,6 +62,17 @@ final class EvidenceNotes {
             }
         }
         addInsertions(work, span, options, rows, notes);
+        if (options.notes() != null) {
+            int index = 0;
+            for (var raw : ExternalTranscribers.readNotes(options.notes())) {
+                String id = "evidence-" + (++index);
+                var note = new ReconstructionStages.Note(id, 0, raw.start(), raw.end(), raw.pitch(),
+                        raw.velocity(), "external", 1);
+                add(notes, span, id, Layer.external, null, null, note.pitch(),
+                        ReconstructionTrace.at(note, TimeBase.source, span.timeline()).timing(), null,
+                        options.notes().getFileName().toString());
+            }
+        }
         if (options.parts().isEmpty() && rows.values().stream().flatMap(row -> row.voiced().stream())
                 .anyMatch(gate -> "assembled".equals(gate.evidence()))) {
             addAssemblyOnlyNotes(project, span, options.lanes(), notes);

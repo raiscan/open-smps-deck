@@ -122,6 +122,7 @@ public final class Main {
                             + "; use validate-project, compile-project or render-project to work with it");
                 }
                 case "demo", "render", "render-project" -> render(args, out);
+                case "render-compare" -> RenderComparison.cli(args, out);
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
             return 0;
@@ -162,6 +163,8 @@ public final class Main {
         int presentations = 120;
         int previousPresentations = 0;
         Path previousPath = null;
+        Double start = null, end = null;
+        List<String> solo = List.of(), mute = List.of();
         var options = new HashSet<String>();
         for (int at = positional; at < args.length; at += 2) {
             String option = args[at];
@@ -169,6 +172,16 @@ public final class Main {
             if (!options.add(option)) throw new IllegalArgumentException("duplicate option " + option);
             switch (option) {
                 case "--frames" -> presentations = parsePresentations(option, value);
+                case "--solo", "--mute", "--start", "--end" -> {
+                    if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
+                    switch (option) {
+                        case "--solo" -> solo = ReconstructionView.csv(value);
+                        case "--mute" -> mute = ReconstructionView.csv(value);
+                        case "--start" -> start = Double.parseDouble(value);
+                        case "--end" -> end = Double.parseDouble(value);
+                        default -> throw new AssertionError(option);
+                    }
+                }
                 case "--previous-project" -> {
                     if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
                     previousPath = Path.of(value);
@@ -186,6 +199,7 @@ public final class Main {
         }
         S3kRenderer.validatePresentations(presentations);
         Path output = Path.of(args[demo ? 1 : 2]);
+        int projectEnd = presentations;
         CompiledProject song;
         if (demo) {
             song = new CompiledProject(S3kDemo.song(), List.of());
@@ -195,6 +209,7 @@ public final class Main {
             if (projectRender) {
                 var project = ProjectFiles.load(input).project();
                 song = ProjectCompiler.compileWithAssets(project);
+                if (start != null || end != null) projectEnd = ProjectRenderTiming.presentationCount(project);
                 if (!options.contains("--frames")) {
                     if (song.nativeProgram() != null) {
                         presentations = ProjectRenderTiming.presentationCount(project);
@@ -208,14 +223,22 @@ public final class Main {
                 }
             }
         }
+        boolean bounded = start != null || end != null;
+        int limit = options.contains("--frames") || !bounded ? presentations : projectEnd;
+        var range = bounded ? WaveFile.Range.seconds(start == null ? 0 : start, end == null ? limit / 60.0 : end)
+                : new WaveFile.Range(0, presentations);
+        if (options.contains("--frames") && range.end() > limit)
+            throw new IllegalArgumentException("Range exceeds --frames");
+        var mask = ReconstructionView.laneMask(solo, mute);
         if (previousPath == null) {
-            WaveFile.render(song, output, presentations);
+            if (bounded || !mask.equals(S3kRenderer.ChannelMask.NONE)) WaveFile.renderRange(song, output, range, mask);
+            else WaveFile.render(song, output, presentations);
         } else {
             requireDifferentFiles(previousPath, output);
             var previous = ProjectCompiler.compileWithAssets(ProjectFiles.load(previousPath).project());
-            WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, output, presentations);
+            WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, output, range, mask);
         }
-        out.println("Rendered " + presentations + " presentations to " + output
+        out.println("Rendered " + range.count() + " presentations to " + output
                 + " (48 kHz stereo, pinned OpenGGF S3K accurate core)");
     }
 
@@ -274,7 +297,9 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N]");
+        out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
+        out.println("       render-compare WORK_DIR --start S --end S [--reference WAV] [--render WAV] OUT.wav|OUT.mp3");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
         ReconstructionCli.usage(out);
         out.println("       mcp  (stdio Model Context Protocol server)");
