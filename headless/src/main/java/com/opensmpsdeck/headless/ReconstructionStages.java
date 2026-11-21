@@ -320,6 +320,7 @@ public final class ReconstructionStages {
                                 : ReconstructionCli.fitVoicing(score, allocation, previousWork.equals(work) ? previous : null,
                                         request.lanes, request.refitLevels, previousAllocation);
                         ReconstructionArtifacts.write(voicingFile, fitted);
+                        if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
                         if (previous != null)
                             ReconstructionVoicing.changes(previous, fitted).forEach(change -> report.accept(change.describe()));
                     }

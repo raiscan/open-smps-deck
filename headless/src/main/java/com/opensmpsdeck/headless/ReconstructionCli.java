@@ -101,8 +101,9 @@ final class ReconstructionCli {
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct view WORK_DIR --start S --end S [options] OUT.png");
+        out.println("           [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--shared-db|--db] [--pitch-preset drums]");
         out.println("       reconstruct audition WORK_DIR --lane FM1 --start S --end S --variant ID ...");
-        out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] OUT.wav");
+        out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
         out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
@@ -209,11 +210,13 @@ final class ReconstructionCli {
         if (!targets.isEmpty() && previous == null && !targets.equals(allocated.keySet()))
             throw new IllegalArgumentException("A lane-targeted refit needs existing voicing for the other lanes");
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets));
-        if (previous == null) return fitted;
-        var result = ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
+        var result = previous == null ? fitted : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels,
                 ReconstructionVoicing.changedMaterial(previousAllocation, allocation), allocated);
-        ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
-        return result;
+        if (previous != null)
+            ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
+        String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
+                result.lanes().get("FM1")));
+        return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning);
     }
 
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
@@ -268,10 +271,15 @@ final class ReconstructionCli {
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
                             structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins()), out, existing, assemblyInputs);
             var edits = ReconstructionEdits.Journal.read(work).all();
-            if (!edits.isEmpty()) {
+            if (!edits.isEmpty() || voicing.sustainWarning() != null) {
                 Path reportFile = staging.resolve("report.json");
                 var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
-                report.add("editResults", new com.google.gson.Gson().toJsonTree(edits));
+                if (!edits.isEmpty()) report.add("editResults", new com.google.gson.Gson().toJsonTree(edits));
+                if (voicing.sustainWarning() != null) {
+                    var warnings = new com.google.gson.JsonArray();
+                    warnings.add(voicing.sustainWarning());
+                    report.add("voicingWarnings", warnings);
+                }
                 ReconstructionArtifacts.write(reportFile, report);
             }
             if (timeline.warped()) Files.move(staging.resolve(STEADY_REFERENCE), work.resolve(STEADY_REFERENCE),
@@ -297,7 +305,8 @@ final class ReconstructionCli {
                                               ReconstructionVoicing.Result voicing) {
         return Map.of("score", ReconstructionArtifacts.fingerprint(score),
                 "allocation", ReconstructionArtifacts.fingerprint(allocation),
-                "voicing", ReconstructionArtifacts.fingerprint(voicing));
+                "voicing", ReconstructionArtifacts.fingerprint(
+                        new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows())));
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {

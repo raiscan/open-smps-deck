@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.List;
 
 /** Centered Hann analysis on native audio time, sampled on a semitone display grid. */
 final class EvidenceSpectrum {
@@ -41,12 +42,63 @@ final class EvidenceSpectrum {
         return pitch + 12 * Math.log(multiple) / LOG_2;
     }
 
+    record Ridge(double time, double pitch, double strength) {}
+    record Spectrum(float[] powers, int columns, int height, int minPitch, int maxPitch, double peak) {
+        Double peakDb() { return peak > 0 ? db(peak) : null; }
+
+        BufferedImage image(double ceiling) {
+            var image = new BufferedImage(columns, height, BufferedImage.TYPE_INT_RGB);
+            var pixels = ((java.awt.image.DataBufferInt) image.getRaster().getDataBuffer()).getData();
+            if (ceiling > 0) {
+                for (int i = 0; i < powers.length; i++) {
+                    double db = 10 * Math.log10(powers[i] / ceiling);
+                    // Darken the bottom of the 30 dB window to keep ridges distinct.
+                    double level = Math.clamp((db + 30) / 30, 0, 1);
+                    int gray = (int) Math.round(255 * level * level);
+                    pixels[i] = gray * 0x010101;
+                }
+            }
+            return image;
+        }
+
+        List<Ridge> ridges(double start, double span) {
+            var result = new ArrayList<Ridge>();
+            for (int x = 0; x < columns; x++) {
+                float best = 0;
+                int row = 0;
+                for (int y = 0; y < height; y++) {
+                    float power = powers[y * columns + x];
+                    if (power > best) {
+                        row = y;
+                        best = power;
+                    }
+                }
+                if (best > 0) result.add(new Ridge(start + (x + .5) * span / columns,
+                        pitch(minPitch, maxPitch, row, height), db(best)));
+            }
+            return List.copyOf(result);
+        }
+
+        // The Hann window has unit coherent gain. The positive-frequency FFT
+        // holds half of a real sine's amplitude, so full-scale sine power is 1/4.
+        private static double db(double power) { return 10 * Math.log10(4 * power); }
+    }
+
     static BufferedImage analyze(Audio audio, double[] times, int minPitch, int maxPitch,
                                  int height, double span, boolean emphasize) {
-        double semitones = maxPitch - minPitch + 1;
+        var spectrum = measure(audio, times, minPitch, maxPitch, height, span, emphasize);
+        return spectrum.image(spectrum.peak());
+    }
+
+    private static double pitch(int min, int max, int row, int height) {
+        return max + .5 - (row + .5) * (max - min + 1.0) / height;
+    }
+
+    static Spectrum measure(Audio audio, double[] times, int minPitch, int maxPitch,
+                            int height, double span, boolean emphasize) {
         double[] frequencies = new double[height];
         for (int y = 0; y < height; y++)
-            frequencies[y] = hz(maxPitch + .5 - (y + .5) * semitones / height);
+            frequencies[y] = hz(pitch(minPitch, maxPitch, y, height));
         var bands = new ArrayList<Band>();
         // Longer bass windows separate neighboring low notes. Treble uses shorter
         // windows so the same plot can show several closely spaced attacks.
@@ -89,18 +141,7 @@ final class EvidenceSpectrum {
                 }
             }
         }
-        var image = new BufferedImage(times.length, height, BufferedImage.TYPE_INT_RGB);
-        var pixels = ((java.awt.image.DataBufferInt) image.getRaster().getDataBuffer()).getData();
-        if (peak > 0) {
-            for (int i = 0; i < power.length; i++) {
-                double db = 10 * Math.log10(power[i] / peak);
-                // Darken the bottom of the 30 dB window to keep ridges distinct.
-                double level = Math.clamp((db + 30) / 30, 0, 1);
-                int gray = (int) Math.round(255 * level * level);
-                pixels[i] = gray * 0x010101;
-            }
-        }
-        return image;
+        return new Spectrum(power, times.length, height, minPitch, maxPitch, peak);
     }
 
     private static double power(LeadEffectMatcher.Spectrum fft, double bin) {

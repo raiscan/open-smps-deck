@@ -27,7 +27,7 @@ import static com.opensmpsdeck.headless.S3kRenderer.*;
 public final class ReconstructionAudition {
     private static final int BINS = 7;
     private static final int MAX_VARIANTS = 16;
-    private static final int FRAME_SAMPLES = STEREO_FRAMES_PER_PRESENTATION * 2;
+    static final int FRAME_SAMPLES = STEREO_FRAMES_PER_PRESENTATION * 2;
 
     public record Candidate(String variantId, String name, String output, List<Double> rms) {}
     public record Result(int startTick, int endTick, boolean solo, List<Double> referenceRms, List<Candidate> candidates) {}
@@ -39,7 +39,7 @@ public final class ReconstructionAudition {
         String lane = null;
         Double start = null, end = null, gain = null;
         Boolean solo = null;
-        Path reference = null;
+        Path reference = null, rmsJson = null;
         var variants = new ArrayList<String>();
         for (int i = 1; i < args.length - 1; i++) {
             String key = args[i];
@@ -57,18 +57,20 @@ public final class ReconstructionAudition {
                 case "--variant" -> variants.add(value);
                 case "--gain" -> gain = Double.parseDouble(value);
                 case "--reference" -> reference = Path.of(value);
+                case "--rms-json" -> rmsJson = Path.of(value);
                 default -> throw new IllegalArgumentException("Unknown audition option " + key);
             }
         }
         if (start == null || end == null) throw new IllegalArgumentException("Expected --start and --end");
         var result = run(Path.of(args[0]), lane, start, end, variants, gain, Boolean.TRUE.equals(solo),
-                reference, Path.of(args[args.length - 1]));
+                reference, Path.of(args[args.length - 1]), rmsJson);
         out.printf(Locale.ROOT, "Ticks %d–%d, %d equal-width RMS bins (dBFS, before A/B matching)%n",
                 result.startTick(), result.endTick(), Math.min(BINS, result.endTick() - result.startTick()));
         for (var candidate : result.candidates()) {
-            out.println(candidate.name() + "  " + db(candidate.rms()) + "  " + candidate.output());
+            out.println(candidate.name() + " [" + candidate.variantId() + "]  " + db(candidate.rms()) + "  " + candidate.output());
         }
         if (result.referenceRms() != null) out.println("Reference  " + db(result.referenceRms()));
+        if (rmsJson != null) out.println("RMS JSON  " + rmsJson);
     }
 
     private static List<String> db(List<Double> rms) {
@@ -84,6 +86,13 @@ public final class ReconstructionAudition {
 
     public static Result run(Path work, String lane, double startSeconds, double endSeconds, List<String> variants,
                              Double gain, boolean solo, Path reference, Path output) throws IOException {
+        return run(work, lane, startSeconds, endSeconds, variants, gain, solo, reference, output, null);
+    }
+
+    public static Result run(Path work, String lane, double startSeconds, double endSeconds, List<String> variants,
+                             Double gain, boolean solo, Path reference, Path output, Path rmsJson) throws IOException {
+        if (rmsJson != null && Files.exists(rmsJson, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new java.nio.file.FileAlreadyExistsException(rmsJson.toString());
         if (lane == null || !ReconstructionAllocation.FM.contains(lane))
             throw new IllegalArgumentException("Audition lane must be FM1–FM5");
         if (!(startSeconds >= 0 && endSeconds > startSeconds && endSeconds <= MAX_PRESENTATIONS / 60.0))
@@ -116,6 +125,8 @@ public final class ReconstructionAudition {
             var file = outputPath(output, i, matches.size());
             if (Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS))
                 throw new java.nio.file.FileAlreadyExistsException(file.toString());
+            if (rmsJson != null && rmsJson.toAbsolutePath().normalize().equals(file.toAbsolutePath().normalize()))
+                throw new IllegalArgumentException("Audition RMS JSON must have a separate output path");
             outputs.add(file);
         }
 
@@ -143,7 +154,12 @@ public final class ReconstructionAudition {
             PhraseAudio.write(outputs.get(i), length, pcm, referencePcm);
             results.add(new Candidate(match.variant().id(), match.variant().name(), outputs.get(i).toString(), envelope(pcm)));
         }
-        return new Result(start, end, solo, referencePcm == null ? null : envelope(referencePcm), List.copyOf(results));
+        var result = new Result(start, end, solo, referencePcm == null ? null : envelope(referencePcm), List.copyOf(results));
+        if (rmsJson != null) {
+            var json = new com.google.gson.GsonBuilder().serializeNulls().setPrettyPrinting().create();
+            Files.writeString(rmsJson, json.toJson(result) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
+        }
+        return result;
     }
 
     private static boolean overlaps(Clip clip, int start, int end) {
@@ -278,7 +294,7 @@ public final class ReconstructionAudition {
         });
     }
 
-    private static List<Double> envelope(float[] pcm) {
+    static List<Double> envelope(float[] pcm) {
         int frames = pcm.length / FRAME_SAMPLES;
         int bins = Math.min(BINS, frames);
         var result = new ArrayList<Double>();

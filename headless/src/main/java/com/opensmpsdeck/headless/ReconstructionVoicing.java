@@ -20,7 +20,12 @@ final class ReconstructionVoicing {
     static final String DEFAULT = "default (inconclusive)";
     static final String EVIDENCE = "evidence";
 
-    record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows) {}
+    record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows,
+                  @Nullable String sustainWarning) {
+        Result(int version, Map<String, Lane> lanes, FitWindows fitWindows) {
+            this(version, lanes, fitWindows, null);
+        }
+    }
     record FitWindows(int frames, List<Integer> starts) {}
     record Lane(Role role, @Nullable String variantId, List<ScoredPatch> shortlist, double gain,
                 Articulation articulation, Effects effects, String patchReason, String articulationReason,

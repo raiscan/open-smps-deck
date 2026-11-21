@@ -78,6 +78,21 @@ java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-packa
 java -jar headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project /path/to/project.json /path/to/project.wav --frames 120
 ```
 
+For an excerpt, use `render-project PROJECT.json OUT.wav --start S --end S`.
+Bounds use project seconds rounded to 60 Hz. Playback warms up from zero
+and discards audio before the start. Omit the start to begin at zero.
+Omit the end to use `--frames` if supplied, or the project's presentation
+count for a bounded render. `--solo FM1,PSG1` mutes all other lanes and
+`--mute DAC,PSG3` mutes the listed lanes even when soloed.
+
+For aligned A/B listening, use `render-compare WORK_DIR --start S --end S OUT.wav`
+with source seconds. It maps the bounds to project time and appends the
+level-matched reference after the render. A warped run uses its saved
+`reference-steady.wav`. Use `--render WAV` for a replacement project-time
+render, or `--reference WAV` for another aligned source-time reference.
+Use an `.mp3` output with ffmpeg installed. The JSON result gives the
+split point and both gains.
+
 A native cue can restore a previous project's live state. Pass
 `--previous-project prior.json --previous-frames N` together on
 `render-project`. The warm-up advances the prior song in the same session.
@@ -229,10 +244,12 @@ Audition uses the last assembled arrangement and applies each candidate to
 one FM lane for the selected phrase. Playback warms up from the song start.
 In-mix playback is the default. `--gain` multiplies the lane's existing level
 within the phrase. With multiple variants the command writes `phrase-1.wav`,
-`phrase-2.wav`, and so on. The table shows successive RMS bins in dBFS before
-optional reference level matching. Warped projects can take the original mix
-or the saved steady reference. The MCP equivalent is `reconstruct_audition`
-with a `variants` array.
+`phrase-2.wav`, and so on. The table shows the variant ID, filename and
+successive RMS bins in dBFS before optional reference level matching.
+`--rms-json FILE` saves the paths, IDs and linear RMS bins to a new JSON
+file. Warped projects can take the original mix or the saved steady reference.
+In MCP, `reconstruct_audition` takes a `variants` array and optional `rmsJson`
+path. It also returns these measurements inline.
 
 To apply a candidate, add an entry in the target lane's `overrides` array in
 `voicing.json`, then run `reconstruct assemble WORK_DIR`. Scope entries use
@@ -356,6 +373,18 @@ The legend also records the lane patch changes.
   the selected note and expands the default upper bound for the first six
   multiples when visible below Nyquist. `--harmonic-sum` optionally emphasizes
   supported fundamentals in the source.
+- `--notes FILE` overlays unmapped source-time evidence from the same
+  single-melodic-part MIDI or JSON `[[start, end, pitch], ...]` input accepted
+  by `transcribe --add-notes`. The overlay is independent of trace filters.
+- Repeat `--harmonics-at PITCH[@TIME]` to mark harmonics from a MIDI pitch
+  or note name (for example, `D#4@35.4`). Time uses the selected clock.
+  Omit it to mark the pitch's harmonics across the whole span.
+- `--ridges` writes `OUT.ridges.json` alongside `OUT.png` with the strongest
+  harmonic-sum ridge per analyzed source column. Rows give time in the
+  selected clock, fractional MIDI pitch and spectral strength in dBFS.
+- `--db` shows each panel's peak spectral dBFS. `--shared-db` also maps
+  both panels to the same 30 dB window, using the higher peak as the ceiling.
+  `--pitch-preset drums` uses MIDI 35–81. Explicit pitch limits take precedence.
 - `--lanes FM1,PSG1 --parts 0,3` filters the overlays and lane rows. The
   source spectrum still shows the selected audio. With `--render`, `--lanes`
   also solos those lanes in the chip panel, so it compares against a stem
@@ -365,7 +394,8 @@ The legend also records the lane patch changes.
 
 MCP uses corresponding fields `time`, `stem`, `wav`, `render`, `pitchMin`,
 `pitchMax`, `lanes` (array), `parts` (array), `harmonics`, `harmonicSum`,
-and `width`.
+`width`, `notes`, `harmonicsAt` (array), `ridges`, `db`, `sharedDb`,
+and `pitchPreset`.
 
 ### Persistent musical edits
 

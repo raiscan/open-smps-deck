@@ -107,6 +107,14 @@ java -jar "$jar" reconstruct view "$work" --start 45.3 --end 48.8 \
   --stem 0 --parts 0 --harmonics "$note_id" --render "$work/evidence.png"
 ```
 
+Use `--notes FILE` (`notes` in MCP) to overlay aligned MIDI or JSON note
+triples without rebuilding. Repeat `--harmonics-at PITCH[@TIME]`
+(`harmonicsAt` array) to probe pitches without trace IDs. `--ridges`
+(`ridges`) exports source time or project time, pitch and spectral strength
+to a sibling JSON file. Use `--db` (`db`) for per-panel spectral peaks,
+`--shared-db` (`sharedDb`) to compare levels, and `--pitch-preset drums`
+(`pitchPreset: "drums"`) for MIDI 35–81.
+
 When comparing a stem with the render, pass the lanes that carry that part
 (for example `--lanes FM1,FM3`). The chip panel then solos them instead of
 playing the full mix, where bass and drums blur the comparison.
@@ -253,19 +261,21 @@ or work on a separate copy.
 
 1. Use `catalog_search` to find FM variant IDs. Compare the current variant
    and challengers with `reconstruct_audition {workDir, lane, start, end,
-   variants, solo, reference, output}`. Use the phrase's project seconds and
+   variants, solo, reference, output, rmsJson}`. Use the phrase's project seconds and
    include the start of the long hold so each patch gets its own attack.
    Omit `solo` to retain the frozen arrangement in the mix. An optional aligned
    reference is appended after the chip phrase at a matched RMS level.
 
    ```sh
    java -jar "$jar" reconstruct audition "$work" --lane FM1 --start 45.3 --end 48.8 \
-     --variant "$current" --variant "$candidate" --solo --reference "$mix" "$work/lead.wav"
+     --variant "$current" --variant "$candidate" --solo --reference "$mix" \
+     --rms-json "$work/lead.rms.json" "$work/lead.wav"
    ```
 
-2. Listen to the numbered WAVs and check the successive RMS bins for a
-   mid-hold dip. The bins describe the chip output before reference matching.
-   Compare candidates in the mix before editing the artifact.
+2. Match each numbered WAV to its variant ID and check the successive
+   pre-match RMS bins for a mid-hold dip. A `voice` warning identifies an
+   FM1 dip above 6 dB and the flattest audible shortlist alternative. Compare
+   candidates in the mix before editing the artifact.
 3. Add an entry such as `{"startSeconds":45.3,"endSeconds":48.8,"variantId":"…"}`
    to `lanes.FM1.overrides`. For an existing lane without an `overrides` member,
    use `artifact_write` to replace the lane object with the updated one.
@@ -288,13 +298,17 @@ or work on a separate copy.
 4. Resolve with `notes_resolve {project, id, reply, author}` or CLI
    `notes resolve PROJECT ID --reply "Shortened FM1's gate at 0:08–0:20" --author agent`.
 
-For CLI-only clip extraction, render from time zero so the driver reaches the
-right state. For example, to listen to 0:08–0:20:
+For a soloed excerpt in project seconds or an A/B pair in source seconds:
 
 ```sh
-java -jar "$jar" render-project "$project" "$work/review-full.wav" --frames 1200
-ffmpeg -n -i "$work/review-full.wav" -ss 8 -t 12 -c:a pcm_s16le "$work/review-08-20.wav"
+java -jar "$jar" render-project "$project" "$work/review.wav" --start 8 --end 20 --solo FM1
+java -jar "$jar" render-compare "$work" --start 8 --end 20 "$work/comparison.mp3"
 ```
+
+`render-project` also accepts `--mute LANES`. `render-compare` uses the
+saved steady reference for warped runs. Select another aligned recording with
+`--reference WAV` or a replacement project-time render with `--render WAV`.
+Choose `.wav` when ffmpeg is unavailable.
 
 ## Gate pipeline code changes
 
