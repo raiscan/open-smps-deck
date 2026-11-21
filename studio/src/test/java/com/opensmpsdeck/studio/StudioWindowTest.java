@@ -950,6 +950,56 @@ class StudioWindowTest {
                 "--at", "1.5", "--text", text, "--author", "agent"}, stream, stream), output::toString);
     }
 
+    @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
+        Path work = Files.createDirectory(folder.resolve("reconstruction"));
+        Files.writeString(work.resolve("score.json"), """
+                {"version":1,"durationUs":2000000,"frames":120,"ticksPerSecond":60,
+                 "inputs":{"midi":"fixture.mid","wav":"mix.wav","catalogue":"index.json","name":"Fixture",
+                           "ticksPerBeat":4,"keepOctaves":false,"fmOnly":false,"wholePartVoices":false,
+                           "audioRefine":false,"stems":{},"harmonyMaxHz":7.5},
+                 "bars":[{"id":"b1","start":0,"end":2,"complete":true}],
+                 "source":{"parts":[{"id":0,"name":"Synthetic Tone","program":0,"drums":false}],
+                           "notes":[],"warnings":[]},"sourceCounts":{},"reductions":[],"pitchChanges":[],
+                 "notes":[{"id":"test-note","part":0,"start":0.5,"end":1.5,"pitch":69,"velocity":90,
+                           "source":"midi","confidence":1}]}
+                """);
+        int rate = 12_000;
+        int[] pcm = new int[rate * 2];
+        for (int i = 0; i < pcm.length; i++) pcm[i] = (int) (22000 * Math.sin(i * 440 * Math.TAU / rate));
+        ReferenceWaveTest.wav(work.resolve("mix.wav"), 16, 1, rate, pcm);
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        try {
+            await(() -> pane.stage().getScene().getRoot().lookupAll(".status").stream()
+                    .filter(Label.class::isInstance).map(Label.class::cast)
+                    .anyMatch(label -> label.getText().equals("Source mix ready")));
+            var plot = fx(() -> (javafx.scene.canvas.Canvas) pane.stage().getScene().lookup("#reconstruction-canvas"));
+            // The single fixture note has 4 padding semitones above and 3 below.
+            double noteY = 67 + (plot.getHeight() - 87) * 4.5 / 8;
+            await(() -> {
+                var pixel = plot.snapshot(null, null).getPixelReader().getColor(110, (int) noteY);
+                return pixel.getRed() > .35; // The tone ridge is visible before the note starts.
+            });
+            fx(() -> {
+                mouse(plot, MouseEvent.MOUSE_RELEASED, plot.getWidth() / 2, noteY, false);
+                var trace = (TextArea) pane.stage().getScene().lookup("#reconstruction-trace");
+                assertTrue(trace.isVisible());
+                assertTrue(trace.getText().contains("test-note"));
+                String target = System.getProperty("studio.snapshot");
+                if (target != null) {
+                    var image = pane.stage().getScene().snapshot(null);
+                    ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", Path.of(target + ".reconstruction.png").toFile());
+                }
+                return null;
+            });
+            try (var files = Files.list(work)) {
+                assertEquals(Set.of("score.json", "mix.wav"), files
+                        .map(path -> path.getFileName().toString()).collect(java.util.stream.Collectors.toSet()));
+            }
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
     @Test void snapshotRealEditor() throws Exception {
         String target=System.getProperty("studio.snapshot");Assumptions.assumeTrue(target!=null,"Optional visual QA artifact");
         fx(()->{

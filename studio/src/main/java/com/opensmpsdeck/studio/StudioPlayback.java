@@ -18,6 +18,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
+import java.util.function.Supplier;
 
 /** Streams both sources through a single 48 kHz stereo device and project-time cursor. */
 final class StudioPlayback implements AutoCloseable {
@@ -27,6 +28,13 @@ final class StudioPlayback implements AutoCloseable {
     record Reference(AudioReference source, ReferenceWave wave) {
         long endFrame() { return frame(source.offsetSeconds() + wave.duration()); }
     }
+    @FunctionalInterface
+    interface Samples {
+        double sample(double projectSeconds, int channel);
+    }
+
+    private static final Samples SILENCE = (seconds, channel) -> 0;
+
     private record Segment(long deviceStart, long projectStart, int length) {}
 
     private final ExecutorService worker = worker("studio-audio");
@@ -49,14 +57,30 @@ final class StudioPlayback implements AutoCloseable {
 
     synchronized void play(StudioProject project, ReviewTransport transport, Reference reference,
                            S3kRenderer.ChannelMask mask, Consumer<String> status, DoubleConsumer position) {
+        double gain = reference == null ? 1 : Math.pow(10, reference.source().gainDb() / 20);
+        Samples samples = reference == null ? SILENCE
+                : (seconds, side) -> reference.wave().sample(seconds - reference.source().offsetSeconds(), side) * gain;
+        long referenceEnd = reference == null ? 0 : reference.endFrame();
+        start(project, transport, mask, referenceEnd, () -> transport.referenceAudible() ? samples : null, status, position);
+    }
+
+    /** A null monitor source selects the live chip renderer. Resolve once per audio block. */
+    void playMonitor(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
+                     double duration, Supplier<Samples> monitor, Consumer<String> status, DoubleConsumer position) {
+        start(project, transport, mask, frame(duration), monitor, status, position);
+    }
+
+    private synchronized void start(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
+                                    long monitorEnd, Supplier<Samples> monitor,
+                                    Consumer<String> status, DoubleConsumer position) {
         stop();
         long version = generation.get(), initial = frame(transport.seconds);
         playing = true;
         activePlayback = worker.submit(() -> {
             Future<?> renderTask = null;
             try {
-                int presentations = presentationCount(project);
-                long end = Math.max((long) presentations * BLOCK, reference == null ? 0 : reference.endFrame());
+                int presentations = project == null ? 0 : presentationCount(project);
+                long end = Math.max((long) presentations * BLOCK, monitorEnd);
                 var rendered = new RenderBuffer(presentations);
                 var format = new AudioFormat(RATE, 16, 2, true, false);
                 var output = AudioSystem.getSourceDataLine(format);
@@ -66,9 +90,9 @@ final class StudioPlayback implements AutoCloseable {
                     output.open(format, BLOCK * 8);
                     output.start();
                 }
-                renderTask = renderer.submit(() -> rendered.render(project, mask));
+                if (presentations > 0) renderTask = renderer.submit(() -> rendered.render(project, mask));
                 status.accept("Playing");
-                stream(output, rendered, transport, reference, initial, end, position, version);
+                stream(output, rendered, transport, monitor, initial, end, position, version);
                 if (version == generation.get()) status.accept("Playback finished");
             } catch (Exception error) {
                 if (version == generation.get()) status.accept("Preview unavailable: " + error.getMessage());
@@ -84,11 +108,10 @@ final class StudioPlayback implements AutoCloseable {
         });
     }
 
-    private void stream(SourceDataLine output, RenderBuffer render, ReviewTransport state, Reference reference,
+    private void stream(SourceDataLine output, RenderBuffer render, ReviewTransport state, Supplier<Samples> monitor,
                         long initial, long end, DoubleConsumer position, long version) throws Exception {
         byte[] bytes = new byte[BLOCK * 4];
         var queued = new ArrayDeque<Segment>();
-        double gain = reference == null ? 1 : Math.pow(10, reference.source().gainDb() / 20);
         long written = 0, cursor = initial < end ? initial : 0;
         while (version == generation.get()) {
             var loop = state.loop;
@@ -104,18 +127,18 @@ final class StudioPlayback implements AutoCloseable {
             }
             int index = (int) (cursor % BLOCK);
             int count = (int) Math.min(BLOCK - index, boundary - cursor);
-            boolean listenToReference = state.referenceAudible();
-            if (listenToReference && reference != null) {
+            var samples = monitor.get();
+            if (samples != null) {
                 for (int i = 0; i < count; i++) {
-                    double time = (cursor + i) / (double) RATE - reference.source().offsetSeconds();
+                    double time = (cursor + i) / (double) RATE;
                     for (int channel = 0; channel < 2; channel++) {
-                        float sample = reference.wave().sample(time, channel);
-                        int pcm = sample == 0 ? 0 : (int) Math.round(Math.clamp(sample * gain * 32768, -32768, 32767));
+                        double sample = samples.sample(time, channel);
+                        int pcm = sample == 0 ? 0 : (int) Math.round(Math.clamp(sample * 32768.0, -32768, 32767));
                         put(bytes, i * 2 + channel, pcm);
                     }
                 }
             } else {
-                short[] pcm = listenToReference || cursor / BLOCK >= render.size()
+                short[] pcm = cursor / BLOCK >= render.size()
                         ? null : render.get((int) (cursor / BLOCK));
                 for (int i = 0; i < count * 2; i++) put(bytes, i, pcm == null ? 0 : pcm[index * 2 + i]);
             }

@@ -1,0 +1,535 @@
+package com.opensmpsdeck.studio;
+
+import com.opensmpsdeck.headless.ReconstructionInspection;
+import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
+import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
+import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
+import com.opensmpsdeck.headless.ReconstructionInspection.Role;
+import javafx.geometry.VPos;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.Tooltip;
+import javafx.scene.input.MouseButton;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
+
+/** Source-time viewport and hit testing. The underlying trace and score remain immutable. */
+final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable {
+    static final String UNASSIGNED = "Unallocated";
+    private static final int AXIS = 76;
+    private static final int SECTION_HEIGHT = 18;
+    private static final int LANE_HEIGHT = 17;
+    private static final int LANE_HEADER = 20;
+    private static final Color BACKGROUND = Color.web("#0c1220");
+    private static final Color PANEL = Color.web("#151f31");
+    private static final Color TEXT = Color.web("#dce7f8");
+    private static final Color SUBTLE = Color.web("#98aeca");
+    private static final Color CURSOR = Color.web("#faf0a9");
+    private static final Color GRID = Color.web("#a5badd").deriveColor(0, 1, 1, .16);
+    private static final String[] PITCHES = {"C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"};
+
+    private record Hit(Overlay note, double left, double top, double width, double height) {
+        boolean contains(double x, double y) {
+            return x >= left && x <= left + width && y >= top && y <= top + height;
+        }
+    }
+
+    private final ReconstructionInspection model;
+    private final ReconstructionTiles tiles;
+    private final Tooltip hover = new Tooltip();
+    private final List<Hit> hits = new ArrayList<>();
+    private final List<String> lanes;
+    private final int low;
+    private final int high;
+    private final List<String> sectionLabels;
+    private final double[] endByIndex;
+    private final Set<Role> roles = EnumSet.allOf(Role.class);
+    private final Set<String> visibleLanes = new HashSet<>();
+    private double pixelsPerSecond = 1;
+    private double zoom;
+    private double playhead;
+    private Double anchor;
+    private ReviewTransport.Range range;
+    private Overlay selection;
+    private String laneSelection;
+    private AudioSource source;
+    private Map<String, List<BendPoint>> assembledBends = Map.of();
+    private int dbRange = 55;
+    private boolean ridges;
+    private boolean projectRuler;
+    private boolean ready;
+
+    Consumer<Overlay> onNote = ignored -> {};
+    Consumer<String> onLane = ignored -> {};
+    Consumer<ReviewTransport.Range> onRange = ignored -> {};
+    DoubleConsumer onSeek = ignored -> {};
+
+    ReconstructionCanvas(ReconstructionInspection model, Consumer<String> error) {
+        this.model = model;
+        tiles = new ReconstructionTiles(model, this::draw, error);
+        var notes = model.overlays();
+        double lowestBend = notes.stream().flatMap(note -> note.bend().stream())
+                .mapToDouble(BendPoint::pitch).min().orElse(127);
+        double highestBend = notes.stream().flatMap(note -> note.bend().stream())
+                .mapToDouble(BendPoint::pitch).max().orElse(0);
+        low = Math.max(0, Math.min((int) Math.floor(lowestBend),
+                notes.stream().mapToInt(Overlay::pitch).min().orElse(42)) - 3);
+        high = Math.min(127, Math.max((int) Math.ceil(highestBend),
+                notes.stream().mapToInt(Overlay::pitch).max().orElse(78)) + 4);
+        endByIndex = new double[notes.size()];
+        double priorEnd = 0;
+        for (int i = 0; i < notes.size(); i++) {
+            priorEnd = Math.max(priorEnd, notes.get(i).interval().sourceEnd());
+            endByIndex[i] = priorEnd;
+        }
+        lanes = TimelineView.LANES.stream().filter(lane -> notes.stream().anyMatch(note -> lane.equals(note.lane()))).toList();
+        visibleLanes.addAll(lanes);
+        visibleLanes.add(UNASSIGNED);
+        sectionLabels = model.sections().levelLabels();
+
+        canvas.setId("reconstruction-canvas");
+        scroll.setFitToHeight(false);
+        scroll.viewportBoundsProperty().addListener((ignored, old, next) -> resizePlot());
+        canvas.setOnMouseMoved(event -> {
+            var hit = hit(event.getX(), event.getY());
+            if (hit != null) {
+                hover.setText(description(hit.note()));
+            } else if (event.getX() >= AXIS && event.getY() >= rulerHeight() && event.getY() < sectionBottom()) {
+                double time = seconds(event.getX());
+                int level = (int) (event.getY() - rulerHeight()) / SECTION_HEIGHT;
+                hover.setText(model.sections().bands().stream().filter(band -> band.level() == level
+                        && band.start() <= time && time < band.end()).map(ReconstructionInspection.Band::label)
+                        .findFirst().orElse(""));
+            } else {
+                hover.hide();
+                hover.setText("");
+            }
+        });
+        hover.setShowDelay(javafx.util.Duration.millis(250));
+        hover.setShowDuration(javafx.util.Duration.seconds(20));
+        Tooltip.install(canvas, hover);
+        canvas.setOnMousePressed(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) return;
+            canvas.requestFocus();
+            if (event.isShiftDown() && event.getX() >= AXIS) anchor = seconds(event.getX());
+        });
+        canvas.setOnMouseDragged(event -> {
+            if (anchor != null) selectRange(seconds(event.getX()));
+        });
+        canvas.setOnMouseReleased(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) return;
+            if (anchor != null) {
+                selectRange(seconds(event.getX()));
+                anchor = null;
+                return;
+            }
+            var hit = hit(event.getX(), event.getY());
+            if (hit != null) {
+                select(hit.note(), hit.note().lane());
+                onSeek.accept(hit.note().interval().sourceStart());
+            } else if (event.getY() >= laneTop() && event.getY() < laneTop() + lanes.size() * LANE_HEIGHT) {
+                select(null, lanes.get((int) (event.getY() - laneTop()) / LANE_HEIGHT));
+                onSeek.accept(event.getX() >= AXIS ? seconds(event.getX()) : playhead);
+            } else if (event.getX() >= AXIS) {
+                if (event.getY() >= sectionBottom() && event.getY() < pitchBottom()) select(null, null);
+                onSeek.accept(seconds(event.getX()));
+            }
+        });
+        ready = true;
+    }
+
+    List<String> lanes() { return lanes; }
+    void source(AudioSource next) { source = next; draw(); }
+    void assembledBends(Map<String, List<BendPoint>> curves) {
+        assembledBends = curves;
+        draw();
+    }
+    void dbRange(int range) { dbRange = range; draw(); }
+    void ridges(boolean show) { ridges = show; draw(); }
+    void projectRuler(boolean show) { projectRuler = show; draw(); }
+
+    void roleVisible(Role role, boolean show) {
+        if (show) roles.add(role); else roles.remove(role);
+        draw();
+    }
+
+    void laneVisible(String lane, boolean show) {
+        if (show) visibleLanes.add(lane); else visibleLanes.remove(lane);
+        draw();
+    }
+
+    void zoom(double value) {
+        double playheadX = x(playhead);
+        double anchor = playheadX >= AXIS && playheadX <= canvas.getWidth() ? playhead : seconds(AXIS + plotWidth() / 2);
+        zoom = value;
+        resizePlot();
+        center(anchor);
+    }
+
+    private void resizePlot() {
+        if (!ready) return;
+        pixelsPerSecond = plotWidth() / Math.max(.001, model.duration()) * Math.pow(2, zoom);
+        double height = Math.max(sectionBottom() + 145 + stripHeight(), scroll.getViewportBounds().getHeight());
+        double width = AXIS + pixelsPerSecond * model.duration();
+        if (Math.abs(height - contentHeight) >= .5 || Math.abs(width - contentWidth) >= .5) dimensions(width, height);
+    }
+
+    void center(double sourceSeconds) {
+        double available = contentWidth - canvas.getWidth();
+        scroll.setHvalue(available <= 0 ? 0 : Math.clamp((sourceSeconds * pixelsPerSecond - plotWidth() / 2) / available, 0, 1));
+    }
+
+    void movePlayhead(double seconds, boolean follow) {
+        playhead = seconds;
+        if (follow && (x(seconds) < AXIS || x(seconds) > canvas.getWidth())) center(seconds);
+        draw();
+    }
+
+    void clearRange() {
+        range = null;
+        onRange.accept(null);
+        draw();
+    }
+
+    private void selectRange(double end) {
+        range = Math.abs(end - anchor) < .01 ? null
+                : new ReviewTransport.Range(Math.min(anchor, end), Math.max(anchor, end));
+        onRange.accept(range);
+        draw();
+    }
+
+    private void select(Overlay note, String lane) {
+        selection = note;
+        laneSelection = lane;
+        onNote.accept(note);
+        onLane.accept(lane);
+        draw();
+    }
+
+    private Hit hit(double x, double y) {
+        if (x < AXIS) return null;
+        for (int i = hits.size() - 1; i >= 0; i--) if (hits.get(i).contains(x, y)) return hits.get(i);
+        return null;
+    }
+
+    private double x(double seconds) { return AXIS + seconds * pixelsPerSecond - offset; }
+    private double seconds(double x) { return Math.clamp((x - AXIS + offset) / pixelsPerSecond, 0, model.duration()); }
+    private double plotWidth() { return Math.max(100, scroll.getViewportBounds().getWidth() - AXIS); }
+    private int rulerHeight() { return 31; }
+    private int sectionBottom() { return rulerHeight() + sectionLabels.size() * SECTION_HEIGHT; }
+    private int stripHeight() { return LANE_HEADER + lanes.size() * LANE_HEIGHT; }
+    private double pitchBottom() { return contentHeight - stripHeight(); }
+    private double laneTop() { return pitchBottom() + LANE_HEADER; }
+    private double rowHeight() { return (pitchBottom() - sectionBottom()) / (high - low + 1); }
+    private double y(double pitch) { return sectionBottom() + (high + .5 - pitch) * rowHeight(); }
+
+    @Override void draw() {
+        if (!ready) return;
+        var g = canvas.getGraphicsContext2D();
+        double width = canvas.getWidth();
+        hits.clear();
+        g.setFill(BACKGROUND);
+        g.fillRect(0, 0, width, contentHeight);
+        g.setFont(Font.font("Monospaced", 11));
+        g.setTextBaseline(VPos.CENTER);
+        drawSpectrum(g, width);
+        drawPitchGrid(g, width);
+        drawBands(g, width);
+        drawLanes(g, width);
+        drawRuler(g, width);
+        g.save();
+        clip(g, AXIS, 0, width - AXIS, contentHeight);
+        if (range != null) {
+            g.setFill(Color.web("#83abff", .17));
+            g.fillRect(x(range.start()), 0, x(range.end()) - x(range.start()), contentHeight);
+        }
+        drawNotes(g, width);
+        g.setStroke(CURSOR);
+        g.strokeLine(x(playhead), 0, x(playhead), contentHeight);
+        g.restore();
+        g.setStroke(GRID);
+        g.strokeLine(AXIS - .5, 0, AXIS - .5, contentHeight);
+    }
+
+    private void drawSpectrum(GraphicsContext g, double width) {
+        if (source == null) {
+            g.setFill(SUBTLE);
+            g.fillText("No source audio available", AXIS + 16, sectionBottom() + 22);
+            return;
+        }
+        int level = (int) Math.clamp(Math.floor(Math.log(ReconstructionTiles.WIDTH / (1.5 * pixelsPerSecond))
+                / Math.log(2)), 0, 7);
+        double tileSpan = Math.scalb(1.5, level);
+        double end = seconds(width);
+        var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
+        g.save();
+        clip(g, AXIS, sectionBottom(), width - AXIS, pitchBottom() - sectionBottom());
+        for (int index = (int) (seconds(AXIS) / tileSpan); index * tileSpan < end; index++) {
+            var key = new ReconstructionTiles.Key(source, level, index, low, high);
+            var imageKey = new ReconstructionTiles.ImageKey(key, dbRange);
+            needed.add(imageKey);
+            var tile = tiles.get(imageKey);
+            if (tile == null) {
+                drawCoarserTile(g, key);
+                continue;
+            }
+            g.drawImage(tile.image(), x(key.start()), sectionBottom(), tileSpan * pixelsPerSecond,
+                    pitchBottom() - sectionBottom());
+            if (ridges) {
+                g.setFill(Color.web("#9cf4fb", .75));
+                for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
+                    g.fillOval(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
+            }
+        }
+        g.restore();
+        tiles.request(needed);
+    }
+
+    private void drawCoarserTile(GraphicsContext g, ReconstructionTiles.Key key) {
+        for (int level = key.level() + 1; level <= 7; level++) {
+            var parent = new ReconstructionTiles.Key(key.source(), level,
+                    key.index() >> (level - key.level()), key.low(), key.high());
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, dbRange));
+            if (cached == null) continue;
+            g.save();
+            clip(g, x(key.start()), sectionBottom(), key.span() * pixelsPerSecond, pitchBottom() - sectionBottom());
+            g.drawImage(cached.image(), x(parent.start()), sectionBottom(), parent.span() * pixelsPerSecond,
+                    pitchBottom() - sectionBottom());
+            g.restore();
+            return;
+        }
+    }
+
+    private void drawPitchGrid(GraphicsContext g, double width) {
+        g.setFill(PANEL);
+        g.fillRect(0, sectionBottom(), AXIS, pitchBottom() - sectionBottom());
+        int minimumSpacing = Math.max(1, (int) Math.ceil(12 / rowHeight()));
+        for (int pitch = low; pitch <= high; pitch++) {
+            g.setStroke(pitch % 12 == 0 ? GRID : Color.web("#a5badd", .07));
+            g.strokeLine(AXIS, y(pitch - .5), width, y(pitch - .5));
+            if (minimumSpacing > 1 && pitch % 12 % minimumSpacing != 0) continue;
+            g.setFill(pitch % 12 == 0 ? TEXT : SUBTLE);
+            g.fillText(pitchName(pitch), 12, y(pitch));
+        }
+    }
+
+    private void drawBands(GraphicsContext g, double width) {
+        g.setFill(PANEL);
+        g.fillRect(0, rulerHeight(), width, sectionBottom() - rulerHeight());
+        g.setFill(SUBTLE);
+        for (int i = 0; i < sectionLabels.size(); i++)
+            g.fillText(sectionLabels.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
+        g.save();
+        clip(g, AXIS, rulerHeight(), width - AXIS, sectionBottom() - rulerHeight());
+        for (var band : model.sections().bands()) {
+            double left = x(band.start()), right = x(band.end());
+            if (right < AXIS || left > width) continue;
+            double top = rulerHeight() + band.level() * SECTION_HEIGHT;
+            g.setFill(band.level() == 0 ? Color.web("#2b4767") : Color.web("#243147"));
+            g.fillRect(left, top, Math.max(1, right - left - 1), SECTION_HEIGHT - 1);
+            g.setFill(TEXT);
+            double labelStart = Math.max(AXIS, left) + 5;
+            String label = band.label();
+            double space = right - labelStart - 3;
+            if (label.startsWith("section-b") && space < label.length() * 6.7) label = "§" + label.substring(9);
+            drawLabel(g, label, labelStart, top + SECTION_HEIGHT / 2.0, space);
+        }
+        g.restore();
+    }
+
+    private void drawLanes(GraphicsContext g, double width) {
+        g.setFill(PANEL);
+        g.fillRect(0, pitchBottom(), width, stripHeight());
+        g.setFill(TEXT);
+        g.fillText("Chip lanes", 4, pitchBottom() + LANE_HEADER / 2.0);
+        if (lanes.isEmpty()) g.fillText("No placed notes", AXIS + 16, pitchBottom() + LANE_HEADER / 2.0);
+        for (int i = 0; i < lanes.size(); i++) {
+            String lane = lanes.get(i);
+            double top = laneTop() + i * LANE_HEIGHT;
+            g.setFill(lane.equals(laneSelection) ? Color.web("#304666") : i % 2 == 0 ? BACKGROUND : PANEL);
+            g.fillRect(0, top, width, LANE_HEIGHT);
+            g.setFill(visibleLanes.contains(lane) ? TEXT : SUBTLE);
+            g.fillText(lane, 12, top + LANE_HEIGHT / 2.0);
+        }
+    }
+
+    private void drawRuler(GraphicsContext g, double width) {
+        g.setFill(PANEL);
+        g.fillRect(0, 0, width, rulerHeight());
+        g.setFill(TEXT);
+        g.fillText(projectRuler ? "Project s" : "Source s", 8, rulerHeight() / 2.0);
+        g.save();
+        clip(g, AXIS, 0, width - AXIS, contentHeight);
+        double metric = 82 / pixelsPerSecond;
+        double magnitude = Math.pow(10, Math.floor(Math.log10(metric)));
+        double step = (metric / magnitude < 2 ? 2 : metric / magnitude < 5 ? 5 : 10) * magnitude;
+        double start = seconds(AXIS), end = seconds(width);
+        if (projectRuler) {
+            start = model.toProject(start);
+            end = model.toProject(end);
+        }
+        for (double tick = Math.ceil(start / step) * step; tick <= end; tick += step) {
+            double left = x(projectRuler ? model.toSource(tick) : tick);
+            g.setStroke(GRID);
+            g.strokeLine(left + .5, rulerHeight() - 8, left + .5, contentHeight);
+            g.setFill(SUBTLE);
+            g.fillText(String.format(Locale.ROOT, step >= 1 ? "%.0f" : step >= .1 ? "%.1f" : "%.2f", tick),
+                    left + 5, rulerHeight() / 2.0);
+        }
+        g.restore();
+    }
+
+    private void drawNotes(GraphicsContext g, double width) {
+        g.save();
+        clip(g, AXIS, sectionBottom(), width - AXIS, pitchBottom() - sectionBottom());
+        var visible = visibleNotes(width);
+        var labels = new ArrayList<LabelBounds>();
+        for (var note : visible) {
+            if (note.part() < 0) continue;
+            double left = x(note.interval().sourceStart());
+            double barWidth = Math.max(2, x(note.interval().sourceEnd()) - left);
+            double height = Math.max(3, Math.min(13, rowHeight() - 1));
+            double top = y(note.pitch()) - height / 2;
+            var color = color(note.role());
+            g.setFill(color.deriveColor(0, 1, 1, note.style() == ReconstructionInspection.Style.DASHED ? .17 : .68));
+            g.fillRect(left, top, barWidth, height);
+            g.setStroke(note == selection ? Color.WHITE : color);
+            if (note.style() == ReconstructionInspection.Style.DASHED) g.setLineDashes(3, 2);
+            g.strokeRect(left + .5, top + .5, barWidth - 1, height - 1);
+            g.setLineDashes();
+            drawBend(g, note, left, barWidth, color);
+            if (pixelsPerSecond >= 24) {
+                double labelLeft = Math.max(left, AXIS) + 3;
+                double space = Math.min(left + barWidth, width) - labelLeft;
+                String text = fitLabel(shortLabel(note), space);
+                double baseline = top - 7;
+                if (!text.isEmpty() && baseline >= sectionBottom() + 7) {
+                    var bounds = new LabelBounds(labelLeft, baseline - 7, text.length() * 6.7, 14);
+                    if (labels.stream().noneMatch(bounds::intersects)) {
+                        labels.add(bounds);
+                        g.setFill(BACKGROUND.deriveColor(0, 1, 1, .83));
+                        g.fillRoundRect(bounds.x - 2, bounds.y, bounds.width + 4, bounds.height, 3, 3);
+                        g.setFill(TEXT);
+                        g.fillText(text, labelLeft, baseline);
+                    }
+                }
+            }
+            hits.add(new Hit(note, left, top, barWidth, height));
+        }
+        g.restore();
+
+        for (var note : visible) {
+            if (!note.sounds()) continue;
+            int lane = lanes.indexOf(note.lane());
+            if (lane < 0) continue;
+            double left = Math.max(AXIS, x(note.interval().sourceStart()));
+            double barWidth = Math.max(2, x(note.interval().sourceEnd()) - left);
+            double top = laneTop() + lane * LANE_HEIGHT + 2;
+            var color = color(note.role());
+            g.setFill(color.deriveColor(0, 1, 1, .45));
+            g.fillRect(left, top, barWidth, LANE_HEIGHT - 4);
+            if (note == selection) {
+                g.setStroke(Color.WHITE);
+                g.strokeRect(left, top, barWidth, LANE_HEIGHT - 4);
+            }
+            if (barWidth > 30) {
+                g.setFill(TEXT);
+                drawLabel(g, note.patch() == null ? pitchName(note.pitch()) : note.patch(),
+                        left + 3, top + (LANE_HEIGHT - 4) / 2.0, Math.min(width - left, barWidth) - 6);
+            }
+            hits.add(new Hit(note, left, top, barWidth, LANE_HEIGHT - 4));
+        }
+    }
+
+    private void drawBend(GraphicsContext g, Overlay note, double left, double width, Color color) {
+        var bend = assembledBends.getOrDefault(note.eventId(), note.bend());
+        if (bend.isEmpty()) return;
+        g.save();
+        clip(g, left, sectionBottom(), width, pitchBottom() - sectionBottom());
+        g.setStroke(color.brighter());
+        g.setLineWidth(1.6);
+        g.beginPath();
+        var first = bend.getFirst();
+        g.moveTo(x(first.sourceSeconds()), y(first.pitch()));
+        for (var point : bend) g.lineTo(x(point.sourceSeconds()), y(point.pitch()));
+        g.stroke();
+        g.restore();
+    }
+
+    private List<Overlay> visibleNotes(double width) {
+        double from = seconds(AXIS), to = seconds(width);
+        int first = 0, last = endByIndex.length;
+        while (first < last) {
+            int middle = (first + last) >>> 1;
+            if (endByIndex[middle] < from) first = middle + 1;
+            else last = middle;
+        }
+        var notes = model.overlays();
+        var visible = new ArrayList<Overlay>();
+        for (int i = first; i < notes.size(); i++) {
+            var note = notes.get(i);
+            if (note.interval().sourceStart() > to) break;
+            if (note.interval().sourceEnd() >= from && roles.contains(note.role())
+                    && visibleLanes.contains(note.lane() == null ? UNASSIGNED : note.lane()))
+                visible.add(note);
+        }
+        return visible;
+    }
+
+    private record LabelBounds(double x, double y, double width, double height) {
+        boolean intersects(LabelBounds other) {
+            return x < other.x + other.width && other.x < x + width
+                    && y < other.y + other.height && other.y < y + height;
+        }
+    }
+
+    private static void drawLabel(GraphicsContext g, String text, double x, double y, double width) {
+        g.fillText(fitLabel(text, width), x, y);
+    }
+
+    private static String fitLabel(String text, double width) {
+        int characters = (int) (width / 6.7);
+        if (characters >= text.length()) return text;
+        if (characters < 3) return "";
+        return text.substring(0, characters - 1).stripTrailing() + "…";
+    }
+
+    static String pitchName(int pitch) { return PITCHES[pitch % 12] + (pitch / 12 - 1); }
+    static String roleName(Role role) {
+        String name = role.name().toLowerCase(Locale.ROOT);
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+    static Color color(Role role) { return Color.rgb(role.rgb() >> 16, role.rgb() >> 8 & 255, role.rgb() & 255); }
+
+    static String shortLabel(Overlay note) {
+        return pitchName(note.pitch()) + " · " + (note.lane() == null ? UNASSIGNED : note.lane())
+                + (note.patch() == null ? "" : " · " + note.patch());
+    }
+
+    static String description(Overlay note) {
+        return shortLabel(note) + " · " + roleName(note.role()) + "\n" + note.fate()
+                + (note.reason() == null ? "" : " · " + note.reason())
+                + (note.competitors().isEmpty() ? "" : "\nCompeting note: " + String.join(", ", note.competitors()));
+    }
+
+    private static void clip(GraphicsContext g, double x, double y, double width, double height) {
+        g.beginPath();
+        g.rect(x, y, Math.max(0, width), Math.max(0, height));
+        g.clip();
+    }
+
+    @Override public void close() {
+        Tooltip.uninstall(canvas, hover);
+        tiles.close();
+    }
+}

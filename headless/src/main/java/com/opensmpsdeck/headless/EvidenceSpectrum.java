@@ -121,7 +121,7 @@ final class EvidenceSpectrum {
 
         // The Hann window has unit coherent gain. The positive-frequency FFT
         // holds half of a real sine's amplitude, so full-scale sine power is 1/4.
-        private static double db(double power) { return 10 * Math.log10(4 * power); }
+        static double db(double power) { return 10 * Math.log10(4 * power); }
     }
 
     static BufferedImage analyze(Audio audio, double[] times, int minPitch, int maxPitch,

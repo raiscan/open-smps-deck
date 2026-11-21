@@ -36,25 +36,29 @@ final class EvidenceBends implements ChipWriteObserver {
         var curves = new ArrayList<Curve>();
         var visibleIds = visible.stream().map(DrawnNote::id).collect(java.util.stream.Collectors.toSet());
         for (var row : rows.values()) {
-            var note = row.allocation() == null ? null : row.allocation().effective();
-            if (note == null || note.note().bend() == null) continue;
-            var bend = note.note().bend();
-            double start = span.start(note.timing()), end = span.end(note.timing());
-            if (end <= span.start() || start >= span.end()) continue;
-            String lane = row.allocation().lane();
             if (!visibleIds.contains(row.id())) continue;
-            var points = new ArrayList<Point>();
-            double from = Math.max(span.start(), start), to = Math.min(span.end(), end);
-            points.add(point(span, from, note.note().pitch() + bend.cents(span.seconds(from, clock)) / 100));
-            for (var step : bend.points()) {
-                double time = span.base() == clock ? step.time()
-                        : span.base() == TimeBase.source ? span.timeline().source(step.time()) : span.timeline().project(step.time());
-                if (time > from && time < to) points.add(point(span, time, note.note().pitch() + step.cents() / 100.0));
-            }
-            points.add(point(span, to, note.note().pitch() + bend.cents(span.seconds(to, clock)) / 100));
-            curves.add(new Curve(row.id(), lane, bend.editReason() == null ? "stem" : "authored", points));
+            var curve = authoredCurve(span, row, clock);
+            if (curve != null) curves.add(curve);
         }
         return curves;
+    }
+
+    static Curve authoredCurve(Span span, ReconstructionTrace.Row row, TimeBase clock) {
+        var note = row.allocation() == null ? null : row.allocation().effective();
+        if (note == null || note.note().bend() == null) return null;
+        var bend = note.note().bend();
+        double start = span.start(note.timing()), end = span.end(note.timing());
+        if (end <= span.start() || start >= span.end()) return null;
+        var points = new ArrayList<Point>();
+        double from = Math.max(span.start(), start), to = Math.min(span.end(), end);
+        points.add(point(span, from, note.note().pitch() + bend.cents(span.seconds(from, clock)) / 100));
+        for (var step : bend.points()) {
+            double time = span.base() == clock ? step.time()
+                    : span.base() == TimeBase.source ? span.timeline().source(step.time()) : span.timeline().project(step.time());
+            if (time > from && time < to) points.add(point(span, time, note.note().pitch() + step.cents() / 100.0));
+        }
+        points.add(point(span, to, note.note().pitch() + bend.cents(span.seconds(to, clock)) / 100));
+        return new Curve(row.id(), row.allocation().lane(), bend.editReason() == null ? "stem" : "authored", points);
     }
 
     static List<ReconstructionTrace.Voiced> assembled(Map<String, ReconstructionTrace.Row> rows, List<DrawnNote> notes) {

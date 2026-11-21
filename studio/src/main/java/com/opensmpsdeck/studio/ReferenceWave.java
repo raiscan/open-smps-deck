@@ -18,12 +18,14 @@ final class ReferenceWave {
     private final byte[] pcm;
     private final int frames;
     private final int sampleBytes;
+    private final boolean floatingPoint;
 
     private ReferenceWave(AudioFormat format, byte[] pcm) {
         this.format = format;
         this.pcm = pcm;
         frames = pcm.length / format.getFrameSize();
         sampleBytes = format.getSampleSizeInBits() / 8;
+        floatingPoint = AudioFormat.Encoding.PCM_FLOAT.equals(format.getEncoding());
     }
 
     static ReferenceWave read(Path path) throws IOException {
@@ -41,10 +43,12 @@ final class ReferenceWave {
         try (var input = AudioSystem.getAudioInputStream(path.toFile())) {
             var format = input.getFormat();
             int bits = format.getSampleSizeInBits(), channels = format.getChannels();
-            if (!AudioFormat.Encoding.PCM_SIGNED.equals(format.getEncoding()) || format.isBigEndian()
-                    || bits != 16 && bits != 24 || channels != 1 && channels != 2
+            boolean supported = AudioFormat.Encoding.PCM_SIGNED.equals(format.getEncoding())
+                    && (bits == 16 || bits == 24 || bits == 32)
+                    || AudioFormat.Encoding.PCM_FLOAT.equals(format.getEncoding()) && bits == 32;
+            if (!supported || format.isBigEndian() || channels != 1 && channels != 2
                     || format.getSampleRate() <= 0 || format.getFrameSize() != bits / 8 * channels) {
-                throw new IOException("Use a 16- or 24-bit PCM WAV with one or two channels");
+                throw new IOException("Use a mono or stereo 16-, 24-, or 32-bit PCM or 32-bit float WAV");
             }
             long frames = input.getFrameLength();
             if (frames <= 0 || frames > MAX_BYTES / format.getFrameSize()) {
@@ -97,7 +101,17 @@ final class ReferenceWave {
     private float at(int frame, int channel) {
         int offset = frame * format.getFrameSize() + (format.getChannels() == 1 ? 0 : channel * sampleBytes);
         int value = (pcm[offset] & 255) | pcm[offset + 1] << 8;
-        if (sampleBytes == 3) value = (value & 65535) | pcm[offset + 2] << 16;
-        return value / (float) (1 << (format.getSampleSizeInBits() - 1));
+        return switch (sampleBytes) {
+            case 2 -> value / 32768f;
+            case 3 -> ((value & 65535) | pcm[offset + 2] << 16) / 8388608f;
+            case 4 -> decode32((value & 65535) | (pcm[offset + 2] & 255) << 16 | pcm[offset + 3] << 24);
+            default -> throw new IllegalStateException("Unsupported PCM sample width");
+        };
+    }
+
+    private float decode32(int value) {
+        if (!floatingPoint) return (float) (value / 2147483648.0);
+        float sample = Float.intBitsToFloat(value);
+        return Float.isFinite(sample) ? sample : 0;
     }
 }

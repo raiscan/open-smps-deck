@@ -59,3 +59,8 @@
 #command-table .table-row-cell:filled:selected { -fx-background-color: #254a46; }
 #command-table .table-row-cell:empty { -fx-background-color: #101722; }
 #command-table .table-cell { -fx-text-fill: #dcebf7; -fx-border-color: transparent; -fx-padding: 6 8; }
+
+.reconstruction-controls { -fx-padding: 6 16; }
+.reconstruction-controls .button, .reconstruction-controls .toggle-button,
+.reconstruction-controls .menu-button, .reconstruction-controls .combo-box { -fx-padding: 5 9; }
+.reconstruction-controls .toggle-button:selected { -fx-background-color: #245f58; }
