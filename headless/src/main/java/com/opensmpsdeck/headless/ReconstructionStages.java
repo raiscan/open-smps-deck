@@ -619,9 +619,12 @@ public final class ReconstructionStages {
                     var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"),
                             ReconstructionAllocation.Result.class);
                     ReconstructionChecks.allocation(allocation, score);
-                    ReconstructionVoicing.validate(
-                            ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value),
-                            allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)), ReconstructionTimeMap.of(score).frames());
+                    var voicing = ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value);
+                    ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)),
+                            ReconstructionTimeMap.of(score).frames());
+                    if (voicing.lanePolicies() != null && !voicing.lanePolicies().isEmpty())
+                        ReconstructionLanePolicies.resolve(work, score, readStructure(work.resolve("structure.json"), score),
+                                voicing.lanePolicies());
                 }
                 default -> throw new IllegalArgumentException("Unknown stage artifact: " + file.getFileName());
             }

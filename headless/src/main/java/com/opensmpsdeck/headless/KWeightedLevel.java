@@ -34,6 +34,17 @@ final class KWeightedLevel {
         return meanAbove(Math.max(ABSOLUTE_GATE, active * .1));
     }
 
+    double probePower() {
+        if (!blocks.isEmpty()) return power();
+        // A short note may never complete a 400 ms BS.1770 block. Use the
+        // same K weighting without block gating for that probe.
+        int samples = hop * HOP + frames;
+        if (samples == 0) return 0;
+        double total = energy;
+        for (int i = 0; i < hop; i++) total += hops[i];
+        return total / samples;
+    }
+
     private double meanAbove(double gate) {
         double total = 0;
         int count = 0;

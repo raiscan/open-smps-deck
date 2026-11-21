@@ -1312,6 +1312,57 @@ copy lanes keep their original settings. Assembly deduplicates FM patches by
 their native bytes, including changes to release rates, with up to 128 local
 voices and a 32 KiB total bank.
 
+#### Optional lane policies
+
+Add a top-level `lanePolicies` array to `voicing.json` and run
+`reconstruct assemble WORK_DIR`. Each rule applies to the whole song by
+default. Use `section` for a section ID or unique label, or `span` for
+`[startTick, endTick]` in 60 Hz project time. Use `voice` with an ID from
+`voices.json` to narrow the selection further. Selection uses the dry note's
+attack on a half-open interval. Its gate and delayed copies can extend past
+that interval up to the project end.
+
+```json
+"lanePolicies": [
+  {"policy":"pads","voice":"part-0-chords"},
+  {"policy":"leadEcho","span":[2400,3600],"delayTicks":7,"octave":0},
+  {"policy":"psgDouble","voice":"part-1-chords","octave":1},
+  {"policy":"fmDouble","mode":"chorus","section":"A"},
+  {"policy":"fmDouble","mode":"echo","delayTicks":14,"attenuation":7,
+   "volumeSteps":[{"tick":6,"attenuation":12}]}
+]
+```
+
+| Policy | Source and defaults |
+| --- | --- |
+| `pads` | Harmony, or counter material in a named voice, with an allocated gate of at least `minimumTicks` (18 by default). Move it onto PSG with one sustaining envelope. Keep the dry placement when the move fails. An unpinned counter already on PSG can reclaim a freed FM interval when its shared FM instrument is available. |
+| `leadEcho` | FM melody with a decaying PSG envelope, delayed seven ticks by default. |
+| `psgDouble` | FM harmony or counter with a sustaining PSG layer at the same attack time. |
+| `fmDouble` | FM melody by default, or notes in an explicitly scoped FM voice. Chorus has the same timing, −2 detune units and one extra TL step, with custom vibrato omitted from the copy. Echo follows the source's attack vibrato with a 14-tick delay, +2 detune units and seven extra TL steps. |
+
+The three PSG policies accept `octave` (−2 to +2, default unison) and
+`levelDb` (−36 to 0, defaults −6 for pads, −12 for lead echo and −10 for
+doubling). Levels compare K-weighted solo probes against the dry note and
+quantize to audible PSG steps. Short probes use the K-weighted mean power.
+FM `detune` is relative to the source, in signed S3K driver units.
+`attenuation` is additional carrier TL (0–127, about 0.75 dB per step within
+the patch's available range). An FM echo can set new relative attenuation
+at increasing `volumeSteps[].tick` offsets from its own attack. Both echoes
+accept `delayTicks` in the range 1–600.
+
+Assembly protects existing gates, including future drum gates on PSG3.
+Copies use a free lane for the complete voiced interval. Bends and
+one-channel chord figures keep their existing encoding. Pads preserve
+authored lane, instrument and scoped voicing decisions. Pads run first,
+then lead echo, PSG doubling and FM doubling. The first matching rule of
+each kind or FM mode owns the dry attack.
+
+`report.json.lanePolicies` records eligible and applied attacks, busy and
+incompatible skips, destination counts and pad relocations. Byte deltas
+compare the compiled arrangement with the indexed rule omitted while
+keeping the other rules enabled. The report gives bank bytes and PSG envelope asset bytes. An omitted or empty array leaves
+assembly behavior unchanged.
+
 ### Studio vibrato gesture
 
 Studio writes a `noteVoicing` intent by allocated FM note ID and resolves its

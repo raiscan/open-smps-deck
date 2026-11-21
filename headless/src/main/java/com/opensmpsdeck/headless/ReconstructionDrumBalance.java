@@ -127,7 +127,7 @@ final class ReconstructionDrumBalance {
         var lanes = new LinkedHashMap<>(base.lanes());
         byLane.forEach((id, gains) -> lanes.put(id, lanes.get(id).withDrumGains(gains)));
         return new ReconstructionVoicing.Result(base.version(), lanes, base.fitWindows(), base.sustainWarning(),
-                base.voiceAssignments(), base.sourceInstruments());
+                base.voiceAssignments(), base.sourceInstruments(), base.lanePolicies());
     }
 
     private record Probe(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
