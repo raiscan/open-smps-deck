@@ -1103,12 +1103,23 @@ has no default pitch effect.
 Edit `variantId` using a catalogue variant ID. `gain` is a linear amplitude
 multiplier converted to native volume (0–4, subject to chip headroom).
 The optional `partGains` object multiplies that gain for specified source
-part IDs. Level calibration measures stereo RMS with the selected patches
-and MIDI velocities. A mapped bass stem is compared with the aligned mix
+part IDs. Lane-only level calibration measures gated K-weighted stereo power
+with the selected patches and MIDI velocities. A mapped bass stem is compared with the aligned mix
 after subtracting that stem. Other independently mapped tonal groups can
 be compared against the drum stem when the drum group has a dedicated
-reference. DAC samples keep their fitted playback level. Peak checks gate
-volume boosts.
+reference. Peak checks gate volume boosts.
+
+A fresh voicing balances the rendered DAC and PSG3 percussion against the
+rendered tonal parts when both groups have independent stem mappings. The
+source target sums only the unique mapped stems of playable tonal parts.
+The fit uses 400 ms stereo K-weighted blocks on a 100 ms hop, with the
+BS.1770 absolute and relative gates to ignore quiet windows. It applies a
+common kit correction when the balance differs by more than 1 LU, rounds
+PSG3 noise to its 2 dB volume steps, and
+checks the rendered result after scaling the DAC's unsigned 8-bit samples.
+The shared tonal instrument gains and PSG spill settings stay intact.
+Retained voicings keep their saved drum gains. Move a saved voicing aside to
+fit a fresh kit balance.
 `articulation.gate` is the fraction of the allocated duration held before
 key-off. FM `minimumReleaseRate` floors the four operator RR nibbles (0
 preserves the patch). `effects.detune` is a signed frequency offset.
