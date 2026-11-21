@@ -1,0 +1,7 @@
+# Shared scoring and CPU adapter dependencies. Install inference packages separately.
+mir_eval==0.8.2
+numpy>=1.26
+pretty-midi>=0.2.10
+PyYAML>=6.0
+scipy>=1.11
+soundfile>=0.13
