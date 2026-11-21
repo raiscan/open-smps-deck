@@ -102,7 +102,7 @@ final class ReconstructionRhythmAudio {
         return new Frame(energy, chords ? chroma(audio, center) : null);
     }
 
-    private static double[] chroma(ReferenceAudio audio, double center) {
+    static double[] chroma(ReferenceAudio audio, double center) {
         double[] real = new double[FFT_SIZE], imaginary = new double[FFT_SIZE];
         for (int i = 0; i < FFT_SIZE; i++) {
             int source = (int) Math.round((center + (i - FFT_SIZE / 2.0) / RATE) * audio.sampleRate());

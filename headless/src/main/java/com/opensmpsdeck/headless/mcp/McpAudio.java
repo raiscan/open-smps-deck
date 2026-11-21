@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.opensmpsdeck.headless.RenderComparison;
 import com.opensmpsdeck.headless.ReconstructionView;
 import com.opensmpsdeck.headless.ReconstructionStages;
+import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
@@ -39,10 +40,13 @@ final class McpAudio {
         var reference = McpPaths.input(string(args, "reference"));
         var work = McpPaths.directory(string(args, "workDir"));
         var output = McpPaths.output(work, string(args, "output"));
-        for (String file : List.of("score.json", "report.json", ReconstructionStages.STEADY_REFERENCE))
+        for (String file : List.of("score.json", "report.json", "structure.json", ReconstructionSections.FILE, ReconstructionStages.STEADY_REFERENCE))
             McpPaths.managed(work, file);
-        return object(RenderComparison.run(work, render, reference, output, args.get("start").getAsDouble(),
-                args.get("end").getAsDouble(), args.has("time") ? string(args, "time") : "source",
+        String time = args.has("time") ? string(args, "time") : "source";
+        var bounds = ReconstructionSections.bounds(work, args.has("section") ? string(args, "section") : null,
+                args.has("start") ? args.get("start").getAsDouble() : null,
+                args.has("end") ? args.get("end").getAsDouble() : null, time);
+        return object(RenderComparison.run(work, render, reference, output, bounds[0], bounds[1], time,
                 args.has("referenceOffset") ? args.get("referenceOffset").getAsDouble() : null));
     }
 

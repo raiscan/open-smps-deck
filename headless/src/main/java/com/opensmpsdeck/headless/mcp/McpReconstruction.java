@@ -7,6 +7,7 @@ import com.opensmpsdeck.headless.ReconstructionAudition;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionEditCommand;
 import com.opensmpsdeck.headless.ReconstructionStages;
+import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.ReconstructionTrace;
 
 import java.io.IOException;
@@ -54,7 +55,7 @@ final class McpReconstruction {
             field("transcriberDevice", "string", "Device passed to the selected transcriber, default auto").optional());
 
     private static final List<String> FILES = List.of("score.json", "structure.json", "roles.json", "allocation.json",
-            "voicing.json", "roleplan.json", "manifest.json", ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
+            "voicing.json", "roleplan.json", "manifest.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE, ReconstructionEditCommand.RESULTS, "arrangement.smps.json", "arrangement.smps.zip", "render.wav", "report.json", ReconstructionStages.STEADY_REFERENCE);
 
     private McpReconstruction() {}
 
@@ -116,6 +117,8 @@ final class McpReconstruction {
             if (Files.isRegularFile(path)) files.put(file, path.toString());
         }
         var result = object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
+        var issues = ReconstructionSections.anchorIssues(work);
+        if (!issues.isEmpty()) result.add("sectionIssues", McpJson.JSON.toJsonTree(issues));
         Path edits = work.resolve(ReconstructionEditCommand.RESULTS);
         if (Files.isRegularFile(edits)) result.add("editResults", read(edits).getAsJsonObject().get("stages"));
         if (command.equals("roles") || !single && (!resume || List.of("transcribe", "structure", "roles").contains(string(args, "from")))) {
@@ -148,6 +151,14 @@ final class McpReconstruction {
         var response = object(result);
         if (rmsJson != null) response.addProperty("rmsJson", rmsJson.toString());
         return response;
+    }
+
+    static JsonObject sections(JsonObject args) throws IOException {
+        var work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", ReconstructionSections.FILE, ReconstructionSections.LOCK))
+            McpPaths.managed(work, file);
+        return object(ReconstructionSections.run(work, args.has("action") ? string(args, "action") : "list",
+                args.get("entries")));
     }
 
     static JsonObject edit(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
@@ -210,7 +221,10 @@ final class McpReconstruction {
         if (write) {
             McpPaths.managed(work, "score.json");
             if (path.getFileName().toString().equals("voicing.json")) McpPaths.managed(work, "allocation.json");
-            if (path.getFileName().toString().equals("roleplan.json")) McpPaths.managed(work, "structure.json");
+            if (path.getFileName().toString().equals("roleplan.json")) {
+                McpPaths.managed(work, "structure.json");
+                McpPaths.managed(work, ReconstructionSections.FILE);
+            }
             JsonElement value = args.get("value");
             if (!selection.isEmpty()) {
                 var tree = read(path);

@@ -33,19 +33,23 @@ final class EvidencePlot {
     private final Plot geometry;
     private final BufferedImage image;
     private final Graphics2D g;
+    private final List<ReconstructionSections.Section> bands;
 
     /** Which lanes the chip panel plays: the full mix, or the solo set from --lanes. */
     String renderLabel = "Full mix";
 
-    EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes, boolean levels, boolean drums) {
+    EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes, boolean levels, boolean drums,
+                 List<ReconstructionSections.Section> bands) {
         this.span = span;
         this.lanes = lanes;
+        this.bands = bands;
         this.minPitch = minPitch;
         this.maxPitch = maxPitch;
         int pitchHeight = Math.max(186, (maxPitch - minPitch + 1) * 14);
-        Integer renderTop = render ? TOP + pitchHeight + 39 + (levels ? LEVEL_HEIGHT : 0) : null;
-        int laneTop = (render ? renderTop : TOP) + pitchHeight + 44 + (levels ? LEVEL_HEIGHT : 0);
-        geometry = new Plot(LEFT, width - LEFT - RIGHT, TOP, renderTop, pitchHeight, laneTop);
+        int sourceTop = TOP + (bands.isEmpty() ? 0 : 63);
+        Integer renderTop = render ? sourceTop + pitchHeight + 39 + (levels ? LEVEL_HEIGHT : 0) : null;
+        int laneTop = (render ? renderTop : sourceTop) + pitchHeight + 44 + (levels ? LEVEL_HEIGHT : 0);
+        geometry = new Plot(LEFT, width - LEFT - RIGHT, sourceTop, renderTop, pitchHeight, laneTop);
         image = new BufferedImage(width, laneTop + (lanes.size() + (drums ? 2 : 0)) * ROW + 66, BufferedImage.TYPE_INT_RGB);
         g = image.createGraphics();
     }
@@ -64,29 +68,30 @@ final class EvidencePlot {
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             text("Reconstruction evidence", LEFT, 29, INK, Font.BOLD, 22);
             key();
+            drawSections();
             String analysis = emphasize ? "  ·  Harmonic sum" : "";
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
             String scale = levels == null ? "Top 30 dB" + analysis : levelLabel(levels.sourcePeakDbfs(), levels.shared());
             int scaleWidth = g.getFontMetrics().stringWidth(scale);
             int reserve = levels == null ? 210 : scaleWidth + 18;
             String sourceLabel = fit("Source  ·  " + source + (levels == null ? "" : analysis), geometry.width() - reserve);
-            text(sourceLabel, LEFT, TOP - 10, INK, Font.BOLD, 14);
+            text(sourceLabel, LEFT, geometry.sourceTop() - 10, INK, Font.BOLD, 14);
             if (target != null) {
                 String label = "Harmonics of " + target.pitchName() + " (" + target.label() + ")";
                 int width = g.getFontMetrics().stringWidth(label);
                 text(label, LEFT + geometry.width() - width, 28, INK, Font.BOLD, 14);
             }
             var metrics = g.getFontMetrics();
-            text(scale, LEFT + geometry.width() - metrics.stringWidth(scale), TOP - 10, INK, Font.PLAIN, 14);
+            text(scale, LEFT + geometry.width() - metrics.stringWidth(scale), geometry.sourceTop() - 10, INK, Font.PLAIN, 14);
 
             var ticks = ticks();
             boolean shared = levels != null && levels.shared() && render != null;
             double ceiling = shared ? Math.max(audio.peak(), render.peak()) : audio.peak();
-            spectrogram(audio.image(ceiling), TOP, ticks);
-            drawHarmonics(TOP, target, harmonics, guides);
+            spectrogram(audio.image(ceiling), geometry.sourceTop(), ticks);
+            drawHarmonics(geometry.sourceTop(), target, harmonics, guides);
             drawOverlays(notes);
-            drawBends(TOP, bends, render == null ? null : false);
-            if (sourceLevels != null) drawLevels(TOP, sourceLevels);
+            drawBends(geometry.sourceTop(), bends, render == null ? null : false);
+            if (sourceLevels != null) drawLevels(geometry.sourceTop(), sourceLevels);
             if (render != null) {
                 int top = geometry.renderTop();
                 String label = "Chip render  ·  " + renderLabel + "  ·  "
@@ -155,13 +160,13 @@ final class EvidencePlot {
     }
 
     private void drawOverlays(List<DrawnNote> notes) {
-        g.setClip(LEFT, TOP, geometry.width(), geometry.pitchHeight());
+        g.setClip(LEFT, geometry.sourceTop(), geometry.width(), geometry.pitchHeight());
         for (Layer layer : Layer.values()) {
             for (var note : notes) {
                 if (note.layer() != layer || note.pitch() < minPitch || note.pitch() > maxPitch) continue;
                 int from = x(span.start(note.timing())), to = x(span.end(note.timing()));
                 int width = Math.max(1, to - from);
-                int y = y(note.pitch(), TOP);
+                int y = y(note.pitch(), geometry.sourceTop());
                 if (layer == Layer.lane) {
                     g.setColor(laneColor(note.lane()));
                     g.fillRect(from, y - 1, width, 3);
@@ -183,7 +188,7 @@ final class EvidencePlot {
         for (var note : notes) {
             if (note.pitch() < minPitch || note.pitch() > maxPitch || labeled.contains(note.id())) continue;
             int from = x(span.start(note.timing())), to = x(span.end(note.timing()));
-            int y = y(note.pitch(), TOP);
+            int y = y(note.pitch(), geometry.sourceTop());
             g.setFont(new Font(Font.MONOSPACED, Font.BOLD, 10));
             int labelWidth = g.getFontMetrics().stringWidth(note.label());
             if (to - from < labelWidth + 14) continue;
@@ -403,6 +408,32 @@ final class EvidencePlot {
             int size = g.getFontMetrics().stringWidth(label);
             text(label, Math.clamp(x(time) - size / 2, LEFT, LEFT + geometry.width() - size),
                     y, INK, Font.PLAIN, 11);
+        }
+    }
+
+    private void drawSections() {
+        if (bands.isEmpty()) return;
+        var colors = List.of(new Color(0xd7e8fa), new Color(0xd9eee3), new Color(0xf7e9cb));
+        for (var level : ReconstructionSections.Level.values()) {
+            int row = level.ordinal();
+            int top = TOP - 20 + row * 20;
+            text(level.name(), 12, top + 13, INK, Font.BOLD, 11);
+            for (var band : bands) {
+                if (band.level() != level) continue;
+                boolean project = span.base() == ReconstructionTimeMap.TimeBase.project;
+                double start = project ? band.projectStart() : band.sourceStart();
+                double end = project ? band.projectEnd() : band.sourceEnd();
+                if (end <= span.start() || start >= span.end()) continue;
+                int left = x(Math.max(start, span.start()));
+                int right = x(Math.min(end, span.end()));
+                if (right <= left) continue;
+                Color color = colors.get(row);
+                g.setColor(band.author() == ReconstructionSections.Author.automatic ? color : color.darker());
+                g.fillRect(left, top, Math.max(1, right - left - 1), 17);
+                g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
+                if (right - left > g.getFontMetrics().stringWidth(band.label()) + 7)
+                    text(band.label(), left + 4, top + 13, INK, Font.BOLD, 11);
+            }
         }
     }
 

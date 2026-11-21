@@ -135,7 +135,7 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit
+            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
@@ -283,6 +283,42 @@ def smoke(jar, root):
                     samples.byteswap()
                 rms.append(math.sqrt(sum(sample * sample for sample in samples) / len(samples)))
             assert math.isclose(*rms, abs_tol=1), rms
+        proposed = rpc.call("reconstruct_sections", workDir=work)
+        assert proposed["sections"] == proposed["automatic"] and proposed["sections"]
+        span = {"id": "chorus-1", "name": "Chorus", "level": "section", "author": "human",
+                "reason": "Synthetic chorus", "sourceStart": 0.25, "sourceEnd": 0.75}
+        form = rpc.call("reconstruct_sections", workDir=work, action="add", entries=[span])
+        authored, = [row for row in form["sections"] if row["id"] == span["id"]]
+        assert authored["author"] == "human" and authored["sourceStart"] == 0.25
+        assert authored["startBar"] > 1 and form["automatic"] == proposed["automatic"]
+        assert rpc.call("artifact_read", workDir=work, artifact="sections")["value"]["entries"][0]["reason"] == span["reason"]
+        by_section = rpc.request("tools/call", name="reconstruct_view", arguments={
+            "workDir": str(work), "section": "chorus-1", "output": "section.png", "width": 640,
+        })
+        assert not by_section["isError"], by_section
+        assert by_section["structuredContent"]["sourceStart"] == 0.25
+        pair = rpc.call("render_compare", render=full, reference=inputs["wav"], workDir=work,
+                        output=work / "section.wav", section="chorus-1")
+        assert pair["splitSeconds"] == 0.5
+        scoped = {"id": "scoped", "reason": "Synthetic passage", "op": "setRole", "part": 0,
+                  "span": {"section": "chorus-1"}, "role": "melody"}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=scoped)
+        assert preview["notes"] and all(0.25 <= note["sourceStart"] < 0.75 for note in preview["notes"])
+        period = dict(span, id="answer-period", name="Answer", level="period")
+        rpc.call("reconstruct_sections", workDir=work, action="add", entries=[period])
+        rpc.call("artifact_write", workDir=work, artifact="roleplan",
+                 value={"version": 1, "rules": [{"section": "answer-period", "part": 0, "role": "melody"}]})
+        report = rpc.call("reconstruct_stage", workDir=work, stage="roles")
+        assert report["rolePlanTimes"][0]["sourceEnd"] == 0.75
+        (work / "roleplan.json").unlink()
+        changed = {"id": "chorus-1", "author": "agent", "reason": "Correct label", "name": "Refrain"}
+        form = rpc.call("reconstruct_sections", workDir=work, action="rename", entries=[changed])
+        assert any(row["label"] == "Refrain" and row["author"] == "agent" for row in form["sections"])
+        del changed["name"]
+        form = rpc.call("reconstruct_sections", workDir=work, action="remove", entries=[changed])
+        assert all(row["id"] != "chorus-1" for row in form["sections"])
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=scoped)
+        assert preview["outcomes"][0]["status"] == "invalid"
         assert [n["id"] for n in rpc.call("notes_list", project=project, openOnly=True)["notes"]] == [note]
         rpc.call("notes_resolve", project=project, id=note, reply="Raised the melody gain.", author="Agent")
         assert rpc.call("notes_list", project=project, openOnly=True)["notes"] == []

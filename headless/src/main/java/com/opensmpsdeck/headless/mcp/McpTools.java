@@ -37,6 +37,7 @@ final class McpTools {
     private static final Field OUTPUT = field("output", "string", "New WAV path relative to or inside the work/project directory");
     private static final Field SOURCE_START = field("start", "number", "Inclusive start in the selected clock (default source)");
     private static final Field SOURCE_END = field("end", "number", "Exclusive end in the selected clock (default source)");
+    private static final Field SECTION = field("section", "string", "Effective section, period or phrase ID or unique name").optional();
     private static final Field START = field("start", "number", "Inclusive start in project seconds, rounded to 60 Hz");
     private static final Field END = field("end", "number", "Exclusive end in project seconds, rounded to 60 Hz");
     private static final Field AUTHOR = field("author", "string", "Review author display name");
@@ -44,7 +45,7 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest", "edits", "edit-results"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "manifest", "edits", "edit-results", "sections"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
@@ -69,8 +70,8 @@ final class McpTools {
                     field("output", "string", "Save inside the work directory instead of returning inline").optional()),
             imageTool("reconstruct_view", "Save a time-aligned PNG of source audio, note fates, and lane gates.",
                     (args, progress) -> McpReconstructionView.view(args), WORK,
-                    field("start", "number", "Inclusive start in the selected time base"),
-                    field("end", "number", "Exclusive end in the selected time base"),
+                    SOURCE_START.optional(), SOURCE_END.optional(), SECTION,
+                    field("sections", "boolean", "Show musical section, period and phrase bands").optional(),
                     field("output", "string", "New PNG path relative to or inside the work directory"),
                     choice("time", "Time base for the range (default source)", "source", "project").optional(),
                     field("stem", "integer", "Zero-based part ID of a mapped stem").optional(),
@@ -92,6 +93,11 @@ final class McpTools {
                     field("db", "boolean", "Show per-panel peak spectral dBFS").optional(),
                     choice("pitchPreset", "Use the General MIDI percussion range (35–81)", "drums").optional(),
                     field("width", "integer", "PNG width in pixels (640–2400, default 1440)").optional()),
+            tool("reconstruct_sections", "List musical form or apply an atomic batch to the human/agent section journal.",
+                    (args, progress) -> McpReconstruction.sections(args), WORK,
+                    choice("action", "Section operation (default list)", "list", "add", "set", "remove", "rename").optional(),
+                    field("entries", object(Map.of("type", "array", "items", Map.of("type", "object"))),
+                            "Changes with id, author and reason. Add/set also give level, name, sourceStart and sourceEnd. Rename gives name. Remove requires only id, author and reason; set can include removed:true.").optional()),
             tool("reconstruct_edit", "Add, list or remove persistent musical intents. Optionally rebuild and compare note fates.",
                     McpReconstruction::edit, WORK,
                     choice("action", "Edit command", "add", "list", "remove"),
@@ -145,7 +151,7 @@ final class McpTools {
                     lanes("solo", "If supplied, keep only these lanes").optional(),
                     lanes("mute", "Silence these lanes after applying solo").optional()),
             tool("render_compare", "Concatenate a level-matched rendered excerpt and aligned reference excerpt, in that order. Maximum 60 seconds per side.",
-                    (args, progress) -> McpAudio.compare(args), WORK, OUTPUT, SOURCE_START, SOURCE_END,
+                    (args, progress) -> McpAudio.compare(args), WORK, OUTPUT, SOURCE_START.optional(), SOURCE_END.optional(), SECTION,
                     path("render", "Rendered WAV"), path("reference", "Reference WAV"),
                     choice("time", "Time base for bounds (default source)", "source", "project").optional(),
                     field("referenceOffset", "number", "Project time at which a project-aligned reference begins").optional()),

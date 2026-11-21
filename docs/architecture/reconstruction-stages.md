@@ -45,6 +45,67 @@ Invalid artifacts return exit code 2 with the artifact and failing field or
 decision. Input paths and artifacts may contain private material. Keep work
 directories outside public checkouts.
 
+## Musical sections
+
+`reconstruct sections WORK_DIR` proposes a source-time hierarchy on demand.
+It combines MIDI and mix chroma, aligned repeat matches, lead releases and
+rests, harmonic arrivals, and texture changes from note activity and mapped
+stem levels. The bar grid constrains the cuts, with strong evidence allowing
+half-bar cuts. Phrases usually span two to four bars. Periods group two or
+more phrases. Similar passages reuse a letter, with a prime for a variant.
+Boundary confidence reflects evidence strength. It is a heuristic score.
+
+The result has `automatic` and effective `sections` arrays. Each span has a
+level, ID, label, author, reason, time in both clocks, one-based fractional
+bar positions, start/end confidence, and a containing parent ID when
+available. All ranges include the start and exclude the end. Use IDs or
+unique names as selectors. Reused labels can be ambiguous.
+
+```sh
+java -jar "$jar" reconstruct sections song-work
+java -jar "$jar" reconstruct sections add song-work \
+  '{"id":"chorus-1","level":"section","name":"Chorus 1","sourceStart":18,"sourceEnd":34,"author":"human","reason":"Lead hook enters"}'
+java -jar "$jar" reconstruct sections rename song-work \
+  '{"id":"chorus-1","name":"Refrain","author":"agent","reason":"Match score labels"}'
+java -jar "$jar" reconstruct view song-work --section chorus-1 excerpt.png
+java -jar "$jar" render-compare song-work --section chorus-1 comparison.wav
+```
+
+`add` requires a new ID. `set` accepts the same fields and replaces an
+existing ID's span or creates one. To split, send a `set` array containing
+the shortened span and the new span. To merge, extend one span in a `set`
+array and include `{"id":"OTHER_ID","removed":true,"author":"human","reason":"Merged"}`.
+`remove` takes `id`, `author`, and `reason` and records a deletion so the
+proposal cannot immediately restore the removed span. All four commands
+accept a JSON object or an atomic array. Authors are `human` or `agent`.
+Authored spans at the same level cannot overlap. Intersecting authored
+parent and child spans require full containment.
+
+`sections.json` stores only authored entries and deletions, with source
+seconds and fractional bar anchors. Reruns retain source times and report
+anchors that move by more than a quarter bar or fall outside the new
+duration. Out-of-range entries remain in the journal for repair.
+The proposal is an annotation over the existing stages. A stage uses it
+only when an explicit roleplan or edit selector requests it.
+
+- Roleplan rules accept `"section":"chorus-1"` for a section or period and
+  intersect it with any other scope. Existing `sections` arrays still refer
+  to the structure stage IDs.
+- Span edits accept `"span":{"section":"chorus-1"}` wherever a numeric
+  span is accepted. Resolve the selector on each run of the consuming
+  stage. After moving a designation, resume from `roles` for role edits
+  or `transcribe` for `setVelocity`.
+- View and render comparison accept `--section NAME` in place of explicit
+  start/end bounds. Existing 60-second export limits apply. Use
+  `view --sections --start S --end S` for bands in a custom range.
+  Views with `sections.json` show bands automatically.
+- MCP `reconstruct_sections` takes `workDir`, optional `action` (default
+  `list`), and an `entries` array for mutations. MCP `reconstruct_view`
+  and `render_compare` take `section` instead of `start` and `end`. View
+  also takes `sections: true` to show bands with explicit bounds.
+- Java clients use `ReconstructionSections.load(Path)` for the effective
+  hierarchy, proposal, and diagnostics.
+
 ## Trace and reproducible inputs
 
 Use `reconstruct trace WORK_DIR --by-onset --start S --end S --part N`

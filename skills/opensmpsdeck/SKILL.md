@@ -328,6 +328,23 @@ For native F0 vibrato, `delay`, `rate` and `steps` count sequencer ticks
 increment. When `rate` divides `steps`, the period is `2 × steps` ticks,
 with peak-to-peak excursion `abs(delta) × steps / rate` in native units.
 
+## Name and reuse musical passages
+
+Use `reconstruct sections WORK_DIR` or MCP `reconstruct_sections` to obtain
+source/project times, bar anchors, boundary confidence, and stable IDs for
+proposed sections, periods and phrases. Inspect the bands with
+`view --sections` or select a span via `view --section ID` and
+`render-compare --section ID` (MCP `section`). Use IDs when letter labels
+repeat. To save a designation, use `sections add|set|remove|rename WORK_DIR
+JSON` or MCP `reconstruct_sections` with `action` and an `entries` array.
+Include an `author` (`human` or `agent`) and `reason`. Add/set also take
+`id`, `level`, `name`, `sourceStart` and `sourceEnd`. A set batch can
+replace a span with two spans or extend one and mark the other `removed:true`.
+The journal survives reruns. Review anchor issues if the source grid changes.
+Use `"section":"chorus-1"` in a roleplan rule or
+`"span":{"section":"chorus-1"}` for an edit, then resume the consuming stage.
+See the [musical sections guide](../../docs/architecture/reconstruction-stages.md#musical-sections).
+
 ## Studio review
 
 1. Open the same `arrangement.smps.json` in Studio. Attach the mix with

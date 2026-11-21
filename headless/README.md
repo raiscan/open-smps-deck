@@ -600,6 +600,18 @@ The score embeds the imported notes and provenance, including file hashes,
 and the report includes per-part provenance. `run --from transcribe`
 reapplies the saved notes without invoking the external command.
 
+## Musical sections
+
+List proposed phrases, periods and sections with
+`reconstruct sections WORK_DIR`. Use `reconstruct sections add|set|remove|rename
+WORK_DIR JSON` to maintain the separate `sections.json` journal. Select a
+span by ID or unique name with `view --section NAME` or
+`render-compare --section NAME`. Use `view --sections` to show the bands
+with explicit time bounds. Roleplan rules accept a singular `section`
+field and edit spans accept `{"section":"chorus-1"}`. See the
+[musical sections guide](../docs/architecture/reconstruction-stages.md#musical-sections)
+for payloads, split and merge, and MCP equivalents.
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then

@@ -275,7 +275,7 @@ final class ReconstructionChecks {
             var rule = plan.rules().get(i);
             String at = "roleplan.json.rules[" + i + "]";
             require(rule.sections() != null || rule.bars() != null || rule.startSeconds() != null
-                    || rule.endSeconds() != null, at, "expected sections, bars or a time bound");
+                    || rule.endSeconds() != null || rule.section() != null, at, "expected sections, bars or a time bound");
             double duration = plan.timeBase(rule, timeline) == ReconstructionTimeMap.TimeBase.source
                     ? timeline.sourceDuration() : timeline.projectDuration();
             if (rule.sections() != null) {

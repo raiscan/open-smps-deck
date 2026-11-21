@@ -181,7 +181,7 @@ public final class ReconstructionEditCommand {
         var range = edit.explicitSpan();
         if (range != null) range = new ReconstructionEdits.Span(edit.toSource(range.start(), timeline),
                 edit.toSource(range.end(), timeline));
-        if (edit.span() != null) return range;
+        if (edit.span() != null && range != null) return range;
         var ids = new java.util.LinkedHashSet<>(edit.noteIds());
         if (edit.kind() == ReconstructionEdits.Kind.insertNote) ids.add(edit.insertedId());
         for (var outcome : journal.all())

@@ -307,7 +307,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
-        out.println("       render-compare WORK_DIR --start S --end S [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");
+        out.println("       render-compare WORK_DIR (--start S --end S | --section NAME) [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
         ReconstructionCli.usage(out);
         out.println("       mcp  (stdio Model Context Protocol server)");
