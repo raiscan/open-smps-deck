@@ -35,7 +35,16 @@ public final class ReconstructionView {
     public record Options(double start, double end, String time, Integer stem, Path wav, boolean render,
                           Integer pitchMin, Integer pitchMax, List<String> lanes, List<Integer> parts,
                           String harmonics, boolean harmonicSum, int width, Path notes, List<String> harmonicsAt,
-                          boolean ridges, boolean sharedDb, boolean db, String pitchPreset, int ridgeCount) {
+                          boolean ridges, boolean sharedDb, boolean db, String pitchPreset, int ridgeCount,
+                          boolean colorByVoice) {
+        public Options(double start, double end, String time, Integer stem, Path wav, boolean render,
+                       Integer pitchMin, Integer pitchMax, List<String> lanes, List<Integer> parts,
+                       String harmonics, boolean harmonicSum, int width, Path notes, List<String> harmonicsAt,
+                       boolean ridges, boolean sharedDb, boolean db, String pitchPreset, int ridgeCount) {
+            this(start, end, time, stem, wav, render, pitchMin, pitchMax, lanes, parts, harmonics, harmonicSum,
+                    width, notes, harmonicsAt, ridges, sharedDb, db, pitchPreset, ridgeCount, false);
+        }
+
         public Options {
             if (!(start >= 0 && end - start >= .001 - 1e-12 && end - start <= MAX_SPAN))
                 throw new IllegalArgumentException("Expected a nonnegative span of 0.001–60 seconds");
@@ -86,6 +95,8 @@ public final class ReconstructionView {
     record Source(Path path, String label, TimeBase base) {}
     record Plot(int left, int width, int sourceTop, Integer renderTop, int pitchHeight, int laneTop) {}
 
+    public record VoiceColor(String name, String color) {}
+
     public record Legend(String path, String source, String time, double start, double end,
                          double sourceStart, double sourceEnd, double projectStart, double projectEnd,
                          int pitchMin, int pitchMax,
@@ -93,7 +104,8 @@ public final class ReconstructionView {
                          List<Harmonic> harmonics, List<EvidenceNotes.PatchChange> patchChanges,
                          List<HarmonicGuide> harmonicsAt, Levels levels, String ridgesPath,
                          List<EvidenceBends.Curve> bends, List<EvidenceTrajectories.Track> sourceLevels,
-                         List<EvidenceTrajectories.Track> renderLevels, DrumEvidence.Review drums) {}
+                         List<EvidenceTrajectories.Track> renderLevels, DrumEvidence.Review drums,
+                         Map<String, VoiceColor> voiceColors, Map<String, String> noteVoices) {}
     public record Result(Legend legend, byte[] png) {}
 
     private ReconstructionView() {}
@@ -102,7 +114,7 @@ public final class ReconstructionView {
         if (args.length < 2) throw new IllegalArgumentException("Expected view WORK_DIR --start S --end S [options] OUT.png");
         var switches = Set.of("--render", "--harmonic-sum", "--ridges", "--shared-db", "--db", "--force", "--sections");
         var keys = Set.of("--start", "--end", "--time", "--stem", "--wav", "--pitch-min", "--pitch-max",
-                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset", "--ridge-count", "--section");
+                "--lanes", "--parts", "--harmonics", "--width", "--notes", "--harmonics-at", "--pitch-preset", "--ridge-count", "--section", "--color-by");
         var flags = new HashMap<String, String>();
         var harmonicsAt = new ArrayList<String>();
         for (int i = 1; i < args.length - 1; i++) {
@@ -121,6 +133,9 @@ public final class ReconstructionView {
         String time = flags.getOrDefault("--time", "source");
         double[] bounds = ReconstructionSections.bounds(work, flags.get("--section"),
                 decimal(flags, "--start"), decimal(flags, "--end"), time);
+        String colorBy = flags.getOrDefault("--color-by", "lane");
+        if (!Set.of("lane", "voice").contains(colorBy))
+            throw new IllegalArgumentException("--color-by expects lane or voice");
         var options = new Options(bounds[0], bounds[1], time, integer(flags, "--stem"),
                 flags.containsKey("--wav") ? Path.of(flags.get("--wav")) : null, flags.containsKey("--render"),
                 integer(flags, "--pitch-min"), integer(flags, "--pitch-max"), csv(flags.get("--lanes")),
@@ -129,7 +144,7 @@ public final class ReconstructionView {
                 flags.containsKey("--notes") ? Path.of(flags.get("--notes")) : null, harmonicsAt,
                 flags.containsKey("--ridges") || flags.containsKey("--ridge-count"),
                 flags.containsKey("--shared-db"), flags.containsKey("--db"),
-                flags.get("--pitch-preset"), Integer.parseInt(flags.getOrDefault("--ridge-count", "3")));
+                flags.get("--pitch-preset"), Integer.parseInt(flags.getOrDefault("--ridge-count", "3")), colorBy.equals("voice"));
         var result = run(work, options, Path.of(args[args.length - 1]),
                 flags.containsKey("--force"), flags.containsKey("--section") || flags.containsKey("--sections"));
         out.println(JSON.toJson(legendJson(result.legend())));
@@ -137,7 +152,7 @@ public final class ReconstructionView {
 
     public static com.google.gson.JsonObject legendJson(Legend legend) {
         var json = JSON.toJsonTree(legend).getAsJsonObject();
-        for (String key : List.of("harmonicsAt", "levels", "ridgesPath", "bends", "sourceLevels", "renderLevels", "drums"))
+        for (String key : List.of("harmonicsAt", "levels", "ridgesPath", "bends", "sourceLevels", "renderLevels", "drums", "voiceColors", "noteVoices"))
             if (json.get(key).isJsonNull()) json.remove(key);
         return json;
     }
@@ -251,8 +266,29 @@ public final class ReconstructionView {
         boolean trajectories = (target != null || !targets.isEmpty()) && (options.ridges || options.db);
         var bands = showSections || Files.exists(work.resolve(ReconstructionSections.FILE))
                 ? ReconstructionSections.load(work, score).sections() : List.<ReconstructionSections.Section>of();
+        var voiceColors = new java.util.TreeMap<String, VoiceColor>();
+        var noteVoices = new java.util.TreeMap<String, String>();
+        var noteColors = new HashMap<String, java.awt.Color>();
+        if (options.colorByVoice) {
+            var identities = new HashMap<String, ReconstructionVoicePlan.Identity>();
+            for (var row : rows.values()) {
+                if (row.voice() == null) continue;
+                identities.put(row.id(), row.voice());
+                for (var gate : row.voiced()) identities.put(gate.id(), row.voice());
+            }
+            for (var note : visible) {
+                var identity = identities.get(note.id());
+                if (identity == null) continue;
+                int hash = identity.id().hashCode() * 0x9E3779B9;
+                var color = java.awt.Color.getHSBColor((hash >>> 8) / 16777216f, .52f, .98f);
+                noteColors.put(note.id(), color);
+                noteVoices.put(note.id(), identity.id());
+                voiceColors.put(identity.id(), new VoiceColor(identity.name(),
+                        String.format(Locale.ROOT, "#%06x", color.getRGB() & 0xffffff)));
+            }
+        }
         var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes,
-                trajectories && options.db, drums != null, bands);
+                trajectories && options.db, drums != null, bands, noteColors);
         if (!options.lanes.isEmpty()) picture.renderLabel = "Solo " + String.join(", ", options.lanes);
         var sounding = lanes.stream().filter(lane -> visible.stream()
                 .anyMatch(note -> note.layer == Layer.lane && lane.equals(note.lane))).toList();
@@ -310,7 +346,8 @@ public final class ReconstructionView {
                 span.seconds(span.start, TimeBase.project), span.seconds(span.end, TimeBase.project), low, high, timeline.warped(), options.harmonicSum,
                 picture.geometry(), visible, harmonics, patchChanges, guides.isEmpty() ? null : guides, levels,
                 ridgeFile == null ? null : ridgeFile.toAbsolutePath().normalize().toString(),
-                bends.isEmpty() ? null : bends, options.db ? sourceTracks : null, options.db ? renderTracks : null, drums);
+                bends.isEmpty() ? null : bends, options.db ? sourceTracks : null, options.db ? renderTracks : null, drums,
+                options.colorByVoice ? voiceColors : null, options.colorByVoice ? noteVoices : null);
         return new Result(legend, png);
     }
 

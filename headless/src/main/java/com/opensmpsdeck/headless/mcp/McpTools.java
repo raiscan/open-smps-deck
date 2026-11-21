@@ -45,7 +45,7 @@ final class McpTools {
     private static final Field SELECTION = field("selection",
             object(Map.of("type", "array", "items", Map.of("type", "string"))),
             "Path within the artifact, as object keys or zero-based array indexes. Omit for the whole artifact").optional();
-    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "import", "manifest", "edits", "edit-results", "sections"};
+    private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "import", "manifest", "edits", "edit-results", "sections", "voices", "voice-edits"};
 
     private static final List<Tool> TOOLS = List.of(
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
@@ -83,6 +83,7 @@ final class McpTools {
                     choice("time", "Time base for the range (default source)", "source", "project").optional(),
                     field("stem", "integer", "Zero-based part ID of a mapped stem").optional(),
                     path("wav", "an aligned source-time WAV").optional(),
+                    choice("colorBy", "Color note overlays by lane (default) or voice", "lane", "voice").optional(),
                     field("render", "boolean", "Include a warmed chip render (solos `lanes` when given, else the full mix)").optional(),
                     field("pitchMin", "integer", "Lowest displayed MIDI pitch (inclusive)").optional(),
                     field("pitchMax", "integer", "Highest displayed MIDI pitch (inclusive)").optional(),
@@ -105,6 +106,11 @@ final class McpTools {
                     choice("action", "Section operation (default list)", "list", "add", "set", "remove", "rename").optional(),
                     field("entries", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Changes with id, author and reason. Add/set also give level, name, sourceStart and sourceEnd. Rename gives name. Remove requires only id, author and reason; set can include removed:true.").optional()),
+            tool("reconstruct_voices", "List identified voices or append an atomic batch of authored edits.",
+                    (args, progress) -> McpReconstruction.voices(args), WORK,
+                    choice("action", "Voice operation (default list)", "list", "create", "rename", "merge", "split", "move", "assign").optional(),
+                    field("entries", object(Map.of("type", "array", "items", Map.of("type", "object"))),
+                            "Edits with id, author and voiceId, plus action-specific fields. Resume from voices to rebuild.").optional()),
             tool("reconstruct_edit", "Add, list or remove persistent musical intents. Optionally rebuild and compare note fates.",
                     McpReconstruction::edit, WORK,
                     choice("action", "Edit command", "add", "list", "remove"),

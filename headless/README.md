@@ -631,6 +631,15 @@ The score embeds the imported notes and provenance, including file hashes,
 and the report includes per-part provenance. `run --from transcribe`
 reapplies the saved notes without invoking the external command.
 
+## Source voices
+
+Use `reconstruct voices WORK_DIR` to list identified instruments, or append
+a `create`, `rename`, `merge`, `split`, `move` or `assign` payload to the
+command. The journal is replayed by `reconstruct run --from voices WORK_DIR`.
+Assignments follow notes across lanes. Use `view --color-by voice` for the
+color overlay. See the [voices stage](../docs/architecture/reconstruction-stages.md#identify-and-assign-voices)
+for operation payloads, MCP, and the Java API.
+
 ## Musical sections
 
 List proposed phrases, periods and sections with

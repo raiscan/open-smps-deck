@@ -392,7 +392,7 @@ class ReconstructionEditsTest {
     }
 
     @Test void laneTypesRespectAffinityAndDoNotSpillWhenFull() {
-        var type = ReconstructionEdits.LaneType.PSG;
+        var type = ReconstructionLaneType.PSG;
         var pins = new java.util.LinkedHashMap<String, ReconstructionEdits.Pin>();
         var decisions = new ArrayList<ReconstructionRoles.Decision>();
         for (int i = 0; i < 4; i++) {
@@ -414,11 +414,11 @@ class ReconstructionEditsTest {
         assertTrue(notes.getLast().reason().contains("edit:psg"));
 
         assertNull(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true,
-                ReconstructionEdits.LaneType.NOISE, false));
+                ReconstructionLaneType.NOISE, false));
         assertTrue(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true, type, false)
                 .contains("cannot voice MIDI drums"));
         assertTrue(ReconstructionEdits.laneTypeIssue(note("hat", .1, .2, 42), true,
-                ReconstructionEdits.LaneType.FM, false).contains("FM percussion voicing"));
+                ReconstructionLaneType.FM, false).contains("FM percussion voicing"));
     }
 
     private static Note note(String id, double start, double end, int pitch) {

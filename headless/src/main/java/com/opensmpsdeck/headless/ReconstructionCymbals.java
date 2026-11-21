@@ -55,7 +55,7 @@ final class ReconstructionCymbals {
     }
 
     static boolean voiced(ReconstructionAllocation.Entry entry) {
-        return automatic(entry.reason()) || entry.laneType() == ReconstructionEdits.LaneType.NOISE
+        return automatic(entry.reason()) || entry.laneType() == ReconstructionLaneType.NOISE
                 && entry.role() == ReconstructionRoles.Role.drums && eligible(entry.note().pitch());
     }
 

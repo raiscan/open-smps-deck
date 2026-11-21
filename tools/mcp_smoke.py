@@ -136,7 +136,7 @@ def smoke(jar, root):
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections
+            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare
@@ -171,6 +171,35 @@ def smoke(jar, root):
         assert recipe["inputs"]["catalogue"] == inputs["catalogue"]
         import_run = rpc.call("reconstruct_run", **recipe, progress=True)
         assert Path(import_run["files"]["arrangement.smps.json"]).is_file()
+        voice_work = recipe["workDir"]
+        voice_list = rpc.call("reconstruct_voices", workDir=voice_work)
+        original_voice = next(voice for voice in voice_list["voices"] if voice["kind"] == "tonal")
+        voice_id = original_voice["id"]
+        note_id = original_voice["noteIds"][0]
+        form = rpc.call("reconstruct_voices", workDir=voice_work, action="split", entries=[{
+            "id": "split-voice", "author": "human", "voiceId": voice_id, "targetId": "answer",
+            "name": "Answer", "noteIds": [note_id],
+        }])
+        assert next(voice for voice in form["voices"] if voice["id"] == "answer")["noteIds"] == [note_id]
+        rpc.call("reconstruct_voices", workDir=voice_work, action="merge", entries=[{
+            "id": "merge-voice", "author": "human", "voiceId": "answer", "targetId": voice_id,
+        }])
+        rpc.call("reconstruct_voices", workDir=voice_work, action="rename", entries=[{
+            "id": "rename-voice", "author": "human", "voiceId": voice_id, "name": "Lead instrument 1",
+        }])
+        rpc.call("reconstruct_voices", workDir=voice_work, action="assign", entries=[{
+            "id": "assign-voice", "author": "agent", "voiceId": voice_id,
+            "assignment": {"laneType": "FM", "instrument": variant},
+        }])
+        rpc.call("reconstruct_run", workDir=voice_work, **{"from": "transcribe"})
+        voices = rpc.call("artifact_read", workDir=voice_work, artifact="voices")["value"]
+        assert not voices["issues"]
+        identified = next(voice for voice in voices["voices"] if voice["id"] == voice_id)
+        assert identified["name"] == "Lead instrument 1" and identified["assignment"]["instrument"] == variant
+        assignments = rpc.call("artifact_read", workDir=voice_work, artifact="voicing")["value"]["voiceAssignments"]
+        assert assignments and all(value["instrument"] == variant for value in assignments.values())
+        traced = rpc.call("reconstruct_trace", workDir=voice_work, lane="FM1")["notes"]
+        assert traced and traced[0]["voice"]["name"] == "Lead instrument 1"
         files = rpc.call("reconstruct_run", workDir=work, inputs=inputs, options={"seconds": 2}, progress=True)["files"]
         assert Path(files["manifest.json"]) == work / "manifest.json"
         manifest = rpc.call("artifact_read", workDir=work, artifact="manifest")["value"]
@@ -206,11 +235,12 @@ def smoke(jar, root):
                            for name, path in files.items()}
         view = rpc.request("tools/call", name="reconstruct_view", arguments={
             "workDir": str(work), "start": 0.25, "end": 0.75, "render": True,
-            "output": "evidence.png", "width": 800, "lanes": ["FM1"], "parts": [0],
+            "output": "evidence.png", "width": 800, "lanes": ["FM1"], "parts": [0], "colorBy": "voice",
         })
         assert not view["isError"], view
         legend = view["structuredContent"]
         assert legend["plot"]["renderTop"] is not None and legend["notes"], legend
+        assert voice_id in legend["voiceColors"] and legend["noteVoices"]
         assert all(note["lane"] == "FM1" and note["status"] and note["pitchName"]
                    for note in legend["notes"])
         png, body = view["content"]

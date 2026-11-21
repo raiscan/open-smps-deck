@@ -314,6 +314,28 @@ arrangement with saved clip anchors. Check `sustainProbe` and
 `voicingWarnings` in the assembly report for FM1 patch dips. Apply direct project and group edits after the final assembly,
 or work on a separate copy.
 
+## Review source voices before assigning chip instruments
+
+Use `reconstruct voices WORK_DIR` or MCP `reconstruct_voices {workDir}` to
+review names, note IDs, part and stem evidence, and confidence. Voices
+identify source instruments across musical roles. The proposal alone
+preserves the existing chip allocation and voicing.
+
+Use `voices WORK_DIR create|rename|merge|split|move|assign JSON` or MCP
+`reconstruct_voices {workDir, action, entries}`. Give each entry a unique
+`id`, `voiceId`, and `author: "human"` or `"agent"`. Move or split notes by
+`noteIds`, point `selectors`, or a half-open source-time `span` with filters.
+Assign with `assignment: {laneType: "FM", instrument: "VARIANT_ID"}` or
+`{laneType: "NOISE", instrument: "closed-hat"}`. Use `clear: true` to remove
+an assignment. See the [voices stage](../../docs/architecture/reconstruction-stages.md#identify-and-assign-voices)
+for all fields and instrument types.
+
+Resume from `voices` to apply the journal. Review `issues` for orphaned
+edits and trace for notes that could not be placed on the requested hardware.
+Use `view --color-by voice` or MCP `colorBy: "voice"` to follow a source
+instrument across lanes. Inspect `voiceAssignmentExtraClips` in the report
+when voices with different instruments share a lane.
+
 ## Audition a phrase
 
 1. Use `catalog_search` to find FM variant IDs. Compare the current variant

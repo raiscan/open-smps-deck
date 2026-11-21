@@ -40,7 +40,8 @@ final class McpReconstructionView {
                 args.has("harmonicsAt") ? args.getAsJsonArray("harmonicsAt").asList().stream()
                         .map(JsonElement::getAsString).toList() : List.of(),
                 flag(args, "ridges") || args.has("ridgeCount"), flag(args, "sharedDb"), flag(args, "db"),
-                args.has("pitchPreset") ? string(args, "pitchPreset") : null, args.has("ridgeCount") ? exactInteger(args.get("ridgeCount")) : 3);
+                args.has("pitchPreset") ? string(args, "pitchPreset") : null, args.has("ridgeCount") ? exactInteger(args.get("ridgeCount")) : 3,
+                args.has("colorBy") && string(args, "colorBy").equals("voice"));
         var result = ReconstructionView.run(work, options, output, args.has("section") || flag(args, "sections"));
         return new McpTools.Result(ReconstructionView.legendJson(result.legend()), result.png());
     }

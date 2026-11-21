@@ -21,7 +21,16 @@ final class ReconstructionVoicing {
     static final String EVIDENCE = "evidence";
 
     record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows,
-                  @Nullable String sustainWarning) {
+                  @Nullable String sustainWarning,
+                  @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments) {
+        Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning) {
+            this(version, lanes, fitWindows, sustainWarning, null);
+        }
+
+        Result withAssignments(Map<String, ReconstructionVoicePlan.Assignment> assignments) {
+            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments);
+        }
+
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows) {
             this(version, lanes, fitWindows, null);
         }
@@ -475,6 +484,17 @@ final class ReconstructionVoicing {
                 vibrato(copy.vibrato(), at + ".effects.copy.vibrato");
             }
         });
+        if (result.voiceAssignments() != null) {
+            var notes = new java.util.HashMap<String, ReconstructionAllocation.Entry>();
+            allocated.values().forEach(entries -> entries.forEach(entry -> notes.put(entry.note().id(), entry)));
+            result.voiceAssignments().forEach((id, assignment) -> {
+                var entry = notes.get(id);
+                String at = "voicing.json.voiceAssignments." + id;
+                require(entry != null && assignment.laneType().accepts(entry.lane(), entry.role() == Role.drums),
+                        at, "expected an allocated note on the assigned lane type");
+                assignment.validate(catalogue, at);
+            });
+        }
         return scopes;
     }
 

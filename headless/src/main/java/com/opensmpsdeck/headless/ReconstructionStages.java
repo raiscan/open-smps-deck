@@ -30,7 +30,7 @@ public final class ReconstructionStages {
     @interface Nullable {}
 
     enum Stage {
-        TRANSCRIBE, STRUCTURE, ROLES, ALLOCATE, VOICE, ASSEMBLE;
+        TRANSCRIBE, STRUCTURE, ROLES, VOICES, ALLOCATE, VOICE, ASSEMBLE;
 
         static Stage parse(String name) {
             try {
@@ -234,6 +234,8 @@ public final class ReconstructionStages {
         ReconstructionManifest.writeReplay(work, replay);
         var sectionFile = oldWork.resolve(ReconstructionSections.FILE);
         if (Files.exists(sectionFile)) Files.copy(sectionFile, work.resolve(ReconstructionSections.FILE));
+        var voiceJournal = oldWork.resolve(ReconstructionVoicePlan.JOURNAL);
+        if (Files.exists(voiceJournal)) Files.copy(voiceJournal, work.resolve(ReconstructionVoicePlan.JOURNAL));
         var edits = ReconstructionEdits.read(oldWork);
         if (!edits.isEmpty()) edits.write(work);
         var score = attach(transcribe(Path.of(inputs.midi()), Path.of(inputs.wav()),
@@ -288,6 +290,7 @@ public final class ReconstructionStages {
             progress.report(0, total, "Starting " + stageName(request.from));
             if (preserveReview) checkInputFiles(readScore(scoreFile).inputs);
         }
+        ReconstructionVoicePlan.Result voicePlan = null;
         for (var stage : Stage.values()) {
             if (stage.ordinal() < request.from.ordinal()) continue;
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
@@ -321,18 +324,27 @@ public final class ReconstructionStages {
                         ReconstructionArtifacts.write(rolesFile, roles);
                         ReconstructionManifest.recordRolePlan(work, rate);
                     }
+                    case VOICES -> {
+                        var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+                        ReconstructionChecks.roles(roles, score);
+                        voicePlan = ReconstructionVoicePlan.generate(work, score, roles);
+                        for (var issue : voicePlan.issues())
+                            out.printf("voice-edit:%s %s %s%n", issue.id(), issue.status(), issue.detail());
+                    }
                     case ALLOCATE -> {
                         var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                         ReconstructionChecks.roles(roles, score);
+                        if (voicePlan == null) voicePlan = ReconstructionVoicePlan.generate(work, score, roles);
+                        var laneTypes = voicePlan.laneTypes();
                         var savedAffinity = previousWork.equals(work) ? null : ReconstructionAllocation.Affinity.read(previousWork);
                         var seed = savedAffinity == null ? ReconstructionAllocation.lanes(previousAllocation) : savedAffinity.seed();
                         int frames = ReconstructionTimeMap.of(score).frames();
                         boolean stems = !score.inputs.stems.isEmpty();
                         var cymbalLevels = ReconstructionCymbals.measure(score);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels);
+                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes);
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(
-                                roles, score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels);
+                                roles, score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -356,6 +368,8 @@ public final class ReconstructionStages {
                                 : ReconstructionCli.fitVoicing(score, allocation, previousWork.equals(work) ? previous : null,
                                         request.lanes, request.refitLevels, previousAllocation, request.variant);
                         fitted = ReconstructionVoicing.withPercussionEvidence(fitted, allocation);
+                        if (voicePlan == null) voicePlan = ReconstructionVoicePlan.saved(work);
+                        if (voicePlan != null) fitted = fitted.withAssignments(voicePlan.assignments(allocation));
                         ReconstructionArtifacts.write(voicingFile, fitted);
                         if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
                         if (previous != null)

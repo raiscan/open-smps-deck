@@ -43,7 +43,12 @@ final class S3kReconstruction {
     record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                   List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends,
-                  List<VoicedGate> voicedGates) {}
+                  List<VoicedGate> voicedGates, int assignmentClipCost) {
+        Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
+               List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends, List<VoicedGate> voicedGates) {
+            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0);
+        }
+    }
     record VoicedGate(String id, String lane, int pitch, int startTick, int endTick) {}
 
     private record Event(MidiScore.Note note, int start, int end, int priority, String assetId, int volume) {}
@@ -56,6 +61,7 @@ final class S3kReconstruction {
         int detune;
         ReconstructionVoicing.PsgPercussion hatClock;
         int volumeFloor;
+        boolean assignedInstrument;
         ReconstructionVoicing.Vibrato vibrato;
         ReconstructionBendEncoding.Fit bend;
         boolean pitchedNoise;
@@ -258,6 +264,20 @@ final class S3kReconstruction {
                                    Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
                                    Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout)
             throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue,
+                matches, echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, layout, Map.of());
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout,
+                                   Map<String, ReconstructionVoicePlan.Assignment> assignments)
+            throws java.io.IOException {
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var gates = new ArrayList<VoicedGate>();
         var parts = indexParts(score.parts());
@@ -283,18 +303,24 @@ final class S3kReconstruction {
             var voice = voicing.get(lane);
             int start = entry.startTick();
             int end = entry.endTick();
+            String noteId = entry.note().id();
+            String origin = origins.getOrDefault(noteId, noteId);
+            var assignment = assignments.get(origin);
             if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
-                boolean cymbal = ReconstructionCymbals.voiced(entry);
-                boolean closedHat = cymbal && ReconstructionCymbals.closedHat(note.pitch());
-                int pitch = cymbal ? ReconstructionCymbals.PITCH : 81;
+                boolean decaying = assignment == null ? ReconstructionCymbals.voiced(entry)
+                        : !assignment.instrument().equals("fixed");
+                boolean closedHat = decaying && (assignment == null ? ReconstructionCymbals.closedHat(note.pitch())
+                        : assignment.instrument().equals("closed-hat"));
+                int pitch = decaying ? ReconstructionCymbals.PITCH : 81;
                 var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
                 int level = closedHat ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
-                int volume = cymbal ? level << 3 : volume(part, note);
-                var envelope = cymbal ? ReconstructionCymbals.envelope(note.pitch()) : null;
+                int volume = decaying ? level << 3 : volume(part, note);
+                var envelope = decaying ? ReconstructionCymbals.envelope(closedHat ? 42 : 46) : null;
                 String asset = envelope == null ? NOISE : envelope.id();
                 if (envelope != null) envelopes.putIfAbsent(asset, envelope);
                 if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
                 var placed = new Placement(new Event(pitched, start, end, 0, asset, volume));
+                placed.assignedInstrument = assignment != null;
                 if (closedHat) {
                     placed.detune = ReconstructionCymbals.detune(hatClock.hatAttackPeriod());
                     placed.hatClock = hatClock;
@@ -305,7 +331,9 @@ final class S3kReconstruction {
             }
             var choices = matches.getOrDefault(lane, Map.of());
             var fallback = choices.get(new ReconstructionVoices.Key(part.id(), part.drums() ? note.pitch() : null));
-            var choice = part.drums() ? fallback : choices.getOrDefault(ReconstructionVoices.Key.section(note), fallback);
+            var choice = assignment == null
+                    ? (part.drums() ? fallback : choices.getOrDefault(ReconstructionVoices.Key.section(note), fallback))
+                    : assignedChoice(catalogue, assignment);
             if (choice == null || choice.assetId() == null) {
                 reductions.add(new Reduction(note, Change.NO_MATCH, entry.note().id(), "no-playable-catalogue-match"));
                 continue;
@@ -329,7 +357,7 @@ final class S3kReconstruction {
                 var articulation = voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation();
                 String id = asset.id();
                 if (isFm) {
-                    byte[] patch = ReconstructionVoicing.patchBytes(asset, articulation);
+                    byte[] patch = assignment == null ? ReconstructionVoicing.patchBytes(asset, articulation) : asset.bytes();
                     id = ReconstructionVoicing.patchId(asset, patch);
                     voices.computeIfAbsent(id, key -> new Voice(key, part.name() + " / " + choice.name(), unsigned(patch)));
                 } else {
@@ -339,20 +367,20 @@ final class S3kReconstruction {
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
                 if (voice != null) volume = Math.max(floor, ReconstructionEcho.scaleVolume(volume, voice.gainFor(part.id())));
-                boolean pitchedNoise = entry.laneType() == ReconstructionEdits.LaneType.NOISE;
+                boolean pitchedNoise = entry.laneType() == ReconstructionLaneType.NOISE;
                 var playedNote = pitchedNoise ? new MidiScore.Note(note.partId(), ReconstructionCymbals.PITCH,
                         note.velocity(), note.startUs(), note.endUs()) : note;
                 var placed = new Placement(new Event(playedNote, start, start + duration,
                         tonePriority(part, note.pitch()), id, volume));
                 placed.pitchedNoise = pitchedNoise;
+                placed.assignedInstrument = assignment != null;
                 if (voice != null) {
                     placed.volumeFloor = floor;
                     placed.detune = voice.effects().detune();
                     placed.vibrato = voice.effects().vibrato();
                 }
                 if (pitchedNoise) placed.detune = ReconstructionPitchedNoise.detune(note.pitch());
-                String noteId = entry.note().id();
-                var spans = scopes.get(origins.getOrDefault(noteId, noteId));
+                var spans = scopes.get(origin);
                 if (spans != null) {
                     var attack = spans.stream().filter(span -> span.start() <= start && span.end() > start
                             && span.settings().gate() != null).findFirst().orElse(null);
@@ -374,12 +402,12 @@ final class S3kReconstruction {
                             tones.put(boundary, placed.baseTone());
                             continue;
                         }
-                        var selected = scoped.variantId() == null ? asset : catalogue.match(scoped.variantId()).asset();
+                        var selected = assignment != null || scoped.variantId() == null ? asset : catalogue.match(scoped.variantId()).asset();
                         String selectedId = selected.id();
                         if (isFm) {
                             var activeArt = scoped.minimumReleaseRate() == null ? articulation
                                     : new ReconstructionVoicing.Articulation("scoped", articulation.gate(), scoped.minimumReleaseRate());
-                            var patch = ReconstructionVoicing.patchBytes(selected, activeArt);
+                            var patch = assignment == null ? ReconstructionVoicing.patchBytes(selected, activeArt) : selected.bytes();
                             selectedId = ReconstructionVoicing.patchId(selected, patch);
                             voices.putIfAbsent(selectedId, new Voice(selectedId, selected.name(), unsigned(patch)));
                         } else {
@@ -427,10 +455,11 @@ final class S3kReconstruction {
         List<Sequence> sequences = new ArrayList<>();
         List<Clip> clips = new ArrayList<>();
         var repeats = ReconstructionClipLinks.from(structure, layout);
+        int assignmentClipCost = 0;
         for (int i = 0; i < fm.size(); i++)
-            writeToneLane("FM", ReconstructionAllocation.FM.get(i), fm.get(i), parts, sequences, clips, repeats);
+            assignmentClipCost += writeToneLane("FM", ReconstructionAllocation.FM.get(i), fm.get(i), parts, sequences, clips, repeats);
         for (int i = 0; i < psg.size(); i++)
-            writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
+            assignmentClipCost += writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
         writeDacLane(dac, sequences, clips, repeats);
         if (!scopes.isEmpty()) {
             var used = new HashSet<String>();
@@ -447,7 +476,14 @@ final class S3kReconstruction {
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
-        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates));
+        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes, List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost);
+    }
+
+    private static ReconstructionVoices.Choice assignedChoice(InstrumentCatalogue catalogue,
+                                                               ReconstructionVoicePlan.Assignment assignment) {
+        var match = catalogue.match(assignment.instrument());
+        return new ReconstructionVoices.Choice(match.asset().id(), match.variant().id(), match.asset().name(),
+                match.variant().recipe().rate(), "voice-assignment", List.of(), List.of());
     }
 
     static int voicedDuration(ReconstructionAllocation.Entry entry, ReconstructionVoicing.Articulation articulation) {
@@ -475,6 +511,7 @@ final class S3kReconstruction {
                 var event = note.event;
                 var placed = new Placement(new Event(event.note(), start, end, event.priority(), event.assetId(),
                         Math.max(note.volumeFloor, ReconstructionEcho.scaleVolume(event.volume(), copy.gain()))));
+                placed.assignedInstrument = note.assignedInstrument;
                 placed.detune = copy.detune();
                 placed.vibrato = copy.vibrato();
                 destination.add(placed);
@@ -588,13 +625,27 @@ final class S3kReconstruction {
         return picked;
     }
 
-    private static void writeToneLane(String chip, String lane, List<Placement> notes,
+    private static int writeToneLane(String chip, String lane, List<Placement> notes,
                                       Map<Integer, MidiScore.Part> parts, List<Sequence> sequences, List<Clip> clips,
                                       ReconstructionClipLinks links) {
         boolean fm = chip.equals("FM");
         NativeCommand selectAsset = fm ? NativeCommand.FM_VOICE : NativeCommand.PSG_ENVELOPE;
         var chunks = links.chunks(lane, notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i),
                 i -> noiseKind(notes.get(i)), CLIP_TICKS);
+        int defaultCount = chunks.size();
+        if (notes.stream().anyMatch(note -> note.assignedInstrument)) {
+            var modes = new ArrayList<ClipMode>();
+            int run = 0;
+            Placement prior = null;
+            for (var current : notes) {
+                if (prior != null && (prior.assignedInstrument || current.assignedInstrument)
+                        && !prior.attackTone().asset().equals(current.attackTone().asset())) run++;
+                modes.add(new ClipMode(noiseKind(current), run));
+                prior = current;
+            }
+            chunks = links.chunks(lane, notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i),
+                    modes::get, CLIP_TICKS);
+        }
         for (var chunk : chunks) {
             int start = chunk.first();
             int end = chunk.limit();
@@ -705,7 +756,10 @@ final class S3kReconstruction {
                     initial.volume(), events, commands, "RESET", fm || noise == PsgMode.FIXED_NOISE ? null : initial.asset(), null);
             links.add(source, lane, from, chunk.span(), sequences, clips);
         }
+        return chunks.size() - defaultCount;
     }
+
+    private record ClipMode(PsgMode mode, int instrumentRun) {}
 
     private enum PsgMode { TONE, FIXED_NOISE, CYMBAL_NOISE, PITCHED_NOISE }
 

@@ -69,7 +69,7 @@ final class ReconstructionCli {
                           ReconstructionDrums.Source drumSource,
                           List<S3kReconstruction.VoicedGate> voicedGates,
                           Map<String, String> assemblyInputs, ReconstructionSustain.Probe sustainProbe,
-                          List<String> voicingWarnings) {}
+                          List<String> voicingWarnings, Integer voiceAssignmentExtraClips) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -95,6 +95,7 @@ final class ReconstructionCli {
         out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
         out.println("       reconstruct structure|roles|allocate|assemble WORK_DIR");
+        out.println("       reconstruct voices WORK_DIR [list | create|rename|merge|split|move|assign JSON]");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct edit WORK_DIR add [--dry-run] JSON | add [--dry-run] --file BATCH | list | remove ID");
@@ -104,7 +105,7 @@ final class ReconstructionCli {
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
-        out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [options] OUT.png");
+        out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [--color-by voice] [options] OUT.png");
         out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
         out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
@@ -120,6 +121,10 @@ final class ReconstructionCli {
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length == 2 && args[1].equals("--help")) {
             usage(out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("voices")) {
+            ReconstructionVoicePlan.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("sections")) {
@@ -277,6 +282,8 @@ final class ReconstructionCli {
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
                         ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
         var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
+        var voiceAssignments = voicing.voiceAssignments() == null
+                ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
         var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var effects = new Effects(Map.of(), Map.of(), Map.of());
@@ -300,13 +307,23 @@ final class ReconstructionCli {
                     allocation.melodyGapFill(), allocation.fm1InterNoteGaps(), placements.isEmpty() ? null : placements, copyLanes,
                     (echoes, copies, bends) -> S3kReconstruction.arrangeAllocated(options.name(), options.ticksPerBeat(), timeline.frames(),
                             new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()), articulated,
-                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), drumGains, layout),
+                            structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends, scopes, playback.origins(), drumGains, layout, voiceAssignments),
                     out, existing, assemblyInputs);
             var edits = ReconstructionEdits.Journal.read(work).all();
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
             if (!edits.isEmpty()) report.add("editResults", json.toJsonTree(edits));
+            if (!voiceAssignments.isEmpty()) {
+                var applied = new java.util.TreeMap<String, Long>();
+                allocation.notes().stream().filter(entry -> voiceAssignments.containsKey(entry.note().id()))
+                        .forEach(entry -> applied.merge(entry.lane(), 1L, Long::sum));
+                report.add("voiceAssignmentsByLane", json.toJsonTree(applied));
+                if (!report.has("voiceAssignmentExtraClips")) report.addProperty("voiceAssignmentExtraClips", 0);
+            }
+            var plan = ReconstructionVoicePlan.saved(work);
+            if (plan != null && !plan.issues().isEmpty())
+                report.add("voiceEditIssues", json.toJsonTree(plan.issues()));
             report.add("sustainProbe", json.toJsonTree(sustain));
             report.add("voicingWarnings", json.toJsonTree(sustain.warning() == null ? List.of() : List.of(sustain.warning())));
             var affinity = ReconstructionAllocation.Affinity.read(work);
@@ -341,7 +358,8 @@ final class ReconstructionCli {
         return Map.of("score", ReconstructionArtifacts.fingerprint(score),
                 "allocation", ReconstructionArtifacts.fingerprint(allocation),
                 "voicing", ReconstructionArtifacts.fingerprint(
-                        new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows())));
+                        new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
+                                voicing.voiceAssignments())));
     }
 
     private static Effects effects(MidiScore score, Path reference, Options options, long durationUs) throws IOException {
@@ -475,7 +493,8 @@ final class ReconstructionCli {
                     result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null,
                     drumSource(transcription, result.dacHits()),
                     assemblyInputs == null ? null : result.voicedGates(), assemblyInputs, legacySustain,
-                    legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()));
+                    legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()),
+                    result.assignmentClipCost() == 0 ? null : result.assignmentClipCost());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(report) + "\n", java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
