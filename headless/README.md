@@ -256,12 +256,13 @@ and both distances. Use `--whole-part-voices` for a single FM patch per part.
 Reconstruction excludes track data inferred to be Azure Lake FM voices on the
 verified locked-on ROM. Native playback still uses the original bytes.
 
-The matcher auditions the FM patch or PSG envelope the arrangement
-can deploy, and DAC samples at their native rates with centered pan.
-
-For GM kick notes 35 and 36, the matcher favors standalone kick samples after
-two distinct excerpts support a low-frequency rise and decay. It uses the
-catalogue's kick tag or verified Sonic 3 & Knuckles DAC slot roles.
+The matcher auditions playable FM patches and PSG envelopes. The staged
+DAC fit uses mapped drum stems to compare isolated hits per MIDI class
+against catalogue samples at nearby hardware rates. It uses catalogue
+class evidence and favors a shared kit when the choices are close. Check the
+saved distances and rates in `voicing.json`. See the
+[voice stage guide](../docs/architecture/reconstruction-stages.md#voice)
+for matching details.
 
 Add `--audio-refine` to check the WAV for missed notes and effects. The pitch
 pass can split a held note or fill a short gap when repeat measurements

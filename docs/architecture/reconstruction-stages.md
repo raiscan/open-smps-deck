@@ -1116,8 +1116,23 @@ assignment takes priority over these patch choices. Existing lane-only
 files can still be assembled. Back up or move one aside before refitting
 to adopt the shared defaults. DAC `instruments` entries also specify
 `drumPitch`. A fitted DAC entry also has a `drumSelection` with the chosen
-rate, optional stem slice and match evidence. To use a different catalogue
-variant at its native rate, change `variantId` and remove `drumSelection`.
+rate, optional stem slice and match evidence. With a dedicated stem, the
+matcher prefers isolated hits, cuts windows at subsequent strong onsets,
+and takes the median distance within each MIDI drum class. A window cut
+while the hit is still audible provides a lower bound on its decay. It compares spectrum, attack, decay, and low resonance
+for kicks and toms. For hats, cymbals, sticks and claps it analyzes the same
+upper bands in the stem and candidate, and charges for excess low body in
+the DAC playback. It tests native DAC rate bytes around each catalogue
+recipe within a six-semitone search and uses named classes and verified
+S3K slots as soft priors. Without a mapped drum stem it uses the mix fit.
+
+The catalogue evidence records the acoustic distance and class penalty.
+When several plausible samples share recorded DAC use in a catalogue song
+or belong to an authored bank, the fitter gives that kit a small bonus. A
+stronger match can come from any kit. Reusing the same PCM across classes
+costs more. The evidence records the preferred kit and whether the chosen
+asset belongs to it. To use another catalogue variant at its native rate,
+change `variantId` and remove `drumSelection`.
 Automatic PSG3 cymbals use tone-linked white noise. Closed and pedal hats
 start at 13.98 kHz for one driver tick (about 16.7 ms) and switch to 6.99 kHz
 for the decay. The envelope uses attenuation offsets 0, 4 and 9 before rest.

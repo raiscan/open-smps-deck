@@ -341,7 +341,10 @@ lists the fields for every operation.
 Standalone `voice` refits lane-wide choices and preserves scoped overrides
 and compatible gains. Fresh voicing uses mapped stems to fit the rendered
 drum-to-tonal balance with gated K-weighted loudness. A rebuild from an upstream stage can relevel lanes
-whose allocated material changed. Pass `--lane FM1` to limit a refit and
+whose allocated material changed. For DAC choices, inspect
+`lanes.DAC.instruments[].drumSelection.evidence` for isolated hit windows,
+candidate distances, class penalties, fitted rates and kit provenance.
+Pass `--lane FM1` to limit a refit and
 `--refit-levels` to recalculate levels. Use `--keep-voicing` with `run --from roles`
 or `rerun` to reuse accepted settings and see which stale part entries were
 dropped. MCP resumed runs expose `options.refitLanes`, `options.refitLevels`

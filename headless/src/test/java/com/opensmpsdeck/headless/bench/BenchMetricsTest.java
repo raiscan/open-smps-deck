@@ -1,14 +1,35 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.headless.InstrumentCatalogue;
+import com.opensmpsdeck.project.DacSample;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static com.opensmpsdeck.headless.bench.BenchDrums.Drum.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BenchMetricsTest {
+    @Test void recognizesGainFittedDacOnlyWhenItsPcmMatchesTheCatalogue() {
+        var builder = new InstrumentCatalogue.Builder();
+        String asset = builder.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Kick",
+                new byte[]{0, 64, (byte) 128, (byte) 192});
+        builder.variant(asset, "Kick", new InstrumentCatalogue.Recipe(4, null, 127, 60,
+                null, null, List.of(), List.of()), null);
+        var drums = new BenchDrums(builder.build(), "fixture");
+        String id = asset + "-4-gain-0x1.0p-1";
+        var scaled = DacSample.of(id, "Kick", 4, new byte[]{64, 96, (byte) 128, (byte) 160});
+        var changed = DacSample.of(id, "Kick", 4, new byte[]{65, 96, (byte) 128, (byte) 160});
+        var truth = new BenchTimeline.Truth(List.of(new BenchTimeline.Channel("dac", List.of(),
+                List.of(new BenchTimeline.Hit(0, BenchFiles.hash(scaled.pcm()), 129),
+                        new BenchTimeline.Hit(.5, BenchFiles.hash(changed.pcm()), 130)))));
+        var events = BenchMetrics.events(truth, drums, false, Map.of(), drums.gainAliases(List.of(scaled, changed)));
+        assertEquals(List.of(KICK, OTHER), events.stream().map(BenchMetrics.Event::drum).toList());
+        assertEquals(BenchFiles.hash(scaled.pcm()), events.getFirst().hash());
+    }
+
     @Test void effectCopiesAreRemovedOnlyWhenFlaggedInTheReport() {
         var lead = new BenchMetrics.Event("FM1", 0, .12, 60, null, null);
         var copy = new BenchMetrics.Event("FM5", .16, .28, 60, null, null);
