@@ -421,6 +421,101 @@ class ReconstructionEditsTest {
                 ReconstructionLaneType.FM, false).contains("FM percussion voicing"));
     }
 
+    @Test void chordEditsSurviveReplayAndDescribeTheirAssembledGates(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("chords.mid"), catalogue = dir.resolve("catalogue.json"), wav = dir.resolve("mix.wav");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        for (int[] event : new int[][]{{60, 0, 420}, {64, 0, 420}, {67, 0, 420},
+                {60, 480, 930}, {63, 480, 930}, {67, 480, 930}, {58, 480, 930},
+                {60, 960, 1350}, {63, 960, 1350}, {67, 960, 1350}}) {
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, event[0], 90), event[1]));
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, event[0], 0), event[2]));
+        }
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2");
+        cli("reconstruct", "sections", "add", work.toString(), """
+                {"id":"opening","level":"section","name":"Opening","sourceStart":0,"sourceEnd":0.45,
+                 "author":"human","reason":"first chord"}
+                """);
+        var arp = add(work, """
+                {"id":"cycle","reason":"free two lanes","op":"arpeggio","part":0,
+                 "span":{"section":"opening"},"rate":2,"order":"up-down"}
+                """, true);
+        assertEquals("allocate", arp.get("from").getAsString());
+        add(work, """
+                {"id":"seventh","reason":"test refusal","op":"chordInstrument","part":0,"span":[0.5,0.9]}
+                """, true);
+        add(work, """
+                {"id":"minor","reason":"use three carriers","op":"chordInstrument",
+                 "noteIds":["n-0-1000000-60","n-0-1000000-63","n-0-1000000-67"]}
+                """, true);
+
+        var trace = ReconstructionTrace.read(work);
+        var root = trace.get("n-0-0-60").voiced();
+        assertEquals(List.of(0L, 8L, 16L, 24L), root.stream().map(gate -> gate.gate().startTick()).toList());
+        assertEquals(2, trace.get("n-0-0-64").voiced().getFirst().gate().startTick());
+        var minor = trace.get("n-0-1000000-63");
+        assertTrue(minor.voiced().getFirst().evidence().contains("chord instrument"));
+        assertEquals(60, minor.voiced().getFirst().gate().startTick());
+        assertTrue(ReconstructionInspection.open(work).overlays().stream().anyMatch(note ->
+                note.id().equals(minor.id()) && note.sounds() && note.reason().equals("absorbed-into-chord-instrument")));
+        assertTrue(ReconstructionEdits.Journal.read(work).all().stream()
+                .anyMatch(row -> row.id().equals("seventh") && row.status() == ReconstructionEdits.Status.invalid));
+        var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
+        assertEquals(24, report.get("arpeggioExtraNoteBytes").getAsInt());
+        Path replay = dir.resolve("replay");
+        cli("reconstruct", "rerun", work.toString(), replay.toString());
+        assertEquals(0, ReconstructionTrace.diff(work, replay, null).getAsJsonArray("changes").size());
+
+        cli("reconstruct", "edit", work.toString(), "remove", "minor");
+        Path batch = dir.resolve("combined-edits.json");
+        Files.writeString(batch, """
+                [
+                  {"id":"split-tone","reason":"reattack after the chord","op":"splitNote","noteId":"n-0-0-64","at":0.3},
+                  {"id":"merge-tone","reason":"hold the middle tone","op":"mergeNotes",
+                   "noteIds":["n-0-500000-63","n-0-1000000-63"]},
+                  {"id":"noise-arp","reason":"route the opening chord to noise","op":"pinLane",
+                   "noteIds":["edit-split-tone-left","n-0-0-67"],"laneType":"NOISE"},
+                  {"id":"fm-chord","reason":"voice the edited minor triad","op":"chordInstrument",
+                   "noteIds":["n-0-500000-60","n-0-500000-63","n-0-500000-67"]},
+                  {"id":"fm-pin","reason":"keep the merged tone on FM","op":"pinLane",
+                   "noteIds":["n-0-500000-63"],"laneType":"FM"}
+                ]
+                """);
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--file", batch.toString()));
+        assertEquals("transcribe", preview.get("from").getAsString());
+        var previewRows = preview.getAsJsonArray("outcomes").asList().stream().map(row -> row.getAsJsonObject()).toList();
+        for (String id : List.of("split-tone", "merge-tone", "fm-chord")) {
+            assertTrue(previewRows.stream().anyMatch(row -> row.get("id").getAsString().equals(id)
+                    && row.get("status").getAsString().equals("applied")), id);
+        }
+        assertEquals(2, previewRows.stream().filter(row -> row.get("id").getAsString().equals("noise-arp")
+                && row.has("lane") && row.get("lane").getAsString().equals("PSG3")).count());
+        cli("reconstruct", "edit", work.toString(), "add", "--file", batch.toString());
+        cli("reconstruct", "run", "--from", "transcribe", work.toString());
+
+        var editedTrace = ReconstructionTrace.read(work);
+        for (String id : List.of("n-0-0-60", "edit-split-tone-left", "n-0-0-67")) {
+            assertTrue(editedTrace.get(id).voiced().stream()
+                    .anyMatch(gate -> gate.lane().equals("PSG3") && gate.evidence().contains("arpeggio")), id);
+        }
+        assertTrue(editedTrace.get("n-0-500000-63").voiced().getFirst().evidence().contains("chord instrument"));
+        var contradictoryPin = """
+                {"id":"conflicting-type","reason":"different chip type","op":"pinLane",
+                 "noteIds":["n-0-0-60"],"laneType":"FM"}
+                """;
+        add(work, contradictoryPin, true);
+        assertTrue(ReconstructionEdits.Journal.read(work).all().stream().anyMatch(row -> row.id().equals("cycle")
+                && row.status() == ReconstructionEdits.Status.conflict && row.detail().contains("different lane types")));
+        var fallback = ReconstructionTrace.read(work);
+        assertEquals("PSG3", fallback.get("edit-split-tone-left").allocation().lane());
+        assertNull(fallback.get("n-0-0-67").allocation().lane());
+        assertTrue(fallback.get("n-0-0-67").allocation().reason().contains("NOISE lanes busy"));
+    }
+
     private static Note note(String id, double start, double end, int pitch) {
         return new Note(id, 0, start, end, pitch, 90, "midi", 1);
     }
@@ -463,12 +558,21 @@ class ReconstructionEditsTest {
     }
 
     private static void writeAudio(Path index, Path wav) throws Exception {
+        writeAudio(index, wav, false);
+    }
+
+    private static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var patch = DemoProject.create().voices().getFirst();
         var bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
         String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        if (psg) {
+            String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Chord envelope",
+                    new byte[]{0, (byte) 0x80});
+            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), null);
+        }
         var catalogue = builder.build();
         catalogue.save(index);
         WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, variant, 68, 24)), wav, 120);

@@ -129,7 +129,8 @@ public final class ReconstructionInspection {
     private void addAssemblyOnlyNotes(StudioProject project, ReconstructionView.Span span,
                                       Map<String, NavigableMap<Double, String>> patches, List<Overlay> notes) {
         var voiced = trace.values().stream().flatMap(row -> row.voiced().stream()).toList();
-        if (voiced.stream().noneMatch(gate -> gate.evidence().equals("assembled"))) return;
+        if (voiced.stream().noneMatch(gate -> gate.evidence().equals("assembled")
+                || ReconstructionChords.isLabel(gate.evidence()))) return;
         var covered = new ArrayList<ReconstructionView.DrawnNote>();
         for (var gate : voiced) covered.add(new ReconstructionView.DrawnNote(gate.id(), null,
                 ReconstructionView.Layer.lane, null, gate.lane(), gate.pitch(), null, gate.gate(), null, gate.evidence()));
@@ -207,7 +208,8 @@ public final class ReconstructionInspection {
         if (roles != null && roles.mergedInto() != null) competitors.add(roles.mergedInto());
         if (row.scoreDecision() != null && row.scoreDecision().successorId() != null)
             competitors.add(row.scoreDecision().successorId());
-        if (!lost && !row.voiced().isEmpty()) return row.voiced().stream()
+        var audible = row.voiced().stream().filter(gate -> !lost || ReconstructionChords.isLabel(gate.evidence())).toList();
+        if (!audible.isEmpty()) return audible.stream()
                 .map(gate -> drawable(row, gate.id(), gate.lane(), gate.pitch(), gate.gate(), color, patches, bend,
                         true, false, competitors)).toList();
         var effective = allocation != null && allocation.effective() != null ? allocation.effective()

@@ -341,10 +341,12 @@ public final class ReconstructionStages {
                         int frames = ReconstructionTimeMap.of(score).frames();
                         boolean stems = !score.inputs.stems.isEmpty();
                         var cymbalLevels = ReconstructionCymbals.measure(score);
+                        var chords = ReconstructionChords.select(edits.bindSections(work, score, null, stage, outcomes),
+                                score, roles, laneTypes, outcomes);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes);
-                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(
-                                roles, score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes);
+                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes);
+                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
+                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -467,6 +469,10 @@ public final class ReconstructionStages {
         Path rolesFile = work.resolve("roles.json");
         var currentRoles = Files.isRegularFile(rolesFile)
                 ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : null;
+        if (from == Stage.ALLOCATE && currentRoles != null) {
+            previewAllocationEdits(work, edits, score, currentRoles, outcomes);
+            return;
+        }
         List<ReconstructionEdits.Outcome> scoreEdits;
         if (from == Stage.TRANSCRIBE) {
             score = retranscribe(score);
@@ -485,16 +491,7 @@ public final class ReconstructionStages {
         var boundEdits = edits.bindSections(work, score, structure, Stage.ROLES, outcomes);
         var roles = boundEdits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes, resolutions);
 
-        if (roles.lanePins() != null && roles.lanePins().values().stream().anyMatch(pin -> pin.laneType() != null)) {
-            Path allocationFile = work.resolve("allocation.json");
-            var saved = Files.isRegularFile(allocationFile)
-                    ? ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class) : null;
-            var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source().parts(),
-                    timeline.frames(), score.inputs().fmOnly(), !score.inputs().stems().isEmpty(),
-                    ReconstructionAllocation.lanes(saved), ReconstructionCymbals.measure(score));
-            outcomes.addAll(boundEdits.allocationOutcomes(allocation, roles.lanePins()).stream()
-                    .filter(outcome -> roles.lanePins().get(outcome.noteIds().getFirst()).laneType() != null).toList());
-        }
+        previewAllocationEdits(work, edits, score, roles, outcomes);
         if (from != Stage.TRANSCRIBE) return;
         var previous = new HashMap<String, ReconstructionRoles.Decision>();
         if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
@@ -515,6 +512,30 @@ public final class ReconstructionStages {
                         before == null ? null : before.role(), after == null ? null : after.role(), false,
                         note == null ? null : note.start(), note == null ? null : timeline.project(note.start())));
             }
+        }
+    }
+
+    private static void previewAllocationEdits(Path work, ReconstructionEdits edits, Score score,
+                                               ReconstructionRoles.Result roles, List<ReconstructionEdits.Outcome> outcomes)
+            throws IOException {
+        var pins = roles.lanePins();
+        var bound = edits.bindSections(work, score, null, Stage.ALLOCATE, outcomes);
+        boolean hasChordEdits = bound.intents().stream().anyMatch(edit -> edit.firstStage() == Stage.ALLOCATE);
+        boolean hasTypedPins = pins != null && pins.values().stream().anyMatch(pin -> pin.laneType() != null);
+        if (!hasChordEdits && !hasTypedPins) return;
+        var laneTypes = Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))
+                ? ReconstructionVoicePlan.preview(work, score, roles).laneTypes()
+                : Map.<String, ReconstructionLaneType>of();
+        var chords = ReconstructionChords.select(bound, score, roles, laneTypes, outcomes);
+        if (chords.isEmpty() && !hasTypedPins) return;
+        try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
+            var previous = previousAllocation(work.resolve("allocation.json"), silent);
+            var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
+                    ReconstructionTimeMap.of(score).frames(),
+                    score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
+                    ReconstructionCymbals.measure(score), laneTypes, chords, outcomes);
+            outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
+                    .filter(outcome -> outcome.laneType() != null).toList());
         }
     }
 
