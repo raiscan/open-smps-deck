@@ -5,6 +5,10 @@ import com.google.gson.JsonParser;
 import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.ProjectFormat;
+import com.opensmpsdeck.project.Clip;
+import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
@@ -125,6 +129,27 @@ class McpServerTest {
         assertToolError("render_clip", Map.of("project", score.toString(), "output", "clip.wav",
                 "start", "0", "end", 1), "expected number");
         assertEquals("{}", Files.readString(score));
+    }
+
+    @Test void bankLimitErrorsCarryTheCompiledAndLimitByteCounts() throws Exception {
+        var demo = DemoProject.create();
+        var sequence = demo.sequences().getFirst();
+        var large = new StudioProject(demo.formatVersion(), "Oversize", demo.mode(), demo.ticksPerBeat(), demo.tempo(),
+                demo.voices(), List.of(sequence), List.of(new Clip("clip", sequence.id(), "FM1", 0, Integer.MAX_VALUE)));
+        var limit = assertThrows(ProjectCompiler.BankLimitException.class, () -> ProjectCompiler.compile(large));
+        Path source = directory.resolve("oversize.smps.json");
+        Files.writeString(source, ProjectFormat.write(large));
+        var validation = toolResult("project_validate", Map.of("project", source.toString()));
+        var exported = toolResult("project_export", Map.of("project", source.toString(), "format", "package",
+                "output", "oversize.smps.zip"));
+        for (var result : List.of(validation, exported)) {
+            assertTrue(result.get("isError").getAsBoolean(), result::toString);
+            var failure = result.getAsJsonObject("structuredContent");
+            assertEquals(limit.getMessage(), failure.get("error").getAsString());
+            assertEquals(limit.compiledBytes(), failure.get("compiledBytes").getAsLong());
+            assertEquals(32_768, failure.get("limitBytes").getAsInt());
+        }
+        assertFalse(Files.exists(directory.resolve("oversize.smps.zip")));
     }
 
     private static int errorCode(JsonObject response) {

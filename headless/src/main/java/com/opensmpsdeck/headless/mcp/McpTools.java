@@ -443,7 +443,7 @@ final class McpTools {
         var errors = new ByteArrayOutputStream();
         try (var out = new PrintStream(output, false, StandardCharsets.UTF_8);
              var err = new PrintStream(errors, false, StandardCharsets.UTF_8)) {
-            if (Main.run(command.toArray(String[]::new), out, err) != 0) {
+            if (Main.runForMcp(command.toArray(String[]::new), out, err) != 0) {
                 String detail = errors.toString(StandardCharsets.UTF_8);
                 int usage = detail.indexOf("\nUsage:");
                 throw new IOException((usage < 0 ? detail : detail.substring(0, usage)).strip());

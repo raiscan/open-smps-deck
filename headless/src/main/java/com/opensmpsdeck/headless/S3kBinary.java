@@ -3,7 +3,9 @@ package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.EnvelopeProgram;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.ProjectCompiler;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -11,7 +13,7 @@ import java.util.TreeSet;
 
 /** Finite native-bank boundary with explicitly supplied envelope and DAC assets. */
 final class S3kBinary {
-    static final int MAX_BYTES = 0x8000;
+    static final int MAX_BYTES = ProjectCompiler.MAX_BANK_BYTES;
     private S3kBinary() {}
 
     static byte[] validateAndCopy(byte[] input) {
@@ -97,20 +99,84 @@ final class S3kBinary {
     private static void scan(byte[] data, Track track, int end, int voices,
                              Map<Integer, List<Integer>> psgEnvelopes,
                              Map<Integer, List<Integer>> modulationEnvelopes, int sampleCount) {
-        if (track.dac) {
-            scanDac(data, track.pointer, end, sampleCount);
-            return;
-        }
-        int position = track.pointer;
+        // A standalone arrangement can have flat, backward counted loops in its
+        // main stream and calls to straight-line routines after its stop. Validate
+        // the physical layout without expanding loops or executing untrusted bytes.
+        BitSet starts = new BitSet(end - track.pointer);
+        TreeSet<Integer> targets = new TreeSet<>();
+        int position = track.pointer, lastBranchEnd = position;
+        boolean timed = false, eventStart = true, inRoutine = false;
+        boolean implicitDuration = false, controlFlow = false, hold = false;
         while (position < end) {
             int at = position, command = u8(data, position++);
-            if (command == 0xF2 || command == 0xE3) return;
-            if (command == 0) fail("zero-duration event is unsupported at " + hex(at));
-            if (command < 0xE0) {
-                if (!track.psg && command >= 0x81 && voices == 0) fail("FM notes require a local voice table");
+            if (eventStart) starts.set(at - track.pointer);
+            if (command == 0xF2 || command == 0xE3) {
+                if (inRoutine) fail("subroutine has a stop instead of a return at " + hex(at));
+                if (targets.isEmpty()) return;
+                inRoutine = true;
+                position = nextRoutine(targets, position);
+                timed = false;
+                eventStart = true;
                 continue;
             }
-            if (command == 0xE7 || command == 0xFA) continue; // HOLD / modulation off
+            if (command == 0xF7 || command == 0xF8 || command == 0xF9) {
+                controlFlow = true;
+                if (implicitDuration || !eventStart) fail("control flow requires complete explicit-duration events at " + hex(at));
+                if (command == 0xF9) {
+                    if (!inRoutine || !timed) fail("return outside a timed subroutine at " + hex(at));
+                    if (targets.isEmpty()) return;
+                    position = nextRoutine(targets, position);
+                    timed = false;
+                } else if (inRoutine) {
+                    fail("nested control flow in a standalone subroutine at " + hex(at));
+                } else if (command == 0xF7) {
+                    if (end - position < 4) fail("truncated loop operands at " + hex(at));
+                    int target = le16(data, position + 2);
+                    if (u8(data, position) != 0 || u8(data, position + 1) < 2 || !timed
+                            || target < lastBranchEnd || target >= at || !starts.get(target - track.pointer))
+                        fail("invalid standalone counted loop at " + hex(at));
+                    position += 4;
+                } else {
+                    if (end - position < 2) fail("truncated call operands at " + hex(at));
+                    int target = le16(data, position);
+                    if (target < position + 2 || target >= end) fail("invalid standalone call target at " + hex(at));
+                    targets.add(target);
+                    position += 2;
+                }
+                lastBranchEnd = position;
+                continue;
+            }
+            if (command < 0xE0) {
+                if (command == 0) fail("zero-duration event is unsupported at " + hex(at));
+                if (track.dac) {
+                    if (command < 0x80) fail("DAC note/rest requires an explicit duration in 1..127 at " + hex(at));
+                    if (command != 0x80 && command - DacSample.FIRST_NOTE >= sampleCount)
+                        fail("undefined DAC sample for note " + hex(command) + " at " + hex(at)
+                                + "; provide the complete asset package");
+                } else if (!track.psg && command >= 0x81 && voices == 0) {
+                    fail("FM notes require a local voice table");
+                }
+                if (command >= 0x80 && position < end && u8(data, position) > 0 && u8(data, position) < 0x80) {
+                    position++;
+                } else {
+                    if (track.dac) fail("DAC note/rest requires an explicit duration in 1..127 at " + hex(at));
+                    // E7 followed by a duration is a timed continuation.
+                    if (command >= 0x80 || !hold) {
+                        if (controlFlow) fail("control flow requires explicit durations at " + hex(at));
+                        implicitDuration = true;
+                    }
+                }
+                timed = true;
+                eventStart = true;
+                hold = false;
+                continue;
+            }
+            eventStart = false;
+            if (track.dac)
+                fail("unsupported DAC event " + hex(command) + " at " + hex(at)
+                        + "; use explicit notes/rests and durations, without replay, HOLD or commands");
+            if (command == 0xE7) { hold = true; continue; }
+            if (command == 0xFA) continue;
             if (command == 0xF0) {
                 if (end - position < 4) fail("truncated modulation operands at " + hex(at));
                 position += 4; // Delay, rate, signed delta, steps: all are raw bytes.
@@ -138,7 +204,7 @@ final class S3kBinary {
             boolean psg = command == 0xEC || command == 0xF3 || command == 0xF5;
             if (!(both || (fm && !track.psg) || (psg && track.psg))) {
                 fail("unsupported command " + hex(command) + " at " + hex(at)
-                        + "; this renderer accepts finite linear tracks with resolved local resources");
+                        + "; this renderer accepts finite tracks with resolved local resources");
             }
             if (position >= end) fail("truncated command operand at " + hex(at));
             int operand = u8(data, position++);
@@ -146,23 +212,14 @@ final class S3kBinary {
             if (command == 0xF4) requireEnvelope(modulationEnvelopes, operand, "modulation", at);
             if (command == 0xF5) requireEnvelope(psgEnvelopes, operand, "PSG", at);
         }
-        fail("track has no stop before its data boundary at " + hex(end));
+        fail(inRoutine ? "subroutine has no return before its data boundary at " + hex(end)
+                : "track has no stop before its data boundary at " + hex(end));
     }
 
-    private static void scanDac(byte[] data, int position, int end, int sampleCount) {
-        while (position < end) {
-            int at = position, note = u8(data, position++);
-            if (note == 0xF2 || note == 0xE3) return;
-            if (note < 0x80 || note >= 0xE0)
-                fail("unsupported DAC event " + hex(note) + " at " + hex(at)
-                        + "; use explicit notes/rests and durations, without replay, HOLD or commands");
-            if (note != 0x80 && note - DacSample.FIRST_NOTE >= sampleCount)
-                fail("undefined DAC sample for note " + hex(note) + " at " + hex(at) + "; provide the complete asset package");
-            if (position >= end) fail("truncated DAC duration at " + hex(at));
-            int duration = u8(data, position++);
-            if (duration < 1 || duration > 127) fail("DAC note/rest requires an explicit duration in 1..127 at " + hex(at));
-        }
-        fail("DAC track has no stop before its data boundary at " + hex(end));
+    private static int nextRoutine(TreeSet<Integer> targets, int position) {
+        int target = targets.pollFirst();
+        if (target != position) fail("call target is not a standalone subroutine at " + hex(target));
+        return target;
     }
 
     private static void validateEnvelopes(Map<Integer, List<Integer>> envelopes, String type, int maximum, boolean compiledAssets) {

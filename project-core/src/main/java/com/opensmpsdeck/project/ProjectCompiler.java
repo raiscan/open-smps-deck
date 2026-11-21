@@ -7,15 +7,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Finite linear S3K compiler. Reuse remains linked in source and is baked inline here. */
+/** Compiles editable arrangements to finite, bank-relative S3K music. */
 public final class ProjectCompiler {
     public static final int MAX_BANK_BYTES=0x8000;
     // Native S3K dialect: transpose-set is biased by 0x40, absolute volume is E4.
     private static final int REST=0x80;
     private ProjectCompiler() {}
 
+    public enum Encoding { LINEAR, COMPACT }
+
     public static CompiledProject compileWithAssets(StudioProject project) {
-        return new CompiledProject(compile(project),project.envelopes(),project.samples(),
+        return compileWithAssets(project, Encoding.COMPACT);
+    }
+
+    public static CompiledProject compileWithAssets(StudioProject project, Encoding encoding) {
+        return new CompiledProject(compile(project, encoding),project.envelopes(),project.samples(),
                 project.nativeProgram(),project.nativeProgram()==null?List.of():project.voices());
     }
 
@@ -27,15 +33,19 @@ public final class ProjectCompiler {
     public static BankLayout compileArrangementLayout(StudioProject project) {
         if (project.nativeProgram() != null) throw new IllegalArgumentException("Expected an editable arrangement");
         var relocations = new java.util.TreeSet<Integer>();
-        byte[] bytes = compile(project, relocations);
+        byte[] bytes = compile(project, Encoding.COMPACT, relocations);
         return new BankLayout(bytes, List.copyOf(relocations));
     }
 
     public static byte[] compile(StudioProject project) {
-        return compile(project, null);
+        return compile(project, Encoding.COMPACT);
     }
 
-    private static byte[] compile(StudioProject project, java.util.Set<Integer> relocations) {
+    public static byte[] compile(StudioProject project, Encoding encoding) {
+        return compile(project, encoding, null);
+    }
+
+    private static byte[] compile(StudioProject project, Encoding encoding, java.util.Set<Integer> relocations) {
         List<Clip> clips = ProjectFormat.validatedClips(project);
         if (project.nativeProgram()!=null) return project.nativeProgram().bank();
         if (project.formatVersion() == 6) {
@@ -61,13 +71,15 @@ public final class ProjectCompiler {
         int header=6+4*fm+6*psg;
         Bank out=new Bank(relocations); for(int i=0;i<header;i++) out.put(0);
         out.set(2,fm); out.set(3,psg); out.set(4,1); out.set(5,project.tempo());
-        dacLane(out,project,sources); // DAC must always be the first positional slot.
-        for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices,psgEnvelopes,modulationEnvelopes);
-        for(int channel=1;channel<=psg;channel++) lane(out,project,"PSG"+channel,6+4*fm+6*(channel-1),sources,notes,voices,psgEnvelopes,modulationEnvelopes);
+        boolean compact = encoding == Encoding.COMPACT;
+        dacLane(out,project,sources,compact); // DAC must always be the first positional slot.
+        for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices,psgEnvelopes,modulationEnvelopes,compact);
+        for(int channel=1;channel<=psg;channel++) lane(out,project,"PSG"+channel,6+4*fm+6*(channel-1),sources,notes,voices,psgEnvelopes,modulationEnvelopes,compact);
         if(!project.voices().isEmpty()) {
             out.word(0,out.size());
             for(Voice v : project.voices()) for(int b : v.bytes()) out.put(b);
         }
+        if (out.size() > MAX_BANK_BYTES) throw new BankLimitException(out.size(), encoding);
         return out.bytes();
     }
 
@@ -118,8 +130,9 @@ public final class ProjectCompiler {
         return (numerator+divisor-1)/divisor;
     }
 
-    private static void dacLane(Bank out,StudioProject project,Map<String,Sequence> sources) {
-        out.word(6,out.size());
+    private static void dacLane(Bank bank,StudioProject project,Map<String,Sequence> sources,boolean compact) {
+        bank.word(6,bank.size());
+        var out = new TrackCompactor(bank, compact);
         List<Clip> clips=dacClips(project.clips());
         Map<String,Integer> sampleNotes=new HashMap<>();
         for(DacSample sample : project.samples()) sampleNotes.put(sample.id(),DacSample.FIRST_NOTE+sampleNotes.size());
@@ -130,83 +143,106 @@ public final class ProjectCompiler {
             var triggers=source.triggers().stream().sorted(Comparator.comparingInt(SampleTrigger::tick)).toList();
             if(triggers.isEmpty()) {
                 rest(out,clip.lengthTicks());
-                cursor=clip.startTick()+clip.lengthTicks();
-                continue;
-            }
-            int remaining=clip.lengthTicks();
-            while(remaining>0) {
-                int length=Math.min(remaining,source.lengthTicks());
-                int at=0;
-                for(int i=0;i<triggers.size();i++) {
-                    SampleTrigger trigger=triggers.get(i);
-                    if(trigger.tick()>=length) break;
-                    rest(out,trigger.tick()-at);
-                    int next=i+1<triggers.size()?Math.min(length,triggers.get(i+1).tick()):length;
-                    int duration=Math.min(127,next-trigger.tick());
-                    out.put(sampleNotes.get(trigger.sampleId()));
-                    out.put(duration);
-                    at=trigger.tick()+duration;
-                }
-                rest(out,length-at);
-                remaining-=length;
+            } else {
+                int cycle = source.lengthTicks();
+                out.repeat(clip.lengthTicks() / cycle, () -> dacUnits(out, triggers, sampleNotes, cycle));
+                int tail = clip.lengthTicks() % cycle;
+                if (tail > 0) dacUnits(out, triggers, sampleNotes, tail);
             }
             cursor=clip.startTick()+clip.lengthTicks();
         }
         rest(out,dacEndTick(project,sources,clips)-cursor);
-        out.put(SmpsCoordFlags.STOP);
+        out.finish();
     }
 
-    private static void lane(Bank out,StudioProject project,String lane,int pointer,
+    private static void dacUnits(TrackCompactor out, List<SampleTrigger> triggers,
+                                 Map<String,Integer> sampleNotes, int length) {
+        int at=0;
+        for(int i=0;i<triggers.size();i++) {
+            SampleTrigger trigger=triggers.get(i);
+            if(trigger.tick()>=length) break;
+            rest(out,trigger.tick()-at);
+            int next=i+1<triggers.size()?Math.min(length,triggers.get(i+1).tick()):length;
+            int duration=Math.min(127,next-trigger.tick());
+            out.event(sampleNotes.get(trigger.sampleId()),duration);
+            at=trigger.tick()+duration;
+        }
+        rest(out,length-at);
+    }
+
+    private static void lane(Bank bank,StudioProject project,String lane,int pointer,
                              Map<String,Sequence> sources,Map<String,List<NoteEvent>> notes,Map<String,Integer> voices,
-                             Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes) {
-        out.word(pointer,out.size());
+                             Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes,boolean compact) {
+        bank.word(pointer,bank.size());
+        var out = new TrackCompactor(bank, compact);
         List<Clip> clips=project.clips().stream().filter(c->c.lane().equals(lane)).sorted(Comparator.comparingInt(Clip::startTick)).toList();
-        int cursor=0;
+        int cursor=0, version=project.formatVersion();
         var activeEffects=EnumSet.noneOf(NativeCommand.class);
         for(Clip clip : clips) {
             rest(out,clip.startTick()-cursor);
             Sequence source=sources.get(clip.sequenceId());
-            int remaining=clip.lengthTicks();
-            boolean first=true;
+            List<NoteEvent> sourceNotes = notes.get(source.id());
             List<CommandEvent> commands=source.commands().stream().sorted(Comparator.comparingInt(CommandEvent::tick)).toList();
-            while(remaining>0) {
-                int length=Math.min(remaining,source.lengthTicks());
-                if(first || project.formatVersion()==1 || source.repeatState().equals("RESET")) {
-                    if(activeEffects.remove(NativeCommand.PSG_NOISE)) {
-                        out.put(0xF3); out.put(0);
-                    }
-                    if(activeEffects.remove(NativeCommand.FM_VOLUME_ENVELOPE)) {
-                        out.put(0xFF); out.put(0x06); out.put(0); out.put(0);
-                    }
-                    reset(out,source,voices,project.formatVersion(),psgEnvelopes,modulationEnvelopes);
-                }
-                if(project.formatVersion()==1) {
-                    int at=0;
-                    for(NoteEvent note : notes.get(source.id())) {
-                        if(note.tick()>=length) break;
-                        rest(out,note.tick()-at);
-                        int duration=Math.min(note.duration(),length-note.tick());
-                        note(out,source.type(),note.pitch(),duration);
-                        at=note.tick()+duration;
-                    }
-                    rest(out,length-at);
-                } else {
-                    units(out,source,notes.get(source.id()),commands,length,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
-                }
-                remaining-=length;
-                first=false;
+            int cycle = source.lengthTicks();
+            int first = Math.min(clip.lengthTicks(), cycle);
+            boolean resetRepeats = version == 1 || source.repeatState().equals("RESET");
+            resetIteration(out,source,voices,version,psgEnvelopes,modulationEnvelopes,activeEffects);
+            toneUnits(out,source,sourceNotes,commands,first,version,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
+
+            int remaining = clip.lengthTicks() - first;
+            int repeats = remaining / cycle;
+            out.repeat(repeats, () -> {
+                if (resetRepeats) resetIteration(out,source,voices,version,psgEnvelopes,modulationEnvelopes,activeEffects);
+                toneUnits(out,source,sourceNotes,commands,cycle,version,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
+            });
+            int tail = remaining % cycle;
+            if (tail > 0) {
+                if (resetRepeats) resetIteration(out,source,voices,version,psgEnvelopes,modulationEnvelopes,activeEffects);
+                toneUnits(out,source,sourceNotes,commands,tail,version,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
             }
             cursor=clip.startTick()+clip.lengthTicks();
         }
-        out.put(SmpsCoordFlags.STOP);
+        out.finish();
     }
 
-    private static void reset(Bank out,Sequence source,Map<String,Integer> voices,int version,
+    private static void resetIteration(TrackCompactor out,Sequence source,Map<String,Integer> voices,int version,
+                                       Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes,
+                                       EnumSet<NativeCommand> activeEffects) {
+        if(activeEffects.remove(NativeCommand.PSG_NOISE)) {
+            out.put(0xF3); out.put(0);
+        }
+        if(activeEffects.remove(NativeCommand.FM_VOLUME_ENVELOPE)) {
+            out.put(0xFF); out.put(0x06); out.put(0); out.put(0);
+        }
+        reset(out,source,voices,version,psgEnvelopes,modulationEnvelopes);
+    }
+
+    private static void toneUnits(TrackCompactor out, Sequence source, List<NoteEvent> notes, List<CommandEvent> commands,
+                                  int length, int version, Map<String,Integer> voices, Map<String,Integer> psgEnvelopes,
+                                  Map<String,Integer> modulationEnvelopes, EnumSet<NativeCommand> activeEffects) {
+        if (version >= 2) {
+            units(out,source,notes,commands,length,voices,psgEnvelopes,modulationEnvelopes,activeEffects);
+            return;
+        }
+        int at=0;
+        for(NoteEvent note : notes) {
+            if(note.tick()>=length) break;
+            rest(out,note.tick()-at);
+            int duration=Math.min(note.duration(),length-note.tick());
+            note(out,source.type(),note.pitch(),duration);
+            at=note.tick()+duration;
+        }
+        rest(out,length-at);
+    }
+
+    private static void reset(TrackCompactor out,Sequence source,Map<String,Integer> voices,int version,
                               Map<String,Integer> psgEnvelopes,Map<String,Integer> modulationEnvelopes) {
         if(source.type().equals("FM")) { out.put(SmpsCoordFlags.SET_VOICE); out.put(voices.get(source.voiceId())); }
         out.put(SmpsCoordFlags.ABSOLUTE_VOLUME); out.put(source.volume());
+        out.state(NativeCommand.VOLUME, source.volume());
         if(source.type().equals("FM")) { out.put(0xE0); out.put(0xC0); }
         out.put(0xED); out.put(0x40);
+        out.state(NativeCommand.TRANSPOSE, 0x40);
         if(version>=2) { out.put(SmpsCoordFlags.DETUNE); out.put(0); out.put(0xE8); out.put(0); out.put(SmpsCoordFlags.MODULATION_OFF); }
         if(version>=3) {
             if(source.type().equals("PSG")) { out.put(SmpsCoordFlags.PSG_INSTRUMENT);out.put(source.psgEnvelopeId()==null?0:psgEnvelopes.get(source.psgEnvelopeId())); }
@@ -219,7 +255,7 @@ public final class ProjectCompiler {
         return indices;
     }
     /** Merge only source events, streaming bounded time units straight into the bank. */
-    private static void units(Bank out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length,
+    private static void units(TrackCompactor out,Sequence source,List<NoteEvent> notes,List<CommandEvent> commands,int length,
                               Map<String,Integer> voices,Map<String,Integer> psgEnvelopes,
                               Map<String,Integer> modulationEnvelopes,EnumSet<NativeCommand> activeEffects) {
         int at=0, noteIndex=0, commandIndex=0;
@@ -230,6 +266,7 @@ public final class ProjectCompiler {
             while(commandIndex<commands.size() && commands.get(commandIndex).tick()==at) {
                 CommandEvent event=commands.get(commandIndex++);
                 NativeCommand command=event.command();
+                out.state(command, event.arguments().isEmpty() ? 0 : event.arguments().getFirst());
                 out.put(command.opcode());
                 if(command.subOpcode()>=0) out.put(command.subOpcode());
                 String asset=event.assetId();
@@ -261,41 +298,123 @@ public final class ProjectCompiler {
                     out.put(SmpsCoordFlags.MODULATION_ENVELOPE); out.put(0);
                 }
             }
-            int next=at+(int)Math.min(127L,(long)length-at);
+            int next=length;
             if(note!=null) next=Math.min(next,sounding ? note.tick()+note.duration() : note.tick());
             if(commandIndex<commands.size()) next=Math.min(next,commands.get(commandIndex).tick());
-            if(sounding) {
-                if(note.tick()==at) out.put(encodedPitch(source.type(),note.pitch()));
-                else out.put(SmpsCoordFlags.HOLD);
-            } else out.put(REST);
-            out.put(next-at);
+            int duration = next - at;
+            if(!sounding) rest(out,duration);
+            else {
+                if(note.tick()==at) {
+                    int attack = Math.min(127,duration);
+                    out.event(encodedPitch(source.type(),note.pitch()),attack);
+                    duration -= attack;
+                }
+                held(out,-1,duration);
+            }
             at=next;
         }
     }
-    private static void rest(Bank out,long ticks) {
-        while(ticks>0) { int duration=(int)Math.min(ticks,127); out.put(REST); out.put(duration); ticks-=duration; }
+
+    private static void rest(TrackCompactor out,long ticks) {
+        if (ticks >= 127) {
+            out.event(REST,127); // Includes any commands queued for this rest.
+            out.repeat((int)(ticks / 127) - 1, () -> out.event(REST,127));
+        }
+        if (ticks % 127 > 0) out.event(REST,(int)(ticks % 127));
     }
-    private static void note(Bank out,String type,int pitch,int ticks) {
-        // FM byte 81 is C0 (MIDI12), but S3K's PSG table starts at C2
-        // (MIDI36). Sharing the FM bias raises every PSG note two octaves.
-        int encoded=encodedPitch(type,pitch); boolean continuation=false;
-        while(ticks>0) { int duration=Math.min(ticks,127); if(continuation) out.put(SmpsCoordFlags.HOLD); out.put(encoded); out.put(duration); ticks-=duration; continuation=true; }
+
+    private static void note(TrackCompactor out,String type,int pitch,int ticks) {
+        // FM byte 81 is C0 (MIDI12), but S3K's PSG table starts at C2 (MIDI36).
+        int encoded=encodedPitch(type,pitch);
+        int attack = Math.min(127,ticks);
+        out.event(encoded,attack);
+        held(out,encoded,ticks-attack);
     }
+
+    private static void held(TrackCompactor out,int note,int ticks) {
+        if (ticks <= 0) return;
+        // Flush any commands waiting for this first continuation before bulk writing.
+        int first = Math.min(127,ticks);
+        out.heldEvent(note,first);
+        int remaining = ticks - first;
+        out.repeat(remaining / 127, () -> out.heldEvent(note,127));
+        if (remaining % 127 > 0) out.heldEvent(note,remaining % 127);
+    }
+
     private static int encodedPitch(String type,int pitch) { return 0x81+pitch-(type.equals("PSG")?36:12); }
 
-    /** Fixed-size writer bounds work even for billion-tick input; no expanded event list. */
-    private static final class Bank {
-        private final java.util.Set<Integer> relocations;
-        Bank(java.util.Set<Integer> relocations) { this.relocations = relocations; }
-        private final byte[] data=new byte[MAX_BANK_BYTES]; private int size;
-        int size() { return size; }
-        void put(int value) { if(size==data.length) throw new IllegalArgumentException("Compiled project exceeds one 32 KiB S3K bank; shorten clips or reduce notes/voices"); data[size++]=(byte)value; }
-        void set(int at,int value) { data[at]=(byte)value; }
-        void word(int at,int value) {
-            if (relocations != null) relocations.add(at);
-            if(value<0 || value>=MAX_BANK_BYTES) throw new IllegalArgumentException("Compiled project pointer exceeds one 32 KiB S3K bank");
-            set(at,value); set(at+1,value>>>8);
+    public static final class BankLimitException extends IllegalArgumentException {
+        private final long compiledBytes;
+
+        private BankLimitException(long compiledBytes, Encoding encoding) {
+            super("Compiled project is " + compiledBytes + " bytes. The 32 KiB S3K bank limit is 32,768 bytes. "
+                    + (encoding == Encoding.COMPACT ? "Loops and calls were already applied. " : "Linear encoding was requested. ")
+                    + "Shorten the song or reduce layering, voices, or notes.");
+            this.compiledBytes = compiledBytes;
         }
-        byte[] bytes() { return Arrays.copyOf(data,size); }
+
+        public long compiledBytes() { return compiledBytes; }
+        public int limitBytes() { return MAX_BANK_BYTES; }
+
+        /** ProjectFiles wraps compile errors in an IOException while loading or saving. */
+        public static BankLimitException from(Throwable failure) {
+            if (failure instanceof BankLimitException limit) return limit;
+            return failure.getCause() instanceof BankLimitException limit ? limit : null;
+        }
+    }
+
+    /** Retain writable bytes up to the bank limit and count the full output past it. */
+    static final class Bank {
+        private final java.util.Set<Integer> relocations;
+        private byte[] data = new byte[64];
+        private long size;
+
+        Bank() { this(null); }
+
+        /** Records the offset of every bank pointer written with {@link #word}. */
+        Bank(java.util.Set<Integer> relocations) { this.relocations = relocations; }
+
+        long size() { return size; }
+
+        void put(int value) { set(size++,value); }
+
+        void putBytes(byte[] bytes) { append(bytes,bytes.length); }
+
+        void append(Bank source) { append(source.data,source.size); }
+
+        private void append(byte[] bytes,long length) {
+            int written = (int)Math.max(0,Math.min(length,MAX_BANK_BYTES-size));
+            if (written > 0) {
+                grow((int)size + written);
+                System.arraycopy(bytes,0,data,(int)size,written);
+            }
+            size += length;
+        }
+
+        // Bulk counting also uses this for output that cannot fit even in part.
+        void skip(long length) { size += length; }
+
+        void set(long at,int value) {
+            if (at >= MAX_BANK_BYTES) return;
+            grow((int)at + 1);
+            data[(int)at]=(byte)value;
+        }
+
+        void word(long at,long value) {
+            if (relocations != null && at < MAX_BANK_BYTES) relocations.add((int)at);
+            set(at,(int)value);
+            set(at+1,(int)(value>>>8));
+        }
+
+        void word(long value) {
+            word(size, value);
+            size += 2;
+        }
+
+        private void grow(int required) {
+            if (required > data.length) data = Arrays.copyOf(data,Math.max(required,data.length * 2));
+        }
+
+        byte[] bytes() { return Arrays.copyOf(data,(int)size); }
     }
 }

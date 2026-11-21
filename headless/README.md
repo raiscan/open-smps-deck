@@ -717,8 +717,10 @@ on stderr.
 
 ## Deliberately limited input contract
 
-The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.
-These restrictions are in its validator, not in the extracted OpenGGF core:
+The CLI accepts a finite subset of standalone S3K SMPS. The arrangement
+compiler packs repeated timed events into counted loops and shared
+subroutines. Use `compile-project PROJECT OUTPUT --linear` to emit the
+original linear encoding.
 
 - Six-byte S3K music header, little-endian file-relative pointers with base zero.
 - One mandatory first DAC header slot, up to five following FM slots, and up
@@ -741,9 +743,11 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   envelope if its ID is nonzero. All resources are validated, including
   unused ones.
 - Every track must terminate before the next track or voice-table boundary.
-  Calls, jumps, loops, other envelope commands, direct register writes,
-  DAC coordination flags and all other commands are rejected explicitly. Unknown commands
-  never silently fall through into notes or partially rendered audio.
+  Counted loops (F7) use counter zero, a nonzero finite count, and a backward
+  pointer. Calls (F8) target routines after the track stop that end in a
+  return (F9). Control flow is flat and timed events have explicit durations.
+  Unconditional jumps, direct register writes and other unlisted commands
+  are rejected.
 
 A normal legacy OpenSMPSDeck export may contain loops or require external
 resources and therefore be rejected. Raw binary rendering and locked-on
