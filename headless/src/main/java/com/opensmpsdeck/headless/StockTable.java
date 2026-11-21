@@ -89,7 +89,11 @@ final class StockTable {
     }
 
     static RetailSongOrigin matchBank(byte[] bytes) {
-        return PublicTable.BANKS.get(hash(bytes));
+        return matchBankHash(hash(bytes));
+    }
+
+    static RetailSongOrigin matchBankHash(String sha256) {
+        return PublicTable.BANKS.get(sha256);
     }
 
     static AssetOrigin origin(String table, int slot, byte[] bytes) {

@@ -141,10 +141,12 @@ tool_timeout_sec = 600
    saved project feedback. Validate the approved project with
    `project_validate`.
 5. **Output.** Call `project_export` with `workDir` or `project`, a new
-   `output` and `format` of `wav`, `mp3`, `vgm`, `smps` or `package`.
+   `output` and `format` of `wav`, `mp3`, `vgm`, `smps`, `package`, `portable` or `mod`.
    For WAV or MP3, use project seconds for optional span bounds and
-   `stems: true` for channel stems. Studio **Export…** supports the same
-   formats. **Open as arrangement** hands the result to the timeline
+   `stems: true` for channel stems. Use `package_validate` on a portable
+   export and supply `roms` for stock references. Check the returned
+   `warnings` before sharing. Studio **Export…** supports audio, VGM, raw
+   SMPS and legacy packages. **Open as arrangement** hands the result to the timeline
    editor. Saved musical hand edits detach the arrangement. Rebuilding
    over them requires explicit approval. Use `reconstruct_rerun` with a
    new `output` to replay the recipe and preserve the original.
@@ -169,7 +171,7 @@ supplies a progress token. Keep input paths and path-bearing artifacts private.
 
 ## MCP tools
 
-The packaged server exposes **29 tools** through `tools/list`. Use the
+The packaged server exposes **31 tools** through `tools/list`. Use the
 returned schemas for optional fields and types.
 
 | Task | Tools |
@@ -180,7 +182,7 @@ returned schemas for optional fields and types.
 | Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |
 | Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` |
 | Track project feedback | `reference_add`, `notes_list`, `notes_add`, `notes_resolve` |
-| Validate, export and check regressions | `project_validate`, `project_export`, `bench_compare` |
+| Validate, export and check regressions | `project_validate`, `project_export`, `package_validate`, `package_inspect`, `bench_compare` |
 
 `artifact_write` is available for validated configuration such as a
 `roleplan`. It accepts a complete object or a `selection` of object keys

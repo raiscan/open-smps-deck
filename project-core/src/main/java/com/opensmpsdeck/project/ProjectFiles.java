@@ -46,6 +46,14 @@ public final class ProjectFiles {
     }
 
     public static LoadedProject load(Path path) throws IOException {
+        return load(path, true);
+    }
+
+    public static StudioProject loadSource(Path path) throws IOException {
+        return load(path, false).project();
+    }
+
+    private static LoadedProject load(Path path, boolean compile) throws IOException {
         Path file = normalized(path);
         byte[] bytes = readBytes(file);
         try {
@@ -54,7 +62,7 @@ public final class ProjectFiles {
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(bytes)).toString();
             StudioProject project = ProjectFormat.read(source);
-            ProjectCompiler.compile(project);
+            if (compile) ProjectCompiler.compile(project);
             return new LoadedProject(project, revision(bytes));
         } catch (CharacterCodingException exception) {
             throw new IOException("Project is not valid UTF-8: " + file, exception);
