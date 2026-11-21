@@ -1095,8 +1095,13 @@ Portable exports include redacted source by default. Pass `--no-source`
 to omit it. Choose `--driver s1|s2|s3k` for an editable arrangement.
 The default is `s3k`, also the only target for native v5 banks. Studio's
 **Portable SMPS package** export has the same driver choice. S1 and S2
-accept `--speed-up-tempo BYTE` (decimal 0–255) for the gameplay speed-shoes
-tempo. An absent value leaves gameplay tempo unchanged. The package ID
+preserve the S3K duration tick rate as closely as their native clocks allow.
+`--speed-up-tempo BYTE` (decimal 0–255) uses the S3K clock for the optional
+gameplay speed-shoes tempo, then converts it to a native manifest byte.
+An absent value leaves gameplay tempo unchanged. Export reports
+`TEMPO_APPROXIMATED` with the source and target bytes and the signed
+relative tick-rate error for each inexact conversion. Pass `--strict-tempo`
+to reject either approximation. The package ID
 defaults to a lowercase slug of the project name,
 the version to `1.0.0`, the author list to empty, and the license to null.
 Use `--package-id`, `--package-version`, repeatable `--author`, and
@@ -1118,7 +1123,7 @@ or `export` to resolve its stock assets. Studio reports the missing assets
 when opening that source. The Studio ROM picker is a follow-up.
 
 MCP `project_export` accepts `format: "portable"` or `"mod"` and optional
-`driver`, `speedUpTempo`, `noSource`, `license`, `packageId`, `packageVersion`, `authors`,
+`driver`, `speedUpTempo`, `strictTempo`, `noSource`, `license`, `packageId`, `packageVersion`, `authors`,
 and `roms`. Use an integer `replace` array for mod export.
 `package_validate` takes `package`, optional `roms` and a new `render` path
 beside the package with optional `frames`. `package_inspect` takes `package`.

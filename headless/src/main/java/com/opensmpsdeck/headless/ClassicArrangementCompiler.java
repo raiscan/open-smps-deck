@@ -25,6 +25,7 @@ final class ClassicArrangementCompiler {
 
     private final ClassicPackageDriver driver;
     private final StudioProject project;
+    private final int tempo;
     private final byte[] bank = new byte[ProjectCompiler.MAX_BANK_BYTES];
     private final TreeSet<Integer> relocations = new TreeSet<>();
     private final Map<String, Sequence> sequences = new HashMap<>();
@@ -34,15 +35,16 @@ final class ClassicArrangementCompiler {
     private final Map<String, Integer> sampleNotes = new HashMap<>();
     private int size;
 
-    ClassicArrangementCompiler(ClassicPackageDriver driver, StudioProject project) {
+    ClassicArrangementCompiler(ClassicPackageDriver driver, StudioProject project, int tempo) {
         this.driver = driver;
         this.project = project;
+        this.tempo = tempo;
     }
 
     ProjectCompiler.BankLayout compile() {
         ProjectFormat.requireResolved(project);
         ProjectFormat.validate(project);
-        driver.validateTempo(project.tempo());
+        driver.validateTempo(tempo);
         project.sequences().forEach(sequence -> sequences.put(sequence.id(), sequence));
         project.voices().forEach(voice -> voices.put(voice.id(), voices.size()));
         for (var envelope : project.envelopes()) {
@@ -67,7 +69,7 @@ final class ClassicArrangementCompiler {
         bank[2] = (byte) fm;
         bank[3] = (byte) psg;
         bank[4] = 1;
-        bank[5] = (byte) project.tempo();
+        bank[5] = (byte) tempo;
         pointer(6);
         writeDac(onLane(clips, "DAC"));
         for (int lane = 1; lane < fm; lane++) {

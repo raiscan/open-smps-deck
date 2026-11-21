@@ -39,14 +39,119 @@ class ClassicPortablePackageTest {
 
     @TempDir Path directory;
 
+    @Test void rendersConvertedTempoAndEquivalentFmVoiceLoads() throws Exception {
+        for (int tempo : List.of(64, 31)) {
+            var project = timingProject(tempo);
+            var s3k = render(project, S3kPackageDriver.INSTANCE);
+            var reference = noteOns(s3k, false);
+            assertTrue(reference.size() > 400);
+            assertEquals(reference, noteOns(s3k, true));
+            var voices = operatorWrites(s3k);
+            assertEquals(3 * 24, voices.size());
+            assertEquals(3, voices.stream().filter(write -> write.register() == 0x30)
+                    .map(Write::value).distinct().count());
+
+            for (var driver : ClassicPackageDriver.values()) {
+                var observed = render(project, driver);
+                assertEquals(voices, operatorWrites(observed), driver.id());
+                var fm = noteOns(observed, false);
+                assertEquals(fm, noteOns(observed, true), driver.id() + " PSG");
+                if (tempo == 64) {
+                    assertTrue(reference.equals(fm), driver.id() + " exact-phase note count " + fm.size());
+                } else {
+                    // At 0x1F S1 uses 8 (224/256), S2 uses 225 (225/256).
+                    double sourceRate = 225 / 256.0;
+                    double targetRate = driver == ClassicPackageDriver.S1 ? 224 / 256.0 : sourceRate;
+                    assertTrue(Math.abs(reference.size() - fm.size())
+                            <= 768 * Math.abs(sourceRate - targetRate) + 1);
+                    for (int i = 0; i < Math.min(fm.size(), reference.size()); i++) {
+                        // Each observed frame is quantized by the native tick phase.
+                        double expectedDrift = (i + 1) * (1 / targetRate - 1 / sourceRate);
+                        assertEquals(expectedDrift, fm.get(i) - reference.get(i), 2.0,
+                                driver.id() + " note " + i);
+                    }
+                }
+            }
+        }
+    }
+
+    private static StudioProject timingProject(int tempo) {
+        var voices = new ArrayList<Voice>();
+        for (int i = 0; i < 3; i++) {
+            byte[] voice = S1_VOICE.clone();
+            for (int offset = 1; offset < 25; offset++) voice[offset] += i;
+            // Use literal TL values for this zero-attenuation test. S1 may
+            // expose the carrier marker on the bus, where YM2612 ignores it.
+            for (int offset = 21; offset < 25; offset++) voice[offset] &= 0x7F;
+            voices.add(new Voice("voice" + i, "Voice " + i, StockAssets.unsigned(voice)));
+        }
+        // One attack per tick and two explicit FM voice changes. Alternating
+        // pitches distinguish PSG attacks from repeated writes of the same pitch.
+        var notes = java.util.stream.IntStream.range(0, 768)
+                .mapToObj(tick -> new NoteEvent("n" + tick, tick, 1, 60 + tick % 2)).toList();
+        var fm = new Sequence("fm", "FM", "FM", 768, "voice0", 127, notes,
+                List.of(new CommandEvent("v1", 160, NativeCommand.FM_VOICE, List.of(), "voice1"),
+                        new CommandEvent("v2", 320, NativeCommand.FM_VOICE, List.of(), "voice2")), "RESET");
+        var psg = new Sequence("psg", "PSG", "PSG", 768, null, 127, notes);
+        return new StudioProject(4, "Tempo and voice fixture", "S3K", 24, tempo, voices, List.of(fm, psg),
+                List.of(new Clip("fm-c", "fm", "FM1", 0, 768), new Clip("psg-c", "psg", "PSG1", 0, 768)));
+    }
+
+    private static Observation render(StudioProject project, PackageDriver driver) throws Exception {
+        var options = new PortableOptions(driver.id(), false, null, null, null, List.of(), List.of());
+        var payload = PortablePackageWriter.build(project, options);
+        var compiled = PortablePackageReader.assemble(archive(payload), List.of());
+        var observation = new Observation();
+        if (driver instanceof ClassicPackageDriver classic)
+            classic.render(compiled, 768, observation::capture, observation);
+        else
+            S3kRenderer.render(compiled, 768, observation::capture, observation);
+        return observation;
+    }
+
+    private static List<Integer> noteOns(Observation observation, boolean psg) {
+        var frames = new ArrayList<Integer>();
+        int previousPitch = -1;
+        for (var write : observation.writes) {
+            if (psg && write.register() == -1 && (write.value() & 0xF0) == 0x80
+                    && previousPitch != write.value()) {
+                previousPitch = write.value();
+                frames.add(write.frame());
+            }
+            if (!psg && write.register() == 0x28 && (write.value() & 0xF7) == 0xF0)
+                frames.add(write.frame());
+        }
+        return frames;
+    }
+
+    private static List<Write> operatorWrites(Observation observation) {
+        // Compare each upload by register address, independent of upload order.
+        var uploads = new ArrayList<Write>();
+        var registers = new java.util.TreeMap<Integer, Write>();
+        int frame = -1;
+        for (var write : observation.writes) {
+            int register = write.register();
+            if (write.port() != 0 || register < 0x30 || register > 0x8C || (register & 3) != 0)
+                continue;
+            if (write.frame() != frame) {
+                if (registers.size() == 24) uploads.addAll(registers.values());
+                registers.clear();
+                frame = write.frame();
+            }
+            registers.put(register, new Write(0, 0, register, write.value()));
+        }
+        if (registers.size() == 24) uploads.addAll(registers.values());
+        return uploads;
+    }
+
     @Test void arrangementMatchesIndependentS1AndS2Programs() throws Exception {
         for (var driver : ClassicPackageDriver.values()) {
             var payload = PortablePackageWriter.build(project(NativeCommand.DETUNE, 60), options(driver));
             var assembled = PortablePackageReader.assemble(archive(payload), List.of());
             boolean s1 = driver == ClassicPackageDriver.S1;
             byte[] header = bytes(s1
-                    ? "00 35 02 01 01 c0 00 14 00 00 00 17 00 00 00 29 00 00 00 00"
-                    : "35 00 02 01 01 c0 14 00 00 00 17 00 00 00 29 00 00 00 00 00");
+                    ? "00 35 02 01 01 02 00 14 00 00 00 17 00 00 00 29 00 00 00 00"
+                    : "35 00 02 01 01 40 14 00 00 00 17 00 00 00 29 00 00 00 00 00");
             byte[] tracks = bytes("""
                     81 06 f2
                     e6 06 ef 00 e0 c0 e1 00 e8 00 f4 b1 02 e1 01 e7 04 f2
@@ -86,7 +191,7 @@ class ClassicPortablePackageTest {
             var payload = PortablePackageWriter.write(project, first, options(driver));
             PortablePackageWriter.write(project, second, options(driver));
             assertEquals(-1, Files.mismatch(first, second));
-            assertEquals(208, PortablePackages.inspect(first).getAsJsonObject("driverOptions").get("speedUpTempo").getAsInt());
+            assertEquals(driver == ClassicPackageDriver.S1 ? 2 : 48, PortablePackages.inspect(first).getAsJsonObject("driverOptions").get("speedUpTempo").getAsInt());
             var report = PortablePackages.validate(first, List.of(), directory.resolve(id + ".wav"), 16);
             assertTrue(report.get("playbackValidated").getAsBoolean(), report.toString());
             assertTrue(report.get("valid").getAsBoolean(), report.toString());

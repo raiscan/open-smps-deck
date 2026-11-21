@@ -303,8 +303,11 @@ S3&K hashes and locators. For S1 or S2, add `--driver s1|s2` and
 Use `compile-package PROJECT OUT.smps.zip --portable` or
 `export PROJECT OUT.smps.zip --format portable` for schema 4. Use
 `--no-source` to omit the default redacted source. Set `--driver s1|s2|s3k`
-(default `s3k`, required for native v5 banks). S1 and S2 accept
-`--speed-up-tempo BYTE` for gameplay. Set `--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
+(default `s3k`, required for native v5 banks). S1 and S2 convert the S3K tempo
+to the nearest native tick rate. Supply `--speed-up-tempo BYTE` on the same
+S3K clock for optional speed shoes. Check `TEMPO_APPROXIMATED` diagnostics
+for the converted bytes and rate error. Use `--strict-tempo` to reject
+inexact normal or speed-shoes tempo conversions. Set `--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
 and repeatable `--author NAME` as needed. Use `export --format mod` with
 repeatable decimal `--replace ID` from the target game to create an OpenGGF patch mod JAR.
 
@@ -315,7 +318,7 @@ driver. Use `render-package PKG OUT.wav [--rom PATH ...] [--frames N]` for
 a direct preview. Pass `--rom PATH` to `validate-project`, `render-project`,
 `compile-package` or `export` to resolve redacted source. In MCP, use
 `project_export` with `format: "portable"` or `"mod"`, optional `driver`
-and `speedUpTempo`, then `package_inspect` or `package_validate`. Check the package warnings even
+`speedUpTempo` and `strictTempo`, then `package_inspect` or `package_validate`. Check the package warnings even
 when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)

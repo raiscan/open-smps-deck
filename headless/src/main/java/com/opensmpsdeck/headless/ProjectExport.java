@@ -48,13 +48,18 @@ public final class ProjectExport {
     }
 
     public record PortableSettings(String driver, boolean includeSource, String license, String id,
-                                   String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+                                   String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
+                                   boolean strictTempo) {
+        public PortableSettings(String driver, boolean includeSource, String license, String id,
+                                String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+            this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, false);
+        }
         public PortableSettings(String driver, boolean includeSource, String license, String id,
                                 String version, List<String> authors, List<Integer> replacements) {
             this(driver, includeSource, license, id, version, authors, replacements, null);
         }
         PortableOptions options() {
-            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo);
+            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo);
         }
     }
 
@@ -85,7 +90,7 @@ public final class ProjectExport {
         }
         if (options.format == Format.PORTABLE || options.format == Format.MOD) {
             var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
-            return writePortable(project, output, options.format, settings, progress).warnings();
+            return writePortable(project, output, options.format, settings, progress).exportWarnings();
         }
         var compiled = ProjectCompiler.compileWithAssets(project);
         if (options.format == Format.SMPS) {
@@ -179,7 +184,7 @@ public final class ProjectExport {
     }
 
     public static List<String> portableWarnings(StudioProject project, PortableSettings settings) throws IOException {
-        return PortablePackageWriter.build(project, settings == null ? PortableOptions.DEFAULT : settings.options()).warnings();
+        return PortablePackageWriter.build(project, settings == null ? PortableOptions.DEFAULT : settings.options()).exportWarnings();
     }
 
     public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
@@ -188,7 +193,7 @@ public final class ProjectExport {
         var payload = writePortable(project, output, options.format, settings, progress);
         var result = new com.google.gson.JsonObject();
         var json = new com.google.gson.Gson();
-        result.add("warnings", json.toJsonTree(payload.warnings()));
+        result.add("warnings", json.toJsonTree(payload.exportWarnings()));
         if (!payload.converted().isEmpty()) result.add("undeclaredStockConverted", json.toJsonTree(payload.converted()));
         return result;
     }

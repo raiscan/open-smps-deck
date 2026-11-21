@@ -125,11 +125,14 @@ The fields are:
 - `requires.stockAssets` is true if any asset has a `ref` without an
   embedded payload. `requires.games` is the sorted unique `ref.game` values.
 - `driverOptions`: `{}` for s3k. For s1 and s2:
-  `{"speedUpTempo": <0–255> | null}`, the speed-shoes tempo byte. Null means
+  `{"speedUpTempo": <0–255> | null}`, the target-native speed-shoes tempo byte. Null means
   speed shoes leave tempo unchanged. On activation with speed shoes, or when
   the effect turns on, a host MUST use this byte in place of the song's normal
   tempo. Turning the effect off restores the normal tempo. Hosts MUST NOT
-  index the game's retail speed table by a replacement ID.
+  index the game's retail speed table by a replacement ID. The export inputs
+  `--speed-up-tempo` and MCP `speedUpTempo` are S3K-clock bytes. Writers
+  convert them before storing the native byte, using the same conversion
+  and warning or strictness policy as for the normal tempo.
 - `bank`: see §4.
 - `assets`, `envelopeBindings`, `dacBindings`, `globalVoices`: see §3.
 - `source`: `null`, or
@@ -292,6 +295,12 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
   The header is the voice pointer, FM/DAC count, PSG count, timing divisor,
   tempo, then four-byte FM/DAC entries and six-byte PSG entries. Slot zero
   is DAC. PSG entries end with a zero modulation byte and a PSG binding slot.
+  The header tempo is target-native. Exporters convert the arrangement's S3K
+  tempo to the closest target duration rate per the [driver matrix](driver-support.md#tempo-conversion).
+  For an inexact rate, the writer MUST record `TEMPO_APPROXIMATED` and
+  report the source byte, target byte and relative rate error to the caller.
+  CLI `--strict-tempo` or MCP `strictTempo: true` MUST fail the export
+  with that diagnostic before writing the archive.
 - `relocations` is the sorted list of unique byte offsets of every 16-bit
   bank pointer word. Words are big-endian for S1 and little-endian for S2
   and S3K. Include track pointers and a nonzero voice pointer. Programs
@@ -399,6 +408,7 @@ generation is reproducible.
 | `SOURCE_AUDIO` | A sample was sliced from an input recording; check that you have the rights to it |
 | `THIRD_PARTY` | Embedded third-party material; check its license |
 | `UNKNOWN_ROM_IMAGE` | The ROM hash is unknown; asset hashes decide |
+| `TEMPO_APPROXIMATED` | The normal or speed-shoes tempo differs in long-run tick rate after conversion from S3K to the target driver |
 | `DPCM_INEXACT` | Report only: the sample will change when a disassembly build encodes it to DPCM |
 
 Legacy packages (schemas 1–3) gain an additive `provenance` object with the

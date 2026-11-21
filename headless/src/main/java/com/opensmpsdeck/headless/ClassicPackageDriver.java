@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Set;
 
 enum ClassicPackageDriver implements PackageDriver {
@@ -85,12 +86,41 @@ enum ClassicPackageDriver implements PackageDriver {
         return new AssetOrigin(origin.type(), origin.ref(), converted, origin.license(), origin.attribution());
     }
 
-    @Override public ProjectCompiler.BankLayout compile(StudioProject project) {
-        return new ClassicArrangementCompiler(this, project).compile();
+    record TempoConversion(int targetByte, double relativeErrorPercent) {
+        boolean exact() { return relativeErrorPercent == 0; }
+
+        String warning(String field, int sourceByte, ClassicPackageDriver driver) {
+            return String.format(Locale.ROOT,
+                    "TEMPO_APPROXIMATED: %s S3K 0x%02X to %s 0x%02X (relative tick-rate error %+.6f%%)",
+                    field, sourceByte, driver.name(), targetByte, relativeErrorPercent);
+        }
     }
 
-    @Override public int previewFrames(StudioProject project) {
-        long frames = framesForTicks(GroupArrangement.endTick(project) + 2L, project.tempo());
+    /** The source clock is S3K's NTSC duration clock. See docs/architecture/driver-support.md. */
+    TempoConversion convertTempo(int sourceByte) {
+        require(sourceByte >= 0 && sourceByte <= 255, "S3K tempo must be in 0..255");
+        int sourceTicks = 256 - sourceByte;
+        if (this == S2) {
+            int target = Math.min(255, sourceTicks);
+            return new TempoConversion(target, 100.0 * (target - sourceTicks) / sourceTicks);
+        }
+
+        // The S1 rate increases monotonically with the countdown. The nearest
+        // rate is at one of the two integers bracketing 256 / sourceByte.
+        int lower = sourceByte == 0 ? 255 : Math.clamp(256 / sourceByte, 2, 255);
+        int upper = Math.min(lower + 1, 255);
+        int lowerError = sourceByte * lower - 256;
+        int upperError = sourceByte * upper - 256;
+        int target = Math.abs(lowerError) * upper <= Math.abs(upperError) * lower ? lower : upper;
+        return new TempoConversion(target, 100.0 * (sourceByte * target - 256) / (target * sourceTicks));
+    }
+
+    @Override public ProjectCompiler.BankLayout compile(StudioProject project, int tempo) {
+        return new ClassicArrangementCompiler(this, project, tempo).compile();
+    }
+
+    @Override public int previewFrames(StudioProject project, int tempo) {
+        long frames = framesForTicks(GroupArrangement.endTick(project) + 2L, tempo);
         long sampleTail = project.samples().stream().mapToLong(this::dacTailFrames).max().orElse(0);
         long preview = frames + Math.max(60, sampleTail);
         require(preview <= S3kRenderer.MAX_PRESENTATIONS, "song exceeds the ten-minute preview limit");

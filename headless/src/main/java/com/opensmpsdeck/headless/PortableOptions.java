@@ -7,7 +7,12 @@ import java.util.List;
 import java.util.Set;
 
 record PortableOptions(String driver, boolean includeSource, String license, String id,
-                       String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+                       String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
+                       boolean strictTempo) {
+    PortableOptions(String driver, boolean includeSource, String license, String id,
+                    String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
+        this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, false);
+    }
     PortableOptions(String driver, boolean includeSource, String license, String id,
                     String version, List<String> authors, List<Integer> replacements) {
         this(driver, includeSource, license, id, version, authors, replacements, null);
@@ -17,19 +22,19 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         replacements = List.copyOf(replacements);
         PackageDriver.supported(driver);
         if (speedUpTempo != null && (driver.equals("s3k") || speedUpTempo < 0 || speedUpTempo > 255))
-            throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and a byte in 0..255");
+            throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and an S3K tempo byte in 0..255");
     }
     static final PortableOptions DEFAULT = new PortableOptions("s3k", true, null, null, null, List.of(), List.of());
 
-    com.google.gson.JsonObject driverOptions() {
+    com.google.gson.JsonObject driverOptions(Integer nativeSpeedUpTempo) {
         var options = new com.google.gson.JsonObject();
-        if (!driver.equals("s3k")) options.addProperty("speedUpTempo", speedUpTempo);
+        if (!driver.equals("s3k")) options.addProperty("speedUpTempo", nativeSpeedUpTempo);
         return options;
     }
 
     static final class Cli {
         private static final Set<String> OPTIONS = Set.of("--portable", "--no-source", "--driver", "--license",
-                "--package-id", "--package-version", "--author", "--replace", "--rom", "--speed-up-tempo");
+                "--package-id", "--package-version", "--author", "--replace", "--rom", "--speed-up-tempo", "--strict-tempo");
         private final Set<String> seen = new HashSet<>();
         private final List<String> authors = new ArrayList<>();
         private final List<Integer> replacements = new ArrayList<>();
@@ -47,7 +52,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
             String option = args[at++];
             boolean repeatable = List.of("--author", "--replace", "--rom").contains(option);
             if (!seen.add(option) && !repeatable) throw new IllegalArgumentException("Duplicate option " + option);
-            if (option.equals("--portable") || option.equals("--no-source")) return at;
+            if (option.equals("--portable") || option.equals("--no-source") || option.equals("--strict-tempo")) return at;
             if (at == args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[at++];
             switch (option) {
@@ -68,7 +73,8 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         }
 
         PortableOptions options() {
-            return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements, speedUpTempo);
+            return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements,
+                    speedUpTempo, seen.contains("--strict-tempo"));
         }
     }
 }

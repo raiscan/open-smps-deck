@@ -25,7 +25,7 @@ import java.util.TreeSet;
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageReader {
-    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG",
+    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG", "TEMPO_APPROXIMATED",
             "UNDECLARED_STOCK_CONVERTED", "SOURCE_AUDIO", "THIRD_PARTY", "UNKNOWN_ROM_IMAGE", "DPCM_INEXACT");
 
     record Package(PackageManifest manifest, Map<String, byte[]> entries) {}

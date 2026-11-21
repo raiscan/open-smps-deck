@@ -18,11 +18,11 @@ interface PackageDriver {
     void preflight(CompiledProject project);
     void render(CompiledProject project, Path output, int frames) throws IOException;
 
-    default ProjectCompiler.BankLayout compile(StudioProject project) {
+    default ProjectCompiler.BankLayout compile(StudioProject project, int tempo) {
         return ProjectCompiler.compileArrangementLayout(project);
     }
 
-    default int previewFrames(StudioProject project) {
+    default int previewFrames(StudioProject project, int tempo) {
         return ProjectRenderTiming.presentationCount(project);
     }
 

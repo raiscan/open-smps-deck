@@ -20,7 +20,7 @@ and asset wire format.
 | Modulation envelopes, FM volume envelopes, SSG-EG | Rejected | Rejected | Supported in existing arrangement profile |
 | PCM DAC | 95 virtual bindings, rate base 301 | 95 virtual bindings, rate base 295 | 95 virtual bindings, rate base 297 |
 | Normal tempo | Countdown. At expiry, extend track durations by one pass. Header 2–255 | Accumulator. No carry extends durations by one pass. Header 1–255 | Accumulator. Carry extends durations by one pass. Header 0–255 |
-| Speed shoes | Optional native tempo byte | Optional native tempo byte | Native frame multiplier |
+| Speed shoes | Optional S3K-clock input converted to a native byte | Same | Native frame multiplier |
 | ROM resources tested | REV00 and REV01 | REV00 and REV01 | Locked-on S3&K |
 
 DAC bindings are runtime sample entries. The retail tables contain fewer
@@ -28,9 +28,49 @@ slots and use DPCM, while the portable session plays the supplied decoded
 PCM without a ROM patch. At most 512 KiB of total PCM and one 32 KiB bank
 are allowed. DAC occupies FM6, leaving five FM arrangement lanes. Outputs
 use the chosen driver's native pitch table, chip-write ordering, envelope
-behavior, timer and DAC rate. Export copies the arrangement's tempo byte to
-the target header. A numeric tempo therefore has different wall-clock
-timing across drivers. Studio still previews the editable source with S3K.
+behavior, timer and DAC rate. The FM table orders above describe ROM storage
+order. The pinned loaders and sequencer normalize the order for chip writes,
+including the [Sonic1SmpsData load-time swap](../../openggf-audio/src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsData.java)
+and [Sonic3kSmpsData's raw `30,38,34,3C` traversal](../../openggf-audio/src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kSmpsData.java).
+
+## Tempo conversion
+
+Studio previews the editable source on the S3K clock. Portable and mod exports
+convert its tempo byte `t` to a target header byte `b` by matching the long-run
+number of duration ticks per NTSC frame.
+
+| Driver | Load and duration rule in the pinned sequencer | Rate | Export byte |
+|---|---|---|---|
+| S3K (`OVERFLOW`) | The load service ticks unconditionally. The accumulator starts at `t`. Later services add `t` modulo 256 and hold the duration on carry | `1 − t/256` | `t` |
+| S2 (`OVERFLOW2`) | The accumulator starts at `b` and adds `b` modulo 256 starting on the load service. Only a carry advances durations. Weight zero freezes music progression | `b/256` | `min(255, 256 − t)` |
+| S1 (`TIMEOUT`) | The countdown starts at `b` and decrements starting on the load service. Reaching zero holds durations and reloads `b` | `1 − 1/b` | Nearest rate among countdowns 2–255, choosing the smaller byte for a tie |
+
+For `n ≥ 1` frames from a cold load, the cumulative duration counts are
+`n − floor(n·t/256)` on S3K, `floor((n+1)·b/256)` on S2 with `b > 0`, and
+`n − floor(n/b)` on S1. S3K tempo zero ticks on every frame. Its nearest
+classic bytes are both 255, each with a tick-rate error of −0.390625%.
+At S2 weight zero the sequencer primes the tracks once and then freezes
+duration progression, so exports use only 1–255.
+
+S1 matches exactly when `256/t` is an integer in 2–255. It then holds the
+same frames as S3K over the full period. S2 matches the rate for every
+nonzero `t`. The cumulative counts match throughout the period when `t`
+divides 256. For other bytes the counts can differ by one because the load
+service and carry condition differ. For example, `0x1F` gives 225/256 on
+S3K, matches that rate with S2 byte `0xE1`, and maps to S1 byte `0x08`
+(224/256, or −0.444444%). These formulas describe duration timing. The track
+walk can still update pitch, volume and envelopes on a held frame.
+
+Inexact rates raise `TEMPO_APPROXIMATED` with both bytes and the signed
+relative rate error `100 × (targetRate/sourceRate − 1)` as a percentage.
+CLI `--strict-tempo` or MCP `strictTempo: true` rejects the export in that
+case. For S1/S2 the optional speed-shoes input uses the same S3K byte scale
+and conversion. The manifest stores the resulting native byte. Omitting the
+input leaves the normal tempo in effect. The rate model applies once the
+effect is active. Its transition phase depends on the driver's current
+accumulator or countdown.
+
+## Arrangement commands
 
 | Arrangement command | S1 and S2 encoding and restrictions |
 |---|---|

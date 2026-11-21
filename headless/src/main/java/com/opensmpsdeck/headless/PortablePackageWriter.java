@@ -28,8 +28,15 @@ import java.util.TreeSet;
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageWriter {
-    record Payload(PackageManifest manifest, Map<String, byte[]> entries, List<String> converted) {
+    record Payload(PackageManifest manifest, Map<String, byte[]> entries, List<String> converted,
+                   List<String> tempoWarnings) {
         List<String> warnings() { return manifest.provenance().warnings(); }
+
+        List<String> exportWarnings() {
+            return warnings().stream()
+                    .flatMap(code -> code.equals("TEMPO_APPROXIMATED") ? tempoWarnings.stream() : java.util.stream.Stream.of(code))
+                    .toList();
+        }
     }
 
     private record Selection(Asset asset, AssetOrigin origin) {
@@ -37,6 +44,7 @@ final class PortablePackageWriter {
     }
 
     private final TreeSet<String> warnings = new TreeSet<>();
+    private final List<String> tempoWarnings = new ArrayList<>();
     private final List<String> converted = new ArrayList<>();
     private final List<Asset> assets = new ArrayList<>();
     private final Map<Kind, Map<String, byte[]>> files = new EnumMap<>(Kind.class);
@@ -67,7 +75,15 @@ final class PortablePackageWriter {
         var nativeProgram = project.nativeProgram();
         if (nativeProgram != null && !driver.id().equals("s3k"))
             throw new IllegalArgumentException(driver.id() + ": native v5 banks are S3K-only");
-        var arrangement = nativeProgram == null ? driver.compile(project) : null;
+        int tempo = project.tempo();
+        Integer speedUpTempo = options.speedUpTempo();
+        if (driver instanceof ClassicPackageDriver classic) {
+            tempo = convertTempo(classic, "Normal tempo", tempo);
+            if (speedUpTempo != null) speedUpTempo = convertTempo(classic, "Speed-shoes tempo", speedUpTempo);
+            if (!tempoWarnings.isEmpty() && options.strictTempo())
+                throw new IllegalArgumentException(String.join("\n", tempoWarnings));
+        }
+        var arrangement = nativeProgram == null ? driver.compile(project, tempo) : null;
         byte[] original = arrangement == null ? ProjectCompiler.compile(project) : arrangement.bytes();
         var compiled = new CompiledProject(original, project.envelopes(), project.samples(), nativeProgram,
                 nativeProgram == null ? List.of() : project.voices());
@@ -75,7 +91,7 @@ final class PortablePackageWriter {
         int base = nativeProgram == null ? 0 : nativeProgram.bankBase();
         int header = nativeProgram == null ? 0 : nativeProgram.headerOffset();
         int localCount = nativeProgram == null ? project.voices().size() : nativeProgram.localVoiceCount();
-        int preview = nativeProgram == null ? driver.previewFrames(project) : nativeProgram.previewFrames();
+        int preview = nativeProgram == null ? driver.previewFrames(project, tempo) : nativeProgram.previewFrames();
         int localStart = localCount == 0 ? -1 : driver.word(original, header) - base;
         require(localCount == 0 || localStart >= 0 && localStart + 25 * localCount <= original.length,
                 "Local FM table extends outside track.bin");
@@ -195,7 +211,7 @@ final class PortablePackageWriter {
                 base, header, localCount, preview, relocations, relocationsComplete, List.copyOf(fills));
         var manifest = new PackageManifest(4, "portable", driver.id(), info, generator(),
                 new Provenance(romBytes, retail != null, retail(retail), List.copyOf(warnings)), new Requirements(!games.isEmpty(), games),
-                options.driverOptions(), bank, List.copyOf(assets), envelopes, List.copyOf(dac.values()), globalVoices, source);
+                options.driverOptions(speedUpTempo), bank, List.copyOf(assets), envelopes, List.copyOf(dac.values()), globalVoices, source);
         var entries = new LinkedHashMap<String, byte[]>();
         entries.put("manifest.json", manifest.encode());
         entries.put("track.bin", track);
@@ -204,7 +220,16 @@ final class PortablePackageWriter {
             entries.putAll(files.getOrDefault(kind, Map.of()));
         if (sourceBytes != null) entries.put("source.smps.json", sourceBytes);
         PortablePackageReader.validateStructure(manifest, entries);
-        return new Payload(manifest, entries, List.copyOf(converted));
+        return new Payload(manifest, entries, List.copyOf(converted), List.copyOf(tempoWarnings));
+    }
+
+    private int convertTempo(ClassicPackageDriver classic, String field, int sourceByte) {
+        var conversion = classic.convertTempo(sourceByte);
+        if (!conversion.exact()) {
+            warnings.add("TEMPO_APPROXIMATED");
+            tempoWarnings.add(conversion.warning(field, sourceByte, classic));
+        }
+        return conversion.targetByte();
     }
 
     private static List<Integer> headerRelocations(byte[] bytes, int base, int header) {

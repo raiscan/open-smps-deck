@@ -145,7 +145,8 @@ tool_timeout_sec = 600
    For WAV or MP3, use project seconds for optional span bounds and
    `stems: true` for channel stems. On portable or mod exports, set
    `driver` to `s1`, `s2` or `s3k` (default). For S1/S2, optionally set
-   `speedUpTempo` to the native speed-shoes tempo byte. Use decimal engine
+   `speedUpTempo` to an S3K-clock byte for speed shoes and set `strictTempo`
+   to reject inexact conversion of either tempo. Use decimal engine
    music IDs for the mod `replace` array. Use `package_validate` on a portable
    export and supply `roms` for stock references. Check the returned
    `warnings` before sharing. Studio **Export…** supports audio, VGM, raw

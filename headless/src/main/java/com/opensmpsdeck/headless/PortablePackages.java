@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeSet;
 
 /** CLI and MCP entry points for the shared portable reader and writer. */
@@ -145,7 +146,8 @@ public final class PortablePackages {
 
     static void printWriteWarnings(PortablePackageWriter.Payload payload, PrintStream err) {
         ProjectProvenance.printWarnings(payload.warnings().stream()
-                .filter(code -> !code.equals("UNDECLARED_STOCK_CONVERTED")).toList(), err);
+                .filter(code -> !Set.of("UNDECLARED_STOCK_CONVERTED", "TEMPO_APPROXIMATED").contains(code)).toList(), err);
+        payload.tempoWarnings().forEach(warning -> err.println("Warning " + warning));
         for (String asset : payload.converted())
             err.println("Warning [UNDECLARED_STOCK_CONVERTED]: Converted exact stock match for asset " + asset);
     }

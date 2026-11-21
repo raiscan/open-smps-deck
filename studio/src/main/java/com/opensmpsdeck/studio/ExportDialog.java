@@ -182,7 +182,7 @@ final class ExportDialog {
                                     .collect(java.util.stream.Collectors.joining("\n\n"));
                             var alert = new Alert(Alert.AlertType.CONFIRMATION, text, ButtonType.OK, ButtonType.CANCEL);
                             alert.initOwner(owner);
-                            alert.setTitle("Package provenance");
+                            alert.setTitle("Package warnings");
                             alert.setHeaderText("Export this package?");
                             return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
                         });

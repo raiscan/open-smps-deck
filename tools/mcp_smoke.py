@@ -258,16 +258,30 @@ for stem in stems:
         assert verified["valid"] and verified["playbackValidated"]
         assert Path(verified["render"]).is_file()
         linked_project = root / "signal-garden.smps.json"
-        shutil.copyfile(Path(__file__).resolve().parents[1] / "examples" / linked_project.name, linked_project)
-        for driver in ("s1", "s2"):
+        linked_fixture = Path(__file__).resolve().parents[1] / "examples" / linked_project.name
+        linked_source = json.loads(linked_fixture.read_text())
+        linked_source["tempo"] = 64
+        linked_project.write_text(json.dumps(linked_source))
+        for driver, native_speed in (("s1", 4), ("s2", 192)):
             classic = rpc.call("project_export", project=linked_project, output=f"{driver}.smps.zip",
-                               format="portable", driver=driver, speedUpTempo=208)
+                               format="portable", driver=driver, speedUpTempo=64, strictTempo=True)
+            assert classic["warnings"] == [], classic
             classic_manifest = rpc.call("package_inspect", package=classic["output"])
             assert classic_manifest["driver"] == driver
-            assert classic_manifest["driverOptions"] == {"speedUpTempo": 208}
+            assert classic_manifest["driverOptions"] == {"speedUpTempo": native_speed}
             classic_render = rpc.call("package_validate", package=classic["output"],
                                       render=f"{driver}.wav", frames=30)
             assert classic_render["valid"] and classic_render["playbackValidated"], classic_render
+        diagnostic = "TEMPO_APPROXIMATED: Speed-shoes tempo S3K 0x00 to S2 0xFF (relative tick-rate error -0.390625%)"
+        approx = rpc.call("project_export", project=linked_project, output="approx.smps.zip",
+                          format="portable", driver="s2", speedUpTempo=0)
+        assert approx["warnings"] == [diagnostic], approx
+        approx_manifest = rpc.call("package_inspect", package=approx["output"])
+        assert approx_manifest["provenance"]["warnings"] == ["TEMPO_APPROXIMATED"], approx_manifest
+        assert approx_manifest["driverOptions"] == {"speedUpTempo": 255}
+        rpc.call("project_export", project=linked_project, output="strict.smps.zip",
+                 format="portable", driver="s2", speedUpTempo=0, strictTempo=True, error=diagnostic)
+        assert not (linked_project.parent / "strict.smps.zip").exists()
         arrangement = Path(files["arrangement.smps.json"])
         attached = arrangement.read_bytes()
         detached = json.loads(attached)

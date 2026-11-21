@@ -102,7 +102,8 @@ final class McpTools {
                     choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod"),
                     ROMS,
                     choice("driver", "Portable target driver (default s3k)", "s1", "s2", "s3k").optional(),
-                    field("speedUpTempo", "integer", "Optional S1/S2 speed-shoes tempo byte (0..255)").optional(),
+                    field("speedUpTempo", "integer", "S3K-clock speed-shoes tempo byte (0..255) for S1/S2 exports").optional(),
+                    field("strictTempo", "boolean", "Reject inexact tempo conversions for portable or mod export").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
                     field("license", "string", "SPDX license expression").optional(),
                     field("packageId", "string", "Portable package ID").optional(),
@@ -358,7 +359,7 @@ final class McpTools {
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
         boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
-        if (!portable && List.of("driver", "speedUpTempo", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
+        if (!portable && List.of("driver", "speedUpTempo", "strictTempo", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
                 .stream().anyMatch(args::has))
             throw new IllegalArgumentException("Portable metadata requires format portable or mod");
         var authors = args.has("authors") ? args.getAsJsonArray("authors").asList().stream()
@@ -368,7 +369,8 @@ final class McpTools {
         var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
                 !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
                 optionalString(args, "packageVersion"), authors, replace,
-                args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null);
+                args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null,
+                flag(args, "strictTempo"));
         var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"), settings);
