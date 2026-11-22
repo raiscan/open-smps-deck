@@ -19,6 +19,9 @@ the full image against these revisions.
 | `s3k` | Sonic 3 & Knuckles (locked-on) | 4,194,304 | `63522553` | Available |
 
 In Studio, open **ROM settings…** and choose **Browse…** next to the game.
+The toolbar and Export dialog open the same settings. Package and kit exports
+use the same library for their project driver. Test in game uses the
+registered clean ROM for the game you select.
 **OK** means the dump verified. **Changed on disk** means the saved path is
 unreadable or no longer matches the expected revision. Browse again to
 select a clean file. **Clear** forgets the path and leaves the file on disk.

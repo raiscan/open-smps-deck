@@ -397,7 +397,8 @@ materialises stock assets for personal use. `--dpcm-closed` quantises the WAVs. 
 each custom DAC binding. S2 extends its playlist by default. The MCP
 options are `roms`, `dpcmClosed` and `replaceDac` (integer note numbers).
 Read the output warnings. In Studio, choose **Export… → Disassembly kit**
-for the project's driver and use **DPCM closed** and **Choose ROM…** as needed.
+for the project's driver. Use **DPCM closed** as needed and register a clean
+ROM in **ROM settings…** to materialise stock assets.
 
 For timeline and piano-roll handoff, choose **Open as arrangement**. Saving
 a musical hand edit detaches the arrangement. Export uses the detached
@@ -480,8 +481,10 @@ export, a supplied ROM also verifies references whose bytes are present and
 checks transformed results against recorded payloads or hashes. Fix the
 reported asset slots before retrying a mismatch. Studio's **Portable SMPS
 package**, **OpenGGF mod** and **Disassembly kit** options share this
-verification. **Choose ROM…** remembers a path by game and the package review
-shows asset matches and provenance warnings before writing. In MCP, use
+verification. Studio defaults to the ROM registered for the project driver in
+**ROM settings…**. Choose **Use another ROM for this export…** if the stock
+assets require a different image. The package review shows asset matches and
+provenance warnings before writing. In MCP, use
 `project_export` with `format: "portable"` or `"mod"`, optional `driver`
 `speedUpTempo`, `strictTempo`, and `retailPatch` (with `roms` for an edited bank).
 Use `package_inspect` to see the patch form and base song and
