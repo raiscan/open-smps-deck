@@ -450,7 +450,9 @@ final class ReconstructionChecks {
             note(note, parts.keySet(), duration, where);
             require(sources.contains(note.source()), where + ".source", "source not valid in this artifact");
             if (!parts.get(note.part()).drums() && !note.source().equals("external")) {
-                require(note.pitch() >= 12 && note.pitch() <= 106, where + ".pitch", "S3K tone pitch must be in 12..106");
+                var profile = score.inputs().profile();
+                require(profile.fm().contains(note.pitch()) || profile.psg().contains(note.pitch()),
+                        where + ".pitch", "pitch outside the target FM and PSG tone ranges");
             }
         }
     }

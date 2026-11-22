@@ -226,8 +226,8 @@ public final class Main {
         for (int at = positional; at < args.length;) {
             String option = args[at++];
             if (!options.add(option) && !option.equals("--rom")) throw new IllegalArgumentException("duplicate option " + option);
-            if (option.equals("--force")) {
-                if (!projectRender) throw new IllegalArgumentException("--force requires render-project");
+            if (option.equals("--force") || option.equals("--linear")) {
+                if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
                 continue;
             }
             if (at == args.length) throw new IllegalArgumentException("Missing value for " + option);
@@ -275,7 +275,8 @@ public final class Main {
             requireDifferentFiles(input, output);
             if (projectRender) {
                 var project = PortablePackages.openProject(input, roms, err);
-                playback = TargetPlayback.prepare(project);
+                playback = TargetPlayback.prepare(project, options.contains("--linear")
+                        ? ProjectCompiler.Encoding.LINEAR : ProjectCompiler.Encoding.COMPACT);
                 song = playback.compiled();
                 if (start != null || end != null) projectEnd = ProjectRenderTiming.presentationCount(project);
                 if (!options.contains("--frames")) {
@@ -385,7 +386,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin [--linear]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--linear] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
         out.println("       render-compare WORK_DIR (--start S --end S | --section NAME) [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");

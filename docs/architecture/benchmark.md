@@ -1,7 +1,7 @@
 # Reconstruction benchmark
 
 The benchmark measures the current headless `reconstruct` command against
-native S3&K playback and optional private hand annotations. Keep the corpus
+native cartridge playback and optional private hand annotations. Keep the corpus
 fixed when changing reconstruction so changes in scores reflect the pipeline.
 The harness calls reconstruction in-process and scores the compiled output
 through the pinned OpenGGF sequencer.
@@ -108,6 +108,63 @@ The bounded worker pool uses up to eight workers by default, or 16 in quick
 mode. Use `--jobs N`
 to adjust it. JSON rows and aggregate order are stable across worker counts.
 Runtime and scratch paths are omitted from successful scorecards.
+
+### Per-target quick gates
+
+`bench run --target s1|s2|s3k` selects the reconstruction destination.
+It uses the destination's catalogue variants, default layering preset,
+stock drum kit where applicable, and pinned playback driver. The default
+is `s3k`. The source ROM is selected during corpus creation by `--game`;
+the manifest's dry native render and note truth stay fixed across targets.
+
+For classic targets, the duration clock accounts for tempo holds when
+placing events. The scorer observes the sequencer's actual 60 Hz
+presentations and converts arrangement-tick annotations to that clock.
+It uses the saved reconstruction tempo map and any corpus drift map to
+align output events and audio to truth seconds. Classic ladder runs also
+report exact and shortlist FM voice scores in editable operator order
+when holdout mode is off, alongside the spectral scores.
+
+Build the classic quick corpora from user-supplied REV01 ROMs. Set `bench`
+to a private output directory, and `s1_rom` and `s2_rom` to the ROM paths.
+`rom set` registers the path in RomLibrary for the stock DAC kit.
+`catalog scan` builds the matching game's FM, PSG and DAC catalogue.
+A classic run validates its target ROM and checks that the catalogue
+contains variants for the requested target before starting cases.
+
+| Gate | Native music IDs | Conditions |
+| --- | --- | --- |
+| S1 | `0x81,0x83,0x84,0x86` | 60 seconds each, R0/R1/R2/R4/R5 |
+| S2 | `0x81,0x82,0x83,0x8c` | 60 seconds each, R0/R1/R2/R4/R5 |
+| S3K | `0x01,0x04,0x0b,0x15` | Existing quick corpus, three MIDI × three audio conditions per song |
+
+Classic gates use the four-song ladder presets and the five rungs available
+without external transcription. Build them with an OpenSMPSDeck configuration
+without MuScriptor, so the builder omits R3. `--quick` filters by the source
+manifest's song selection and retains its available rungs. This lets you use
+the same cases for cross-target diagnostics.
+
+```sh
+for game in s1 s2; do
+  case "$game" in s1) rom="$s1_rom";; s2) rom="$s2_rom";; esac
+  java -jar "$jar" rom set "$game" "$rom"
+  java -jar "$jar" catalog scan "$bench/catalogue-$game.json" --game "$game" --rom "$rom"
+  java -jar "$jar" bench build-corpus "$rom" "$bench/catalogue-$game.json" "$bench/corpus-$game" \
+    --game "$game" --ladder --quick --seconds 60
+  java -jar "$jar" bench run "$bench/corpus-$game/manifest.json" "$bench/catalogue-$game.json" \
+    "$bench/baseline-$game" --target "$game" --quick
+done
+```
+
+For pipeline changes, build clean base and candidate JARs in separate
+checkouts and copy them outside `target/` before any further clean builds.
+Run both builds against the same S3K quick manifest and catalogue. Require
+`bench compare --tolerance 0` and byte-identical S3K scorecards when default
+behavior is intended to stay identical. Run both classic quick gates
+against their fixed manifests, ROMs and catalogues. Compare each candidate
+to its own target's baseline using `bench compare --tolerance 0` for
+no headline regression, and review case failures and measurement counts.
+Keep the corpora, catalogues, scorecards and listening outputs private.
 
 ### Measure a ground-truth role plan
 
@@ -243,7 +300,10 @@ and release energy. `compare` returns 1 if an overall headline or gold metric
 regresses by **more than** the default 0.01 absolute tolerance, disappears,
 or if a card has failed cases. Use `--tolerance N` to set a different absolute
 threshold. It requires the same manifest, case selection, gold inputs and
-holdout mode. Lead fidelity F1 is additive when comparing with older
+holdout mode. Scorecards record `target` for S1 and S2. An absent key
+means `s3k`, keeping existing S3K scorecards byte-compatible. Comparisons
+require equal targets unless you supply `--cross-target` for diagnostics
+on otherwise comparable cards. Lead fidelity F1 is additive when comparing with older
 scorecards. Its delta uses the same tolerance when both cards report it.
 A changed catalogue or refinement setting remains visible on the cards and
 can be compared. Inspect the profile and variant slices for regressions
@@ -327,8 +387,9 @@ java -jar "$jar" bench run "$bench/credits-s3k/manifest.json" "$catalogue" "$ben
 java -jar "$jar" bench ladder-report "$bench/run-s3k" "$bench/run-credits-s3k" --out "$bench/report"
 ```
 
-Run the same commands with `--game s1` or `--game s2` and the corresponding
-ROM and output directories. Each manifest uses one cartridge revision.
+For a same-game classic ladder, use `--game s1` or `--game s2` at build time,
+and pass the matching `--target` at run time. Use the corresponding ROM,
+catalogue and output directories. Each manifest uses one cartridge revision.
 `--songs` overrides the four default zone themes. Sonic 2 takes the engine
 music IDs in `Sonic2Music`, including those whose music IDs differ from the
 sound-test labels. Sonic 3 & Knuckles uses the combined music table IDs.

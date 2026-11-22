@@ -22,23 +22,27 @@ public final class TargetPlayback {
     private final ClassicPackageDriver classic;
     private final CompiledProject compiled;
 
-    private TargetPlayback(StudioProject project) {
+    private TargetPlayback(StudioProject project, ProjectCompiler.Encoding encoding) {
         target = project.target();
         classic = classic(target);
         if (classic == null) {
-            compiled = ProjectCompiler.compileWithAssets(project);
+            compiled = ProjectCompiler.compileWithAssets(project, encoding);
         } else {
             classic.require(project.nativeProgram() == null,
                     "native S3K banks require an editable copy for classic playback");
             int tempo = classic.projectTempo(project).targetByte();
-            var bank = classic.compile(project, tempo);
+            var bank = classic.compile(project, tempo, encoding);
             compiled = new CompiledProject(bank.bytes(), project.envelopes(), project.samples());
             classic.preflight(compiled);
         }
     }
 
     public static TargetPlayback prepare(StudioProject project) {
-        return new TargetPlayback(project);
+        return prepare(project, ProjectCompiler.Encoding.COMPACT);
+    }
+
+    public static TargetPlayback prepare(StudioProject project, ProjectCompiler.Encoding encoding) {
+        return new TargetPlayback(project, encoding);
     }
 
     static ClassicPackageDriver classic(TargetGame target) {
@@ -75,7 +79,7 @@ public final class TargetPlayback {
                 : classic.openPlayback(compiled, mask, observer);
     }
 
-    SmpsSequencer timeline(MusicRestoreSink restore, Sonic3kCoordFlagHandler handler) {
+    public SmpsSequencer timeline(MusicRestoreSink restore, Sonic3kCoordFlagHandler handler) {
         return classic == null ? S3kRenderer.timelineSequencer(compiled, restore, handler)
                 : classic.timeline(compiled, restore);
     }

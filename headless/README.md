@@ -310,7 +310,7 @@ java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
 - On S2 and S3K, `--loop` replaces each channel's final stop with a jump to
   its start when the active channels reach their stops on the same tick and
   loop control is supported. S2 loop generation requires tracks without
-  existing branches and is unavailable for the Extra Life slot.
+  existing `F6` jumps and is unavailable for the Extra Life slot.
 - `--force` allows replacing existing output files. Keep outputs separate from
   the source project and clean ROM.
 
@@ -776,6 +776,7 @@ and `pitchPreset`.
 java -jar "$jar" reconstruct edit "$work" add   '{"id":"answer","reason":"second attack audible in stem","op":"insertNote","part":0,"start":12.5,"end":12.8,"pitch":68,"lane":"FM1","role":"melody"}'
 java -jar "$jar" reconstruct run --from transcribe "$work"
 java -jar "$jar" reconstruct edit "$work" add --file batch.json
+java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"register","reason":"raise the lead","op":"transpose","noteIds":["NOTE_ID"],"semitones":12}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"cut","reason":"mark the second attack","op":"splitNote","noteId":"NOTE_ID","at":12.75}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"sustain","reason":"join repeated attacks","op":"mergeNotes","part":0,"pitch":64,"span":[15.2,16.8]}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"backing","reason":"use PSG tone","op":"pinLane","noteIds":["NOTE_ID"],"laneType":"PSG"}'
@@ -833,6 +834,14 @@ whitespace-separated list), or the `--group` and `--op` selectors. MCP
 and records it as a batch if it resolves. Rebuild from the returned `from`
 stage. Reject records the decision without rebuilding. Use `--verbose`
 (MCP `verbose: true`) to include the full acceptance preview.
+
+A `transpose` intent adds a signed, nonzero integer `semitones` offset to
+each stable score ID in `noteIds` and rebuilds from `transcribe`. Offsets
+compose in journal order. The optional `laneType` checks the target's
+`FM` (default) or `PSG` tone range. PSG pitches above the FM range require a
+PSG tone lane. The intent skips drum parts and refuses the batch if a tonal
+target would exceed its range. MCP `reconstruct_edit` accepts the same
+intent in `edit` or `edits`.
 
 `reconstruct edit WORK_DIR add --file BATCH` and `--dry-run` return one
 result per intent. `applied` and `satisfied` describe the journal's

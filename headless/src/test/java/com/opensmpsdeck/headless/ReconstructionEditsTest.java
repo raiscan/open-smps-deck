@@ -90,6 +90,7 @@ class ReconstructionEditsTest {
               {"id":"layer","op":"layer","reason":"Add echo","noteIds":["n-0-1500000-65"],"mode":"echo","laneType":"FM"},
               {"id":"vibrato","op":"noteVoicing","reason":"Add motion","noteIds":["n-0-2000000-67"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}},
               {"id":"scope","op":"setVelocity","reason":"Soften section","part":0,"span":{"section":"region"},"velocity":41},
+              {"id":"register","op":"transpose","reason":"Lift the middle attack","noteIds":["n-0-2500000-68"],"semitones":2},
               {"id":"timing","op":"setNote","reason":"Lengthen note","noteId":"n-0-3000000-69","end":3.35},
               {"id":"merge-role","op":"setRole","reason":"Classify both held notes","role":"counter","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
               {"id":"merge","op":"mergeNotes","reason":"Sustain pitch","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
@@ -147,8 +148,63 @@ class ReconstructionEditsTest {
         assertTrue(overlays.stream().anyMatch(note -> note.id().equals("n-0-4500000-72")
                 && note.style() == ReconstructionInspection.Style.DASHED && !note.sounds()));
         var notes = ReconstructionStages.readScore(work.resolve("score.json")).notes();
-        assertEquals(41, notes.stream().filter(note -> note.id().equals("n-0-2500000-68")).findFirst().orElseThrow().velocity());
+        var shifted = notes.stream().filter(note -> note.id().equals("n-0-2500000-68")).findFirst().orElseThrow();
+        assertEquals(41, shifted.velocity());
+        assertEquals(70, shifted.pitch());
         assertEquals(90, notes.stream().filter(note -> note.id().equals("edit-cut-left")).findFirst().orElseThrow().velocity());
+    }
+
+    @Test void transposeComposesAndLeavesDrumsAndOutOfRangeBatchesAlone() {
+        var lead = note("lead", .1, .2, 60);
+        var low = note("low", .25, .35, 45);
+        var drum = new Note("drum", 1, .4, .5, 36, 96, "midi", 1);
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false),
+                        new MidiScore.Part(1, "Kit", 0, true)), List.of(), List.of()),
+                Map.of(), List.of(lead, low, drum), List.of(), List.of(), null, null);
+        var edits = new ReconstructionEdits(List.of(intent("""
+                {"op":"transpose","id":"up","reason":"register","noteIds":["lead","drum","absent"],"semitones":12}
+                """), intent("""
+                {"op":"transpose","id":"down","reason":"step","noteIds":["lead"],"semitones":-1}
+                """), intent("""
+                {"op":"transpose","id":"out","reason":"step","noteIds":["lead","low"],"semitones":-1,"laneType":"PSG"}
+                """)));
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var rebuilt = edits.applyScore(score, outcomes);
+        assertEquals(List.of(71, 45, 36), rebuilt.notes().stream().map(Note::pitch).toList());
+        assertEquals(List.of("lead"), outcomes.getFirst().noteIds());
+        assertEquals(List.of("absent"), outcomes.getFirst().missingNoteIds());
+        assertTrue(outcomes.getFirst().detail().contains("drum"));
+        assertEquals(ReconstructionEdits.Status.invalid, outcomes.getLast().status());
+        assertTrue(outcomes.getLast().detail().contains("45–117"));
+        assertEquals(rebuilt, edits.applyScore(score, new ArrayList<>()));
+        for (String value : List.of("0", "1.5", "\"12\""))
+            assertThrows(IllegalArgumentException.class, () -> intent("""
+                    {"op":"transpose","id":"bad","reason":"invalid","noteIds":["lead"],"semitones":%s}
+                    """.formatted(value)));
+    }
+
+    @Test void cliTransposeSupportsTheHighPsgRegisterAndRebuildsRelatively(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("theme.mid");
+        writeMidi(midi, false);
+        Path catalogue = dir.resolve("catalogue.json");
+        Path wav = dir.resolve("mix.wav");
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--lane-policy-preset", "off");
+        String id = "n-0-0-60";
+        cli("reconstruct", "edit", work.toString(), "add", """
+                {"op":"transpose","id":"register","reason":"synthetic high tone","noteIds":["n-0-0-60"],
+                 "semitones":57,"laneType":"PSG"}
+                """);
+        for (String from : List.of("transcribe", "roles", "transcribe")) {
+            cli("reconstruct", "run", "--from", from, work.toString());
+            var row = ReconstructionTrace.read(work).get(id);
+            assertEquals(117, row.score().note().pitch());
+            assertTrue(row.allocation().lane().startsWith("PSG"));
+            assertEquals(117, row.voiced().getFirst().pitch());
+        }
     }
 
     @Test void retriggerKeepsTheFirstIdAndReplaysStableIndependentAttacks() {

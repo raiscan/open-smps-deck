@@ -1364,6 +1364,101 @@ class StudioWindowTest {
         });
     }
 
+    @Test void pianoRollTransposesWithUndoOnlyWhenTheCanvasHasFocus() throws Exception {
+        fx(() -> {
+            ((ListView<?>) window.scene().lookup("#sequence-browser")).getSelectionModel().select(0);
+            window.showNotes();
+            window.scene().getRoot().layout();
+            var original = window.piano.sequence.notes().getFirst();
+            window.piano.selection.accept(original.id());
+            window.piano.selected = original.id();
+            window.piano.canvas.requestFocus();
+            key(window.piano.canvas, KeyCode.ADD, false);
+            Event.fireEvent(window.piano.canvas,
+                    new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.MINUS, true, false, false, false));
+            assertEquals(original.pitch() - 11, window.piano.sequence.notes().getFirst().pitch());
+            key(window.piano.canvas, KeyCode.Z, true);
+            assertEquals(original.pitch() + 1, window.piano.sequence.notes().getFirst().pitch());
+            key(window.piano.canvas, KeyCode.Z, true);
+            assertEquals(original, window.piano.sequence.notes().getFirst());
+            key(window.piano.canvas, KeyCode.Y, true);
+            assertEquals(original.pitch() + 1, window.piano.sequence.notes().getFirst().pitch());
+            var field = window.scene().lookup("#note-pitch");
+            assertNotNull(field);
+            field.requestFocus();
+            key(field, KeyCode.EQUALS, false);
+            assertEquals(original.pitch() + 1, window.piano.sequence.notes().getFirst().pitch());
+            return null;
+        });
+    }
+
+    @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
+        Path work = reconstructionFixture();
+        var score = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
+        var notes = score.getAsJsonArray("notes");
+        var kit = new JsonObject();
+        kit.addProperty("id", 1);
+        kit.addProperty("name", "Synthetic Kit");
+        kit.addProperty("program", 0);
+        kit.addProperty("drums", true);
+        score.getAsJsonObject("source").getAsJsonArray("parts").add(kit);
+        var drum = notes.get(0).getAsJsonObject().deepCopy();
+        drum.addProperty("id", "drum-note");
+        drum.addProperty("part", 1);
+        drum.addProperty("pitch", 36);
+        notes.add(drum);
+        Files.writeString(work.resolve("score.json"), score.toString());
+        Files.writeString(work.resolve("allocation.json"), """
+                {"version":1,"notes":[
+                  {"note":%s,"role":"melody","lane":"FM1","startTick":30,"endTick":90,"outcome":"kept"},
+                  {"note":%s,"role":"drums","lane":"DAC","startTick":30,"endTick":31,"outcome":"kept"}]}
+                """.formatted(notes.get(0), drum));
+
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-role-melody") != null);
+            fx(() -> {
+                var plot = scene.lookup("#reconstruction-canvas");
+                var melody = (Button) scene.lookup("#reconstruction-role-melody");
+                melody.fire();
+                assertEquals(plot, scene.getFocusOwner());
+                key(plot, KeyCode.EQUALS, false);
+                var title = (Label) scene.lookup("#reconstruction-note-title");
+                assertTrue(title.getText().startsWith("A♯4"), title::getText);
+                key(plot, KeyCode.ADD, false);
+                assertTrue(title.getText().startsWith("B4"), title::getText);
+                key(plot, KeyCode.Z, true);
+                assertTrue(title.getText().startsWith("A♯4"), title::getText);
+                key(plot, KeyCode.Y, true);
+                assertTrue(title.getText().startsWith("B4"), title::getText);
+
+                var drums = scene.lookup("#reconstruction-role-drums");
+                modifierClick(drums, 5, 5, true, false, false);
+                scene.getRoot().layout();
+                assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-selection-count")).getText());
+                key(plot, KeyCode.SUBTRACT, false);
+                var status = (Label) scene.lookup("#reconstruction-status");
+                assertTrue(status.getText().contains("skipped drums or noise (1)"), status::getText);
+                var octave = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> button.getText().equals("+Oct")).findFirst().orElseThrow();
+                octave.fire();
+                octave.fire();
+                octave.fire();
+                assertTrue(title.getText().startsWith("A♯7"), title::getText); // MIDI 106 is playable on FM.
+                octave.fire();
+                assertTrue(status.getText().contains("12–106"), status::getText);
+                assertTrue(title.getText().startsWith("A♯7"), title::getText);
+                key(plot, KeyCode.Z, true);
+                assertTrue(title.getText().startsWith("A♯6"), title::getText);
+                return null;
+            });
+            assertFalse(Files.exists(work.resolve("edits.json")));
+        } finally {
+            fx(() -> { pane.stage().close(); return null; });
+        }
+    }
+
     @Test void reconstructionBulkRoutesAndCreatesAVoiceAsOneDraftStep() throws Exception {
         Path work = reconstructionFixture();
         var model = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
@@ -1371,7 +1466,7 @@ class StudioWindowTest {
         fx(() -> {
             var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
             var panel = new ReconstructionBulk(ignored -> {}, edits -> draft.change(entries -> edits.forEach(entries::add)),
-                    (ids, instrument) -> fail("Unexpected audition"), () -> {}, edit -> fail("Unexpected preview"));
+                    ignored -> fail("Unexpected transpose"), (ids, instrument) -> fail("Unexpected audition"), () -> {}, edit -> fail("Unexpected preview"));
             var host = new Stage();
             host.setScene(new javafx.scene.Scene(new ScrollPane(panel), 320, 700));
             host.show();

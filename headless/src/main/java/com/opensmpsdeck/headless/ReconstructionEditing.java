@@ -85,6 +85,10 @@ public final class ReconstructionEditing {
                 single(note), bend);
     }
 
+    public String transposeIssue(String id, int pitch, ReconstructionLaneType type) {
+        return ReconstructionEdits.transposeIssue(notes.get(id), pitch, type, score.inputs().profile(), score.inputs().fmOnly());
+    }
+
     public String laneIssue(ReconstructionInspection.Overlay overlay, ReconstructionLaneType type, String lane) {
         var note = notes.getOrDefault(overlay.id(), new ReconstructionStages.Note(overlay.id(), overlay.part(),
                 overlay.interval().sourceStart(), overlay.interval().sourceEnd(), overlay.pitch(), 96, "edit", 1));

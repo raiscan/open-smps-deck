@@ -207,7 +207,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             builtLow = Math.min(builtLow, Math.max(0, layer.pitch() - 3));
             builtHigh = Math.max(builtHigh, Math.min(127, layer.pitch() + 4));
         }
-        proposalPitchRange();
+        updatePitchRange();
         endByIndex = new double[notes.size()];
         double priorEnd = 0;
         for (int i = 0; i < notes.size(); i++) {
@@ -228,21 +228,30 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void proposals(List<ProposalMark> marks) {
         proposals = List.copyOf(marks);
-        proposalPitchRange();
+        updatePitchRange();
         draw();
     }
 
-    private void proposalPitchRange() {
+    private void updatePitchRange() {
         low = builtLow;
         high = builtHigh;
+        for (var note : pending) includePitch(note);
         for (var mark : proposals) {
             low = Math.min(low, Math.max(0, mark.note().pitch() - 3));
             high = Math.max(high, Math.min(127, mark.note().pitch() + 4));
         }
     }
 
+    private void includePitch(Overlay note) {
+        double min = note.bend().stream().mapToDouble(BendPoint::pitch).min().orElse(note.pitch());
+        double max = note.bend().stream().mapToDouble(BendPoint::pitch).max().orElse(note.pitch());
+        low = Math.min(low, Math.max(0, (int) Math.floor(Math.min(min, note.pitch())) - 3));
+        high = Math.max(high, Math.min(127, (int) Math.ceil(Math.max(max, note.pitch())) + 4));
+    }
+
     void pending(List<Overlay> overlays) {
         pending = overlays;
+        updatePitchRange();
         pendingByNote = new java.util.HashMap<>();
         for (var overlay : overlays) pendingByNote.put(overlay.id(), overlay);
         updateLanes();
@@ -693,6 +702,27 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         return List.copyOf(byId.values());
     }
 
+    void selectRole(Role role, boolean add) {
+        var matches = new ArrayList<String>();
+        for (var built : model.overlays()) {
+            var current = pendingByNote.getOrDefault(built.id(), built);
+            if (current.role() == role && current.part() >= 0 && selectableDraft(current))
+                matches.add(built.eventId());
+        }
+        for (var note : pending) {
+            if (note.role() == role && note.part() >= 0 && selectableDraft(note)) matches.add(note.eventId());
+        }
+        selection.modify(matches, add, false);
+        if (selection.eventIds().isEmpty()) laneSelection = null;
+        canvas.requestFocus();
+        publishSelection(null);
+        draw();
+    }
+
+    private static boolean selectableDraft(Overlay note) {
+        return !note.fate().equals("Superseded draft") && !note.fate().equals("Pending deletion");
+    }
+
     void filterSelection(java.util.function.Predicate<Overlay> filter) {
         var kept = selectionNotes.stream().filter(selection::contains).filter(filter)
                 .map(Overlay::eventId).toList();
@@ -702,9 +732,9 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void publishSelection(Overlay note) {
-        var selected = new ArrayList<Overlay>();
+        var selected = new LinkedHashSet<Overlay>();
         for (var row : model.overlays()) if (selection.contains(row)) selected.add(pendingByNote.getOrDefault(row.id(), row));
-        for (var row : pending) if (selection.contains(row) && !selected.contains(row)) selected.add(row);
+        for (var row : pending) if (selection.contains(row)) selected.add(row);
         selectionNotes = List.copyOf(selected);
         if (note == null) note = selectionNotes.stream().filter(selection::primary).findFirst()
                 .orElse(selectionNotes.isEmpty() ? null : selectionNotes.getFirst());

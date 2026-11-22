@@ -27,6 +27,7 @@ final class S2Bank {
     private final BitSet dacBytes = new BitSet();
     private final TreeSet<Integer> pointers = new TreeSet<>();
     private final TreeSet<Integer> branches = new TreeSet<>();
+    private boolean hasJump;
     final TreeSet<Integer> envelopes = new TreeSet<>();
     final TreeSet<Integer> drums = new TreeSet<>();
     private final Track[] tracks;
@@ -123,7 +124,10 @@ final class S2Bank {
                     return new Track(start, pc, ticks, volumeCommand, volumeDelta, transposeDelta);
                 }
                 case 0xF5 -> envelopes.add(pc + 1);
-                case 0xF6 -> next = branch(pc + 1);
+                case 0xF6 -> {
+                    hasJump = true;
+                    next = branch(pc + 1);
+                }
                 case 0xF7 -> {
                     int index = u8(source, pc + 1);
                     maxCounter = Math.max(maxCounter, index);
@@ -251,8 +255,8 @@ final class S2Bank {
                 require(previous == null || Arrays.equals(previous, jump), track.end(),
                         "Cannot enable --loop: different channels share a final stop");
             }
-            require(length > 0 && branches.isEmpty(), 0,
-                    "Cannot enable --loop: expected a timed song without existing branches");
+            require(length > 0 && !hasJump, 0,
+                    "Cannot enable --loop: expected a timed song without existing F6 jumps");
         }
         for (var track : tracks) {
             if (loop && track.ticks() == 0)

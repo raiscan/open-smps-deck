@@ -20,6 +20,7 @@ import com.opensmpsdeck.headless.ReconstructionReview.Revision;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.project.ProjectWatcher;
 import com.opensmpsdeck.project.ProjectDocument;
+import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.studio.ReconstructionTools.Mode;
 import com.opensmpsdeck.studio.ReconstructionTools.Placement;
 import javafx.application.Platform;
@@ -135,6 +136,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private final Button stopPreview = new Button("Stop preview");
     private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, proposalTab, diffTab);
     private final ReconstructionBulk bulk;
+    private Map<String, List<JsonObject>> draftPitchEdits = Map.of();
     private final StudioPlayback audition = new StudioPlayback();
 
     private Snapshot snapshot;
@@ -171,7 +173,7 @@ final class ReconstructionEditor implements AutoCloseable {
         this.previewPosition = previewPosition;
         sections = initial.inspection().sections().sections();
         draft = new ReconstructionDraft(accepted(initial.revision().entries()));
-        bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::audition, this::stopAudition, this::previewLayer);
+        bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::transpose, this::audition, this::stopAudition, this::previewLayer);
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
         view.attack = this::attack;
@@ -257,6 +259,7 @@ final class ReconstructionEditor implements AutoCloseable {
     TabPane inspector() {
         noteTitle.getStyleClass().add("inspector-title");
         noteTitle.setWrapText(true);
+        noteTitle.setId("reconstruction-note-title");
         noteSummary.setWrapText(true);
         noteSummary.setId("reconstruction-note-summary");
         rawTrace.setId("reconstruction-trace");
@@ -450,16 +453,20 @@ final class ReconstructionEditor implements AutoCloseable {
         if (!note.fate().startsWith("Pending") && original != null) return original;
         boolean drums = snapshot.inspection().parts().stream().anyMatch(part -> part.id() == note.part() && part.drums());
         var pendingAttack = note.fate().equals("Pending insertion") || note.fate().equals("Pending cut");
-        var place = pendingAttack || original == null ? Placement.of(note)
-                : new Placement(original.start(), original.end(), original.pitch());
-        for (var entry : draft.entries()) {
-            if (!draft.changed(entry) || !note.id().equals(targetId(entry)) || !"setNote".equals(text(entry, "op", ""))) continue;
-            var json = entry.getAsJsonObject();
-            place = new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
-                    (int) number(json, "pitch", place.pitch()));
+        if (pendingAttack || original == null)
+            return new ReconstructionEditing.Attack(note.interval().sourceStart(), note.interval().sourceEnd(),
+                    note.pitch(), drums, original == null || original.single(), note.bend());
+        var place = new Placement(original.start(), original.end(), original.pitch());
+        for (var json : draftPitchEdits.getOrDefault(note.id(), List.of())) {
+            String op = text(json, "op", "");
+            if (op.equals("setNote")) {
+                place = new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
+                        (int) number(json, "pitch", place.pitch()));
+            } else if (op.equals("transpose")) {
+                place = new Placement(place.start(), place.end(), place.pitch() + json.get("semitones").getAsInt());
+            }
         }
-        return new ReconstructionEditing.Attack(place.start(), place.end(), place.pitch(), drums,
-                original == null || original.single(), note.bend());
+        return new ReconstructionEditing.Attack(place.start(), place.end(), place.pitch(), drums, original.single(), note.bend());
     }
 
     private List<ReconstructionEditing.VibratoSegment> vibrato(Overlay note) {
@@ -614,6 +621,64 @@ final class ReconstructionEditor implements AutoCloseable {
                 .ifPresent(note -> view.select(note, note.lane()));
     }
 
+    private void transpose(int semitones) {
+        if (busy || external != null || externalError) return;
+        var profile = TargetProfile.of(snapshot.inspection().target());
+        var groups = new LinkedHashMap<ReconstructionLaneType, List<String>>();
+        int percussion = 0;
+        int unscored = 0;
+        for (var note : view.selectedNotes()) {
+            var type = transposeLane(note);
+            var attack = attack(note);
+            if (note.role() == Role.DRUMS || type == ReconstructionLaneType.DAC || type == ReconstructionLaneType.NOISE
+                    || attack != null && attack.drums()) {
+                percussion++;
+                continue;
+            }
+            if (attack == null) {
+                unscored++;
+                continue;
+            }
+            var range = type == ReconstructionLaneType.PSG ? profile.psg() : profile.fm();
+            int pitch = attack.pitch() + semitones;
+            String issue = snapshot.editing().transposeIssue(note.id(), pitch, type);
+            if (issue == null && note.bend().stream().anyMatch(point ->
+                    point.pitch() + semitones < range.low() || point.pitch() + semitones > range.high()))
+                issue = "Pitch curve must stay in MIDI " + range.low() + "–" + range.high();
+            if (issue != null) {
+                status.accept("Transpose refused · " + type + " · " + issue + " (" + note.id() + ")");
+                return;
+            }
+            groups.computeIfAbsent(type, ignored -> new ArrayList<>()).add(note.id());
+        }
+        var intents = groups.entrySet().stream().map(group ->
+                ReconstructionDraft.transpose(group.getValue(), semitones, group.getKey())).toList();
+        if (!intents.isEmpty()) addBatch(intents);
+        int count = groups.values().stream().mapToInt(List::size).sum();
+        String message = count == 0 ? "Select a scored tonal note to transpose"
+                : "Transposed " + count + (count == 1 ? " note" : " notes") + " by "
+                        + "%+d".formatted(semitones) + (Math.abs(semitones) == 1 ? " semitone" : " semitones");
+        if (percussion != 0) message += " · skipped drums or noise (" + percussion + ")";
+        if (unscored != 0) message += " · skipped notes without an editable score attack (" + unscored + ")";
+        status.accept(message);
+    }
+
+    private ReconstructionLaneType transposeLane(Overlay note) {
+        var type = snapshot.inspection().laneType(note);
+        for (var entry : draftPitchEdits.getOrDefault(note.id(), List.of())) {
+            if (!"pinLane".equals(text(entry, "op", ""))) continue;
+            String laneType = text(entry, "laneType", null);
+            String lane = text(entry, "lane", null);
+            if (laneType != null) type = ReconstructionLaneType.valueOf(laneType);
+            else if (lane != null) {
+                if (lane.equals("DAC")) type = ReconstructionLaneType.DAC;
+                else if (lane.startsWith("FM")) type = ReconstructionLaneType.FM;
+                else if (type != ReconstructionLaneType.NOISE || !lane.equals("PSG3")) type = ReconstructionLaneType.PSG;
+            }
+        }
+        return type == null ? ReconstructionLaneType.FM : type;
+    }
+
     private void add(JsonObject intent) { addBatch(List.of(intent)); }
 
     private void addBatch(List<JsonObject> intents) {
@@ -701,6 +766,12 @@ final class ReconstructionEditor implements AutoCloseable {
                 var next = op.equals("setNote")
                         ? new Placement(number(json, "start", place.start()), number(json, "end", place.end()),
                             (int) number(json, "pitch", place.pitch())) : place;
+                int shift = op.equals("transpose") ? json.get("semitones").getAsInt() : 0;
+                if (shift != 0) {
+                    int pitch = place.pitch() + shift;
+                    if (note.role() == Role.DRUMS || pitch < 0 || pitch > 127) continue;
+                    next = new Placement(place.start(), place.end(), pitch);
+                }
                 String nextRole = text(entry, "role", null);
                 boolean drop = op.equals("deleteNote") || "drop".equals(nextRole)
                         || nextRole == null && note.fate().equals("Pending deletion");
@@ -711,18 +782,24 @@ final class ReconstructionEditor implements AutoCloseable {
                 if (op.equals("pinLane") && json.has("laneType")) reason += " · " + json.get("laneType").getAsString();
                 var overlay = preview(note, next, color, nextLane, fate, reason, !drop && nextLane != null);
                 if (op.equals("bend")) {
-                    var original = snapshot.editing().attack(id);
-                    int pitch = original == null ? note.pitch() : original.pitch();
+                    int pitch = note.pitch();
                     var points = json.getAsJsonArray("points").asList().stream().map(JsonElement::getAsJsonArray)
                             .map(pair -> new BendPoint(pair.get(0).getAsDouble(), pitch + pair.get(1).getAsDouble())).toList();
-                    overlay = new Overlay(overlay.id(), overlay.eventId(), overlay.part(), overlay.partName(), overlay.role(),
-                            overlay.lane(), overlay.pitch(), overlay.patch(), overlay.interval(), points, overlay.sounds(),
-                            overlay.style(), overlay.fate(), overlay.reason(), overlay.competitors());
+                    overlay = withBend(overlay, points);
+                } else if (shift != 0 && !overlay.bend().isEmpty()) {
+                    overlay = withBend(overlay, overlay.bend().stream()
+                            .map(point -> new BendPoint(point.sourceSeconds(), point.pitch() + shift)).toList());
                 }
                 pending.put(id, overlay);
             }
         }
         return List.copyOf(pending.values());
+    }
+
+    private static Overlay withBend(Overlay overlay, List<BendPoint> points) {
+        return new Overlay(overlay.id(), overlay.eventId(), overlay.part(), overlay.partName(), overlay.role(),
+                overlay.lane(), overlay.pitch(), overlay.patch(), overlay.interval(), points, overlay.sounds(),
+                overlay.style(), overlay.fate(), overlay.reason(), overlay.competitors());
     }
 
     private Overlay half(Overlay note, String id, Placement place, String reason) {
@@ -1038,6 +1115,15 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void updateDraft() {
         noteModulation.clear();
+        var pitchEdits = new LinkedHashMap<String, List<JsonObject>>();
+        for (var entry : draft.entries()) {
+            String op = text(entry, "op", "");
+            if (!(op.equals("setNote") || op.equals("transpose") || op.equals("pinLane")) || !draft.changed(entry)
+                    || ReconstructionReview.validationIssue(entry) != null) continue;
+            for (String id : targetIds(entry))
+                pitchEdits.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry.getAsJsonObject());
+        }
+        draftPitchEdits = pitchEdits;
         var rows = new ArrayList<EditRow>();
         var entries = draft.entries();
         var idCounts = entries.asList().stream().collect(Collectors.groupingBy(e -> text(e, "id", ""), Collectors.counting()));
@@ -1104,7 +1190,10 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     boolean key(KeyEvent event) {
-        if (event.isShortcutDown() && (event.getCode() == KeyCode.Z || event.getCode() == KeyCode.Y)) {
+        int semitones = TransposeKeys.semitones(event);
+        if (semitones != 0 && view.canvas.isFocused()) {
+            transpose(semitones);
+        } else if (event.isShortcutDown() && (event.getCode() == KeyCode.Z || event.getCode() == KeyCode.Y)) {
             history(event.getCode() == KeyCode.Y || event.isShiftDown());
         } else if (!event.isShortcutDown() && event.getCode() == KeyCode.DELETE && view.canvas.isFocused()) {
             delete();

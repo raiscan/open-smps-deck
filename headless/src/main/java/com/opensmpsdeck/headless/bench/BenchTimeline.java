@@ -1,13 +1,21 @@
 package com.opensmpsdeck.headless.bench;
 
 import com.openggf.audio.smps.DacData;
+import com.openggf.audio.smps.FmVoiceOperatorOrder;
 import com.openggf.audio.smps.SmpsNoteListener;
 import com.openggf.audio.smps.SmpsSequencer;
-import com.opensmpsdeck.headless.BenchCartridge;
 import com.openggf.audio.smps.SmpsSequencer.Track;
 import com.openggf.audio.smps.SmpsSequencer.TrackType;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
+import com.opensmpsdeck.headless.BenchCartridge;
+import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.NativeProgram;
+import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetClock;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -23,6 +31,29 @@ final class BenchTimeline implements SmpsNoteListener {
     record Channel(String kind, List<Note> notes, List<Hit> hits) {}
     record Truth(List<Channel> channels, Map<String, byte[]> voices) {
         Truth(List<Channel> channels) { this(channels, null); }
+
+        // Legacy corpus truth keeps the sequencer's FM hash. Catalogue assets
+        // use editable operator order. The saved S2 probe bytes are already
+        // in that order, while S1's loader swapped its middle operators.
+        Truth catalogueOrder(BenchCartridge.Game game) {
+            if (game == BenchCartridge.Game.s3k || voices == null) return this;
+            var keys = new java.util.HashMap<String, String>();
+            var canonical = new java.util.TreeMap<String, byte[]>();
+            voices.forEach((hash, bytes) -> {
+                byte[] patch = bytes;
+                if (game == BenchCartridge.Game.s1) {
+                    patch = bytes.clone();
+                    FmVoiceOperatorOrder.swapMiddleOperatorsInPlace(patch);
+                }
+                String id = BenchFiles.hash(patch);
+                keys.put(hash, id);
+                canonical.put(id, patch);
+            });
+            return new Truth(channels.stream().map(channel -> new Channel(channel.kind(),
+                    channel.notes().stream().map(note -> note.voiceHash() == null ? note
+                            : new Note(note.start(), note.end(), note.pitch(), keys.getOrDefault(note.voiceHash(), note.voiceHash()),
+                                    note.envelopeId())).toList(), channel.hits())).toList(), canonical);
+        }
     }
 
     // Same coordinate handler, sequencer preparation and outer-frame clock as NativeArrangement.
@@ -47,14 +78,18 @@ final class BenchTimeline implements SmpsNoteListener {
 
     private BenchTimeline(CompiledProject project, boolean captureVoices) {
         this(BenchCartridge.Game.s3k, captureVoices);
+        bindSamples(project.samples(), project.nativeProgram());
+    }
+
+    private void bindSamples(List<DacSample> assets, NativeProgram nativeProgram) {
         var hashes = new LinkedHashMap<String, String>();
-        for (var sample : project.samples()) hashes.put(sample.id(), BenchFiles.hash(sample.pcm()));
-        if (project.nativeProgram() == null) {
-            for (int i = 0; i < project.samples().size(); i++) {
-                samples.put(0x81 + i, hashes.get(project.samples().get(i).id()));
+        for (var sample : assets) hashes.put(sample.id(), BenchFiles.hash(sample.pcm()));
+        if (nativeProgram == null) {
+            for (int i = 0; i < assets.size(); i++) {
+                samples.put(0x81 + i, hashes.get(assets.get(i).id()));
             }
         } else {
-            for (var slot : project.nativeProgram().dacSlots()) samples.put(slot.note(), hashes.get(slot.sampleId()));
+            for (var slot : nativeProgram.dacSlots()) samples.put(slot.note(), hashes.get(slot.sampleId()));
         }
     }
 
@@ -67,6 +102,17 @@ final class BenchTimeline implements SmpsNoteListener {
             throws InterruptedIOException {
         var walk = new BenchTimeline(project, captureVoices);
         return walk.walk(factory.create(project, () -> walk.restored = true, new Sonic3kCoordFlagHandler()), frames, 0).truth();
+    }
+
+    static Truth read(StudioProject project, int frames, BenchCli.SequencerFactory factory, boolean captureVoices)
+            throws InterruptedIOException {
+        if (project.target() == TargetGame.S3K)
+            return read(ProjectCompiler.compileWithAssets(project), frames, factory, captureVoices);
+        var game = BenchCartridge.Game.valueOf(project.target().id());
+        var walk = new BenchTimeline(game, true);
+        walk.bindSamples(project.samples(), null);
+        var sequencer = TargetPlayback.prepare(project).timeline(() -> walk.restored = true, new Sonic3kCoordFlagHandler());
+        return walk.walk(sequencer, frames, 0).truth().catalogueOrder(game);
     }
 
     private BenchTimeline(BenchCartridge.Game game, boolean captureVoices) {
@@ -233,7 +279,7 @@ final class BenchTimeline implements SmpsNoteListener {
             byte[] probe = bytes.clone();
             // S2 stores the middle operators in the opposite order from S3K.
             if (game == BenchCartridge.Game.s2)
-                com.openggf.audio.smps.FmVoiceOperatorOrder.swapMiddleOperatorsInPlace(probe);
+                FmVoiceOperatorOrder.swapMiddleOperatorsInPlace(probe);
             voices.putIfAbsent(hash, probe);
         }
         return hash;
@@ -255,6 +301,6 @@ final class BenchTimeline implements SmpsNoteListener {
     }
 
     private static double seconds(int frame) {
-        return frame / 60.0;
+        return frame / (double) TargetClock.FRAMES_PER_SECOND;
     }
 }

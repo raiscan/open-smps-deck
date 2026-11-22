@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.DoubleUnaryOperator;
 
 final class BenchVoice {
     record Channel(int matched, Integer top1, Integer top3, Integer spectralCompared, Double spectralDistance) {}
@@ -63,7 +64,8 @@ final class BenchVoice {
     }
 
     static Score ladder(List<BenchMetrics.Event> truth, List<BenchMetrics.Event> estimate,
-                        List<BenchMetrics.Pair> pairs, Map<String, byte[]> originals, Map<String, byte[]> emitted)
+                        List<BenchMetrics.Pair> pairs, Map<String, byte[]> originals, Map<String, byte[]> emitted,
+                        BenchReconstruction.Attribution attribution, DoubleUnaryOperator truthToInput)
             throws IOException {
         var counts = new TreeMap<String, Count>();
         var total = new Count();
@@ -80,13 +82,18 @@ final class BenchVoice {
                 var second = ladderProbe(probes, "emitted:" + b.hash(), emitted.get(b.hash()), a.pitch());
                 spectral = first.distance(second).spectral();
             }
-            total.add(false, false, spectral);
-            counts.computeIfAbsent(a.lane(), ignored -> new Count()).add(false, false, spectral);
+            boolean top1 = attribution != null && a.hash().equals(b.hash());
+            boolean top3 = attribution != null && attribution.shortlist(BenchLadderTrace.map(b, truthToInput))
+                    .stream().limit(3).anyMatch(candidate -> candidate.assetId().equals("fm-voice-" + a.hash()));
+            total.add(top1, top3, spectral);
+            counts.computeIfAbsent(a.lane(), ignored -> new Count()).add(top1, top3, spectral);
         }
         var output = new TreeMap<String, Channel>();
         counts.forEach((lane, count) -> output.put(lane,
-                new Channel(count.matched, null, null, count.compared, count.mean())));
-        return new Score(output, total.matched, null, null, total.compared, total.mean());
+                new Channel(count.matched, attribution == null ? null : count.top1,
+                        attribution == null ? null : count.top3, count.compared, count.mean())));
+        return new Score(output, total.matched, attribution == null ? null : total.top1,
+                attribution == null ? null : total.top3, total.compared, total.mean());
     }
 
     private static AudioFingerprint ladderProbe(Map<Probe, AudioFingerprint> probes, String key, byte[] bytes,

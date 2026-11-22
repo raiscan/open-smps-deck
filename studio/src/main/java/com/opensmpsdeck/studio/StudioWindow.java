@@ -674,6 +674,17 @@ public final class StudioWindow implements AutoCloseable {
             return;
         }
         if (focusOwner instanceof ComboBoxBase<?>) return;
+        int semitones = TransposeKeys.semitones(e);
+        if (semitones != 0 && piano.canvas.isFocused()) {
+            piano.transpose(semitones, TargetProfile.of(document.project().target()), status::setText);
+            e.consume();
+            return;
+        }
+        if (semitones != 0 && triggers.grid.canvas.isFocused()) {
+            status.setText("Transpose skipped · DAC hits");
+            e.consume();
+            return;
+        }
         if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.G && document.project().nativeProgram()==null){

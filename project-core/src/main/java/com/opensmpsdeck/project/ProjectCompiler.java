@@ -347,16 +347,14 @@ public final class ProjectCompiler {
         private final long compiledBytes;
 
         private BankLimitException(long compiledBytes, Encoding encoding) {
-            super("Compiled project is " + compiledBytes + " bytes. The 32 KiB S3K bank limit is 32,768 bytes. "
-                    + (encoding == Encoding.COMPACT ? "Loops and calls were already applied. " : "Linear encoding was requested. ")
-                    + "Shorten the song or reduce layering, voices, or notes.");
-            this.compiledBytes = compiledBytes;
+            this(compiledBytes, TargetGame.S3K, encoding);
         }
 
-        /** Classic compilers report the first attempted write beyond the bank. */
-        public BankLimitException(long compiledBytes, TargetGame target) {
-            super(target.id() + ": compiled arrangement exceeds one 32 KiB bank (attempted "
-                    + compiledBytes + " bytes). Shorten the song or reduce layering, voices, or notes.");
+        BankLimitException(long compiledBytes, TargetGame target, Encoding encoding) {
+            super("Compiled project is " + compiledBytes + " bytes. The 32 KiB " + target.name()
+                    + " bank limit is 32,768 bytes. "
+                    + (encoding == Encoding.COMPACT ? "Loops and calls were already applied. " : "Linear encoding was requested. ")
+                    + "Shorten the song or reduce layering, voices, or notes.");
             this.compiledBytes = compiledBytes;
         }
 
