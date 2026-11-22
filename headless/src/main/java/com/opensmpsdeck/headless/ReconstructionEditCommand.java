@@ -146,7 +146,7 @@ public final class ReconstructionEditCommand {
                     result.addProperty("status", "unresolved");
                     return result;
                 }
-                result.addProperty("from", ReconstructionProposals.from(updated.accepted(), selected,
+                result.addProperty("from", ReconstructionProposals.from(work, updated.accepted(), selected,
                         ReconstructionEdits.Journal.read(work)).name().toLowerCase(Locale.ROOT));
             }
             updated.write(work);
@@ -331,7 +331,7 @@ public final class ReconstructionEditCommand {
             return result;
         }
         var prior = ReconstructionEdits.Journal.read(work);
-        var from = Objects.equals(prior.scoreRecipe(), updated.accepted().scoreRecipe())
+        var from = Objects.equals(prior.scoreRecipe(), updated.accepted().scoreRecipe(work))
                 ? changed.stream().filter(intent -> !intent.inactive()).map(ReconstructionEdits.Intent::firstStage)
                     .min(Comparator.naturalOrder()).orElse(ReconstructionStages.Stage.ASSEMBLE)
                 : ReconstructionStages.Stage.TRANSCRIBE;

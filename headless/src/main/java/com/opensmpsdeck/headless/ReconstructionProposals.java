@@ -68,9 +68,9 @@ public final class ReconstructionProposals {
         return result;
     }
 
-    static Stage from(ReconstructionEdits shadow, List<ReconstructionEdits.Intent> selected,
-                      ReconstructionEdits.Journal prior) {
-        if (!java.util.Objects.equals(prior.scoreRecipe(), shadow.scoreRecipe())) return Stage.TRANSCRIBE;
+    static Stage from(Path work, ReconstructionEdits shadow, List<ReconstructionEdits.Intent> selected,
+                      ReconstructionEdits.Journal prior) throws IOException {
+        if (!java.util.Objects.equals(prior.scoreRecipe(), shadow.scoreRecipe(work))) return Stage.TRANSCRIBE;
         var built = prior.all().stream().map(ReconstructionEdits.Outcome::id)
                 .collect(java.util.stream.Collectors.toSet());
         return java.util.stream.Stream.concat(selected.stream(),
@@ -126,7 +126,7 @@ public final class ReconstructionProposals {
         var resolutions = new ArrayList<ReconstructionEdits.Resolution>();
         var notes = new HashMap<String, ReconstructionStages.Note>();
         try {
-            ReconstructionStages.previewEdits(work, from(shadow, selected, prior), shadow, prior, outcomes, resolutions, notes);
+            ReconstructionStages.previewEdits(work, from(work, shadow, selected, prior), shadow, prior, outcomes, resolutions, notes);
         } catch (IOException | IllegalArgumentException failure) {
             // A partial run may not have the artifacts that the proposal needs yet.
             return selected.stream().map(edit -> new Result(edit.json(), List.of(

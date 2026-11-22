@@ -121,6 +121,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private final Spinner<Integer> velocity = new Spinner<>(1, 127, 96);
     private final Button noteDelete = new Button("Delete note");
     private final ListView<EditRow> journal = new ListView<>();
+    private final Button reviseEdit = new Button("Revise selected edit…");
     private final Button remove = new Button("Remove selected edit");
     private final Label comparison = new Label("Apply a change to compare reconstruction output.");
     private final Tab noteTab = new Tab("Note");
@@ -323,7 +324,8 @@ final class ReconstructionEditor implements AutoCloseable {
             draft.remove(row.index());
             updateDraft();
         });
-        var editList = new VBox(8, journal, remove);
+        reviseEdit.setOnAction(event -> reviseJournalEdit());
+        var editList = new VBox(8, journal, new FlowPane(5, 4, reviseEdit, remove));
         editList.getStyleClass().add("inspector");
         VBox.setVgrow(journal, Priority.ALWAYS);
         editTab.setContent(editList);
@@ -859,26 +861,46 @@ final class ReconstructionEditor implements AutoCloseable {
         }
     }
 
-    private void reviseProposal(ReconstructionProposals.Result proposal) {
-        if (busy || external != null || externalError) return;
+    private JsonObject editJson(String title, JsonElement entry) {
         var dialog = new Dialog<String>();
         dialog.initOwner(owner);
-        dialog.setTitle("Revise proposal");
-        var area = new TextArea(new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(proposal.edit()));
+        dialog.setTitle(title);
+        var area = new TextArea(new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(entry));
         area.setPrefColumnCount(58);
         area.setPrefRowCount(17);
         dialog.getDialogPane().setContent(area);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
         dialog.setResultConverter(button -> button == ButtonType.OK ? area.getText() : null);
         var replacement = dialog.showAndWait();
-        if (replacement.isEmpty()) return;
-        JsonObject intent;
+        if (replacement.isEmpty()) return null;
         try {
-            intent = com.google.gson.JsonParser.parseString(replacement.get()).getAsJsonObject();
+            return com.google.gson.JsonParser.parseString(replacement.get()).getAsJsonObject();
         } catch (com.google.gson.JsonParseException | IllegalStateException failure) {
             status.accept("Revision needs a JSON intent object");
+            return null;
+        }
+    }
+
+    private void reviseJournalEdit() {
+        var row = journal.getSelectionModel().getSelectedItem();
+        if (row == null || row.index() < 0 || busy || external != null || externalError) return;
+        var entry = draft.entries().get(row.index());
+        var revised = editJson("Revise edit", entry);
+        if (revised == null) return;
+        String issue = !Objects.equals(text(entry, "id", null), text(revised, "id", null))
+                ? "Keep the edit ID when revising its target" : ReconstructionReview.validationIssue(revised);
+        if (issue != null) {
+            status.accept(issue);
             return;
         }
+        draft.change(entries -> entries.set(row.index(), revised));
+        updateDraft();
+    }
+
+    private void reviseProposal(ReconstructionProposals.Result proposal) {
+        if (busy || external != null || externalError) return;
+        var intent = editJson("Revise proposal", proposal.edit());
+        if (intent == null) return;
         var expected = snapshot.revision();
         setBusy();
         cancel.setDisable(true);
@@ -1072,6 +1094,7 @@ final class ReconstructionEditor implements AutoCloseable {
         velocity.setDisable(!editing || selected == null || !editableScore(selected));
         var edit = journal.getSelectionModel().getSelectedItem();
         remove.setDisable(!editing || edit == null || edit.index() < 0);
+        reviseEdit.setDisable(remove.isDisabled());
     }
 
     private void history(boolean forward) {
@@ -1360,6 +1383,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     busy = false;
                     snapshot = updated;
                     sections = result.result().sections();
+                    externalUnbuilt = true;
                     view.sections(sections);
                     status.accept("Musical sections saved");
                     updateDraft();

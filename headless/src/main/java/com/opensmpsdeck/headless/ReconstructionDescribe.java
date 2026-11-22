@@ -132,7 +132,19 @@ public final class ReconstructionDescribe {
         }
         var view = build(score, structure, effectiveNotes, roles, section, filter, span,
                 section == null && bars == null, continuity, audit, envelopes);
-        return json ? new GsonBuilder().disableHtmlEscaping().create().toJson(view) + "\n" : text(view);
+        var orphaned = ReconstructionEdits.Journal.read(work).all().stream()
+                .filter(outcome -> outcome.status() == ReconstructionEdits.Status.orphaned).toList();
+        if (json) {
+            var gson = new GsonBuilder().disableHtmlEscaping().create();
+            var result = gson.toJsonTree(view).getAsJsonObject();
+            if (!orphaned.isEmpty()) result.add("orphanedEdits", gson.toJsonTree(orphaned));
+            return gson.toJson(result) + "\n";
+        }
+        var description = new StringBuilder(text(view));
+        for (var issue : orphaned)
+            description.append("\nOrphaned edit ").append(issue.id()).append(" (").append(issue.op())
+                    .append(") · ").append(issue.detail()).append('\n');
+        return description.toString();
     }
 
     private static List<Note> describeNotes(List<Note> structural, List<ReconstructionRoles.Decision> decisions) {
