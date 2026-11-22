@@ -2,6 +2,9 @@ package com.opensmpsdeck.studio;
 
 import com.google.gson.JsonArray;
 import com.opensmpsdeck.headless.ReconstructionReview;
+import com.opensmpsdeck.headless.ReconstructionLaneType;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import com.opensmpsdeck.headless.ReconstructionSections.Level;
 import com.opensmpsdeck.headless.ReconstructionSections.Author;
 import com.opensmpsdeck.headless.ReconstructionSections.Section;
@@ -16,6 +19,38 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionDraftTest {
     @TempDir Path work;
+
+    @Test void transposeKeysHandleBothKeyboardsAndReserveOtherModifiers() {
+        for (var code : List.of(KeyCode.PLUS, KeyCode.EQUALS, KeyCode.ADD)) {
+            assertEquals(1, TransposeKeys.semitones(key(code, false, false)));
+            assertEquals(12, TransposeKeys.semitones(key(code, true, false)));
+        }
+        for (var code : List.of(KeyCode.MINUS, KeyCode.SUBTRACT)) {
+            assertEquals(-1, TransposeKeys.semitones(key(code, false, false)));
+            assertEquals(-12, TransposeKeys.semitones(key(code, true, false)));
+        }
+        assertEquals(-12, TransposeKeys.semitones(key(KeyCode.UNDERSCORE, true, false)));
+        assertEquals(0, TransposeKeys.semitones(key(KeyCode.EQUALS, false, true)));
+        assertEquals(0, TransposeKeys.semitones(key(KeyCode.ENTER, false, false)));
+    }
+
+    private static KeyEvent key(KeyCode code, boolean shift, boolean control) {
+        return new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, shift, control, false, false);
+    }
+
+    @Test void mixedChipTransposeIsOneDraftStep() throws Exception {
+        var draft = new ReconstructionDraft(new JsonArray());
+        var fm = ReconstructionDraft.transpose(List.of("lead", "answer"), 12, ReconstructionLaneType.FM);
+        var psg = ReconstructionDraft.transpose(List.of("pad"), 12, ReconstructionLaneType.PSG);
+        draft.change(entries -> { entries.add(fm); entries.add(psg); });
+        assertEquals("transcribe", ReconstructionReview.firstStage(work, new JsonArray(), draft.entries()));
+        assertNull(ReconstructionReview.validationIssue(fm));
+        assertNull(ReconstructionReview.validationIssue(psg));
+        draft.undo(false);
+        assertTrue(draft.entries().isEmpty());
+        draft.undo(true);
+        assertEquals(List.of(fm, psg), draft.entries().asList());
+    }
 
     @Test void insertionIsAnUndoableHumanIntentUntilApply() {
         var draft = new ReconstructionDraft(new JsonArray());
