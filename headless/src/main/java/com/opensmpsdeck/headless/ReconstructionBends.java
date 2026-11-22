@@ -74,26 +74,37 @@ final class ReconstructionBends {
         }
 
         List<Sample> trace(Note note) {
+            return trace(note, false);
+        }
+
+        List<Sample> vibratoTrace(Note note) {
+            return trace(note, true);
+        }
+
+        private List<Sample> trace(Note note, boolean vibrato) {
             double span = note.end() - note.start();
-            if (note.run() != null || note.pitch() < 48 || note.pitch() > 94 || span < .075 || span > 2.5)
+            if (note.run() != null || note.pitch() < (vibrato ? 36 : 48) || note.pitch() > 94 || span < .075 || span > 2.5)
                 return List.of();
-            if (note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED)
+            if (!vibrato && note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED)
                 return List.of();
 
             double carrier = ReconstructionLeadAudio.hz(note.pitch());
             int rate = audio.sampleRate();
-            int length = (int) Math.round(rate * Math.clamp(7 / carrier, .016, .034));
+            int length = (int) Math.round(rate * Math.clamp(7 / carrier, .016, vibrato ? .050 : .034));
             double[] window = new double[length];
             for (int i = 0; i < length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
             int first = (int) Math.ceil(note.start() * rate);
             int end = Math.min(audio.samples().length, (int) Math.floor(note.end() * rate));
             int hop = (int) Math.round(HOP * rate);
             var track = new ArrayList<Sample>();
+            int windows = 0;
             for (int at = first; at + length <= end; at += hop) {
+                windows++;
                 double time = (at + length / 2.0) / rate;
                 double prior = track.isEmpty() ? 0 : track.getLast().cents();
-                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty());
+                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty(), vibrato);
                 if (sample == null) {
+                    if (vibrato) continue;
                     if (track.isEmpty() && time - note.start() < .023) continue;
                     // A broken ridge cannot support a bend through a new attack or silence.
                     if ((end - at) / (double) rate > .032) return List.of();
@@ -101,10 +112,12 @@ final class ReconstructionBends {
                 }
                 track.add(sample);
             }
+            if (vibrato && track.size() < .68 * windows) return List.of();
             return track;
         }
 
-        private Sample sample(int at, double[] window, double carrier, double time, double prior, boolean attack) {
+        private Sample sample(int at, double[] window, double carrier, double time, double prior, boolean attack,
+                              boolean vibrato) {
             double energy = 0;
             for (int i = 0; i < window.length; i++) {
                 double value = audio.samples()[at + i];
@@ -136,7 +149,7 @@ final class ReconstructionBends {
             for (Peak peak : peaks) {
                 double cents = CENTS_PER_LOG * Math.log(peak.hz() / carrier);
                 double jump = Math.abs(cents - prior);
-                if (jump > (attack ? 85 : 190) || Math.abs(cents) > MAX_EXCURSION
+                if (jump > (vibrato ? 100 : attack ? 85 : 190) || Math.abs(cents) > (vibrato ? 155 : MAX_EXCURSION)
                         || peak.amplitude() < .14 * rms) continue;
                 double salience = peak.amplitude();
                 double numerator = cents * peak.amplitude();
@@ -151,8 +164,9 @@ final class ReconstructionBends {
                 }
                 double support = Math.sqrt(harmonicEnergy) / rms;
                 // A strong fundamental alone can support a nearly sinusoidal tone.
-                if (support < .62) continue;
-                double merit = salience / (1 + jump / 150);
+                if (support < (vibrato ? .28 : .62)) continue;
+                double merit = salience / (1 + jump / (vibrato ? 45 : 150));
+                if (vibrato) merit /= 1 + Math.abs(cents) / 115;
                 if (merit > bestSalience) {
                     bestSalience = merit;
                     best = new Sample(time, numerator / salience, Math.min(1, support));

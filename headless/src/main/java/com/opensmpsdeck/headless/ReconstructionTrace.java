@@ -68,7 +68,11 @@ public final class ReconstructionTrace {
         }
     }
     record Voiced(String id, String lane, int pitch, Timing gate, ReconstructionBendEncoding.Applied bend,
-                  String evidence) {}
+                  String evidence, List<ReconstructionEditing.VibratoSegment> vibratoEnvelope) {
+        Voiced(String id, String lane, int pitch, Timing gate, ReconstructionBendEncoding.Applied bend, String evidence) {
+            this(id, lane, pitch, gate, bend, evidence, null);
+        }
+    }
     record Row(String id, int part, String partName, int pitch, Timing timing, Timing effectiveTiming, Origin source, NoteAt score,
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
@@ -419,7 +423,7 @@ public final class ReconstructionTrace {
 
     private static Voiced voicedFate(Voiced gate) {
         return new Voiced(gate.id, gate.lane, gate.pitch, gate.gate, gate.bend,
-                ReconstructionChords.isLabel(gate.evidence) ? gate.evidence : null);
+                ReconstructionChords.isLabel(gate.evidence) ? gate.evidence : null, gate.vibratoEnvelope);
     }
 
     private static Summary summary(Row row) {
@@ -834,7 +838,7 @@ public final class ReconstructionTrace {
         if (exact) {
             for (var gate : reportList(report, "voicedGates", S3kReconstruction.VoicedGate.class, true)) {
                 gates.add(new Voiced(gate.id(), gate.lane(), gate.pitch(), ticks(gate.startTick(), gate.endTick(), timeline),
-                        bends.get(gate.id()), Objects.requireNonNullElse(gate.evidence(), "assembled")));
+                        bends.get(gate.id()), Objects.requireNonNullElse(gate.evidence(), "assembled"), gate.vibratoEnvelope()));
             }
         } else {
             for (var entry : playback.notes()) {

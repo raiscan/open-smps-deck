@@ -1328,8 +1328,33 @@ class StudioWindowTest {
                 var vibrato = gestures.getLast();
                 assertEquals("noteVoicing", vibrato.get("op").getAsString());
                 assertEquals("test-note", vibrato.getAsJsonArray("noteIds").get(0).getAsString());
-                assertEquals(2, vibrato.getAsJsonObject("vibrato").get("steps").getAsInt());
-                assertTrue(vibrato.getAsJsonObject("vibrato").get("delta").getAsInt() > 0);
+                var stage = vibrato.getAsJsonArray("vibratoEnvelope").get(0).getAsJsonObject();
+                assertEquals(30, stage.get("startOffset").getAsInt());
+                assertEquals(15, stage.get("rateHz").getAsDouble());
+                assertEquals(50, stage.get("depthCents").getAsDouble());
+                view.vibrato = note -> com.opensmpsdeck.headless.ReconstructionEditing.vibratoEnvelope(vibrato);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x + 60, lowY, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 60, lowY - 12, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 60, lowY - 12, false);
+                var deeper = gestures.getLast();
+                var stages = deeper.getAsJsonArray("vibratoEnvelope");
+                assertEquals(2, stages.size());
+                assertEquals(stage, stages.get(0));
+                assertEquals(74, stages.get(1).getAsJsonObject().get("depthCents").getAsDouble());
+
+                view.vibrato = note -> com.opensmpsdeck.headless.ReconstructionEditing.vibratoEnvelope(deeper);
+                modifierClick(plot, x, lowY, false, false, true);
+                assertEquals(1, gestures.getLast().getAsJsonArray("vibratoEnvelope").size());
+
+                int editsBeforePan = gestures.size();
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, lowY, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 10, lowY - 5, true);
+                view.holdSpace();
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 40, lowY - 15, true);
+                assertFalse(view.releaseSpace());
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 40, lowY - 15, false);
+                assertEquals(editsBeforePan, gestures.size(), "Space-pan cancels an active vibrato gesture");
+
                 var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
                 gestures.forEach(edit -> {
                     assertEquals("human", edit.get("author").getAsString());

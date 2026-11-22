@@ -159,6 +159,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private long auditionEpoch;
     private boolean previewPlaying;
     private List<String> inspectedSelection = List.of();
+    private final Map<String, JsonObject> noteModulation = new LinkedHashMap<>();
     private final List<Control> detailTools = new ArrayList<>();
     private Map<String, ReconstructionBulk.Voice> draftVoices = Map.of();
     private Map<String, String> draftMembership = Map.of();
@@ -186,7 +187,6 @@ final class ReconstructionEditor implements AutoCloseable {
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
         view.attack = this::attack;
-        view.detune = note -> snapshot.editing().detune(note.lane());
         view.vibrato = this::vibrato;
         view.onInsert = this::insert;
         view.onPlacement = this::move;
@@ -215,7 +215,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 case INSERT -> "Click an empty pitch row to insert";
                 case CUT -> "Click inside a note. Alt-click at a new pitch to retune the second half.";
                 case BEND -> "Drag to bend a note or edit a point. Hold Shift to snap to semitones.";
-                case VIBRATO -> "Drag horizontally for rate and vertically for depth on an FM note.";
+                case VIBRATO -> "Drag from a point on an FM note. Horizontal sets rate, vertical sets depth. Alt-click a marker to remove it.";
             }));
             bar.getChildren().add(button);
             detailTools.add(button);
@@ -398,7 +398,8 @@ final class ReconstructionEditor implements AutoCloseable {
                 orDash(note.lane()), orDash(note.patch()), time.sourceStart(), time.sourceEnd(),
                 time.projectStart(), time.projectEnd(), names(note.competitors()), names(detail.edits()));
         var vibration = vibrato(note);
-        if (vibration != null) body += "\n\nVibrato  " + ReconstructionCanvas.vibratoLabel(vibration);
+        if (!vibration.isEmpty()) body += "\n\nVibrato\n" + vibration.stream().map(ReconstructionCanvas::vibratoLabel)
+                .collect(Collectors.joining("\n"));
         for (var layer : inspection.noteLayers(note.id())) {
             String result = layer.lane() == null ? layer.reason() : layer.lane() + " · " + layer.delayFrames()
                     + " frames · " + layer.attenuation() + " TL";
@@ -614,21 +615,16 @@ final class ReconstructionEditor implements AutoCloseable {
         return new ReconstructionEditing.Attack(place.start(), place.end(), place.pitch(), drums, original.single(), note.bend());
     }
 
-    private ReconstructionEditing.Vibrato vibrato(Overlay note) {
-        if (note.lane() == null || !note.lane().startsWith("FM")) return null;
-        ReconstructionEditing.Vibrato result = null;
-        for (var entry : draft.entries()) {
-            if (!"noteVoicing".equals(text(entry, "op", "")) || !targetIds(entry).contains(note.id())
-                    || ReconstructionReview.validationIssue(entry) != null) continue;
-            var json = entry.getAsJsonObject();
-            if (json.has("modulationOff")) result = ReconstructionEditing.vibrato(note.pitch(), 0, 5, 0);
-            else if (json.has("vibrato")) {
-                var nativeMod = json.getAsJsonObject("vibrato");
-                result = snapshot.editing().vibrato(note.pitch(), note.lane(), nativeMod.get("rate").getAsInt(),
-                        nativeMod.get("delta").getAsInt(), nativeMod.get("steps").getAsInt());
-            }
-        }
-        return result;
+    private List<ReconstructionEditing.VibratoSegment> vibrato(Overlay note) {
+        var edit = noteModulation.get(note.id());
+        if (edit == null || note.lane() == null || !note.lane().startsWith("FM")) return List.of();
+        if (edit.has("vibratoEnvelope")) return ReconstructionEditing.vibratoEnvelope(edit);
+        if (edit.has("modulationOff")) return List.of();
+        var nativeMod = edit.getAsJsonObject("vibrato");
+        var legacy = snapshot.editing().vibrato(note.pitch(), note.lane(), nativeMod.get("rate").getAsInt(),
+                nativeMod.get("delta").getAsInt(), nativeMod.get("steps").getAsInt());
+        int onset = nativeMod.get("delay").getAsInt() + legacy.rate() - 2;
+        return List.of(new ReconstructionEditing.VibratoSegment(onset, legacy.hz(), Math.min(200, legacy.cents())));
     }
 
     private void audition(List<String> ids, ReconstructionEditing.Instrument instrument) {
@@ -1316,6 +1312,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void updateDraft() {
+        noteModulation.clear();
         var pitchEdits = new LinkedHashMap<String, List<JsonObject>>();
         for (var entry : draft.entries()) {
             String op = text(entry, "op", "");
@@ -1325,6 +1322,29 @@ final class ReconstructionEditor implements AutoCloseable {
                 pitchEdits.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry.getAsJsonObject());
         }
         draftPitchEdits = pitchEdits;
+        var rows = new ArrayList<EditRow>();
+        var entries = draft.entries();
+        var idCounts = entries.asList().stream().collect(Collectors.groupingBy(e -> text(e, "id", ""), Collectors.counting()));
+        for (int i = 0; i < entries.size(); i++) {
+            var entry = entries.get(i);
+            String id = text(entry, "id", "");
+            String issue = ReconstructionReview.validationIssue(entry);
+            if (issue == null && idCounts.get(id) > 1) issue = "Duplicate edit ID";
+            if (issue == null && "noteVoicing".equals(text(entry, "op", ""))) {
+                var edit = entry.getAsJsonObject();
+                if (edit.has("vibrato") || edit.has("vibratoEnvelope") || edit.has("modulationOff"))
+                    for (String noteId : targetIds(entry)) noteModulation.put(noteId, edit);
+            }
+            var results = snapshot.outcomes().getOrDefault(id, List.of());
+            String state = issue != null ? "invalid" : draft.changed(entry) || results.isEmpty() ? "pending"
+                    : results.stream().map(result -> result.status().equals("satisfied") ? "applied" : result.status())
+                        .distinct().collect(Collectors.joining(", "));
+            String detail = issue != null ? issue : results.stream().map(EditResult::reason).filter(Objects::nonNull)
+                    .distinct().collect(Collectors.joining(" · "));
+            rows.add(row(i, entry, state, detail));
+        }
+        for (var removed : draft.removed()) rows.add(row(-1, removed, "pending removal", ""));
+        journal.getItems().setAll(rows);
         updateVoiceProjection();
         var pending = overlays();
         view.pending(pending);
@@ -1342,24 +1362,6 @@ final class ReconstructionEditor implements AutoCloseable {
         var projection = ReconstructionVoices.of(snapshot.inspection().overlays(), pending, draftVoices, draftMembership, voicePalette);
         view.voices(projection, Set.copyOf(edited));
         voiceLegend.show(projection.entries());
-        var rows = new ArrayList<EditRow>();
-        var entries = draft.entries();
-        var idCounts = entries.asList().stream().collect(Collectors.groupingBy(e -> text(e, "id", ""), Collectors.counting()));
-        for (int i = 0; i < entries.size(); i++) {
-            var entry = entries.get(i);
-            String id = text(entry, "id", "");
-            String issue = ReconstructionReview.validationIssue(entry);
-            if (issue == null && idCounts.get(id) > 1) issue = "Duplicate edit ID";
-            var results = snapshot.outcomes().getOrDefault(id, List.of());
-            String state = issue != null ? "invalid" : draft.changed(entry) || results.isEmpty() ? "pending"
-                    : results.stream().map(result -> result.status().equals("satisfied") ? "applied" : result.status())
-                        .distinct().collect(Collectors.joining(", "));
-            String detail = issue != null ? issue : results.stream().map(EditResult::reason).filter(Objects::nonNull)
-                    .distinct().collect(Collectors.joining(" · "));
-            rows.add(row(i, entry, state, detail));
-        }
-        for (var removed : draft.removed()) rows.add(row(-1, removed, "pending removal", ""));
-        journal.getItems().setAll(rows);
         updateProposals();
         updateControls();
     }

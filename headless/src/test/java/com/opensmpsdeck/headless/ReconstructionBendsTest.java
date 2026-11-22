@@ -97,6 +97,37 @@ class ReconstructionBendsTest {
         assertTrue(roundTrip(fit, bend) < 90);
     }
 
+    @Test void stagedVibratoRendersOneAttackAndTwoDepths() throws IOException {
+        var fit = ReconstructionBendEncoding.envelope(PITCH, 0, 90, List.of(
+                new ReconstructionEditing.VibratoSegment(0, 0, 0),
+                new ReconstructionEditing.VibratoSegment(24, 5, 18),
+                new ReconstructionEditing.VibratoSegment(50, 5, 60)));
+        var keyOns = new java.util.ArrayList<Integer>();
+        var sequence = new Sequence("probe", "Vibrato", "FM", 90, VOICE.id(), 100,
+                fit.notes(), fit.commands(), "RESET");
+        var project = new StudioProject(4, "Vibrato", "S3K", 30, 0, List.of(VOICE),
+                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, 90)), TargetGame.S3K, null);
+        int[] frame = {0};
+        TargetPlayback.prepare(project).render(90, S3kRenderer.ChannelMask.NONE, pcm -> frame[0]++,
+                new ChipWriteObserver() {
+                    @Override public void onYm2612Write(int port, int register, int value) {
+                        if (port == 0 && register == 0x28 && value == 0xF0) keyOns.add(frame[0]);
+                    }
+                    @Override public void onPsgWrite(int value) {}
+                });
+        assertEquals(List.of(0), keyOns);
+        int[] frequency = ReconstructionBendEncoding.frequencies(fit, VOICE, 90);
+        assertEquals(1, Arrays.stream(frequency, 0, 24).distinct().count());
+        assertNotEquals(frequency[23], frequency[24]);
+        assertTrue(spread(frequency, 24, 50) > 10);
+        assertTrue(spread(frequency, 50, 90) > 2 * spread(frequency, 24, 50));
+    }
+
+    private static int spread(int[] frequencies, int start, int end) {
+        var stats = Arrays.stream(frequencies, start, end).summaryStatistics();
+        return stats.getMax() - stats.getMin();
+    }
+
     @Test void modulationTraceUsesTheClassicDriversNativeTiming() throws IOException {
         var fit = new ReconstructionBendEncoding.Fit(ReconstructionBendEncoding.Mode.F0,
                 List.of(new NoteEvent("note", 0, FRAMES, PITCH)),

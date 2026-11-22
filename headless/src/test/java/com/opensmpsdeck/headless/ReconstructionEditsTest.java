@@ -242,6 +242,37 @@ class ReconstructionEditsTest {
                 """));
     }
 
+    @Test void resolvesVibratoEnvelopeOnlyOnAnS3kFmHold() {
+        var edit = intent("""
+                {"op":"noteVoicing","id":"stages","reason":"evidence","noteIds":["held"],
+                 "vibratoEnvelope":[{"startOffset":0,"depthCents":0},
+                   {"startOffset":12,"rateHz":5,"depthCents":20},{"startOffset":24,"rateHz":6,"depthCents":42}]}
+                """);
+        var held = note("held", 0, .5, 60);
+        var score = new ReconstructionStages.Score(1, 500_000, 30, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false)), List.of(), List.of()),
+                Map.of(), List.of(held), List.of(), List.of(), null, null);
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var allocated = new ReconstructionAllocation.Entry(held, Role.melody, "FM1", 0, 30,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var resolved = ReconstructionNoteVoicing.resolve(List.of(edit), new ReconstructionAllocation.Result(1, List.of(allocated)),
+                null, score, Map.of(), Map.of(), outcomes);
+        assertEquals(ReconstructionEdits.Status.applied, outcomes.getFirst().status());
+        assertEquals(List.of(0, 12, 24), resolved.scopes().get("held").getFirst().settings().vibratoEnvelope()
+                .stream().map(ReconstructionEditing.VibratoSegment::startOffset).toList());
+
+        outcomes.clear();
+        var shortened = new ReconstructionAllocation.Entry(held, Role.melody, "FM1", 0, 24,
+                ReconstructionAllocation.Outcome.shortened, null, null);
+        ReconstructionNoteVoicing.resolve(List.of(edit), new ReconstructionAllocation.Result(1, List.of(shortened)),
+                null, score, Map.of(), Map.of(), outcomes);
+        assertEquals(ReconstructionEdits.Status.orphaned, outcomes.getFirst().status());
+        assertThrows(IllegalArgumentException.class, () -> intent("""
+                {"op":"noteVoicing","id":"bad-order","reason":"evidence","noteIds":["held"],
+                 "vibratoEnvelope":[{"startOffset":12,"rateHz":4,"depthCents":20},{"startOffset":12,"depthCents":0}]}
+                """));
+    }
+
     @Test void rejectsAmbiguousSelectorsAndUnorderedBendPoints() {
         var ambiguous = json("""
                 {"id":"bad","reason":"evidence","op":"setRole","noteIds":["n"],

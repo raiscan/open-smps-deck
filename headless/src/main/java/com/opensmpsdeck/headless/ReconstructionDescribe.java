@@ -48,7 +48,10 @@ public final class ReconstructionDescribe {
                         ReconstructionTimeMap.TimeBase timeBase, List<Part> parts,
                         List<Section> sections, ReconstructionBeatMap.Summary tempoCurve,
                         ReconstructionLeadContinuity.Stats leadContinuity, List<Run> fastRuns,
-                        ReconstructionChordReduction.Audit chordAudit) {}
+                        ReconstructionChordReduction.Audit chordAudit,
+                        List<Envelope> vibratoEnvelopes) {}
+    private record Envelope(String id, int part, String lane, double startSeconds,
+                            List<ReconstructionEditing.VibratoSegment> segments) {}
     private record Run(String kind, int part, double start, double end, Role role, double confidence,
                        List<ReconstructionFastRuns.Step> steps, List<ReconstructionFigureVoices.Voice> voices) {}
 
@@ -131,8 +134,18 @@ public final class ReconstructionDescribe {
         var audit = !Files.isRegularFile(allocationFile) ? null : ReconstructionChordReduction.audit(score,
                 ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class),
                 ReconstructionSections.load(work, score, structure), List.of());
+        var envelopes = new ArrayList<Envelope>();
+        if (ReconstructionEdits.read(work).accepted().intents().stream().anyMatch(edit -> edit.json().has("vibratoEnvelope"))) {
+            for (var row : ReconstructionTrace.read(work, score).values()) {
+                if (!filter.isEmpty() && !filter.contains(row.part())) continue;
+                for (var gate : row.voiced()) {
+                    if (gate.vibratoEnvelope() == null) continue;
+                    envelopes.add(new Envelope(row.id(), row.part(), gate.lane(), gate.gate().projectStart(), gate.vibratoEnvelope()));
+                }
+            }
+        }
         var view = build(score, structure, effectiveNotes, roles, section, filter, span,
-                section == null && bars == null, continuity, audit);
+                section == null && bars == null, continuity, audit, envelopes);
         var orphaned = ReconstructionEdits.Journal.read(work).all().stream()
                 .filter(outcome -> outcome.status() == ReconstructionEdits.Status.orphaned).toList();
         if (json) {
@@ -212,7 +225,7 @@ public final class ReconstructionDescribe {
     private static View build(ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                               List<Note> effectiveNotes, Map<String, Role> roles, String onlySection, Set<Integer> filter,
                               ReconstructionRolePlan.BarRange range, boolean collapse,
-                              ReconstructionLeadContinuity.Stats continuity, ReconstructionChordReduction.Audit audit) {
+                              ReconstructionLeadContinuity.Stats continuity, ReconstructionChordReduction.Audit audit, List<Envelope> envelopes) {
         var notes = new HashMap<Integer, List<Note>>();
         for (var note : effectiveNotes)
             notes.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
@@ -278,8 +291,10 @@ public final class ReconstructionDescribe {
                 .map(note -> new Run(note.source(), note.part(), note.start(), note.end(),
                         roles == null ? null : roles.get(figures.get(note)), note.confidence(), note.run(),
                         score.figureVoices() == null ? null : score.figureVoices().get(note.id()))).toList();
+        var visibleEnvelopes = envelopes.stream().filter(envelope -> sections.stream().anyMatch(s ->
+                envelope.startSeconds() >= s.startSeconds && envelope.startSeconds() < s.endSeconds)).toList();
         return new View(round(bpm), round(barSeconds), inferred ? tempo.source() : "MIDI bar estimate", GRID, timeline.timeBase(), parts,
-                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs, audit);
+                List.copyOf(sections), score.usesBeatGrid() || timeline.warped() ? timeline.summary() : null, continuity, runs.isEmpty() ? null : runs, audit, visibleEnvelopes.isEmpty() ? null : visibleEnvelopes);
     }
 
     private static Section repeat(List<Section> earlier, Section current, List<ReconstructionStructure.Bar> bars,
@@ -399,6 +414,12 @@ public final class ReconstructionDescribe {
         if (view.sections.stream().flatMap(section -> section.parts.stream())
                 .flatMap(part -> part.bars.stream()).anyMatch(pattern -> pattern.contains("~")))
             out.append("~ periodic pitch modulation\n");
+        if (view.vibratoEnvelopes != null) for (var envelope : view.vibratoEnvelopes) {
+            out.append("Vibrato envelope ").append(envelope.id()).append(" ").append(envelope.lane());
+            for (var segment : envelope.segments()) out.append(String.format(Locale.ROOT,
+                    "  +%dt %.2f Hz %.1f cents", segment.startOffset(), segment.rateHz(), segment.depthCents()));
+            out.append('\n');
+        }
         if (view.fastRuns != null) for (var run : view.fastRuns) {
             var sequence = run.steps.stream().map(step -> pitch(step.pitch())).collect(java.util.stream.Collectors.joining(" "));
             out.append(String.format(Locale.ROOT, "%s P%d %.3f–%.3f s %s (%.2f)%n",

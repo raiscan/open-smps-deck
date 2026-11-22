@@ -92,6 +92,59 @@ final class ReconstructionBendEncoding {
         return modulated ? withVibrato(best, desired, vibrato, changes) : best;
     }
 
+    static Fit envelope(int pitch, int detune, int duration, List<ReconstructionEditing.VibratoSegment> segments) {
+        var notes = new ArrayList<NoteEvent>();
+        var commands = new ArrayList<CommandEvent>();
+        var base = new Pitch(pitch, detune);
+        double frequency = linear(packed(base));
+        int first = 0;
+        while (first < segments.size() && segments.get(first).depthCents() == 0) first++;
+        if (first == segments.size()) {
+            append(notes, commands, 0, duration, base);
+            return new Fit(Mode.E7, notes, commands, 0);
+        }
+
+        var onset = segments.get(first);
+        var shape = ReconstructionEditing.vibrato(pitch, detune, onset.rateHz(), onset.depthCents());
+        // The attack already consumes one delay pass, followed by rate-1 more
+        // passes before the first frequency change.
+        int delay = onset.startOffset() - shape.rate() + 2;
+        var nativeMod = delay <= 255 && (delay >= 1 || onset.startOffset() == 0)
+                ? new ReconstructionVoicing.Vibrato(Math.max(1, delay), shape.rate(), shape.delta(), shape.steps())
+                : null;
+        int boundary = nativeMod == null ? onset.startOffset()
+                : first + 1 < segments.size() ? segments.get(first + 1).startOffset() : duration;
+        if (nativeMod != null) {
+            commands.add(new CommandEvent("envelope-f0", 0, NativeCommand.MODULATION, nativeMod.bytes()));
+        }
+        if (boundary > 0) append(notes, commands, 0, boundary, base);
+        if (boundary == duration) return new Fit(Mode.E7, notes, commands, 0, nativeMod);
+
+        // F0 cannot replace the active delta on a held note. Stop custom
+        // modulation and continue with tied pitch steps, keeping the FM gate.
+        if (nativeMod != null) {
+            commands.add(new CommandEvent("envelope-off", boundary, NativeCommand.MODULATION_OFF, List.of()));
+        }
+        int segment = nativeMod == null ? first : first + 1;
+        double phase = nativeMod == null ? 0 : (boundary - nativeMod.delay() + 1) / (2.0 * shape.steps());
+        Pitch prior = null;
+        int from = boundary;
+        for (int tick = boundary; tick < duration; tick++) {
+            if (segment + 1 < segments.size() && segments.get(segment + 1).startOffset() == tick) segment++;
+            var active = segments.get(segment);
+            Pitch next = active.depthCents() == 0 ? base : nearest(pitch, detune, frequency,
+                    active.depthCents() * 2 / Math.PI * Math.asin(Math.sin(Math.TAU * phase)));
+            phase = active.depthCents() == 0 ? 0 : phase + active.rateHz() / 60;
+            if (!next.equals(prior)) {
+                if (prior != null) append(notes, commands, from, tick, prior);
+                from = tick;
+                prior = next;
+            }
+        }
+        append(notes, commands, from, duration, prior);
+        return new Fit(Mode.E7, notes, commands, 0);
+    }
+
     private static Fit steps(int pitch, int detune, double base, double[] desired, int limit) {
         // Keep the gate intact, using detuned equal-tempered notes as staircase steps.
         // Increasing the tolerance first keeps the byte cost bounded on long bends.

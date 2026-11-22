@@ -5,6 +5,7 @@ import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
 import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
+import com.opensmpsdeck.project.TargetGame;
 import javafx.geometry.Orientation;
 import javafx.geometry.VPos;
 import javafx.scene.canvas.GraphicsContext;
@@ -28,7 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.ToIntFunction;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionEditing;
 import java.util.function.BiConsumer;
@@ -116,7 +116,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private Box box;
     private EffectDrag effect;
     private List<BendPoint> bendPreview = List.of();
-    private ReconstructionEditing.Vibrato vibratoPreview;
+    private List<ReconstructionEditing.VibratoSegment> vibratoPreview;
     private String effectReadout;
     private List<Overlay> selectionNotes = List.of();
     private SectionDrag sectionDrag;
@@ -142,7 +142,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
     private record EffectDrag(Overlay note, ReconstructionEditing.Attack attack, double x, double y,
                               double at, boolean retune, List<BendPoint> curve, int point,
-                              ReconstructionEditing.Vibrato vibrato) {}
+                              List<ReconstructionEditing.VibratoSegment> vibrato, int vibratoTick) {}
     private record SectionDrag(Section section, boolean end) {}
     record SectionPoint(Section section, double time, double screenX, double screenY) {}
     private final Tooltip hover = new Tooltip();
@@ -176,8 +176,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     Consumer<JsonObject> onEffect = ignored -> {};
     Runnable onSelection = () -> {};
     Function<Overlay, ReconstructionEditing.Attack> attack = ignored -> null;
-    ToIntFunction<Overlay> detune = ignored -> 0;
-    Function<Overlay, ReconstructionEditing.Vibrato> vibrato = ignored -> null;
+    Function<Overlay, List<ReconstructionEditing.VibratoSegment>> vibrato = ignored -> List.of();
 
     Consumer<Placement> onInsert = ignored -> {};
     BiConsumer<Overlay, Placement> onPlacement = (note, place) -> {};
@@ -707,11 +706,30 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
         if (note == null) return;
         var data = attack.apply(note);
+        var stages = List.<ReconstructionEditing.VibratoSegment>of();
+        int vibratoTick = 0;
         if (mode == Mode.VIBRATO) {
+            if (model.target() != TargetGame.S3K) {
+                error.accept("Vibrato envelopes require an S3K target.");
+                return;
+            }
             if (!note.sounds() || note.lane() == null || !note.lane().startsWith("FM")) {
                 error.accept("Select an allocated FM note to edit vibrato.");
                 return;
             }
+            stages = vibrato.apply(note);
+            var nearby = stages.stream().filter(stage -> Math.abs(x(stageTime(hit.note(), stage.startOffset())) - x) <= 5)
+                    .min(java.util.Comparator.comparingDouble(stage -> Math.abs(x(stageTime(hit.note(), stage.startOffset())) - x)))
+                    .orElse(null);
+            if (event.isAltDown()) {
+                if (nearby != null) onEffect.accept(ReconstructionTools.vibrato(note.id(), stages.stream()
+                        .filter(stage -> stage != nearby).toList()));
+                return;
+            }
+            var interval = note.interval();
+            int length = Math.max(1, (int) (Math.round(interval.projectEnd() * 60) - Math.round(interval.projectStart() * 60)));
+            vibratoTick = nearby == null ? Math.clamp((int) Math.round((model.toProject(seconds(x)) - interval.projectStart()) * 60),
+                    0, length - 1) : nearby.startOffset();
         } else if (data == null || !data.single() || mode == Mode.BEND && data.drums()) {
             error.accept(mode == Mode.BEND ? "A slide needs a single tonal score attack."
                     : "A cut needs a single score attack.");
@@ -719,7 +737,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
         var base = data == null || mode != Mode.BEND ? List.<BendPoint>of() : data.bend();
         effect = new EffectDrag(note, data, x, y, seconds(x), event.isAltDown(), base, point,
-                mode == Mode.VIBRATO ? vibrato.apply(note) : null);
+                stages, vibratoTick);
         if (!selection.contains(note)) select(note, note.lane());
         updateEffect(event);
         draw();
@@ -764,17 +782,29 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             bendPreview = curve.entrySet().stream().map(p -> new BendPoint(p.getKey(), p.getValue())).toList();
             effectReadout = String.format(Locale.ROOT, "Slide  %+.2f semitones", target - data.pitch());
         } else if (mode == Mode.VIBRATO) {
-            var origin = gesture.vibrato();
-            double hz = (origin == null ? 5 : origin.hz()) + (event.getX() - gesture.x()) * .08;
-            double cents = (origin == null ? 0 : origin.cents()) + (gesture.y() - event.getY()) * 2;
-            vibratoPreview = ReconstructionEditing.vibrato(gesture.note().pitch(), detune.applyAsInt(gesture.note()), hz, cents);
-            effectReadout = vibratoLabel(vibratoPreview);
+            int tick = gesture.vibratoTick();
+            var stages = new java.util.TreeMap<Integer, ReconstructionEditing.VibratoSegment>();
+            for (var stage : gesture.vibrato()) stages.put(stage.startOffset(), stage);
+            var previous = stages.floorEntry(tick);
+            var origin = previous == null ? null : previous.getValue();
+            double hz = Math.clamp((origin == null || origin.rateHz() == 0 ? 5 : origin.rateHz())
+                    + (event.getX() - gesture.x()) * .08, .12, 15);
+            double cents = Math.clamp((origin == null ? 0 : origin.depthCents()) + (gesture.y() - event.getY()) * 2, 0, 200);
+            var segment = new ReconstructionEditing.VibratoSegment(tick, hz, cents);
+            stages.put(tick, segment);
+            vibratoPreview = List.copyOf(stages.values());
+            effectReadout = vibratoLabel(segment);
         }
     }
 
-    static String vibratoLabel(ReconstructionEditing.Vibrato value) {
-        return String.format(Locale.ROOT, "%.2f Hz · %.1f cents   (range %.1f–%.1f cents at this rate)",
-                value.hz(), value.cents(), value.minCents(), value.maxCents());
+    static String vibratoLabel(ReconstructionEditing.VibratoSegment value) {
+        return value.depthCents() == 0 ? String.format(Locale.ROOT, "+%d ticks · flat", value.startOffset())
+                : String.format(Locale.ROOT, "+%d ticks · %.2f Hz · %.1f cents",
+                        value.startOffset(), value.rateHz(), value.depthCents());
+    }
+
+    private double stageTime(Overlay note, int offset) {
+        return model.toSource(note.interval().projectStart() + offset / 60.0);
     }
 
     private void finishEffect(MouseEvent event) {
@@ -1362,6 +1392,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             if (deleted) g.strokeLine(left, top + height / 2, left + barWidth, top + height / 2);
             g.setLineWidth(1);
             g.setLineDashes();
+            drawVibrato(g, note, top, height, left + barWidth);
             if (!draft || !note.bend().isEmpty()) drawBend(g, note, left, barWidth, draft ? Color.GOLD : color);
             if (mode == Mode.BEND && selection.contains(note) && effect == null) {
                 var data = attack.apply(note);
@@ -1482,6 +1513,25 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private static Color layerColor(String lane, double alpha) {
         int rgb = ReconstructionInspection.laneRgb(lane);
         return Color.rgb(rgb >> 16, rgb >> 8 & 255, rgb & 255, alpha);
+    }
+
+    private void drawVibrato(GraphicsContext g, Overlay note, double top, double height, double right) {
+        var stages = effect != null && effect.note() == note && vibratoPreview != null ? vibratoPreview : vibrato.apply(note);
+        if (stages.isEmpty()) return;
+        g.setStroke(Color.GOLD);
+        for (int i = 0; i < stages.size(); i++) {
+            var stage = stages.get(i);
+            double left = x(stageTime(note, stage.startOffset()));
+            if (left >= right) break;
+            double end = i + 1 == stages.size() ? right : Math.min(right, x(stageTime(note, stages.get(i + 1).startOffset())));
+            g.setLineWidth(1);
+            g.strokeLine(left, top - 2, left, top + height);
+            if (stage.depthCents() > 0) {
+                g.setLineWidth(Math.clamp(stage.depthCents() / 26, 1.25, 4));
+                g.strokeLine(left, top + height - 1, end, top + height - 1);
+            }
+        }
+        g.setLineWidth(1);
     }
 
     private void drawBend(GraphicsContext g, Overlay note, double left, double width, Color color) {
