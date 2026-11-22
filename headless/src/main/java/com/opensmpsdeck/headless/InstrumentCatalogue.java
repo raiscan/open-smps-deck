@@ -311,7 +311,14 @@ public final class InstrumentCatalogue {
     }
 
     public Page search(Query query) {
-        var matches = sortedMatches.stream().filter(row -> matches(row, query)).toList();
+        return page(query, matching(query));
+    }
+
+    List<Match> matching(Query query) {
+        return sortedMatches.stream().filter(row -> matches(row, query)).toList();
+    }
+
+    static Page page(Query query, List<Match> matches) {
         int start = Math.min(query.offset(), matches.size());
         int end = start + Math.min(query.limit(), matches.size() - start);
         return new Page(FORMAT_VERSION, matches.size(), query.offset(), matches.subList(start, end));
@@ -327,8 +334,8 @@ public final class InstrumentCatalogue {
         if (query.kind() != null && row.asset().kind() != query.kind()) return false;
         if (!contains(variant.id(), query.variant())) return false;
         if (!contains(variant.driver(), query.driver())) return false;
-        if (!empty(query.role()) && variant.roles().stream().noneMatch(role -> contains(role, query.role())))
-            return false;
+        if (!empty(query.role()) && variant.roles().stream().noneMatch(role -> contains(role, query.role()))
+                && !observedFmRoles(row).contains(query.role().strip().toLowerCase(Locale.ROOT))) return false;
         if (!empty(query.source()) && variant.occurrences().stream().noneMatch(o -> matchesSource(o, query.source())))
             return false;
         if (empty(query.text())) return true;
@@ -336,6 +343,19 @@ public final class InstrumentCatalogue {
                 || contains(variant.id(), query.text()) || contains(row.asset().id(), query.text())
                 || variant.roles().stream().anyMatch(role -> contains(role, query.text()))
                 || variant.occurrences().stream().anyMatch(o -> matchesSource(o, query.text()));
+    }
+
+    /** Musical role hints from observed FM lane usage, including in existing indices. */
+    static List<String> observedFmRoles(Match row) {
+        if (row.asset().kind() != Kind.FM_VOICE) return List.of();
+        return row.variant().occurrences().stream().filter(Occurrence::played)
+                .map(Occurrence::lane).filter(Objects::nonNull)
+                .map(lane -> switch (lane.toUpperCase(Locale.ROOT)) {
+                    case "FM1" -> "lead";
+                    case "FM2" -> "bass";
+                    case "FM3", "FM4", "FM5" -> "backing";
+                    default -> "";
+                }).filter(role -> !role.isEmpty()).distinct().sorted().toList();
     }
 
     private static boolean matchesSource(Occurrence occurrence, String query) {

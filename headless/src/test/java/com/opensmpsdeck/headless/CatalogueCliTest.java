@@ -59,6 +59,17 @@ class CatalogueCliTest {
         var voices = json("search", index.toString(), "--kind", "fm-voice", "--source", "album/",
                 "--role", "tone", "--driver", "S3K", "--limit", "1", "--json");
         assertEquals(2, voices.get("total").getAsInt());
+        var measured = json("search", index.toString(), "--role", "lead", "--min-centroid-hz", "1",
+                "--max-decay-db", "120", "--limit", "1");
+        assertTrue(measured.get("total").getAsInt() > 0);
+        var held = measured.getAsJsonArray("items").get(0).getAsJsonObject().getAsJsonObject("heldNote");
+        assertTrue(held.get("centroidHz").getAsDouble() > 1);
+        assertTrue(held.get("decayDb").getAsDouble() <= 120);
+        assertTrue(measured.getAsJsonArray("items").get(0).getAsJsonObject().getAsJsonArray("roles")
+                .contains(new com.google.gson.JsonPrimitive("lead")));
+        assertEquals(0, json("search", index.toString(), "--role", "bass").get("total").getAsInt());
+        assertEquals(0, json("search", index.toString(), "--role", "tone", "--min-centroid-hz", "6001")
+                .get("total").getAsInt());
         var first = voices.getAsJsonArray("items").get(0).getAsJsonObject();
         assertFalse(first.has("payload"));
         String variant = first.get("variantId").getAsString();
