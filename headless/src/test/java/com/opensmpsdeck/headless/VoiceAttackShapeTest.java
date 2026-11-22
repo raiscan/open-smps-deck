@@ -18,6 +18,27 @@ class VoiceAttackShapeTest {
         assertTrue(reference.distance(slow) > .1);
     }
 
+    @Test void resolvesFiveMillisecondRiseAndUsesFirstNearPeakBin() {
+        var shape = new VoiceAttackShape();
+        var early = shape.measure(plateau(1));
+        var late = shape.measure(plateau(2));
+
+        assertEquals(1, early.riseBin());
+        assertEquals(2, late.riseBin());
+        assertEquals(1.0 / 9, early.riseDistance(late), 1e-9);
+    }
+
+    private static float[] plateau(int riseBin) {
+        var samples = new float[VoiceAttackShape.SAMPLES];
+        int binSize = VoiceSpectra.RATE / 200;
+        for (int i = 0; i < samples.length; i++) {
+            int bin = i / binSize;
+            double gain = bin < riseBin ? .5 : bin == 8 ? 1 : .95;
+            samples[i] = (float) (gain * Math.sin(Math.TAU * 800 * i / VoiceSpectra.RATE));
+        }
+        return samples;
+    }
+
     private static float[] attack(boolean slow, boolean bloom, double gain) {
         var samples = new float[VoiceAttackShape.SAMPLES];
         for (int i = 0; i < samples.length; i++) {

@@ -1236,10 +1236,15 @@ For long notes with a mapped stem, the fitter measures pitch-band energy
 near the attack and in the hold. It screens the FM attack shortlist on
 representative long gates using the pinned chip. For shared FM guitar
 profiles (General MIDI guitar programs with a mapped stem), it also
-compares the first 50 ms of exposed attacks for changes in relative level
-and spectral brightness. It fits the surviving choices jointly with the
-other instruments. The PSG spill fit includes a long-hold probe alongside
-its short FM contour probes. If an attack would
+nominates catalogue patches from the first 50 ms of exposed attacks.
+The attack comparison uses pitch-matched probes, overlapping brightness
+windows, and the first 5 ms bin that reaches 90% of peak RMS. The combined
+shortlist still has to pass the sustain screen. Among sustaining candidates,
+it keeps the patches with the lowest median rise error and comparable
+attack-shape loss for the joint fit with the other instruments. In this case,
+the shortlist score is one divided by one plus the attack-shape loss.
+The PSG spill fit includes a long-hold probe alongside its short FM contour
+probes. If an attack would
 steal most of a stem-supported hold from another source part, allocation
 first tries moving the whole hold to a free inner FM lane. It can also route
 the new attack around the hold when another compatible lane is free.

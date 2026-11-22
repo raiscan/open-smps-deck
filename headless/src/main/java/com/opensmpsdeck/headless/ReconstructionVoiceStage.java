@@ -127,15 +127,14 @@ final class ReconstructionVoiceStage {
                     : List.of();
             if (fm && !lane.equals(vocalGroup) && !lane.equals(chosenLane)) {
                 var examples = ReconstructionHeldNotes.examples(entry.getValue(), holds);
-                if (!examples.isEmpty()) {
-                    sustainExamples.put(lane, examples);
+                if (!examples.isEmpty()) sustainExamples.put(lane, examples);
+                int part = entry.getValue().getFirst().note().part();
+                var stem = options.stems().get(part);
+                if (instrument && guitarParts.contains(part) && stem != null && !mix.equals(stem)) {
+                    patches = screening.fittingGuitar(patches, entry.getValue(), stem, windows,
+                            score.profile(), examples);
+                } else {
                     patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
-                }
-                if (instrument) {
-                    int part = entry.getValue().getFirst().note().part();
-                    var stem = options.stems().get(part);
-                    if (guitarParts.contains(part) && !mix.equals(stem))
-                        patches = screening.fittingAttacks(patches, entry.getValue(), stem, windows);
                 }
             }
             incumbents.add(incumbent == null ? null : incumbent.id());
