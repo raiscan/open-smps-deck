@@ -7,23 +7,18 @@ import com.google.gson.JsonPrimitive;
 import com.opensmpsdeck.headless.rom.RomExport;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
-import com.opensmpsdeck.headless.rom.RomTarget;
 import com.opensmpsdeck.headless.rompatch.RomPatch;
-import com.opensmpsdeck.headless.rompatch.S1RomTarget;
-import com.opensmpsdeck.headless.rompatch.S3kRomTarget;
+import com.opensmpsdeck.headless.rompatch.S2RomPatch;
 import com.opensmpsdeck.project.StudioProject;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
-import java.util.Map;
 
 /** Shared Test in game export for Studio snapshots and headless project/package inputs. */
 public final class TestInGame {
     private static final Gson JSON = new Gson();
-    private static final Map<RomGame, RomTarget<?, ?, ?>> TARGETS = Map.of(
-            RomGame.S1, S1RomTarget.TARGET, RomGame.S3K, S3kRomTarget.TARGET);
 
     private TestInGame() {}
 
@@ -42,6 +37,21 @@ public final class TestInGame {
         }
     }
 
+    public record Options(Integer slot, boolean titleMusic, boolean noDemo, boolean loop) {
+        public Options {
+            if (slot != null && !(slot >= 1 && slot <= 0x33 || slot >= 0x81 && slot <= 0x9F))
+                throw new IllegalArgumentException("Music ID must be in 0x01–0x33 for S3K or 0x81–0x9F for S2");
+        }
+
+        RomPatch.Options s3k() {
+            return new RomPatch.Options(slot == null ? RomPatch.DEFAULT_SLOT : slot, titleMusic, noDemo, loop);
+        }
+
+        S2RomPatch.Options s2() {
+            return new S2RomPatch.Options(slot == null ? S2RomPatch.DEFAULT_SLOT : slot, titleMusic, noDemo, loop);
+        }
+    }
+
     public static RomGame game(StudioProject project) {
         return game(project.mode());
     }
@@ -57,8 +67,8 @@ public final class TestInGame {
     }
 
     public static boolean available(RomGame game) {
-        // TODO(#81): Resolve/compile the S1 portable bank before exposing the cartridge engine.
-        return game != null && game != RomGame.S1 && TARGETS.containsKey(game);
+        // S1 waits for project compiler integration (the cartridge engine is in rompatch.S1RomPatch).
+        return game == RomGame.S3K || game == RomGame.S2;
     }
 
     static void requireAvailable(RomGame game) {
@@ -71,23 +81,38 @@ public final class TestInGame {
 
     public static JsonObject export(RomLibrary library, Path source, Path rom, Outputs outputs,
                                     RomPatch.Options options) throws IOException {
-        outputs.protectSource(source);
-        var input = RomPatchInput.load(source);
-        return write(library, input, rom, outputs, options);
+        return export(library, source, rom, outputs, null,
+                new Options(options.slot(), options.titleMusic(), options.noDemo(), options.loop()));
     }
 
     public static JsonObject export(RomLibrary library, StudioProject project, Path source, Outputs outputs,
                                     RomPatch.Options options) throws IOException {
+        return export(library, project, source, outputs, null,
+                new Options(options.slot(), options.titleMusic(), options.noDemo(), options.loop()));
+    }
+
+    public static JsonObject export(RomLibrary library, Path source, Path rom, Outputs outputs,
+                                    RomGame driver, Options options) throws IOException {
         outputs.protectSource(source);
-        var input = RomPatchInput.compile(project);
-        return write(library, input, null, outputs, options);
+        return write(library, RomPatchInput.load(source, driver), rom, outputs, options);
+    }
+
+    public static JsonObject export(RomLibrary library, StudioProject project, Path source, Outputs outputs,
+                                    RomGame driver, Options options) throws IOException {
+        outputs.protectSource(source);
+        return write(library, RomPatchInput.compile(project, driver), null, outputs, options);
     }
 
     private static JsonObject write(RomLibrary library, RomPatchInput input, Path rom, Outputs outputs,
-                                    RomPatch.Options options) throws IOException {
-        var target = S3kRomTarget.TARGET;
+                                    Options options) throws IOException {
+        // Validate game-specific IDs before resolving or opening a cartridge.
+        switch (input.game()) {
+            case S1 -> throw unavailable("s1");
+            case S2 -> options.s2();
+            case S3K -> options.s3k();
+        }
         var clean = library.resolve(input.game(), rom);
-        var patched = target.patch(clean, input.song(), options);
+        var patched = input.song().patch(clean, options);
         var written = RomExport.write(clean, patched, outputs.out(), outputs.bps(), outputs.force());
 
         var result = new JsonObject();

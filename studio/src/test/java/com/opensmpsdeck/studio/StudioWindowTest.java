@@ -104,6 +104,31 @@ class StudioWindowTest {
         closeDialog("test-in-game-dialog", ButtonType.CANCEL);
     }
 
+    @Test void selectingSonic2UsesItsVerifiedRomAndOpensItsExportDialog() throws Exception {
+        String clean = System.getenv("OPENSMPSDECK_S2_ROM");
+        Assumptions.assumeTrue(clean != null && !clean.isBlank());
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        library.set(RomGame.S2, Path.of(clean));
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null
+                && ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("clean S3K"));
+        fx(() -> {
+            @SuppressWarnings("unchecked")
+            var target = (ChoiceBox<RomGame>) dialogPane("export-dialog").lookup("#test-in-game-driver");
+            assertEquals(RomGame.S3K, target.getValue());
+            target.setValue(RomGame.S2);
+            return null;
+        });
+        await(() -> !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-test-in-game")).fire());
+        await(() -> dialogPane("test-in-game-dialog") != null);
+        fx(() -> {
+            assertEquals("Export to Sonic 2", dialogPane("test-in-game-dialog").getHeaderText());
+            return null;
+        });
+        closeDialog("test-in-game-dialog", ButtonType.CANCEL);
+    }
+
     private void showExport(RomLibrary library) {
         Platform.runLater(() -> ExportDialog.show(stage, window.document().project(), file, null, library,
                 task -> Thread.ofVirtual().start(task), ignored -> {}));

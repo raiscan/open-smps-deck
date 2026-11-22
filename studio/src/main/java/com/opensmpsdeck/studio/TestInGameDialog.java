@@ -5,7 +5,7 @@ import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.TestInGame;
 import com.opensmpsdeck.headless.rom.RomExport;
 import com.opensmpsdeck.headless.rom.RomLibrary;
-import com.opensmpsdeck.headless.rompatch.RomPatch;
+import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.project.StudioProject;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
@@ -26,12 +26,21 @@ import java.util.stream.Collectors;
 final class TestInGameDialog {
     private TestInGameDialog() {}
 
+    static String gameName(RomGame game) {
+        if (game == null) return "";
+        return switch (game) {
+            case S1 -> "Sonic 1";
+            case S2 -> "Sonic 2";
+            case S3K -> "Sonic 3 & Knuckles";
+        };
+    }
+
     static void show(Window owner, String songName, Callable<ProjectExport.Source> source, Path sourcePath,
-                     RomLibrary library, Executor worker, Consumer<String> status) {
+                     RomGame game, RomLibrary library, Executor worker, Consumer<String> status) {
         var dialog = new Dialog<ButtonType>();
         dialog.initOwner(owner);
         dialog.setTitle("Test in game");
-        dialog.setHeaderText("Export to Sonic 3 & Knuckles");
+        dialog.setHeaderText("Export to " + gameName(game));
         var pane = dialog.getDialogPane();
         pane.setId("test-in-game-dialog");
         pane.setPrefWidth(535);
@@ -40,8 +49,8 @@ final class TestInGameDialog {
 
         String name = songName.replaceAll("[\\p{Cntrl}<>:\"/\\\\|?*]", "-").strip();
         if (name.isEmpty()) name = "song";
-        var rom = new Destination("Patched ROM", name + ".s3k.gen", "*.gen", pane);
-        var bps = new Destination("BPS patch", name + ".s3k.bps", "*.bps", pane);
+        var rom = new Destination("Patched ROM", name + "." + game.id() + ".gen", "*.gen", pane);
+        var bps = new Destination("BPS patch", name + "." + game.id() + ".bps", "*.bps", pane);
         var noDemo = new CheckBox("Skip title demo");
         noDemo.setId("rom-skip-demo");
         noDemo.setSelected(true);
@@ -65,8 +74,8 @@ final class TestInGameDialog {
             confirm.setTitle("Confirm Test in game export");
             confirm.setHeaderText("Write the selected files?");
             confirm.showAndWait().filter(export::equals).ifPresent(confirmed ->
-                    run(owner, source, sourcePath, library, outputs, new RomPatch.Options(
-                            RomPatch.DEFAULT_SLOT, true, noDemo.isSelected(), loop.isSelected()), worker, status));
+                    run(owner, source, sourcePath, game, library, outputs, new TestInGame.Options(
+                            null, true, noDemo.isSelected(), loop.isSelected()), worker, status));
         });
     }
 
@@ -99,12 +108,12 @@ final class TestInGameDialog {
         }
     }
 
-    private static void run(Window owner, Callable<ProjectExport.Source> source, Path sourcePath, RomLibrary library,
-                            TestInGame.Outputs outputs, RomPatch.Options options, Executor worker, Consumer<String> status) {
+    private static void run(Window owner, Callable<ProjectExport.Source> source, Path sourcePath, RomGame game,
+                            RomLibrary library, TestInGame.Outputs outputs, TestInGame.Options options, Executor worker, Consumer<String> status) {
         var progress = new Dialog<ButtonType>();
         progress.initOwner(owner);
         progress.setTitle("Test in game");
-        progress.setHeaderText("Exporting for Sonic 3 & Knuckles");
+        progress.setHeaderText("Exporting for " + gameName(game));
         var spinner = new ProgressIndicator();
         spinner.setPrefSize(24, 24);
         var message = new HBox(12, spinner, new Label("Verifying ROM and preparing export…"));
@@ -120,7 +129,7 @@ final class TestInGameDialog {
         var job = new Task<String>() {
             @Override protected String call() throws Exception {
                 var project = source.call().project();
-                return summary(project, TestInGame.export(library, project, sourcePath, outputs, options));
+                return summary(project, TestInGame.export(library, project, sourcePath, outputs, game, options));
             }
         };
         job.setOnSucceeded(event -> {
@@ -146,7 +155,7 @@ final class TestInGameDialog {
             alert.getDialogPane().setContent(wrappedMessage(reason));
             alert.initOwner(owner);
             alert.setTitle("Test in game");
-            alert.setHeaderText("Could not export for Sonic 3 & Knuckles");
+            alert.setHeaderText("Could not export for " + gameName(game));
             alert.getDialogPane().setPrefWidth(535);
             alert.show();
         });
@@ -187,7 +196,11 @@ final class TestInGameDialog {
                     .map(sample -> sample.name()).findFirst().orElse(id);
             var metrics = drum.getAsJsonObject("metrics");
             text.append(name).append(" · ");
-            if (metrics.has("snrDb")) {
+            if (drum.has("stockSample")) {
+                text.append(drum.get("stockSample").getAsString());
+                if (!drum.get("exact").getAsBoolean())
+                    text.append(String.format(Locale.ROOT, " (distance %.3f)", drum.get("distance").getAsDouble()));
+            } else if (metrics.has("snrDb")) {
                 text.append(String.format(Locale.ROOT, "%.1f dB SNR", metrics.get("snrDb").getAsDouble()));
             } else {
                 text.append(drum.get("exact").getAsBoolean() ? "Exact" : "SNR unavailable");

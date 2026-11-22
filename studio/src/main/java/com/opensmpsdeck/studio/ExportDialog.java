@@ -138,20 +138,22 @@ final class ExportDialog {
         });
         dialog.setResultConverter(button -> button == export ? result[0] : null);
         var testRequested = new javafx.beans.property.SimpleBooleanProperty();
-        addTestInGame(dialog, body, game, library, worker, () -> {
+        var testDriver = new javafx.beans.property.SimpleObjectProperty<>(game);
+        addTestInGame(dialog, body, testDriver, !nativeBank, library, worker, () -> {
             testRequested.set(true);
             dialog.close();
         });
         var options = dialog.showAndWait();
         if (testRequested.get()) {
-            TestInGameDialog.show(owner, name, source, projectPath, library, worker, status);
+            TestInGameDialog.show(owner, name, source, projectPath, testDriver.get(), library, worker, status);
         } else {
             options.ifPresent(value -> chooseDestination(owner, source, worker, status, value));
         }
     }
 
-    private static void addTestInGame(Dialog<?> dialog, VBox body, RomGame game, RomLibrary library,
-                                      Executor worker, Runnable openTestInGame) {
+    private static void addTestInGame(Dialog<?> dialog, VBox body,
+                                      javafx.beans.property.ObjectProperty<RomGame> gameSelection,
+                                      boolean editable, RomLibrary library, Executor worker, Runnable openTestInGame) {
         var test = new Button("Test in game…");
         test.setId("export-test-in-game");
         var settings = new Button("ROM settings…");
@@ -160,9 +162,25 @@ final class ExportDialog {
         hint.setId("export-rom-hint");
         hint.setWrapText(true);
         hint.setMaxWidth(435);
-        body.getChildren().addAll(new HBox(8, test, settings), hint);
+        var actions = new HBox(8, test, settings);
+        if (editable) {
+            var target = new ChoiceBox<RomGame>();
+            target.setId("test-in-game-driver");
+            target.setAccessibleText("Test in game target");
+            target.getItems().setAll(RomGame.S3K, RomGame.S2);
+            target.setConverter(new javafx.util.StringConverter<>() {
+                @Override public String toString(RomGame value) { return TestInGameDialog.gameName(value); }
+                @Override public RomGame fromString(String value) { throw new UnsupportedOperationException(); }
+            });
+            target.valueProperty().bindBidirectional(gameSelection);
+            actions.getChildren().addFirst(target);
+        }
+        body.getChildren().addAll(actions, hint);
 
+        var latest = new java.util.concurrent.atomic.AtomicReference<Task<RomLibrary.Entry>>();
         Runnable refresh = () -> {
+            latest.set(null);
+            var game = gameSelection.get();
             test.setDisable(true);
             if (!TestInGame.available(game)) {
                 hint.setText("Test in game for " + game.id() + " is not available yet.");
@@ -175,7 +193,9 @@ final class ExportDialog {
                             .findFirst().orElseThrow();
                 }
             };
+            latest.set(job);
             job.setOnSucceeded(event -> {
+                if (latest.get() != job) return;
                 var entry = job.getValue();
                 test.setDisable(!entry.status().equals("ok"));
                 hint.setText(switch (entry.status()) {
@@ -184,7 +204,9 @@ final class ExportDialog {
                     default -> "Select a clean " + game.id().toUpperCase(java.util.Locale.ROOT) + " ROM in ROM settings.";
                 });
             });
-            job.setOnFailed(event -> hint.setText("Could not read ROM settings. " + job.getException().getMessage()));
+            job.setOnFailed(event -> {
+                if (latest.get() == job) hint.setText("Could not read ROM settings. " + job.getException().getMessage());
+            });
             worker.execute(job);
         };
         settings.setOnAction(event -> {
@@ -192,6 +214,7 @@ final class ExportDialog {
             refresh.run();
         });
         test.setOnAction(event -> openTestInGame.run());
+        gameSelection.addListener((observable, previous, selected) -> refresh.run());
         refresh.run();
     }
 
