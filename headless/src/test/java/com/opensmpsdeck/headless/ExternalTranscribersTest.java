@@ -267,6 +267,21 @@ class ExternalTranscribersTest {
         var view = ReconstructionVocalReview.review(work, null, false);
         assertEquals(1, view.getAsJsonObject("flagsByType").get("missingSyllableNote").getAsInt());
         assertEquals("splitNote", view.getAsJsonArray("edits").get(0).getAsJsonObject().get("op").getAsString());
+        assertEquals(List.of(.2, .4, .6), view.getAsJsonArray("syllables").asList().stream()
+                .map(com.google.gson.JsonElement::getAsDouble).toList());
+        assertEquals(2, view.getAsJsonArray("keptFm1Notes").size());
+        var phrase = view.getAsJsonArray("phrases").get(0).getAsJsonObject().get("id").getAsString();
+        Path clip = directory.resolve("solo-phrase.wav");
+        var rendered = VocalPhraseRender.render(work, phrase, clip);
+        assertTrue(Files.isRegularFile(clip));
+        assertEquals(3, rendered.getAsJsonObject("metrics").get("syllables").getAsInt());
+        assertTrue(rendered.getAsJsonObject("metrics").get("stemVoicedSeconds").getAsDouble() > .5);
+        assertTrue(rendered.getAsJsonObject("metrics").has("pitchAgreement"));
+        var idle = directory.resolve("solo-idle.wav");
+        run(0, List.of("render-project", work.resolve("arrangement.smps.json").toString(), idle.toString(),
+                "--solo", "FM1", "--start", ".033333333333", "--end", ".1"));
+        var silent = ReferenceAudio.read(idle, 0, null);
+        for (float pcm : silent.samples()) assertEquals(0f, pcm);
         assertFalse(Files.exists(work.resolve("edits.json")));
         assertEquals(List.of(36), pitches(score, 0));
         assertEquals(105, score.tempo().selected().bpm());
@@ -286,6 +301,13 @@ class ExternalTranscribersTest {
         assertEquals(0, ReconstructionVocalReview.review(replay, null, true).get("proposalsSaved").getAsInt());
         var proposal = ReconstructionEdits.read(replay).intents().getFirst();
         assertTrue(proposal.proposed());
+        ReconstructionEditCommand.proposals(replay, "reject", proposal.id(), null);
+        run(0, List.of("reconstruct", "run", "--from", "transcribe", replay.toString()));
+        var decided = ReconstructionVocalReview.review(replay, null, true, true);
+        assertEquals(0, decided.getAsJsonObject("flagsByType").get("missingSyllableNote").getAsInt());
+        assertEquals("rejected", decided.getAsJsonArray("decided").get(0).getAsJsonObject().get("status").getAsString());
+        ReconstructionEditCommand.run(replay, "remove", null, proposal.id(), false, (a, b, c) -> {});
+        ReconstructionVocalReview.review(replay, null, true);
         ReconstructionEditCommand.proposals(replay, "accept", proposal.id(), null);
         run(0, List.of("reconstruct", "run", "--from", "transcribe", replay.toString()));
         assertEquals(List.of(90, 90, 90), pitches(ReconstructionStages.readScore(replay.resolve("score.json")), 1));

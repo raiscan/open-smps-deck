@@ -134,7 +134,7 @@ def transcribe(args):
         contour = np.asarray(pitches)
         onsets = syllable_onsets(audio.mean(axis=1), rate, contour > 0, settings)
         notes, boundaries = segment_syllables(contour, onsets, settings)
-        metadata.update(version="2", vocalMode="syllable", vocalBoundaries10ms=boundaries,
+        metadata.update(version="3", vocalMode="syllable", vocalBoundaries10ms=boundaries,
                         syllableSettings=asdict(settings))
     else:
         notes = segment(pitches)
