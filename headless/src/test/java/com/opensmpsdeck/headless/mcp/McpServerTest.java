@@ -2,9 +2,11 @@ package com.opensmpsdeck.headless.mcp;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectFiles;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
@@ -65,6 +67,23 @@ class McpServerTest {
         assertEquals("complete", discovery.get("resultType").getAsString());
         assertTrue(discovery.getAsJsonObject("_meta").has("io.modelcontextprotocol/serverInfo"));
         assertEquals(-32602, errorCode(modern.getLast()));
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S3K_ROM", matches = ".+")
+    void exportsAndValidatesRetailPatchOverMcp() throws Exception {
+        Path rom = Path.of(System.getenv("OPENSMPSDECK_S3K_ROM"));
+        Path source = directory.resolve("retail.smps.json");
+        ProjectFiles.save(source, S3kRomImporter.readSong(rom, 13), null);
+        var exported = call("project_export", Map.of("project", source.toString(), "output", "retail.smps.zip",
+                "format", "portable", "retailPatch", true, "roms", List.of(rom.toString())));
+        String output = exported.get("output").getAsString();
+        assertEquals(List.of("DERIVED_FROM_RETAIL_SONG"), exported.getAsJsonArray("warnings").asList().stream()
+                .map(value -> value.getAsString()).toList());
+        assertEquals("patch", call("package_inspect", Map.of("package", output))
+                .getAsJsonObject("bank").get("form").getAsString());
+        assertTrue(call("package_validate", Map.of("package", output, "roms", List.of(rom.toString())))
+                .get("playbackValidated").getAsBoolean());
     }
 
     @Test void notesAreVisibleToProjectFilesOnReloadAndAcrossIndependentServers() throws Exception {

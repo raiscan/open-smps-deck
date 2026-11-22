@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
+import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.RetailSongOrigin;
@@ -22,8 +23,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
@@ -73,6 +76,14 @@ final class PortablePackageWriter {
         driver = PackageDriver.supported(options.driver());
         var info = Metadata.make(project.name(), options.id(), options.version(), options.authors(), options.license());
         var nativeProgram = project.nativeProgram();
+        var retail = retail(ProjectProvenance.retailOrigin(project));
+        boolean patch = options.retailPatch();
+        if (patch) {
+            require(driver.id().equals("s3k"), "--retail-patch supports only S3K native v5 banks");
+            require(nativeProgram != null, "--retail-patch requires a native v5 bank. "
+                    + "copy-arrangement produces a compiled arrangement; use the embedded export for it.");
+            require(retail != null && retail.game().equals(driver.id()), "--retail-patch requires a retail-derived S3K bank");
+        }
         if (nativeProgram != null && !driver.id().equals("s3k"))
             throw new IllegalArgumentException(driver.id() + ": native v5 banks are S3K-only");
         int tempo = project.tempo();
@@ -96,7 +107,7 @@ final class PortablePackageWriter {
         require(localCount == 0 || localStart >= 0 && localStart + 25 * localCount <= original.length,
                 "Local FM table extends outside track.bin");
 
-        byte[] track = original.clone();
+        byte[] track = patch ? encodePatch(retail, original, options) : original.clone();
         var sourceVoices = new ArrayList<Voice>();
         var sourceEnvelopes = new ArrayList<Envelope>();
         var sourceSamples = new ArrayList<DacSample>();
@@ -130,7 +141,7 @@ final class PortablePackageWriter {
             sourceVoices.add(new Voice(voice.id(), voice.name(), selected.referenced() ? null : voice.bytes(), sourceOrigin));
         }
 
-        if (nativeProgram != null) {
+        if (nativeProgram != null && !patch) {
             for (int slot = 0; slot < localCount; slot++) {
                 int offset = localStart + slot * 25;
                 addBankVoice(original, track, offset, "bank-local-" + slot, "Local FM " + slot);
@@ -148,9 +159,16 @@ final class PortablePackageWriter {
             if (options.includeSource() && !fills.isEmpty()) romBytes = true;
         }
 
+        // The importer keeps raw ROM envelopes alongside their bound playback
+        // versions for editing. A source-free patch needs only the latter.
+        var boundEnvelopes = patch ? nativeProgram.envelopeSlots().stream()
+                .map(NativeProgram.EnvelopeSlot::assetId).collect(Collectors.toSet()) : Set.<String>of();
         for (var envelope : project.envelopes()) {
+            var origin = envelope.origin();
+            if (patch && origin != null && origin.type().equals("stock") && origin.ref() == null
+                    && !boundEnvelopes.contains(envelope.id())) continue;
             Kind kind = Kind.valueOf(envelope.type());
-            var selected = select(kind, envelope.id(), envelope.name(), StockTable.bytes(envelope.bytes()), envelope.origin(), null);
+            var selected = select(kind, envelope.id(), envelope.name(), StockTable.bytes(envelope.bytes()), origin, null);
             envelopeKeys.put(envelope.id(), selected.asset().key());
             sourceEnvelopes.add(new Envelope(envelope.id(), envelope.name(), envelope.type(),
                     selected.referenced() ? null : envelope.bytes(), selected.origin()));
@@ -179,14 +197,17 @@ final class PortablePackageWriter {
             }
         }
 
-        var retail = ProjectProvenance.retailOrigin(project);
-        if (retail != null) {
+        if (patch) {
+            warnings.add("DERIVED_FROM_RETAIL_SONG");
+        } else if (retail != null) {
             romBytes = true;
             warnings.add("RETAIL_SONG_DATA");
         }
         if (romBytes) warnings.add("ROM_DERIVED_DATA");
-        var games = assets.stream().filter(a -> a.ref() != null).map(a -> a.ref().game()).distinct().sorted().toList();
-        byte[] sourceBytes = options.includeSource()
+        var games = new TreeSet<String>();
+        for (var asset : assets) if (asset.ref() != null) games.add(asset.ref().game());
+        if (patch) games.add(retail.game());
+        byte[] sourceBytes = options.includeSource() && !patch
                 ? ProjectFiles.encodeSource(project.withAssets(sourceVoices, sourceEnvelopes, sourceSamples)) : null;
         var source = sourceBytes == null ? null : new Source("source.smps.json", StockTable.hash(sourceBytes), true);
         var globalVoices = global == null ? null : new GlobalVoices("voices/global.bin", StockTable.hash(global), globalKeys);
@@ -207,20 +228,42 @@ final class PortablePackageWriter {
             }
         }
         fills.sort(java.util.Comparator.comparingInt(Fill::offset));
-        var bank = new Bank("embedded", "track.bin", StockTable.hash(track), StockTable.hash(original),
+        var bank = new Bank(patch ? "patch" : "embedded", patch ? RetailBankPatch.PATH : "track.bin",
+                StockTable.hash(track), StockTable.hash(original),
                 base, header, localCount, preview, relocations, relocationsComplete, List.copyOf(fills));
         var manifest = new PackageManifest(4, "portable", driver.id(), info, generator(),
-                new Provenance(romBytes, retail != null, retail(retail), List.copyOf(warnings)), new Requirements(!games.isEmpty(), games),
+                new Provenance(romBytes, retail != null && !patch, retail, List.copyOf(warnings)),
+                new Requirements(!games.isEmpty(), List.copyOf(games)),
                 options.driverOptions(speedUpTempo), bank, List.copyOf(assets), envelopes, List.copyOf(dac.values()), globalVoices, source);
         var entries = new LinkedHashMap<String, byte[]>();
         entries.put("manifest.json", manifest.encode());
-        entries.put("track.bin", track);
+        entries.put(bank.path(), track);
         if (global != null) entries.put("voices/global.bin", global);
         for (Kind kind : List.of(Kind.PSG_VOLUME, Kind.MODULATION, Kind.DAC_SAMPLE))
             entries.putAll(files.getOrDefault(kind, Map.of()));
         if (sourceBytes != null) entries.put("source.smps.json", sourceBytes);
         PortablePackageReader.validateStructure(manifest, entries);
         return new Payload(manifest, entries, List.copyOf(converted), List.copyOf(tempoWarnings));
+    }
+
+    private byte[] encodePatch(Retail retail, byte[] target, PortableOptions options) throws IOException {
+        byte[] base;
+        String targetHash = StockTable.hash(target);
+        if (options.roms().isEmpty()) {
+            require(StockTable.entries().stream().anyMatch(entry -> entry.kind().equals("BANK")
+                            && entry.game().equals(retail.game()) && entry.songId() == retail.songId()
+                            && entry.sha256().equals(retail.bankSha256())),
+                    "No stock table BANK entry for " + retail.game() + " song " + retail.songId()
+                            + " with SHA-256 " + retail.bankSha256() + "; supply --rom");
+            require(retail.bankSha256().equals(targetHash), RetailBankPatch.romNeeded(retail)
+                    + " to compare the edited bank");
+            base = target;
+        } else {
+            base = RetailBankPatch.resolveBase(retail, PortablePackages.openRoms(options.roms(), driver, warnings));
+        }
+        byte[] delta = RetailBankPatch.encode(base, target);
+        StockAssets.verifyHash("Assembled bank", targetHash, RetailBankPatch.apply(delta, base));
+        return delta;
     }
 
     private int convertTempo(ClassicPackageDriver classic, String field, int sourceByte) {

@@ -68,11 +68,15 @@ public final class S3kRomImporter {
         int address = loader.findMusicOffset(song.id());
         if (address < 0) throw new IOException("Cartridge music table has no entry for " + song.name());
         int headerOffset = address % BANK_SIZE;
-        byte[] bank = rom.readBytes(address - headerOffset, BANK_SIZE);
+        byte[] bank = readBank(rom, address);
         return assemble(song.name(), bank, headerOffset, loader.getGlobalVoiceData(),
                 loader.getPsgEnvelopes(), loader.getModEnvelopes(), loader.getPlaybackModEnvelopes(),
                 loader.loadDacData(), true).withDerivedFrom(
                         new RetailSongOrigin("retail-song", "s3k", song.id(), StockTable.hash(bank)));
+    }
+
+    static byte[] readBank(Rom rom, int musicAddress) throws IOException {
+        return rom.readBytes(musicAddress - musicAddress % BANK_SIZE, BANK_SIZE);
     }
 
     static StudioProject assemble(String name, byte[] bank, int headerOffset, byte[] globalTable,

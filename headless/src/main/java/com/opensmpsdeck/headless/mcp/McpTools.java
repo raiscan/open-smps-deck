@@ -106,6 +106,7 @@ final class McpTools {
                     field("speedUpTempo", "integer", "S3K-clock speed-shoes tempo byte (0..255) for S1/S2 exports").optional(),
                     field("strictTempo", "boolean", "Reject inexact tempo conversions for portable or mod export").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
+                    field("retailPatch", "boolean", "Store a native retail bank delta and omit source (edited banks need roms)").optional(),
                     field("license", "string", "SPDX license expression").optional(),
                     field("packageId", "string", "Portable package ID").optional(),
                     field("packageVersion", "string", "Portable package version").optional(),
@@ -360,24 +361,25 @@ final class McpTools {
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
         boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
-        if (!portable && List.of("driver", "speedUpTempo", "strictTempo", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
+        if (!portable && List.of("driver", "speedUpTempo", "strictTempo", "noSource", "retailPatch", "license", "packageId", "packageVersion", "authors", "replace")
                 .stream().anyMatch(args::has))
             throw new IllegalArgumentException("Portable metadata requires format portable or mod");
         var authors = args.has("authors") ? args.getAsJsonArray("authors").asList().stream()
                 .map(com.google.gson.JsonElement::getAsString).toList() : List.<String>of();
         var replace = args.has("replace") ? args.getAsJsonArray("replace").asList().stream()
                 .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
+        var romPaths = roms(args);
         var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
                 !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
                 optionalString(args, "packageVersion"), authors, replace,
                 args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null,
-                flag(args, "strictTempo"));
+                flag(args, "strictTempo"), flag(args, "retailPatch"), romPaths);
         var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"), settings);
         var warnings = new java.util.TreeSet<String>();
         var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input,
-                roms(args), warnings::add);
+                romPaths, warnings::add);
         JsonObject result;
         if (portable) {
             result = ProjectExport.exportPortable(project, output, options, progress);

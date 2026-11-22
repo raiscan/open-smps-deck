@@ -67,6 +67,12 @@ public final class PortablePackages {
             result.addProperty("driver", manifest.driver());
             result.addProperty("schemaVersion", manifest.schemaVersion());
             result.addProperty("stockAssetsRequired", manifest.requires().stockAssets());
+            boolean patch = manifest.bank().form().equals("patch");
+            if (patch && roms.isEmpty()) {
+                String requirement = RetailBankPatch.romNeeded(manifest.provenance().derivedFromRetailSong());
+                if (output != null) throw new IllegalArgumentException(requirement);
+                result.addProperty("playbackPending", requirement);
+            }
             if (!manifest.requires().stockAssets() || !roms.isEmpty() || output != null) {
                 var driver = PackageDriver.supported(manifest.driver());
                 var sources = openRoms(roms, driver, warnings);
@@ -94,7 +100,7 @@ public final class PortablePackages {
         return result;
     }
 
-    private static List<StockAssets> openRoms(List<Path> paths, PackageDriver driver, TreeSet<String> warnings) throws IOException {
+    static List<StockAssets> openRoms(List<Path> paths, PackageDriver driver, TreeSet<String> warnings) throws IOException {
         var sources = new ArrayList<StockAssets>();
         for (Path path : paths) {
             var image = driver.openRom(path);

@@ -1105,8 +1105,8 @@ the union of both verified revisions. Choose a new output path.
 
 Schema 4 stores an S1, S2 or S3K bank with relocations and references to known game
 assets. Original payloads remain embedded. Stock matches are resolved
-from the player's own ROM at playback. Retail songs remain embedded and
-carry a redistribution warning.
+from the player's own ROM at playback. By default, retail-derived songs
+remain embedded and carry a redistribution warning.
 
 ```sh
 java -jar "$deck_jar" compile-package PROJECT.smps.json song.smps.zip --portable
@@ -1135,10 +1135,22 @@ at least one decimal `--replace` stock music ID for the selected driver. Repeat 
 several IDs to the exported song. Its required mod author defaults to
 `Unknown` when no author was supplied.
 
-`inspect-package` returns the validated schema 4 manifest and warnings.
+For a native v5 project from `import-rom-song`, add `--retail-patch` to
+`compile-package --portable` or `export --format portable|mod`. Supply
+`--rom PATH` for an edited bank. An unchanged bank listed in the stock
+table can export without the ROM. The patch stores the changes and always
+omits the source. It warns that the composition still belongs to the game
+(`DERIVED_FROM_RETAIL_SONG`). Compiled arrangements from `copy-arrangement`
+require embedded export and retain `RETAIL_SONG_DATA`. OpenGGF's
+`smpsPackage` reader still rejects patch form, including in mod JARs.
+
+`inspect-package` returns the validated schema 4 manifest and warnings,
+including a patch's bank form and base song.
 `validate-package` returns a JSON report with `structureValidated` and
 `playbackValidated`. Repeat `--rom` to supply several images. Without a ROM,
-packages with references are checked structurally. `--render` writes a new
+packages with references are checked structurally. For a patch bank,
+`playbackPending` identifies the base song that needs a ROM. Pass the
+matching ROM to rebuild the bank and verify its hash. `--render` writes a new
 48 kHz WAV after resolution and native preflight. `--frames` overrides
 the stored preview length. `render-package PKG OUT.wav [--rom PATH ...]
 [--frames N]` runs the same native rendering path with a positional output.
@@ -1148,8 +1160,8 @@ or `export` to resolve its stock assets. Studio reports the missing assets
 when opening that source. The Studio ROM picker is a follow-up.
 
 MCP `project_export` accepts `format: "portable"` or `"mod"` and optional
-`driver`, `speedUpTempo`, `strictTempo`, `noSource`, `license`, `packageId`, `packageVersion`, `authors`,
-and `roms`. Use an integer `replace` array for mod export.
+`driver`, `speedUpTempo`, `strictTempo`, `noSource`, `retailPatch`,
+`license`, `packageId`, `packageVersion`, `authors`, and `roms`. Use an integer `replace` array for mod export.
 `package_validate` takes `package`, optional `roms` and a new `render` path
 beside the package with optional `frames`. `package_inspect` takes `package`.
 See the [driver feature matrix](../docs/architecture/driver-support.md)

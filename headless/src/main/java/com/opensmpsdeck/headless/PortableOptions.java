@@ -8,7 +8,12 @@ import java.util.Set;
 
 record PortableOptions(String driver, boolean includeSource, String license, String id,
                        String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
-                       boolean strictTempo) {
+                       boolean strictTempo, boolean retailPatch, List<Path> roms) {
+    PortableOptions(String driver, boolean includeSource, String license, String id,
+                    String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
+                    boolean strictTempo) {
+        this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo, false, List.of());
+    }
     PortableOptions(String driver, boolean includeSource, String license, String id,
                     String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
         this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, false);
@@ -20,6 +25,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
     PortableOptions {
         authors = List.copyOf(authors);
         replacements = List.copyOf(replacements);
+        roms = List.copyOf(roms);
         PackageDriver.supported(driver);
         if (speedUpTempo != null && (driver.equals("s3k") || speedUpTempo < 0 || speedUpTempo > 255))
             throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and an S3K tempo byte in 0..255");
@@ -34,7 +40,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
 
     static final class Cli {
         private static final Set<String> OPTIONS = Set.of("--portable", "--no-source", "--driver", "--license",
-                "--package-id", "--package-version", "--author", "--replace", "--rom", "--speed-up-tempo", "--strict-tempo");
+                "--package-id", "--package-version", "--author", "--replace", "--rom", "--speed-up-tempo", "--strict-tempo", "--retail-patch");
         private final Set<String> seen = new HashSet<>();
         private final List<String> authors = new ArrayList<>();
         private final List<Integer> replacements = new ArrayList<>();
@@ -52,7 +58,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
             String option = args[at++];
             boolean repeatable = List.of("--author", "--replace", "--rom").contains(option);
             if (!seen.add(option) && !repeatable) throw new IllegalArgumentException("Duplicate option " + option);
-            if (option.equals("--portable") || option.equals("--no-source") || option.equals("--strict-tempo")) return at;
+            if (List.of("--portable", "--no-source", "--strict-tempo", "--retail-patch").contains(option)) return at;
             if (at == args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[at++];
             switch (option) {
@@ -74,7 +80,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
 
         PortableOptions options() {
             return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements,
-                    speedUpTempo, seen.contains("--strict-tempo"));
+                    speedUpTempo, seen.contains("--strict-tempo"), seen.contains("--retail-patch"), roms);
         }
     }
 }

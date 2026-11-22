@@ -104,3 +104,20 @@ The initial [catalogue assessment](../validation/2026-11-17-native-import-target
 records the 28 blockers that motivated the driver change. The
 [re-pin verification](../validation/2026-11-17-s3k-repin.md) records the
 follow-up catalogue check and its playback boundary.
+
+## Edited retail songs
+
+Keep the v5 project locally for editing. Export and verify the patch with
+the matching ROM.
+
+```sh
+java -jar "$deck_jar" compile-package edited.smps.json edited.smps.zip --portable --retail-patch --rom locked-on.gen
+java -jar "$deck_jar" validate-package edited.smps.zip --rom locked-on.gen --render edited.wav
+```
+
+The package stores only changes at their native offsets and omits the source
+because the v5 file contains the full retail bank. The player needs a ROM
+with the matching bank. The composition is still the game's. An arrangement
+made with `copy-arrangement` exports an embedded bank with the
+`RETAIL_SONG_DATA` warning. See the [patch format](portable-package.md#54-patch-form-for-retail-derived-banks)
+for the on-disk contract and current OpenGGF compatibility.

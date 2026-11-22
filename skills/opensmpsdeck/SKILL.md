@@ -317,6 +317,12 @@ inexact normal or speed-shoes tempo conversions. Set `--license SPDX`, `--packag
 and repeatable `--author NAME` as needed. Use `export --format mod` with
 repeatable decimal `--replace ID` from the target game to create an OpenGGF patch mod JAR.
 
+For native v5 S3K retail banks, use `--retail-patch` with either portable
+export or `export --format mod`. An edited bank needs `--rom PATH`.
+An unchanged bank in the stock table can export without a ROM. The patch
+omits source and carries the `DERIVED_FROM_RETAIL_SONG` composition warning.
+`copy-arrangement` requires embedded form. OpenGGF still rejects patch form.
+
 Run `inspect-package PKG` to read the manifest and
 `validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]` to
 verify hashes, resolve stock references and audition through the pinned
@@ -324,7 +330,9 @@ driver. Use `render-package PKG OUT.wav [--rom PATH ...] [--frames N]` for
 a direct preview. Pass `--rom PATH` to `validate-project`, `render-project`,
 `compile-package` or `export` to resolve redacted source. In MCP, use
 `project_export` with `format: "portable"` or `"mod"`, optional `driver`
-`speedUpTempo` and `strictTempo`, then `package_inspect` or `package_validate`. Check the package warnings even
-when validation succeeds.
+`speedUpTempo`, `strictTempo`, and `retailPatch` (with `roms` for an edited bank).
+Use `package_inspect` to see the patch form and base song and
+`package_validate` with `roms` to verify the rebuilt bank. Check warnings
+even when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)

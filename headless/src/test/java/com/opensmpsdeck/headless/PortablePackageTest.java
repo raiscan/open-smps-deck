@@ -10,6 +10,7 @@ import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.ProjectFormat;
+import com.opensmpsdeck.project.RetailSongOrigin;
 import com.opensmpsdeck.project.StockRef;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
@@ -212,7 +213,7 @@ class PortablePackageTest {
         assertFailure("unknown fields", () -> openMutated(artifact, json -> json.addProperty("extra", false)));
         assertFailure("is required", () -> openMutated(artifact, json -> json.remove("source")));
         assertFailure("Unsupported bank form", () -> openMutated(artifact, json -> json.getAsJsonObject("bank")
-                .addProperty("form", "patch")));
+                .addProperty("form", "unknown")));
         assertFailure("actual", () -> openMutated(artifact, json -> json.getAsJsonObject("source")
                 .addProperty("sha256", "b".repeat(64))));
         assertFailure("stock references", () -> openMutated(artifact, json -> json.getAsJsonObject("requires")
@@ -332,6 +333,116 @@ class PortablePackageTest {
         assertEquals(-1, Files.mismatch(expected, resolved));
         expectSuccess("compile-package", source.toString(), directory.resolve("resolved.smps.zip").toString(),
                 "--rom", path.toString(), "--portable");
+    }
+
+    @Test void retailArrangementKeepsEmbeddedWarningAndRejectsPatchExport() throws Exception {
+        var retail = new RetailSongOrigin("retail-song", "s3k", 13, "0".repeat(64));
+        var source = directory.resolve("copied.smps.json");
+        ProjectFiles.save(source, DemoProject.create().withDerivedFrom(retail), null);
+        var output = directory.resolve("copied.smps.zip");
+        var patched = run("compile-package", source.toString(), output.toString(), "--portable", "--retail-patch");
+        assertEquals(2, patched.exit());
+        assertTrue(patched.err().contains("copy-arrangement produces"), patched.err());
+        assertFalse(Files.exists(output));
+        var embedded = expectSuccess("compile-package", source.toString(), output.toString(), "--portable");
+        assertTrue(embedded.err().contains("RETAIL_SONG_DATA"));
+    }
+
+    @Test void retailPatchWithoutRomRequiresExactStockBankEntry() throws Exception {
+        var project = ProjectFiles.load(example("native-evening-clock")).project();
+        var retail = new RetailSongOrigin("retail-song", "s3k", 13, StockTable.hash(project.nativeProgram().bank()));
+        var source = directory.resolve("unlisted.smps.json");
+        ProjectFiles.save(source, project.withDerivedFrom(retail), null);
+        var output = directory.resolve("unlisted.smps.zip");
+        var result = run("compile-package", source.toString(), output.toString(), "--portable", "--retail-patch");
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("No stock table BANK entry for s3k song 13"), result.err());
+        assertFalse(Files.exists(output));
+        result = run("compile-package", source.toString(), output.toString(), "--portable", "--retail-patch", "--driver", "s2");
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("supports only S3K native v5 banks"), result.err());
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S3K_ROM", matches = ".+")
+    void editedRetailBankPatchRebuildsExactBytesAndPcm() throws Exception {
+        Path rom = Path.of(System.getenv("OPENSMPSDECK_S3K_ROM"));
+        var original = S3kRomImporter.readSong(rom, 13);
+        Path unedited = directory.resolve("unedited.smps.json");
+        ProjectFiles.save(unedited, original, null);
+        var identity = directory.resolve("identity.smps.zip");
+        expectSuccess("compile-package", unedited.toString(), identity.toString(), "--portable", "--retail-patch");
+        assertArrayEquals(new byte[]{(byte) 0x80, 0}, PortableArchive.read(identity).get("track.delta"));
+
+        var nativeProgram = original.nativeProgram();
+        byte[] edited = nativeProgram.bank();
+        edited[nativeProgram.headerOffset() + 5] ^= 1;
+        var program = nativeProgram.withBank(edited);
+        var project = new StudioProject(5, original.name(), original.mode(), original.ticksPerBeat(), program.tempo(),
+                original.voices(), List.of(), List.of(), original.envelopes(), original.samples(), program)
+                .withDerivedFrom(original.derivedFrom());
+        Path source = directory.resolve("edited.smps.json");
+        ProjectFiles.save(source, project, null);
+
+        Path file = directory.resolve("edit.smps.zip");
+        var noBase = run("compile-package", source.toString(), file.toString(), "--portable", "--retail-patch");
+        assertEquals(2, noBase.exit());
+        assertTrue(noBase.err().contains("--rom"), noBase.err());
+        var export = expectSuccess("compile-package", source.toString(), file.toString(),
+                "--portable", "--retail-patch", "--rom", rom.toString());
+        assertTrue(export.err().contains("DERIVED_FROM_RETAIL_SONG"), export.err());
+        assertFalse(export.err().contains("[RETAIL_SONG_DATA]"), export.err());
+        Path second = directory.resolve("second-patch.smps.zip");
+        expectSuccess("export", source.toString(), second.toString(), "--format", "portable",
+                "--retail-patch", "--rom", rom.toString());
+        assertEquals(-1, Files.mismatch(file, second));
+        var artifact = PortablePackageReader.read(file);
+        assertEquals("patch", artifact.manifest().bank().form());
+        assertEquals(13, artifact.manifest().provenance().derivedFromRetailSong().songId());
+        assertFalse(artifact.manifest().provenance().containsRetailSongData());
+        assertFalse(artifact.manifest().provenance().containsRomDerivedData());
+        assertNull(artifact.manifest().source());
+        assertFalse(artifact.entries().containsKey("source.smps.json"));
+        assertFalse(artifact.entries().containsKey("track.bin"));
+        assertEquals(7, artifact.entries().get("track.delta").length);
+        assertTrue(artifact.manifest().bank().fills().isEmpty());
+        assertArrayEquals(edited, PortablePackageReader.assemble(artifact,
+                List.of(S3kPackageDriver.INSTANCE.openRom(rom).assets())).song());
+
+        var embedded = PortablePackageWriter.build(project, PortableOptions.DEFAULT);
+        assertFailure("Patch bank must omit source", () -> openMutated(artifact, json ->
+                json.add("source", embedded.manifest().json().get("source"))));
+        assertFailure("track.delta: expected SHA-256", () -> openMutated(artifact, json -> json
+                .getAsJsonObject("bank").addProperty("sha256", "0".repeat(64))));
+        assertFailure("Assembled bank", () -> assembleMutated(artifact, json -> json
+                .getAsJsonObject("bank").addProperty("assembledSha256", "0".repeat(64)),
+                S3kPackageDriver.INSTANCE.openRom(rom).assets()));
+
+        var inspected = parse(expectSuccess("inspect-package", file.toString()).out());
+        assertEquals("patch", inspected.getAsJsonObject("bank").get("form").getAsString());
+        assertEquals(13, inspected.getAsJsonObject("provenance").getAsJsonObject("derivedFromRetailSong")
+                .get("songId").getAsInt());
+        var structural = parse(expectSuccess("validate-package", file.toString()).out());
+        assertFalse(structural.get("playbackValidated").getAsBoolean());
+        assertTrue(structural.get("playbackPending").getAsString().contains("needs ROM"));
+        var verified = parse(expectSuccess("validate-package", file.toString(), "--rom", rom.toString()).out());
+        assertTrue(verified.get("playbackValidated").getAsBoolean());
+        Path expected = directory.resolve("edited.wav"), rendered = directory.resolve("patch.wav");
+        expectSuccess("render-project", source.toString(), expected.toString(), "--frames", "60");
+        expectSuccess("render-package", file.toString(), rendered.toString(), "--rom", rom.toString(), "--frames", "60");
+        assertEquals(-1, Files.mismatch(expected, rendered));
+
+        Path mod = directory.resolve("patch.jar");
+        expectSuccess("export", source.toString(), mod.toString(), "--format", "mod",
+                "--rom", rom.toString(), "--retail-patch", "--package-id", "edited", "--replace", "13");
+        try (var jar = new ZipFile(mod.toFile())) {
+            var delta = jar.getEntry("audio/smps/edited/track.delta");
+            assertNotNull(delta);
+            try (var bytes = jar.getInputStream(delta)) {
+                assertArrayEquals(artifact.entries().get("track.delta"), bytes.readAllBytes());
+            }
+            assertNull(jar.getEntry("audio/smps/edited/source.smps.json"));
+        }
     }
 
     private static Path example(String name) {

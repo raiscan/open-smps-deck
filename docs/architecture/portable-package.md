@@ -29,7 +29,7 @@ Keywords: MUST, MUST NOT and SHOULD as in RFC 2119.
   and display names MUST NOT become paths.
 - Entry order:
   1. `manifest.json`
-  2. `track.bin`
+  2. `track.bin` (embedded) or `track.delta` (patch)
   3. optional `voices/global.bin`
   4. `psg/asset-NNN.bin`
   5. `mod/asset-NNN.bin`
@@ -123,7 +123,8 @@ The fields are:
     `containsRetailSongData` is false (patch form, §5.4).
   - `warnings`: the sorted unique warning codes from §7.
 - `requires.stockAssets` is true if any asset has a `ref` without an
-  embedded payload. `requires.games` is the sorted unique `ref.game` values.
+  embedded payload or the bank uses patch form. `requires.games` is the
+  sorted union of the `ref.game` values and the patch base game, if any.
 - `driverOptions`: `{}` for s3k. For s1 and s2:
   `{"speedUpTempo": <0–255> | null}`, the target-native speed-shoes tempo byte. Null means
   speed shoes leave tempo unchanged. On activation with speed shoes, or when
@@ -137,8 +138,9 @@ The fields are:
 - `assets`, `envelopeBindings`, `dacBindings`, `globalVoices`: see §3.
 - `source`: `null`, or
   `{"path": "source.smps.json", "sha256": "<hex>", "redacted": true|false}`.
-  It is included by default. `--no-source` omits it. A redacted source
-  replaces each stock asset's bytes with its reference (§6).
+  Embedded-bank exports include it by default. `--no-source` omits it.
+  A redacted source replaces each stock asset's bytes with its reference
+  (§6). Patch-bank exports always omit it (§5.4).
 
 ## 3. Assets and bindings
 
@@ -273,8 +275,8 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
 
 ## 4. Bank
 
-- `form`: `"embedded"`. The value `"patch"` is reserved (§5.4). Readers that
-  do not implement it MUST reject it with a clear error.
+- `form` is `"embedded"` or `"patch"` (§5.4). Readers that do not implement
+  patch form MUST reject it with a clear error.
 - `track.bin` holds the complete bank. Every stock FM voice inside it (in
   the local voice table, or any other bank-resident voice) is stored as
   zeros and listed in `fills`.
@@ -316,8 +318,9 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
    `ref.sha256`, apply the transforms, and check `resultSha256`. A missing
    ROM or a mismatch fails the whole package, with an error naming the asset
    key, the locator and the expected and actual hashes.
-3. Assemble the bank by applying `fills` and check `assembledSha256`.
-   Assemble `globalVoices` the same way.
+3. Assemble the embedded bank by applying `fills`, or rebuild the patch
+   bank as in §5.4. Check `assembledSha256`. Assemble `globalVoices` by
+   filling its referenced slots.
 4. For s3k, build the data from the assembled bank:
 
    ```java
@@ -357,12 +360,60 @@ produce the same committed locators and hashes. S1 relocates ROM tables
 through `Sonic1RomProfile`. The S2 music and DAC load extents and the
 compressed driver are identical across the two tested revisions.
 
-### 5.4 Reserved: patch form for retail-derived banks
+### 5.4 Patch form for retail-derived banks
 
-`bank.form: "patch"` will store the bank as a delta against the retail bank
-named by `provenance.derivedFromRetailSong`. The package then carries no
-original song bytes, so `containsRetailSongData` is false. The delta format
-is defined later. Until then, writers MUST NOT emit this form.
+- Patch form is defined for S3K native v5 banks. The base locator is
+  `provenance.derivedFromRetailSong` with `game: "s3k"`, a locked-on
+  `songId`, and the SHA-256 of the original bank as `bankSha256`.
+  Apply the profile's music ID mapping (§3.1) to the requested ROM.
+  Use the pinned loader's `findMusicOffset` for that ID, round the discovered
+  ROM address down to a 32 KiB boundary, and read exactly 32 KiB from there.
+  This is the bank used by `import-rom-song` and the S3K stock table BANK
+  entries, including shared data and bytes outside the selected song.
+  Verify `bankSha256` before applying literals.
+- `bank.path` MUST be `track.delta` and `bank.sha256` MUST hash the stored
+  delta bytes. `bank.assembledSha256` MUST hash the complete rebuilt bank,
+  including its local voices. All other bank metadata addresses the rebuilt
+  bank. `fills` MUST be empty and assets MUST NOT use `bankOffset`. In-bank
+  voices come from the rebuilt bank. Separate global voices and other
+  assets follow §3.
+- The first two bytes of `track.delta` are the unsigned big-endian target
+  length, 10–32,768 bytes. Until end of entry, each run is an unsigned
+  big-endian 16-bit offset, an unsigned big-endian 16-bit positive length,
+  and exactly that many literal bytes. Offsets are zero-based. The initial
+  target is the base truncated to the target length, or extended to that
+  length with space for literals. Each run MUST fit within the target and
+  MUST be separated from its predecessor by at least one omitted byte.
+  Each literal within the base length MUST differ from the original byte
+  at the same offset. Every byte beyond the base length MUST be supplied
+  explicitly, including zero bytes. Thus runs are the maximal contiguous
+  ranges of changed or extension bytes. A bank equal to its base has no
+  runs. Truncation alone also needs no runs. The stored delta is at most
+  98,306 bytes (§8).
+- `source` MUST be null. OpenSMPSDeck's v5 source stores a complete bank,
+  so `--retail-patch` implies `--no-source`. The source-free writer also
+  omits unbound stock envelopes with no locator, such as raw ROM modulation
+  data kept for editing. The patch MUST set `containsRetailSongData: false`,
+  include `DERIVED_FROM_RETAIL_SONG`, and omit `RETAIL_SONG_DATA`.
+  Independently embedded ROM-derived assets still emit `ROM_DERIVED_DATA`.
+- OpenSMPSDeck accepts `--retail-patch` on `compile-package --portable` or
+  `export --format portable|mod`, and `retailPatch: true` in MCP
+  `project_export`. A writer with a ROM MUST verify the base hash and
+  rebuild the delta to check the result hash before writing. Without a ROM,
+  the writer MUST require a BANK entry matching the provenance game, song
+  ID and hash, and the target MUST hash to that entry. Without base bytes
+  it can only emit a delta with no runs for a byte-identical bank. An edited
+  bank needs a ROM to compare bytes. Compiled arrangements from
+  `copy-arrangement` use embedded form and retain `RETAIL_SONG_DATA`.
+- Structural validation without a ROM MUST check provenance, container
+  and delta framing and report that playback validation needs a ROM.
+  Reject missing or unexpected entries, out-of-range, truncated, adjacent
+  or overlapping runs, and all limit violations. With a ROM, also reject
+  unchanged literals or incomplete extension coverage. Diagnostics MUST
+  identify `track.delta` for a malformed delta or stored hash mismatch,
+  the game and song ID with expected and actual hashes (or missing data)
+  for a base mismatch, and the expected and actual hashes for an assembled
+  bank mismatch. Missing ROM diagnostics name the base game and song ID.
 
 ## 6. Project-format provenance (OpenSMPSDeck)
 
@@ -403,7 +454,7 @@ generation is reproducible.
 |---|---|
 | `RETAIL_SONG_DATA` | The package contains copyrighted retail song data. It is for personal use and must not be redistributed |
 | `ROM_DERIVED_DATA` | The package embeds bytes from the game ROM. It is for personal use and must not be redistributed |
-| `DERIVED_FROM_RETAIL_SONG` | Patch form: no retail bytes, but the composition is still the game's |
+| `DERIVED_FROM_RETAIL_SONG` | The patch stores only changes to the retail bank. The player's ROM supplies the original bank. The composition still belongs to the game |
 | `UNDECLARED_STOCK_CONVERTED` | An embedded payload matched a stock asset and was converted to a reference |
 | `SOURCE_AUDIO` | A sample was sliced from an input recording; check that you have the rights to it |
 | `THIRD_PARTY` | Embedded third-party material; check its license |
@@ -419,7 +470,8 @@ Otherwise their bytes are unchanged.
 
 | Item | Limit |
 |---|---|
-| `track.bin` | 32 KiB |
+| `track.bin` or rebuilt bank | 32 KiB |
+| `track.delta` | 98,306 bytes (2-byte length, up to 32,768 literals and up to 16,384 four-byte run headers) |
 | `manifest.json` | 1 MiB |
 | `source.smps.json` | 16 MiB |
 | Whole package | 2 MiB without source, 20 MiB with source |
@@ -452,14 +504,32 @@ sfx: []
   mod manager and log show the corresponding warning.
 - Mod v1 manifests and streamed tracks are unchanged.
 
+The OpenGGF `smpsPackage` reader in
+[OpenGGF PR #452](https://github.com/OpenGGF/OpenGGF/pull/452) still
+rejects patch form. The follow-up reader must implement these steps.
+
+1. Accept `patch` for S3K and enforce the manifest constraints in §5.4.
+   Read the exploded `track.delta` with its own entry limit, verify
+   `bank.sha256`, and validate the run framing and target metadata bounds.
+2. Map the provenance song ID using the active base game's ROM profile.
+   Read the full 32 KiB bank aligned from the loader's music address and
+   verify `bankSha256`.
+3. Copy or truncate the verified base to the target length, apply the
+   literal runs with unchanged-byte and extension-coverage checks, and
+   verify `assembledSha256`. Use the rebuilt bank with the declared header
+   and local voice metadata and the regular asset bindings in §5.
+4. Surface `DERIVED_FROM_RETAIL_SONG` in the mod manager and log. Route
+   failures through the existing track-disable and stock fallback path.
+
+
 ## OpenSMPSDeck implementation
 
 The [headless guide](../../headless/README.md#portable-song-packages) lists
 the CLI options and MCP tools. `validate-package` checks a package with stock
 references structurally without a ROM. The report sets `playbackValidated`
 after resolution and native preflight. `--render` requires any ROMs needed
-by the package. Export and validation support S3K playback. Inspect can
-read S1/S2 metadata without references.
+by the package. Embedded exports support S1, S2 and S3K. S3K patch exports
+report `playbackPending` with the base song when the ROM is absent.
 
 Studio requires a resolved project. Use a ROM with the headless tools before
 rendering or compiling redacted source. A Studio ROM picker is a follow-up.
