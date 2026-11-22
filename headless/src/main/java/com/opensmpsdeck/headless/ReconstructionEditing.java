@@ -154,6 +154,11 @@ public final class ReconstructionEditing {
         return 600 * Math.log((fNumber + amplitude) / (double) (fNumber - amplitude)) / Math.log(2);
     }
 
+    /** Assemble the selected allocated attacks using their fitted instruments, without publishing. */
+    public static Audition audition(Path work, Set<String> noteIds) throws IOException {
+        return audition(work, noteIds, null);
+    }
+
     /** Assemble just the selected, allocated attacks with the candidate instrument, without publishing. */
     public static Audition audition(Path work, Set<String> noteIds, Instrument candidate) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
@@ -162,15 +167,17 @@ public final class ReconstructionEditing {
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var scopes = ReconstructionVoicing.validate(voicing, allocation, catalogue, timeline);
-        var candidateAssignment = new ReconstructionVoicePlan.Assignment(candidate.type(), candidate.id());
-        candidateAssignment.validate(catalogue, "Audition");
         var selected = allocation.notes().stream().filter(entry -> entry.lane() != null && noteIds.contains(entry.note().id())).toList();
         require(!selected.isEmpty(), "Audition", "selection has no allocated notes");
         var assignments = new HashMap<String, ReconstructionVoicePlan.Assignment>();
-        for (var entry : selected) {
-            require(candidate.type().accepts(entry),
-                    "Audition", "apply a compatible lane type before auditioning " + candidate.type());
-            assignments.put(entry.note().id(), candidateAssignment);
+        if (candidate != null) {
+            var candidateAssignment = new ReconstructionVoicePlan.Assignment(candidate.type(), candidate.id());
+            candidateAssignment.validate(catalogue, "Audition");
+            for (var entry : selected) {
+                require(candidate.type().accepts(entry),
+                        "Audition", "apply a compatible lane type before auditioning " + candidate.type());
+                assignments.put(entry.note().id(), candidateAssignment);
+            }
         }
         var solo = new ReconstructionAllocation.Result(allocation.version(), selected);
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);

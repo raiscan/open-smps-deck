@@ -1255,7 +1255,10 @@ class StudioWindowTest {
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
-            var plot = fx(() -> (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas"));
+            var plot = fx(() -> {
+                reconstructionWorkspace(scene, "detail");
+                return (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas");
+            });
             double midpoint = fx(() -> 76 + (plot.getWidth() - 76) / 2);
             fx(() -> {
                 mouse(plot, MouseEvent.MOUSE_PRESSED, midpoint - 1, 76, true);
@@ -1281,6 +1284,9 @@ class StudioWindowTest {
                 ((ToggleButton) scene.lookup("#reconstruction-tool-insert")).fire();
                 mouse(plot, MouseEvent.MOUSE_PRESSED, 120, 103, true);
                 mouse(plot, MouseEvent.MOUSE_RELEASED, 120, 103, false);
+                ((TitledPane) scene.lookup("#reconstruction-note-evidence")).setExpanded(true);
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
                 var summary = (Label) scene.lookup("#reconstruction-note-summary");
                 assertTrue(summary.getText().startsWith("Pending insertion"), summary::getText);
                 return null;
@@ -1491,9 +1497,14 @@ class StudioWindowTest {
         var pane = fx(() -> new ReconstructionPane(stage, work));
         var scene = pane.stage().getScene();
         try {
-            await(() -> scene.lookup("#reconstruction-role-melody") != null);
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
             fx(() -> {
                 var plot = scene.lookup("#reconstruction-canvas");
+                scene.getRoot().lookupAll(".titled-pane").stream().filter(TitledPane.class::isInstance)
+                        .map(TitledPane.class::cast).filter(group -> group.getText().equals("Musical roles"))
+                        .findFirst().orElseThrow().setExpanded(true);
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
                 var melody = (Button) scene.lookup("#reconstruction-role-melody");
                 melody.fire();
                 assertEquals(plot, scene.getFocusOwner());
@@ -1510,6 +1521,8 @@ class StudioWindowTest {
                 var drums = scene.lookup("#reconstruction-role-drums");
                 modifierClick(drums, 5, 5, true, false, false);
                 scene.getRoot().layout();
+                assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-role-selection")).getText());
+                reconstructionWorkspace(scene, "detail");
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-selection-count")).getText());
                 key(plot, KeyCode.SUBTRACT, false);
                 var status = (Label) scene.lookup("#reconstruction-status");
@@ -1619,7 +1632,7 @@ class StudioWindowTest {
                 down, false, false, false, false, true, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
     }
 
-    @Test void reconstructionRolesUseDetailCoordinatesForBoxSelectionAndJump() throws Exception {
+    @Test void reconstructionRolesHideVoicesBoxSelectAndJump() throws Exception {
         Path work = reconstructionFixture();
         var inspection = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
         fx(() -> {
@@ -1644,13 +1657,15 @@ class StudioWindowTest {
                 view.select(null, null);
 
                 view.rolesView(true);
+                view.scroll.layout();
+                double roleNoteY = 85 + (plot.getHeight() - 85) * 4.5 / 8;
                 view.voiceVisible("lead", false);
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x, noteY, false);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, roleNoteY, false);
                 assertTrue(view.selectedNotes().isEmpty());
                 view.voiceVisible("lead", true);
-                mouse(plot, MouseEvent.MOUSE_PRESSED, x - 15, noteY - 12, true);
-                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, noteY + 12, true);
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, noteY + 12, false);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x - 15, roleNoteY - 12, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, roleNoteY + 12, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, roleNoteY + 12, false);
                 assertEquals(List.of("test-note"), view.selectedNotes().stream()
                         .map(com.opensmpsdeck.headless.ReconstructionInspection.Overlay::id).toList());
 
@@ -1660,9 +1675,9 @@ class StudioWindowTest {
                     view.rolesView(false);
                     assertTrue(view.detailZoom(notes) > 0);
                 };
-                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, x, noteY, x, noteY,
+                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, x, roleNoteY, x, roleNoteY,
                         MouseButton.PRIMARY, 2, false, false, false, false, false, false, false, false,
-                        false, true, new PickResult(plot, new javafx.geometry.Point3D(x, noteY, 0), 0)));
+                        false, true, new PickResult(plot, new javafx.geometry.Point3D(x, roleNoteY, 0), 0)));
                 assertFalse(view.rolesView());
                 assertEquals(List.of("test-note"), jumped);
                 assertEquals("test-note", view.selectedNotes().getFirst().id());
@@ -1704,14 +1719,15 @@ class StudioWindowTest {
                 assertEquals(fitted, pitch.getValue());
                 assertEquals(120, pitch.getMax());
 
-                // One DAC row and one FM lane share the reserved strip in both views.
+                // Roles reserves a compact strip for the one visible drum voice.
                 double drumX = 76 + (plot.getWidth() - 76) * .25;
-                double drumY = plot.getHeight() - 2 * 17 + 4.5;
+                double drumY = plot.getHeight() - 4.5;
                 mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
                 assertTrue(view.selectedNotes().isEmpty());
                 toggle.setSelected(true);
+                scene.getRoot().layout();
                 assertEquals(fitted, pitch.getValue());
-                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, plot.getHeight() - 4.5, false);
                 assertEquals("drum-note", view.selectedNotes().getFirst().id());
                 return null;
             });
@@ -1768,6 +1784,58 @@ class StudioWindowTest {
                     mode + " at stage width " + width);
             assertEquals(step * 1.5, zoom.getValue(), 1e-9);
         }
+    }
+
+    @Test void reconstructionSectionAndLoopSurviveWorkspaceChanges() throws Exception {
+        Path work = reconstructionFixture();
+        com.opensmpsdeck.headless.ReconstructionSections.run(work, "set", com.google.gson.JsonParser.parseString("""
+                [{"id":"phrase","level":"phrase","name":"Entrance","author":"agent",
+                  "reason":"fixture","sourceStart":0.25,"sourceEnd":1.25}]
+                """));
+        withReconstructionPlot(work, true, (scene, view) -> {
+            var plot = view.canvas;
+            var scope = (ComboBox<?>) scene.lookup("#reconstruction-play-scope");
+            double x = 76 + (plot.getWidth() - 76) * .75 / 2;
+            mouse(plot, MouseEvent.MOUSE_RELEASED, x, 76, false);
+            assertEquals(ReconstructionTransport.Scope.Section, scope.getValue());
+            var hint = (Label) scene.lookup("#reconstruction-scope-hint");
+            assertTrue(hint.getText().contains("Entrance"), hint::getText);
+            assertTrue(hint.getText().contains("0.25–1.25"), hint::getText);
+
+            var note = view.voices().entries().stream().flatMap(entry -> entry.notes().stream())
+                    .findFirst().orElseThrow();
+            view.select(note, note.lane());
+            var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+            zoom.setValue(1.5);
+            scene.getRoot().layout();
+            view.scroll.setHvalue(.35);
+            view.zoomPitch(.5);
+            double pitchPosition = view.pitchScroll.getValue();
+            view.onRange.accept(new ReviewTransport.Range(.40, 1.05));
+            var loop = (Label) scene.lookup("#reconstruction-loop");
+            assertEquals("Loop 0.40–1.05 s", loop.getText());
+
+            var insert = (ToggleButton) scene.lookup("#reconstruction-tool-insert");
+            insert.fire();
+            for (String workspace : List.of("roles", "review", "export", "detail")) {
+                reconstructionWorkspace(scene, workspace);
+                assertEquals(ReconstructionTransport.Scope.Section, scope.getValue());
+                assertEquals("Loop 0.40–1.05 s", loop.getText());
+                assertEquals(List.of(note), view.selectedNotes());
+                assertEquals(1.5, zoom.getValue());
+            }
+            assertEquals(.35, view.scroll.getHvalue(), 1e-6);
+            assertEquals(pitchPosition, view.pitchScroll.getValue(), 1e-6);
+            assertTrue(insert.isSelected());
+            reconstructionWorkspace(scene, "review");
+            mouse(plot, MouseEvent.MOUSE_PRESSED, 120, 100, true);
+            mouse(plot, MouseEvent.MOUSE_RELEASED, 120, 100, false);
+            assertTrue(scene.lookup("#reconstruction-apply").isDisabled());
+            var clear = (Button) scene.lookup("#reconstruction-clear-loop");
+            clear.fire();
+            assertFalse(clear.isVisible());
+            assertEquals(ReconstructionTransport.Scope.Section, scope.getValue());
+        });
     }
 
     @Test void reconstructionSpaceTapTogglesPlaybackOnceOnRelease() throws Exception {
@@ -1846,6 +1914,13 @@ class StudioWindowTest {
         });
     }
 
+    private static void reconstructionWorkspace(javafx.scene.Scene scene, String name) {
+        var button = (ToggleButton) scene.lookup("#reconstruction-" + name + "-view");
+        if (!button.isSelected()) button.fire();
+        scene.getRoot().applyCss();
+        scene.getRoot().layout();
+    }
+
     private void withReconstructionPlot(java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test)
             throws Exception {
         withReconstructionPlot(reconstructionFixture(), false, test);
@@ -1866,8 +1941,7 @@ class StudioWindowTest {
                 await(() -> scene.getWidth() < originalWidth);
             }
             fx(() -> {
-                scene.getRoot().applyCss();
-                scene.getRoot().layout();
+                reconstructionWorkspace(scene, "detail");
                 test.accept(scene, (ReconstructionCanvas) scene.lookup("#reconstruction-canvas").getParent());
                 return null;
             });
@@ -1899,7 +1973,10 @@ class StudioWindowTest {
             await(() -> pane.stage().getScene().getRoot().lookupAll(".status").stream()
                     .filter(Label.class::isInstance).map(Label.class::cast)
                     .anyMatch(label -> label.getText().equals("Source mix ready")));
-            var plot = fx(() -> (javafx.scene.canvas.Canvas) pane.stage().getScene().lookup("#reconstruction-canvas"));
+            var plot = fx(() -> {
+                reconstructionWorkspace(pane.stage().getScene(), "detail");
+                return (javafx.scene.canvas.Canvas) pane.stage().getScene().lookup("#reconstruction-canvas");
+            });
             // The single fixture note has 4 padding semitones above and 3 below.
             double noteY = 85 + (plot.getHeight() - 105) * 4.5 / 8;
             await(() -> {
@@ -1908,6 +1985,10 @@ class StudioWindowTest {
             });
             fx(() -> {
                 mouse(plot, MouseEvent.MOUSE_RELEASED, plot.getWidth() / 2, noteY, false);
+                var evidence = (TitledPane) pane.stage().getScene().lookup("#reconstruction-note-evidence");
+                evidence.setExpanded(true);
+                pane.stage().getScene().getRoot().applyCss();
+                pane.stage().getScene().getRoot().layout();
                 var trace = (TextArea) pane.stage().getScene().lookup("#reconstruction-trace");
                 var summary = (Label) pane.stage().getScene().lookup("#reconstruction-note-summary");
                 assertTrue(summary.getText().startsWith("kept"));
@@ -1924,8 +2005,8 @@ class StudioWindowTest {
                 zoom.setValue(.5);
                 ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
                 assertEquals(.5, zoom.getValue());
-                assertFalse(scene.lookup("#reconstruction-tool-insert").isVisible());
-                assertTrue(((Label) scene.lookup("#reconstruction-selection-count")).getText().contains("1 note"));
+                assertFalse(scene.lookup("#reconstruction-note-tools").isVisible());
+                assertTrue(((Label) scene.lookup("#reconstruction-role-selection")).getText().contains("1 note"));
                 if (target != null) {
                     scene.getRoot().applyCss();
                     scene.getRoot().layout();
@@ -1934,23 +2015,18 @@ class StudioWindowTest {
                 }
                 var apply = (Button) scene.lookup("#reconstruction-apply");
                 assertTrue(apply.isDisabled());
-                var roleChoice = scene.getRoot().lookupAll(".combo-box").stream()
-                        .filter(ComboBox.class::isInstance).map(node -> (ComboBox<?>) node)
-                        .filter(combo -> "Role".equals(combo.getPromptText()) && combo.isVisible()).findFirst().orElseThrow();
+                var roleChoice = (ComboBox<?>) scene.lookup("#reconstruction-assign-role");
                 roleChoice.getSelectionModel().select(roleChoice.getItems().indexOf("counter"));
-                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
-                        .map(Button.class::cast).filter(button -> button.getText().equals("Set role") && button.isVisible())
-                        .findFirst().orElseThrow().fire();
+                ((Button) scene.lookup("#reconstruction-set-role")).fire();
                 assertFalse(apply.isDisabled());
                 ((ToggleButton) scene.lookup("#reconstruction-detail-view")).fire();
                 assertEquals(.5, zoom.getValue());
-                assertTrue(scene.lookup("#reconstruction-tool-insert").isVisible());
+                assertTrue(scene.lookup("#reconstruction-note-tools").isVisible());
                 assertTrue(trace.getText().contains("test-note"));
-                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
-                        .map(Button.class::cast).filter(button -> button.getText().equals("Undo"))
-                        .findFirst().orElseThrow().fire();
+                ((MenuButton) scene.lookup("#reconstruction-history")).getItems().getFirst().fire();
                 assertTrue(apply.isDisabled());
 
+                reconstructionWorkspace(scene, "roles");
                 ((Button) scene.lookup("#reconstruction-voice-select-")).fire();
                 var newVoice = (MenuButton) scene.lookup("#reconstruction-new-voice");
                 nameNextVoice("Pad");

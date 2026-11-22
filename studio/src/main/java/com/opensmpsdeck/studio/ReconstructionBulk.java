@@ -16,6 +16,7 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TitledPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.VBox;
 
@@ -69,7 +70,6 @@ final class ReconstructionBulk extends VBox {
     private final TextField arpeggioRate = new TextField("2");
     private final ComboBox<String> arpeggioOrder = combo("Arpeggio order", List.of("up", "down", "up-down"));
     private final VBox actions = new VBox(10);
-    private final VBox detail = new VBox(10);
     private final ComboBox<String> layerMode = combo("Layer mode", List.of("Echo", "Chorus", "Double", "Off"));
     private final ComboBox<ReconstructionLaneType> layerTarget = combo("Target",
             List.of(ReconstructionLaneType.FM, ReconstructionLaneType.PSG));
@@ -95,7 +95,6 @@ final class ReconstructionBulk extends VBox {
                        Runnable stop, Consumer<JsonObject> previewLayer) {
         super(10);
         this.submit = submit;
-        getStyleClass().add("inspector");
         count.getStyleClass().add("inspector-title");
         count.setWrapText(true);
         issue.setWrapText(true);
@@ -158,26 +157,33 @@ final class ReconstructionBulk extends VBox {
             if (!updating && value != null) filter.accept(note -> value.equals(laneName(note)));
         });
         actions.getChildren().addAll(
-                row(role, button("Set role", this::setRole)),
-                row(voice, button("Move to voice", this::move)),
-                row(voiceName, button("Create voice", this::create)),
-                row(type, route), row(lane, pin), detail);
-        detail.getChildren().addAll(
                 row(new Label("Transpose"),
                         button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
                         button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
-                row(velocity, button("Set", () -> velocity(false)), button("Scale", () -> velocity(true))),
-                new SeparatorLabel("Instrument"),
-                row(scope, instrumentType), instrumentSearch, instrument,
-                row(assign, audition, button("Stop audition", stop)),
-                new SeparatorLabel("Retrigger"),
-                row(new Label("Interval (ms)"), retriggerRate, new Label("Count"), retriggerCount),
-                row(new Label("Gate (ms)"), retriggerGate, retrigger),
-                new SeparatorLabel("Combine notes"),
-                row(collapse, glide), row(arpeggioOrder, arpeggioRate),
-                row(arpeggio, chord), layerControls(previewLayer, stop));
-        detail.managedProperty().bind(detail.visibleProperty());
-        getChildren().addAll(count, row(roles, voices, lanes), issue, actions);
+                group("Layers", layerControls(previewLayer, stop)),
+                group("Voice and routing",
+                        row(role, button("Set role", this::setRole)),
+                        row(voice, button("Move to voice", this::move)),
+                        row(voiceName, button("Create voice", this::create)),
+                        row(type, route), row(lane, pin)),
+                group("Instrument", row(scope, instrumentType), instrumentSearch, instrument,
+                        row(assign, audition, button("Stop audition", stop))),
+                group("Velocity", row(velocity, button("Set", () -> velocity(false)), button("Scale", () -> velocity(true)))),
+                group("Retrigger",
+                        row(new Label("Interval (ms)"), retriggerRate, new Label("Count"), retriggerCount),
+                        row(new Label("Gate (ms)"), retriggerGate, retrigger)),
+                group("Combine notes", row(collapse, glide), row(arpeggioOrder, arpeggioRate), row(arpeggio, chord)));
+        var filters = row(roles, voices, lanes);
+        filters.visibleProperty().bind(count.visibleProperty());
+        filters.managedProperty().bind(filters.visibleProperty());
+        getChildren().addAll(count, filters, issue, actions);
+    }
+
+    private static TitledPane group(String title, javafx.scene.Node... controls) {
+        var section = new TitledPane(title, new VBox(8, controls));
+        section.setExpanded(false);
+        section.setAnimated(false);
+        return section;
     }
 
     private VBox layerControls(Consumer<JsonObject> preview, Runnable stop) {
@@ -229,7 +235,7 @@ final class ReconstructionBulk extends VBox {
         queue.setId("reconstruction-queue-layer");
         var audition = button("Preview A/B", () -> layer(preview));
         audition.setId("reconstruction-preview-layer");
-        return new VBox(6, new SeparatorLabel("Layer"), row(layerMode, new Label("Target"), layerTarget),
+        return new VBox(6, row(layerMode, new Label("Target"), layerTarget),
                 echo, level, detune, octave, masks, row(queue, audition, button("Stop", stop)));
     }
 
@@ -318,10 +324,6 @@ final class ReconstructionBulk extends VBox {
         if (invalid == null) action.accept(edit);
     }
 
-    private static final class SeparatorLabel extends Label {
-        SeparatorLabel(String text) { super(text); getStyleClass().add("inspector-title"); }
-    }
-
     void show(List<Overlay> selection, List<Voice> targets, java.util.Map<String, Voice> owners,
               ReconstructionEditing data, java.util.function.Function<Overlay, ReconstructionLaneType> playedType) {
         updating = true;
@@ -329,6 +331,8 @@ final class ReconstructionBulk extends VBox {
         this.owners = owners;
         this.data = data;
         this.playedType = playedType;
+        count.setVisible(selection.size() != 1);
+        count.setManaged(count.isVisible());
         count.setText(selection.isEmpty() ? "Select notes to edit them together."
                 : selection.size() + (selection.size() == 1 ? " note selected" : " notes selected"));
         actions.setDisable(selection.isEmpty());
@@ -526,7 +530,7 @@ final class ReconstructionBulk extends VBox {
 
     private List<String> ids() { return selected.stream().map(Overlay::id).toList(); }
 
-    void rolesView(boolean roles) { detail.setVisible(!roles); }
+
 
     static JsonObject voiceEdit(String op, String voice, String reason, Consumer<JsonObject> properties) {
         var edit = ReconstructionDraft.human("voiceEdit", reason);

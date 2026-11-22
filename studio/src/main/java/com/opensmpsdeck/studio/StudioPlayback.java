@@ -61,18 +61,24 @@ final class StudioPlayback implements AutoCloseable {
         Samples samples = reference == null ? SILENCE
                 : (seconds, side) -> reference.wave().sample(seconds - reference.source().offsetSeconds(), side) * gain;
         long referenceEnd = reference == null ? 0 : reference.endFrame();
-        start(project, transport, mask, referenceEnd, () -> transport.referenceAudible() ? samples : null, status, position);
+        start(project, transport, mask, referenceEnd, () -> transport.referenceAudible() ? samples : null, status, position, null);
     }
 
     /** A null monitor source selects the live chip renderer. Resolve once per audio block. */
     void playMonitor(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
                      double duration, Supplier<Samples> monitor, Consumer<String> status, DoubleConsumer position) {
-        start(project, transport, mask, frame(duration), monitor, status, position);
+        playMonitor(project, transport, mask, duration, monitor, status, position, null);
+    }
+
+    void playMonitor(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
+                     double duration, Supplier<Samples> monitor, Consumer<String> status, DoubleConsumer position,
+                     ReviewTransport.Range span) {
+        start(project, transport, mask, frame(duration), monitor, status, position, span);
     }
 
     private synchronized void start(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
                                     long monitorEnd, Supplier<Samples> monitor,
-                                    Consumer<String> status, DoubleConsumer position) {
+                                    Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span) {
         stop();
         long version = generation.get(), initial = frame(transport.seconds);
         playing = true;
@@ -80,7 +86,7 @@ final class StudioPlayback implements AutoCloseable {
             Future<?> renderTask = null;
             try {
                 int presentations = project == null ? 0 : presentationCount(project);
-                long end = Math.max((long) presentations * BLOCK, monitorEnd);
+                long end = span == null ? Math.max((long) presentations * BLOCK, monitorEnd) : frame(span.end());
                 var rendered = new RenderBuffer(presentations);
                 var format = new AudioFormat(RATE, 16, 2, true, false);
                 var output = AudioSystem.getSourceDataLine(format);
