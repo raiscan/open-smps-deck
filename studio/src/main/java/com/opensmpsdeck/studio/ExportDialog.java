@@ -6,12 +6,16 @@ import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
 import com.opensmpsdeck.headless.TestInGame;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.prefs.Preferences;
+import java.util.List;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.binding.Bindings;
 import javafx.beans.value.ObservableBooleanValue;
 import java.util.concurrent.Callable;
@@ -56,8 +60,7 @@ final class ExportDialog {
         String name = project == null ? work.getFileName().toString() : project.name();
         var target = project == null ? fallbackTarget : project.target();
         var packageOptions = new ExportPackageOptions(target,
-                nativeBank && ProjectExport.canExportRetailPatch(project),
-                Preferences.userNodeForPackage(ExportDialog.class).node("export-roms"));
+                nativeBank && ProjectExport.canExportRetailPatch(project));
         var dialog = new Dialog<ProjectExport.Options>();
         dialog.initOwner(owner);
         dialog.setTitle("Export");
@@ -162,36 +165,94 @@ final class ExportDialog {
         var dacRow = fieldRow("Replace DAC notes", replaceDac);
         showWhen(dacRow, kitSelected);
 
-        var rom = new javafx.beans.property.SimpleObjectProperty<>(packageOptions.rememberedRom());
+        var packageGame = RomGame.parse(target.id());
+        var roms = new SimpleObjectProperty<List<RomLibrary.Entry>>();
+        var libraryError = new SimpleStringProperty("");
+        var registered = Bindings.createObjectBinding(() -> entry(roms.get(), packageGame), roms);
+
+        var useRom = new CheckBox("Use ROM for stock assets");
+        useRom.setId("export-use-rom");
+        useRom.setSelected(true);
+        var override = new SimpleObjectProperty<Path>();
+        var rom = Bindings.createObjectBinding(() -> {
+            if (!useRom.isSelected()) return null;
+            if (override.get() != null) return override.get();
+            var entry = registered.get();
+            return verified(entry) ? Path.of(entry.path()) : null;
+        }, useRom.selectedProperty(), override, registered);
         var romName = new Label();
         romName.setId("export-package-rom");
-        romName.textProperty().bind(Bindings.createStringBinding(
-                () -> rom.get() == null ? "No ROM selected" : rom.get().getFileName().toString(), rom));
-        var chooseRom = new Button("Choose ROM…");
-        chooseRom.setId("export-choose-rom");
-        chooseRom.setOnAction(event -> {
-            var chooser = new FileChooser();
-            chooser.setTitle("Choose a " + driver.getText() + " ROM for export");
-            var file = chooser.showOpenDialog(dialog.getDialogPane().getScene().getWindow());
-            if (file != null) {
-                rom.set(file.toPath());
-                packageOptions.rememberRom(rom.get());
+        romName.setMaxWidth(435);
+        romName.textProperty().bind(Bindings.createStringBinding(() -> {
+            if (!useRom.isSelected()) return "Exporting without a ROM";
+            if (rom.get() != null) {
+                return (override.get() == null ? "Registered ROM · " : "This export only · ") + rom.get().getFileName();
             }
+            if (!libraryError.get().isEmpty()) return "Could not read ROM settings";
+            var entry = registered.get();
+            if (entry == null) return "Checking the ROM library…";
+            if (entry.status().equals("changed-on-disk")) return "Saved " + driver.getText() + " ROM changed on disk";
+            return "No " + driver.getText() + " ROM registered";
+        }, rom, registered, override, useRom.selectedProperty(), libraryError));
+        var romDetails = new Tooltip();
+        romDetails.textProperty().bind(Bindings.createStringBinding(() -> {
+            if (!useRom.isSelected()) return "";
+            if (rom.get() != null) return rom.get().toString();
+            if (!libraryError.get().isEmpty()) return libraryError.get();
+            var entry = registered.get();
+            return entry != null && entry.detail() != null ? entry.detail() : "";
+        }, rom, registered, useRom.selectedProperty(), libraryError));
+        romName.tooltipProperty().bind(Bindings.when(romDetails.textProperty().isEmpty())
+                .then((Tooltip) null).otherwise(romDetails));
+        showWhen(romName, packageSelected);
+        var alternateRom = new Hyperlink("Use another ROM for this export…");
+        alternateRom.setId("export-rom-override");
+        alternateRom.setTooltip(new Tooltip("Use a matching stock-asset source, such as standalone Sonic 3 or Sonic & Knuckles."));
+        alternateRom.setOnAction(event -> {
+            var chooser = new FileChooser();
+            chooser.setTitle("Choose a ROM for this export only");
+            var file = chooser.showOpenDialog(dialog.getDialogPane().getScene().getWindow());
+            if (file != null) override.set(file.toPath());
         });
-        var clearRom = new Button("Clear");
-        clearRom.disableProperty().bind(rom.isNull());
-        clearRom.setOnAction(event -> {
-            rom.set(null);
-            packageOptions.rememberRom(null);
+        var resetRom = new Hyperlink("Use registered ROM");
+        resetRom.setOnAction(event -> override.set(null));
+        var choosingRom = packageSelected.and(useRom.selectedProperty());
+        showWhen(alternateRom, choosingRom.and(override.isNull()));
+        showWhen(resetRom, choosingRom.and(override.isNotNull()));
+
+        var settings = new Button("ROM settings…");
+        settings.setId("export-rom-settings");
+        settings.disableProperty().bind(roms.isNull());
+        var romActions = new HBox(8, settings, alternateRom, resetRom);
+        romActions.setAlignment(Pos.CENTER_LEFT);
+        Runnable refreshRoms = () -> {
+            libraryError.set("");
+            roms.set(null);
+            var job = new Task<List<RomLibrary.Entry>>() {
+                @Override protected List<RomLibrary.Entry> call() throws Exception {
+                    return library.list();
+                }
+            };
+            job.setOnSucceeded(event -> roms.set(job.getValue()));
+            job.setOnFailed(event -> {
+                libraryError.set(job.getException().getMessage());
+                roms.set(List.of());
+            });
+            worker.execute(job);
+        };
+        settings.setOnAction(event -> {
+            RomSettingsDialog.show(dialog.getDialogPane().getScene().getWindow(), library, worker);
+            refreshRoms.run();
         });
+
         var driverRow = new HBox(8, new Label("Target driver"), driver);
         showWhen(driverRow, portableSelected.or(kitSelected));
-        var romRow = new HBox(8, chooseRom, clearRom, romName);
-        romRow.setAlignment(Pos.CENTER_LEFT);
-        var packageForm = new VBox(10, driverRow, includeSource, retailPatch, licenseRow, modRow, dpcmClosed, dacRow, romRow);
+        var packageForm = new VBox(10, driverRow, includeSource, retailPatch, licenseRow, modRow, dpcmClosed, dacRow);
+        if (!redacted) packageForm.getChildren().add(useRom);
+        packageForm.getChildren().add(romName);
         showWhen(packageForm, packageSelected);
 
-        var body = new VBox(14, new HBox(14, new Label("Format"), formats), form, packageForm, note, error);
+        var body = new VBox(14, new HBox(14, new Label("Format"), formats), form, note, packageForm, romActions, error);
         if (redacted) body.getChildren().addFirst(new Label("Choose a ROM to resolve this project's stock references."));
         else body.getChildren().add(new Separator());
         body.setPadding(new Insets(8, 6, 4, 6));
@@ -211,13 +272,14 @@ final class ExportDialog {
         var confirm = (Region) dialog.getDialogPane().lookupButton(export);
         ButtonBar.setButtonUniformSize(confirm, false);
         confirm.setMinWidth(172);
+        confirm.disableProperty().bind(choosingRom.and(override.isNull()).and(roms.isNull())
+                .or(Bindings.createBooleanBinding(() -> redacted && rom.get() == null, rom)));
         confirm.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
             Format format = formats.getValue();
             boolean audio = format.audio();
             boolean bounded = audio && span.isSelected();
             boolean split = audio && stems.isSelected();
             try {
-                if (redacted && rom.get() == null) throw new IllegalArgumentException("Choose a ROM to resolve stock assets.");
                 result[0] = packageSelected.get()
                         ? packageOptions.options(format, rom.get(), includeSource.isSelected(), retailPatch.isSelected(),
                                 license.getText(), modIds.getText(), dpcmClosed.isSelected(), replaceDac.getText())
@@ -235,10 +297,11 @@ final class ExportDialog {
         dialog.setResultConverter(button -> button == export ? result[0] : null);
         var testRequested = new javafx.beans.property.SimpleBooleanProperty();
         var testDriver = new javafx.beans.property.SimpleObjectProperty<>(game);
-        if (!redacted) addTestInGame(dialog, body, testDriver, !nativeBank, library, worker, () -> {
+        if (!redacted) addTestInGame(body, testDriver, !nativeBank, roms, libraryError, () -> {
             testRequested.set(true);
             dialog.close();
         });
+        refreshRoms.run();
         var options = dialog.showAndWait();
         if (testRequested.get()) {
             TestInGameDialog.show(owner, name, source, projectPath, testDriver.get(), library, worker, status);
@@ -247,23 +310,22 @@ final class ExportDialog {
                 Callable<ProjectExport.Source> exportSource = project == null && ExportPackageOptions.supports(value.format())
                         ? () -> new ProjectExport.Source(ProjectFiles.loadSource(work.resolve("arrangement.smps.json")), work)
                         : source;
-                chooseDestination(owner, exportSource, worker, status, value);
+                Path verifyRom = packageSelected.get() && override.get() == null ? rom.get() : null;
+                chooseDestination(owner, exportSource, worker, status, value, packageGame, verifyRom);
             });
         }
     }
 
-    private static void addTestInGame(Dialog<?> dialog, VBox body,
-                                      javafx.beans.property.ObjectProperty<RomGame> gameSelection,
-                                      boolean editable, RomLibrary library, Executor worker, Runnable openTestInGame) {
+    private static void addTestInGame(VBox body, ObjectProperty<RomGame> gameSelection, boolean editable,
+                                      ObjectProperty<List<RomLibrary.Entry>> roms, SimpleStringProperty libraryError,
+                                      Runnable openTestInGame) {
         var test = new Button("Test in game…");
         test.setId("export-test-in-game");
-        var settings = new Button("ROM settings…");
-        settings.setId("export-rom-settings");
         var hint = new Label();
         hint.setId("export-rom-hint");
         hint.setWrapText(true);
         hint.setMaxWidth(435);
-        var actions = new HBox(8, test, settings);
+        var actions = new HBox(8, test);
         if (editable) {
             var target = new ChoiceBox<RomGame>();
             target.setId("test-in-game-driver");
@@ -278,41 +340,29 @@ final class ExportDialog {
         }
         body.getChildren().addAll(actions, hint);
 
-        var latest = new java.util.concurrent.atomic.AtomicReference<Task<RomLibrary.Entry>>();
-        Runnable refresh = () -> {
-            latest.set(null);
-            var game = gameSelection.get();
-            test.setDisable(true);
-            hint.setText("Checking the ROM library…");
-            var job = new Task<RomLibrary.Entry>() {
-                @Override protected RomLibrary.Entry call() throws Exception {
-                    return library.list().stream().filter(entry -> entry.game().equals(game.id()))
-                            .findFirst().orElseThrow();
-                }
+        var selected = Bindings.createObjectBinding(() -> entry(roms.get(), gameSelection.get()), roms, gameSelection);
+        test.disableProperty().bind(Bindings.createBooleanBinding(() -> !verified(selected.get()), selected));
+        hint.textProperty().bind(Bindings.createStringBinding(() -> {
+            if (!libraryError.get().isEmpty()) return "Could not read ROM settings. " + libraryError.get();
+            var entry = selected.get();
+            if (entry == null) return "Checking the ROM library…";
+            return switch (entry.status()) {
+                case "ok" -> entry.revision() + " ROM verified.";
+                case "changed-on-disk" -> "The saved ROM changed on disk. Select a clean ROM in ROM settings.";
+                default -> "Select a clean " + gameSelection.get().id().toUpperCase(java.util.Locale.ROOT)
+                        + " ROM in ROM settings.";
             };
-            latest.set(job);
-            job.setOnSucceeded(event -> {
-                if (latest.get() != job) return;
-                var entry = job.getValue();
-                test.setDisable(!entry.status().equals("ok"));
-                hint.setText(switch (entry.status()) {
-                    case "ok" -> entry.revision() + " ROM verified.";
-                    case "changed-on-disk" -> "The saved ROM changed on disk. Select a clean ROM in ROM settings.";
-                    default -> "Select a clean " + game.id().toUpperCase(java.util.Locale.ROOT) + " ROM in ROM settings.";
-                });
-            });
-            job.setOnFailed(event -> {
-                if (latest.get() == job) hint.setText("Could not read ROM settings. " + job.getException().getMessage());
-            });
-            worker.execute(job);
-        };
-        settings.setOnAction(event -> {
-            RomSettingsDialog.show(dialog.getDialogPane().getScene().getWindow(), library, worker);
-            refresh.run();
-        });
+        }, selected, libraryError));
         test.setOnAction(event -> openTestInGame.run());
-        gameSelection.addListener((observable, previous, selected) -> refresh.run());
-        refresh.run();
+    }
+
+    private static RomLibrary.Entry entry(List<RomLibrary.Entry> entries, RomGame game) {
+        return entries == null ? null : entries.stream().filter(entry -> entry.game().equals(game.id()))
+                .findFirst().orElse(null);
+    }
+
+    private static boolean verified(RomLibrary.Entry entry) {
+        return entry != null && entry.status().equals("ok");
     }
 
     private static void showWhen(javafx.scene.Node node, ObservableBooleanValue condition) {
@@ -353,7 +403,8 @@ final class ExportDialog {
     }
 
     private static void chooseDestination(Window owner, Callable<ProjectExport.Source> source,
-                                          Executor worker, Consumer<String> status, ProjectExport.Options options) {
+                                          Executor worker, Consumer<String> status, ProjectExport.Options options,
+                                          RomGame game, Path registeredRom) {
         var chooser = new FileChooser();
         if (options.stems() && !options.zip()) {
             chooser.setTitle("Name a new directory for channel stems");
@@ -374,6 +425,7 @@ final class ExportDialog {
                 var opened = source.call();
                 if (ExportPackageOptions.supports(options.format())) {
                     updateMessage("Checking package and ROM references…");
+                    if (registeredRom != null) VerifiedRom.read(game, registeredRom);
                     var prepared = ProjectExport.preparePackage(opened.project(), options);
                     var messages = new ArrayList<String>();
                     for (var warning : prepared.warnings()) {

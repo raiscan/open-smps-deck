@@ -7,26 +7,15 @@ import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.prefs.Preferences;
 
 /** Package-specific choices shared by the Studio export controls. */
-record ExportPackageOptions(TargetGame target, boolean retailPatchAvailable, Preferences preferences) {
+record ExportPackageOptions(TargetGame target, boolean retailPatchAvailable) {
     static boolean supports(Format format) {
         return format == Format.PACKAGE || portable(format) || format == Format.DISASM;
     }
 
     static boolean portable(Format format) {
         return format == Format.PORTABLE || format == Format.MOD;
-    }
-
-    Path rememberedRom() {
-        String path = preferences.get(target.id(), null);
-        return path == null ? null : Path.of(path);
-    }
-
-    void rememberRom(Path rom) {
-        if (rom == null) preferences.remove(target.id());
-        else preferences.put(target.id(), rom.toAbsolutePath().normalize().toString());
     }
 
     ProjectExport.Options options(Format format, Path rom, boolean includeSource, boolean retailPatch,

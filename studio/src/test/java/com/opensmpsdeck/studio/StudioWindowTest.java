@@ -80,7 +80,16 @@ class StudioWindowTest {
             assertFalse(includeSource.isVisible());
             assertTrue(pane.lookup("#export-dpcm-closed").isVisible());
             assertFalse(((CheckBox) pane.lookup("#export-dpcm-closed")).isSelected());
-            assertTrue(pane.lookup("#export-choose-rom").isVisible());
+            assertTrue(pane.lookup("#export-rom-settings").isVisible());
+            assertEquals(1, pane.lookupAll("#export-rom-settings").size());
+            assertEquals("Use another ROM for this export…", ((Hyperlink) pane.lookup("#export-rom-override")).getText());
+            assertTrue(pane.lookup("#export-rom-override").isVisible());
+            assertNull(pane.lookup("#export-choose-rom"));
+            var useRom = (CheckBox) pane.lookup("#export-use-rom");
+            assertTrue(useRom.isSelected());
+            useRom.fire();
+            assertEquals("Exporting without a ROM", ((Label) pane.lookup("#export-package-rom")).getText());
+            assertFalse(pane.lookup("#export-rom-override").isVisible());
             snapshotDialog("export-dialog", ".kit.png");
             return null;
         });
@@ -106,13 +115,65 @@ class StudioWindowTest {
             var pane = dialogPane("rom-settings-dialog");
             assertEquals("Missing", ((Label) pane.lookup("#rom-status-s1")).getText());
             assertEquals("Missing", ((Label) pane.lookup("#rom-status-s2")).getText());
-            ((Button) pane.lookup("#rom-clear-s3k")).fire();
+            return null;
+        });
+        closeDialog("rom-settings-dialog", ButtonType.CLOSE);
+        await(() -> ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("changed on disk"));
+        fx(() -> {
+            var pane = dialogPane("export-dialog");
+            @SuppressWarnings("unchecked")
+            var formats = (ChoiceBox<Format>) pane.lookup("#export-format");
+            formats.setValue(Format.DISASM);
+            @SuppressWarnings("unchecked")
+            var testTarget = (ChoiceBox<RomGame>) pane.lookup("#test-in-game-driver");
+            testTarget.setValue(RomGame.S2);
+            assertTrue(((Label) pane.lookup("#export-rom-hint")).getText().contains("clean S2"));
+            assertEquals("Saved S3K ROM changed on disk", ((Label) pane.lookup("#export-package-rom")).getText());
+            testTarget.setValue(RomGame.S3K);
+            return null;
+        });
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-rom-settings")).fire());
+        await(() -> dialogPane("rom-settings-dialog") != null
+                && !dialogPane("rom-settings-dialog").lookup("#rom-clear-s3k").isDisabled());
+        fx(() -> {
+            ((Button) dialogPane("rom-settings-dialog").lookup("#rom-clear-s3k")).fire();
             return null;
         });
         await(() -> ((Label) dialogPane("rom-settings-dialog").lookup("#rom-status-s3k")).getText().equals("Missing"));
         assertEquals("invalid ROM", Files.readString(invalid));
         closeDialog("rom-settings-dialog", ButtonType.CLOSE);
         await(() -> ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("Select a clean"));
+        assertEquals("No S3K ROM registered",
+                fx(() -> ((Label) dialogPane("export-dialog").lookup("#export-package-rom")).getText()));
+        closeDialog("export-dialog", ButtonType.CANCEL);
+    }
+
+    @Test void redactedSourceRequiresARomAndCanOpenSharedSettings() throws Exception {
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        var project = DemoProject.create();
+        var voices = new ArrayList<>(project.voices());
+        var voice = voices.getFirst();
+        var stock = AssetOrigin.stock(new StockRef("s3k", "global-fm", null, 0, null, null, "0".repeat(64)));
+        voices.set(0, new Voice(voice.id(), voice.name(), null, stock));
+        var redacted = project.withAssets(voices, project.envelopes(), project.samples());
+        assertThrows(IllegalArgumentException.class, () -> ProjectFormat.requireResolved(redacted));
+        Platform.runLater(() -> ExportDialog.showRedacted(stage, redacted, file, library,
+                task -> Thread.ofVirtual().start(task), ignored -> {}));
+        await(() -> dialogPane("export-dialog") != null
+                && !dialogPane("export-dialog").lookup("#export-rom-settings").isDisabled());
+        fx(() -> {
+            var pane = dialogPane("export-dialog");
+            assertEquals("Export redacted source", pane.getHeaderText());
+            assertTrue(pane.lookupButton(pane.getButtonTypes().getFirst()).isDisabled());
+            assertNull(pane.lookup("#export-use-rom"));
+            assertNull(pane.lookup("#export-test-in-game"));
+            assertTrue(pane.lookup("#export-rom-override").isVisible());
+            return null;
+        });
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-rom-settings")).fire());
+        await(() -> dialogPane("rom-settings-dialog") != null
+                && !dialogPane("rom-settings-dialog").lookupButton(ButtonType.CLOSE).isDisabled());
+        closeDialog("rom-settings-dialog", ButtonType.CLOSE);
         closeDialog("export-dialog", ButtonType.CANCEL);
     }
 

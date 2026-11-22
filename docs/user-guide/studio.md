@@ -490,13 +490,20 @@ Choose **Disassembly kit** for an SMPS2ASM ZIP targeting the project's driver.
 replacement DAC notes use hexadecimal. A ROM materialises stock files for
 personal use.
 
-Use **Choose ROM…** to verify stock references against a local cartridge image.
-Studio remembers the path per game in preferences. **Clear** removes the
-selection. The confirmation lists matched stock assets and provenance warnings
-before writing. A mismatch identifies the slot that failed. Keep embedded
-retail data and ROM-materialised kits for personal use. When you open redacted
-package source from Studio, the export dialog resolves its stock assets with
-the same picker.
+Register a clean ROM under **ROM settings…** in the toolbar or the Export dialog.
+Packages and kits show the filename of the registered ROM for the project's
+driver and use it by default. Clear **Use ROM for stock assets** to export
+without a ROM when the project has the data it needs. If a previous export
+selection verifies and the game has no registered ROM, **Register previous
+export ROM** appears in ROM settings.
+
+Choose **Use another ROM for this export…** when the stock assets need a different
+image, such as standalone Sonic 3 or Sonic & Knuckles. Studio keeps that
+selection for the open Export dialog only. Review the matched stock assets
+and provenance warnings before writing. A mismatch identifies the slot that
+failed. Keep embedded retail data and ROM-materialised kits for personal use.
+When you open redacted package source, the same Export dialog requires a
+registered ROM or a matching image for that export to resolve stock references.
 
 To hear the song on the Sonic 3 & Knuckles title screen, register a verified
 locked-on ROM under **ROM settings…** and choose **Export… → Test in game…**.
