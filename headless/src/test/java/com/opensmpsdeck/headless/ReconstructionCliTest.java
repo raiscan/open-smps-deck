@@ -30,6 +30,8 @@ class ReconstructionCliTest {
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
         String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        for (var target : List.of(TargetGame.S1, TargetGame.S2))
+            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, null);
         String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Tone contour",
                 new byte[]{0, 2, (byte) 0x83});
         builder.variant(envelope, "Tone contour", InstrumentCatalogue.Recipe.plain(), null);
@@ -220,7 +222,8 @@ class ReconstructionCliTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        for (var target : List.of(TargetGame.S1, TargetGame.S2))
+            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, null);
         Path index = directory.resolve("click-index.json");
         builder.build().save(index);
 
@@ -298,6 +301,7 @@ class ReconstructionCliTest {
         assertEquals("s2", artifact(imported, "import.json").getAsJsonObject("runRequest")
                 .getAsJsonObject("options").get("target").getAsString());
 
+        var catalogue = InstrumentCatalogue.open(index);
         for (var target : TargetGame.values()) {
             Path work = switch (target) {
                 case S3K -> staged;
@@ -311,6 +315,14 @@ class ReconstructionCliTest {
             assertEquals(target, project.target());
             assertEquals(target == TargetGame.S3K ? null : 255, project.nativeTempo());
             if (target != TargetGame.S3K) {
+                var report = artifact(work, "report.json");
+                assertEquals(target.id() + "-ntsc-match-assets-v2", report.get("matcher").getAsString());
+                var selected = report.getAsJsonArray("matches").asList().stream()
+                        .map(match -> match.getAsJsonObject().getAsJsonObject("choice"))
+                        .filter(choice -> choice.has("variantId")).toList();
+                assertFalse(selected.isEmpty());
+                for (var choice : selected)
+                    assertEquals(target, catalogue.match(choice.get("variantId").getAsString()).variant().target());
                 var playback = TargetPlayback.prepare(project);
                 assertEquals(target, playback.target());
                 var expected = directory.resolve(target.id() + "-expected.wav");

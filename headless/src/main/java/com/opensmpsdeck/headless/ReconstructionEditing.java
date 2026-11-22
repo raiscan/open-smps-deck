@@ -60,7 +60,7 @@ public final class ReconstructionEditing {
     public static ReconstructionEditing open(Path work) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var cataloguePath = Path.of(score.inputs().catalogue());
-        var catalogue = Files.isRegularFile(cataloguePath) ? InstrumentCatalogue.open(cataloguePath) : null;
+        var catalogue = Files.isRegularFile(cataloguePath) ? InstrumentCatalogue.open(cataloguePath, score.inputs().targetGame()) : null;
         return new ReconstructionEditing(score,
                 ReconstructionTrace.optional(work, "voicing.json", ReconstructionVoicing.Result.class), catalogue);
     }
@@ -148,7 +148,7 @@ public final class ReconstructionEditing {
         var timeline = ReconstructionTimeMap.of(score);
         var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var scopes = ReconstructionVoicing.validate(voicing, allocation, catalogue, timeline);
         var candidateAssignment = new ReconstructionVoicePlan.Assignment(candidate.type(), candidate.id());
         candidateAssignment.validate(catalogue, "Audition");

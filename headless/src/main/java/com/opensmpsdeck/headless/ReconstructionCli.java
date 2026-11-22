@@ -255,7 +255,7 @@ final class ReconstructionCli {
         var prepared = new S3kReconstruction.Score(score.parts(),
                 transcription.notes().stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
-        InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
+        InstrumentCatalogue catalogue = InstrumentCatalogue.open(index, options.target());
         var forCatalogue = prepared;
         if (options.stockDrums()) {
             var drumParts = score.parts().stream().filter(MidiScore.Part::drums).map(MidiScore.Part::id).toList();
@@ -291,7 +291,7 @@ final class ReconstructionCli {
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
             java.util.Set<String> targets, boolean refitLevels, ReconstructionAllocation.Result previousAllocation, String variant)
             throws IOException {
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
         var allocated = ReconstructionVoicing.byLane(allocation);
         for (String target : targets)
@@ -331,7 +331,7 @@ final class ReconstructionCli {
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
             java.util.function.Consumer<String> report) throws IOException {
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var timeline = ReconstructionTimeMap.of(score);
         var allocated = ReconstructionVoicing.byLane(allocation);
         var targets = ReconstructionVoicing.lanesNeedingFit(previous, allocated);
@@ -379,7 +379,7 @@ final class ReconstructionCli {
         Path midi = inputs.midi() == null ? null : Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
-        var catalogue = InstrumentCatalogue.open(index);
+        var catalogue = InstrumentCatalogue.open(index, options.target());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, policyDecisions);
         var matched = assembly.matched();
         var instruments = voicing.sourceInstruments();
@@ -508,7 +508,7 @@ final class ReconstructionCli {
             var plan = ReconstructionVoicePlan.preview(work, score, roles, edits);
             voicing = voicing.withAssignments(plan.assignments(allocation, roles.lanePins()));
         }
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true);
         var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
         for (var layer : arrangement.layers()) layer.report(outcomes);
@@ -744,7 +744,7 @@ final class ReconstructionCli {
             }
             var legacySustain = assemblyInputs == null && options.target() == TargetGame.S3K
                     ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
-            var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, playback.compiled().song().length,
+            var report = new Report(REPORT_VERSION, CatalogueMatcher.assetProfile(options.target()), durationUs, frames, playback.compiled().song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
                     matched.evidence(), score.warnings(), options.wholePartVoices(), matched.sectionTrials(),

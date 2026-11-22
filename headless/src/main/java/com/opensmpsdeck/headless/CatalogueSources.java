@@ -1,10 +1,15 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.smps.CoordFlagContext;
+import com.openggf.data.Rom;
+import com.openggf.data.RomByteReader;
 import com.openggf.audio.smps.SmpsNoteListener;
 import com.openggf.audio.smps.SmpsSequencer.Track;
 import com.openggf.audio.smps.SmpsSequencer.TrackType;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
+import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsLoader;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Builder;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Occurrence;
@@ -20,15 +25,11 @@ import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.TargetProfile;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,16 +45,28 @@ public final class CatalogueSources {
     private CatalogueSources() {}
 
     public static void scanRom(Path rom, Builder catalogue) throws IOException, InterruptedException {
-        var songs = S3kRomImporter.listSongs(rom);
-        String revision = "sha256:" + sha256(rom);
-        String source = rom.getFileName().toString();
-        for (var song : songs) {
-            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            try {
-                scan(S3kRomImporter.readSong(rom, song.id()), source, revision, song.id(), catalogue);
-            } catch (IllegalArgumentException failure) {
-                catalogue.issue(source, "song-import", "%02X %s: %s".formatted(
-                        song.id(), song.name(), failure.getMessage()));
+        scanRom(VerifiedRom.read(rom), catalogue);
+    }
+
+    static void scanRom(VerifiedRom image, Builder catalogue) throws IOException, InterruptedException {
+        byte[] bytes = image.bytes();
+        String revision = "sha256:" + InstrumentCatalogue.digest(bytes);
+        String source = image.path().getFileName().toString();
+        TargetGame game = TargetGame.parse(image.revision().game().id());
+        try (var rom = Rom.fromReader(RomByteReader.fromBytes(bytes), source)) {
+            if (game != TargetGame.S3K) {
+                ClassicCatalogueSources.scanRom(game, rom, bytes, source, revision, catalogue);
+                return;
+            }
+            var loader = new Sonic3kSmpsLoader(rom);
+            for (var song : S3kRomImporter.songs()) {
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+                try {
+                    scan(S3kRomImporter.readSong(rom, loader, song), source, revision, song.id(), catalogue);
+                } catch (IllegalArgumentException failure) {
+                    catalogue.issue(source, "song-import", "%02X %s: %s".formatted(
+                            song.id(), song.name(), failure.getMessage()));
+                }
             }
         }
     }
@@ -61,7 +74,15 @@ public final class CatalogueSources {
     /** Project declaration and playback scan. The supplied source/revision identify its input. */
     public static void scanProject(StudioProject project, String source, String revision, Builder catalogue)
             throws InterruptedException {
-        scan(project, source, revision, null, catalogue);
+        if (project.target() == TargetGame.S3K) {
+            scan(project, source, revision, null, catalogue);
+        } else {
+            var playback = TargetPlayback.prepare(project);
+            var bank = playback.compiled();
+            ClassicCatalogueSources.scanBank(project.target(), bank, project.voices().size(),
+                    ProjectRenderTiming.presentationCount(project), source, revision, project.name(),
+                    project.voices().stream().map(com.opensmpsdeck.project.Voice::name).toList(), catalogue);
+        }
     }
 
     private static void scan(StudioProject project, String source, String revision, Integer songId, Builder catalogue)
@@ -402,16 +423,4 @@ public final class CatalogueSources {
         return result;
     }
 
-    private static String sha256(Path input) throws IOException {
-        try {
-            var digest = MessageDigest.getInstance("SHA-256");
-            try (var stream = Files.newInputStream(input)) {
-                byte[] buffer = new byte[8192];
-                for (int size; (size = stream.read(buffer)) >= 0; ) digest.update(buffer, 0, size);
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    }
 }

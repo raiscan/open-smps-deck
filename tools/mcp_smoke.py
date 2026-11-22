@@ -199,8 +199,10 @@ for stem in stems:
         delta, = comparison["deltas"]
         assert delta["result"] == "regression" and math.isclose(delta["delta"], -0.1), comparison
         results = rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice")
+        assert rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice", target="s3k") == results
+        assert rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice", target="s2")["total"] == 0
         variant = results["items"][0]["variantId"]
-        rpc.call("catalog_audition", catalogue=inputs["catalogue"], variant=variant,
+        rpc.call("catalog_audition", catalogue=inputs["catalogue"], variant=variant, target="s3k",
                  workDir=root, output=root / "audition.wav")
         download = root / "download"
         download.mkdir()

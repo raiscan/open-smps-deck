@@ -38,12 +38,12 @@ final class CatalogueRips {
                 if (name.endsWith(".smps.json")) {
                     readSource(path, source, builder, CatalogueRips::readProject);
                 } else if (name.endsWith(".smps.zip")) {
-                    readSource(path, source, builder, CatalogueRips::readPackageProject);
+                    readSource(path, source, builder, () -> scanPackage(path, source, builder));
                 } else if (name.endsWith(".s3k")) {
                     readSource(path, source, builder, CatalogueRips::readBank);
                 } else if (isOtherRip(name)) {
                     builder.issue(source, "unsupported-input",
-                            "Use a self-contained S3K rip or a Studio project with its companion bindings");
+                            "Use a portable SMPS package or a Studio project with its companion bindings");
                 }
             }
         } catch (UncheckedIOException failure) {
@@ -60,11 +60,21 @@ final class CatalogueRips {
     @FunctionalInterface
     private interface Reader { Source read(Path path) throws IOException; }
 
+    @FunctionalInterface
+    private interface RipScan { void run() throws IOException, InterruptedException; }
+
     private static void readSource(Path path, String name, InstrumentCatalogue.Builder builder, Reader reader)
             throws InterruptedException {
-        try {
+        readSource(path, name, builder, () -> {
             var source = reader.read(path);
             CatalogueSources.scanProject(source.project(), name, source.revision(), builder);
+        });
+    }
+
+    private static void readSource(Path path, String name, InstrumentCatalogue.Builder builder, RipScan scan)
+            throws InterruptedException {
+        try {
+            scan.run();
         } catch (MissingCompanion failure) {
             builder.issue(name, "missing-companion", failure.getMessage());
         } catch (IllegalArgumentException failure) {
@@ -78,6 +88,50 @@ final class CatalogueRips {
     private static Source readProject(Path path) throws IOException {
         var loaded = ProjectFiles.load(path);
         return new Source(loaded.project(), loaded.revision());
+    }
+
+    private static void scanPackage(Path path, String name, InstrumentCatalogue.Builder builder)
+            throws IOException, InterruptedException {
+        // Legacy archives contain a project and have no driver in the manifest.
+        try (var zip = new ZipFile(path.toFile())) {
+            var entry = zip.getEntry("manifest.json");
+            if (entry != null) {
+                try (var in = zip.getInputStream(entry)) {
+                    byte[] bytes = in.readNBytes(PortableArchive.MAX_MANIFEST + 1);
+                    if (bytes.length > PortableArchive.MAX_MANIFEST)
+                        throw new IllegalArgumentException("Package manifest exceeds the size limit");
+                    var manifest = com.google.gson.JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
+                    if (manifest.isJsonObject() && manifest.getAsJsonObject().has("driver")) {
+                        var driver = manifest.getAsJsonObject().get("driver");
+                        if (!driver.isJsonPrimitive() || !driver.getAsJsonPrimitive().isString())
+                            throw new IllegalArgumentException("Package driver must be a string");
+                        if (PackageDriver.supported(driver.getAsString()) instanceof ClassicPackageDriver classic) {
+                            scanClassicPackage(path, name, builder, classic);
+                            return;
+                        }
+                    }
+                } catch (com.google.gson.JsonParseException | IllegalStateException failure) {
+                    throw new IllegalArgumentException("Invalid package manifest", failure);
+                }
+            }
+        }
+        var source = readPackageProject(path);
+        CatalogueSources.scanProject(source.project(), name, source.revision(), builder);
+    }
+
+    private static void scanClassicPackage(Path path, String name, InstrumentCatalogue.Builder builder,
+                                           ClassicPackageDriver classic) throws IOException, InterruptedException {
+        var archive = PortablePackageReader.read(path);
+        var manifest = archive.manifest();
+        if (!manifest.driver().equals(classic.id()))
+            throw new IllegalArgumentException("Package driver changed while reading");
+        if (manifest.requires().stockAssets())
+            throw new MissingCompanion("Classic package requires ROM assets. Scan a self-contained package or the ROM.");
+        var bank = PortablePackageReader.assemble(archive, List.of());
+        classic.preflight(bank);
+        ClassicCatalogueSources.scanBank(TargetGame.parse(classic.id()), bank, manifest.bank().localVoiceCount(),
+                manifest.bank().previewFrames(), name, manifest.bank().assembledSha256(),
+                manifest.packageInfo().name(), List.of(), builder);
     }
 
     private static Source readPackageProject(Path path) throws IOException {

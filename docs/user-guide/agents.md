@@ -202,7 +202,7 @@ returned schemas for optional fields and types.
 | Inspect evidence | `reconstruct_describe`, `reconstruct_view`, `reconstruct_trace`, `reconstruct_trace_diff`, `artifact_read` |
 | Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |
 | Review a vocal lead | `reconstruct_vocal_review` |
-| Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` |
+| Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` (catalogue tools accept optional `target`) |
 | Track project feedback | `reference_add`, `notes_list`, `notes_add`, `notes_resolve` |
 | Test in game | `rom_list`, `rom_set`, `rom_patch` |
 | Validate, export and check regressions | `project_validate`, `project_export`, `package_validate`, `package_inspect`, `bench_compare` |

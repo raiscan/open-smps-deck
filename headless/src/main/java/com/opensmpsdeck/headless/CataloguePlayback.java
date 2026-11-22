@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Match;
@@ -35,8 +36,12 @@ public final class CataloguePlayback {
 
     /** Plays a fixed phrase or one-shot, with the entry's available playback context. */
     public static StudioProject audition(InstrumentCatalogue catalogue, String id) {
-        Match match = catalogue.match(id);
-        return renderProbe(catalogue, match, recipe(match), false, TargetGame.S3K);
+        return audition(catalogue, id, null);
+    }
+
+    static StudioProject audition(InstrumentCatalogue catalogue, String id, TargetGame target) {
+        Match match = catalogue.match(id, target);
+        return renderProbe(catalogue, match, recipe(match), false, target == null ? match.variant().target() : target);
     }
 
     /**
@@ -48,22 +53,26 @@ public final class CataloguePlayback {
     }
 
     static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks, boolean rawAsset) {
-        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, TargetGame.S3K);
+        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, null);
     }
 
     static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
                                     boolean rawAsset, TargetGame target) {
-        Match match = catalogue.match(id);
+        Match match = catalogue.match(id, target);
+        if (target == null) target = match.variant().target();
         Recipe source = recipe(match);
         if (rawAsset) source = new Recipe(source.rate(), null, 127, source.durationTicks(),
                 null, null, List.of(), List.of());
+        requirePlayable(match, source, rawAsset, target);
         if (match.asset().kind() == Kind.DAC_SAMPLE || match.asset().kind() == Kind.PSG_NOISE)
             return renderProbe(catalogue, match, source, rawAsset, target);
         if (gateTicks < 1 || gateTicks > 180)
             throw new IllegalArgumentException("Matching note length must be 1–180 ticks (was " + gateTicks + ").");
         String chip = probeChip(match, rawAsset);
-        int lowest = chip.equals("PSG") ? 45 : 12;
-        int highest = chip.equals("PSG") ? 117 : 106;
+        var profile = TargetProfile.of(target);
+        var range = chip.equals("PSG") ? profile.psg() : profile.fm();
+        int lowest = range.low();
+        int highest = range.high();
         if (midi < lowest || midi > highest)
             throw new IllegalArgumentException(chip + " matching probe supports MIDI " + lowest + "–" + highest
                     + " (requested " + midi + ").");
@@ -84,6 +93,7 @@ public final class CataloguePlayback {
     }
 
     private static StudioProject renderProbe(InstrumentCatalogue catalogue, Match match, Recipe recipe, boolean rawAsset, TargetGame target) {
+        requirePlayable(match, recipe, rawAsset, target);
         var base = new StudioProject(4, name(match), "S3K", 15, 0, List.of(), List.of(), List.of(), target, null);
         var install = new Install(catalogue, base);
         var asset = match.asset();
@@ -126,6 +136,30 @@ public final class CataloguePlayback {
         return result;
     }
 
+    private static void requirePlayable(Match match, Recipe recipe, boolean rawAsset, TargetGame target) {
+        if (target != TargetGame.S3K) {
+            for (var event : recipe.commands()) {
+                switch (event.command()) {
+                    case FM_VOLUME_ENVELOPE, MODULATION_ENVELOPE, SSG_EG ->
+                            throw unsupported(target, event.command().name());
+                    default -> { }
+                }
+            }
+            if (recipe.modulationEnvelope() != null || match.asset().kind() == Kind.MODULATION)
+                throw unsupported(target, "MODULATION_ENVELOPE");
+            if ((recipe.volumeEnvelope() != null || match.asset().kind() == Kind.PSG_VOLUME)
+                    && probeChip(match, rawAsset).equals("FM"))
+                throw unsupported(target, "FM_VOLUME_ENVELOPE");
+        }
+        if (match.variant().target() != target)
+            throw new IllegalArgumentException("Catalogue variant is for " + match.variant().driver()
+                    + "; choose a " + target.id() + " variant.");
+    }
+
+    private static IllegalArgumentException unsupported(TargetGame target, String command) {
+        return new IllegalArgumentException(target.id() + ": " + command + " has no native equivalent");
+    }
+
     private static StudioProject pannedDac(StudioProject probe, byte[] linear, int pan, int frames) {
         int stream = Byte.toUnsignedInt(linear[6]) | Byte.toUnsignedInt(linear[7]) << 8;
         byte[] bank = Arrays.copyOf(linear, linear.length + 2);
@@ -148,7 +182,12 @@ public final class CataloguePlayback {
         ProjectFormat.validate(target);
         if (target.nativeProgram() != null)
             throw new IllegalArgumentException("Save an editable copy before applying catalogue instruments to a native bank.");
-        var match = catalogue.match(id);
+        var match = catalogue.match(id, target.target());
+        // An occurrence-less legacy PSG entry can still be explicitly copied as a raw
+        // envelope. The target compiler validates its byte grammar before deployment.
+        boolean rawLegacyEnvelope = match.variant().target() == TargetGame.S3K
+                && match.asset().kind() == Kind.PSG_VOLUME && match.variant().occurrences().isEmpty();
+        if (!rawLegacyEnvelope) requirePlayable(match, recipe(match), false, target.target());
         var install = new Install(catalogue, target);
         var asset = match.asset();
         switch (asset.kind()) {
@@ -158,7 +197,7 @@ public final class CataloguePlayback {
             case PSG_NOISE -> install.noiseSource(match);
         }
         StudioProject result = install.finish();
-        ProjectCompiler.compile(result);
+        TargetPlayback.prepare(result);
         return result;
     }
 
@@ -222,7 +261,7 @@ public final class CataloguePlayback {
         String voice(InstrumentCatalogue.Asset asset) {
             requireKind(asset, Kind.FM_VOICE);
             var bytes = unsigned(asset.bytes());
-            var origin = catalogue.origin(asset);
+            var origin = catalogue.origin(asset, target.target());
             for (int i = 0; i < voices.size(); i++) {
                 var existing = voices.get(i);
                 if (!existing.bytes().equals(bytes)) continue;
@@ -238,7 +277,7 @@ public final class CataloguePlayback {
             requireKind(asset, kind);
             String type = kind == Kind.PSG_VOLUME ? Envelope.PSG_VOLUME : Envelope.MODULATION;
             var bytes = unsigned(asset.bytes());
-            var origin = catalogue.origin(asset);
+            var origin = catalogue.origin(asset, target.target());
             for (int i = 0; i < envelopes.size(); i++) {
                 var existing = envelopes.get(i);
                 if (!existing.type().equals(type) || !existing.bytes().equals(bytes)) continue;
@@ -253,7 +292,7 @@ public final class CataloguePlayback {
 
         String dac(InstrumentCatalogue.Asset asset, int rate) {
             byte[] bytes = asset.bytes();
-            var origin = catalogue.origin(asset);
+            var origin = catalogue.origin(asset, target.target());
             for (int i = 0; i < samples.size(); i++) {
                 var existing = samples.get(i);
                 if (existing.rate() != rate || !Arrays.equals(existing.pcm(), bytes)) continue;

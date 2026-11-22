@@ -5,6 +5,7 @@ import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Recipe;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,6 +59,30 @@ class CatalogueMatcherTest {
                 new PrintStream(output), new PrintStream(errors));
         assertEquals(0, audition, errors.toString(StandardCharsets.UTF_8));
         assertArrayEquals(Files.readAllBytes(reference), Files.readAllBytes(replay));
+    }
+
+    @Test void rawReconstructionMatchesOnlyVariantsForTheRenderingDriver() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var voice = DemoProject.create().voices().getFirst();
+        String asset = builder.asset(Kind.FM_VOICE, voice.name(), StockTable.bytes(voice.bytes()));
+        builder.variant(asset, voice.name(), Recipe.plain(), TargetGame.S1, null);
+        builder.variant(asset, voice.name(), Recipe.plain(), TargetGame.S2, null);
+        builder.variant(asset, voice.name(), Recipe.plain(), null);
+        var index = builder.build();
+        var options = new CatalogueMatcher.Options(Kind.FM_VOICE, null, null, 60, 18, 10);
+        for (var game : List.of(TargetGame.S1, TargetGame.S2)) {
+            var variant = index.variants().stream().filter(v -> v.target() == game).findFirst().orElseThrow();
+            Path reference = directory.resolve(game.id() + ".wav");
+            var probe = CataloguePlayback.matchProbe(index, variant.id(), 60, 18);
+            WaveFile.render(probe, reference, 30);
+            var result = CatalogueMatcher.matchAssets(index, ReferenceAudio.read(reference, 0, null),
+                    options, java.util.Set.of(), game);
+            assertEquals(game.id() + "-ntsc-match-assets-v2", result.featureProfile());
+            assertEquals(1, result.eligible());
+            assertEquals(1, result.compared());
+            assertEquals(variant.id(), result.matches().getFirst().variantId());
+            assertEquals(0, result.matches().getFirst().distance().total(), 1e-8);
+        }
     }
 
     @Test void rawReconstructionSkipsAzureLakeDataWithoutIndependentVoiceProvenance() throws Exception {

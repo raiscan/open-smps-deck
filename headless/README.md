@@ -34,12 +34,43 @@ playback and access to driver operations outside the arrangement format.
 
 ## Instrument catalogue
 
-Use `catalog show INDEX.json ID --brief` to replace occurrence lists with counts.
-Run `catalog --help` for the local index, search, show, match, audition, and apply
-commands. `catalog match` ranks chip-rendered variants against a short WAV
-excerpt and returns the distances with stable IDs. Each successful operation writes versioned JSON. The
+Build a local catalogue from a verified Sonic 1 or Sonic 2 REV01 ROM, a
+locked-on Sonic 3 & Knuckles ROM, or supported rips. The CLI detects an
+explicit ROM's game by its verified revision. Set `--game` to check the game
+or to use the matching path saved by `rom set`. With no source flags,
+`catalog scan` uses the configured S3K ROM.
+
+```sh
+java -jar "$CLI" catalog scan s1-instruments.json --rom "$s1_rom"
+java -jar "$CLI" rom set s2 "$s2_rom"
+java -jar "$CLI" catalog scan s2-instruments.json --game s2
+java -jar "$CLI" catalog scan mixed-instruments.json --rom "$s1_rom" --rom "$s2_rom" --rom "$s3k_rom"
+java -jar "$CLI" catalog search s2-instruments.json --target s2 --kind fm-voice
+java -jar "$CLI" catalog show s2-instruments.json "$variant_id" --brief
+java -jar "$CLI" catalog audition s2-instruments.json "$variant_id" audition.wav
+java -jar "$CLI" catalog match s2-instruments.json excerpt.wav --target s2 --kind fm-voice
+```
+
+Repeat `--rom` to index several games together. Use `--rips DIRECTORY` to
+index rips on their own or alongside ROM sources. Keep indexes built from
+ROMs in a private directory. Rip sources include editable `.smps.json`
+projects, self-contained S1/S2 portable `.smps.zip` packages, and supported
+S3K banks and project packages. Loose SM1/SM2 rips require a separate adapter.
+
+Search without `--target` lists all drivers. Audition uses the variant's
+driver and accepts `--target` to select a matching variant or check
+compatibility. S1 and S2 audition reject FM volume envelopes, modulation
+envelopes, and SSG-EG. `catalog match` defaults to S3K. It ranks variants
+from the selected driver against a short WAV excerpt. Reconstruction uses
+the driver saved in the work directory or selected by `--target` on a
+fresh run. Automatic catalogue selection is game-specific for FM patches,
+PSG envelopes, and DAC variants. Older indexes remain S3K catalogues.
+
+Each successful operation writes versioned JSON. See the
 [instrument catalogue guide](../docs/architecture/instrument-catalogue.md#first-pass-in-use)
-covers source formats, filters, and Studio deployment.
+for formats and Studio deployment. MCP `catalog_search` and
+`catalog_audition` accept the same optional `target` field
+(`s1`, `s2`, or `s3k`).
 
 ## Reference audio and review notes
 

@@ -393,8 +393,8 @@ class StudioWindowTest {
     @Test void instrumentCataloguePagesFiltersAndAppliesWithProjectUndo() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope",
-                new byte[]{0, 1, (byte) 0x83});
-        var occurrence = new InstrumentCatalogue.Occurrence("fixture.s3k", "S3K", "review",
+                new byte[]{0, 1, (byte) 0x80});
+        var occurrence = new InstrumentCatalogue.Occurrence("fixture.smps.json", "s1", "review",
                 "Evening clock", 42, 3, "PSG1", 0, true);
         for (int i = 1; i <= 31; i++)
             builder.variant(asset, "Test variant %02d".formatted(i),
@@ -431,7 +431,7 @@ class StudioWindowTest {
             layout();
             var detail = (TextArea) window.scene().lookup("#catalogue-details");
             assertTrue(detail.getText().contains("Test variant 18"));
-            assertTrue(detail.getText().contains("fixture.s3k"));
+            assertTrue(detail.getText().contains("fixture.smps.json"));
             assertTrue(detail.getText().contains("Evening clock"));
             assertTrue(detail.getText().contains("18 ticks"));
             button("catalogue-apply").fire();
