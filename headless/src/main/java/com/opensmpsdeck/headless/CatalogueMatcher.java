@@ -15,7 +15,6 @@ import java.util.Set;
 /** Ranks catalogue playback variants against one isolated reference sound. */
 public final class CatalogueMatcher {
     public static final String PROFILE = "s3k-ntsc-match-v1";
-    static final String ASSET_PROFILE = "s3k-ntsc-match-assets-v2";
     static final String LOCKED_ON_S3K = "sha256:fba0677fde9f76df93f3e98d6310d8af68b9847bde16e253d73cd4dd8134ed23";
 
     public record Options(Kind kind, String role, String source, int midi, Integer gateTicks, int limit) {
@@ -47,7 +46,16 @@ public final class CatalogueMatcher {
     private CatalogueMatcher() {}
 
     public static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
-        return match(index, audio, options, false, Set.of(), TargetGame.S3K);
+        return match(index, audio, options, TargetGame.S3K);
+    }
+
+    static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options, TargetGame target)
+            throws IOException {
+        return match(index, audio, options, false, Set.of(), target);
+    }
+
+    static String assetProfile(TargetGame target) {
+        return target.id() + "-ntsc-match-assets-v2";
     }
 
     static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
@@ -74,12 +82,12 @@ public final class CatalogueMatcher {
         var ranked = new ArrayList<Ranked>();
         var skipped = new ArrayList<Skipped>();
         var emitted = new HashSet<EmittedAsset>();
-        Set<String> trackData = rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
+        Set<String> trackData = target == TargetGame.S3K && rawAssets && options.kind() == Kind.FM_VOICE ? inferredAzureLakeSlots(index) : Set.of();
         int total;
         int eligible = 0;
         int offset = 0;
         do {
-            var query = new InstrumentCatalogue.Query(null, options.kind(), null, options.role(),
+            var query = new InstrumentCatalogue.Query(null, options.kind(), target.id(), options.role(),
                     options.source(), null, offset, InstrumentCatalogue.PAGE_LIMIT);
             var page = index.search(query);
             total = page.total();
@@ -107,7 +115,7 @@ public final class CatalogueMatcher {
 
         ranked.sort(Comparator.comparingDouble((Ranked row) -> row.distance().total())
                 .thenComparing(Ranked::variantId));
-        return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? ASSET_PROFILE : PROFILE, options.midi(), gate, seconds, eligible,
+        return new Report(InstrumentCatalogue.FORMAT_VERSION, rawAssets ? assetProfile(target) : target.id() + "-ntsc-match-v1", options.midi(), gate, seconds, eligible,
                 ranked.size(), reference.summary(), ranked.subList(0, Math.min(options.limit(), ranked.size())), skipped);
     }
 

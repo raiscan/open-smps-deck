@@ -1,7 +1,11 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.TargetGame;
 
 import com.google.gson.Gson;
 
@@ -19,7 +23,6 @@ import java.util.Set;
 
 final class CatalogueCli {
     private static final int VERSION = InstrumentCatalogue.FORMAT_VERSION;
-    private static final String PROFILE = "s3k-ntsc-v1";
 
     private CatalogueCli() {}
 
@@ -51,43 +54,52 @@ final class CatalogueCli {
 
     static void usage(PrintStream out) {
         out.println("Catalogue commands");
-        out.println("  catalog scan OUTPUT.json [--rom ROM] [--rips DIRECTORY]");
-        out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--driver S3K]");
+        out.println("  catalog scan OUTPUT.json [--game s1|s2|s3k] [--rom ROM ...] [--rips DIRECTORY]");
+        out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--target s1|s2|s3k]");
         out.println("          [--role ROLE] [--source SOURCE] [--variant ID] [--offset N] [--limit N]");
         out.println("  catalog show INDEX.json ID [--brief]");
         out.println("  catalog dac-classes INDEX.json");
-        out.println("  catalog match INDEX.json REFERENCE.wav [--kind KIND] [--midi N] [--gate-ticks N]");
+        out.println("  catalog match INDEX.json REFERENCE.wav [--target s1|s2|s3k] [--kind KIND] [--midi N] [--gate-ticks N]");
         out.println("          [--start SECONDS] [--duration SECONDS] [--role ROLE] [--source SOURCE] [--limit N]");
         out.println("  catalog match-effects PROJECT.json REFERENCE.wav OUTPUT.json --lead ID --double ID");
-        out.println("  catalog audition INDEX.json ID OUTPUT.wav [--frames N] [--midi N] [--gate-ticks N]");
+        out.println("  catalog audition INDEX.json ID OUTPUT.wav [--target s1|s2|s3k] [--frames N] [--midi N] [--gate-ticks N]");
         out.println("  catalog apply INDEX.json ID PROJECT.json OUTPUT.json");
     }
 
     private static void scan(String[] args, PrintStream out) throws IOException, InterruptedException {
-        var options = options(args, 3, Set.of("--rom", "--rips"));
-        if (options.isEmpty()) throw new IllegalArgumentException("Supply --rom or --rips to scan");
+        var roms = new ArrayList<Path>();
+        var options = options(args, 3, Set.of("--rom", "--rips", "--game"), roms);
         var builder = new InstrumentCatalogue.Builder();
-        if (options.containsKey("--rom")) CatalogueSources.scanRom(Path.of(options.get("--rom")), builder);
+        RomGame game = options.containsKey("--game") ? RomGame.parse(options.get("--game")) : null;
+        if (!roms.isEmpty()) {
+            for (Path path : roms)
+                CatalogueSources.scanRom(game == null ? VerifiedRom.read(path) : VerifiedRom.read(game, path), builder);
+        } else if (game != null || !options.containsKey("--rips")) {
+            CatalogueSources.scanRom(RomLibrary.userLibrary().resolve(game == null ? RomGame.S3K : game, null), builder);
+        }
         if (options.containsKey("--rips")) CatalogueRips.scan(Path.of(options.get("--rips")), builder);
         var catalogue = builder.build();
         catalogue.save(Path.of(args[2]));
         var counts = new EnumMap<Kind, Long>(Kind.class);
         for (var asset : catalogue.assets()) counts.merge(asset.kind(), 1L, Long::sum);
-        print(out, new Scan(VERSION, PROFILE, catalogue.indexedSongs(), counts, catalogue.variants().size(),
+        print(out, new Scan(VERSION, profile(catalogue.variants()), catalogue.indexedSongs(), counts, catalogue.variants().size(),
                 catalogue.issues()));
     }
 
     private static void search(String[] args, PrintStream out) throws IOException {
-        var options = options(args, 3, Set.of("--query", "--kind", "--driver", "--role", "--source",
+        var options = options(args, 3, Set.of("--query", "--kind", "--driver", "--target", "--role", "--source",
                 "--variant", "--offset", "--limit"));
         Kind kind = options.containsKey("--kind") ? parseKind(options.get("--kind")) : null;
-        var query = new InstrumentCatalogue.Query(options.get("--query"), kind, options.get("--driver"),
+        String driver = options.containsKey("--target") ? target(options).id() : options.get("--driver");
+        if (options.containsKey("--target") && options.containsKey("--driver"))
+            throw new IllegalArgumentException("Choose --target or --driver");
+        var query = new InstrumentCatalogue.Query(options.get("--query"), kind, driver,
                 options.get("--role"), options.get("--source"), options.get("--variant"),
                 integer(options, "--offset", 0), integer(options, "--limit", 25));
         var page = InstrumentCatalogue.open(Path.of(args[2])).search(query);
         var summaries = page.items().stream().map(match -> {
             var variant = match.variant();
-            return new Summary(match.asset().id(), variant.id(), match.asset().kind(), variant.name(), "S3K",
+            return new Summary(match.asset().id(), variant.id(), match.asset().kind(), variant.name(), variant.driver(),
                     variant.recipe().rate(), variant.recipe().pan(), variant.roles(), variant.occurrences().size());
         }).toList();
         print(out, new Results(VERSION, page.total(), page.offset(), summaries));
@@ -103,7 +115,7 @@ final class CatalogueCli {
         var asset = catalogue.asset(exact.map(InstrumentCatalogue.Variant::assetId).orElse(id));
         var variants = exact.map(List::of).orElseGet(() -> catalogue.variants().stream()
                 .filter(item -> item.assetId().equals(id)).toList());
-        var details = new Details(VERSION, PROFILE, asset, variants);
+        var details = new Details(VERSION, profile(variants), asset, variants);
         if (!brief) {
             print(out, details);
             return;
@@ -118,7 +130,7 @@ final class CatalogueCli {
     }
 
     private static void match(String[] args, PrintStream out) throws IOException {
-        var options = options(args, 4, Set.of("--kind", "--role", "--source", "--midi", "--gate-ticks",
+        var options = options(args, 4, Set.of("--kind", "--role", "--source", "--midi", "--gate-ticks", "--target",
                 "--start", "--duration", "--limit"));
         Kind kind = options.containsKey("--kind") ? parseKind(options.get("--kind")) : null;
         Integer gate = options.containsKey("--gate-ticks") ? integer(options, "--gate-ticks", 0) : null;
@@ -128,7 +140,7 @@ final class CatalogueCli {
                 ? decimal(options, "--start") : 0, options.containsKey("--duration")
                 ? decimal(options, "--duration") : null);
         var index = InstrumentCatalogue.open(Path.of(args[2]));
-        print(out, CatalogueMatcher.match(index, reference, filters));
+        print(out, CatalogueMatcher.match(index, reference, filters, target(options)));
     }
 
     private static void matchEffects(String[] args, PrintStream out) throws IOException {
@@ -156,16 +168,18 @@ final class CatalogueCli {
     }
 
     private static void audition(String[] args, PrintStream out) throws IOException {
-        var options = options(args, 5, Set.of("--frames", "--midi", "--gate-ticks"));
+        var options = options(args, 5, Set.of("--frames", "--midi", "--gate-ticks", "--target"));
         var catalogue = InstrumentCatalogue.open(Path.of(args[2]));
+        TargetGame target = options.containsKey("--target") ? target(options) : null;
+        String variantId = catalogue.match(args[3], target).variant().id();
         boolean matchProbe = options.containsKey("--midi") || options.containsKey("--gate-ticks");
         var project = matchProbe
-                ? CataloguePlayback.matchProbe(catalogue, args[3], integer(options, "--midi", 60),
-                    integer(options, "--gate-ticks", 60))
-                : CataloguePlayback.audition(catalogue, args[3]);
+                ? CataloguePlayback.matchProbe(catalogue, variantId, integer(options, "--midi", 60),
+                    integer(options, "--gate-ticks", 60), false, target)
+                : CataloguePlayback.audition(catalogue, variantId, target);
         int frames = integer(options, "--frames", ProjectRenderTiming.presentationCount(project));
         WaveFile.render(project, Path.of(args[4]), frames);
-        print(out, new Output(VERSION, PROFILE, catalogue.match(args[3]).variant().id(), frames));
+        print(out, new Output(VERSION, profile(project.target()), variantId, frames));
     }
 
     private static void apply(String[] args, PrintStream out) throws IOException {
@@ -174,10 +188,14 @@ final class CatalogueCli {
         var source = ProjectFiles.load(Path.of(args[4])).project();
         var result = CataloguePlayback.apply(catalogue, args[3], source);
         ProjectFiles.save(Path.of(args[5]), result, null);
-        print(out, new Output(VERSION, PROFILE, catalogue.match(args[3]).variant().id(), null));
+        print(out, new Output(VERSION, profile(source.target()), catalogue.match(args[3], source.target()).variant().id(), null));
     }
 
     private static Map<String, String> options(String[] args, int start, Set<String> accepted) {
+        return options(args, start, accepted, null);
+    }
+
+    private static Map<String, String> options(String[] args, int start, Set<String> accepted, List<Path> roms) {
         if (args.length < start) throw new IllegalArgumentException("Missing arguments for catalog " + args[1]);
         var options = new HashMap<String, String>();
         boolean json = false;
@@ -189,7 +207,9 @@ final class CatalogueCli {
             }
             if (!accepted.contains(option) || at + 1 >= args.length)
                 throw new IllegalArgumentException("Invalid catalogue option " + option);
-            if (options.putIfAbsent(option, args[++at]) != null)
+            String value = args[++at];
+            if (roms != null && option.equals("--rom")) roms.add(Path.of(value));
+            else if (options.putIfAbsent(option, value) != null)
                 throw new IllegalArgumentException("Duplicate option " + option);
         }
         return options;
@@ -209,6 +229,19 @@ final class CatalogueCli {
         } catch (IllegalArgumentException failure) {
             throw new IllegalArgumentException("Unknown asset kind " + value);
         }
+    }
+
+    private static TargetGame target(Map<String, String> options) {
+        return TargetGame.parse(options.getOrDefault("--target", "s3k"));
+    }
+
+    private static String profile(List<InstrumentCatalogue.Variant> variants) {
+        var targets = variants.stream().map(InstrumentCatalogue.Variant::target).distinct().toList();
+        return targets.size() > 1 ? null : profile(targets.isEmpty() ? TargetGame.S3K : targets.getFirst());
+    }
+
+    private static String profile(TargetGame target) {
+        return target.id() + "-ntsc-v1";
     }
 
     private static void print(PrintStream out, Object value) { out.println(InstrumentCatalogue.json(value)); }

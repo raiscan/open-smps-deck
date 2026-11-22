@@ -14,8 +14,15 @@ from ROMs, work artifacts and renders outside public checkouts.
 Choose the target game before analysis. Use `--target s1|s2|s3k` on
 `reconstruct import` or a fresh `reconstruct run`. In MCP, use `target` on
 `reconstruct_import` or `options.target` on `reconstruct_run`. The default is
-`s3k`. Replays retain the saved target. S1 and S2 reconstruction are in
-progress and can stop at assembly on incompatible envelopes or commands.
+`s3k`. Replays retain the saved target. Use a catalogue with variants from
+the selected game. Build one from a verified ROM with
+`java -jar "$jar" catalog scan "$catalogue" --game s1 --rom "$rom"`
+(substitute `s2` or `s3k` for the other games). Omit `--rom` to use the
+path set by `rom set`. Use `catalog search --target` to browse the game's
+variants. `catalog audition` uses the variant's driver. MCP
+`catalog_search` and `catalog_audition` take an optional `target` field.
+If the S3K layering preset adds an incompatible envelope on a classic
+target, use `--lane-policy-preset off` on the fresh reconstruction.
 Portable and mod exports default to the saved project target.
 
 ## 1. Separate and check a local mix

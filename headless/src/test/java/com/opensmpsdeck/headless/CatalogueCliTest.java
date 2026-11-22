@@ -86,6 +86,69 @@ class CatalogueCliTest {
         assertArrayEquals(before, Files.readAllBytes(duplicate));
     }
 
+    @Test void separatesClassicAndS3kVariantsOfTheSamePayload() throws Exception {
+        Path rips = Files.createDirectory(directory.resolve("mixed"));
+        var voice = DemoProject.create().voices().getFirst();
+        var source = new Sequence("tone", "Tone", "FM", 12, voice.id(), 127,
+                List.of(new NoteEvent("note", 0, 12, 60)));
+        var clip = new Clip("tone-clip", source.id(), "FM1", 0, 12);
+        for (var target : TargetGame.values()) {
+            var project = new StudioProject(4, target.id(), "S3K", 24, 0, List.of(voice),
+                    List.of(source), List.of(clip), target, null);
+            ProjectFiles.save(rips.resolve(target.id() + ".smps.json"), project, null);
+            if (target != TargetGame.S3K) {
+                var options = new PortableOptions(target.id(), false, null, null, null, List.of(), List.of());
+                PortablePackageWriter.write(project, rips.resolve(target.id() + ".smps.zip"), options);
+            }
+        }
+        Path index = directory.resolve("mixed.json");
+        assertEquals(5, json("scan", index.toString(), "--rips", rips.toString()).get("indexedSongs").getAsInt());
+        var catalogue = InstrumentCatalogue.open(index);
+        assertEquals(1, catalogue.assets().size());
+        assertEquals(3, catalogue.variants().size());
+        for (var target : TargetGame.values()) {
+            var results = json("search", index.toString(), "--target", target.id());
+            assertEquals(1, results.get("total").getAsInt());
+            var summary = results.getAsJsonArray("items").get(0).getAsJsonObject();
+            assertEquals(target.id(), summary.get("driver").getAsString().toLowerCase(java.util.Locale.ROOT));
+            String variant = summary.get("variantId").getAsString();
+            var occurrences = catalogue.match(variant).variant().occurrences();
+            assertTrue(occurrences.stream().anyMatch(InstrumentCatalogue.Occurrence::played));
+            if (target != TargetGame.S3K)
+                assertTrue(occurrences.stream().anyMatch(o -> o.source().endsWith(".smps.zip") && o.played()));
+            assertEquals(List.of(variant), catalogue.forTarget(target).variants().stream()
+                    .map(InstrumentCatalogue.Variant::id).toList());
+            assertEquals(target.id() + "-ntsc-v1", json("audition", index.toString(), variant,
+                    directory.resolve(target.id() + ".wav").toString(), "--frames", "3")
+                    .get("auditionProfile").getAsString());
+        }
+    }
+
+    @Test void rejectsS3kOnlyRecipeCommandsForClassicAuditions() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var voice = DemoProject.create().voices().getFirst();
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), StockTable.bytes(voice.bytes()));
+        for (var command : List.of(NativeCommand.SSG_EG, NativeCommand.MODULATION_ENVELOPE,
+                NativeCommand.FM_VOLUME_ENVELOPE)) {
+            var recipe = new InstrumentCatalogue.Recipe(null, null, 127, 30, null, null, List.of(),
+                    List.of(new CommandEvent("setup", 0, command, command.defaultArguments())));
+            builder.variant(asset, voice.name(), recipe, null);
+        }
+        Path index = directory.resolve("recipes.json");
+        var catalogue = builder.build();
+        catalogue.save(index);
+        for (var variant : catalogue.variants()) {
+            String command = variant.recipe().commands().getFirst().command().name();
+            for (var target : List.of(TargetGame.S1, TargetGame.S2)) {
+                var result = run("audition", index.toString(), variant.id(), directory.resolve("probe.wav").toString(),
+                        "--target", target.id());
+                assertEquals(2, result.code(), result.stderr());
+                assertTrue(result.stderr().contains(target.id() + ": " + command), result.stderr());
+            }
+        }
+        assertFalse(Files.exists(directory.resolve("probe.wav")));
+    }
+
     @Test void tracesAPlayedPsgRecipeFromSourceAndSavesADeployableCopy() throws Exception {
         Path rips = Files.createDirectory(directory.resolve("psg-rips"));
         var envelope = new Envelope("contour", "Contour", Envelope.PSG_VOLUME, List.of(0, 0x80));

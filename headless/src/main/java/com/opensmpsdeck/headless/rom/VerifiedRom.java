@@ -21,6 +21,16 @@ public final class VerifiedRom {
     }
 
     public static VerifiedRom read(RomGame game, Path path) throws IOException {
+        var rom = read(path);
+        if (rom.revision().game() != game) {
+            var revision = rom.revision();
+            throw new IllegalArgumentException("Expected " + game.id() + " ROM, found " + revision.displayName()
+                    + " (" + revision.game().id() + ", " + rom.bytes.length + " bytes, SHA-1 " + revision.sha1() + ").");
+        }
+        return rom;
+    }
+
+    public static VerifiedRom read(Path path) throws IOException {
         Path realPath = path.toRealPath();
         if (!Files.isRegularFile(realPath)) throw new IOException("Expected a regular ROM file: " + path);
         byte[] bytes;
@@ -39,10 +49,6 @@ public final class VerifiedRom {
         }
 
         RomRevision revision = RomRevision.identify(bytes, size, digest.digest());
-        if (revision.game() != game) {
-            throw new IllegalArgumentException("Expected " + game.id() + " ROM, found " + revision.displayName()
-                    + " (" + revision.game().id() + ", " + size + " bytes, SHA-1 " + revision.sha1() + ").");
-        }
         return new VerifiedRom(realPath, revision, bytes);
     }
 

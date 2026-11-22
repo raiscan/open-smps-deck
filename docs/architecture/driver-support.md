@@ -45,7 +45,7 @@ and supports channel masks and chip-write observers.
 Reconstruction uses this path for patch and articulation probes, level and
 drum balance, lead effects, bend traces, timeline and PSG-tail comparisons,
 and final, vocal phrase and audition WAVs. Studio uses it for playback and reconstruction
-monitoring. The standalone catalogue audition still creates S3K projects.
+monitoring. Catalogue audition uses the driver saved with each variant.
 The S3K PSG cymbal calibration also uses S3K projects because the cymbal
 envelopes and noise setup are specific to that driver. Raw S3K banks and
 native S3K-to-editable conversion retain their existing native reader.

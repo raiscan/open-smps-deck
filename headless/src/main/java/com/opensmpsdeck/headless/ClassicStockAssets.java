@@ -70,8 +70,13 @@ final class ClassicStockAssets implements StockAssets {
         };
     }
 
-    private byte[] envelope(int index) {
-        if (s1) return s1Envelopes[index - 1];
+    DacData dac() { return dac; }
+
+    byte[] envelope(int index) {
+        return s1 ? s1Envelopes[index - 1] : sonic2Envelopes().get(index);
+    }
+
+    Map<Integer, byte[]> sonic2Envelopes() {
         if (s2Envelopes == null) {
             try {
                 s2Envelopes = Sonic2RomEnvelopes.extract(image);
@@ -79,6 +84,6 @@ final class ClassicStockAssets implements StockAssets {
                 throw new StockAssets.Unavailable(error.getMessage(), error);
             }
         }
-        return s2Envelopes.get(index);
+        return s2Envelopes;
     }
 }

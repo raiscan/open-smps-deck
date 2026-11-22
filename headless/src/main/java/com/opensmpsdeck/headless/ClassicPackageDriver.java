@@ -228,7 +228,7 @@ enum ClassicPackageDriver implements PackageDriver {
         return sequencer;
     }
 
-    private DacData dac(CompiledProject project) {
+    DacData dac(CompiledProject project) {
         return S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), profile.dacBaseCycles());
     }
 

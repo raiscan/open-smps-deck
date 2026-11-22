@@ -293,7 +293,8 @@ final class McpTools {
                     (args, progress) -> catalogue(args, false), CATALOGUE,
                     field("query", "string", "Search text").optional(),
                     choice("kind", "Catalogue asset kind", "fm-voice", "psg-volume", "modulation", "dac-sample", "psg-noise").optional(),
-                    field("driver", "string", "Driver filter (S3K)").optional(),
+                    field("driver", "string", "Legacy driver text filter").optional(),
+                    choice("target", "Target driver filter", "s1", "s2", "s3k").optional(),
                     field("role", "string", "Role filter").optional(),
                     field("source", "string", "Source filter").optional(),
                     field("variant", "string", "Variant ID filter").optional(),
@@ -302,6 +303,7 @@ final class McpTools {
             tool("catalog_audition", "Render a catalogue variant to a new WAV inside the work directory.",
                     (args, progress) -> catalogue(args, true), CATALOGUE, WORK, OUTPUT,
                     field("variant", "string", "Catalogue variant or asset ID"),
+                    choice("target", "Target driver (defaults to the variant's driver)", "s1", "s2", "s3k").optional(),
                     field("frames", "integer", "Number of 60 Hz presentations").optional(),
                     field("midi", "integer", "Pitch for a match probe").optional(),
                     field("gateTicks", "integer", "Gate length in ticks for a match probe").optional()),
@@ -368,14 +370,14 @@ final class McpTools {
         var index = McpPaths.input(string(args, "catalogue"));
         var command = new ArrayList<>(List.of("catalog", audition ? "audition" : "search", index.toString()));
         if (!audition) {
-            options(command, args, "query", "kind", "driver", "role", "source", "variant", "offset", "limit");
+            options(command, args, "query", "kind", "driver", "target", "role", "source", "variant", "offset", "limit");
             return McpJson.parse(cli(command)).getAsJsonObject();
         }
         var work = McpPaths.directory(string(args, "workDir"));
         var output = McpPaths.output(work, string(args, "output"));
         command.add(string(args, "variant"));
         command.add(output.toString());
-        options(command, args, "frames", "midi", "gateTicks");
+        options(command, args, "frames", "midi", "gateTicks", "target");
         var result = McpJson.parse(cli(command)).getAsJsonObject();
         result.addProperty("output", output.toString());
         return result;

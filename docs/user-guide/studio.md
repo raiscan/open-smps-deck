@@ -211,13 +211,28 @@ undo, Save and recovery flow; typing alone does not save a draft.
 
 Under **Voices & assets → Catalogue**, choose **Open catalogue…** and select a
 local index. Search or choose an asset kind. **View variant** shows its native
-settings and source occurrences. **Audition** previews it through the same
-chips as the project and uses the shared Stop control. **Add to project**
+settings and source occurrences. **Audition** plays it with the variant's driver and uses the shared Stop
+control. **Add to project**
 is undoable. Added assets are saved with the project. A PSG noise recipe
 adds a linked PSG3 clip after your current arrangement.
 
-Use the headless `catalog scan` command to create an index from a verified
-S3&K image or compatible rips. [Catalogue guide](../architecture/instrument-catalogue.md#first-pass-in-use)
+To build an index for Sonic 1 or Sonic 2, use your own verified REV01 ROM.
+From a private working directory, set `jar` to the path to the headless JAR
+and run the commands for your game.
+
+```sh
+java -jar "$jar" rom set s1 "$s1_rom"
+java -jar "$jar" catalog scan s1-instruments.json --game s1
+java -jar "$jar" rom set s2 "$s2_rom"
+java -jar "$jar" catalog scan s2-instruments.json --game s2
+```
+
+You can also pass `--rom PATH` to scan directly. Open the resulting JSON
+in Studio. Each variant auditions with its own driver. Use the matching
+game when adding catalogue instruments to a project or starting a
+reconstruction. Keep ROM-derived indexes local. The same workflow
+supports a verified locked-on S3&K ROM with `--game s3k`.
+[Catalogue guide](../architecture/instrument-catalogue.md#first-pass-in-use)
 
 ## Samples and the DAC lane
 

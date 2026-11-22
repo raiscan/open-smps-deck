@@ -83,7 +83,8 @@ arrangement. It plays at the target project's tempo. Native bank documents
 can audition the catalogue and use an editable copy for deployment.
 
 The CLI writes versioned JSON to standard output and accepts explicit local
-paths. Scan either source or combine both in a single index.
+paths. Scan rips, repeat `--rom` for several games, or combine both input
+types in a single index.
 
 ```sh
 deck_jar=headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar
@@ -95,15 +96,18 @@ java -jar "$deck_jar" catalog audition instruments.json "$variant_id" audition.w
 java -jar "$deck_jar" catalog apply instruments.json "$variant_id" song.smps.json song-with-asset.smps.json
 ```
 
-Search returns summaries with asset and variant IDs. It also accepts
-`--query`, `--driver`, `--role`, `--source`, `--variant`, and `--offset`.
-Show returns exact Base64 payloads and occurrence records. An asset with
-several variants needs a specific variant ID for audition and apply.
+Search returns summaries with asset IDs, variant IDs and driver IDs. It
+accepts `--target s1|s2|s3k`, `--query`, `--role`, `--source`,
+`--variant`, and `--offset`. The legacy `--driver` text filter still works.
+Show returns exact Base64 payloads and occurrence records. Choose a variant
+ID when an asset has multiple variants for the requested driver.
 Output files use new names. Applying an identical asset reuses the
 project's existing entry.
 
-The first rip reader accepts verified, self-contained `.s3k` banks and Studio
-`.smps.json` or `.smps.zip` sources with explicit bindings. Loose rips with
+The rip reader accepts self-contained `.s3k` banks, Studio projects and
+project packages, and self-contained S1/S2 portable `.smps.zip` banks.
+Classic portable packages are scanned from their bank and asset bindings
+even when they lack editable source. Loose rips with
 missing dependencies and unsupported dialects are listed in scan diagnostics.
 A standalone bank must carry its local voices. Use a bound Studio source for
 external assets. Broad SMPSPlay companion parsing remains a separate adapter.
@@ -123,6 +127,23 @@ across rate and pan and 64 PSG noise recipes. Two scans produced the same
 index bytes. Every variant was rendered through the pinned chips for up to
 24 presentations. The scan retained six unresolved-envelope diagnostics
 and marked the Extra Life cue's request to restore previous music.
+
+Sonic 1 and Sonic 2 scans use verified REV01 images and the pinned loaders.
+They index each song's local FM table plus the shared PSG and DAC tables.
+PSG envelopes retain their native `80` hold terminator. DAC variants preserve
+the loader's decoded PCM and note-specific rate byte, including Sonic 1's
+timpani aliases and Sonic 2's 17 note mappings. Auditions use the native
+rate base of 301 cycles for S1 and 295 for S2. Stock references use the
+original table coordinates and payload hashes.
+
+The v1 index can share exact assets across drivers to avoid duplicating
+payloads. Variants carry a driver ID, as do their occurrences. Older variants
+without a driver field remain S3K and retain their IDs. FM assets use editable
+operator order (4/3/2/1). S2 bank bytes are reordered at ingestion and
+returned to S2 order at export. Reconstruction and reference matching use
+only variants for their target. An identical FM patch in two games is
+available through both games' own variants. This keeps the target's native
+FM carrier rules and avoids cross-game envelope and DAC playback assumptions.
 
 ## DAC acoustic classes
 
@@ -156,7 +177,8 @@ available. Older catalogues can be used as inputs to the derived index.
 
 An agent can rank catalogue variants against a short WAV excerpt from a stem.
 Use one note or one drum hit with its tail. For a tone, supply the MIDI note.
-The matcher renders each eligible tone on the pinned S3&K chips at that note.
+The matcher renders each eligible tone through the selected native driver
+at that note. Use `--target` for S1 or S2 matching.
 DAC and PSG noise candidates keep their recorded rate or noise recipe.
 
 ```sh

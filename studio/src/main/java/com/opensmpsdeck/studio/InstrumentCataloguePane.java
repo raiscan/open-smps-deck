@@ -297,6 +297,8 @@ final class InstrumentCataloguePane extends VBox implements AutoCloseable {
         var variant = match.variant();
         var recipe = variant.recipe();
         var label = new StringBuilder(variant.name()).append(" · ").append(kindName(match.asset().kind()));
+        if (variant.target() != com.opensmpsdeck.project.TargetGame.S3K)
+            label.append(" · ").append(variant.driver().toUpperCase(java.util.Locale.ROOT));
         if (recipe.rate() != null) label.append(" · rate %02X".formatted(recipe.rate()));
         if (recipe.pan() != null) label.append(" · pan %02X".formatted(recipe.pan()));
         if (match.asset().kind() == Kind.PSG_NOISE && !recipe.notes().isEmpty()) {

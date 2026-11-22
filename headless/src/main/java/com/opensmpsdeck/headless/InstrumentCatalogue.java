@@ -3,8 +3,11 @@ package com.opensmpsdeck.headless;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
+import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NoteEvent;
+import com.opensmpsdeck.project.StockRef;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -91,16 +94,22 @@ public final class InstrumentCatalogue {
     }
 
     public record Variant(String id, String assetId, String name, Recipe recipe,
-                          List<String> roles, List<Occurrence> occurrences) {
+                          List<String> roles, List<Occurrence> occurrences, String driver) {
         public Variant {
+            if (driver == null) driver = TargetGame.S3K.id();
+            TargetGame target = TargetGame.parse(driver);
             requireText(assetId, "asset ID");
             requireText(name, "variant name");
             Objects.requireNonNull(recipe, "recipe");
-            if (!variantId(assetId, recipe).equals(id))
+            if (!variantId(assetId, recipe, target).equals(id))
                 throw new IllegalArgumentException("Variant ID does not match its recipe");
             roles = List.copyOf(roles);
             occurrences = List.copyOf(occurrences);
+            if (occurrences.stream().anyMatch(usage -> !target.id().equalsIgnoreCase(usage.driver())))
+                throw new IllegalArgumentException("Occurrence driver differs from its variant driver");
         }
+
+        public TargetGame target() { return TargetGame.parse(driver); }
     }
 
     public record Issue(String source, String reason, String detail) {}
@@ -127,7 +136,14 @@ public final class InstrumentCatalogue {
     private final Map<String, List<Variant>> assetVariants;
     private final List<Match> sortedMatches;
 
+    private final TargetGame scope;
+
     private InstrumentCatalogue(Index source) {
+        this(source, null);
+    }
+
+    private InstrumentCatalogue(Index source, TargetGame scope) {
+        this.scope = scope;
         if (source.formatVersion() != FORMAT_VERSION)
             throw new IllegalArgumentException("Unsupported catalogue version " + source.formatVersion());
         checkRange(source.indexedSongs(), 0, Integer.MAX_VALUE, "Indexed song count");
@@ -186,31 +202,41 @@ public final class InstrumentCatalogue {
         }
     }
 
-    private final Map<String, java.util.Optional<com.opensmpsdeck.project.AssetOrigin>> origins =
+    private record OriginKey(String id, TargetGame target) {}
+
+    private final Map<OriginKey, java.util.Optional<AssetOrigin>> origins =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    com.opensmpsdeck.project.AssetOrigin origin(Asset asset) {
-        return origins.computeIfAbsent(asset.id(), ignored -> java.util.Optional.ofNullable(findOrigin(asset))).orElse(null);
+    AssetOrigin origin(Asset asset) {
+        return origin(asset, scope);
     }
 
-    private com.opensmpsdeck.project.AssetOrigin findOrigin(Asset asset) {
+    AssetOrigin origin(Asset asset, TargetGame target) {
+        return origins.computeIfAbsent(new OriginKey(asset.id(), target),
+                ignored -> java.util.Optional.ofNullable(findOrigin(asset, target))).orElse(null);
+    }
+
+    private AssetOrigin findOrigin(Asset asset, TargetGame target) {
         var choices = assetVariants.getOrDefault(asset.id(), List.of());
         byte[] bytes = asset.bytes();
         String hash = digest(bytes);
         String s2VoiceHash = asset.kind() == Kind.FM_VOICE
                 ? digest(ClassicPackageDriver.S2.voiceBytes(bytes.clone())) : hash;
-        com.opensmpsdeck.project.StockRef best = null;
+        StockRef best = null;
         boolean stock = false;
         for (var variant : choices) {
+            if (target != null && target != variant.target()) continue;
             for (var usage : variant.occurrences()) {
-                String game = usage.driver().toLowerCase(Locale.ROOT);
-                if (!List.of("s1", "s2", "s3k").contains(game) || usage.songId() == null) continue;
-                stock = true;
+                String game = variant.driver();
+                boolean retailSong = usage.songId() != null;
+                if (retailSong) stock = true;
                 if (usage.table() == null || usage.slot() == null) continue;
                 String table = switch (usage.table()) {
-                    case "global-fm", "local-fm", "dac" -> usage.table();
-                    case "psg-envelope" -> "psg";
-                    case "modulation" -> "mod";
+                    case "global-fm", "local-fm" -> retailSong ? usage.table() : null;
+                    case "dac" -> retailSong || variant.target() != TargetGame.S3K ? "dac" : null;
+                    case "psg-envelope" -> retailSong ? "psg" : null;
+                    case "modulation" -> retailSong ? "mod" : null;
+                    case "psg" -> "psg";
                     default -> null;
                 };
                 if (table == null) continue;
@@ -220,12 +246,39 @@ public final class InstrumentCatalogue {
                     if (candidate.kind().equals(asset.kind().name()))
                         best = best == null ? candidate : StockTable.prefer(best, candidate);
                 } catch (IllegalArgumentException invalidLocator) {
-                    // Older or custom catalogues may only identify the source song.
+                    // Older catalogues may only identify the source song.
                 }
             }
         }
-        if (best == null) best = StockTable.matchProjectAsset(asset.kind().name(), bytes);
-        return stock || best != null ? com.opensmpsdeck.project.AssetOrigin.stock(best) : null;
+        if (best == null) {
+            best = target == null || target == TargetGame.S3K ? StockTable.matchProjectAsset(asset.kind().name(), bytes)
+                    : StockTable.match(asset.kind().name(), target == TargetGame.S2 && asset.kind() == Kind.FM_VOICE
+                            ? ClassicPackageDriver.S2.voiceBytes(bytes) : bytes, target.id());
+        }
+        return stock || best != null ? AssetOrigin.stock(best) : null;
+    }
+
+    static InstrumentCatalogue open(Path path, TargetGame target) throws IOException {
+        return open(path).forTarget(target);
+    }
+
+    InstrumentCatalogue forTarget(TargetGame target) {
+        if (scope == target) return this;
+        var filtered = index.variants().stream().filter(variant -> variant.target() == target).toList();
+        // Preserve unbound assets from legacy S3K scans. They are available for
+        // inspection or use as dependencies even when no audition was indexed.
+        if (target == TargetGame.S3K && filtered.size() == index.variants().size()) return this;
+        var selected = new java.util.HashSet<String>();
+        for (var variant : filtered) {
+            selected.add(variant.assetId());
+            var recipe = variant.recipe();
+            if (recipe.volumeEnvelope() != null) selected.add(recipe.volumeEnvelope());
+            if (recipe.modulationEnvelope() != null) selected.add(recipe.modulationEnvelope());
+            for (var command : recipe.commands())
+                if (command.assetId() != null) selected.add(command.assetId());
+        }
+        return new InstrumentCatalogue(new Index(FORMAT_VERSION, indexedSongs(), assets().stream()
+                .filter(asset -> selected.contains(asset.id())).toList(), filtered, issues()), target);
     }
 
     public List<Asset> assets() { return index.assets(); }
@@ -240,10 +293,18 @@ public final class InstrumentCatalogue {
     }
 
     public Match match(String id) {
+        return match(id, null);
+    }
+
+    Match match(String id, TargetGame target) {
         Variant exact = variants.get(id);
         if (exact != null) return new Match(asset(exact.assetId()), exact);
         var choices = assetVariants.get(id);
         if (choices == null) throw new IllegalArgumentException("Unknown catalogue asset or variant " + id);
+        if (target != null && choices.size() > 1) {
+            var preferred = choices.stream().filter(variant -> variant.target() == target).toList();
+            if (!preferred.isEmpty()) choices = preferred;
+        }
         if (choices.size() != 1)
             throw new IllegalArgumentException("Asset has " + choices.size() + " playback variants. Choose a variant ID.");
         return new Match(asset(id), choices.getFirst());
@@ -265,9 +326,7 @@ public final class InstrumentCatalogue {
         Variant variant = row.variant();
         if (query.kind() != null && row.asset().kind() != query.kind()) return false;
         if (!contains(variant.id(), query.variant())) return false;
-        if (!empty(query.driver()) && (variant.occurrences().isEmpty()
-                ? !contains("S3K", query.driver())
-                : variant.occurrences().stream().noneMatch(usage -> contains(usage.driver(), query.driver())))) return false;
+        if (!contains(variant.driver(), query.driver())) return false;
         if (!empty(query.role()) && variant.roles().stream().noneMatch(role -> contains(role, query.role())))
             return false;
         if (!empty(query.source()) && variant.occurrences().stream().noneMatch(o -> matchesSource(o, query.source())))
@@ -291,7 +350,8 @@ public final class InstrumentCatalogue {
     private static boolean empty(String text) { return text == null || text.isBlank(); }
 
     public static final class Builder {
-        private record PendingVariant(String assetId, String name, Recipe recipe, LinkedHashSet<Occurrence> usages) {}
+        private record PendingVariant(String assetId, String name, Recipe recipe, TargetGame target,
+                                      LinkedHashSet<Occurrence> usages) {}
 
         private final Map<String, Asset> assets = new LinkedHashMap<>();
         private final Map<String, PendingVariant> variants = new LinkedHashMap<>();
@@ -305,10 +365,16 @@ public final class InstrumentCatalogue {
         }
 
         public String variant(String assetId, String name, Recipe recipe, Occurrence occurrence) {
+            TargetGame target = occurrence == null ? TargetGame.S3K
+                    : TargetGame.parse(occurrence.driver().toLowerCase(Locale.ROOT));
+            return variant(assetId, name, recipe, target, occurrence);
+        }
+
+        public String variant(String assetId, String name, Recipe recipe, TargetGame target, Occurrence occurrence) {
             if (!assets.containsKey(assetId)) throw new IllegalArgumentException("Unknown asset " + assetId);
-            String id = variantId(assetId, recipe);
+            String id = variantId(assetId, recipe, target);
             var variant = variants.computeIfAbsent(id,
-                    ignored -> new PendingVariant(assetId, name, recipe, new LinkedHashSet<>()));
+                    ignored -> new PendingVariant(assetId, name, recipe, target, new LinkedHashSet<>()));
             if (occurrence != null) variant.usages().add(occurrence);
             return id;
         }
@@ -320,7 +386,7 @@ public final class InstrumentCatalogue {
             var playable = variants.entrySet().stream().map(entry -> {
                 var pending = entry.getValue();
                 return new Variant(entry.getKey(), pending.assetId(), pending.name(), pending.recipe(),
-                        roles(assets.get(pending.assetId())), List.copyOf(pending.usages()));
+                        roles(assets.get(pending.assetId())), List.copyOf(pending.usages()), pending.target().id());
             }).toList();
             return new InstrumentCatalogue(new Index(FORMAT_VERSION, indexedSongs,
                     List.copyOf(assets.values()), playable, List.copyOf(issues)));
@@ -342,8 +408,10 @@ public final class InstrumentCatalogue {
         return kind.name().toLowerCase(Locale.ROOT).replace('_', '-') + "-" + digest(bytes);
     }
 
-    private static String variantId(String assetId, Recipe recipe) {
-        return "variant-" + digest((assetId + "\n" + JSON.toJson(recipe)).getBytes(StandardCharsets.UTF_8));
+    private static String variantId(String assetId, Recipe recipe, TargetGame target) {
+        String identity = assetId + "\n" + JSON.toJson(recipe);
+        if (target != TargetGame.S3K) identity = target.id() + "\n" + identity;
+        return "variant-" + digest(identity.getBytes(StandardCharsets.UTF_8));
     }
 
     static String digest(byte[] bytes) {
