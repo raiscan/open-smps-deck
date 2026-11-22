@@ -471,7 +471,7 @@ removes only the selected proposals. See the
 | `deleteNote` | `noteId` or a point selector. When the score has no match, roles can remove a generated note such as a `lead-audio-added` attack. | `transcribe` |
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
 | `splitNote` | `noteId` or a point selector and `at` strictly inside the gate. Both halves need a project tick. Optional `pitch` retunes the second attack. The source attack is replaced by `edit-<id>-left` and `edit-<id>-right`. | `transcribe` |
-| `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each pitch change needs four project ticks between attacks. The resulting slide is routed to FM. | `transcribe` |
+| `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each generated pitch change needs four project ticks between attacks. With `glide: true`, supply explicit `points` to use the last note’s pitch as the base for the measured curve. The resulting slide is routed to FM. | `transcribe` |
 | `setVelocity` | `noteIds`, or `span` with `part` and optional `pitchMin` and `pitchMax`. Choose either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
 | `setRole` | A selector and `role`. A span, ID list or point list can filter by `fromRole` after earlier edits. Optional `lane` also pins the note. | `roles` |
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
@@ -1021,7 +1021,23 @@ points in source seconds, bend direction or shape, initial delay, and
 confidence. Structure warps the points together with the gate. The describe
 grid marks upward and downward motion with ↗ and ↘.
 
-For an FM1 bend, assembly measures the chip frequency contour to choose
+S3K transcription also tracks backward from a stable landing in the mapped
+stem. This finds upward scoops that begin below the attack window and can
+join short, ascending fragments that follow one continuous ridge. A
+stationary pitch between fragments, a pitch jump, or a drop in energy at
+the boundary keeps separate attacks. The merged gate keeps the first ID and
+uses the landing pitch as its nominal pitch. A scoop can adjust the written
+start with the optional `start` field on a `bend` edit. Curve points use the
+same `[seconds, semitones]` format on `bend` and `mergeNotes`.
+
+High-confidence approaches on the selected lead or a mapped guitar part
+apply automatically and use FM. Other candidates enter `edits.json` as
+`stem-pitch-approach` proposals. Use
+`reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect
+them. Retranscribe to recover approaches from existing work. Accepted and
+rejected decisions carry forward on replay.
+
+For a bend on FM1 or an authored or recovered bend on another FM lane, assembly measures the chip frequency contour to choose
 between a compact F0 ramp and E7 tied pitch steps. A modulated bend uses E7.
 F0 at the attack loads the normal vibrato counters. FA pauses vibrato at the
 first moving pitch step while E7 changes pitch without keying on. When there

@@ -606,6 +606,31 @@ class ReconstructionEditsTest {
         assertEquals(trace, ReconstructionTrace.read(work));
     }
 
+    @Test void routesRecoveredGlidesToFmWithoutAnAuthoredJournal() {
+        var pickup = note("pickup", .10, .18, 57);
+        var landing = note("landing", .18, .55, 60);
+        var bars = List.of(new ReconstructionStructure.Bar("b0", 0, 1, false));
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), bars,
+                new MidiScore(List.of(new MidiScore.Part(0, "Guitar", 27, false)), List.of(), List.of()),
+                Map.of(), List.of(pickup, landing), List.of(), List.of(), null, null);
+        var edit = intent("""
+                {"id":"stem-pitch-approach-landing","op":"mergeNotes","reason":"continuous rise",
+                 "glide":true,"noteIds":["pickup","landing"],"points":[[0.10,-3],[0.18,0]]}
+                """);
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var recovered = new ReconstructionEdits(List.of(edit)).applyScore(score, outcomes);
+        var note = recovered.notes().getFirst();
+        assertEquals(1, recovered.notes().size());
+        assertEquals("pickup", note.id());
+        assertEquals(landing.pitch(), note.pitch());
+        var structure = new ReconstructionStructure.Result(1, bars, List.of(), List.of(), List.of(), recovered.notes());
+        var roles = new ReconstructionRoles.Result(1, 7.5,
+                List.of(new ReconstructionRoles.Decision(note, Role.counter, null, null)), null);
+        roles = new ReconstructionEdits(List.of()).applyRoles(recovered, structure, roles, outcomes, new ArrayList<>());
+        assertEquals(ReconstructionLaneType.FM, roles.lanePins().get(note.id()).laneType());
+        ReconstructionChecks.roles(roles, recovered);
+    }
+
     @Test void spanMergeKeepsTheFirstAttackAndRejectsConflictsAtomically() {
         var notes = List.of(note("first", .10, .22, 60), note("repeat", .25, .32, 60),
                 note("last", .37, .64, 60), note("neighbor", .25, .45, 64),

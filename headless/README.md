@@ -1229,6 +1229,17 @@ field and edit spans accept `{"section":"chorus-1"}`. See the
 [musical sections guide](../docs/architecture/reconstruction-stages.md#musical-sections)
 for payloads, split and merge, and MCP equivalents.
 
+### Recover pitch approaches from mapped stems
+
+On S3K, transcription follows the source pitch backward from a settled
+note. A continuous rise can become an onset scoop or a single bent gate
+across adjacent transcription fragments. Use
+`reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect
+weaker candidates. Rebuild with `reconstruct run --from transcribe WORK_DIR`
+to scan an existing reconstruction. See
+[Stem-backed pitch bends](../docs/architecture/reconstruction-stages.md#stem-backed-pitch-bends)
+for curve and routing details.
+
 ### Recover missing notes from mapped stems
 
 Staged `reconstruct run` and `reconstruct transcribe` measure excess

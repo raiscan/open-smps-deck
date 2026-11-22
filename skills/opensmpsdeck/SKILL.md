@@ -272,6 +272,15 @@ Existing voicing and reruns keep their saved policy. Set
 `voicing.json.lanePolicies` also accepts custom `pads`, `leadEcho`,
 `psgDouble` and `fmDouble` (chorus or echo) rules scoped by `voice`,
 `section` or `span`.
+For a missed upward scoop or a run of apparent semitone fragments, inspect
+the mapped stem with `reconstruct view` and check
+`reconstruct proposals list WORK_DIR --group stem-pitch-approach`. Resume
+from `transcribe` to scan old work or apply an accepted proposal. Separate
+attacks can each have a scoop. Check the stem’s pitch and attack evidence
+before merging them into one note. A `bend` can set `start`, and
+`mergeNotes` with `glide: true` can supply explicit points relative to its
+last note’s pitch.
+
 Per-note layers and copy policies follow rendered bends, including the
 dry note's vibrato. Check the curve fit and cents RMS error in `noteLayers`
 or `lanePolicies[].bendLayers` in the report.

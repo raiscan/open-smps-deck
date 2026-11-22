@@ -221,7 +221,8 @@ public final class ReconstructionStages {
                                 @Nullable String lanePolicyPreset, boolean policyDecisions,
                                 Map<String, Path> audioStems, Map<String, String> stemRoles, @Nullable String drumDetector,
                                 Map<String, String> transcriberFor, @Nullable Path separatorConfig) {}
-    private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates) {}
+    private record Transcription(Score score, List<ReconstructionStemTemplates.Candidate> candidates,
+                                 List<ReconstructionBendRecovery.Candidate> approaches) {}
     private record Request(Path work, Stage from, boolean chain, @Nullable Transcription initial, @Nullable Double harmonyHz,
                            java.util.Set<String> lanes, boolean refitLevels, boolean keepVoicing, @Nullable String variant,
                            boolean overwriteDetached, @Nullable String lanePolicyPreset, boolean policyDecisions) {}
@@ -376,9 +377,12 @@ public final class ReconstructionStages {
                 var transcription = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
                 Score score = transcription.score();
                 if (request.initial != null && capture != null) score = capture.relocateGeneratedStems(work, score);
-                score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
+                var bound = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes);
+                score = ReconstructionBendRecovery.apply(work, score, bound, journal, transcription.approaches(), outcomes);
+                trackEdits |= !outcomes.isEmpty();
                 ReconstructionArtifacts.write(scoreFile, score);
                 journal = ReconstructionStemTemplates.publish(work, journal, transcription.candidates());
+                journal = ReconstructionBendRecovery.publish(work, journal, transcription.approaches(), outcomes);
             } else {
                 var score = readScore(scoreFile);
                 switch (stage) {
@@ -594,8 +598,11 @@ public final class ReconstructionStages {
         }
         List<ReconstructionEdits.Outcome> scoreEdits;
         if (from == Stage.TRANSCRIBE) {
-            score = retranscribe(score).score();
-            score = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes).applyScore(work, score, outcomes);
+            var transcription = retranscribe(score);
+            score = transcription.score();
+            var bound = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes);
+            score = ReconstructionBendRecovery.apply(work, score, bound, ReconstructionEdits.read(work),
+                    transcription.approaches(), outcomes);
             scoreEdits = List.copyOf(outcomes);
         } else {
             scoreEdits = prior.stages().getOrDefault("transcribe", List.of());
@@ -1264,10 +1271,21 @@ public final class ReconstructionStages {
         var voices = new java.util.TreeMap<String, List<ReconstructionFigureVoices.Voice>>();
         var bursts = new ArrayList<ReconstructionRetriggers.Burst>();
         var decisions = new ArrayList<ScoreDecision>();
+        var approaches = new ArrayList<ReconstructionBendRecovery.Candidate>();
         boolean fastRuns = !Boolean.TRUE.equals(inputs.fastRunsOff);
         for (var part : score.source.parts()) {
             String stem = inputs.stems.get(part.id());
-            if (part.drums() || newParts.contains(part.id()) || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
+            if (part.drums() || stem == null || notes.stream().noneMatch(note -> note.part == part.id())) continue;
+            boolean selectedLead = java.util.Objects.equals(lead, part.id());
+            boolean guitar = part.program() >= 24 && part.program() <= 31;
+            if (newParts.contains(part.id())) {
+                if ((selectedLead || guitar) && inputs.targetGame() == TargetGame.S3K) {
+                    var audio = ReconstructionLeadAudio.readMono(Path.of(stem), score.durationUs / 1e6);
+                    approaches.addAll(ReconstructionBendRecovery.detect(audio,
+                            notes.stream().filter(note -> note.part == part.id()).toList(), true));
+                }
+                continue;
+            }
             boolean leadCandidate = inputs.leadPart != null && inputs.leadPart == part.id()
                     || part.program() < 32 || part.program() > 39;
             var anchors = sourceNotes.getOrDefault(part.id(), List.of());
@@ -1306,6 +1324,9 @@ public final class ReconstructionStages {
                     var bend = tracker.detect(note);
                     if (bend != null) notes.set(i, note.withBend(bend));
                 }
+                if (inputs.targetGame() == TargetGame.S3K && (selectedLead || guitar || lead == null))
+                    approaches.addAll(ReconstructionBendRecovery.detect(audio,
+                            notes.stream().filter(note -> note.part == part.id()).toList(), selectedLead || guitar));
             }
         }
         if (!Boolean.TRUE.equals(inputs.stemTemplateNotesOff))
@@ -1317,7 +1338,7 @@ public final class ReconstructionStages {
             var result = score.withInputs(effective, grid.bars(), notes.stream().sorted(NOTE_ORDER).toList(),
                     grid.tempo(), null, grid.beats());
             ReconstructionChecks.score(result);
-            return new Transcription(result, List.copyOf(stemCandidates));
+            return new Transcription(result, List.copyOf(stemCandidates), List.copyOf(approaches));
         }
         Path midi = Path.of(inputs.midi);
         var metadata = MidiScore.gridMetadata(midi);
@@ -1360,7 +1381,7 @@ public final class ReconstructionStages {
                 voices.isEmpty() ? null : voices, bursts.isEmpty() ? null : List.copyOf(bursts),
                 decisions.isEmpty() ? null : List.copyOf(decisions));
         ReconstructionChecks.score(result);
-        return new Transcription(result, List.copyOf(stemCandidates));
+        return new Transcription(result, List.copyOf(stemCandidates), List.copyOf(approaches));
     }
 
     static String midiNoteKey(MidiScore.Note note) {
