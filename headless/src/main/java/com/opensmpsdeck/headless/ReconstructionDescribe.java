@@ -156,14 +156,20 @@ public final class ReconstructionDescribe {
                     double time = timeMap.project(note.sourceTailTime());
                     return time >= row.startSeconds() && time < row.endSeconds();
                 })).toList();
+        var stockVoices = new java.util.TreeMap<>(ReconstructionVoicing.stockReasons(work));
+        if (!filter.isEmpty())
+            stockVoices.keySet().removeIf(id -> id.startsWith("part-") && filter.stream()
+                    .noneMatch(part -> id.equals(ReconstructionVoicePlan.SourceInstrument.id(part))));
         if (json) {
             var gson = new GsonBuilder().disableHtmlEscaping().create();
             var result = gson.toJsonTree(view).getAsJsonObject();
+            if (!stockVoices.isEmpty()) result.add("stockVoiceChoices", gson.toJsonTree(stockVoices));
             if (!findings.isEmpty()) result.add("heldNotes", gson.toJsonTree(findings));
             if (!orphaned.isEmpty()) result.add("orphanedEdits", gson.toJsonTree(orphaned));
             return gson.toJson(result) + "\n";
         }
         var description = new StringBuilder(text(view));
+        stockVoices.forEach((id, reason) -> description.append("\n").append(id).append(" · ").append(reason).append('\n'));
         for (var finding : findings)
             description.append("\n").append(finding.kind()).append(" · ").append(finding.noteId())
                     .append(" · ").append(finding.proposal()).append('\n');
