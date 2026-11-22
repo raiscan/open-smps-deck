@@ -70,6 +70,7 @@ public final class Main {
                     roms.addAll(options.roms());
                     StockTable.build(roms, Path.of(args[3]), PackageDriver.supported(options.options().driver()));
                 }
+                case "rom-patch" -> RomPatchCommand.run(args, out, err);
                 case "list-rom-songs" -> {
                     requireArguments(args, 2);
                     for (var song : S3kRomImporter.listSongs(Path.of(args[1]))) {
@@ -343,6 +344,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs ROM");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar rom-patch PROJECT ROM OUTPUT [--slot ID] [--title-music] [--no-demo] [--loop] [--force]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement PROJECT.json OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
