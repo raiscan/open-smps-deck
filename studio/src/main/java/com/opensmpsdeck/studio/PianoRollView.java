@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.TargetProfile;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -20,13 +21,13 @@ final class PianoRollView extends ViewportCanvas {
     Sequence sequence;
     String selected;
     private final LinkedHashSet<String> additionalNotes = new LinkedHashSet<>();
-    BooleanSupplier copyForAgent = () -> false;
     int ticksPerBeat=24, topPitch=76, bottomPitch=48;
     double scale=9;
     Consumer<String> commandSelection=ignored -> {};
     Consumer<String> selection=ignored -> {};
     Consumer<NoteEvent> edit=ignored -> {};
     Consumer<NoteEvent> addition=ignored -> {};
+    BiConsumer<ContextMenuEvent, NoteEvent> onContext = (event, note) -> {};
     private final boolean readOnly;
     private NoteEvent dragging, ghost;
     private double pressX,pressY;
@@ -36,19 +37,6 @@ final class PianoRollView extends ViewportCanvas {
     PianoRollView(boolean readOnly) {
         this.readOnly=readOnly;
         dimensions(1000,400);
-        if (!readOnly) {
-            canvas.setOnKeyPressed(event -> {
-                if (AgentClipboard.shortcut(event) && copyForAgent.getAsBoolean()) event.consume();
-            });
-            canvas.setOnContextMenuRequested(event -> {
-                var note = hit(event.getX(), event.getY());
-                if (!event.isKeyboardTrigger() && note != null && !selected(note.id())) select(note, false);
-                if (!selectedNotes().isEmpty()) {
-                    AgentClipboard.menu(canvas, event, copyForAgent);
-                    event.consume();
-                }
-            });
-        }
         canvas.setOnMousePressed(e -> {
             if (e.getButton() != MouseButton.PRIMARY) return;
             canvas.requestFocus();
@@ -63,8 +51,8 @@ final class PianoRollView extends ViewportCanvas {
             dragging=note; ghost=note; pressX=e.getX(); pressY=e.getY();
             resizing=note!=null&&e.getX()>=KEYBOARD+(note.tick()+note.duration())*scale-offset-8;
             if(note==null&&e.getClickCount()==2&&sequence!=null&&e.getX()>KEYBOARD&&e.getY()>HEADER) {
-                int tick=Math.max(0,snap((e.getX()-KEYBOARD+offset)/scale));
-                if(tick<sequence.lengthTicks()) addition.accept(new NoteEvent("note-"+UUID.randomUUID(),tick,Math.min(unit(),sequence.lengthTicks()-tick),pitchAt(e.getY())));
+                var noteHere = noteAt(e.getX(), e.getY());
+                if (noteHere != null) addition.accept(noteHere);
             }
             draw();
         });
@@ -75,7 +63,28 @@ final class PianoRollView extends ViewportCanvas {
                     :new NoteEvent(dragging.id(),(int)Math.clamp((long)dragging.tick()+delta,0,Integer.MAX_VALUE),dragging.duration(),Math.clamp(dragging.pitch()-(int)Math.round((e.getY()-pressY)/NOTE_ROW),minPitch(),maxPitch()));
             draw();
         });
-        canvas.setOnMouseReleased(e -> { var change=ghost; dragging=null; ghost=null; if(change!=null) edit.accept(change); draw(); });
+        canvas.setOnMouseReleased(e -> { if (e.getButton() != MouseButton.PRIMARY) return; canvas.requestFocus(); var change=ghost; dragging=null; ghost=null; if(change!=null) edit.accept(change); draw(); });
+        if (!readOnly) canvas.setOnContextMenuRequested(event -> {
+            if (sequence == null) return;
+            if (event.isKeyboardTrigger()) {
+                if (selected != null) onContext.accept(event, null);
+                return;
+            }
+            var point = canvas.sceneToLocal(event.getSceneX(), event.getSceneY());
+            if (point.getX() < KEYBOARD || point.getY() < HEADER) return;
+            canvas.requestFocus();
+            var note = hit(point.getX(), point.getY());
+            if (note == null || !selected(note.id())) {
+                select(note, false);
+            } else if (!note.id().equals(selected)) {
+                additionalNotes.remove(note.id());
+                additionalNotes.add(selected);
+                selected = note.id();
+                selection.accept(selected);
+                draw();
+            }
+            onContext.accept(event, note == null ? noteAt(point.getX(), point.getY()) : null);
+        });
     }
     private void select(NoteEvent note, boolean extend) {
         String id = note == null ? null : note.id();
@@ -185,6 +194,12 @@ final class PianoRollView extends ViewportCanvas {
         scroll.setHvalue(scrollable==0?0:Math.clamp(previousOffset/scrollable,0,1));
         updateViewport();
     }
+    private NoteEvent noteAt(double x, double y) {
+        int tick = Math.max(0, snap((x - KEYBOARD + offset) / scale));
+        return tick >= sequence.lengthTicks() ? null : new NoteEvent("note-" + UUID.randomUUID(), tick,
+                Math.min(unit(), sequence.lengthTicks() - tick), pitchAt(y));
+    }
+
     private int unit(){return Math.max(1,ticksPerBeat/4);}
     private int snap(double tick){return (int)Math.clamp(Math.round(tick/unit())*unit(),Integer.MIN_VALUE,Integer.MAX_VALUE);}
     private int pitchAt(double y){return Math.clamp(topPitch-(int)((y-HEADER)/NOTE_ROW),minPitch(),maxPitch());}

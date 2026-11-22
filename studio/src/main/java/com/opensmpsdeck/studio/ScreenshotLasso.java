@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -47,7 +48,8 @@ final class ScreenshotLasso {
     private byte[] lastPng;
     private String reference;
 
-    ScreenshotLasso(ViewportCanvas view, Function<Rectangle2D, NoteHandoff.Capture> payload, Consumer<String> status) {
+    ScreenshotLasso(ViewportCanvas view, Function<Rectangle2D, NoteHandoff.Capture> payload, Consumer<String> status,
+                    BooleanSupplier panning) {
         this.view = view;
         this.payload = payload;
         this.status = status;
@@ -74,19 +76,20 @@ final class ScreenshotLasso {
             if (!visible) toggle.setSelected(false);
         });
         view.canvas.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (controls.isVisible() && event.getCode() == KeyCode.L && event.isShortcutDown() && event.isShiftDown()) {
-                toggle.setSelected(!toggle.isSelected());
+            if (controls.isVisible() && event.getCode() == KeyCode.L && event.isShortcutDown()
+                    && event.isShiftDown() && !event.isAltDown()) {
+                toggle();
                 event.consume();
             }
         });
         view.canvas.addEventFilter(MouseEvent.MOUSE_MOVED, event -> {
-            if (toggle.isSelected()) {
+            if (toggle.isSelected() && !panning.getAsBoolean()) {
                 view.canvas.setCursor(Cursor.CROSSHAIR);
                 event.consume();
             }
         });
         view.canvas.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
-            if (!toggle.isSelected() || event.getButton() != MouseButton.PRIMARY) return;
+            if (!toggle.isSelected() || panning.getAsBoolean() || event.getButton() != MouseButton.PRIMARY) return;
             view.canvas.requestFocus();
             x = event.getX();
             y = event.getY();
@@ -95,6 +98,10 @@ final class ScreenshotLasso {
         });
         view.canvas.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
             if (!dragging) return;
+            if (panning.getAsBoolean()) {
+                clearGesture();
+                return;
+            }
             var box = bounds(event.getX(), event.getY());
             outline.setX(box.getMinX());
             outline.setY(box.getMinY());
@@ -106,6 +113,10 @@ final class ScreenshotLasso {
         });
         view.canvas.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
             if (!dragging || event.getButton() != MouseButton.PRIMARY) return;
+            if (panning.getAsBoolean()) {
+                clearGesture();
+                return;
+            }
             var box = bounds(event.getX(), event.getY());
             clearGesture();
             if (box.getWidth() >= 2 && box.getHeight() >= 2) capture(box);
@@ -114,6 +125,14 @@ final class ScreenshotLasso {
     }
 
     HBox controls() { return controls; }
+
+    void toggle() {
+        toggle.setSelected(!toggle.isSelected());
+    }
+
+    static void addTo(StudioContextMenu menu, Runnable action) {
+        menu.add("Screenshot lasso", StudioContextMenu.shortcut("Shift+L"), null, action);
+    }
 
     private void clearGesture() {
         dragging = false;

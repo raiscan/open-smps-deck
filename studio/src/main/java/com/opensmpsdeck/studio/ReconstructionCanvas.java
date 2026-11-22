@@ -61,7 +61,6 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private static final Color GRID = Color.web("#a5badd").deriveColor(0, 1, 1, .16);
     private static final String[] PITCHES = {"C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"};
 
-    java.util.function.BooleanSupplier copyForAgent = () -> false;
 
     private record Hit(Overlay note, double left, double top, double width, double height) {
         boolean contains(double x, double y) {
@@ -82,6 +81,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private ReconstructionVoices voices = new ReconstructionVoices(List.of(), Map.of());
     private final Set<String> hiddenVoices = new HashSet<>();
     private String soloVoice;
+    Runnable onVoiceMonitor = () -> {};
+
+    boolean voiceMonitorActive() { return soloVoice != null || !hiddenVoices.isEmpty(); }
+
+    boolean voiceAudible(Overlay note) {
+        var voice = voices.byNote().get(note.id());
+        return (soloVoice == null || voice != null && soloVoice.equals(voice.id()))
+                && (voice == null || voiceVisible(voice.id()));
+    }
     private Set<String> detailedNotes = Set.of();
     private Overlay roleDrag;
 
@@ -97,12 +105,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private Mode mode = Mode.SELECT;
     private ReconstructionInspection.Grid grid = ReconstructionInspection.Grid.BEAT;
     private final ReconstructionTools selection = new ReconstructionTools();
-    record ProposalMark(com.opensmpsdeck.headless.ReconstructionProposals.Marker note, String reason) {}
+    record ProposalMark(com.opensmpsdeck.headless.ReconstructionProposals.Marker note, String reason, String id) {}
     private record ProposalHit(ProposalMark proposal, double left, double top, double width, double height) {
         boolean contains(double x, double y) {
             return x >= left && x <= left + width && y >= top && y <= top + height;
         }
     }
+    record ContextTarget(Overlay note, ProposalMark proposal, double time, Placement insertion) {}
+    BiConsumer<javafx.scene.input.ContextMenuEvent, ContextTarget> onContext = (event, target) -> {};
+
     private List<ProposalMark> proposals = List.of();
     private record SkipHit(double x, double y, String reason) {
         boolean contains(double px, double py) {
@@ -163,6 +174,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private double pixelsPerSecond = 1;
     private double zoom;
     private double playhead;
+
+    double playhead() { return playhead; }
     private Double anchor;
     private ReviewTransport.Range range;
     private Role soloRole;
@@ -236,19 +249,6 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         hover.setShowDelay(javafx.util.Duration.millis(250));
         hover.setShowDuration(javafx.util.Duration.seconds(20));
         Tooltip.install(canvas, hover);
-        canvas.setOnKeyPressed(event -> {
-            if (AgentClipboard.shortcut(event) && copyForAgent.getAsBoolean()) event.consume();
-        });
-        canvas.setOnContextMenuRequested(event -> {
-            if (reviewing) return;
-            var item = hit(event.getX(), event.getY());
-            if (!event.isKeyboardTrigger() && item != null && !selection.contains(item.note()))
-                select(item.note(), item.note().lane());
-            if (!selectedNotes().isEmpty()) {
-                AgentClipboard.menu(canvas, event, copyForAgent);
-                event.consume();
-            }
-        });
         canvas.setOnMousePressed(this::press);
         canvas.setOnMouseDragged(this::drag);
         canvas.setOnDragDetected(event -> {
@@ -261,6 +261,22 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             event.consume();
         });
         canvas.setOnMouseReleased(this::release);
+        canvas.setOnContextMenuRequested(event -> {
+            var point = event.isKeyboardTrigger()
+                    ? selectedNotes().stream().findFirst().flatMap(note -> noteContextPoint(note.id())).orElse(null)
+                    : canvas.sceneToLocal(event.getSceneX(), event.getSceneY());
+            if (point == null) return;
+            double x = point.getX(), y = point.getY();
+            if (x < axis() || (!reviewing && sectionAt(x, y) != null)) return;
+            var hit = hit(x, y);
+            var mark = proposalHits.stream().filter(proposal -> proposal.contains(x, y))
+                    .map(ProposalHit::proposal).findFirst().orElse(null);
+            canvas.requestFocus();
+            if (!reviewing && hit != null && selectedNotes().stream().noneMatch(note -> note.id().equals(hit.note().id())))
+                select(hit.note(), hit.note().lane());
+            onContext.accept(event, new ContextTarget(hit == null ? null : hit.note(), mark, seconds(x),
+                    !rolesView && pitchArea(y) ? insertionAt(seconds(x), pitch(y), false) : null));
+        });
         canvas.setOnScroll(this::wheelZoom);
         ready = true;
     }
@@ -444,15 +460,18 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     boolean voiceVisible(String id) { return !hiddenVoices.contains(id); }
 
     void voiceVisible(String id, boolean visible) {
-        if (visible) hiddenVoices.remove(id);
-        else hiddenVoices.add(id);
+        boolean changed = visible ? hiddenVoices.remove(id) : hiddenVoices.add(id);
+        if (!changed) return;
         pitchFitDirty = true;
         draw();
+        onVoiceMonitor.run();
     }
 
     void soloVoice(String id) {
+        if (java.util.Objects.equals(soloVoice, id)) return;
         soloVoice = id;
         draw();
+        onVoiceMonitor.run();
     }
 
     private void pressRole(MouseEvent event) {
@@ -523,6 +542,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         boundaryPreview = null;
         anchor = null;
         dragged = false;
+    }
+
+    boolean panning() {
+        return spaceHeld || pan != null;
     }
 
     void holdSpace() {
@@ -639,6 +662,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             return;
         }
         if (event.getButton() != MouseButton.PRIMARY) return;
+        // ScrollPane can take focus during the press as part of its mouse handling.
+        canvas.requestFocus();
         if (anchor != null) {
             selectRange(seconds(event.getX()));
             cancelGesture();
@@ -699,10 +724,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         } else if (event.getX() >= axis()) {
             if (inPitch(event)) {
                 if (editing && !reviewing && mode == Mode.INSERT && insertAvailable && !moved) {
-                    double limit = model.duration();
-                    double start = Math.min(placementTime(seconds(event.getX()), event.isAltDown()), Math.max(0, limit - .017));
-                    double end = Math.max(start + Math.min(.017, limit - start), model.nextBeat(start));
-                    onInsert.accept(new Placement(start, end, pitch(event.getY())));
+                    onInsert.accept(insertionAt(seconds(event.getX()), pitch(event.getY()), event.isAltDown()));
                     return;
                 }
                 select(null, null);
@@ -710,6 +732,28 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             onSeek.accept(seconds(event.getX()));
         }
         draw();
+    }
+
+    private boolean pitchArea(double y) {
+        return y >= sectionBottom() && y < pitchBottom();
+    }
+
+    private Placement insertionAt(double time, int pitch, boolean free) {
+        double limit = model.duration();
+        double start = Math.min(placementTime(time, free), Math.max(0, limit - .017));
+        double end = Math.max(start + Math.min(.017, limit - start), model.nextBeat(start));
+        return new Placement(start, end, pitch);
+    }
+
+    List<Overlay> selectableOverlays() {
+        return java.util.stream.Stream.concat(
+                model.overlays().stream().filter(note -> !pendingByNote.containsKey(note.id())), pending.stream())
+                .filter(note -> note.part() >= 0 && selectableDraft(note)).toList();
+    }
+
+    void zoomToFit() {
+        onTimeZoom.accept(0);
+        fitPitch();
     }
 
     private void beginEffect(MouseEvent event, Hit hit) {
@@ -891,7 +935,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private boolean inPitch(MouseEvent event) {
-        return event.getX() >= axis() && event.getY() >= sectionBottom() && event.getY() < pitchBottom();
+        return event.getX() >= axis() && pitchArea(event.getY());
     }
 
     private int pitch(double y) {
@@ -1120,6 +1164,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         onNote.accept(note);
         onLane.accept(laneSelection);
         onSelection.run();
+    }
+
+    java.util.Optional<javafx.geometry.Point2D> noteContextPoint(String id) {
+        double right = canvas.getWidth();
+        return hits.stream().filter(hit -> hit.note().id().equals(id) && hit.left() < right
+                        && hit.left() + hit.width() > axis() && hit.top() < pitchBottom())
+                .findFirst().map(hit -> new javafx.geometry.Point2D(
+                        (Math.max(axis(), hit.left()) + Math.min(right, hit.left() + hit.width())) / 2,
+                        hit.top() + hit.height() / 2));
     }
 
     private Hit hit(double x, double y) {

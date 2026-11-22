@@ -205,6 +205,7 @@ public final class StudioWindow implements AutoCloseable {
         };
         timeline.edit=item->change(p->GroupEdits.replace(p,parentId(),item));
         timeline.placement=this::placeItem;
+        timeline.onContext = this::timelineMenu;
         Slider zoom=new Slider(1,10,3);zoom.setPrefWidth(125);zoom.setId("timeline-zoom");
         timeline.scale=zoom.getValue();zoom.valueProperty().addListener((o,a,b)->{timeline.scale=b.doubleValue();if(document!=null)timeline.setProject(document.project(),selectedClip);});
         makeGroup.setId("group-selection");
@@ -221,11 +222,12 @@ public final class StudioWindow implements AutoCloseable {
         commands.voiceEditor=id->{showAssets();assetKinds.getSelectionModel().select(0);if(id!=null)voices.selectVoice(id);};
         commands.envelopeEditor=id->{showEnvelopes();if(id!=null)envelopes.selectEnvelope(id);};
         piano.selection=id->{selectedNote=id;refreshNoteInspector();};
-        piano.copyForAgent = this::copyNotesForAgent;
         piano.edit=n->change(p->ProjectEdits.updateNote(p,selectedSequence,n));
         piano.addition=n->{if(change(p->ProjectEdits.addNote(p,selectedSequence,n))){selectedNote=n.id();refreshView();}};
         detail.getStyleClass().add("section");linked.getStyleClass().add("muted");
-        var lasso = new ScreenshotLasso(piano, this::lassoNotesForAgent, status::setText).controls();
+        var screenshotLasso = new ScreenshotLasso(piano, this::lassoNotesForAgent, status::setText, () -> false);
+        piano.onContext = (event, insertion) -> pianoMenu(event, insertion, screenshotLasso);
+        var lasso = screenshotLasso.controls();
         lasso.visibleProperty().bind(sourceModes.getSelectionModel().selectedItemProperty().isEqualTo(noteMode)
                 .and(piano.scroll.visibleProperty()));
         lasso.managedProperty().bind(lasso.visibleProperty());
@@ -390,9 +392,7 @@ public final class StudioWindow implements AutoCloseable {
                 new Clip(c.id(),c.sequenceId(),lane.getValue(),Integer.parseInt(start.getText()),Integer.parseInt(length.getText()))));apply.setId("apply-clip");
         boolean dac=source().type().equals("DAC");
         Button editSource=dac?button("Edit DAC hits",this::showNotes):button("Source controls & commands",this::showCommands);
-        inspector.getChildren().addAll(apply,button("Duplicate linked clip",()->{
-            if (c.equals(clip())) placeItem(new Clip("clip-"+UUID.randomUUID(),c.sequenceId(),c.lane(),c.endTick(),c.lengthTicks()));
-        }),button("Delete clip",this::deleteClip),new Separator(),editSource,label("Shared source","section"));
+        inspector.getChildren().addAll(apply,button("Duplicate linked clip", () -> duplicateClip(c)),button("Delete clip",this::deleteClip),new Separator(),editSource,label("Shared source","section"));
         Label help=label(dac?"Editing hits changes every linked clip. Extending a clip repeats its hits. A sample can finish after the clip ends.":"Editing notes changes every linked clip. Extending a clip repeats its notes at their original lengths.","help");help.setWrapText(true);inspector.getChildren().add(help);
     }
     private TextField field(int value,String id){TextField f=new TextField(String.valueOf(value));f.setId(id);f.setPrefColumnCount(5);return f;}
@@ -653,6 +653,48 @@ public final class StudioWindow implements AutoCloseable {
             }
         }catch(IllegalArgumentException e){error(e);}
     }
+    private void duplicateClip(Clip clip) {
+        if (clip.equals(clip())) placeItem(new Clip("clip-" + UUID.randomUUID(), clip.sequenceId(), clip.lane(),
+                clip.endTick(), clip.lengthTicks()));
+    }
+
+    private void timelineMenu(ContextMenuEvent event, double time) {
+        var menu = new StudioContextMenu();
+        if (clip() != null) {
+            var clip = clip();
+            menu.add("Edit notes", this::showNotes).add("Duplicate clip", () -> duplicateClip(clip));
+        } else if (groupPlacement() != null) {
+            menu.add("Edit inside", this::enterGroup)
+                    .add("Ungroup", StudioContextMenu.shortcut("Shift+G"), null, this::ungroupSelected);
+        }
+        if (selectedClip != null)
+            menu.add("Delete", "Delete / Backspace", null, this::deleteClip);
+        if (!makeGroup.isDisable())
+            menu.add("Group into sequence", StudioContextMenu.shortcut("G"), null, this::groupSelected);
+        menu.add("Play from here", () -> { setPosition(time); play(); }).show(timeline.canvas, event);
+    }
+
+    private void pianoMenu(ContextMenuEvent event, NoteEvent insertion, ScreenshotLasso lasso) {
+        var menu = new StudioContextMenu();
+        if (selectedNote != null && source() != null) {
+            menu.add("Delete", "Delete / Backspace", null, this::deleteNote);
+            var note = source().notes().stream().filter(candidate -> candidate.id().equals(selectedNote)).findFirst().orElseThrow();
+            var profile = TargetProfile.of(document.project().target());
+            boolean psg = source().type().equals("PSG");
+            var range = psg ? profile.psg() : profile.fm();
+            menu.submenu("Transpose", List.of(1, -1, 12, -12).stream().map(step -> StudioContextMenu.item(
+                    "%+d".formatted(step), TransposeKeys.label(step),
+                    psg && PianoRollView.usesNoise(source(), note) ? "PSG noise hits have no tonal pitch."
+                            : range.contains(note.pitch() + step) ? null : "Outside the chip pitch range.",
+                    null, () -> piano.transpose(step, profile, status::setText))).toList());
+            AgentClipboard.addTo(menu, this::copyNotesForAgent);
+        } else {
+            if (insertion != null) menu.add("Insert note here", () -> piano.addition.accept(insertion));
+            ScreenshotLasso.addTo(menu, lasso::toggle);
+        }
+        menu.show(piano.canvas, event);
+    }
+
     private void deleteClip(){
         String id=selectedClip;
         if (id!=null && change(p->GroupEdits.remove(p,parentId(),id))) {
@@ -694,7 +736,7 @@ public final class StudioWindow implements AutoCloseable {
             leaveGroup(groupPath.size()-1);e.consume();return;
         }
         Node focusOwner = stage.getScene().getFocusOwner();
-        if (e.getTarget() instanceof TextInputControl || focusOwner instanceof TextInputControl) return;
+        if (StudioContextMenu.editingText(e.getTarget()) || StudioContextMenu.editingText(focusOwner)) return;
         if (!e.isShortcutDown() && e.getCode() == KeyCode.R && !review.mode.isShowing() && !review.references.isShowing()) {
             toggleAB();
             e.consume();
@@ -712,7 +754,8 @@ public final class StudioWindow implements AutoCloseable {
             e.consume();
             return;
         }
-        if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
+        if (piano.canvas.isFocused() && AgentClipboard.shortcut(e) && copyNotesForAgent()) e.consume();
+        else if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.G && document.project().nativeProgram()==null){
             if(e.isShiftDown())ungroupSelected();else groupSelected();

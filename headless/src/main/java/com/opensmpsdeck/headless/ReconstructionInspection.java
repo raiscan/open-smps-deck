@@ -151,6 +151,12 @@ public final class ReconstructionInspection {
         return Math.clamp(gridTime(seconds, grid, false), 0, duration());
     }
 
+    /** Source-time start of the bar containing this position, if a grid is available. */
+    public java.util.OptionalDouble barStart(double seconds) {
+        return bars.stream().filter(bar -> bar.start() <= seconds && seconds < bar.end())
+                .mapToDouble(ReconstructionStructure.Bar::start).findFirst();
+    }
+
     public double nextBeat(double seconds) {
         return Math.clamp(gridTime(seconds, Grid.BEAT, true), 0, duration());
     }

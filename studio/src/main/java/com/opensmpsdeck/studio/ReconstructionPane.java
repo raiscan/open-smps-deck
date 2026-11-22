@@ -14,7 +14,6 @@ import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.Slider;
-import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
@@ -142,9 +141,11 @@ final class ReconstructionPane implements AutoCloseable {
                 position -> listen.cuePreview(position), openProject);
         listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition, audioLines);
         editor.liveTransport(listen);
+        editor.playFrom = listen::playFrom;
         view.onNote = editor::show;
-        view.copyForAgent = editor::copyForAgent;
-        var lasso = new ScreenshotLasso(view, editor::lasso, status::setText).controls();
+        var screenshotLasso = new ScreenshotLasso(view, editor::lasso, status::setText, view::panning);
+        editor.screenshotLasso = screenshotLasso::toggle;
+        var lasso = screenshotLasso.controls();
         lasso.managedProperty().bind(lasso.visibleProperty());
         editor.onSelectionChanged = listen::selectionChanged;
         editor.onVoicesChanged = listen::refreshTargets;
@@ -229,8 +230,11 @@ final class ReconstructionPane implements AutoCloseable {
         };
 
         stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (stage.getScene().getFocusOwner() instanceof TextInputControl || event.isAltDown()) return;
-            if (editor.key(event) || listen.key(event)) event.consume();
+            var focus = stage.getScene().getFocusOwner();
+            if (StudioContextMenu.editingText(focus) || StudioContextMenu.editingText(event.getTarget()) || event.isAltDown()) return;
+            boolean editorFocused = workspace.isVisible() && (StudioContextMenu.within(focus, workspace)
+                    || StudioContextMenu.within(focus, tools));
+            if (editor.key(event, editorFocused) || listen.key(event)) event.consume();
         });
         listen.initialize();
         loadBends(model);

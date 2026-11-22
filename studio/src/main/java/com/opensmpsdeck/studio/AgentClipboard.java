@@ -1,15 +1,10 @@
 package com.opensmpsdeck.studio;
 
-import javafx.scene.Node;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.MenuItem;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 final class AgentClipboard {
@@ -27,9 +22,7 @@ final class AgentClipboard {
         return true;
     }
 
-    static void menu(Node anchor, ContextMenuEvent event, BooleanSupplier action) {
-        var copy = new MenuItem("Copy for agent");
-        copy.setOnAction(ignored -> action.getAsBoolean());
-        new ContextMenu(copy).show(anchor, event.getScreenX(), event.getScreenY());
+    static void addTo(StudioContextMenu menu, Runnable action) {
+        menu.add("Copy for agent", StudioContextMenu.shortcut("C"), null, action);
     }
 }
