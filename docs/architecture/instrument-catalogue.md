@@ -138,6 +138,15 @@ signal to measure is unclassified. These rules estimate suitability for
 drum fitting and can group synthetic effects with speech-like sounds.
 Played, recognized S3K slots provide separate evidence of drum usage.
 
+Speech-like profiles require at least 100 ms of active audio, fundamental
+frequency variation, and movement in the voiced spectral envelope. Short,
+bright transients can qualify as noise-like even when they contain a ringing
+mode. The derived index applies listening curation to DAC slots A5, A9, AA,
+and BE from the verified locked-on S3K revision. It reports their effective
+class as `SPEECH_LIKE`, sets `excludeFromDrumFit`, and records
+`curationSource` as `user listening 2026-11-22`. Per-rate profiles retain the
+measured acoustic classifications.
+
 To exclude a sound from automatic reconstruction, set the optional
 `excludeFromDrumFit` boolean to `true` on its DAC asset in the catalogue's
 `assets` array. The asset ID, native recipes, and manual selection remain
