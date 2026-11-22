@@ -85,9 +85,9 @@ class McpServerTest {
         assertEquals(2, old.size());
         assertEquals("2025-06-18", old.getFirst().getAsJsonObject("result").get("protocolVersion").getAsString());
         var tools = old.getLast().getAsJsonObject("result").getAsJsonArray("tools");
-        assertEquals(36, tools.size());
+        assertEquals(37, tools.size());
         var names = tools.asList().stream().map(tool -> tool.getAsJsonObject().get("name").getAsString()).toList();
-        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_vocal_review", "reconstruct_vocal_render", "reconstruct_trace", "reconstruct_trace_diff",
+        assertTrue(names.containsAll(List.of("reconstruct_describe", "reconstruct_vocal_review", "reconstruct_vocal_render", "reconstruct_part_render", "reconstruct_trace", "reconstruct_trace_diff",
                 "reconstruct_edit", "reconstruct_voices", "reconstruct_sections", "reconstruct_plan_template", "reconstruct_view",
                 "transcribers_list", "separators_list", "separate", "project_export", "reconstruct_rerun", "package_validate", "package_inspect",
                 "rom_list", "rom_set", "rom_patch")));

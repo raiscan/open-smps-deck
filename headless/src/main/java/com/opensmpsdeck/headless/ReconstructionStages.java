@@ -317,6 +317,10 @@ public final class ReconstructionStages {
         summarizeEdits(work, err);
     }
 
+    public static com.google.gson.JsonObject renderPart(Path work, int part, Path output) throws IOException {
+        return ReconstructionCli.renderPart(work, part, output);
+    }
+
     public static List<String> packageWarnings(Path work) throws IOException {
         var project = com.opensmpsdeck.project.ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         return ProjectProvenance.detect(project).warnings();
@@ -358,6 +362,10 @@ public final class ReconstructionStages {
         Path voicingFile = work.resolve("voicing.json");
         var previousAllocation = request.chain && request.from.ordinal() <= Stage.ALLOCATE.ordinal()
                 ? previousAllocation(previousWork.resolve("allocation.json"), out) : null;
+        Path oldVoicingFile = previousWork.resolve("voicing.json");
+        boolean fitOrAllocate = request.from == Stage.ALLOCATE || request.from == Stage.VOICE
+                || request.chain && request.from.ordinal() < Stage.ALLOCATE.ordinal();
+        var arrangement = fitOrAllocate ? arrangement(oldVoicingFile) : null;
         var journal = ReconstructionEdits.read(work);
         var edits = journal.accepted();
         var previousEdits = ReconstructionEdits.Journal.read(work);
@@ -427,12 +435,14 @@ public final class ReconstructionStages {
                         var salience = chordReduction ? ReconstructionStemParts.salience(score, roles) : Map.<String, Double>of();
                         var chords = ReconstructionChords.select(edits.bindSections(work, score, null, stage, outcomes),
                                 score, roles, laneTypes, outcomes);
+                        var rules = arrangement == null ? ReconstructionArrangement.Allocation.NONE
+                                : arrangement.resolve(score, roles);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                                 frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience,
-                                chordReduction, score.profile());
+                                chordReduction, score.profile(), rules);
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
                                 score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
-                                chordReduction, score.profile());
+                                chordReduction, score.profile(), rules);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -444,7 +454,6 @@ public final class ReconstructionStages {
                                 && !request.refitLevels && !request.keepVoicing && Files.exists(voicingFile)) break;
                         var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
                         ReconstructionChecks.allocation(allocation, score);
-                        Path oldVoicingFile = previousWork.resolve("voicing.json");
                         var previous = Files.notExists(oldVoicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
                                 : ReconstructionArtifacts.read(oldVoicingFile, ReconstructionVoicing.Result.class);
                         java.util.function.Consumer<String> report = change -> {
@@ -462,7 +471,7 @@ public final class ReconstructionStages {
                             var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
                             fitted = fitted.withAssignments(voicePlan.assignments(allocation, roles.lanePins()));
                         }
-                        ReconstructionArtifacts.write(voicingFile, fitted);
+                        ReconstructionArtifacts.write(voicingFile, fitted.withArrangement(arrangement));
                         if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
                         if (fitted.leadProminenceWarning() != null) out.println("Warning: " + fitted.leadProminenceWarning());
                         if (previous != null)
@@ -664,16 +673,23 @@ public final class ReconstructionStages {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
             var salience = chordReduction ? ReconstructionStemParts.salience(score, roles) : Map.<String, Double>of();
+            var arrangement = arrangement(work.resolve("voicing.json"));
+            var rules = arrangement == null ? ReconstructionArrangement.Allocation.NONE : arrangement.resolve(score, roles);
             var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                     ReconstructionTimeMap.of(score).ticks(),
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience,
-                                chordReduction, score.profile());
+                    chordReduction, score.profile(), rules);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
             if (hasLayers) ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes, true, roles);
             else if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
         }
+    }
+
+    static ReconstructionArrangement.Configuration arrangement(Path voicing) throws IOException {
+        return Files.isRegularFile(voicing)
+                ? ReconstructionArtifacts.read(voicing, ReconstructionVoicing.Result.class).arrangement() : null;
     }
 
     public static void writeArtifact(Path file, JsonElement value) throws IOException {
@@ -699,6 +715,7 @@ public final class ReconstructionStages {
                             ReconstructionAllocation.Result.class);
                     ReconstructionChecks.allocation(allocation, score);
                     var voicing = ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value);
+                    if (voicing.arrangement() != null) voicing.arrangement().validate(score);
                     ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue), score.inputs.targetGame()),
                             ReconstructionTimeMap.of(score));
                     if (voicing.lanePolicies() != null && !voicing.lanePolicies().rules().isEmpty())
@@ -834,7 +851,7 @@ public final class ReconstructionStages {
             source = new MidiScore(parts, source.notes(), source.warnings());
         }
         var external = ExternalTranscribers.collect(source, stems, transcriber, config, transcriberFor, audioOnly,
-                roles, device, extra.imports, capture);
+                roles, device, extra.imports, capture, audioOnly ? audio.provenance().stems() : Map.of());
         for (int part : newParts) {
             var result = external.get(part);
             var e = result.provenance();
@@ -1213,6 +1230,9 @@ public final class ReconstructionStages {
                             continue;
                         }
                     }
+                } else if (imported.provenance().metadata().containsKey(ReconstructionMonophonicStem.KEY)) {
+                    joined = ReconstructionMonophonicStem.join(part, imported, ReconstructionLeadAudio.Track.read(stemPath, limit),
+                            spectrum, limit, reductions);
                 } else {
                     candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
                     joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);

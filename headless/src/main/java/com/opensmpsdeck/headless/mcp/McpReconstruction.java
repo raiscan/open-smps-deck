@@ -322,6 +322,14 @@ final class McpReconstruction {
                 McpPaths.output(work, string(args, "output")));
     }
 
+    static JsonObject partRender(JsonObject args) throws IOException {
+        Path work = vocalWork(args);
+        for (String file : List.of("arrangement.smps.json", "report.json", "voicing.json"))
+            McpPaths.managed(work, file);
+        return ReconstructionStages.renderPart(work, args.get("part").getAsInt(),
+                McpPaths.output(work, string(args, "output")));
+    }
+
     private static Path vocalWork(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : List.of("score.json", "structure.json", "allocation.json", ReconstructionSections.FILE,

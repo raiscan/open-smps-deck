@@ -1208,6 +1208,119 @@ For `reconstruct_import`, put those options and `audioOnly` at the top level
 and use file-based `stemRoles`. The MCP server reads its own local configuration. Its `runRequest` can be passed to
 `reconstruct_run` once a catalogue is supplied.
 
+## Arrange for cleanliness
+
+Save the rules you want under `arrangement` in the work directory's
+`voicing.json`. Use part IDs from `reconstruct describe WORK_DIR`. MCP
+`artifact_read` can fetch the current voicing. Add the object below as its
+`arrangement` member and submit the whole result through `artifact_write`
+with `artifact: "voicing"`. The rules persist through voice refits,
+staged rebuilds and manifest replays. Omit any control you do not use.
+
+```json
+{
+  "partChips": [{"part": 3, "chip": "FM", "lanes": ["FM3", "FM4", "FM5"]}],
+  "polyphony": [{"part": 3, "maxVoices": 3, "span": [8, 24]}],
+  "bassHarmonics": [{"part": 3, "bassPart": 1, "intervals": [12, 19, 24],
+                    "pitchTolerance": 0, "minOverlap": 0.6, "minLevelDb": 6}],
+  "hats": "all",
+  "drumDynamics": {"part": 0, "levels": true, "dropBelowDb": -15},
+  "sectionFit": [{"part": 3, "maxJumpDb": 3}]
+}
+```
+
+- **Part chip.** Choose `FM` or `PSG`, optionally with a subset of its tonal
+  lanes and a source-time `span`. The last matching chip rule applies at each
+  attack. An incompatible pitch or conflicting explicit lane/voice assignment
+  is reported as a dropped note. Explicit layers are separate from dry placement.
+- **Polyphony.** Cap simultaneous source gates at hardware tick resolution.
+  The cap counts held notes as well as new attacks. At one voice it preserves
+  the top note. At two or more it preserves top and bottom while preferring
+  stronger, longer inner notes. It drops whole notes, including a sustained
+  note crossing the start of an optional span if it conflicts there.
+- **Bass partials.** `bassPart` defaults to `part`. Choose another part ID
+  to use a separate bass line. Defaults are intervals 12, 19 and 24,
+  exact semitone alignment, and 60% overlap of the candidate's gate.
+  `pitchTolerance: 1` allows a one-semitone miss. When both parts have aligned
+  stems, compare fundamental levels in the overlap (`minLevelDb`, default 6).
+  Otherwise compare velocities (`minVelocityDelta`, default 10).
+- **Hats.** `all` sends GM 42, 44 and 46 to PSG3 noise. `overflow` sends
+  only hats rejected by simultaneous DAC hits or protected DAC tails.
+  PSG3 collisions with explicit placements or other simultaneous hats can
+  still drop a hit. These modes require PSG to be enabled.
+- **Drum dynamics.** Map an isolated drum stem and choose its part, optionally
+  restricting attack times with `span`. Attack band RMS is measured relative
+  to the median for the drum class in the selected scope. `dropBelowDb`
+  deletes hits below that relative level. `levels: true` adjusts kept DAC
+  and PSG hits in 2 dB increments between −10 and +2 dB relative to the
+  existing class level. A DAC `drumGainOverrides` entry takes precedence.
+  S1/S2 stock DAC samples retain their stock levels.
+- **Section fit.** Map a stem for each listed tonal part. Assembly probes the
+  built part across its lanes, including layers, and measures level error over
+  active stem frames within effective sections. It limits fitted adjustments
+  to ±12 dB and limits the change between sections to `maxJumpDb`. Each new
+  attack takes the gain for its section. Unmeasurable sections carry the
+  previous adjustment (zero if there is none). Consult `report.json.sectionGains`
+  for measured and applied dB values, and `drumHitGains` for hit multipliers.
+
+Spans are half-open `[start, end)` in source seconds. Rebuild with
+`reconstruct run --from allocate WORK_DIR` after changing allocation controls
+or the drum drop threshold. Use `reconstruct assemble WORK_DIR` for
+section fit or level-only changes. The MCP equivalents are `reconstruct_run`
+with `from: "allocate"` and `reconstruct_stage` with `stage: "assemble"`.
+Inspect `reconstruct trace WORK_DIR --part ID --json` and the report's
+`reductions` for dropped IDs, reasons and allocation blockers.
+
+For an aligned solo of a built part, run
+`reconstruct part-render WORK_DIR --part ID OUT.wav` or use
+`reconstruct_part_render` with `workDir`, `part` and `output`.
+The WAV plays from zero on the project clock, including PSG spills and
+layers on any lane. Its JSON identifies the lanes and the mapped stem
+if available. Use the saved time map to compare project time with source
+time if steady tempo is active.
+
+For a vocal transcribed at another register, set `vocalLead.registerShift`
+in `transcribers.json` on the fresh run. Review uses the saved semitone
+shift, including values such as +24. If you transpose already-transcribed
+notes through edits, set `arrangement.vocalRegisterShift` in `voicing.json`
+to tell review their new register.
+
+For a non-vocal monophonic stem, add a rule by stem label in
+`transcribers.json` and use the usual audio-only CLI or MCP run/import:
+
+```json
+"monophonicStems": {
+  "guitar": {"adapter": "rmvpe", "span": [8, 24], "registerShift": 12}
+}
+```
+
+Use a configured F0 adapter that emits notes and a `f0Cents10ms` sidecar
+such as the RMVPE syllable adapter. The adapter receives the `vocals` prompt
+and runs against the aligned stem. The arrangement part retains its own
+role. Outside the optional span the normal polyphonic adapter still
+supplies notes. Omit the span to use F0 for the entire stem. The default
+register shift is zero. The run captures the transcriptions for replay.
+Use the role plan to place a solo span on the lead lane when needed.
+
+### Shortlist sustained FM patches
+
+Combine role and held-note filters before auditioning. FM role hints
+`lead`, `bass` and `backing` use observed playback on FM1, FM2 and FM3–5
+respectively. They supplement existing catalogue tags and work with
+existing indices. For example:
+
+```sh
+java -jar "$CLI" catalog search catalogue.json --kind fm-voice --role lead \
+  --min-centroid-hz 500 --max-centroid-hz 2600 --max-decay-db 4
+```
+
+The MCP `catalog_search` equivalents are `role`, `minCentroidHz`,
+`maxCentroidHz` and `maxDecayDb`. With any acoustic filter, search probes
+raw FM voices at A4 for 0.8 seconds and returns `heldNote.centroidHz`
+and `heldNote.decayDb`. Decay is the early RMS level minus the late
+held RMS level in dB, so smaller values favor sustain. The centroid is
+measured on the held portion of the note. Filtering happens before pagination.
+
 ## Source voices
 
 Use `reconstruct voices WORK_DIR` to list identified instruments, or append

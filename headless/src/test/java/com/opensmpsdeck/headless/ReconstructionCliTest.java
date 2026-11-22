@@ -547,6 +547,15 @@ class ReconstructionCliTest {
             assertEquals("FM5", report.getAsJsonArray("effectCopyLanes").get(0).getAsString());
             assertEquals(1, report.get("echoNotes").getAsInt());
         }
+        Path solo = work.resolve("part.wav");
+        var part = ReconstructionCli.renderPart(work, 0, solo);
+        var soloLanes = part.getAsJsonArray("lanes").asList().stream()
+                .map(com.google.gson.JsonElement::getAsString).toList();
+        var builtLanes = ProjectFiles.load(work.resolve("arrangement.smps.json")).project().clips().stream()
+                .map(com.opensmpsdeck.project.Clip::lane).distinct().toList();
+        assertTrue(soloLanes.containsAll(List.of("FM1", "FM5")));
+        assertEquals(builtLanes, soloLanes);
+        assertEquals(-1, Files.mismatch(solo, work.resolve("render.wav")));
     }
 
     @Test void scopedVoicingRestoresInsideAHeldNoteAndSurvivesRefit() throws Exception {

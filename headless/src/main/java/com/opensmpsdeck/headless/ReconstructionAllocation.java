@@ -140,6 +140,8 @@ final class ReconstructionAllocation {
     private final java.util.Set<String> fmChordAnchors = new java.util.HashSet<>();
     private final Map<String, String> continuations = new HashMap<>();
     private final java.util.PriorityQueue<Attack> pending;
+    private Map<String, ReconstructionArrangement.PartChip> partPins = Map.of();
+    private ReconstructionArrangement.Hats hats;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
     private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
@@ -242,6 +244,19 @@ final class ReconstructionAllocation {
                                        Map<String, ReconstructionChords.Group> chords,
                                        List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience, boolean chordReduction,
                                        TargetProfile profile) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels,
+                voiceTypes, chords, outcomes, salience, chordReduction, profile, ReconstructionArrangement.Allocation.NONE);
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                                       Map<String, ReconstructionLaneType> voiceTypes,
+                                       Map<String, ReconstructionChords.Group> chords,
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience,
+                                       boolean chordReduction, TargetProfile profile,
+                                       ReconstructionArrangement.Allocation arrangement) {
+        var usableChords = usableChords(chords, arrangement, outcomes);
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -250,6 +265,9 @@ final class ReconstructionAllocation {
             boolean drum = decision.role() == Role.drums;
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
             var voiceType = voiceTypes.get(note.id());
+            var partPin = arrangement.pins().get(note.id());
+            if (pin == null && partPin != null)
+                pin = new ReconstructionEdits.Pin(null, "arrangement:part-chip", Integer.MAX_VALUE, partPin.chip());
             if (pin == null && voiceType != null)
                 pin = new ReconstructionEdits.Pin(null, VOICE_ASSIGNMENT, Integer.MAX_VALUE, voiceType);
             boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part()))
@@ -264,12 +282,12 @@ final class ReconstructionAllocation {
         var anchors = new HashMap<ReconstructionChords.Group, String>();
         var anchorChords = new TreeMap<String, ReconstructionChords.Group>();
         for (var attack : attacks) {
-            var chord = chords.get(attack.note().id());
+            var chord = usableChords.get(attack.note().id());
             if (chord != null && anchors.putIfAbsent(chord, attack.note().id()) == null)
                 anchorChords.put(attack.note().id(), chord);
         }
-        var scheduled = chords.isEmpty() ? attacks : attacks.stream().filter(attack -> {
-            var chord = chords.get(attack.note().id());
+        var scheduled = usableChords.isEmpty() ? attacks : attacks.stream().filter(attack -> {
+            var chord = usableChords.get(attack.note().id());
             return chord == null || anchorChords.containsKey(attack.note().id());
         }).map(attack -> {
             var chord = anchorChords.get(attack.note().id());
@@ -278,6 +296,8 @@ final class ReconstructionAllocation {
         var tones = chordReduction ? ReconstructionChordReduction.classify(attacks.stream().filter(a -> a.role() != Role.drums && a.role() != Role.drop)
                 .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList()) : Map.<String, ReconstructionChordReduction.Tone>of();
         var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, profile);
+        allocator.partPins = arrangement.pins();
+        allocator.hats = arrangement.hats();
         var louderParts = new java.util.HashSet<Integer>();
         cymbalLevels.keySet().forEach(key -> louderParts.add(key.partId()));
         cymbalLevels.forEach((key, level) -> {
@@ -287,6 +307,22 @@ final class ReconstructionAllocation {
         // Resolve the DAC first so tonal spill can avoid upcoming noise hits.
         // Both passes retain the same attack ordering within their priority tiers.
         for (var attack : attacks) {
+            var authoredDrop = arrangement.drops().get(attack.note().id());
+            if (authoredDrop != null) {
+                allocator.drop(attack, authoredDrop.reason(), authoredDrop.blockers());
+                continue;
+            }
+            var partPin = arrangement.pins().get(attack.note().id());
+            if (partPin != null) {
+                var pin = attack.pin;
+                var issue = ReconstructionEdits.laneTypeIssue(attack.note(), false, partPin.chip(), fmOnly, profile);
+                if (issue == null && (pin.laneType() != null ? pin.laneType() != partPin.chip()
+                        : !partPin.allowed().contains(pin.lane()))) issue = "conflicts with " + pin.tag() + " " + pin.target();
+                if (issue != null) {
+                    allocator.drop(attack, "arrangement:part-chip " + issue);
+                    continue;
+                }
+            }
             var voiceType = voiceTypes.get(attack.note().id());
             if (attack.role() != Role.drop && voiceType != null) {
                 var issue = ReconstructionEdits.laneTypeIssue(attack.note(), attack.role() == Role.drums, voiceType, fmOnly, profile);
@@ -320,7 +356,7 @@ final class ReconstructionAllocation {
         allocator.pending.addAll(remaining);
         while (!allocator.pending.isEmpty()) {
             var attack = allocator.pending.remove();
-            var chord = chords.get(attack.note().id());
+            var chord = usableChords.get(attack.note().id());
             if (chord == null) {
                 if (!hasStems || !allocator.dropCoveredUnison(attack)) allocator.place(attack);
                 continue;
@@ -381,6 +417,26 @@ final class ReconstructionAllocation {
                 ReconstructionMelodyGapFill.Stats.of(roles.notes()),
                 hasStems ? Fm1Gaps.of(placed, roles.notes(), frames, profile.clock()) : null, runs.isEmpty() ? null : List.copyOf(runs),
                 placedChords.isEmpty() ? null : placedChords);
+    }
+
+    private static Map<String, ReconstructionChords.Group> usableChords(
+            Map<String, ReconstructionChords.Group> chords, ReconstructionArrangement.Allocation arrangement,
+            List<ReconstructionEdits.Outcome> outcomes) {
+        if (chords.isEmpty() || arrangement.drops().isEmpty() && arrangement.pins().isEmpty()) return chords;
+        var usable = new HashMap<>(chords);
+        var groups = chords.entrySet().stream().sorted(Map.Entry.comparingByKey()).map(Map.Entry::getValue).distinct().toList();
+        for (var group : groups) {
+            var ids = group.members().stream().map(ReconstructionChords.Member::id).toList();
+            var chip = arrangement.pins().get(ids.getFirst());
+            boolean mixed = ids.stream().anyMatch(id -> !java.util.Objects.equals(chip, arrangement.pins().get(id)));
+            if (ids.stream().noneMatch(arrangement.drops()::containsKey) && !mixed
+                    && (chip == null || chip.chip() == ReconstructionLaneType.FM || !group.fmOnly())) continue;
+            ids.forEach(usable::remove);
+            if (outcomes != null) outcomes.add(new ReconstructionEdits.Outcome(group.editId(),
+                    group.arpeggio() ? ReconstructionEdits.Kind.arpeggio : ReconstructionEdits.Kind.chordInstrument,
+                    ReconstructionEdits.Status.conflict, ids, null, "chord conflicts with scoped arrangement controls", null));
+        }
+        return usable;
     }
 
     private static Comparator<Attack> attackOrder(TargetProfile profile) {
@@ -503,7 +559,8 @@ final class ReconstructionAllocation {
             lane = shorten(primary, attack);
             if (lane == null) lane = shorten(secondary, attack);
         }
-        if (lane == null && !reservePsg3 && secondary.size() == 2 && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
+        if (lane == null && !reservePsg3 && hats == null && secondary.size() == 2
+                && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
             lane = sustainedSpill(attack);
         if (lane == null) {
             drop(attack, switch (attack.role()) {
@@ -548,7 +605,13 @@ final class ReconstructionAllocation {
                 && S3kReconstruction.drumPriority(last.note.pitch()) > S3kReconstruction.drumPriority(pitch)) {
             blocked = "protect-dac-tail";
         }
-        if (!fmOnly && ReconstructionCymbals.eligible(pitch)) {
+        if (!fmOnly && hats != null && (ReconstructionCymbals.closedHat(pitch) || pitch == 46)) {
+            if (hats == ReconstructionArrangement.Hats.all || blocked != null) {
+                var routed = attack.onNoise(ReconstructionCymbals.HAT_ROUTE, frames);
+                cymbals.merge(routed.start, routed.end, Math::max);
+                return routed;
+            }
+        } else if (!fmOnly && ReconstructionCymbals.eligible(pitch)) {
             Double level = cymbalLevels.get(ReconstructionCymbals.key(attack.note()));
             boolean quiet = ReconstructionCymbals.quiet(level);
             // Preserve the existing DAC strategy when the stem calls for a
@@ -607,7 +670,11 @@ final class ReconstructionAllocation {
 
     private void placeByType(Attack attack) {
         var type = attack.pin.laneType();
-        var lanes = reservePsg3 && type == ReconstructionLaneType.PSG ? PSG.subList(0, 2) : type.lanes();
+        var partPin = partPins.get(attack.note().id());
+        var lanes = partPin == null ? type.lanes() : partPin.allowed();
+        if (type == ReconstructionLaneType.PSG && (reservePsg3
+                || partPin != null && overlapsCymbal(attack.start, attack.end)))
+            lanes = lanes.stream().filter(lane -> !lane.equals("PSG3")).toList();
         String previous = previousLanes.get(attack.note().id());
         String lane = null;
         if (attack.role() == Role.melody && type == ReconstructionLaneType.FM
@@ -618,7 +685,8 @@ final class ReconstructionAllocation {
             lane = free(melody, attack);
             if (lane == null) lane = shorten(melody, attack);
         }
-        if (lane == null && previous != null && lanes.contains(previous) && available(previous, attack)) lane = previous;
+        if (lane == null && partPin == null && previous != null && lanes.contains(previous) && available(previous, attack))
+            lane = previous;
         if (lane == null) {
             var preferred = expectedLanes(attack.role(), attack.noise).stream().filter(lanes::contains).toList();
             lane = free(preferred, attack);
@@ -650,7 +718,7 @@ final class ReconstructionAllocation {
     private List<String> spillLanes(Attack attack) {
         if (expectedLanes(attack.role(), attack.noise) != INNER_FM || fmOnly || attack.fmRequired
                 || attack.note().pitch() < profile.psg().low() || attack.note().run() != null) return List.of();
-        return reservePsg3 || attack.role() == Role.harmony && overlapsCymbal(attack.start, attack.end)
+        return reservePsg3 || (hats != null || attack.role() == Role.harmony) && overlapsCymbal(attack.start, attack.end)
                 ? PSG.subList(0, 2) : PSG;
     }
 
@@ -689,7 +757,8 @@ final class ReconstructionAllocation {
             if (prior == null || prior.pinnedLane != null || prior.note.pitch() < profile.psg().low() || prior.note.run() != null
                     || fmChordAnchors.contains(prior.note.id())) continue;
             for (String destination : reservePsg3 ? PSG.subList(0, 2) : PSG) {
-                if (destination.equals("PSG3") && prior.role == Role.harmony && overlapsCymbal(prior.startTick, prior.endTick)) continue;
+                if (destination.equals("PSG3") && (hats != null || prior.role == Role.harmony)
+                        && overlapsCymbal(prior.startTick, prior.endTick)) continue;
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;
                 var moved = new Entry(prior.note, prior.role, destination, prior.startTick, prior.endTick,

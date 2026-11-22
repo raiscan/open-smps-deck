@@ -92,6 +92,21 @@ class ReconstructionVocalReviewTest {
         assertEquals("noVocal", phrase.flags().getFirst().type());
     }
 
+    @Test void judgesAnEstablishedLeadTwoOctavesAboveItsStem() {
+        var audio = new VocalStemEvidence(tones(220, .8));
+        var f0 = new double[100];
+        Arrays.fill(f0, 10, 70, 81); // Stem A3 (57) + 24.
+        var boundaries = new ReconstructionVocalReview.Boundaries(new int[]{10}, new int[0], new int[0]);
+        var inRegister = ReconstructionVocalReview.analyze(1, SPAN, List.of(note("in-register", 81, .1, .7)),
+                f0, boundaries, TIME, audio, null, 24, Map.of());
+        assertTrue(inRegister.notes().getFirst().harmonics().supportsSungOctave());
+        assertTrue(inRegister.flags().isEmpty());
+        var wrong = ReconstructionVocalReview.analyze(1, SPAN, List.of(note("wrong", 93, .1, .7)),
+                f0, boundaries, TIME, audio, null, 24, Map.of());
+        assertTrue(wrong.flags().stream().anyMatch(flag -> flag.proposal().has("pitch")
+                && flag.proposal().get("pitch").getAsInt() == 81));
+    }
+
     @Test void alignsRepeatedContoursAndDefersToStrongLocalEvidence() {
         var spans = IntStream.range(0, 3)
                 .mapToObj(i -> new ReconstructionVocalReview.Span("p" + i, i, i + 1)).toList();

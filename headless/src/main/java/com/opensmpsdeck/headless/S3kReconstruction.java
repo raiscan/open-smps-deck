@@ -404,6 +404,29 @@ final class S3kReconstruction {
                                    Map<String, ReconstructionLayers.Request> layers, boolean fmOnly, boolean policyDecisions,
                                    TargetProfile profile)
             throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue, matches,
+                echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, layout, assignments, sourceInstruments,
+                policies, levels, layers, fmOnly, policyDecisions, profile, Performance.FULL);
+    }
+
+    record Performance(Integer soloPart, Map<String, Double> gains) {
+        static final Performance FULL = new Performance(null, Map.of());
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout,
+                                   Map<String, ReconstructionVoicePlan.Assignment> assignments,
+                                   Map<String, ReconstructionVoicing.SourceSound> sourceInstruments,
+                                   List<ReconstructionLanePolicies.Scoped> policies, ReconstructionLanePolicies.Levels levels,
+                                   Map<String, ReconstructionLayers.Request> layers, boolean fmOnly, boolean policyDecisions,
+                                   TargetProfile profile, Performance performance)
+            throws java.io.IOException {
         var candidates = new ArrayList<PolicySource>();
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
         var gates = new ArrayList<VoicedGate>();
@@ -434,13 +457,15 @@ final class S3kReconstruction {
             int end = entry.endTick();
             String noteId = entry.note().id();
             String origin = origins.getOrDefault(noteId, noteId);
+            double sectionGain = performance.gains().getOrDefault(noteId, 1.0);
             var assignment = assignments.get(origin);
             if (entry.role() == ReconstructionRoles.Role.drums && lane.equals("PSG3")) {
                 boolean decaying = assignment == null ? ReconstructionCymbals.voiced(entry)
                         : !assignment.instrument().equals("fixed");
                 boolean closedHat = assignment == null ? ReconstructionCymbals.closedHat(note.pitch())
                         : assignment.instrument().equals("closed-hat");
-                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, profile);
+                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, profile,
+                        scopedDrumGains.get(entry.note().id()));
                 placed.assignedInstrument = assignment != null;
                 psg.get(2).add(placed);
                 gates.add(new VoicedGate(entry.note().id(), lane, placed.event.note().pitch(), start, end));
@@ -493,7 +518,7 @@ final class S3kReconstruction {
                     var toneLane = isFm ? fm.get(ReconstructionAllocation.FM.indexOf(lane))
                             : psg.get(ReconstructionAllocation.PSG.indexOf(lane));
                     int extra = placeChord(chord, entry, part, voice, asset, settings, catalogue, toneLane,
-                            voices, envelopes, gates, assignment != null, psgOffset, profile);
+                            voices, envelopes, gates, assignment != null, psgOffset, profile, sectionGain);
                     if (chord.arpeggio())
                         arpeggioExtraNoteBytes = extra + (arpeggioExtraNoteBytes == null ? 0 : arpeggioExtraNoteBytes);
                     continue;
@@ -511,6 +536,7 @@ final class S3kReconstruction {
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes(), profile) : 0;
                 if (voice != null) volume = voicedVolume(volume, floor, voice.gainFor(part.id()), psgOffset);
+                volume = sectionVolume(volume, floor, sectionGain, isFm);
                 boolean pitchedNoise = entry.laneType() == ReconstructionLaneType.NOISE;
                 var playedNote = pitchedNoise ? new MidiScore.Note(note.partId(), ReconstructionCymbals.pitch(profile),
                         note.velocity(), note.startUs(), note.endUs()) : note;
@@ -574,6 +600,7 @@ final class S3kReconstruction {
                             int raw = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                             scopedVolume = voicedVolume(raw, selectedFloor, voice.gainFor(part.id(), gain),
                                     selected.id().equals(asset.id()) ? psgOffset : 0);
+                            scopedVolume = sectionVolume(scopedVolume, selectedFloor, sectionGain, isFm);
                         }
                         var vibrato = scoped.changesModulation() ? scoped.vibrato() : placed.vibrato;
                         tones.put(boundary, new Tone(selectedId, scopedVolume, vibrato));
@@ -621,10 +648,17 @@ final class S3kReconstruction {
         var lanePolicyCopies = new ArrayList<CopyWindow>();
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
         var coverage = applyLanePolicies(policies, levels, frames, fm, tonePsg, candidates, voices, envelopes, gates,
-                catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile);
+                catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile,
+                performance.gains());
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
+        }
+        if (performance.soloPart() != null) {
+            int part = performance.soloPart();
+            fm.forEach(lane -> lane.removeIf(event -> event.event.note().partId() != part));
+            psg.forEach(lane -> lane.removeIf(event -> event.event.note().partId() != part));
+            dac.removeIf(event -> event.note().partId() != part);
         }
         List<Sequence> sequences = new ArrayList<>();
         List<Clip> clips = new ArrayList<>();
@@ -638,7 +672,8 @@ final class S3kReconstruction {
         writeDacLane(dac, sequences, clips, repeats);
         if (profile.game() == TargetGame.S1)
             sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, voices.values()));
-        if (!scopes.isEmpty() || !allocation.chords().isEmpty() || !policies.isEmpty() || !layers.isEmpty()) {
+        if (performance.soloPart() != null || !scopes.isEmpty() || !allocation.chords().isEmpty()
+                || !policies.isEmpty() || !layers.isEmpty()) {
             var used = new HashSet<String>();
             for (var sequence : sequences) {
                 used.add(sequence.voiceId());
@@ -673,7 +708,8 @@ final class S3kReconstruction {
                                   MidiScore.Part part, ReconstructionVoicing.Lane voice, InstrumentCatalogue.Asset asset,
                                   ReconstructionOverrides.Settings settings, InstrumentCatalogue catalogue,
                                   List<Placement> lane, Map<String, Voice> voices, Map<String, Envelope> envelopes,
-                                  List<VoicedGate> gates, boolean assigned, int psgOffset, TargetProfile profile) {
+                                  List<VoicedGate> gates, boolean assigned, int psgOffset, TargetProfile profile,
+                                  double sectionGain) {
         int start = anchor.startTick(), end = anchor.endTick();
         boolean fm = anchor.lane().startsWith("FM");
         var articulation = voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation();
@@ -689,6 +725,7 @@ final class S3kReconstruction {
             double gain = settings != null && settings.gain() != null ? settings.gain() : voice.gain();
             level = voicedVolume(level, 0, voice.gainFor(part.id(), gain), psgOffset);
         }
+        level = sectionVolume(level, 0, sectionGain, fm);
         String label = chord.label();
         if (chord.arpeggio()) {
             String id = asset.id();
@@ -768,6 +805,14 @@ final class S3kReconstruction {
         double period = 3_579_545 / (32 * hz);
         double fnum = LeadEffectMatcher.fmFnum(pitch);
         return Math.clamp((int) Math.round(-period * fmOffset / (fnum + fmOffset)), -128, 127);
+    }
+
+    private static int sectionVolume(int volume, int floor, double gain, boolean fm) {
+        if (gain == 1) return volume;
+        // FM uses 0.75 dB TL steps. PSG uses 2 dB steps encoded in the upper four bits.
+        int adjusted = fm ? ReconstructionEcho.scaleVolume(volume, gain)
+                : volume + 8 * (int) Math.round(10 * Math.log10(gain));
+        return Math.clamp(adjusted, floor, 127);
     }
 
     private static int voicedVolume(int raw, int floor, double gain, int offset) {
@@ -972,7 +1017,8 @@ final class S3kReconstruction {
             Map<String, Voice> voices, Map<String, Envelope> envelopes, List<VoicedGate> gates,
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
             Map<Integer, MidiScore.Part> parts, int[] overlappingTone, Map<String, ReconstructionLayers.Request> layers,
-            List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile) throws java.io.IOException {
+            List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile,
+            Map<String, Double> gains) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -1107,7 +1153,7 @@ final class S3kReconstruction {
                 count++;
             }
             int promoted = promoteCounters(scoped, sources, freed, moved, fm, psg, voices, gates, catalogue,
-                    instruments, parts, layers, decisions, profile);
+                    instruments, parts, layers, decisions, profile, gains);
             coverage.add(new ReconstructionLanePolicies.Coverage(scoped.index(), kind, mode, eligible, count,
                     busy, incompatible, movedFromFm, promoted, byLane, bendLayers.isEmpty() ? null : List.copyOf(bendLayers)));
         }
@@ -1171,7 +1217,7 @@ final class S3kReconstruction {
                                        Map<String, Voice> voices, List<VoicedGate> gates, InstrumentCatalogue catalogue,
                                        Map<String, ReconstructionVoicing.SourceSound> instruments,
                                        Map<Integer, MidiScore.Part> parts, Map<String, ReconstructionLayers.Request> layers,
-                                       List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile) {
+                                       List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile, Map<String, Double> gains) {
         if (freed.isEmpty() || instruments == null) return 0;
         int promoted = 0;
         for (var source : sources) {
@@ -1201,6 +1247,8 @@ final class S3kReconstruction {
                 voices.putIfAbsent(id, new Voice(id, part.name() + " / " + asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
                 int level = voicedVolume(volume(part, note), ReconstructionEcho.fmVolumeFloor(patch, profile),
                         sound.fm().gainFor(note.partId()), 0);
+                level = sectionVolume(level, ReconstructionEcho.fmVolumeFloor(patch, profile),
+                        gains.getOrDefault(entry.note().id(), 1.0), true);
                 var placed = new Placement(new Event(note, start, dry.end, dry.event.priority(), id, level));
                 placed.noteId = dry.noteId;
                 placed.detune = sound.fm().effects().detune();
@@ -1265,7 +1313,7 @@ final class S3kReconstruction {
     private static Placement psgDrum(ReconstructionAllocation.Entry entry, MidiScore.Part part, int end,
                                      ReconstructionVoicing.Lane voice, Map<String, Envelope> envelopes,
                                      ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat,
-                                     TargetProfile profile) {
+                                     TargetProfile profile, Double gain) {
         var note = entry.note().midi();
         closedHat &= decaying;
         int pitch = decaying ? ReconstructionCymbals.pitch(profile) : 81;
@@ -1275,7 +1323,8 @@ final class S3kReconstruction {
         var envelope = decaying ? ReconstructionCymbals.envelope(closedHat ? 42 : 46) : null;
         String asset = envelope == null ? NOISE : envelope.id();
         if (envelope != null) envelopes.putIfAbsent(asset, envelope);
-        if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
+        if (gain != null || voice != null)
+            volume = psgDrumVolume(volume, gain == null ? voice.drumGain(note.pitch()) : gain);
         var placed = new Placement(new Event(pitched, entry.startTick(), end, 0, asset, volume));
         placed.noteId = entry.note().id();
         if (decaying) placed.detune = ReconstructionCymbals.detune(
@@ -1309,7 +1358,7 @@ final class S3kReconstruction {
             int busy = occupied.nextSetBit(start);
             int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(note.pitch()));
             var placed = psgDrum(entry, parts.get(note.partId()), end, voice, envelopes, hatClock,
-                    true, ReconstructionCymbals.closedHat(note.pitch()), profile);
+                    true, ReconstructionCymbals.closedHat(note.pitch()), profile, null);
             lane.add(placed);
             gates.add(new VoicedGate(entry.note().id(), "PSG3", placed.event.note().pitch(), start, end, DAC_NOISE_FALLBACK));
             occupied.set(start, end);

@@ -206,6 +206,7 @@ class ExternalTranscribersTest {
         Path adapter = directory.resolve("rmvpe-fixture.sh");
         Files.writeString(adapter, """
                 set -eu
+                test "$3" = vocals
                 cat > "$2" <<'JSON'
                 [[0.2,0.4,78],[0.4,0.78,78]]
                 JSON
@@ -214,7 +215,7 @@ class ExternalTranscribersTest {
                 JSON
                 """.formatted(encoded));
         var configJson = com.google.gson.JsonParser.parseString(Files.readString(config)).getAsJsonObject();
-        configJson.add("rmvpe", new Gson().toJsonTree(List.of("sh", adapter.toString(), "{input}", "{output}")));
+        configJson.add("rmvpe", new Gson().toJsonTree(List.of("sh", adapter.toString(), "{input}", "{output}", "{role}")));
         configJson.add("defaults", new Gson().toJsonTree(Map.of("vocals", "fixture")));
         Files.writeString(config, configJson.toString());
         Path drum = directory.resolve("drum.wav");
@@ -293,13 +294,36 @@ class ExternalTranscribersTest {
         for (float pcm : silent.samples()) assertEquals(0f, pcm);
         assertFalse(Files.exists(work.resolve("edits.json")));
         assertEquals(List.of(36), pitches(score, 0));
+        var drumSolo = ReconstructionCli.renderPart(work, 0, work.resolve("drum-part.wav"));
+        assertEquals("DAC", drumSolo.getAsJsonArray("lanes").get(0).getAsString());
+        assertEquals(1, drumSolo.getAsJsonArray("lanes").size());
+        assertNotEquals(-1, Files.mismatch(work.resolve("drum-part.wav"), work.resolve("render.wav")));
         assertEquals(105, score.tempo().selected().bpm());
         assertEquals(.125, score.tempo().selected().barOffset());
         var manifest = ReconstructionArtifacts.read(work.resolve("manifest.json"), ReconstructionManifest.Manifest.class);
         assertFalse(manifest.inputs().containsKey("midi"));
         assertEquals(score.inputs().audioOnly(), manifest.options().audioOnly());
 
+        configJson.add("monophonicStems", new Gson().toJsonTree(Map.of("guitar",
+                Map.of("adapter", "rmvpe", "span", List.of(.3, .7), "registerShift", 12))));
+        Files.writeString(config, configJson.toString());
+        var soloWork = directory.resolve("guitar-work");
+        var soloArgs = new ArrayList<>(args);
+        soloArgs.set(5, soloWork.toString());
+        soloArgs.set(7, "guitar=" + vocal);
+        run(0, soloArgs);
+        var soloScore = ReconstructionStages.readScore(soloWork.resolve("score.json"));
+        assertEquals("guitar", soloScore.inputs().audioOnly().stems().get(1).role());
+        var monoNotes = soloScore.notes().stream().filter(n -> n.id().startsWith("mono-")).toList();
+        assertEquals(List.of(90, 90), monoNotes.stream().map(ReconstructionStages.Note::pitch).toList());
+        assertEquals(.3, monoNotes.getFirst().start());
+        assertEquals(.7, monoNotes.getLast().end());
+
         Files.delete(config);
+        var monoReplay = directory.resolve("guitar-replay");
+        run(0, List.of("reconstruct", "rerun", soloWork.toString(), monoReplay.toString()));
+        assertEquals(-1, Files.mismatch(soloWork.resolve("score.json"), monoReplay.resolve("score.json")));
+        assertEquals(-1, Files.mismatch(soloWork.resolve("render.wav"), monoReplay.resolve("render.wav")));
         var replay = directory.resolve("replay");
         run(0, List.of("reconstruct", "rerun", work.toString(), replay.toString()));
         assertEquals(-1, Files.mismatch(work.resolve("render.wav"), replay.resolve("render.wav")));
@@ -462,7 +486,7 @@ class ExternalTranscribersTest {
 
     public static class TranscriberFixture {
         public static void main(String[] args) throws Exception {
-            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals", "drums").contains(args[2]) || !args[3].equals("cuda:0"))
+            if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals", "guitar", "drums").contains(args[2]) || !args[3].equals("cuda:0"))
                 throw new IllegalArgumentException("Invalid substituted arguments");
             String notes = switch (args[2]) {
                 case "drums" -> "[[0.12, 35, 99], [0.4, 38, 85], [1.2, 42, 89]]";
