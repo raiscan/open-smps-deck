@@ -46,6 +46,10 @@ final class ReconstructionVoiceStage {
         if (!noise.isEmpty() && fitPsg3.isEmpty()) byLane.remove("PSG3");
         else if (fitPsg3.size() != noise.size()) byLane.put("PSG3", fitPsg3);
         var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of(), score.profile());
+        // General MIDI guitar programs. Synth and keyboard stems can have
+        // layered or deliberately evolving attacks that are poor pick targets.
+        var guitarParts = source.parts().stream().filter(part -> part.program() >= 24 && part.program() < 32)
+                .map(MidiScore.Part::id).collect(java.util.stream.Collectors.toSet());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
         var tonalInstruments = shared ? Map.<ReconstructionVoices.Key, ReconstructionVoices.Choice>of()
@@ -126,6 +130,12 @@ final class ReconstructionVoiceStage {
                 if (!examples.isEmpty()) {
                     sustainExamples.put(lane, examples);
                     patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
+                }
+                if (instrument) {
+                    int part = entry.getValue().getFirst().note().part();
+                    var stem = options.stems().get(part);
+                    if (guitarParts.contains(part) && !mix.equals(stem))
+                        patches = screening.fittingAttacks(patches, entry.getValue(), stem, windows);
                 }
             }
             incumbents.add(incumbent == null ? null : incumbent.id());

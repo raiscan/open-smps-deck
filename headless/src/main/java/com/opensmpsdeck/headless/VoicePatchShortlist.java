@@ -28,7 +28,8 @@ final class VoicePatchShortlist {
     private record Key(String asset, int pitch, TargetGame target) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
-    private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile) {}
+    private record AttackProbe(int pitch, VoiceAttackShape.Profile shape) {}
+    private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile, VoiceAttackShape.Profile attack) {}
     private static final Map<Key, Template> TEMPLATES = new ConcurrentHashMap<>();
 
     private final InstrumentCatalogue catalogue;
@@ -36,6 +37,7 @@ final class VoicePatchShortlist {
     private final List<InstrumentCatalogue.Variant> variants;
     private final VoiceSpectra spectra = new VoiceSpectra();
     private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
+    private final VoiceAttackShape attackShape = new VoiceAttackShape();
 
     VoicePatchShortlist(InstrumentCatalogue catalogue, TargetGame target) {
         this.catalogue = catalogue;
@@ -133,6 +135,66 @@ final class VoicePatchShortlist {
             shortlist.add(rank(incumbent, probes));
         }
         return List.copyOf(shortlist);
+    }
+
+    /**
+     * Keep viable attacks for the longer contextual fit. The spectral shortlist
+     * uses 85 ms windows and can hide a slow rise or a brief burst of harmonics.
+     */
+    List<RankedPatch> fittingAttacks(List<RankedPatch> candidates,
+                                    List<ReconstructionAllocation.Entry> part,
+                                    Path stem, VoiceWindows windows) throws IOException {
+        if (candidates.size() < 2 || stem == null) return candidates;
+        double duration = VoiceAttackShape.SAMPLES / (double) VoiceSpectra.RATE;
+        double audioEnd = ReferenceAudio.durationMicros(stem) / 1e6;
+        var ordered = part.stream().sorted(Comparator.comparingDouble(n -> n.note().start())).toList();
+        var exposed = new ArrayList<ReconstructionAllocation.Entry>();
+        double previousEnd = 0;
+        for (int i = 0; i < ordered.size(); i++) {
+            var entry = ordered.get(i);
+            var note = entry.note();
+            double nextStart = i + 1 < ordered.size() ? ordered.get(i + 1).note().start()
+                    : Double.POSITIVE_INFINITY;
+            // Reject chords and continuing notes on the same stem. A small
+            // boundary tolerance permits adjacent gates with score rounding.
+            if (previousEnd <= note.start() + .005 && nextStart >= note.start() + duration
+                    && note.run() == null && entry.lane().startsWith("FM")
+                    && entry.endTick() - entry.startTick() >= 3
+                    && note.end() - note.start() >= duration && note.start() + duration <= audioEnd
+                    && windows.trainingAttack(entry.startTick(), 3)) exposed.add(entry);
+            previousEnd = Math.max(previousEnd, note.end());
+        }
+        var probes = new ArrayList<AttackProbe>();
+        var pitches = new java.util.HashMap<Integer, Integer>();
+        // Interleave the timeline so a fast run cannot supply all examples.
+        int stride = Math.max(1, exposed.size() / 8);
+        for (int i = 0; i < exposed.size() && probes.size() < 8; i += stride) {
+            var note = exposed.get(i).note();
+            int pitch = note.pitch();
+            var range = TargetProfile.of(target).fm();
+            if (pitch < range.low() || pitch > range.high() || pitches.getOrDefault(pitch, 0) >= 2) continue;
+            var audio = VoiceSpectra.resample(ReferenceAudio.read(stem, note.start(), duration), VoiceAttackShape.SAMPLES);
+            var shape = attackShape.measure(audio);
+            if (shape.peak() < .003) continue;
+            probes.add(new AttackProbe(pitch, shape));
+            pitches.merge(pitch, 1, Integer::sum);
+        }
+        if (probes.size() < 3) return candidates;
+
+        var losses = new double[candidates.size()];
+        double best = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < candidates.size(); i++) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("attack fitting cancelled");
+            var variant = catalogue.match(candidates.get(i).id(), target).variant();
+            for (var probe : probes)
+                losses[i] += probe.shape().distance(template(variant, probe.pitch()).attack()) / probes.size();
+            best = Math.min(best, losses[i]);
+        }
+        // Leave the contextual fit a choice when attacks differ only slightly.
+        var result = new ArrayList<RankedPatch>();
+        for (int i = 0; i < candidates.size(); i++)
+            if (losses[i] <= best + .08) result.add(candidates.get(i));
+        return List.copyOf(result);
     }
 
     List<RankedPatch> lowCandidates(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
@@ -238,7 +300,8 @@ final class VoicePatchShortlist {
         var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true, target);
         var rendered = VoiceWindows.renderMono(project, ATTACK_TICKS);
         var features = new Template(spectra.average(rendered),
-                pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null);
+                pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null,
+                attackShape.measure(rendered));
         if (TEMPLATES.size() < CACHE_LIMIT) {
             var existing = TEMPLATES.putIfAbsent(key, features);
             if (existing != null) return existing;

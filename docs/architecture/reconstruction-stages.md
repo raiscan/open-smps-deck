@@ -1209,9 +1209,12 @@ it carries a backing role.
 
 For long notes with a mapped stem, the fitter measures pitch-band energy
 near the attack and in the hold. It screens the FM attack shortlist on
-representative long gates using the pinned chip, then fits the surviving
-choices jointly with the other instruments. The PSG spill fit includes a
-long-hold probe alongside its short FM contour probes. If an attack would
+representative long gates using the pinned chip. For shared FM guitar
+profiles (General MIDI guitar programs with a mapped stem), it also
+compares the first 50 ms of exposed attacks for changes in relative level
+and spectral brightness. It fits the surviving choices jointly with the
+other instruments. The PSG spill fit includes a long-hold probe alongside
+its short FM contour probes. If an attack would
 steal most of a stem-supported hold from another source part, allocation
 first tries moving the whole hold to a free inner FM lane. It can also route
 the new attack around the hold when another compatible lane is free.
