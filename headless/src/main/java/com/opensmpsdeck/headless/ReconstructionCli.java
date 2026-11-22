@@ -408,7 +408,7 @@ final class ReconstructionCli {
             var json = new com.google.gson.Gson();
             if (policyDecisions) report.add("policyDecisions", json.toJsonTree(rendered.policyDecisions()));
             for (var layer : rendered.layers()) layer.report(outcomes);
-            var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
+            var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).through(ReconstructionStages.Stage.ASSEMBLE).all());
             var resolved = new ArrayList<>(edits);
             resolved.addAll(outcomes);
             ReconstructionEdits.reportLostSound(allocation, resolved, rendered, outcomes);

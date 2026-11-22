@@ -547,7 +547,8 @@ final class ReconstructionEdits {
                         : new Span(selected.sourceStart(), selected.sourceEnd());
                 bound.add(edit.withSpan(range));
             } catch (IllegalArgumentException error) {
-                outcomes.add(new Outcome(edit.id, edit.kind, Status.orphaned, List.of(), null, error.getMessage(), null));
+                var status = shapesSound(edit.kind) || edit.kind == Kind.layer ? Status.orphaned : Status.invalid;
+                outcomes.add(new Outcome(edit.id, edit.kind, status, List.of(), null, error.getMessage(), null));
             }
         }
         return new ReconstructionEdits(bound);
