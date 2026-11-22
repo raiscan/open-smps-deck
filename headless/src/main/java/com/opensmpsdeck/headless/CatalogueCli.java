@@ -129,7 +129,8 @@ final class CatalogueCli {
                     if (!roles.contains(role)) roles.add(role);
             }
             return new Summary(match.asset().id(), variant.id(), match.asset().kind(), variant.name(), variant.driver(),
-                    variant.recipe().rate(), variant.recipe().pan(), roles, variant.occurrences().size(), measured.get(variant.id()));
+                    variant.recipe().rate(), variant.recipe().pan(), roles, InstrumentCatalogue.labels(match),
+                    variant.occurrences().size(), measured.get(variant.id()));
         }).toList();
         print(out, new Results(VERSION, page.total(), page.offset(), summaries));
     }
@@ -148,7 +149,9 @@ final class CatalogueCli {
         var asset = catalogue.asset(exact.map(InstrumentCatalogue.Variant::assetId).orElse(id));
         var variants = exact.map(List::of).orElseGet(() -> catalogue.variants().stream()
                 .filter(item -> item.assetId().equals(id)).toList());
-        var details = new Details(VERSION, profile(variants), asset, variants);
+        var labels = variants.stream().anyMatch(variant -> variant.target() == com.opensmpsdeck.project.TargetGame.S3K)
+                ? InstrumentCatalogue.labels(asset) : List.<InstrumentCatalogue.Label>of();
+        var details = new Details(VERSION, profile(variants), asset, labels, variants);
         if (!brief) {
             print(out, details);
             return;
@@ -283,8 +286,9 @@ final class CatalogueCli {
                         int variants, List<InstrumentCatalogue.Issue> issues) {}
     private record Results(int formatVersion, int total, int offset, List<Summary> items) {}
     private record Summary(String assetId, String variantId, Kind kind, String name, String driver, Integer rate,
-                           Integer pan, List<String> roles, int occurrenceCount, CatalogueSustain.Measurement heldNote) {}
+                           Integer pan, List<String> roles, List<InstrumentCatalogue.Label> labels, int occurrenceCount,
+                           CatalogueSustain.Measurement heldNote) {}
     private record Details(int formatVersion, String auditionProfile, InstrumentCatalogue.Asset asset,
-                           List<InstrumentCatalogue.Variant> variants) {}
+                           List<InstrumentCatalogue.Label> labels, List<InstrumentCatalogue.Variant> variants) {}
     private record Output(int formatVersion, String auditionProfile, String variantId, Integer frames) {}
 }
