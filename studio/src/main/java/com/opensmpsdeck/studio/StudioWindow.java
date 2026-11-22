@@ -113,6 +113,7 @@ public final class StudioWindow implements AutoCloseable {
     private void adaptHeight(double height){boolean compact=height<700;editors.setCompact(compact);nativeArrangement.setCompact(compact);root.getStyleClass().remove("compact");if(compact)root.getStyleClass().add("compact");}
     ProjectDocument document(){return document;}
     Scene scene(){return stage.getScene();}
+    ReconstructionPane reconstruction(){return reconstruction;}
     String selectedClip(){return selectedClip;}
     private Button button(String text,Runnable action){Button b=new Button(text);b.setOnAction(e->action.run());return b;}
     private Label label(String text,String style){Label l=new Label(text);l.getStyleClass().add(style);return l;}
@@ -1047,10 +1048,14 @@ public final class StudioWindow implements AutoCloseable {
         chooser.setTitle("Choose a separate reconstruction work directory");
         var work = chooser.showDialog(stage);
         if (work == null) return;
+        openSunoImport(folder.toPath(),work.toPath());
+    }
+
+    Stage openSunoImport(Path folder,Path work) {
         var window = new Stage();
         window.initOwner(stage);
         window.setTitle("Import Suno folder");
-        var pane = new SunoImportPane(folder.toPath(), work.toPath(), output -> {
+        var pane = new SunoImportPane(folder, work, output -> {
             try {
                 openSavedProject(output, "Reconstructed from Suno");
                 window.close();
@@ -1063,6 +1068,7 @@ public final class StudioWindow implements AutoCloseable {
         window.setScene(scene);
         window.setOnHidden(event -> pane.close());
         window.show();
+        return window;
     }
 
     private void importRom() {

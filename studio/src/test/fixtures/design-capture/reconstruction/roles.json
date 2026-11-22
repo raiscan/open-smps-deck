@@ -1,0 +1,1209 @@
+{
+  "version": 1,
+  "harmonyMaxHz": 7.5,
+  "notes": [
+    {
+      "note": {
+        "id": "n-0-0-36",
+        "part": 0,
+        "start": 0.0,
+        "end": 0.06,
+        "pitch": 36,
+        "velocity": 120,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-0",
+        "part": 2,
+        "start": 0.0,
+        "end": 0.42,
+        "pitch": 43,
+        "velocity": 79,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-0",
+        "part": 1,
+        "start": 0.03,
+        "end": 0.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-245000-38",
+        "part": 0,
+        "start": 0.245,
+        "end": 0.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-0",
+        "part": 3,
+        "start": 0.25,
+        "end": 0.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-1",
+        "part": 3,
+        "start": 0.25,
+        "end": 0.8,
+        "pitch": 59,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-495000-38",
+        "part": 0,
+        "start": 0.495,
+        "end": 0.555,
+        "pitch": 38,
+        "velocity": 120,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-1",
+        "part": 2,
+        "start": 0.5,
+        "end": 0.9199999999999999,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-1",
+        "part": 1,
+        "start": 0.53,
+        "end": 0.9299999999999999,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-745000-38",
+        "part": 0,
+        "start": 0.745,
+        "end": 0.805,
+        "pitch": 38,
+        "velocity": 96,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-995000-36",
+        "part": 0,
+        "start": 0.995,
+        "end": 1.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-2",
+        "part": 2,
+        "start": 1.0,
+        "end": 1.42,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-2",
+        "part": 1,
+        "start": 1.03,
+        "end": 1.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-1245000-38",
+        "part": 0,
+        "start": 1.245,
+        "end": 1.305,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-2",
+        "part": 3,
+        "start": 1.25,
+        "end": 1.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-3",
+        "part": 3,
+        "start": 1.25,
+        "end": 1.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-1495000-38",
+        "part": 0,
+        "start": 1.495,
+        "end": 1.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-3",
+        "part": 2,
+        "start": 1.5,
+        "end": 1.92,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-3",
+        "part": 1,
+        "start": 1.53,
+        "end": 1.93,
+        "pitch": 86,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-1745000-38",
+        "part": 0,
+        "start": 1.745,
+        "end": 1.805,
+        "pitch": 38,
+        "velocity": 98,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-1995000-36",
+        "part": 0,
+        "start": 1.995,
+        "end": 2.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-4",
+        "part": 2,
+        "start": 2.0,
+        "end": 2.42,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-4",
+        "part": 1,
+        "start": 2.03,
+        "end": 2.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-2245000-38",
+        "part": 0,
+        "start": 2.245,
+        "end": 2.305,
+        "pitch": 38,
+        "velocity": 93,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-4",
+        "part": 3,
+        "start": 2.25,
+        "end": 2.8,
+        "pitch": 53,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-5",
+        "part": 3,
+        "start": 2.25,
+        "end": 2.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-2495000-38",
+        "part": 0,
+        "start": 2.495,
+        "end": 2.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-5",
+        "part": 2,
+        "start": 2.5,
+        "end": 2.92,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-5",
+        "part": 1,
+        "start": 2.53,
+        "end": 2.93,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-2745000-38",
+        "part": 0,
+        "start": 2.745,
+        "end": 2.805,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-2995000-36",
+        "part": 0,
+        "start": 2.995,
+        "end": 3.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-6",
+        "part": 2,
+        "start": 3.0,
+        "end": 3.42,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-6",
+        "part": 1,
+        "start": 3.03,
+        "end": 3.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-3245000-38",
+        "part": 0,
+        "start": 3.245,
+        "end": 3.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-6",
+        "part": 3,
+        "start": 3.25,
+        "end": 3.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-7",
+        "part": 3,
+        "start": 3.25,
+        "end": 3.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-3495000-38",
+        "part": 0,
+        "start": 3.495,
+        "end": 3.555,
+        "pitch": 38,
+        "velocity": 115,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-7",
+        "part": 2,
+        "start": 3.5,
+        "end": 3.92,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-7",
+        "part": 1,
+        "start": 3.53,
+        "end": 3.93,
+        "pitch": 76,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-3745000-38",
+        "part": 0,
+        "start": 3.745,
+        "end": 3.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-3995000-36",
+        "part": 0,
+        "start": 3.995,
+        "end": 4.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-8",
+        "part": 2,
+        "start": 4.0,
+        "end": 4.42,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-8",
+        "part": 1,
+        "start": 4.03,
+        "end": 4.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-4245000-38",
+        "part": 0,
+        "start": 4.245,
+        "end": 4.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-8",
+        "part": 3,
+        "start": 4.25,
+        "end": 4.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-9",
+        "part": 3,
+        "start": 4.25,
+        "end": 4.8,
+        "pitch": 59,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-4495000-38",
+        "part": 0,
+        "start": 4.495,
+        "end": 4.555,
+        "pitch": 38,
+        "velocity": 114,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-9",
+        "part": 2,
+        "start": 4.5,
+        "end": 4.92,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-9",
+        "part": 1,
+        "start": 4.53,
+        "end": 4.93,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-4745000-38",
+        "part": 0,
+        "start": 4.745,
+        "end": 4.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-4995000-36",
+        "part": 0,
+        "start": 4.995,
+        "end": 5.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-10",
+        "part": 2,
+        "start": 5.0,
+        "end": 5.42,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-10",
+        "part": 1,
+        "start": 5.03,
+        "end": 5.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-5245000-38",
+        "part": 0,
+        "start": 5.245,
+        "end": 5.305,
+        "pitch": 38,
+        "velocity": 91,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-10",
+        "part": 3,
+        "start": 5.25,
+        "end": 5.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-11",
+        "part": 3,
+        "start": 5.25,
+        "end": 5.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-5495000-38",
+        "part": 0,
+        "start": 5.495,
+        "end": 5.555,
+        "pitch": 38,
+        "velocity": 116,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-11",
+        "part": 2,
+        "start": 5.5,
+        "end": 5.92,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-11",
+        "part": 1,
+        "start": 5.53,
+        "end": 5.93,
+        "pitch": 88,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-5745000-38",
+        "part": 0,
+        "start": 5.745,
+        "end": 5.805,
+        "pitch": 38,
+        "velocity": 94,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-5995000-36",
+        "part": 0,
+        "start": 5.995,
+        "end": 6.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-12",
+        "part": 2,
+        "start": 6.0,
+        "end": 6.42,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-12",
+        "part": 1,
+        "start": 6.03,
+        "end": 6.43,
+        "pitch": 86,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-6245000-38",
+        "part": 0,
+        "start": 6.245,
+        "end": 6.305,
+        "pitch": 38,
+        "velocity": 92,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-12",
+        "part": 3,
+        "start": 6.25,
+        "end": 6.8,
+        "pitch": 53,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-13",
+        "part": 3,
+        "start": 6.25,
+        "end": 6.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-6495000-38",
+        "part": 0,
+        "start": 6.495,
+        "end": 6.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-13",
+        "part": 2,
+        "start": 6.5,
+        "end": 6.92,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-13",
+        "part": 1,
+        "start": 6.53,
+        "end": 6.93,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-6745000-38",
+        "part": 0,
+        "start": 6.745,
+        "end": 6.805,
+        "pitch": 38,
+        "velocity": 94,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "n-0-6995000-36",
+        "part": 0,
+        "start": 6.995,
+        "end": 7.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-14",
+        "part": 2,
+        "start": 7.0,
+        "end": 7.42,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-14",
+        "part": 1,
+        "start": 7.03,
+        "end": 7.43,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-7245000-38",
+        "part": 0,
+        "start": 7.245,
+        "end": 7.305,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-14",
+        "part": 3,
+        "start": 7.25,
+        "end": 7.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "assignmentReason": "remaining-tonal-note"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-15",
+        "part": 3,
+        "start": 7.25,
+        "end": 7.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "assignmentReason": "section-counter-line"
+    },
+    {
+      "note": {
+        "id": "n-0-7495000-38",
+        "part": 0,
+        "start": 7.495,
+        "end": 7.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-15",
+        "part": 2,
+        "start": 7.5,
+        "end": 7.92,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "assignmentReason": "section-bass-line"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-15",
+        "part": 1,
+        "start": 7.53,
+        "end": 7.93,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "assignmentReason": "explicit-lead-part"
+    },
+    {
+      "note": {
+        "id": "n-0-7745000-38",
+        "part": 0,
+        "start": 7.745,
+        "end": 7.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "assignmentReason": "midi-drum-part"
+    }
+  ],
+  "timeBase": "source",
+  "structureNoteHashes": {
+    "n-0-0-36": "651ae0ff367874ef61425db016a466b07f13b5ba92161cf92a76cb6774924827",
+    "n-0-1245000-38": "3122e94aae5f45f2931685c27f675d3100c09c0874bdfe5ec7158758c7cc142a",
+    "n-0-1495000-38": "d949c5029358f0e4be51051b61b74c8744d56fba166d331277c61b19dc1dfe3d",
+    "n-0-1745000-38": "ea2539a392b54e592cb3115491df30065dccd3a30490193f3f192dc746af42bd",
+    "n-0-1995000-36": "8a4cc6fc6e58c48d55987f628dd867a8b0c30cc7c05dc43e167c8a6242d17eae",
+    "n-0-2245000-38": "a6463db8ba80f02fd300a5d3853330f130abbf0fea768fc075451072f390acdc",
+    "n-0-245000-38": "84bc76a0279b50286946ff2e125755d77d0154d2d9feeec337c54bf5f375c08c",
+    "n-0-2495000-38": "46edf35d7e7565ec138be8973eace505377552240defdecb4053f7c08f9bd42f",
+    "n-0-2745000-38": "ab9fcc0e96971c3df4d6035c9a5df555d78d1f53e5f14d403b3db49635f536b8",
+    "n-0-2995000-36": "66fbc20ab1798902c234c300c817c30e643a3ed17856f4c2d0c62da1433185eb",
+    "n-0-3245000-38": "636d197a1e65429b1c0cc087f7df586b1d6b8ee031f9e99b5593b6783e26c040",
+    "n-0-3495000-38": "58f72da0aa4f717278ad65d00ced3a097d4f685e63ae3c77b808a580a042c2ed",
+    "n-0-3745000-38": "64bdb3bb339ef4bbf7aae34c21ae4397920d79a18ab66e05f1b39d7f6532225e",
+    "n-0-3995000-36": "c542b6514263a4b40a35355da7f6f1dac4bfafeecde19ba7ddbb4a45d420da0b",
+    "n-0-4245000-38": "9bc1604700853faab034d46f33c5ac92f150574d278a4913d52c786a93720ce4",
+    "n-0-4495000-38": "8479f8f01074ea0623285aa365d16b080d51383f9632b3f0b86e27c55156cee6",
+    "n-0-4745000-38": "c2525e604265a16e7ccd2ea9c9649b11841b6d45c0505337c86748ffb7874e9c",
+    "n-0-495000-38": "213478bc24d10fcca8469ac6681a16a855350f79444ce5e979b39e05adf3b11d",
+    "n-0-4995000-36": "d1dccc09c4b75cbcb49081c59b73692463d04b0a0b47ba4e4d520900778685a6",
+    "n-0-5245000-38": "4c37bca44b7ecd492f53fc904f7f22a9056ea395e906eb983deaca8c9637ff9c",
+    "n-0-5495000-38": "f9be2bdad0f76356e8c6fb529c36db71777b490dd06fef07985f2e1f0860f457",
+    "n-0-5745000-38": "0c87f706e169cb57b2493565e268470ce85752802b50438118d948be52124f11",
+    "n-0-5995000-36": "8c33b61e5292301e415f86e8ea9ddc9f6ee53449ac95d79a095ffd2a0f20f665",
+    "n-0-6245000-38": "9f98fefc1929db44f05e8ab043a75750e6dca7a077e47af055a1dab58e202839",
+    "n-0-6495000-38": "dcffc1917e32c2f59fd0a11a5eadff414e1e018f697a35ed4974ec8fa3db4ccc",
+    "n-0-6745000-38": "5af2d3de56b9965fc4d311f8c81f3b3f463c07af1acb389b167e0447122634f3",
+    "n-0-6995000-36": "444daa1afa1197388d48eeec9c94856b985307dca7a7fc5c949c2c73bec9d00d",
+    "n-0-7245000-38": "9321ef784d0e37019dc21b393fa2cff3769f2d4c0681f5276d9f1a5c94135ba1",
+    "n-0-745000-38": "e2e94a00904eb845b7805d72fa5d2fcd808c2045289d139430346e8feabc7c72",
+    "n-0-7495000-38": "3c65a977266c72001f544533fac13b928a5d186c13d69e43960f5b5ebab5ac4a",
+    "n-0-7745000-38": "ab9cd5b6a3c8e6d1063eb07aa9e30f5ae44f3190c2977643489ffcbbeea4b7c0",
+    "n-0-995000-36": "66e4a2f96f3d64dd8746845820e615aa8199033d99f7744e719f304a86ff7b40",
+    "transcriber-1-0": "8f52826b130d7dc589b22c436fd4f81ae7ac152d31f4b12fa7d1bd17863dc943",
+    "transcriber-1-1": "37db85e3209e4e676491e5f447f3ba9aa08f4869b8bdc2568c91dffd314cac4c",
+    "transcriber-1-10": "8acf1b72097badd21399df99d3dff1294a148cd27f2beaeffb5327aadb6849bc",
+    "transcriber-1-11": "3c273b00e7c6577e44ac4cd45c9fee324ab86fc7d771af30d3ac3875fa6505df",
+    "transcriber-1-12": "7cd681f6e924a60bb0f2a59d0761ce0a7eb0f0acd76e4bde547df2428d75f4b9",
+    "transcriber-1-13": "e73a24f935f23f8fd3dd17cf1c02121cb39d8cb1f287d8eeb3f73f59c00c0960",
+    "transcriber-1-14": "22450d726e34fabfe79690c34501ac1e83a32658ed1b856a1c11514fce35b136",
+    "transcriber-1-15": "057494acf1b510a407c7d01bec8edc95a91b394f9c1dc019c3c1880b70e873c4",
+    "transcriber-1-2": "46a681b577081fbf75abbe72ee4970444b7bfdb43938bb7105667f503d212e74",
+    "transcriber-1-3": "36f6ccaaf5adb8f07c585739862270e7cbbd8cf3ce9fd19d48f5531b7eb58175",
+    "transcriber-1-4": "295fbe13581cf91607935c4c608a48fe0906f5df87c525a722a6fd1e5e03da08",
+    "transcriber-1-5": "9d1aeb4adffbe897c4b7a46eee916bda443a5afe89ba181c3474043b815ade8c",
+    "transcriber-1-6": "40188f3367fd1cd3fc1350cbeb41ed4b24a30c497913b69e9de7bcfd5e0bf2a6",
+    "transcriber-1-7": "cb5799e7bb28dee31926df630dc6916452a0e6171bb4a638c4702baee0fb1391",
+    "transcriber-1-8": "a2b2f47a6d7038ee801e4b2e3714df8300e925f7bf6298f297d57f8fc46d8173",
+    "transcriber-1-9": "5fcb39372016b7fefae14e132701e6ffd3e3fe715787e4aba51244716751b1f4",
+    "transcriber-2-0": "f18474e30e8931f52f665ca845e377e69d6f772202b9cf43d4db2925d294784a",
+    "transcriber-2-1": "c16ec21ffb31d866d90879025a63aa8bad6ddd4cbc479d05b93be8a68fcb0912",
+    "transcriber-2-10": "26bf386ef415e04d1a994d3b4061ea599ba9bcdee64d5cba95f9e67eb1dca5b9",
+    "transcriber-2-11": "bf2c92816bac0000b010103d5e31d02a9f2b1378ed5f1899b9de2cb521f5f76c",
+    "transcriber-2-12": "c9f84e3987426075d12da119c827e99b9cb37f7c7bee129fd82b49f881742ac5",
+    "transcriber-2-13": "5c58cc104a429397a59b9f598f0dd65ef13834c588f0f2cd0ad499958fa9dbc5",
+    "transcriber-2-14": "baf23e23409fd09d28861d2841684132658e0bb5e28fb3cdc9395c2c87ff093c",
+    "transcriber-2-15": "5684fa296342f740b8a5e14af780427524c0b6027f4b842e4cdd081f7abb6dd8",
+    "transcriber-2-2": "ff7fa2b15b120641ff4ad373a2d24801328c202998222d6d5720da2d2ac6b6f9",
+    "transcriber-2-3": "f2b66b8e0fea51816096bf77d2cfcc466c4cee5b84f1cab7918823bf216e84a3",
+    "transcriber-2-4": "eb7e74b1acfa44ca4aca1f97beab98eca012bf8df20b0d3a9949a79d9a224d75",
+    "transcriber-2-5": "49b4c12f706da318ee18cc2e8ac71ee369a03bb3fe8f09643a3283a67fd08624",
+    "transcriber-2-6": "7fe88e1b43e14d7b3613014e2b55ed397a7f0c757716414bbb857a64cc19d103",
+    "transcriber-2-7": "cf8d037ac8fb90071175905fad1996dcb16ce94d23aea146927395585f2c9958",
+    "transcriber-2-8": "e59496f6c3a26702764c3f17370c08d3cbdaa7bc2ed08a8092c5cf5872a19539",
+    "transcriber-2-9": "2b3aed6b2c1a26d1a74834421b64fe0c3a07535f384bc62dec54911bd75d29d5",
+    "transcriber-3-0": "072d4d56a2afe8d069f28180ddd7b73ab371a55ed7a6be798299955a4203431d",
+    "transcriber-3-1": "e1fe1301815a8dbfd24959becd07f6f335404d23eefe600a7ff727d499d29d4f",
+    "transcriber-3-10": "a9607ba24c59c0d2193d7bbc92623f73295bc13c20b130a11c9ce43223f4edcd",
+    "transcriber-3-11": "d04b4791b4271a708c21b2386b86661caaca457c6d3826ad143de49b58e57368",
+    "transcriber-3-12": "7c053c1c8516239a828e1131eea18bade7cc408da76968b0a551ec0f0e4ff408",
+    "transcriber-3-13": "dce18ee716398758f0c22bd4321c1ac3d429966278867283aa4aebb4e7681b69",
+    "transcriber-3-14": "8662fe8d1a46d0658ffd127a41f76940b18de239dabd08a8d745753914c1bb09",
+    "transcriber-3-15": "8592deac5c35f4e3701486d307bc1d1658fbb2cf553aebc6a89abff9606e9e4e",
+    "transcriber-3-2": "12474381a9137d0593ff4ee8384a98eb0769936890fd83c9d1849a9c97f793d4",
+    "transcriber-3-3": "65b7cc7085e42dc514a990528f68ecb7ebd940e58c9a4e89c022d2234e75bbcf",
+    "transcriber-3-4": "98a835f512e6ed31675344f30331fab7592e5dab64eaffa19c0f8cd77fd286b7",
+    "transcriber-3-5": "21509e0cd5826dcd89e4c1741449325fd9376c67cb609a06b864634fdd7fde69",
+    "transcriber-3-6": "d3ab9d33f507d8e0c8cd995e670380ae1bef330cbb404ce65ba4dc4f0ed4e546",
+    "transcriber-3-7": "74b17bb066dc81eb718ce218b60371bcdc56ab4b0bce9cbbce7e25fc34846ce5",
+    "transcriber-3-8": "e1c1c2bf40b8e2f2b69a0d2e83d54f14f23add4ea25738af4fc09b4854b88828",
+    "transcriber-3-9": "68bb0d4bc5d72659dfc34fb376f18f59c2a9d263b5eb0058c98e32e3aa2b2524"
+  }
+}

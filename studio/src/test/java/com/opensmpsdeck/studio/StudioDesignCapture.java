@@ -116,7 +116,7 @@ public class StudioDesignCapture {
         }
     }
 
-    private static StudioProject withCommands(StudioProject project, boolean dense) {
+    static StudioProject withCommands(StudioProject project, boolean dense) {
         var envelope = new Envelope("review-vibrato", "Slow vibrato", Envelope.MODULATION, List.of(0, 1, 0xFF, 0x81));
         // The signed envelope program needs v4. Adding the first timed command
         // upgrades the source before its final asset bytes are applied.

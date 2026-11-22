@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "stages": {
+    "transcribe": [
+      {
+        "id": "bass-attack",
+        "op": "setNote",
+        "status": "applied",
+        "noteIds": [
+          "transcriber-2-0"
+        ]
+      }
+    ]
+  },
+  "scoreRecipe": "96ad9addcbc6b921b84eb533b5e45843a3419e828d572f4ba59a9aef2530725e"
+}

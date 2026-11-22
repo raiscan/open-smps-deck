@@ -359,6 +359,7 @@ final class ReconstructionEditor implements AutoCloseable {
         summary.getStyleClass().add("inspector");
         diffTab.setContent(scroll(summary));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.setId("reconstruction-inspector-tabs");
         tabs.setPrefHeight(170);
         tabs.setMinHeight(110);
         updateDraft();

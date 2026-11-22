@@ -85,3 +85,37 @@ and exercises huge virtual timelines without allocating huge canvas buffers.
 Use `-Dstudio.snapshot=/path/to/editor.png` with the isolated UI test to capture a
 scene snapshot for visual QA. No browser, server or physical audio device is
 needed by these tests; audible preview requires an available audio output device.
+
+## Design captures
+
+From the repository root, build with Java 25 and run the capture suite on Linux.
+It uses Xvfb when available, so it can run without a physical display or a
+desktop login. The native folder chooser capture also uses Python 3, X11/XTest,
+and FFmpeg with `x11grab`. JavaFX needs GTK and its usual Linux dependencies.
+
+```sh
+mkdir -p "$HOME/scratch/agent-tmp/runtime"
+scratch=$(mktemp -d "$HOME/scratch/agent-tmp/runtime/task-XXXXXXXX")
+mvn -B -pl studio -am package -Djava.io.tmpdir="$scratch"
+tools/capture_studio.sh --output "$scratch/captures"
+```
+
+For a private reconstruction use `--work-dir /path/to/reconstruction`. Studio
+opens its `arrangement.smps.json` by default. Use `--project /path/to/song.smps.json`
+to open a different project in the arrangement window. With only `--project`,
+Analysis still opens the synthetic fixture. The import checks and native bank
+captures always use public inputs.
+
+Each run writes `1920x1080/index.md` and `1366x768/index.md` under the output
+directory, with one PNG per named state at each size. The indexes record the
+actual logical window and PNG dimensions, including the smaller modal
+dialogs, the default launch sizes, and the short-window tabs. Use a fresh
+output directory for each review round. The suite prints states it could not reach and records the
+reasons in the relevant index. Input-dependent states such as reference
+review and vocal proposals require corresponding data in the supplied project.
+
+The suite uses a temporary Studio profile and leaves the open projects and
+reconstruction journals untouched. It stages an unsaved edit in memory and
+captures the audition controls with audio loaded. It does not require an
+audio device or a registered ROM. Without Xvfb it uses the current Linux
+display for JavaFX snapshots and skips the native screenshot.

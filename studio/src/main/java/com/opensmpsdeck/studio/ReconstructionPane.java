@@ -155,6 +155,8 @@ final class ReconstructionPane implements AutoCloseable {
     }
 
     Stage stage() { return stage; }
+    ReconstructionCanvas canvas() { return view; }
+    ReconstructionInspection inspection() { return model; }
 
     private static ExecutorService worker(String name) {
         return Executors.newSingleThreadExecutor(runnable -> Thread.ofPlatform().daemon().name(name).unstarted(runnable));
