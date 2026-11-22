@@ -76,6 +76,7 @@ final class McpTools {
                     McpReconstruction::importFolder, path("folder", "Absolute path to the input folder"), WORK,
                     CATALOGUE.optional(),
                     choice("target", "Target game (default s3k)", "s1", "s2", "s3k").optional(),
+                    choice("drumKit", "DAC kit selection. S1 and S2 default to stock", "stock", "custom").optional(),
                     field("assign", object(Map.of("type", "object", "additionalProperties", Map.of("type", "integer"))),
                             "Map of folder-relative stem files to MIDI part IDs").optional(),
                     field("exclude", object(Map.of("type", "array", "items", Map.of("type", "string"))),

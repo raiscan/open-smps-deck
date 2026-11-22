@@ -30,6 +30,11 @@ final class ClassicStockAssets implements StockAssets {
         s1Envelopes = s1 ? ((Sonic1SmpsLoader) loader).getPsgEnvelopes() : null;
     }
 
+    int dacRate(int note) {
+        var entry = dac == null ? null : dac.mappingForNote(note);
+        return entry == null ? -1 : entry.rate();
+    }
+
     AbstractSmpsData song(int id) {
         return songs.computeIfAbsent(id, loader::loadMusic);
     }

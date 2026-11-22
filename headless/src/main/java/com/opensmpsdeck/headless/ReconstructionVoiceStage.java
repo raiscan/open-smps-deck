@@ -491,7 +491,7 @@ final class ReconstructionVoiceStage {
         return choices;
     }
 
-    private static ReconstructionVoices.Choice drumChoice(ReconstructionDrums.Selection selection) {
+    static ReconstructionVoices.Choice drumChoice(ReconstructionDrums.Selection selection) {
         var candidate = selection.evidence().catalogue();
         var slice = selection.slice();
         String asset = slice != null ? slice.id() : candidate == null ? null : candidate.assetId();

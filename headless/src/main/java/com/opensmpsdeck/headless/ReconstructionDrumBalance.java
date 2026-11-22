@@ -77,6 +77,10 @@ final class ReconstructionDrumBalance {
         double nativeDrums = renderLevel(probe.compile(drumNotes, voicing), chipSamples).powerOn(active, timeline);
         if (nativeDrums == 0 || nativeTone == 0) return voicing;
         double target = nativeTone * (referenceDrums / referenceTone);
+        if (score.inputs().options(score.durationUs()).stockDrums()) {
+            return balanceAroundStockKit(voicing, probe, toneNotes, drumNotes, chipSamples, timeline, active,
+                    nativeDrums / (referenceDrums / referenceTone), db(target / nativeDrums));
+        }
         double correction = db(target / nativeDrums);
         if (Math.abs(correction) <= BALANCE_TOLERANCE_LU) return voicing;
 
@@ -105,6 +109,30 @@ final class ReconstructionDrumBalance {
             if (peak > PEAK_LIMIT && peak > renderLevel(probe.compile(all, voicing), chipSamples).peak()) return voicing;
         }
         return fitted;
+    }
+
+    private static ReconstructionVoicing.Result balanceAroundStockKit(ReconstructionVoicing.Result voicing,
+            ReconstructionLevels.Probe probe, List<ReconstructionAllocation.Entry> toneNotes,
+            List<ReconstructionAllocation.Entry> drumNotes, int samples, ReconstructionTimeMap timeline,
+            boolean[] active, double desiredTone, double correction) throws IOException {
+        if (Math.abs(correction) <= BALANCE_TOLERANCE_LU) return voicing;
+
+        // DAC is fixed-level on both cartridges. Adjust the tonal lanes'
+        // native volume instead, preserving both stock PCM and its reference.
+        double multiplier = Math.clamp(amplitude(-correction), .125, 4);
+        var lanes = new LinkedHashMap<>(voicing.lanes());
+        toneNotes.stream().map(ReconstructionAllocation.Entry::lane).distinct().forEach(id ->
+                lanes.computeIfPresent(id, (key, lane) -> lane.withGain(Math.min(4, lane.gain() * multiplier))));
+        var balanced = voicing.withLevels(lanes, voicing.sourceInstruments(), voicing.leadProminenceWarning());
+        double tone = renderLevel(probe.compile(toneNotes, balanced), samples).powerOn(active, timeline);
+        if (tone == 0 || Math.abs(db(desiredTone / tone)) >= Math.abs(correction)) return voicing;
+        if (multiplier > 1) {
+            var all = new ArrayList<>(toneNotes);
+            all.addAll(drumNotes);
+            double peak = renderLevel(probe.compile(all, balanced), samples).peak();
+            if (peak > PEAK_LIMIT && peak > renderLevel(probe.compile(all, voicing), samples).peak()) return voicing;
+        }
+        return balanced;
     }
 
     private static ReconstructionVoicing.Result apply(ReconstructionVoicing.Result base,

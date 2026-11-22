@@ -23,7 +23,6 @@ final class ReconstructionVoices {
     private static final long INDEPENDENT_US = 500_000;
     // Standalone kick slots from skdisasm's S3K DAC equates. Hybrids such as dKickHey
     // and dOddSnareKick can have strong bass but add a voice or another percussion hit.
-    private static final Set<Integer> S3K_KICK_SLOTS = Set.of(0x86, 0x9D, 0xA4, 0xA7, 0xA8, 0xBD);
 
     record Key(int partId, Integer drumPitch, Long sectionStartUs) {
         Key(int partId, Integer drumPitch) {
@@ -225,7 +224,7 @@ final class ReconstructionVoices {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var probes = new ArrayList<Probe>();
         var evidence = new LinkedHashMap<String, Evidence>();
-        Set<String> kicks = drums ? corroboratedKicks(catalogue, audio, windows) : Set.of();
+        Set<String> kicks = drums ? corroboratedKicks(catalogue, audio, windows, target) : Set.of();
         for (Window window : windows) {
             Probe probe = probe(catalogue, audio, source, kind, window, timeline, drums ? kicks : variants, target);
             probes.add(probe);
@@ -334,7 +333,7 @@ final class ReconstructionVoices {
         return window.note().startUs() / (8 * MICROS_PER_SECOND);
     }
 
-    private static Set<String> corroboratedKicks(InstrumentCatalogue catalogue, Path audio, List<Window> windows)
+    private static Set<String> corroboratedKicks(InstrumentCatalogue catalogue, Path audio, List<Window> windows, TargetGame target)
             throws IOException {
         if (windows.size() < 2) return Set.of();
         int pitch = windows.getFirst().note().pitch();
@@ -343,9 +342,7 @@ final class ReconstructionVoices {
         var kicks = new HashSet<String>();
         for (var variant : catalogue.variants()) {
             if (variant.roles().contains("kick") || variant.occurrences().stream().anyMatch(occurrence ->
-                    CatalogueMatcher.LOCKED_ON_S3K.equals(occurrence.revision())
-                            && "S3K".equals(occurrence.driver()) && "dac".equals(occurrence.table())
-                            && occurrence.slot() != null && S3K_KICK_SLOTS.contains(occurrence.slot()))) {
+                    DacFamily.corroboratedKick(target, occurrence))) {
                 kicks.add(variant.id());
             }
         }

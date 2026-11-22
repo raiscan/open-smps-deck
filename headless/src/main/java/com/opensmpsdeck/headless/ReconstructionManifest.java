@@ -356,7 +356,7 @@ final class ReconstructionManifest {
         return new ReconstructionStages.Inputs(midi, wav, catalogue, options.name(), options.ticksPerBeat(),
                 options.keepOctaves(), options.fmOnly(), options.wholePartVoices(), options.audioRefine(), stems,
                 candidates, options.harmonyMaxHz(), options.grid(), options.audioRepeats(), external,
-                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff(), options.audioOnly(), options.target());
+                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff(), options.audioOnly(), options.target(), options.drumKit());
     }
 
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {

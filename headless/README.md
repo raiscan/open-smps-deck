@@ -392,7 +392,22 @@ and `frames` counts 60 Hz audio presentations. Assembly uses the selected native
 compiler and reports incompatible assets or commands, such as S3K PSG
 control bytes or unsupported envelope and noise commands. A successful
 classic assembly writes a portable package and a render for the selected
-driver. Studio editing and its live preview use the S3K editing dialect.
+driver. Studio uses the saved target for playback.
+
+S1 and S2 default to the target game's stock DAC kit. Register the supported
+clean cartridge with `rom set s1 PATH` or `rom set s2 PATH` before fitting a
+project with DAC drums. The matcher uses each stock note at its native rate.
+The local project contains playable samples and the portable package records
+stock references resolved from the recipient's ROM.
+
+Use `--drum-kit custom` on `reconstruct run`, `transcribe`, or `import` to opt
+into custom PCM on S1 or S2. Pass `--drum-source catalogue|sliced|auto` on a
+fresh staged `run` or `transcribe` to select the PCM source. These settings
+persist with the reconstruction. S3K defaults to the existing catalogue
+fit. The portable drivers support up to 95 virtual DAC bindings and 512 KiB
+of decoded PCM. Test in game reports any approximations. S1 has up to three
+custom DPCM entries sharing 1,030 encoded bytes, and S2 maps custom PCM to
+stock drums.
 
 The target is saved as `inputs.target` in `score.json`, `options.target`
 in `manifest.json`, and `target` in the arrangement project. An omitted
@@ -475,9 +490,11 @@ Reconstruction excludes track data inferred to be Azure Lake FM voices on the
 verified locked-on ROM. Native playback still uses the original bytes.
 
 The matcher auditions playable FM patches and PSG envelopes. The staged
-DAC fit uses mapped drum stems to compare isolated hits per MIDI class
-against catalogue samples at nearby hardware rates. It uses catalogue
-class evidence and favors a shared kit when the choices are close. Check the
+DAC fit uses mapped drum stems to compare isolated hits per MIDI class.
+Custom kit fitting tests catalogue samples at nearby target-driver rates.
+It uses catalogue class evidence and favors a shared kit when the choices are
+close. The stock kits use fixed native rates. Stock-kit balance adjusts
+tonal lane volumes against the reference stems while preserving DAC PCM. Check the
 saved distances and rates in `voicing.json`. See the
 [voice stage guide](../docs/architecture/reconstruction-stages.md#voice)
 for matching details.

@@ -50,6 +50,34 @@ The S3K PSG cymbal calibration also uses S3K projects because the cymbal
 envelopes and noise setup are specific to that driver. Raw S3K banks and
 native S3K-to-editable conversion retain their existing native reader.
 
+## Reconstruction DAC kits
+
+Reconstruction uses the target profile's DAC base cycles for sample probes,
+rate-byte quantization and stem slicing. The S3K default searches catalogue
+sounds and nearby rates. S1 and S2 default to fixed native DAC entries
+decoded by the pinned loaders from the verified cartridge in the ROM library.
+
+The classic kits include kick and snare. S1 uses four fixed timpani aliases.
+The raw timpani command inherits an earlier rate write, so the matcher uses
+the aliases for deterministic playback. S2 fits all 17 entries, including
+clap, scratch and the timpani, tom and bongo pitches. Kick, snare, clap and
+tuned percussion provide drum-class priors. The editable project pairs
+unchanged PCM and a native rate with the stock note locator and PCM hash.
+Portable export resolves that reference from the target ROM. Test in game
+matches the same PCM and rate to the original note in the cartridge's DAC
+table.
+
+The classic DAC lane has fixed output level. With suitable mapped stems the
+balance fit measures drum and tonal renders through the target driver and
+adjusts tonal lane gains. The native render must improve the drum-to-tone
+ratio, and increases must pass the peak check. Stock PCM stays byte-identical.
+
+`--drum-kit custom` enables catalogue and sliced PCM on S1 and S2 at target
+rates. Portable playback supports 95 virtual bindings and 512 KiB of PCM
+on each target. The S1 cartridge engine has room for three custom slots
+with a shared 1,030-byte DPCM budget. S2 substitutes stock drums for custom
+samples. Test in game reports the resulting approximations.
+
 ## Tempo conversion
 
 Classic playback and same-target export use the saved `nativeTempo` when

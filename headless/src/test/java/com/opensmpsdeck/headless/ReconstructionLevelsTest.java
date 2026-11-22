@@ -1,8 +1,13 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.AssetOrigin;
+import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.DemoProject;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -63,6 +68,55 @@ class ReconstructionLevelsTest {
         double expected = probe.render(List.of(lead), ideal).powerOn(active, probe.timeline());
         double actual = probe.render(List.of(lead), fitted).powerOn(active, probe.timeline());
         assertEquals(0, 10 * Math.log10(actual / expected), 2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TargetGame.class, names = {"S1", "S2"})
+    void classicStockBalanceChangesTonalVolumeAndPreservesDac(TargetGame target) throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), StockTable.bytes(patch.bytes()));
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        var catalogue = builder.build();
+        Path drums = directory.resolve("drums.wav");
+        Path tone = directory.resolve("tone.wav");
+        int frames = 120;
+        var inputs = new ReconstructionStages.Inputs(null, directory.resolve("mix.wav").toString(), "unused",
+                "Stock balance", 30, false, false, false, false, Map.of(0, drums.toString(), 1, tone.toString()),
+                null, 0, null, false, null, null, null, null, null, null, target.id(), null);
+        var notes = List.of(
+                new ReconstructionStages.Note("kick", 0, .5, .55, 36, 100, "test", 1),
+                new ReconstructionStages.Note("lead", 1, .25, 1.5, 69, 90, "test", 1));
+        var source = new MidiScore(List.of(new MidiScore.Part(0, "Drums", 0, true),
+                new MidiScore.Part(1, "Lead", 0, false)), List.of(), List.of());
+        var score = new ReconstructionStages.Score(VERSION, 2_000_000, frames, 60, inputs, List.of(), source,
+                Map.of(), notes, List.of(), List.of(), null, null);
+        var kick = placement(notes.getFirst(), "DAC", Role.drums, frames);
+        var lead = placement(notes.getLast(), "FM1", Role.melody, frames);
+        var allocation = new ReconstructionAllocation.Result(VERSION, List.of(lead, kick));
+
+        byte[] pcm = new byte[2400];
+        for (int i = 0; i < pcm.length; i++)
+            pcm[i] = (byte) (128 + Math.round(60 * Math.sin(i * .10) * Math.exp(-i / 700.0)));
+        var ref = StockTable.ref(target.id(), "dac", null, 0x81, StockTable.hash(pcm));
+        var sample = DacSample.of("synthetic-stock", "Synthetic stock fixture", 12, pcm).withOrigin(AssetOrigin.stock(ref));
+        var evidence = new ReconstructionDrums.Evidence("stem", ReconstructionTimeMap.of(score).timeBase(),
+                List.of(), null, List.of(), null, ReconstructionDrums.Source.stock, "test",
+                null, null, null, null, null, null);
+        var drum = new Instrument(0, 36, null, new ReconstructionDrums.Selection(null, sample.rate(), sample, evidence));
+        var dac = new Lane(Role.drums, null, List.of(), 1, WRITTEN, DRY, DEFAULT, DEFAULT, DEFAULT, List.of(drum));
+        var normal = lane(Role.melody, variant, 1);
+        var base = new Result(VERSION, Map.of("DAC", dac, "FM1", normal), null);
+        var softTone = new Result(VERSION, Map.of("DAC", dac, "FM1", normal.withGain(.25)), null);
+        var probe = new ReconstructionLevels.Probe(score, catalogue, allocation, base);
+        probe.compile(List.of(kick), base).writeWave(drums, frames);
+        probe.compile(List.of(lead), softTone).writeWave(tone, frames);
+
+        var fitted = ReconstructionDrumBalance.fit(score, catalogue, allocation, base);
+        assertTrue(fitted.lanes().get("FM1").gain() < normal.gain());
+        assertEquals(dac, fitted.lanes().get("DAC"));
+        var played = probe.compile(probe.notes(), fitted).compiled().samples().getFirst();
+        assertEquals(sample, played);
     }
 
     @Test void patchRefitRetainsCalibratedSourceGain() {
