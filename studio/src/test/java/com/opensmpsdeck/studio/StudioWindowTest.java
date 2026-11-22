@@ -1377,8 +1377,7 @@ class StudioWindowTest {
         });
     }
 
-    @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
-        Path work = reconstructionFixture();
+    private static void addFixtureDrum(Path work) throws Exception {
         var score = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
         var notes = score.getAsJsonArray("notes");
         var kit = new JsonObject();
@@ -1398,7 +1397,11 @@ class StudioWindowTest {
                   {"note":%s,"role":"melody","lane":"FM1","startTick":30,"endTick":90,"outcome":"kept"},
                   {"note":%s,"role":"drums","lane":"DAC","startTick":30,"endTick":31,"outcome":"kept"}]}
                 """.formatted(notes.get(0), drum));
+    }
 
+    @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
+        Path work = reconstructionFixture();
+        addFixtureDrum(work);
         var pane = fx(() -> new ReconstructionPane(stage, work));
         var scene = pane.stage().getScene();
         try {
@@ -1585,6 +1588,52 @@ class StudioWindowTest {
         });
     }
 
+    @Test void reconstructionPitchFitAndDrumTogglePreserveSharedCoordinates() throws Exception {
+        Path work = reconstructionFixture();
+        addFixtureDrum(work);
+        // Give the drum a visible DAC gate at the same onset as the tonal fixture.
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                var plot = (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas");
+                var view = (ReconstructionCanvas) plot.getParent();
+                var pitch = view.pitchScroll;
+                var toggle = (CheckBox) scene.lookup("#reconstruction-show-drums");
+                scene.getRoot().layout();
+                // The octave-spanning drum pitch must not widen the eight-semitone tonal fit.
+                assertEquals(120, pitch.getMax());
+                double fitted = pitch.getValue();
+                view.zoomPitch(.5);
+                assertEquals(122, pitch.getMax());
+                pitch.setValue(fitted - 12);
+                double panned = pitch.getValue();
+                ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                assertEquals(panned, pitch.getValue());
+                assertEquals(122, pitch.getMax());
+                assertTrue(toggle.isVisible());
+                assertFalse(toggle.isSelected());
+                ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
+                assertEquals(fitted, pitch.getValue());
+                assertEquals(120, pitch.getMax());
+
+                // One DAC row and one FM lane share the reserved strip in both views.
+                double drumX = 76 + (plot.getWidth() - 76) * .25;
+                double drumY = plot.getHeight() - 2 * 17 + 4.5;
+                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
+                assertTrue(view.selectedNotes().isEmpty());
+                toggle.setSelected(true);
+                assertEquals(fitted, pitch.getValue());
+                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
+                assertEquals("drum-note", view.selectedNotes().getFirst().id());
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));
@@ -1658,8 +1707,27 @@ class StudioWindowTest {
                         .findFirst().orElseThrow();
                 assertFalse(pad.isDisabled());
                 assertTrue(pad.getTooltip().getText().contains("1 note"));
+                var manage = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Manage Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                manage.fire();
+                var tagItem = javafx.stage.Window.getWindows().stream()
+                        .filter(javafx.scene.control.ContextMenu.class::isInstance)
+                        .map(javafx.scene.control.ContextMenu.class::cast).filter(javafx.stage.Window::isShowing)
+                        .flatMap(menu -> menu.getItems().stream()).filter(item -> item.getText().equals("Edit tag…"))
+                        .findFirst().orElseThrow();
+                Platform.runLater(() -> {
+                    var dialog = dialogPane("reconstruction-voice-tag");
+                    ((TextField) dialog.lookup(".text-field")).setText("PD");
+                    ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+                });
+                tagItem.fire();
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                assertTrue(scene.getRoot().lookupAll(".voice-name").stream().filter(Label.class::isInstance)
+                        .map(Label.class::cast).anyMatch(label -> label.getText().equals("PD · Pad")));
                 assertNull(scene.lookup("#reconstruction-voice-select-"));
-                pad.fire();
+                ((Button) scene.lookup("#" + pad.getId())).fire();
                 assertTrue(trace.getText().contains("test-note"));
                 return null;
             });

@@ -5,9 +5,10 @@ import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
 import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
-import com.opensmpsdeck.headless.ReconstructionVoicePlan.Kind;
+import javafx.geometry.Orientation;
 import javafx.geometry.VPos;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.MouseButton;
@@ -62,6 +63,14 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private boolean rolesView;
+    private boolean showDrums;
+    private Map<String, Integer> drumRows = Map.of();
+    final ScrollBar pitchScroll = new ScrollBar();
+    private boolean updatingPitchScroll;
+    private boolean autoFitPitch = true;
+    private boolean pitchFitDirty = true;
+    private double fittedFrom = Double.NaN;
+    private double fittedTo = Double.NaN;
     private ReconstructionVoices voices = new ReconstructionVoices(List.of(), Map.of());
     private final Set<String> hiddenVoices = new HashSet<>();
     private String soloVoice;
@@ -170,6 +179,18 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         refresh(model);
         canvas.setId("reconstruction-canvas");
         scroll.setFitToHeight(false);
+        pitchScroll.setId("reconstruction-pitch-scroll");
+        pitchScroll.setAccessibleText("Scroll pitch");
+        pitchScroll.setOrientation(Orientation.VERTICAL);
+        pitchScroll.valueProperty().addListener((ignored, old, value) -> {
+            if (updatingPitchScroll) return;
+            autoFitPitch = false;
+            cancelGesture();
+            int span = high - low + 1;
+            high = 127 - value.intValue();
+            low = high - span + 1;
+            draw();
+        });
         scroll.viewportBoundsProperty().addListener((ignored, old, next) -> resizePlot());
         canvas.setOnMouseMoved(event -> {
             var hit = hit(event.getX(), event.getY());
@@ -219,19 +240,18 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         tiles = new ReconstructionTiles(model, this::draw, error);
         assembledBends = Map.of();
         var notes = model.overlays();
-        double lowestBend = notes.stream().flatMap(note -> note.bend().stream())
-                .mapToDouble(BendPoint::pitch).min().orElse(127);
-        double highestBend = notes.stream().flatMap(note -> note.bend().stream())
-                .mapToDouble(BendPoint::pitch).max().orElse(0);
-        builtLow = Math.max(0, Math.min((int) Math.floor(lowestBend),
-                notes.stream().mapToInt(Overlay::pitch).min().orElse(42)) - 3);
-        builtHigh = Math.min(127, Math.max((int) Math.ceil(highestBend),
-                notes.stream().mapToInt(Overlay::pitch).max().orElse(78)) + 4);
-        for (var layer : model.layers()) {
-            builtLow = Math.min(builtLow, Math.max(0, layer.pitch() - 3));
-            builtHigh = Math.max(builtHigh, Math.min(127, layer.pitch() + 4));
+        builtLow = 127;
+        builtHigh = 0;
+        for (var note : notes) if (!isDrum(note, null)) includePitch(note);
+        if (builtLow > builtHigh) {
+            builtLow = 42;
+            builtHigh = 78;
         }
-        updatePitchRange();
+        if (!ready) {
+            low = builtLow;
+            high = builtHigh;
+        }
+        pitchFitDirty = true;
         endByIndex = new double[notes.size()];
         double priorEnd = 0;
         for (int i = 0; i < notes.size(); i++) {
@@ -252,30 +272,77 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void proposals(List<ProposalMark> marks) {
         proposals = List.copyOf(marks);
-        updatePitchRange();
         draw();
     }
 
-    private void updatePitchRange() {
-        low = builtLow;
-        high = builtHigh;
-        for (var note : pending) includePitch(note);
-        for (var mark : proposals) {
-            low = Math.min(low, Math.max(0, mark.note().pitch() - 3));
-            high = Math.max(high, Math.min(127, mark.note().pitch() + 4));
-        }
+    private void includePitch(Overlay note) {
+        builtLow = Math.min(builtLow, noteLow(note));
+        builtHigh = Math.max(builtHigh, noteHigh(note));
     }
 
-    private void includePitch(Overlay note) {
+    private static int noteLow(Overlay note) {
         double min = note.bend().stream().mapToDouble(BendPoint::pitch).min().orElse(note.pitch());
+        return Math.max(0, (int) Math.floor(Math.min(min, note.pitch())) - 3);
+    }
+
+    private static int noteHigh(Overlay note) {
         double max = note.bend().stream().mapToDouble(BendPoint::pitch).max().orElse(note.pitch());
-        low = Math.min(low, Math.max(0, (int) Math.floor(Math.min(min, note.pitch())) - 3));
-        high = Math.max(high, Math.min(127, (int) Math.ceil(Math.max(max, note.pitch())) + 4));
+        return Math.min(127, (int) Math.ceil(Math.max(max, note.pitch())) + 4);
+    }
+
+    void fitPitch() {
+        autoFitPitch = true;
+        pitchFitDirty = true;
+        cancelGesture();
+        draw();
+    }
+
+    void zoomPitch(double factor) {
+        int span = Math.clamp((int) Math.round((high - low + 1) * factor), 6, 128);
+        int bottom = Math.clamp((low + high - span + 1) / 2, 0, 128 - span);
+        autoFitPitch = false;
+        cancelGesture();
+        pitchRange(bottom, bottom + span - 1);
+        draw();
+    }
+
+    private void fitVisiblePitch(double width) {
+        double from = seconds(axis()), to = seconds(width);
+        if (!autoFitPitch || !pitchFitDirty && fittedFrom == from && fittedTo == to) return;
+        fittedFrom = from;
+        fittedTo = to;
+        pitchFitDirty = false;
+        int bottom = 127, top = 0;
+        for (var note : visibleNotes(width)) {
+            if (!roles.contains(note.role()) || isDrum(note, voices.byNote().get(note.id()))
+                    || !selectableDraft(note)) continue;
+            bottom = Math.min(bottom, noteLow(note));
+            top = Math.max(top, noteHigh(note));
+        }
+        pitchRange(bottom <= top ? bottom : builtLow, bottom <= top ? top : builtHigh);
+    }
+
+    private void pitchRange(int bottom, int top) {
+        low = bottom;
+        high = top;
+        int span = high - low + 1;
+        updatingPitchScroll = true;
+        try {
+            pitchScroll.setMax(128 - span);
+            // JavaFX sizes the thumb relative to the scrollable range.
+            pitchScroll.setVisibleAmount(span * (128 - span) / 128.0);
+            pitchScroll.setBlockIncrement(Math.max(1, span / 2));
+            pitchScroll.setUnitIncrement(1);
+            pitchScroll.setValue(127 - high);
+            pitchScroll.setDisable(span == 128);
+        } finally {
+            updatingPitchScroll = false;
+        }
     }
 
     void pending(List<Overlay> overlays) {
         pending = overlays;
-        updatePitchRange();
+        pitchFitDirty = true;
         pendingByNote = new java.util.HashMap<>();
         for (var overlay : overlays) pendingByNote.put(overlay.id(), overlay);
         updateLanes();
@@ -299,6 +366,26 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     void voices(ReconstructionVoices projection, Set<String> edited) {
         voices = projection;
         detailedNotes = edited;
+        var rows = new java.util.LinkedHashMap<String, Integer>();
+        for (var entry : voices.entries()) {
+            if (entry.notes().stream().anyMatch(note -> isDrum(note, entry)))
+                rows.put(entry.id(), rows.size());
+        }
+        drumRows = rows;
+        pitchFitDirty = true;
+        resizePlot();
+        draw();
+    }
+
+    ReconstructionVoices voices() { return voices; }
+
+    void voiceTags(ReconstructionVoices projection) {
+        voices = projection;
+        draw();
+    }
+
+    void showDrums(boolean show) {
+        showDrums = show;
         draw();
     }
 
@@ -307,6 +394,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     void voiceVisible(String id, boolean visible) {
         if (visible) hiddenVoices.remove(id);
         else hiddenVoices.add(id);
+        pitchFitDirty = true;
         draw();
     }
 
@@ -316,8 +404,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void pressRole(MouseEvent event) {
-        if (!inPitch(event)) return;
         var hit = hit(event.getX(), event.getY());
+        if (!inPitch(event)) {
+            if (hit != null) roleDrag = hit.note();
+            return;
+        }
         if (hit == null || event.isShiftDown() || event.isControlDown()) {
             box = new Box(event.getX(), event.getY(), event.getX(), event.getY(), event.isShiftDown(), event.isControlDown());
         } else roleDrag = hit.note();
@@ -713,6 +804,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void roleVisible(Role role, boolean show) {
         if (show) roles.add(role); else roles.remove(role);
+        pitchFitDirty = true;
         draw();
     }
 
@@ -720,6 +812,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void laneVisible(String lane, boolean show) {
         if (show) visibleLanes.add(lane); else visibleLanes.remove(lane);
+        pitchFitDirty = true;
         draw();
     }
 
@@ -831,9 +924,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private double plotWidth() { return Math.max(100, scroll.getViewportBounds().getWidth() - axis()); }
     private int rulerHeight() { return 31; }
     private int sectionBottom() { return rulerHeight() + SECTION_LABELS.size() * SECTION_HEIGHT; }
-    private int stripHeight() { return LANE_HEADER + lanes.size() * LANE_HEIGHT; }
+    private int stripHeight() {
+        return LANE_HEADER + Math.max(lanes.size() * LANE_HEIGHT, drumRows.size() * 9);
+    }
     private double pitchBottom() { return contentHeight - stripHeight(); }
-    private double plotBottom() { return rolesView ? pitchBottom() : contentHeight; }
+    private double plotBottom() { return rolesView && !showDrums ? pitchBottom() : contentHeight; }
     private double laneTop() { return pitchBottom() + LANE_HEADER; }
     private double rowHeight() { return (pitchBottom() - sectionBottom()) / (high - low + 1); }
     private double y(double pitch) { return sectionBottom() + (high + .5 - pitch) * rowHeight(); }
@@ -842,6 +937,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         if (!ready) return;
         var g = canvas.getGraphicsContext2D();
         double width = canvas.getWidth();
+        fitVisiblePitch(width);
         hits.clear();
         proposalHits.clear();
         layerSkips.clear();
@@ -858,6 +954,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         drawPitchGrid(g, width);
         drawBands(g, width);
         if (!rolesView) drawLanes(g, width);
+        else if (showDrums && !drumRows.isEmpty()) {
+            g.setFill(SUBTLE);
+            g.fillText("Drums", 12, pitchBottom() + LANE_HEADER / 2.0);
+        }
         drawRuler(g, width);
         g.save();
         clip(g, axis(), 0, width - axis(), plotBottom());
@@ -866,7 +966,9 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             g.fillRect(x(range.start()), 0, x(range.end()) - x(range.start()), contentHeight);
         }
         if (rolesView) {
-            drawVoiceNotes(g, width);
+            var visible = visibleNotes(width);
+            drawVoiceNotes(g, width, visible);
+            if (showDrums) drawDrums(g, visible);
             drawBox(g);
         } else drawNotes(g, width);
         if (boundaryPreview != null) {
@@ -1016,14 +1118,38 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.restore();
     }
 
-    private void drawVoiceNotes(GraphicsContext g, double width) {
+    private static boolean isDrum(Overlay note, ReconstructionVoices.Entry voice) {
+        return note.role() == Role.DRUMS || voice != null && voice.drum();
+    }
+
+    private void drawDrums(GraphicsContext g, List<Overlay> visible) {
+        for (var note : visible) {
+            var voice = voices.byNote().get(note.id());
+            if (voice == null || !isDrum(note, voice) || !roles.contains(note.role()) || !selectableDraft(note)) continue;
+            Integer row = drumRows.get(voice.id());
+            if (row == null) continue;
+            double x = x(note.interval().sourceStart()), y = laneTop() + row * 9 + 4.5;
+            if (x < axis() || x > canvas.getWidth()) continue;
+            boolean selected = selection.contains(note);
+            g.setGlobalAlpha(voiceDimmed(note) ? .24 : selected ? 1 : .75);
+            var mark = voice.drum() ? voice.drumMark() : ReconstructionVoices.DrumMark.of(note.partName(), note.pitch());
+            mark.draw(g, voice.style().color(), x, y);
+            if (selected) {
+                g.setStroke(Color.WHITE);
+                g.strokeRect(x - 4, y - 4, 8, 8);
+            }
+            hits.add(new Hit(note, x - 4, y - 4, 8, 8));
+        }
+        g.setGlobalAlpha(1);
+    }
+
+    private void drawVoiceNotes(GraphicsContext g, double width, List<Overlay> visible) {
         g.save();
         clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
         var tags = new ArrayList<VoiceTag>();
-        var drumTags = new HashMap<String, Double>();
-        for (var note : visibleNotes(width)) {
+        for (var note : visible) {
             var voice = voices.byNote().get(note.id());
-            if (voice == null || !roles.contains(note.role()) || !inPitchRange(note)) continue;
+            if (voice == null || isDrum(note, voice) || !roles.contains(note.role()) || !inPitchRange(note)) continue;
             var bounds = noteBounds(note);
             double left = bounds.left(), top = bounds.top(), length = bounds.width(), height = bounds.height();
             boolean selected = selection.contains(note);
@@ -1031,13 +1157,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             boolean deleted = note.fate().equals("Pending deletion");
             boolean draft = pendingByNote.get(note.id()) == note;
             g.setGlobalAlpha(dimmed ? .24 : 1);
-            if (!deleted) {
-                g.setFill(voice.color().deriveColor(0, 1, 1, note.sounds() ? .69 : .34));
-                g.fillRect(left, top, length, height);
+            voice.style().draw(g, left, top, length, height, deleted ? 0 : note.sounds() ? .78 : .42);
+            if (deleted) {
+                g.setStroke(voice.style().color());
+                g.strokeLine(left, top + height / 2, left + length, top + height / 2);
             }
-            g.setStroke(voice.color());
-            g.strokeRect(left + .5, top + .5, length - 1, height - 1);
-            if (deleted) g.strokeLine(left, top + height / 2, left + length, top + height / 2);
             if (selected || draft) {
                 g.setStroke(selected ? Color.WHITE : Color.GOLD);
                 g.strokeRect(left - .5, top - .5, length + 1, height + 1);
@@ -1046,25 +1170,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 g.setFill(Color.GOLD);
                 g.fillOval(left + 1, top - 4, 4, 4);
             }
-            if (!dimmed) {
-                double labelLeft = Math.max(left, axis()) + 3;
-                double space = Math.min(left + length, width) - labelLeft - 2;
-                String name = voice.shortName();
-                double nameWidth = name.length() * 6.7;
-                // Brief drum hits can share a spaced caption even when their bars are too narrow for text.
-                boolean drumCaption = space < nameWidth && pixelsPerSecond >= 100 && voice.voice() != null
-                        && voice.voice().kind() == Kind.drum
-                        && labelLeft >= drumTags.getOrDefault(voice.id(), Double.NEGATIVE_INFINITY) + 145;
-                if (drumCaption) space = Math.min(nameWidth, width - labelLeft - 2);
-                String full = name + " · " + roleName(note.role());
-                String label = full.length() * 6.7 <= space ? full : fitLabel(name, space);
-                double baseline = height >= 12 && !drumCaption ? top + height / 2 : top - 7;
-                if (!label.isEmpty() && baseline >= sectionBottom() + 7) {
-                    var tag = new LabelBounds(labelLeft, baseline - 6, label.length() * 6.7 + 4, 12);
-                    if (tags.stream().noneMatch(other -> tag.intersects(other.bounds()))) {
-                        tags.add(new VoiceTag(tag, label));
-                        if (drumCaption) drumTags.put(voice.id(), labelLeft);
-                    }
+            if (!dimmed && pixelsPerSecond >= 24) {
+                // Leave the attack and its pattern visible beside the tag.
+                double labelLeft = Math.max(left + 7, axis() + 2);
+                String label = voice.tag();
+                double labelWidth = label.codePointCount(0, label.length()) * 6.7;
+                double baseline = height >= 12 ? top + height / 2 : top - 7;
+                if (labelLeft + labelWidth + 2 <= Math.min(left + length, width) && baseline >= sectionBottom() + 7) {
+                    var tag = new LabelBounds(labelLeft, baseline - 6, labelWidth + 4, 12);
+                    if (tags.stream().noneMatch(other -> tag.intersects(other.bounds()))) tags.add(new VoiceTag(tag, label));
                 }
             }
             hits.add(bounds);
@@ -1090,7 +1204,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         double left = x(note.interval().sourceStart());
         double height = Math.max(3, Math.min(13, rowHeight() - 1));
         return new Hit(note, left, y(note.pitch()) - height / 2,
-                Math.max(2, x(note.interval().sourceEnd()) - left), height);
+                Math.max(rolesView ? 4 : 2, x(note.interval().sourceEnd()) - left), height);
     }
 
     private void drawBox(GraphicsContext g) {

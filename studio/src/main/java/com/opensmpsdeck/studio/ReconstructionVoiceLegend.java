@@ -10,7 +10,7 @@ import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-import javafx.scene.shape.Rectangle;
+import javafx.scene.canvas.Canvas;
 
 import java.util.List;
 import java.util.Objects;
@@ -23,6 +23,8 @@ final class ReconstructionVoiceLegend extends TitledPane {
     private final ReconstructionCanvas view;
     private final Function<ReconstructionBulk.Voice, Boolean> assign;
     private final Function<ReconstructionBulk.Voice, ContextMenu> actions;
+    private final Consumer<Entry> editTag;
+    private final CheckBox showDrums = new CheckBox("Show drums");
     private final MenuButton create = new MenuButton("New voice");
     private final MenuItem createFromSelection = new MenuItem("From selected notes…");
     private final ScrollPane viewport = new ScrollPane(rows);
@@ -32,10 +34,12 @@ final class ReconstructionVoiceLegend extends TitledPane {
     private final SimpleBooleanProperty hasSelection = new SimpleBooleanProperty();
 
     ReconstructionVoiceLegend(ReconstructionCanvas view, Function<ReconstructionBulk.Voice, Boolean> assign,
-                              Consumer<Kind> add, Function<ReconstructionBulk.Voice, ContextMenu> actions) {
+                              Consumer<Kind> add, Function<ReconstructionBulk.Voice, ContextMenu> actions,
+                              Consumer<Entry> editTag) {
         this.view = view;
         this.assign = assign;
         this.actions = actions;
+        this.editTag = editTag;
         setId("reconstruction-voice-legend");
         setText("Voices");
         setAnimated(false);
@@ -50,7 +54,12 @@ final class ReconstructionVoiceLegend extends TitledPane {
         create.getItems().addAll(createFromSelection, tonal, drum);
         create.disableProperty().bind(editing.not());
         createFromSelection.disableProperty().bind(hasSelection.not());
-        var header = new HBox(create);
+        showDrums.setId("reconstruction-show-drums");
+        showDrums.setTooltip(new Tooltip("Show drum hits in a separate strip in Roles"));
+        showDrums.managedProperty().bind(showDrums.visibleProperty());
+        showDrums.setVisible(false);
+        showDrums.selectedProperty().addListener((ignored, old, show) -> view.showDrums(show));
+        var header = new HBox(8, showDrums, create);
         header.setAlignment(Pos.CENTER_RIGHT);
         viewport.getStyleClass().add("editor-scroll");
         viewport.setFitToWidth(true);
@@ -79,19 +88,24 @@ final class ReconstructionVoiceLegend extends TitledPane {
         viewport.setMaxHeight(height + 2);
     }
 
+    void rolesView(boolean roles) {
+        showDrums.setVisible(roles);
+    }
+
     void controls(boolean editable, boolean selected) {
         editing.set(editable);
         hasSelection.set(selected);
     }
 
     private HBox row(Entry entry, String solo) {
-        String name = entry.voice() == null ? "?  Unassigned" : entry.shortName();
+        String name = entry.tag() + " · " + entry.shortName();
         String role = entry.roles();
         int count = entry.notes().size();
         String summary = count + (count == 1 ? " note" : " notes") + " · " + role;
-        var swatch = new Rectangle(10, 10, entry.color());
-        swatch.setArcWidth(3);
-        swatch.setArcHeight(3);
+        var swatch = new Canvas(16, 12);
+        var g = swatch.getGraphicsContext2D();
+        if (entry.drum()) entry.drumMark().draw(g, entry.style().color(), 8, 6);
+        else entry.style().draw(g, 0, 0, 16, 12, .85);
         var title = new Label(name);
         title.getStyleClass().add("voice-name");
         var subtitle = new Label(summary);
@@ -138,11 +152,10 @@ final class ReconstructionVoiceLegend extends TitledPane {
 
         var menu = new Button("⋯");
         menu.setAccessibleText("Manage " + entry.name());
-        menu.setTooltip(new Tooltip("Rename, split or merge this voice"));
-        menu.setOnAction(event -> actions.apply(entry.voice()).show(menu, javafx.geometry.Side.BOTTOM, 0, 0));
+        menu.setTooltip(new Tooltip("Edit tag, rename, split or merge this voice"));
+        menu.setOnAction(event -> menu(entry).show(menu, javafx.geometry.Side.BOTTOM, 0, 0));
         row.getChildren().addAll(move, menu);
         move.disableProperty().bind(editing.not().or(hasSelection.not()));
-        menu.disableProperty().bind(editing.not());
 
         row.setOnDragOver(event -> {
             if (!editing.get() || event.getGestureSource() != view.canvas) return;
@@ -158,10 +171,17 @@ final class ReconstructionVoiceLegend extends TitledPane {
             event.consume();
         });
         row.setOnContextMenuRequested(event -> {
-            if (!editing.get()) return;
-            actions.apply(entry.voice()).show(row, event.getScreenX(), event.getScreenY());
+            menu(entry).show(row, event.getScreenX(), event.getScreenY());
             event.consume();
         });
         return row;
+    }
+
+    private ContextMenu menu(Entry entry) {
+        var menu = editing.get() ? actions.apply(entry.voice()) : new ContextMenu();
+        var tag = new MenuItem("Edit tag…");
+        tag.setOnAction(event -> editTag.accept(entry));
+        menu.getItems().addFirst(tag);
+        return menu;
     }
 }

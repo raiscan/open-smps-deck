@@ -241,7 +241,7 @@ final class ReconstructionPane implements AutoCloseable {
         playback.getChildren().addAll(detail, roles);
         root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls));
         root.setRight(editor.inspector());
-        root.setCenter(view.scroll);
+        root.setCenter(new BorderPane(view.scroll, null, view.pitchScroll, null, null));
         stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
         updatePosition(0, false);
         refreshSolo();
@@ -298,6 +298,20 @@ final class ReconstructionPane implements AutoCloseable {
         zoom.valueProperty().addListener((ignored, previous, next) -> view.zoom(next.doubleValue()));
         var fit = new Button("Fit song");
         fit.setOnAction(event -> zoom.setValue(0));
+        var pitchOut = new Button("−");
+        pitchOut.setAccessibleText("Zoom pitch out");
+        pitchOut.setTooltip(new Tooltip("Show more pitches"));
+        pitchOut.setOnAction(event -> view.zoomPitch(1.4));
+        var pitchIn = new Button("+");
+        pitchIn.setAccessibleText("Zoom pitch in");
+        pitchIn.setTooltip(new Tooltip("Show fewer pitches"));
+        pitchIn.setOnAction(event -> view.zoomPitch(1 / 1.4));
+        var fitPitch = new Button("Fit pitch");
+        fitPitch.setId("reconstruction-fit-pitch");
+        fitPitch.setTooltip(new Tooltip("Fit the tonal notes in the visible time window"));
+        fitPitch.setOnAction(event -> view.fitPitch());
+        var pitch = new HBox(4, new Label("Pitch zoom"), pitchOut, pitchIn, fitPitch);
+        pitch.setAlignment(Pos.CENTER_LEFT);
         var db = new Slider(20, 85, 55);
         db.setPrefWidth(120);
         var dbLabel = new Label();
@@ -318,7 +332,7 @@ final class ReconstructionPane implements AutoCloseable {
         ridges.selectedProperty().addListener((ignored, previous, selected) -> view.ridges(selected));
         var project = new CheckBox("Project time");
         project.selectedProperty().addListener((ignored, previous, selected) -> view.projectRuler(selected));
-        var row = new FlowPane(9, 6, new Label("Time zoom"), zoom, fit, new Label("Spectrum"), db, dbLabel,
+        var row = new FlowPane(9, 6, new Label("Time zoom"), zoom, fit, pitch, new Label("Spectrum"), db, dbLabel,
                 ridges, project);
         row.setAlignment(Pos.CENTER_LEFT);
         row.getStyleClass().addAll("panelbar", "reconstruction-controls");

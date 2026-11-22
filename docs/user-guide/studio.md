@@ -293,7 +293,10 @@ playback.
 
 - Choose a **Source** to change the spectrogram and playback together. Use
   **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**
-  restores the overview. The ruler starts in source seconds. Toggle
+  restores the overview. **Fit pitch** follows the tonal notes in the visible
+  time window with a small margin. It starts enabled. Use the **Pitch zoom**
+  buttons and the vertical scrollbar to set a manual range. The ruler starts
+  in source seconds. Toggle
   **Project time** to see the steady project clock on the same aligned view.
 - Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
   background detail. **Ridges** marks the three strongest spectral peaks in
@@ -507,11 +510,16 @@ records coverage for the retail importer and the remaining driver gaps.
 ### Classify notes in Analysis
 
 Switch between **Detail** and **Roles** in the Analysis toolbar. Both views
-use the same pitch and time coordinates over the spectrogram, including
-drum hits at their transcribed pitches. Roles colors each note by voice.
-Unassigned notes are grey with a **?** tag. Zoom in to read voice and role
-tags, or hover over a note for its full name and role. Gold dots mark notes
-with detail edits.
+share the time and pitch viewport over the spectrogram. Roles uses voice
+colors and patterns that match the swatches in **Voices**. Notes show short
+tags when space allows. Hover for the full voice name and the note's role.
+Unassigned notes are grey with a **?** tag. Gold dots mark notes with detail
+edits.
+
+Drum hits are hidden when Roles opens. Turn on **Show drums** in **Voices**
+to see small, unlabelled hits in a separate strip beneath the pitch plot.
+Kick, snare and hat use different shapes. Drum hits stay available in Detail's
+chip lanes.
 
 Click a voice name in **Voices** to select all its notes. The checkbox hides
 or shows the voice, and **S** highlights it against the other voices.
@@ -520,7 +528,10 @@ to toggle. To assign the selection, click the destination voice's **→**
 button or drag the selected notes from the Roles plot onto its legend entry.
 
 Use **New voice** to create an empty tonal or drum voice or create a voice
-from selected notes. Use **⋯** to rename, split or merge a voice. Use
+from selected notes. Use **⋯** to rename, split or merge a voice. Choose
+**Edit tag…** in the same menu to change its label, or clear the field to
+restore the automatic tag. Studio saves tags and swatches locally for the
+reconstruction. Use
 **Selection** to change a role or chip lane type in bulk. Studio checks
 whether a classification change would orphan a detail edit target before
 queuing the change.

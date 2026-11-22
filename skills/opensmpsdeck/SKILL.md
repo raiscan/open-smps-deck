@@ -472,7 +472,10 @@ the intent and add one with the corrected target.
 For the coarse classification pass, use `reconstruct describe WORK_DIR
 --roles --json` or `reconstruct_describe` with `roles: true`. This groups
 stable note IDs by voice and role. Use the same IDs for detail edits.
-In Studio, Roles shows voice colors and name tags at the same pitch and time
-as Detail. Click a voice name in the Voices panel to select its notes. Click
-its assignment arrow, or drag a Roles selection onto the entry, to move the
-selection into that voice. Both views share the edit history.
+In Studio, Roles shows voice colors, patterns and short tags over the same
+spectrogram viewport as Detail. Use **Fit pitch** to follow the visible tonal
+range or use the pitch zoom buttons and vertical scrollbar to set it manually.
+Enable **Show drums** in **Voices** for a separate drum-hit strip. Use the
+voice's **⋯ → Edit tag…** to change its tag locally. Click the voice name to
+select its notes. Click its assignment arrow, or drag a Roles selection onto
+the entry, to move the selection into that voice. Both views share edit history.

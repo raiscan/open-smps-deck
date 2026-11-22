@@ -182,7 +182,7 @@ final class ReconstructionEditor implements AutoCloseable {
         draft = new ReconstructionDraft(accepted(initial.revision().entries()));
         bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::transpose, this::audition, this::stopAudition, this::previewLayer);
         voicePalette = new ReconstructionVoices.Palette(work);
-        voiceLegend = new ReconstructionVoiceLegend(view, this::assignVoice, this::createLegendVoice, this::voiceActions);
+        voiceLegend = new ReconstructionVoiceLegend(view, this::assignVoice, this::createLegendVoice, this::voiceActions, this::editVoiceTag);
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
         view.attack = this::attack;
@@ -508,7 +508,33 @@ final class ReconstructionEditor implements AutoCloseable {
     void rolesView(boolean roles) {
         detailTools.forEach(control -> control.setVisible(!roles));
         bulk.rolesView(roles);
+        voiceLegend.rolesView(roles);
         if (roles) tabs.getSelectionModel().select(bulkTab);
+    }
+
+    private void editVoiceTag(ReconstructionVoices.Entry entry) {
+        var dialog = new TextInputDialog(entry.tag());
+        dialog.initOwner(owner);
+        dialog.setTitle("Edit voice tag");
+        dialog.setHeaderText(entry.name());
+        dialog.setContentText("Tag (up to 6 letters or digits, blank for automatic)");
+        dialog.getDialogPane().setId("reconstruction-voice-tag");
+        var field = dialog.getEditor();
+        field.setTextFormatter(new TextFormatter<>(change ->
+                change.getControlNewText().matches("[\\p{L}\\p{N}]{0,6}") ? change : null));
+        dialog.showAndWait().ifPresent(tag -> {
+            var projection = view.voices();
+            if (!tag.isEmpty() && projection.entries().stream()
+                    .anyMatch(other -> !entry.id().equals(other.id()) && tag.equalsIgnoreCase(other.tag()))) {
+                status.accept("Voice tag is already in use · " + tag);
+                return;
+            }
+            voicePalette.tag(entry.id(), tag);
+            var updated = ReconstructionVoices.of(snapshot.inspection().overlays(), overlays(),
+                    draftVoices, draftMembership, voicePalette);
+            view.voiceTags(updated);
+            voiceLegend.show(updated.entries());
+        });
     }
 
     private boolean assignVoice(ReconstructionBulk.Voice voice) {
