@@ -4,6 +4,7 @@ import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
@@ -144,13 +145,21 @@ class ProjectCliTest {
     @Test void compilerBankLimitIsReportedBeforeAnyOutputIsCreated() throws Exception {
         Path source = source("too-long.json", validSource().replace("\"startTick\": 0, \"lengthTicks\": 36",
                 "\"startTick\": 0, \"lengthTicks\": 2147483647"));
-        for (String command : List.of("validate-project", "compile-project", "render-project")) {
+        var error = assertThrows(ProjectCompiler.BankLimitException.class,
+                () -> ProjectCompiler.compile(ProjectFormat.read(Files.readString(source))));
+        for (String command : List.of("validate-project", "compile-project", "compile-package", "render-project", "export")) {
             Path output = directory.resolve(command + ".output");
-            Result result = command.equals("validate-project") ? run(command, source.toString())
-                    : run(command, source.toString(), output.toString());
-            assertEquals(2, result.exit());
-            assertTrue(result.err().contains("32 KiB"), result.err());
-            assertFalse(Files.exists(output));
+            var format = command.equals("export") ? List.of("wav", "smps", "package") : List.of("");
+            for (String target : format) {
+                Result result = switch (command) {
+                    case "validate-project" -> run(command, source.toString());
+                    case "export" -> run(command, source.toString(), output.toString(), "--format", target);
+                    default -> run(command, source.toString(), output.toString());
+                };
+                assertEquals(2, result.exit(), command + " " + target);
+                assertEquals("Error: " + error.getMessage(), result.err().strip());
+                assertFalse(Files.exists(output));
+            }
         }
     }
 

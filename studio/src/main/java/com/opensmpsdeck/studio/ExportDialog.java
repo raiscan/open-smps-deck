@@ -3,6 +3,7 @@ package com.opensmpsdeck.studio;
 import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.ProjectProvenance;
 import com.opensmpsdeck.headless.ProjectExport.Format;
+import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -217,10 +218,15 @@ final class ExportDialog {
         });
         job.setOnFailed(event -> {
             progress.close();
-            status.accept("Export failed · " + job.getException().getMessage());
-            var alert = new Alert(Alert.AlertType.ERROR, job.getException().getMessage());
+            var failure = job.getException();
+            var bankLimit = BankLimitException.from(failure);
+            String detail = bankLimit == null ? failure.getMessage() : bankLimit.getMessage();
+            status.accept("Export failed · " + detail);
+            var alert = new Alert(Alert.AlertType.ERROR, detail);
             alert.initOwner(owner);
             alert.setHeaderText("Could not export arrangement");
+            alert.getDialogPane().setPrefWidth(500);
+            alert.setResizable(true);
             alert.show();
         });
         job.setOnCancelled(event -> {

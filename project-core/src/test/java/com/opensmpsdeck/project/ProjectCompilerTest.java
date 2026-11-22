@@ -42,7 +42,7 @@ class ProjectCompilerTest {
     }
     @Test void repetitionsResetAbsoluteStateAndTruncateFinalNotesAndRests() {
         var s=sequence("s","FM",10,List.of(new NoteEvent("n",2,6,60)));
-        byte[] b=ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",3,25))));
+        byte[] b=ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",3,25))), ProjectCompiler.Encoding.LINEAR);
         int start=word(b,10), end=word(b,0);
         assertArrayEquals(bytes(0x80,3,
                 0xEF,0,0xE4,100,0xE0,0xC0,0xED,0x40,0x80,2,0xB1,6,0x80,2,
@@ -60,22 +60,81 @@ class ProjectCompilerTest {
         assertTrue(assertThrows(IllegalArgumentException.class,()->ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",0,Integer.MAX_VALUE))))).getMessage().contains("32 KiB"));
         assertTrue(assertThrows(IllegalArgumentException.class,()->ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",Integer.MAX_VALUE-1,1))))).getMessage().contains("32 KiB"));
     }
+    @Test void adjacentWholeEventsUseOneCountedLoopWithABankRelativeTarget() {
+        var phrase = sequence("s", "FM", 10, List.of(new NoteEvent("n", 0, 10, 60)));
+        var song = project(List.of(phrase), List.of(new Clip("c", "s", "FM1", 0, 100)));
+        byte[] bank = ProjectCompiler.compile(song);
+        int start = word(bank, 10), end = word(bank, 0);
+        assertArrayEquals(bytes(0xEF,0,0xE4,100,0xE0,0xC0,0xED,0x40,0xB1,10,
+                0xF7,0,10,start,0,0xF2), Arrays.copyOfRange(bank,start,end));
+        assertArrayEquals(bank, ProjectCompiler.compile(song));
+    }
+
     @Test void exactBankBoundaryIsAcceptedButOneMoreEventIsRejected() {
         // Header14 + DAC1 + reset8 + two bytes per note + stop1 + voice25.
         int count=(32768-49)/2;
         var notes=new java.util.ArrayList<NoteEvent>();
         for(int i=0;i<count;i++) notes.add(new NoteEvent("n"+i,i,1,60));
         var s=sequence("s","FM",count,notes);
-        byte[] b=ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",0,count))));
+        byte[] b=ProjectCompiler.compile(project(List.of(s),List.of(new Clip("c","s","FM1",0,count))), ProjectCompiler.Encoding.LINEAR);
         assertEquals(32767,b.length);
         var exactNotes=new java.util.ArrayList<NoteEvent>();
         exactNotes.add(new NoteEvent("n0",0,128,60));
         for(int i=1;i<count-1;i++) exactNotes.add(new NoteEvent("n"+i,i+127,1,60));
         var exact=sequence("s","FM",count+126,exactNotes);
-        byte[] full=ProjectCompiler.compile(project(List.of(exact),List.of(new Clip("c","s","FM1",0,count+126))));
+        byte[] full=ProjectCompiler.compile(project(List.of(exact),List.of(new Clip("c","s","FM1",0,count+126))), ProjectCompiler.Encoding.LINEAR);
         assertEquals(32768,full.length); assertEquals(full.length-25,word(full,0));
         notes.add(new NoteEvent("last",count,1,60));
         var larger=sequence("s","FM",count+1,notes);
-        assertThrows(IllegalArgumentException.class,()->ProjectCompiler.compile(project(List.of(larger),List.of(new Clip("c","s","FM1",0,count+1)))));
+        assertThrows(IllegalArgumentException.class,()->ProjectCompiler.compile(project(List.of(larger),List.of(new Clip("c","s","FM1",0,count+1))), ProjectCompiler.Encoding.LINEAR));
+    }
+
+    @Test void anArrangementAboveTheLinearLimitCanFitWithCountedLoops() {
+        var phrase = sequence("s", "FM", 1, List.of(new NoteEvent("n", 0, 1, 60)));
+        var song = project(List.of(phrase), List.of(new Clip("c", "s", "FM1", 0, 20_000)));
+        var failure = assertThrows(ProjectCompiler.BankLimitException.class,
+                () -> ProjectCompiler.compile(song, ProjectCompiler.Encoding.LINEAR));
+        assertEquals(200_041, failure.compiledBytes());
+        assertTrue(ProjectCompiler.compile(song).length < 1_500);
+    }
+
+    @Test void compactBankLimitReportsTotalEvenBeyondTheFirstTrack() {
+        int duration = 127 * 20_000;
+        var s = new Sequence("s", "s", "FM", duration, "v", 100,
+                List.of(new NoteEvent("long", 0, duration, 60)));
+        var song = new StudioProject(2, "Two long held notes", "S3K", 24, 0, List.of(VOICE), List.of(s),
+                List.of(new Clip("a", "s", "FM1", 0, duration), new Clip("b", "s", "FM2", 0, duration)));
+        var error = assertThrows(ProjectCompiler.BankLimitException.class, () -> ProjectCompiler.compile(song));
+        // Header, DAC stop, two channels (reset, attack, held durations, stop), voice.
+        assertEquals(18 + 1 + 2 * (13 + 2 * 20_000 + 1) + 25, error.compiledBytes());
+        assertEquals(32_768, error.limitBytes());
+        assertTrue(error.getMessage().contains("80072 bytes"));
+        assertTrue(error.getMessage().contains("32,768 bytes"));
+        assertTrue(error.getMessage().contains("Loops and calls were already applied"));
+        assertTrue(error.getMessage().contains("reduce layering, voices, or notes"));
+    }
+
+    @Test void refusesSharingAcrossRelativeOrDifferentAbsoluteState() {
+        for (var command : List.of(NativeCommand.TRANSPOSE_ADD, NativeCommand.FM_VOLUME,
+                NativeCommand.TRANSPOSE, NativeCommand.VOLUME)) {
+            var notes = new java.util.ArrayList<NoteEvent>();
+            for (int i = 0; i < 15; i++) notes.add(new NoteEvent("n" + i, i, 1, 60 + i % 5));
+            var commands = List.of(new CommandEvent("change1", 5, command, List.of(66)),
+                    new CommandEvent("change2", 10, command, List.of(67)));
+            var s = new Sequence("s","s","FM",15,"v",100,notes,commands,"CARRY");
+            var song = new StudioProject(2,"State","S3K",24,0,List.of(VOICE),List.of(s),
+                    List.of(new Clip("c","s","FM1",0,15)));
+            assertArrayEquals(ProjectCompiler.compile(song, ProjectCompiler.Encoding.LINEAR),
+                    ProjectCompiler.compile(song), command.name());
+        }
+    }
+
+    @Test void refusesSharingADurationOnlyContinuationOrTieAcrossABoundary() {
+        var notes = List.of(new NoteEvent("a", 0, 900, 60), new NoteEvent("b", 900, 900, 61),
+                new NoteEvent("c", 1800, 900, 60));
+        var s = new Sequence("s","s","FM",2700,"v",100,notes,List.of(),"CARRY");
+        var song = new StudioProject(2,"Ties","S3K",24,0,List.of(VOICE),List.of(s),
+                List.of(new Clip("c","s","FM1",0,2700)));
+        assertArrayEquals(ProjectCompiler.compile(song, ProjectCompiler.Encoding.LINEAR), ProjectCompiler.compile(song));
     }
 }

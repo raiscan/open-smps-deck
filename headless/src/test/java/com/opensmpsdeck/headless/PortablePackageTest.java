@@ -248,8 +248,8 @@ class PortablePackageTest {
 
     @Test void legacySchemaGoldenArchivesAreByteIdentical() throws Exception {
         var expected = Map.of(
-                "lantern-walk", "2e55e6cac18b91d8589264f2008e7cb74588af6432677548c48c70e31ff2c561",
-                "dac-percussion", "fb801916f2a5e1df989906e87257c070af8d46b4bbb68451ee170b1dde87c00c",
+                "lantern-walk", "9121be2ffba152dbb30b27f5f2ae1f78f758747804d43ecb431c8ae158a9d6c9",
+                "dac-percussion", "8ea979880c30d8bb682cf03446bf48cf11d7ac33516a0665a7c8c4117df5e92c",
                 "native-evening-clock", "250d6debe4334018c0bfb62a3ddb36f687667524856b1b9b8d6c92590b5fb728");
         for (var entry : expected.entrySet()) {
             Path zip = directory.resolve(entry.getKey() + ".smps.zip");

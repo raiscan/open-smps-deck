@@ -5,6 +5,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.opensmpsdeck.headless.ReconstructionStages;
+import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -165,6 +166,11 @@ public final class McpServer {
             var result = McpTools.call(params.get("name").getAsString(), arguments, progress(meta));
             return toolResult(result.value(), false, result.png());
         } catch (IOException | RuntimeException failed) {
+            var limit = BankLimitException.from(failed);
+            if (limit != null) {
+                return toolResult(object(Map.of("error", limit.getMessage(),
+                        "compiledBytes", limit.compiledBytes(), "limitBytes", limit.limitBytes())), true, null);
+            }
             String message = failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage();
             return toolResult(object(Map.of("error", message)), true, null);
         }

@@ -24,6 +24,15 @@ public final class Main {
     public static void main(String[] args) { System.exit(run(args, System.out, System.err)); }
 
     public static int run(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, false);
+    }
+
+    /** Preserve the bank limit's structured fields for in-process MCP tool calls. */
+    public static int runForMcp(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, true);
+    }
+
+    private static int run(String[] args, PrintStream out, PrintStream err, boolean propagateBankLimit) {
         try {
             if (args.length == 1 && (args[0].equals("--help") || args[0].equals("-h"))) {
                 usage(out); return 0;
@@ -113,10 +122,13 @@ public final class Main {
                     inspect(compiled, out);
                 }
                 case "compile-project" -> {
-                    requireArguments(args, 3);
+                    boolean linear = args.length == 4 && args[3].equals("--linear");
+                    if (!linear) requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
-                    var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
+                    var project = ProjectFiles.load(input).project();
+                    var compiled = linear ? ProjectCompiler.compileWithAssets(project, ProjectCompiler.Encoding.LINEAR)
+                            : ProjectCompiler.compileWithAssets(project);
                     byte[] song = ProjectExport.rawBytes(compiled);
                     writeNewBinary(output, song);
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
@@ -157,6 +169,12 @@ public final class Main {
             }
             return 0;
         } catch (IllegalArgumentException | IOException failure) {
+            var limit = ProjectCompiler.BankLimitException.from(failure);
+            if (limit != null) {
+                if (propagateBankLimit) throw limit;
+                err.println("Error: " + limit.getMessage());
+                return 2;
+            }
             String message = failure instanceof FileAlreadyExistsException exists
                     ? "output already exists: " + exists.getFile() : failure.getMessage();
             err.println("Error: " + message);
@@ -352,7 +370,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group place PROJECT.json GROUP_ID PLACEMENT_ID START LENGTH [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group ungroup PROJECT.json PLACEMENT_ID [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin [--linear]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
@@ -370,6 +388,6 @@ public final class Main {
         out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package|portable|mod");
         out.println("              Portable/mod: [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
-        out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
+        out.println("Binary input: finite standalone S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
 }

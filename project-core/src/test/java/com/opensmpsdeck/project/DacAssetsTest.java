@@ -122,7 +122,7 @@ class DacAssetsTest {
         var source=dac(List.of(new SampleTrigger("long",0,"slow"),new SampleTrigger("short",7,"fast")),10);
         var p=project(source,List.of(new Clip("c","drums","DAC",0,7)),List.of(slow,fast));
         assertEquals(3918,ProjectCompiler.dacEndTick(p));
-        byte[] song=ProjectCompiler.compile(p);
+        byte[] song=ProjectCompiler.compile(p, ProjectCompiler.Encoding.LINEAR);
         int at=word(song,6);
         assertEquals(0x81,song[at++]&255);
         int ticks=song[at++]&255;
@@ -147,7 +147,7 @@ class DacAssetsTest {
     }
     @Test void aRepeatedEmptyDacSourceUsesCompactRests() {
         var p=project(dac(List.of(),1),List.of(new Clip("c","drums","DAC",0,20_000)),List.of());
-        byte[] song=ProjectCompiler.compile(p);
+        byte[] song=ProjectCompiler.compile(p, ProjectCompiler.Encoding.LINEAR);
         assertEquals(10+2*158+1,song.length);
         int elapsed=0;
         for(int at=word(song,6);at<song.length-1;at+=2) {
