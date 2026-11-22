@@ -125,6 +125,7 @@ final class ReconstructionAllocation {
         }
         Note note() { return decision.note(); }
         Role role() { return decision.role(); }
+        boolean upperLine() { return ReconstructionPolyphonicLead.REASON.equals(decision.reason()); }
 
         Attack onNoise(String reason, int frames) {
             return new Attack(decision, start, Math.min(frames, start + ReconstructionCymbals.gate(note().pitch())),
@@ -141,6 +142,7 @@ final class ReconstructionAllocation {
     private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
     private final Map<String, ReconstructionChordReduction.Tone> tones;
     private final Map<String, Double> salience;
+    private final java.util.Set<String> upperLine;
     private final Map<String, ReconstructionHeldNotes.Hold> stemHolds;
     private final Map<String, String> previousLanes;
     private final java.util.Set<String> chordAnchors = new java.util.HashSet<>();
@@ -153,18 +155,20 @@ final class ReconstructionAllocation {
 
     private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
                                      Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience,
-                                     TargetProfile profile, Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
+                                     java.util.Set<Integer> leadAttacks, TargetProfile profile, Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
         this.fmOnly = fmOnly;
         this.profile = profile;
         this.previousLanes = previousLanes;
         this.tones = tones;
+        this.upperLine = attacks.stream().filter(Attack::upperLine).map(a -> a.note().id())
+                .collect(java.util.stream.Collectors.toSet());
         this.salience = salience;
         this.stemHolds = stemHolds;
         var ordinal = new HashMap<String, Integer>();
         for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
         pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
                 .thenComparing(a -> continuations.containsKey(a.note().id()))
-                .thenComparing(attackOrder(profile))
+                .thenComparing(attackOrder(profile, tones, leadAttacks))
                 .thenComparingInt(a -> ordinal.getOrDefault(a.note().id(), Integer.MAX_VALUE))
                 .thenComparing(a -> a.note().id()));
         for (var attack : attacks) {
@@ -329,9 +333,14 @@ final class ReconstructionAllocation {
             var chord = anchorChords.get(attack.note().id());
             return chord == null ? attack : attack.withChord(chord);
         }).toList();
-        var tones = chordReduction ? ReconstructionChordReduction.classify(attacks.stream().filter(a -> a.role() != Role.drums && a.role() != Role.drop)
-                .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList()) : Map.<String, ReconstructionChordReduction.Tone>of();
-        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, profile, stemHolds);
+        var leadAttacks = scheduled.stream().filter(Attack::upperLine).map(Attack::start)
+                .collect(java.util.stream.Collectors.toSet());
+        var tones = chordReduction || !leadAttacks.isEmpty() ? ReconstructionChordReduction.classify(attacks.stream()
+                .filter(a -> a.role() != Role.drums && a.role() != Role.drop)
+                .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList(),
+                note -> leadAttacks.contains(note.startTick(frames, profile.clock())))
+                : Map.<String, ReconstructionChordReduction.Tone>of();
+        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, leadAttacks, profile, stemHolds);
         allocator.partPins = arrangement.pins();
         allocator.hats = arrangement.hats();
         var louderParts = new java.util.HashSet<Integer>();
@@ -477,10 +486,18 @@ final class ReconstructionAllocation {
     }
 
     private static Comparator<Attack> attackOrder(TargetProfile profile) {
+        return attackOrder(profile, Map.of(), java.util.Set.of());
+    }
+
+    private static Comparator<Attack> attackOrder(TargetProfile profile,
+                                                  Map<String, ReconstructionChordReduction.Tone> tones,
+                                                  java.util.Set<Integer> leadAttacks) {
         return Comparator.comparingInt(Attack::start)
                 .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < profile.psg().low() ? 0 : 1)
+                .thenComparingInt(a -> !backing(a.role()) || !leadAttacks.contains(a.start) ? 0 : -tones.getOrDefault(a.note().id(),
+                        ReconstructionChordReduction.Tone.extension).priority)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony || a.role() == Role.counter ? a.start - a.end : 0)
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER);
@@ -527,6 +544,7 @@ final class ReconstructionAllocation {
     }
 
     private static int priority(Attack attack) {
+        if (attack.upperLine() && attack.role() == Role.counter) return 7;
         return switch (attack.role()) {
             case melody, bass -> attack.note().run() == null ? 12 : 13;
             case drums -> attack.cymbalRoute != null ? 4
@@ -634,6 +652,7 @@ final class ReconstructionAllocation {
                             && ("quantized-release-overlap".equals(entry.reason()) || "higher-priority-attack".equals(entry.reason()));
                 })
                 .sorted(Comparator.comparing((Attack a) -> backing(a.role()))
+                        .thenComparing(a -> backing(a.role()) && !a.upperLine())
                         .thenComparing(a -> !stemHolds.containsKey(a.note().id()))
                         .thenComparing(a -> entries.get(a.note().id()).outcome() != Outcome.shortened)
                         .thenComparingInt(a -> a.note().pitch() < profile.psg().low() ? 0 : 1)
@@ -662,7 +681,7 @@ final class ReconstructionAllocation {
             var lanes = recoveryLanes(attack, entry.lane(), attack.start, attack.end);
             String lane = lanes.stream().filter(l -> conflicts(schedule.get(l), attack.start, attack.end, entry).isEmpty())
                     .findFirst().orElse(null);
-            if (lane == null && (entry.lane() != null || !backing(attack.role())
+            if (lane == null && (entry.lane() != null || !backing(attack.role()) || attack.upperLine()
                     || stemHolds.containsKey(attack.note().id()))) {
                 for (String alternative : lanes) {
                     if (relocateBlockers(schedule, byId, attack, entry, alternative)) {
@@ -686,7 +705,8 @@ final class ReconstructionAllocation {
         for (var blocker : blockers) {
             var other = byId.get(blocker.note().id());
             if (!canMove(other, blocker) || blocker.outcome() != Outcome.kept
-                    || !backing(blocker.role()) || RECOVERED_GATE.equals(blocker.reason())) break;
+                    || !backing(blocker.role()) || attack.role() != Role.bass && upperLine.contains(blocker.note().id())
+                    || RECOVERED_GATE.equals(blocker.reason())) break;
             String destination = recoveryLanes(other, blocker.lane(), blocker.startTick(), blocker.endTick()).stream()
                     .filter(l -> !l.equals(lane))
                     .filter(l -> conflicts(schedule.get(l), blocker.startTick(), blocker.endTick(), blocker).isEmpty())
@@ -712,6 +732,7 @@ final class ReconstructionAllocation {
         if (next.startTick() < earlier.endTick() || attack.end - next.startTick() > RELEASE_TICKS
                 || next.endTick() - attack.end < MIN_OVERFLOW_TICKS
                 || !canMove(byId.get(next.note().id()), next) || !backing(next.role())
+                || upperLine.contains(next.note().id())
                 || next.outcome() != Outcome.kept || next.note().bend() != null || next.note().motion() != null
                 || RECOVERED_GATE.equals(next.reason()) || RECOVERY_RELOCATION.equals(next.reason())
                 || nextLevel <= 0 || salience(attack.note()) < RELEASE_YIELD_LEVEL_RATIO * nextLevel) return false;
@@ -735,7 +756,7 @@ final class ReconstructionAllocation {
     private static boolean capacityDrop(String reason) {
         return "fm-lanes-busy".equals(reason) || "fm-and-psg-lanes-busy".equals(reason)
                 || "bass-lane-busy".equals(reason) || "melody-lane-busy".equals(reason)
-                || "higher-priority-chord-tone".equals(reason);
+                || "higher-priority-chord-tone".equals(reason) || "yielded-to-upper-line".equals(reason);
     }
 
     private Entry coveredBy(Attack attack, Map<String, NavigableMap<Integer, Entry>> schedule) {
@@ -819,6 +840,15 @@ final class ReconstructionAllocation {
                 && attack.note().pitch() >= profile.psg().low() && attack.note().pitch() <= profile.psg().high()) {
             var psg = reservePsg3 || overlapsCymbal(attack.start, attack.end) ? PSG.subList(0, 2) : PSG;
             alternate = free(psg, attack);
+        }
+        if (alternate == null && attack.role() == Role.bass && !upperLine.isEmpty()) {
+            // Preserve the bass hold even if a backing gate must yield to route
+            // the other bass attack away from FM2.
+            alternate = shorten(INNER_FM.stream().filter(lane -> {
+                var last = tail.get(lane);
+                return last != null && backing(last.role()) && !chordAnchors.contains(last.note().id())
+                        && !upperLine.contains(last.note().id()) && last.startTick() < attack.start;
+            }).toList(), attack);
         }
         return alternate;
     }
@@ -1000,7 +1030,8 @@ final class ReconstructionAllocation {
     private String freeFmForLowAttack(Attack attack) {
         for (String lane : INNER_FM.reversed()) {
             Entry prior = tail.get(lane);
-            if (prior == null || prior.pinnedLane != null || prior.note.pitch() < profile.psg().low() || prior.note.run() != null
+            if (prior == null || prior.pinnedLane != null || upperLine.contains(prior.note().id())
+                    || prior.note.pitch() < profile.psg().low() || prior.note.run() != null
                     || fmChordAnchors.contains(prior.note.id())) continue;
             for (String destination : reservePsg3 ? PSG.subList(0, 2) : PSG) {
                 if (destination.equals("PSG3") && (hats != null || prior.role == Role.harmony)
@@ -1033,11 +1064,13 @@ final class ReconstructionAllocation {
             if (earlier.startTick == attack.start) {
                 if (continuations.containsKey(earlier.note.id())) entries.remove(earlier.note.id());
                 else entries.put(earlier.note.id(), new Entry(earlier.note, earlier.role, null, null, null,
-                        Outcome.dropped, "higher-priority-chord-tone", null, attack.note().id(), null, null));
+                        Outcome.dropped, attack.upperLine() ? "yielded-to-upper-line" : "higher-priority-chord-tone",
+                        null, attack.note().id(), null, null));
                 return lane;
             }
             scheduleResume(earlier, attack);
-            String reason = earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack";
+            String reason = attack.upperLine() && backing(earlier.role) ? "yielded-to-upper-line"
+                    : earlier.endTick - attack.start <= RELEASE_TICKS ? "quantized-release-overlap" : "higher-priority-attack";
             entries.put(earlier.note.id(), earlier.shorten(attack.start, reason, attack.note().id()));
         }
         return lane;
@@ -1053,6 +1086,11 @@ final class ReconstructionAllocation {
         if (protectedHold(last, next) && last.role == Role.melody && next.role() != Role.melody) return false;
         if (last.role == Role.drums)
             return last.startTick < next.start && next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
+        if (backing(next.role()) && last.role == Role.bass && !upperLine.isEmpty()) return false;
+        if (backing(next.role()) && backing(last.role) && !chordAnchors.contains(last.note.id())) {
+            boolean priorLead = upperLine.contains(last.note.id());
+            if (priorLead != next.upperLine()) return next.upperLine();
+        }
         if (last.startTick < next.start && (last.endTick - next.start <= RELEASE_TICKS
                 || next.role() == Role.melody || next.role() == Role.bass || next.role() == Role.drums)) return true;
         if (tones.isEmpty()) return next.role() == Role.counter && last.role == Role.harmony;

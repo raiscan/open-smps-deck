@@ -1125,6 +1125,17 @@ of comparable velocity is excluded. The second path search considers the
 remaining candidates alongside the initial contour and rewards the portion
 of each supported hold that can play before another lead attack cuts it.
 
+For audio-only synth, keyboard, piano, guitar and lead stems, a second pass
+looks for an upper phrase inside the decoded chords. It requires a fresh,
+salient stem attack, with a higher threshold when lower tones attack at the
+same time. A lower note's harmonic must show a separate onset before it can
+support an upper note. Nearby notes with small pitch steps support a phrase.
+The pass can put the phrase on the primary melody lane or mark it as a
+protected counter line when another part carries the melody. Trace shows
+`stem-upper-line` for the promoted notes. The pass runs after the edit
+journal resolves its selectors and preserves authored roles and pins.
+A custom role plan retains control of the contour.
+
 The roles stage can add a nearby, modulated tone that stays present for
 at least 150 ms and has no corresponding MIDI note. It records
 `source: "audio"` and `lead-audio-added`. A melody release can also extend
@@ -1215,6 +1226,12 @@ Harmony spill avoids those PSG3 intervals. Counter lines, sustained
 harmony with no other playable lane, and explicit lane pins can take precedence. The allocation records `psg-cymbal-dac-collision`
 or `psg-cymbal-quiet-stem` for a substitute and `psg-noise-lane-busy` when
 the substitute cannot play.
+
+When a stem-backed upper line is promoted, it can take a lane from chord
+backing. Bass stays on its own allocation path. Among chord tones, the
+allocator prefers the root when bass does not supply it, the third and the
+upper chord pitch ahead of octave doublings. A displaced backing gate is
+reported as `yielded-to-upper-line`.
 
 After audio-only allocation, a second pass checks the full requested gate
 against the lane schedule. It prioritizes lead and bass, then stem-backed
