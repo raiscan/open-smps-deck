@@ -1,0 +1,1307 @@
+[
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 129,
+    "length": 1896,
+    "sha256": "832fa95a4c6d1f1e7d1545eed7123d4785cd2671f30dc18aae407cac9be487aa"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 130,
+    "length": 1104,
+    "sha256": "7556b97b54f1125783d0454e1798520cdef55c7336723032610b260f9ceafbb7"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 131,
+    "length": 1118,
+    "sha256": "792ff23e69097ab19498b02b4036bd72ef74070d03e55db5c94f26e6bc477494"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 132,
+    "length": 1134,
+    "sha256": "a11d0e8ae0c910c9e6c842123311b52fb41e3d24cf3a1690b27ac9455c361fa2"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 133,
+    "length": 1100,
+    "sha256": "9d187539f9dd0b4dc73964cf5ff4e41ac668a931cc03436dca039b37c4d2a342"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 134,
+    "length": 1360,
+    "sha256": "595f4cd0d742bab14f05e678ac376652990d5fb421b5f6241feb14872aff2ade"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 135,
+    "length": 486,
+    "sha256": "7f7525c0c6512d686b4f0886a2239d6b2137411562f5f7e33e7d43465975be5b"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 136,
+    "length": 238,
+    "sha256": "802febfabc88f31a3d02db58ce69d32d9d74b2f62d5d00b163ab697a2bfc81fd"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 137,
+    "length": 812,
+    "sha256": "224b23fbe6df9b1972060bd8af08ecc0245b9bd538320abadc65c5053b0da2eb"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 138,
+    "length": 428,
+    "sha256": "6f250614b9ed263763101e04b9ccf486a9be358aa028b891b775a3c13eeedb21"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 139,
+    "length": 666,
+    "sha256": "c65d23eb3f0bfd79287b81e13d8a5944588970ea2a557d600b0c5e39c64fc1e6"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 140,
+    "length": 540,
+    "sha256": "63308933dac3ae8cdeec69b876ac78f17991a959f9ed38b36fc8cc5c299a3793"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 141,
+    "length": 540,
+    "sha256": "0f5ee582a72e0b0dfc6c7e8ac5d67e4603f685ebf1168f6e54bc003b7d802dea"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 142,
+    "length": 342,
+    "sha256": "3aa4f06e728c01b1f592084538a6f5d998be1ab8da5836abe75d69d98e75f84b"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 143,
+    "length": 336,
+    "sha256": "58872a295473190065467c7a69df78f24896c4c0c7e672ad837d231beaad1a7b"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 144,
+    "length": 350,
+    "sha256": "2a6fe392f893efa58930db0ceacebbaf246987852caa30f075ccc4ef4894e8a6"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 145,
+    "length": 4814,
+    "sha256": "ec585deda8439e83641893e6a4a91289bb196caec79cbe31e1fa4047f7ce6416"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 146,
+    "length": 298,
+    "sha256": "840509fa4242121db1b62066c2eae751c387badaae2a5b65d0d6d4a615add37d"
+  },
+  {
+    "game": "s1",
+    "kind": "BANK",
+    "songId": 147,
+    "length": 16384,
+    "sha256": "8ed4568a7b47820bd9c7b3c18453bf4eb575d9bee1ca043c01898dc1c9caea4e"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 129,
+    "length": 1700,
+    "sha256": "de804f283ebd7829636cd331242e5f4456672973c98118debc0d40ee57e7af89"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 130,
+    "length": 3808,
+    "sha256": "633cbe76179db5c34c9276fd6804330df92552c086fbd07af1c861f2ba06ed65"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 131,
+    "length": 8236,
+    "sha256": "dca17255ec41495f4a48fce725b2e0c744442000f72eef9e4168b9d129098473"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 136,
+    "length": 8236,
+    "sha256": "dca17255ec41495f4a48fce725b2e0c744442000f72eef9e4168b9d129098473"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 137,
+    "length": 8236,
+    "sha256": "dca17255ec41495f4a48fce725b2e0c744442000f72eef9e4168b9d129098473"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 138,
+    "length": 8236,
+    "sha256": "dca17255ec41495f4a48fce725b2e0c744442000f72eef9e4168b9d129098473"
+  },
+  {
+    "game": "s1",
+    "kind": "DAC_SAMPLE",
+    "table": "dac",
+    "note": 139,
+    "length": 8236,
+    "sha256": "dca17255ec41495f4a48fce725b2e0c744442000f72eef9e4168b9d129098473"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 0,
+    "length": 25,
+    "sha256": "37bf8f042d005767bb98245c42cbc848e137e0f324e97d201c6e3e6bd13affa2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 1,
+    "length": 25,
+    "sha256": "ca6da86658865ba737a2d8152ec350a747f9ca457ebb9bb0c790b47ba83cb6e2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 2,
+    "length": 25,
+    "sha256": "5a932d1d90f357bba89faef3ce3684e565046f5ebaae59b0d23a2daca2dc340c"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 3,
+    "length": 25,
+    "sha256": "bb6bde89544b4def0710568a9740c0e1fe7f8d8807ff6e59efd3172037466ba8"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 4,
+    "length": 25,
+    "sha256": "6ecd16264d5f25868181cedd6660fbf16146a8baafcd9b5b02430e9faa37a125"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 5,
+    "length": 25,
+    "sha256": "5036582f584511df9c40bac189f7eda3b2666d72f2bebff2292dfe38cfcd111e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 6,
+    "length": 25,
+    "sha256": "7a936de8a4b621381ee4535112e0bc7a9ebb1d7840ab33eb5333dea3cb178165"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 7,
+    "length": 25,
+    "sha256": "f2ce31109304399c169fd963d5899c04df77522b630ce50518dd3676c5b152e7"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 129,
+    "slot": 8,
+    "length": 25,
+    "sha256": "d6b4cba661be5c8b8d5ad97448fb3d866c8cc130767ea9601c64805297a915b9"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 130,
+    "slot": 0,
+    "length": 25,
+    "sha256": "513a23a048c59878a2f72913f52fc15f3827fe1b4386fb3deefb5a765e7a83d7"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 130,
+    "slot": 1,
+    "length": 25,
+    "sha256": "376d5b822f5842e6fc4da4a2332b4201001d307ada183b94f16a3169240ef718"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 130,
+    "slot": 2,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 130,
+    "slot": 3,
+    "length": 25,
+    "sha256": "58a3ca9344e5e69d3af6c7511819db8f829190dc2a491d1485ea38f49102daad"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 130,
+    "slot": 4,
+    "length": 25,
+    "sha256": "95cc9e9c2e05b0530a7bb13d84624c172e135ab0cc23a1c4a40c03c7c3fd6578"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 131,
+    "slot": 0,
+    "length": 25,
+    "sha256": "a03f37f2fc5e8c0c8b0ca9299102c3086e5e6488312bf12482cc19d9f40c9bc0"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 131,
+    "slot": 1,
+    "length": 25,
+    "sha256": "a89dcd7da848153a5d2319803aed6665d83917debd3290b23367c5ef6a4dbca3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 131,
+    "slot": 2,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 131,
+    "slot": 3,
+    "length": 25,
+    "sha256": "3f186c4bf96e2324313f4b82e89b7606a5e755a71a630b188953448f39a59195"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 131,
+    "slot": 4,
+    "length": 25,
+    "sha256": "ed1bcd622f8604416ab361decac6956a1e4b7d53afb25f9de908f2eab0f38760"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 0,
+    "length": 25,
+    "sha256": "8137b4b8e6d08890948b57fcc02b402bca9afa19713e7425572376bbc09fbc44"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 1,
+    "length": 25,
+    "sha256": "a89dcd7da848153a5d2319803aed6665d83917debd3290b23367c5ef6a4dbca3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 2,
+    "length": 25,
+    "sha256": "00f53a1a28c6128463a936b2770be4714436d1c05f0a2abe943fae87ba525950"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 3,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 4,
+    "length": 25,
+    "sha256": "0a132e3c8b739b5c699727eb3c8fd3afea45a4ee2464c4bc94ab337bc6551bd6"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 132,
+    "slot": 5,
+    "length": 25,
+    "sha256": "934cd6173773c69326832d04835a133dcd5a2255525767b05380d4514f82db96"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 0,
+    "length": 25,
+    "sha256": "4fb8b9c3deae87ac135a4ce131ee65d608219ce259907c1db47d7778d1957103"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 1,
+    "length": 25,
+    "sha256": "f58b9cfc27b2fd5225ee10d4c77b5203460ea8782c0bd07e76712ada7ca5b748"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 2,
+    "length": 25,
+    "sha256": "2114a8144bc5effe3076f78a7335662c6fd622113487c689e110e360b7071d53"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 3,
+    "length": 25,
+    "sha256": "0ad74041093e60b3147659de797edb42eaa87939ee9ad5c745035838c7a85f6f"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 4,
+    "length": 25,
+    "sha256": "47b61a4ab832f1b753fb65d30f1db5be1290f4dcd44f47d8ea15b761b0fc73b1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 133,
+    "slot": 5,
+    "length": 25,
+    "sha256": "196a56356bf566dc01585e135fa4eda59d3c30dad6b70741bba3a0f6c62d0184"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 0,
+    "length": 25,
+    "sha256": "37bf8f042d005767bb98245c42cbc848e137e0f324e97d201c6e3e6bd13affa2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 1,
+    "length": 25,
+    "sha256": "5233f1553791f8e02c7bea8b0239b2a9b73f607edc80128fbc8ed45c4d2af6d3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 2,
+    "length": 25,
+    "sha256": "ac0a249339e675ef56d8b9a66d35fd00f19d655b5e6a9275dfdfadecef16d43b"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 3,
+    "length": 25,
+    "sha256": "11fdaee84cf582fdb2363528273a7077c58948a20f553118faf1521572164083"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 4,
+    "length": 25,
+    "sha256": "a80a41ae59d08aa9a8efade4337ec3758d9eb5121b065a6f135640f7dcf672c1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 5,
+    "length": 25,
+    "sha256": "1f88aee03a47499f175b5995da8e375cc27ae65d570b73b7029f2763b0f55dbc"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 134,
+    "slot": 6,
+    "length": 25,
+    "sha256": "ddafd6b46a2016f7c9f9225c2932711d900d164da872016e76fecf7f2cf0acdd"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 135,
+    "slot": 0,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 135,
+    "slot": 1,
+    "length": 25,
+    "sha256": "a89dcd7da848153a5d2319803aed6665d83917debd3290b23367c5ef6a4dbca3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 136,
+    "slot": 0,
+    "length": 25,
+    "sha256": "e86c41ce24e9db87461337b78cf4dc2fb262310fcc4fceb70bbfef39c3a7cc01"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 136,
+    "slot": 1,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 136,
+    "slot": 2,
+    "length": 25,
+    "sha256": "94a14f8020a601eb75ffc10ab2080050ed92ccbd962f88773101e241a83d6c02"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 137,
+    "slot": 0,
+    "length": 25,
+    "sha256": "8c12bf8e9a0ec1dea41a53cabfa190c32ebe8b8f2e42187cdc4a3c4ff256d9ef"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 137,
+    "slot": 1,
+    "length": 25,
+    "sha256": "d935c7739073612cd483eea9532a5661e289ff5451525e1003e49dda95e8b2de"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 137,
+    "slot": 2,
+    "length": 25,
+    "sha256": "a974053830c5fda458a78157ddb3a9115f4ed108ab82ad20e6f23b052d570d05"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 137,
+    "slot": 3,
+    "length": 25,
+    "sha256": "329054e1e9b1d5a110238e8965d48509a319fd2f6da4f30d09c7ea64c98ab37c"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 138,
+    "slot": 0,
+    "length": 25,
+    "sha256": "7b8e44297eb0b9bdb2f88a8607130de98e78a3daf0ae4e333d3c34f742e5f703"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 138,
+    "slot": 1,
+    "length": 25,
+    "sha256": "6a0e718b91da8721253b0ea966bffed9756f596734ce7e429f11affc5f95788e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 138,
+    "slot": 2,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 139,
+    "slot": 0,
+    "length": 25,
+    "sha256": "22fe5cf8a33966f225a9c24e686b78c2269f790eb9a3454805b1dfb2ec5c67a2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 139,
+    "slot": 1,
+    "length": 25,
+    "sha256": "6a0e718b91da8721253b0ea966bffed9756f596734ce7e429f11affc5f95788e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 139,
+    "slot": 2,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 139,
+    "slot": 3,
+    "length": 25,
+    "sha256": "7b8e44297eb0b9bdb2f88a8607130de98e78a3daf0ae4e333d3c34f742e5f703"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 0,
+    "length": 25,
+    "sha256": "37bf8f042d005767bb98245c42cbc848e137e0f324e97d201c6e3e6bd13affa2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 1,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 2,
+    "length": 25,
+    "sha256": "58a3ca9344e5e69d3af6c7511819db8f829190dc2a491d1485ea38f49102daad"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 3,
+    "length": 25,
+    "sha256": "1f88aee03a47499f175b5995da8e375cc27ae65d570b73b7029f2763b0f55dbc"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 4,
+    "length": 25,
+    "sha256": "30d7c453a7d7a908d8ba87bc59597d704d472d58f3897db6737b4813c78455f0"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 140,
+    "slot": 5,
+    "length": 25,
+    "sha256": "a063f168ceabcadebc1ccc83704fed4c183ecb9c03229ab3b960958d81a6e86a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 141,
+    "slot": 0,
+    "length": 25,
+    "sha256": "58a3ca9344e5e69d3af6c7511819db8f829190dc2a491d1485ea38f49102daad"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 141,
+    "slot": 1,
+    "length": 25,
+    "sha256": "6a0e718b91da8721253b0ea966bffed9756f596734ce7e429f11affc5f95788e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 141,
+    "slot": 2,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 141,
+    "slot": 3,
+    "length": 25,
+    "sha256": "f69c786a5e83e9283a799e653922529c2e476b6915d1d21351a012174849d5c5"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 142,
+    "slot": 0,
+    "length": 25,
+    "sha256": "ddafd6b46a2016f7c9f9225c2932711d900d164da872016e76fecf7f2cf0acdd"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 142,
+    "slot": 1,
+    "length": 25,
+    "sha256": "be83a829d3f216d064c7005fc2ef4beb8c5a0910c6eec1a125171f0d1f4105fb"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 142,
+    "slot": 2,
+    "length": 25,
+    "sha256": "a80a41ae59d08aa9a8efade4337ec3758d9eb5121b065a6f135640f7dcf672c1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 142,
+    "slot": 3,
+    "length": 25,
+    "sha256": "a80a41ae59d08aa9a8efade4337ec3758d9eb5121b065a6f135640f7dcf672c1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 142,
+    "slot": 4,
+    "length": 25,
+    "sha256": "6227a6f1c0fb9d94fe153cf9b38e2196c4fc126ed7399cd6448457d96142aeeb"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 143,
+    "slot": 0,
+    "length": 25,
+    "sha256": "7b8e44297eb0b9bdb2f88a8607130de98e78a3daf0ae4e333d3c34f742e5f703"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 143,
+    "slot": 1,
+    "length": 25,
+    "sha256": "656b88551b99918a57bfcc0150037ecb5f1a0befccecc6ab088ebfda6b982abc"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 143,
+    "slot": 2,
+    "length": 25,
+    "sha256": "d7ada5208dc31be55147af15b6a4da95b78af44cab3b1c64bdffbbffeb1c4513"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 143,
+    "slot": 3,
+    "length": 25,
+    "sha256": "7b175781f8c081e98d2ddd6daadcd7cdfb6032be901fbb0ec49a4f59f2a26998"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 144,
+    "slot": 0,
+    "length": 25,
+    "sha256": "7b8e44297eb0b9bdb2f88a8607130de98e78a3daf0ae4e333d3c34f742e5f703"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 144,
+    "slot": 1,
+    "length": 25,
+    "sha256": "ca460515b7f944d153301f369f9efa95d067629fb56433bb3f9b2df0dabe8f34"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 144,
+    "slot": 2,
+    "length": 25,
+    "sha256": "a89dcd7da848153a5d2319803aed6665d83917debd3290b23367c5ef6a4dbca3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 144,
+    "slot": 3,
+    "length": 25,
+    "sha256": "28cb74e84bd38271cc1a994ea0e492fcb34d50aad6c3b7053f65be9529c89cab"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 0,
+    "length": 25,
+    "sha256": "ca6da86658865ba737a2d8152ec350a747f9ca457ebb9bb0c790b47ba83cb6e2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 1,
+    "length": 25,
+    "sha256": "6ecd16264d5f25868181cedd6660fbf16146a8baafcd9b5b02430e9faa37a125"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 2,
+    "length": 25,
+    "sha256": "5036582f584511df9c40bac189f7eda3b2666d72f2bebff2292dfe38cfcd111e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 3,
+    "length": 25,
+    "sha256": "7a936de8a4b621381ee4535112e0bc7a9ebb1d7840ab33eb5333dea3cb178165"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 4,
+    "length": 25,
+    "sha256": "d6b4cba661be5c8b8d5ad97448fb3d866c8cc130767ea9601c64805297a915b9"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 5,
+    "length": 25,
+    "sha256": "513a23a048c59878a2f72913f52fc15f3827fe1b4386fb3deefb5a765e7a83d7"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 6,
+    "length": 25,
+    "sha256": "376d5b822f5842e6fc4da4a2332b4201001d307ada183b94f16a3169240ef718"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 7,
+    "length": 25,
+    "sha256": "95cc9e9c2e05b0530a7bb13d84624c172e135ab0cc23a1c4a40c03c7c3fd6578"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 8,
+    "length": 25,
+    "sha256": "a03f37f2fc5e8c0c8b0ca9299102c3086e5e6488312bf12482cc19d9f40c9bc0"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 9,
+    "length": 25,
+    "sha256": "a89dcd7da848153a5d2319803aed6665d83917debd3290b23367c5ef6a4dbca3"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 10,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 11,
+    "length": 25,
+    "sha256": "8137b4b8e6d08890948b57fcc02b402bca9afa19713e7425572376bbc09fbc44"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 12,
+    "length": 25,
+    "sha256": "00f53a1a28c6128463a936b2770be4714436d1c05f0a2abe943fae87ba525950"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 13,
+    "length": 25,
+    "sha256": "0a132e3c8b739b5c699727eb3c8fd3afea45a4ee2464c4bc94ab337bc6551bd6"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 14,
+    "length": 25,
+    "sha256": "934cd6173773c69326832d04835a133dcd5a2255525767b05380d4514f82db96"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 15,
+    "length": 25,
+    "sha256": "11fdaee84cf582fdb2363528273a7077c58948a20f553118faf1521572164083"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 16,
+    "length": 25,
+    "sha256": "37bf8f042d005767bb98245c42cbc848e137e0f324e97d201c6e3e6bd13affa2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 17,
+    "length": 25,
+    "sha256": "a80a41ae59d08aa9a8efade4337ec3758d9eb5121b065a6f135640f7dcf672c1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 18,
+    "length": 25,
+    "sha256": "ddafd6b46a2016f7c9f9225c2932711d900d164da872016e76fecf7f2cf0acdd"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 19,
+    "length": 25,
+    "sha256": "4fb8b9c3deae87ac135a4ce131ee65d608219ce259907c1db47d7778d1957103"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 20,
+    "length": 25,
+    "sha256": "f58b9cfc27b2fd5225ee10d4c77b5203460ea8782c0bd07e76712ada7ca5b748"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 21,
+    "length": 25,
+    "sha256": "196a56356bf566dc01585e135fa4eda59d3c30dad6b70741bba3a0f6c62d0184"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 22,
+    "length": 25,
+    "sha256": "0ad74041093e60b3147659de797edb42eaa87939ee9ad5c745035838c7a85f6f"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 23,
+    "length": 25,
+    "sha256": "47b61a4ab832f1b753fb65d30f1db5be1290f4dcd44f47d8ea15b761b0fc73b1"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 24,
+    "length": 25,
+    "sha256": "22fe5cf8a33966f225a9c24e686b78c2269f790eb9a3454805b1dfb2ec5c67a2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 25,
+    "length": 25,
+    "sha256": "6a0e718b91da8721253b0ea966bffed9756f596734ce7e429f11affc5f95788e"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 26,
+    "length": 25,
+    "sha256": "7b8e44297eb0b9bdb2f88a8607130de98e78a3daf0ae4e333d3c34f742e5f703"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 27,
+    "length": 25,
+    "sha256": "a859939d35178698471d9cdbce6c3efaed969a73d18a88e9287fd003c6d83fad"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 28,
+    "length": 25,
+    "sha256": "0f3776e549f73c2c4196361acd5c4f05c114322dd2134ecd1a6b6a7d967bf85a"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 29,
+    "length": 25,
+    "sha256": "37bf8f042d005767bb98245c42cbc848e137e0f324e97d201c6e3e6bd13affa2"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 30,
+    "length": 25,
+    "sha256": "94a14f8020a601eb75ffc10ab2080050ed92ccbd962f88773101e241a83d6c02"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 31,
+    "length": 25,
+    "sha256": "5a932d1d90f357bba89faef3ce3684e565046f5ebaae59b0d23a2daca2dc340c"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 145,
+    "slot": 32,
+    "length": 25,
+    "sha256": "70391ec11e50b038dc6da5f2ba780154a5f9df5605aade7840e03afe839e087b"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 146,
+    "slot": 0,
+    "length": 25,
+    "sha256": "95cc9e9c2e05b0530a7bb13d84624c172e135ab0cc23a1c4a40c03c7c3fd6578"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 146,
+    "slot": 1,
+    "length": 25,
+    "sha256": "376d5b822f5842e6fc4da4a2332b4201001d307ada183b94f16a3169240ef718"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 146,
+    "slot": 2,
+    "length": 25,
+    "sha256": "e66cc51c747a233c4e0a58483dc380ec21948096f5a4ae15929f0e5457ce3571"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 146,
+    "slot": 3,
+    "length": 25,
+    "sha256": "38f29ed9fd352dd07b88c207999e612a3bd9c9c34a41393eb3b6ee8098de7035"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 147,
+    "slot": 0,
+    "length": 25,
+    "sha256": "a9bb38a9c3d24e0998f7cd2cc544dca126cd2527c97d9ae6f8a74a81468965a6"
+  },
+  {
+    "game": "s1",
+    "kind": "FM_VOICE",
+    "table": "local-fm",
+    "songId": 147,
+    "slot": 1,
+    "length": 25,
+    "sha256": "4fb8b9c3deae87ac135a4ce131ee65d608219ce259907c1db47d7778d1957103"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 1,
+    "length": 23,
+    "sha256": "2c6db6088873e79b77b65a643e715aea11e4c909fc0fb75eab46d338467c6722"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 2,
+    "length": 7,
+    "sha256": "959c9162ba581c1cce41280d50d9c3a821e6fcf0b87ce9bb64f577086b3731c7"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 3,
+    "length": 17,
+    "sha256": "11bfd2a07ca7636f901f3d34603333a1ba7f79d8b2d7175f729966422af51515"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 4,
+    "length": 11,
+    "sha256": "a4b1d8ce3f465ca9acfeeac96577ccd3af8a8104aff47662c7523b3512e56169"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 5,
+    "length": 42,
+    "sha256": "897862f75666cc88c161eca281bb77a3c9751e9aa721246333bf61f42968667b"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 6,
+    "length": 15,
+    "sha256": "0b0790bba9e63ee0a546de043522ef562a80421b36a6e1286747196f0d63b72f"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 7,
+    "length": 28,
+    "sha256": "16b1aaa0e098f7e76f72ff9b0ba405bda5cdc6dd1cc06c3f8b945c3bcc6be533"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 8,
+    "length": 40,
+    "sha256": "1984a8b8eb926a9a116c8307ded4899170731ab73a93d96d1b54e0c2eb1a0f5b"
+  },
+  {
+    "game": "s1",
+    "kind": "PSG_VOLUME",
+    "table": "psg",
+    "index": 9,
+    "length": 17,
+    "sha256": "ee5ff51c086b39a59b30d9c223a2e2f3107dc61eb80b1c9effa5909c71ffa52c"
+  }
+]

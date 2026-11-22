@@ -72,6 +72,31 @@ class PortablePackageTest {
         assertEquals(List.of("SOURCE_AUDIO"), ProjectExport.portableWarnings(project));
     }
 
+    @Test void cliReportsTempoApproximationAndStrictModeLeavesNoArchive() throws Exception {
+        var original = ProjectFiles.load(example("signal-garden")).project();
+        var source = directory.resolve("tempo.smps.json");
+        ProjectFiles.save(source, original.withSettings(original.name(), original.ticksPerBeat(), 31), null);
+        Path packageFile = directory.resolve("tempo.smps.zip");
+        var result = expectSuccess("compile-package", source.toString(), packageFile.toString(),
+                "--portable", "--driver", "s1");
+        String diagnostic = "TEMPO_APPROXIMATED: Normal tempo S3K 0x1F to S1 0x08 (relative tick-rate error -0.444444%)";
+        assertTrue(result.err().contains(diagnostic), result.err());
+        assertEquals(List.of("TEMPO_APPROXIMATED"), PortablePackageReader.read(packageFile).manifest().provenance().warnings());
+
+        Path mod = directory.resolve("strict.jar");
+        var rejected = run("export", source.toString(), mod.toString(), "--format", "mod",
+                "--replace", "129", "--driver", "s1", "--strict-tempo");
+        assertNotEquals(0, rejected.exit());
+        assertTrue(rejected.err().contains(diagnostic), rejected.err());
+        assertFalse(Files.exists(mod));
+
+        Path exact = directory.resolve("exact.smps.zip");
+        var accepted = expectSuccess("export", source.toString(), exact.toString(), "--format", "portable",
+                "--driver", "s2", "--strict-tempo");
+        assertFalse(accepted.err().contains("TEMPO_APPROXIMATED"), accepted.err());
+        assertEquals(List.of(), PortablePackageReader.read(exact).manifest().provenance().warnings());
+    }
+
     @Test void modJarHasBothManifestsAndIdenticalExplodedPackageEntries() throws Exception {
         Path source = example("lantern-walk");
         Path mod = directory.resolve("pack.jar"), pkg = directory.resolve("pack.smps.zip");
@@ -215,12 +240,8 @@ class PortablePackageTest {
                     .getBytes(StandardCharsets.UTF_8));
             readPatched(entries);
         });
-        var other = openMutated(artifact, json -> {
-            json.addProperty("driver", "s2");
-            json.getAsJsonObject("driverOptions").add("speedUpTempo", com.google.gson.JsonNull.INSTANCE);
-        });
-        assertEquals("s2", other.manifest().driver());
-        assertFailure("driver not yet supported", () -> PortablePackageReader.assemble(other, List.of()));
+        assertFailure("Sonic CD FM has no music loader", () ->
+                openMutated(artifact, json -> json.addProperty("driver", "scd")));
         assertFailure("SPDX", () -> Metadata.validateLicense("MIT AND ("));
     }
 
@@ -243,7 +264,7 @@ class PortablePackageTest {
         var image = S3kPackageDriver.INSTANCE.openRom(path);
         assertTrue(image.known());
         for (var entry : StockTable.entries()) {
-            if (entry.kind().equals("BANK")) continue;  // Bank entries are checked by the regeneration test.
+            if (!entry.game().equals("s3k") || entry.kind().equals("BANK")) continue;  // Bank entries are checked by the regeneration test.
             byte[] bytes = image.assets().payload(entry.ref());
             assertNotNull(bytes, entry::toString);
             assertEquals(entry.length(), bytes.length, entry::toString);

@@ -51,7 +51,7 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
 
     private static void check(TreeSet<String> warnings, String kind, byte[] bytes, AssetOrigin origin) {
         if (origin == null) {
-            if (StockTable.match(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
+            if (StockTable.matchProjectAsset(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
         } else {
             switch (origin.type()) {
                 case "stock" -> warnings.add("ROM_DERIVED_DATA");
@@ -89,6 +89,7 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
                     + "It is for personal use and must not be redistributed. Use portable mode to reference eligible stock assets when sharing.";
             case "UNKNOWN_ROM_IMAGE" -> "ROM image fingerprint is unknown. The stock asset hashes decide whether it can be used.";
             case "SOURCE_AUDIO" -> "This package contains audio derived from an input recording. Check that you have the rights to it.";
+            case "TEMPO_APPROXIMATED" -> "The target driver approximates the S3K tick rate for a tempo in this package.";
             case "THIRD_PARTY" -> "This package contains third-party material. Check its license.";
             default -> code;
         };

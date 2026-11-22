@@ -25,7 +25,7 @@ import java.util.TreeSet;
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageReader {
-    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG",
+    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG", "TEMPO_APPROXIMATED",
             "UNDECLARED_STOCK_CONVERTED", "SOURCE_AUDIO", "THIRD_PARTY", "UNKNOWN_ROM_IMAGE", "DPCM_INEXACT");
 
     record Package(PackageManifest manifest, Map<String, byte[]> entries) {}
@@ -36,15 +36,13 @@ final class PortablePackageReader {
         var entries = PortableArchive.read(file);
         var manifest = PackageManifest.decode(required(entries, "manifest.json"));
         validateStructure(manifest, entries);
-        if (!manifest.driver().equals("s3k") && manifest.requires().stockAssets())
-            PackageDriver.supported(manifest.driver());
         return new Package(manifest, entries);
     }
 
     static void validateStructure(PackageManifest manifest, Map<String, byte[]> entries) throws IOException {
         require(manifest.schemaVersion() == 4 && manifest.profile().equals("portable"), "Expected portable schema 4");
         String driver = manifest.driver();
-        require(Set.of("s1", "s2", "s3k").contains(driver), "Unknown package driver " + driver);
+        var dialect = PackageDriver.supported(driver);
         Metadata.validate(manifest.packageInfo());
         nonblank(manifest.generator().tool(), "generator.tool");
         nonblank(manifest.generator().version(), "generator.version");
@@ -57,6 +55,10 @@ final class PortablePackageReader {
         byte[] stored = required(entries, bank.path());
         validateBank(driver, bank, stored);
         var global = manifest.globalVoices();
+        if (dialect instanceof ClassicPackageDriver) {
+            require(bank.headerOffset() == 0, driver + ": bank.headerOffset must be 0");
+            require(global == null, driver + ": global FM voices are unsupported");
+        }
         byte[] globalBytes = null;
         var globalIndex = new HashMap<String, Integer>();
         if (global != null) {
@@ -85,6 +87,8 @@ final class PortablePackageReader {
         for (var asset : manifest.assets()) {
             var kind = asset.kind();
             require(kind != null, "Unknown asset kind for " + asset.key());
+            require(!(dialect instanceof ClassicPackageDriver) || kind != Kind.MODULATION,
+                    driver + ": MODULATION envelopes are unsupported");
             int ordinal = ordinals.merge(kind, 1, Integer::sum) - 1;
             require(asset.key().equals(kind.prefix + "/" + ordinal), "Asset keys must be canonical: " + asset.key());
             byKey.put(asset.key(), asset);
@@ -97,6 +101,8 @@ final class PortablePackageReader {
             Integer globalSlot = globalIndex.get(asset.key());
             if (asset.ref() != null) {
                 require(asset.ref().game().equals(driver), asset.key() + " reference game must match package driver");
+                if (dialect instanceof ClassicPackageDriver && asset.ref().table().equals("local-fm"))
+                    require(dialect.musicIds().contains(asset.ref().songId()), asset.key() + " has unknown " + driver + " music ID");
                 if (asset.resultSha256() != null) hash(asset.resultSha256(), asset.key() + " resultSha256");
                 games.add(asset.ref().game());
                 if (globalSlot != null) {
@@ -119,6 +125,8 @@ final class PortablePackageReader {
                 }
                 byte[] payload = embedded(asset, entries, globalIndex, stored);
                 kind.validateLength(asset.key(), payload.length);
+                if (kind == Kind.PSG_VOLUME && dialect instanceof ClassicPackageDriver classic)
+                    ClassicPackageBank.validateEnvelope(classic, new Envelope(asset.id(), asset.name(), kind.name(), StockAssets.unsigned(payload)));
                 StockAssets.verifyHash(asset.key(), asset.sha256(), payload);
                 if (kind == Kind.DAC_SAMPLE) dacBytes += payload.length;
             }
@@ -135,7 +143,7 @@ final class PortablePackageReader {
             require(asset != null && asset.kind() == Kind.FM_VOICE && asset.ref() != null,
                     "Bank fill must refer to an FM_VOICE reference: " + key);
         }
-        validateLocalOffsets(bank, stored, offsets);
+        validateLocalOffsets(dialect, bank, stored, offsets);
         validateBindings(manifest, byKey);
         for (Kind kind : List.of(Kind.PSG_VOLUME, Kind.MODULATION, Kind.DAC_SAMPLE))
             expectedFiles.addAll(paths.getOrDefault(kind, List.of()));
@@ -202,7 +210,11 @@ final class PortablePackageReader {
             var tempo = options.get("speedUpTempo");
             if (!tempo.isJsonNull()) {
                 require(tempo.isJsonPrimitive() && tempo.getAsJsonPrimitive().isNumber(), "speedUpTempo must be an integer");
-                range(tempo.getAsInt(), 0, 255, "speedUpTempo");
+                try {
+                    range(tempo.getAsBigDecimal().intValueExact(), 0, 255, "speedUpTempo");
+                } catch (ArithmeticException invalid) {
+                    throw new IllegalArgumentException("speedUpTempo must be an integer in 0..255", invalid);
+                }
             }
         }
     }
@@ -214,7 +226,7 @@ final class PortablePackageReader {
         StockAssets.verifyHash(bank.path(), bank.sha256(), stored);
         if (bank.fills().isEmpty()) require(bank.sha256().equals(bank.assembledSha256()), "A bank without fills must have matching hashes");
         range(bank.base(), 0, 65535, "bank.base");
-        if (driver.equals("s3k")) PackageDriver.supported(driver).validateBase(bank.base());
+        PackageDriver.supported(driver).validateBase(bank.base());
         range(bank.headerOffset(), 0, stored.length - 1, "bank.headerOffset");
         range(bank.localVoiceCount(), 0, 128, "bank.localVoiceCount");
         S3kRenderer.validatePresentations(bank.previewFrames());
@@ -233,10 +245,12 @@ final class PortablePackageReader {
         }
     }
 
-    private static void validateLocalOffsets(Bank bank, byte[] stored, Set<Integer> offsets) {
+    private static void validateLocalOffsets(PackageDriver driver, Bank bank, byte[] stored, Set<Integer> offsets) {
+        if (driver instanceof ClassicPackageDriver)
+            require(offsets.size() == bank.localVoiceCount(), driver.id() + ": FM assets must be local table slots");
         if (bank.localVoiceCount() > 0) {
             require(bank.headerOffset() + 1 < stored.length, "Missing voice pointer");
-            int start = PortablePackageWriter.word(stored, bank.headerOffset()) - bank.base();
+            int start = driver.word(stored, bank.headerOffset()) - bank.base();
             range(start, 0, stored.length - 25 * bank.localVoiceCount(), "local voice table offset");
             for (int i = 0; i < bank.localVoiceCount(); i++)
                 require(offsets.contains(start + i * 25), "Missing local FM asset at " + (start + i * 25));
