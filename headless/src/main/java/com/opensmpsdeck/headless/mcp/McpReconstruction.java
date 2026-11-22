@@ -363,10 +363,12 @@ final class McpReconstruction {
 
     static JsonObject describe(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE, "edit-results.json")) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE, "edit-results.json",
+                "edits.json", "voice-edits.json")) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
-                optional(args, "parts"), optional(args, "bars"));
+                optional(args, "parts"), optional(args, "bars"),
+                args.has("roles") && args.get("roles").getAsBoolean());
         if (args.has("output")) {
             Path output = McpPaths.output(work, string(args, "output"));
             Files.writeString(output, description, java.nio.file.StandardOpenOption.CREATE_NEW);

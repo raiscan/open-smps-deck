@@ -24,6 +24,7 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -69,7 +70,7 @@ final class ReconstructionPane implements AutoCloseable {
     private final ToggleButton soloNote = new ToggleButton("Solo note");
     private final Button clearRange = new Button("Clear loop");
     private final Label loopLabel = new Label("Shift-drag to loop");
-    private final Slider zoom = new Slider(0, 9, 0);
+    private final Slider zoom = new Slider(0, ReconstructionCanvas.MAX_TIME_ZOOM, 0);
     private final AnimationTimer playheadTimer = new AnimationTimer() {
         @Override public void handle(long now) {
             if (playing && Double.isFinite(devicePosition) && devicePosition != projectPosition)
@@ -211,10 +212,51 @@ final class ReconstructionPane implements AutoCloseable {
         clearRange.setOnAction(event -> view.clearRange());
         clearRange.setDisable(true);
 
-        root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls()));
+        var detail = new ToggleButton("Detail");
+        detail.setId("reconstruction-detail-view");
+        var roles = new ToggleButton("Roles");
+        roles.setId("reconstruction-roles-view");
+        var views = new ToggleGroup();
+        detail.setToggleGroup(views);
+        roles.setToggleGroup(views);
+        views.selectToggle(detail);
+        var roleControls = roleControls();
+        views.selectedToggleProperty().addListener((ignored, old, next) -> {
+            if (next == null) {
+                views.selectToggle(old);
+                return;
+            }
+            boolean showRoles = next == roles;
+            view.rolesView(showRoles);
+            editor.rolesView(showRoles);
+            laneFilters.setVisible(!showRoles);
+        });
+        view.onDetailJump = notes -> {
+            views.selectToggle(detail);
+            zoom.setValue(view.detailZoom(notes));
+            double start = notes.stream().mapToDouble(note -> note.interval().sourceStart()).min().orElse(0);
+            double end = notes.stream().mapToDouble(note -> note.interval().sourceEnd()).max().orElse(start);
+            view.center((start + end) / 2);
+        };
+        playback.getChildren().addAll(detail, roles);
+        root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls));
         root.setRight(editor.inspector());
-        root.setCenter(view.scroll);
-        stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
+        root.setCenter(new BorderPane(view.scroll, null, view.pitchScroll, null, null));
+        var scene = stage.getScene();
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, this::key);
+        scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> {
+            if (event.getCode() == KeyCode.SPACE
+                    && !(scene.getFocusOwner() instanceof javafx.scene.control.Control)) {
+                if (view.releaseSpace()) togglePlayback();
+                event.consume();
+            }
+        });
+        scene.focusOwnerProperty().addListener((ignored, old, next) -> {
+            if (next instanceof javafx.scene.control.Control) view.releaseSpace();
+        });
+        stage.focusedProperty().addListener((ignored, old, focused) -> {
+            if (!focused) view.cancelNavigation();
+        });
         updatePosition(0, false);
         refreshSolo();
         loadBends(model);
@@ -268,8 +310,23 @@ final class ReconstructionPane implements AutoCloseable {
         zoom.setPrefWidth(160);
         zoom.setBlockIncrement(1);
         zoom.valueProperty().addListener((ignored, previous, next) -> view.zoom(next.doubleValue()));
+        view.onTimeZoom = zoom::setValue;
         var fit = new Button("Fit song");
         fit.setOnAction(event -> zoom.setValue(0));
+        var pitchOut = new Button("−");
+        pitchOut.setAccessibleText("Zoom pitch out");
+        pitchOut.setTooltip(new Tooltip("Show more pitches"));
+        pitchOut.setOnAction(event -> view.zoomPitch(1.4));
+        var pitchIn = new Button("+");
+        pitchIn.setAccessibleText("Zoom pitch in");
+        pitchIn.setTooltip(new Tooltip("Show fewer pitches"));
+        pitchIn.setOnAction(event -> view.zoomPitch(1 / 1.4));
+        var fitPitch = new Button("Fit pitch");
+        fitPitch.setId("reconstruction-fit-pitch");
+        fitPitch.setTooltip(new Tooltip("Fit the tonal notes in the visible time window"));
+        fitPitch.setOnAction(event -> view.fitPitch());
+        var pitch = new HBox(4, new Label("Pitch zoom"), pitchOut, pitchIn, fitPitch);
+        pitch.setAlignment(Pos.CENTER_LEFT);
         var db = new Slider(20, 85, 55);
         db.setPrefWidth(120);
         var dbLabel = new Label();
@@ -290,7 +347,7 @@ final class ReconstructionPane implements AutoCloseable {
         ridges.selectedProperty().addListener((ignored, previous, selected) -> view.ridges(selected));
         var project = new CheckBox("Project time");
         project.selectedProperty().addListener((ignored, previous, selected) -> view.projectRuler(selected));
-        var row = new FlowPane(9, 6, new Label("Time zoom"), zoom, fit, new Label("Spectrum"), db, dbLabel,
+        var row = new FlowPane(9, 6, new Label("Time zoom"), zoom, fit, pitch, new Label("Spectrum"), db, dbLabel,
                 ridges, project);
         row.setAlignment(Pos.CENTER_LEFT);
         row.getStyleClass().addAll("panelbar", "reconstruction-controls");
@@ -325,7 +382,9 @@ final class ReconstructionPane implements AutoCloseable {
         }
         laneFilters = new MenuButton("Lanes");
         refreshLaneFilters();
-        roles.getChildren().addAll(laneFilters, editor.visibility());
+        var detail = editor.visibility();
+        detail.visibleProperty().bind(laneFilters.visibleProperty());
+        roles.getChildren().addAll(laneFilters, detail);
         roles.getStyleClass().addAll("panelbar", "reconstruction-controls");
         return roles;
     }
@@ -349,7 +408,7 @@ final class ReconstructionPane implements AutoCloseable {
         }
         if (event.isShortcutDown()) return;
         if (event.getCode() == KeyCode.SPACE && !(stage.getScene().getFocusOwner() instanceof javafx.scene.control.Control))
-            togglePlayback();
+            view.holdSpace();
         else if (event.getCode() == KeyCode.R) {
             var current = sources.getValue();
             if (current != null && current.kind() == AudioKind.CHIP) {

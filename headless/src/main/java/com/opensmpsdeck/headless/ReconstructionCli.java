@@ -131,7 +131,7 @@ final class ReconstructionCli {
         out.println("       reconstruct run --from STAGE WORK_DIR [--policy-decisions]");
         out.println("       reconstruct voices WORK_DIR [list | create|rename|merge|split|move|assign JSON]");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
-        out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
+        out.println("       reconstruct describe WORK_DIR [--json] [--roles] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
         out.println("       reconstruct edit WORK_DIR add [--dry-run] [--verbose] JSON | add [--dry-run] --file BATCH | list | remove ID");
         out.println("       reconstruct edit propose WORK_DIR [--dry-run] JSON | [--dry-run] --file BATCH");
         out.println("       reconstruct proposals list|accept|reject WORK_DIR [ID ... | --file FILE | --group GROUP | --op OP]");

@@ -6,16 +6,21 @@ import com.opensmpsdeck.headless.ReconstructionInspection.BendPoint;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.project.TargetGame;
+import javafx.geometry.Orientation;
 import javafx.geometry.VPos;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.input.TransferMode;
 import javafx.scene.paint.Color;
 import com.opensmpsdeck.headless.ReconstructionLayers;
 import javafx.scene.text.Font;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,6 +39,7 @@ import com.opensmpsdeck.studio.ReconstructionTools.Mode;
 import com.opensmpsdeck.studio.ReconstructionTools.Placement;
 import javafx.scene.Cursor;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import java.util.function.DoubleConsumer;
 
 /** Source-time viewport and hit testing. The underlying trace and score remain immutable. */
@@ -43,6 +49,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private static final int SECTION_HEIGHT = 18;
     private static final int LANE_HEIGHT = 17;
     private static final int LANE_HEADER = 20;
+    static final int MAX_TIME_ZOOM = 9;
+    private static final double WHEEL_STEP = 40;
+    private static final double MIDI_TOP = 127.5;
+    private static final double MIDI_BOTTOM = -.5;
     private static final Color BACKGROUND = Color.web("#0c1220");
     private static final Color PANEL = Color.web("#151f31");
     private static final Color TEXT = Color.web("#dce7f8");
@@ -56,6 +66,23 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             return x >= left && x <= left + width && y >= top && y <= top + height;
         }
     }
+
+    private boolean rolesView;
+    private boolean showDrums;
+    private Map<String, Integer> drumRows = Map.of();
+    final ScrollBar pitchScroll = new ScrollBar();
+    private boolean updatingPitchScroll;
+    private boolean autoFitPitch = true;
+    private boolean pitchFitDirty = true;
+    private double fittedFrom = Double.NaN;
+    private double fittedTo = Double.NaN;
+    private ReconstructionVoices voices = new ReconstructionVoices(List.of(), Map.of());
+    private final Set<String> hiddenVoices = new HashSet<>();
+    private String soloVoice;
+    private Set<String> detailedNotes = Set.of();
+    private Overlay roleDrag;
+
+    Consumer<List<Overlay>> onDetailJump = notes -> {};
 
     private ReconstructionInspection model;
     private ReconstructionTiles tiles;
@@ -96,8 +123,12 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private Placement preview;
     private Double boundaryPreview;
     private boolean dragged;
+    private Pan pan;
+    private boolean spaceHeld;
+    private boolean spaceDragged;
 
     private enum Handle { MOVE, START, END }
+    private record Pan(MouseButton button, double sceneX, double sceneY) {}
     private record NoteDrag(Overlay note, Handle handle, double at, int pitch) {}
     private record Box(double x, double y, double endX, double endY, boolean add, boolean toggle) {
         double left() { return Math.min(x, endX); }
@@ -118,7 +149,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private final List<Hit> hits = new ArrayList<>();
     private List<String> lanes;
     private int builtLow, builtHigh;
-    private int low, high;
+    private double pitchTop, pitchSpan;
     private static final List<String> SECTION_LABELS = List.of("Section", "Period", "Phrase");
     private double[] endByIndex;
     private final Set<Role> roles = EnumSet.allOf(Role.class);
@@ -140,6 +171,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     Consumer<String> onLane = ignored -> {};
     Consumer<ReviewTransport.Range> onRange = ignored -> {};
     DoubleConsumer onSeek = ignored -> {};
+    DoubleConsumer onTimeZoom = ignored -> {};
 
     Consumer<JsonObject> onEffect = ignored -> {};
     Runnable onSelection = () -> {};
@@ -152,12 +184,24 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     Consumer<SectionPoint> onSectionMenu = ignored -> {};
 
     ReconstructionCanvas(ReconstructionInspection model, Consumer<String> error) {
+        super(AXIS + 100);
         this.error = error;
         refresh(model);
         canvas.setId("reconstruction-canvas");
-        scroll.setFitToHeight(false);
+        scroll.setFitToHeight(true);
+        pitchScroll.setId("reconstruction-pitch-scroll");
+        pitchScroll.setAccessibleText("Scroll pitch");
+        pitchScroll.setOrientation(Orientation.VERTICAL);
+        pitchScroll.valueProperty().addListener((ignored, old, value) -> {
+            if (updatingPitchScroll) return;
+            autoFitPitch = false;
+            cancelGesture();
+            pitchTop = MIDI_TOP - value.doubleValue();
+            draw();
+        });
         scroll.viewportBoundsProperty().addListener((ignored, old, next) -> resizePlot());
         canvas.setOnMouseMoved(event -> {
+            if (spaceHeld || pan != null) return;
             var hit = hit(event.getX(), event.getY());
             var section = sectionAt(event.getX(), event.getY());
             var proposalsAtPointer = proposalHits.stream().filter(mark -> mark.contains(event.getX(), event.getY()))
@@ -166,14 +210,15 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             String blockers = layerSkips.stream().filter(mark -> mark.contains(event.getX(), event.getY()))
                     .map(SkipHit::reason).distinct().limit(4).collect(java.util.stream.Collectors.joining("\n"));
             String text = !blockers.isEmpty() ? blockers : !proposalsAtPointer.isEmpty() ? proposalsAtPointer
-                    : hit != null ? description(hit.note()) : section != null
+                    : hit != null ? hoverDescription(hit.note()) : section != null
                     ? section.label() + " · " + section.author() : "";
             if (text.isEmpty()) hover.hide();
             hover.setText(text);
             boolean horizontal = sectionEdge(section, event.getX()) != null
                     || (mode == Mode.SELECT || mode == Mode.INSERT) && hit != null
                     && inPitch(event) && handle(hit, event.getX()) != Handle.MOVE;
-            boolean crosshair = inPitch(event) && ((mode == Mode.INSERT && insertAvailable)
+            if (rolesView) horizontal = false;
+            boolean crosshair = !rolesView && inPitch(event) && ((mode == Mode.INSERT && insertAvailable)
                     || mode == Mode.CUT || mode == Mode.BEND || mode == Mode.VIBRATO);
             canvas.setCursor(editing && horizontal ? Cursor.H_RESIZE
                     : editing && crosshair ? Cursor.CROSSHAIR : Cursor.DEFAULT);
@@ -183,7 +228,17 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         Tooltip.install(canvas, hover);
         canvas.setOnMousePressed(this::press);
         canvas.setOnMouseDragged(this::drag);
+        canvas.setOnDragDetected(event -> {
+            if (roleDrag == null || !editing) return;
+            if (!selection.contains(roleDrag)) select(roleDrag, roleDrag.lane());
+            var content = new ClipboardContent();
+            content.putString("Reconstruction notes");
+            canvas.startDragAndDrop(TransferMode.MOVE).setContent(content);
+            cancelGesture();
+            event.consume();
+        });
         canvas.setOnMouseReleased(this::release);
+        canvas.setOnScroll(this::wheelZoom);
         ready = true;
     }
 
@@ -195,19 +250,18 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         tiles = new ReconstructionTiles(model, this::draw, error);
         assembledBends = Map.of();
         var notes = model.overlays();
-        double lowestBend = notes.stream().flatMap(note -> note.bend().stream())
-                .mapToDouble(BendPoint::pitch).min().orElse(127);
-        double highestBend = notes.stream().flatMap(note -> note.bend().stream())
-                .mapToDouble(BendPoint::pitch).max().orElse(0);
-        builtLow = Math.max(0, Math.min((int) Math.floor(lowestBend),
-                notes.stream().mapToInt(Overlay::pitch).min().orElse(42)) - 3);
-        builtHigh = Math.min(127, Math.max((int) Math.ceil(highestBend),
-                notes.stream().mapToInt(Overlay::pitch).max().orElse(78)) + 4);
-        for (var layer : model.layers()) {
-            builtLow = Math.min(builtLow, Math.max(0, layer.pitch() - 3));
-            builtHigh = Math.max(builtHigh, Math.min(127, layer.pitch() + 4));
+        builtLow = 127;
+        builtHigh = 0;
+        for (var note : notes) if (!isDrum(note, null)) includePitch(note);
+        if (builtLow > builtHigh) {
+            builtLow = 42;
+            builtHigh = 78;
         }
-        updatePitchRange();
+        if (!ready) {
+            pitchTop = builtHigh + .5;
+            pitchSpan = builtHigh - builtLow + 1;
+        }
+        pitchFitDirty = true;
         endByIndex = new double[notes.size()];
         double priorEnd = 0;
         for (int i = 0; i < notes.size(); i++) {
@@ -228,30 +282,84 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void proposals(List<ProposalMark> marks) {
         proposals = List.copyOf(marks);
-        updatePitchRange();
         draw();
     }
 
-    private void updatePitchRange() {
-        low = builtLow;
-        high = builtHigh;
-        for (var note : pending) includePitch(note);
-        for (var mark : proposals) {
-            low = Math.min(low, Math.max(0, mark.note().pitch() - 3));
-            high = Math.max(high, Math.min(127, mark.note().pitch() + 4));
-        }
+    private void includePitch(Overlay note) {
+        builtLow = Math.min(builtLow, noteLow(note));
+        builtHigh = Math.max(builtHigh, noteHigh(note));
     }
 
-    private void includePitch(Overlay note) {
+    private static int noteLow(Overlay note) {
         double min = note.bend().stream().mapToDouble(BendPoint::pitch).min().orElse(note.pitch());
+        return Math.max(0, (int) Math.floor(Math.min(min, note.pitch())) - 3);
+    }
+
+    private static int noteHigh(Overlay note) {
         double max = note.bend().stream().mapToDouble(BendPoint::pitch).max().orElse(note.pitch());
-        low = Math.min(low, Math.max(0, (int) Math.floor(Math.min(min, note.pitch())) - 3));
-        high = Math.max(high, Math.min(127, (int) Math.ceil(Math.max(max, note.pitch())) + 4));
+        return Math.min(127, (int) Math.ceil(Math.max(max, note.pitch())) + 4);
+    }
+
+    void fitPitch() {
+        autoFitPitch = true;
+        pitchFitDirty = true;
+        cancelGesture();
+        draw();
+    }
+
+    void zoomPitch(double factor) {
+        zoomPitch(factor, .5);
+    }
+
+    private void zoomPitch(double factor, double fraction) {
+        double span = Math.clamp(pitchSpan * factor, 6, 128);
+        double top = Math.clamp(pitchTop + fraction * (span - pitchSpan), MIDI_BOTTOM + span, MIDI_TOP);
+        autoFitPitch = false;
+        cancelGesture();
+        pitchRange(top, span);
+        draw();
+    }
+
+    private void fitVisiblePitch(double width) {
+        double from = seconds(axis()), to = seconds(width);
+        if (!autoFitPitch || !pitchFitDirty && fittedFrom == from && fittedTo == to) return;
+        fittedFrom = from;
+        fittedTo = to;
+        pitchFitDirty = false;
+        int bottom = 127, top = 0;
+        for (var note : visibleNotes(width)) {
+            if (!roles.contains(note.role()) || isDrum(note, voices.byNote().get(note.id()))
+                    || !selectableDraft(note)) continue;
+            bottom = Math.min(bottom, noteLow(note));
+            top = Math.max(top, noteHigh(note));
+        }
+        if (bottom > top) {
+            bottom = builtLow;
+            top = builtHigh;
+        }
+        pitchRange(top + .5, top - bottom + 1);
+    }
+
+    private void pitchRange(double top, double span) {
+        pitchTop = top;
+        pitchSpan = span;
+        updatingPitchScroll = true;
+        try {
+            pitchScroll.setMax(128 - span);
+            // JavaFX sizes the thumb relative to the scrollable range.
+            pitchScroll.setVisibleAmount(span * (128 - span) / 128.0);
+            pitchScroll.setBlockIncrement(Math.max(1, span / 2));
+            pitchScroll.setUnitIncrement(1);
+            pitchScroll.setValue(MIDI_TOP - pitchTop);
+            pitchScroll.setDisable(span == 128);
+        } finally {
+            updatingPitchScroll = false;
+        }
     }
 
     void pending(List<Overlay> overlays) {
         pending = overlays;
-        updatePitchRange();
+        pitchFitDirty = true;
         pendingByNote = new java.util.HashMap<>();
         for (var overlay : overlays) pendingByNote.put(overlay.id(), overlay);
         updateLanes();
@@ -263,6 +371,103 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         draw();
     }
 
+    boolean rolesView() { return rolesView; }
+
+    void rolesView(boolean enabled) {
+        if (rolesView == enabled) return;
+        rolesView = enabled;
+        cancelGesture();
+        draw();
+    }
+
+    void voices(ReconstructionVoices projection, Set<String> edited) {
+        voices = projection;
+        detailedNotes = edited;
+        var rows = new java.util.LinkedHashMap<String, Integer>();
+        for (var entry : voices.entries()) {
+            if (entry.notes().stream().anyMatch(note -> isDrum(note, entry)))
+                rows.put(entry.id(), rows.size());
+        }
+        drumRows = rows;
+        pitchFitDirty = true;
+        resizePlot();
+        draw();
+    }
+
+    ReconstructionVoices voices() { return voices; }
+
+    void voiceTags(ReconstructionVoices projection) {
+        voices = projection;
+        draw();
+    }
+
+    void showDrums(boolean show) {
+        showDrums = show;
+        draw();
+    }
+
+    boolean voiceVisible(String id) { return !hiddenVoices.contains(id); }
+
+    void voiceVisible(String id, boolean visible) {
+        if (visible) hiddenVoices.remove(id);
+        else hiddenVoices.add(id);
+        pitchFitDirty = true;
+        draw();
+    }
+
+    void soloVoice(String id) {
+        soloVoice = id;
+        draw();
+    }
+
+    private void pressRole(MouseEvent event) {
+        var hit = hit(event.getX(), event.getY());
+        if (!inPitch(event)) {
+            if (hit != null) roleDrag = hit.note();
+            return;
+        }
+        if (hit == null || event.isShiftDown() || event.isControlDown()) {
+            box = new Box(event.getX(), event.getY(), event.getX(), event.getY(), event.isShiftDown(), event.isControlDown());
+        } else roleDrag = hit.note();
+    }
+
+    private void releaseRole(MouseEvent event) {
+        var hit = hit(event.getX(), event.getY());
+        boolean moved = dragged;
+        cancelGesture();
+        if (moved) return;
+        if (hit != null) {
+            if (!selection.contains(hit.note())) select(hit.note(), hit.note().lane());
+            if (event.getClickCount() == 2) onDetailJump.accept(selectedNotes());
+            else onSeek.accept(hit.note().interval().sourceStart());
+        } else if (event.getX() >= axis()) {
+            var section = sectionAt(event.getX(), event.getY());
+            if (section != null) {
+                range = new ReviewTransport.Range(section.sourceStart(), section.sourceEnd());
+                onRange.accept(range);
+            } else if (inPitch(event)) select(null, null);
+            onSeek.accept(section == null ? seconds(event.getX()) : section.sourceStart());
+        }
+        draw();
+    }
+
+    void selectNotes(List<Overlay> notes) {
+        var ids = notes.stream().map(Overlay::id).collect(java.util.stream.Collectors.toSet());
+        var events = java.util.stream.Stream.concat(
+                model.overlays().stream().filter(note -> !pendingByNote.containsKey(note.id())), pending.stream())
+                .filter(note -> ids.contains(note.id())).map(Overlay::eventId).toList();
+        selection.select(events, null);
+        publishSelection(null);
+        draw();
+    }
+
+    double detailZoom(List<Overlay> notes) {
+        double start = notes.stream().mapToDouble(note -> note.interval().sourceStart()).min().orElse(0);
+        double end = notes.stream().mapToDouble(note -> note.interval().sourceEnd()).max().orElse(start);
+        return Math.clamp(Math.log(model.duration() / Math.max(.05, (end - start) * 1.2)) / Math.log(2),
+                0, MAX_TIME_ZOOM);
+    }
+
     void mode(Mode mode) { this.mode = mode; cancelGesture(); draw(); }
     void grid(ReconstructionInspection.Grid grid) { this.grid = grid; }
     void editing(boolean enabled) { editing = enabled; if (!enabled) cancelGesture(); }
@@ -272,6 +477,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     private void cancelGesture() {
         noteDrag = null;
+        roleDrag = null;
         box = null;
         effect = null;
         bendPreview = List.of();
@@ -284,15 +490,61 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         dragged = false;
     }
 
+    void holdSpace() {
+        if (spaceHeld) return;
+        spaceHeld = true;
+        spaceDragged = false;
+        updatePanCursor();
+    }
+
+    boolean releaseSpace() {
+        boolean tap = spaceHeld && !spaceDragged;
+        spaceHeld = false;
+        updatePanCursor();
+        return tap;
+    }
+
+    void cancelNavigation() {
+        pan = null;
+        releaseSpace();
+    }
+
+    private void updatePanCursor() {
+        canvas.setCursor(pan != null ? Cursor.CLOSED_HAND : spaceHeld ? Cursor.OPEN_HAND : Cursor.DEFAULT);
+        if (pan != null || spaceHeld) hover.hide();
+    }
+
+    private void beginPan(MouseButton button, MouseEvent event) {
+        cancelGesture();
+        pan = new Pan(button, event.getSceneX(), event.getSceneY());
+        updatePanCursor();
+        draw();
+    }
+
     private void press(MouseEvent event) {
+        if (pan != null) {
+            event.consume();
+            return;
+        }
+        if (event.getButton() == MouseButton.MIDDLE || spaceHeld && event.getButton() == MouseButton.PRIMARY) {
+            canvas.requestFocus();
+            beginPan(event.getButton(), event);
+            event.setDragDetect(false);
+            event.consume();
+            return;
+        }
         if (event.getButton() != MouseButton.PRIMARY) return;
         cancelGesture();
         canvas.requestFocus();
-        if (event.isShiftDown() && event.getX() >= AXIS && !inPitch(event)) {
+        if (event.isShiftDown() && event.getX() >= axis() && !inPitch(event)) {
             anchor = seconds(event.getX());
             return;
         }
         if (!editing) return;
+        if (rolesView) {
+            pressRole(event);
+            return;
+        }
         var section = sectionAt(event.getX(), event.getY());
         var edge = sectionEdge(section, event.getX());
         if (edge != null) sectionDrag = new SectionDrag(section, edge);
@@ -307,12 +559,24 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void drag(MouseEvent event) {
+        if (pan == null && spaceHeld && event.isPrimaryButtonDown()) beginPan(MouseButton.PRIMARY, event);
+        if (pan != null) {
+            double dx = event.getSceneX() - pan.sceneX();
+            double dy = event.getSceneY() - pan.sceneY();
+            if (spaceHeld) spaceDragged = true;
+            if (dy != 0) pitchScroll.setValue(pitchScroll.getValue() - dy / rowHeight());
+            if (dx != 0) scrollTo(offset - dx);
+            pan = new Pan(pan.button(), event.getSceneX(), event.getSceneY());
+            event.setDragDetect(false);
+            event.consume();
+            return;
+        }
         if (anchor != null) {
             selectRange(seconds(event.getX()));
             return;
         }
         if (box != null) {
-            box = new Box(box.x(), box.y(), Math.clamp(event.getX(), AXIS, canvas.getWidth()),
+            box = new Box(box.x(), box.y(), Math.clamp(event.getX(), axis(), canvas.getWidth()),
                     Math.clamp(event.getY(), sectionBottom(), pitchBottom()), box.add(), box.toggle());
         } else if (effect != null) updateEffect(event);
         else if (sectionDrag != null) {
@@ -325,6 +589,14 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void release(MouseEvent event) {
+        if (pan != null) {
+            if (event.getButton() == pan.button()) {
+                pan = null;
+                updatePanCursor();
+            }
+            event.consume();
+            return;
+        }
         if (event.getButton() == MouseButton.SECONDARY) {
             var section = sectionAt(event.getX(), event.getY());
             if (section != null && editing) onSectionMenu.accept(new SectionPoint(section,
@@ -342,7 +614,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             return;
         }
         if (box != null && (dragged || box.add() || box.toggle())) {
-            var area = new Box(box.x(), box.y(), Math.clamp(event.getX(), AXIS, canvas.getWidth()),
+            var area = new Box(box.x(), box.y(), Math.clamp(event.getX(), axis(), canvas.getWidth()),
                     Math.clamp(event.getY(), sectionBottom(), pitchBottom()), box.add(), box.toggle());
             var found = hits.stream().filter(hit -> area.intersects(hit) && hit.top() < pitchBottom())
                     .map(hit -> hit.note().eventId()).distinct().toList();
@@ -350,6 +622,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             selection.modify(found, area.add(), area.toggle());
             publishSelection(null);
             draw();
+            return;
+        }
+        if (rolesView) {
+            releaseRole(event);
             return;
         }
         var moving = noteDrag;
@@ -386,8 +662,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             onSeek.accept(hit.note().interval().sourceStart());
         } else if (event.getY() >= laneTop() && event.getY() < laneTop() + lanes.size() * LANE_HEIGHT) {
             select(null, lanes.get((int) (event.getY() - laneTop()) / LANE_HEIGHT));
-            onSeek.accept(event.getX() >= AXIS ? seconds(event.getX()) : playhead);
-        } else if (event.getX() >= AXIS) {
+            onSeek.accept(event.getX() >= axis() ? seconds(event.getX()) : playhead);
+        } else if (event.getX() >= axis()) {
             if (inPitch(event)) {
                 if (editing && mode == Mode.INSERT && insertAvailable && !moved) {
                     double limit = model.duration();
@@ -575,18 +851,19 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                     end = Math.min(model.duration(), end + next - start);
                     start = next;
                 }
-                pitch = Math.clamp(pitch + pitch(event.getY()) - gesture.pitch(), low, high);
+                pitch = Math.clamp(pitch + pitch(event.getY()) - gesture.pitch(), lowestPitch(), highestPitch());
             }
         }
         return new Placement(start, end, pitch);
     }
 
     private boolean inPitch(MouseEvent event) {
-        return event.getX() >= AXIS && event.getY() >= sectionBottom() && event.getY() < pitchBottom();
+        return event.getX() >= axis() && event.getY() >= sectionBottom() && event.getY() < pitchBottom();
     }
 
     private int pitch(double y) {
-        return Math.clamp((int) Math.round(high + .5 - (y - sectionBottom()) / rowHeight()), low, high);
+        return Math.clamp((int) Math.round(pitchTop - (y - sectionBottom()) / rowHeight()),
+                lowestPitch(), highestPitch());
     }
 
     private double placementTime(double value, boolean free) {
@@ -603,7 +880,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private Section sectionAt(double x, double y) {
-        if (x < AXIS || y < rulerHeight() || y >= sectionBottom()) return null;
+        if (x < axis() || y < rulerHeight() || y >= sectionBottom()) return null;
         var level = Level.values()[(int) (y - rulerHeight()) / SECTION_HEIGHT];
         double time = seconds(x);
         return sections.stream().filter(section -> section.level() == level
@@ -639,6 +916,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void roleVisible(Role role, boolean show) {
         if (show) roles.add(role); else roles.remove(role);
+        pitchFitDirty = true;
         draw();
     }
 
@@ -646,33 +924,65 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     void laneVisible(String lane, boolean show) {
         if (show) visibleLanes.add(lane); else visibleLanes.remove(lane);
+        pitchFitDirty = true;
         draw();
     }
 
     void zoom(double value) {
+        if (value == zoom) return;
         double playheadX = x(playhead);
-        double anchor = playheadX >= AXIS && playheadX <= canvas.getWidth() ? playhead : seconds(AXIS + plotWidth() / 2);
+        double anchor = playheadX >= axis() && playheadX <= canvas.getWidth() ? playhead : seconds(axis() + plotWidth() / 2);
         zoom = value;
         resizePlot();
         center(anchor);
     }
 
+    private void wheelZoom(ScrollEvent event) {
+        // Some devices report a Shift-modified wheel as horizontal scroll.
+        double delta = event.getDeltaY();
+        if (event.isShiftDown() && delta == 0) delta = event.getDeltaX();
+        if (delta == 0) return;
+        if (event.isShiftDown()) {
+            double fraction = Math.clamp((event.getY() - sectionBottom()) / (pitchBottom() - sectionBottom()), 0, 1);
+            zoomPitch(Math.pow(1.4, -delta / WHEEL_STEP), fraction);
+        } else {
+            double value = Math.clamp(zoom + delta / WHEEL_STEP, 0, MAX_TIME_ZOOM);
+            if (value != zoom) {
+                double anchorX = Math.clamp(event.getX(), axis(), canvas.getWidth());
+                double seconds = seconds(anchorX);
+                zoom = value;
+                resizePlot();
+                scroll.layout();
+                scrollTo(seconds * pixelsPerSecond - (anchorX - axis()));
+                onTimeZoom.accept(zoom);
+            }
+        }
+        event.consume();
+    }
+
     private void resizePlot() {
         if (!ready) return;
         pixelsPerSecond = plotWidth() / Math.max(.001, model.duration()) * Math.pow(2, zoom);
-        double height = Math.max(sectionBottom() + 145 + stripHeight(), scroll.getViewportBounds().getHeight());
-        double width = AXIS + pixelsPerSecond * model.duration();
-        if (Math.abs(height - contentHeight) >= .5 || Math.abs(width - contentWidth) >= .5) dimensions(width, height);
+        // Let the ScrollPane fill spare height. Using the old viewport height as the
+        // minimum makes a new horizontal scrollbar create vertical overflow.
+        double minHeight = sectionBottom() + 145 + stripHeight();
+        // Match the skin's layout width so it doesn't renormalize hvalue after zoom.
+        double width = snapSizeX(axis() + pixelsPerSecond * model.duration());
+        if (minHeight != getMinHeight() || width != contentWidth) dimensions(width, minHeight);
     }
 
     void center(double sourceSeconds) {
+        scrollTo(sourceSeconds * pixelsPerSecond - plotWidth() / 2);
+    }
+
+    private void scrollTo(double pixels) {
         double available = contentWidth - canvas.getWidth();
-        scroll.setHvalue(available <= 0 ? 0 : Math.clamp((sourceSeconds * pixelsPerSecond - plotWidth() / 2) / available, 0, 1));
+        scroll.setHvalue(available <= 0 ? 0 : Math.clamp(pixels / available, 0, 1));
     }
 
     void movePlayhead(double seconds, boolean follow) {
         playhead = seconds;
-        if (follow && (x(seconds) < AXIS || x(seconds) > canvas.getWidth())) center(seconds);
+        if (follow && pan == null && (x(seconds) < axis() || x(seconds) > canvas.getWidth())) center(seconds);
         draw();
     }
 
@@ -745,45 +1055,66 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private Hit hit(double x, double y) {
-        if (x < AXIS) return null;
+        if (x < axis()) return null;
         for (int i = hits.size() - 1; i >= 0; i--) if (hits.get(i).contains(x, y)) return hits.get(i);
         return null;
     }
 
-    private double x(double seconds) { return AXIS + seconds * pixelsPerSecond - offset; }
-    private double seconds(double x) { return Math.clamp((x - AXIS + offset) / pixelsPerSecond, 0, model.duration()); }
-    private double plotWidth() { return Math.max(100, scroll.getViewportBounds().getWidth() - AXIS); }
+    private int axis() { return AXIS; }
+    private double x(double seconds) { return axis() + seconds * pixelsPerSecond - offset; }
+    private double seconds(double x) { return Math.clamp((x - axis() + offset) / pixelsPerSecond, 0, model.duration()); }
+    private double plotWidth() { return Math.max(100, scroll.getViewportBounds().getWidth() - axis()); }
     private int rulerHeight() { return 31; }
     private int sectionBottom() { return rulerHeight() + SECTION_LABELS.size() * SECTION_HEIGHT; }
-    private int stripHeight() { return LANE_HEADER + lanes.size() * LANE_HEIGHT; }
+    private int stripHeight() {
+        return LANE_HEADER + Math.max(lanes.size() * LANE_HEIGHT, drumRows.size() * 9);
+    }
     private double pitchBottom() { return contentHeight - stripHeight(); }
+    private double plotBottom() { return rolesView && !showDrums ? pitchBottom() : contentHeight; }
     private double laneTop() { return pitchBottom() + LANE_HEADER; }
-    private double rowHeight() { return (pitchBottom() - sectionBottom()) / (high - low + 1); }
-    private double y(double pitch) { return sectionBottom() + (high + .5 - pitch) * rowHeight(); }
+    private double rowHeight() { return (pitchBottom() - sectionBottom()) / pitchSpan; }
+    private double y(double pitch) { return sectionBottom() + (pitchTop - pitch) * rowHeight(); }
+    private int lowestPitch() { return (int) Math.ceil(pitchTop - pitchSpan); }
+    private int highestPitch() { return (int) Math.floor(pitchTop); }
 
     @Override void draw() {
         if (!ready) return;
         var g = canvas.getGraphicsContext2D();
         double width = canvas.getWidth();
+        fitVisiblePitch(width);
         hits.clear();
         proposalHits.clear();
         layerSkips.clear();
         g.setFill(BACKGROUND);
         g.fillRect(0, 0, width, contentHeight);
+        if (rolesView) {
+            // Reserve the lane strip height so pitch coordinates stay fixed when switching views.
+            g.setFill(PANEL);
+            g.fillRect(0, pitchBottom(), width, stripHeight());
+        }
         g.setFont(Font.font("Monospaced", 11));
         g.setTextBaseline(VPos.CENTER);
         drawSpectrum(g, width);
         drawPitchGrid(g, width);
         drawBands(g, width);
-        drawLanes(g, width);
+        if (!rolesView) drawLanes(g, width);
+        else if (showDrums && !drumRows.isEmpty()) {
+            g.setFill(SUBTLE);
+            g.fillText("Drums", 12, pitchBottom() + LANE_HEADER / 2.0);
+        }
         drawRuler(g, width);
         g.save();
-        clip(g, AXIS, 0, width - AXIS, contentHeight);
+        clip(g, axis(), 0, width - axis(), plotBottom());
         if (range != null) {
             g.setFill(Color.web("#83abff", .17));
             g.fillRect(x(range.start()), 0, x(range.end()) - x(range.start()), contentHeight);
         }
-        drawNotes(g, width);
+        if (rolesView) {
+            var visible = visibleNotes(width);
+            drawVoiceNotes(g, width, visible);
+            if (showDrums) drawDrums(g, visible);
+            drawBox(g);
+        } else drawNotes(g, width);
         if (boundaryPreview != null) {
             g.setStroke(Color.GOLD);
             g.strokeLine(x(boundaryPreview), rulerHeight(), x(boundaryPreview), sectionBottom());
@@ -797,13 +1128,13 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.strokeLine(x(playhead), 0, x(playhead), contentHeight);
         g.restore();
         g.setStroke(GRID);
-        g.strokeLine(AXIS - .5, 0, AXIS - .5, contentHeight);
+        g.strokeLine(axis() - .5, 0, axis() - .5, plotBottom());
     }
 
     private void drawSpectrum(GraphicsContext g, double width) {
         if (source == null) {
             g.setFill(SUBTLE);
-            g.fillText("No source audio available", AXIS + 16, sectionBottom() + 22);
+            g.fillText("No source audio available", axis() + 16, sectionBottom() + 22);
             return;
         }
         int level = (int) Math.clamp(Math.floor(Math.log(ReconstructionTiles.WIDTH / (1.5 * pixelsPerSecond))
@@ -811,9 +1142,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         double tileSpan = Math.scalb(1.5, level);
         double end = seconds(width);
         var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
+        int low = (int) Math.floor(pitchTop - pitchSpan + .5);
+        int high = (int) Math.ceil(pitchTop - .5);
         g.save();
-        clip(g, AXIS, sectionBottom(), width - AXIS, pitchBottom() - sectionBottom());
-        for (int index = (int) (seconds(AXIS) / tileSpan); index * tileSpan < end; index++) {
+        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
+        for (int index = (int) (seconds(axis()) / tileSpan); index * tileSpan < end; index++) {
             var key = new ReconstructionTiles.Key(source, level, index, low, high);
             var imageKey = new ReconstructionTiles.ImageKey(key, dbRange);
             needed.add(imageKey);
@@ -822,8 +1155,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 drawCoarserTile(g, key);
                 continue;
             }
-            g.drawImage(tile.image(), x(key.start()), sectionBottom(), tileSpan * pixelsPerSecond,
-                    pitchBottom() - sectionBottom());
+            drawTile(g, key, tile.image());
             if (ridges) {
                 g.setFill(Color.web("#9cf4fb", .75));
                 for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
@@ -842,24 +1174,31 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             if (cached == null) continue;
             g.save();
             clip(g, x(key.start()), sectionBottom(), key.span() * pixelsPerSecond, pitchBottom() - sectionBottom());
-            g.drawImage(cached.image(), x(parent.start()), sectionBottom(), parent.span() * pixelsPerSecond,
-                    pitchBottom() - sectionBottom());
+            drawTile(g, parent, cached.image());
             g.restore();
             return;
         }
     }
 
+    private void drawTile(GraphicsContext g, ReconstructionTiles.Key key, javafx.scene.image.Image image) {
+        g.drawImage(image, x(key.start()), y(key.high() + .5), key.span() * pixelsPerSecond,
+                (key.high() - key.low() + 1) * rowHeight());
+    }
+
     private void drawPitchGrid(GraphicsContext g, double width) {
         g.setFill(PANEL);
-        g.fillRect(0, sectionBottom(), AXIS, pitchBottom() - sectionBottom());
+        g.fillRect(0, sectionBottom(), axis(), pitchBottom() - sectionBottom());
         int minimumSpacing = Math.max(1, (int) Math.ceil(12 / rowHeight()));
-        for (int pitch = low; pitch <= high; pitch++) {
+        g.save();
+        clip(g, 0, sectionBottom(), width, pitchBottom() - sectionBottom());
+        for (int pitch = lowestPitch(); pitch <= highestPitch(); pitch++) {
             g.setStroke(pitch % 12 == 0 ? GRID : Color.web("#a5badd", .07));
-            g.strokeLine(AXIS, y(pitch - .5), width, y(pitch - .5));
+            g.strokeLine(axis(), y(pitch - .5), width, y(pitch - .5));
             if (minimumSpacing > 1 && pitch % 12 % minimumSpacing != 0) continue;
             g.setFill(pitch % 12 == 0 ? TEXT : SUBTLE);
             g.fillText(pitchName(pitch), 12, y(pitch));
         }
+        g.restore();
     }
 
     private void drawBands(GraphicsContext g, double width) {
@@ -869,10 +1208,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int i = 0; i < SECTION_LABELS.size(); i++)
             g.fillText(SECTION_LABELS.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
         g.save();
-        clip(g, AXIS, rulerHeight(), width - AXIS, sectionBottom() - rulerHeight());
+        clip(g, axis(), rulerHeight(), width - axis(), sectionBottom() - rulerHeight());
         for (var band : sections) {
             double left = x(band.sourceStart()), right = x(band.sourceEnd());
-            if (right < AXIS || left > width) continue;
+            if (right < axis() || left > width) continue;
             double top = rulerHeight() + band.level().ordinal() * SECTION_HEIGHT;
             g.setFill(switch (band.level()) {
                 case section -> Color.web("#2b4767");
@@ -881,7 +1220,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             });
             g.fillRect(left, top, Math.max(1, right - left - 1), SECTION_HEIGHT - 1);
             g.setFill(TEXT);
-            double labelStart = Math.max(AXIS, left) + 5;
+            double labelStart = Math.max(axis(), left) + 5;
             String label = band.label();
             double space = right - labelStart - 3;
             drawLabel(g, label, labelStart, top + SECTION_HEIGHT / 2.0, space);
@@ -894,7 +1233,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.fillRect(0, pitchBottom(), width, stripHeight());
         g.setFill(TEXT);
         g.fillText("Chip lanes", 4, pitchBottom() + LANE_HEADER / 2.0);
-        if (lanes.isEmpty()) g.fillText("No placed notes", AXIS + 16, pitchBottom() + LANE_HEADER / 2.0);
+        if (lanes.isEmpty()) g.fillText("No placed notes", axis() + 16, pitchBottom() + LANE_HEADER / 2.0);
         for (int i = 0; i < lanes.size(); i++) {
             String lane = lanes.get(i);
             double top = laneTop() + i * LANE_HEIGHT;
@@ -911,11 +1250,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.setFill(TEXT);
         g.fillText(projectRuler ? "Project s" : "Source s", 8, rulerHeight() / 2.0);
         g.save();
-        clip(g, AXIS, 0, width - AXIS, contentHeight);
+        clip(g, axis(), 0, width - axis(), plotBottom());
         double metric = 82 / pixelsPerSecond;
         double magnitude = Math.pow(10, Math.floor(Math.log10(metric)));
         double step = (metric / magnitude < 2 ? 2 : metric / magnitude < 5 ? 5 : 10) * magnitude;
-        double start = seconds(AXIS), end = seconds(width);
+        double start = seconds(axis()), end = seconds(width);
         if (projectRuler) {
             start = model.toProject(start);
             end = model.toProject(end);
@@ -931,17 +1270,113 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.restore();
     }
 
+    private static boolean isDrum(Overlay note, ReconstructionVoices.Entry voice) {
+        return note.role() == Role.DRUMS || voice != null && voice.drum();
+    }
+
+    private void drawDrums(GraphicsContext g, List<Overlay> visible) {
+        for (var note : visible) {
+            var voice = voices.byNote().get(note.id());
+            if (voice == null || !isDrum(note, voice) || !roles.contains(note.role()) || !selectableDraft(note)) continue;
+            Integer row = drumRows.get(voice.id());
+            if (row == null) continue;
+            double x = x(note.interval().sourceStart()), y = laneTop() + row * 9 + 4.5;
+            if (x < axis() || x > canvas.getWidth()) continue;
+            boolean selected = selection.contains(note);
+            g.setGlobalAlpha(voiceDimmed(note) ? .24 : selected ? 1 : .75);
+            var mark = voice.drum() ? voice.drumMark() : ReconstructionVoices.DrumMark.of(note.partName(), note.pitch());
+            mark.draw(g, voice.style().color(), x, y);
+            if (selected) {
+                g.setStroke(Color.WHITE);
+                g.strokeRect(x - 4, y - 4, 8, 8);
+            }
+            hits.add(new Hit(note, x - 4, y - 4, 8, 8));
+        }
+        g.setGlobalAlpha(1);
+    }
+
+    private void drawVoiceNotes(GraphicsContext g, double width, List<Overlay> visible) {
+        g.save();
+        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
+        var tags = new ArrayList<VoiceTag>();
+        for (var note : visible) {
+            var voice = voices.byNote().get(note.id());
+            if (voice == null || isDrum(note, voice) || !roles.contains(note.role()) || !inPitchRange(note)) continue;
+            var bounds = noteBounds(note);
+            double left = bounds.left(), top = bounds.top(), length = bounds.width(), height = bounds.height();
+            boolean selected = selection.contains(note);
+            boolean dimmed = voiceDimmed(note);
+            boolean deleted = note.fate().equals("Pending deletion");
+            boolean draft = pendingByNote.get(note.id()) == note;
+            g.setGlobalAlpha(dimmed ? .24 : 1);
+            voice.style().draw(g, left, top, length, height, deleted ? 0 : note.sounds() ? .78 : .42);
+            if (deleted) {
+                g.setStroke(voice.style().color());
+                g.strokeLine(left, top + height / 2, left + length, top + height / 2);
+            }
+            if (selected || draft) {
+                g.setStroke(selected ? Color.WHITE : Color.GOLD);
+                g.strokeRect(left - .5, top - .5, length + 1, height + 1);
+            }
+            if (detailedNotes.contains(note.id())) {
+                g.setFill(Color.GOLD);
+                g.fillOval(left + 1, top - 4, 4, 4);
+            }
+            if (!dimmed && pixelsPerSecond >= 24) {
+                // Leave the attack and its pattern visible beside the tag.
+                double labelLeft = Math.max(left + 7, axis() + 2);
+                String label = voice.tag();
+                double labelWidth = label.codePointCount(0, label.length()) * 6.7;
+                double baseline = height >= 12 ? top + height / 2 : top - 7;
+                if (labelLeft + labelWidth + 2 <= Math.min(left + length, width) && baseline >= sectionBottom() + 7) {
+                    var tag = new LabelBounds(labelLeft, baseline - 6, labelWidth + 4, 12);
+                    if (tags.stream().noneMatch(other -> tag.intersects(other.bounds()))) tags.add(new VoiceTag(tag, label));
+                }
+            }
+            hits.add(bounds);
+        }
+        g.setGlobalAlpha(1);
+        for (var tag : tags) {
+            var bounds = tag.bounds();
+            g.setFill(BACKGROUND.deriveColor(0, 1, 1, .91));
+            g.fillRoundRect(bounds.x - 2, bounds.y, bounds.width, bounds.height, 3, 3);
+            g.setFill(TEXT);
+            g.fillText(tag.text(), bounds.x, bounds.y + bounds.height / 2);
+        }
+        g.restore();
+    }
+
+    private record VoiceTag(LabelBounds bounds, String text) {}
+
+    private boolean inPitchRange(Overlay note) {
+        return note.part() >= 0 && note.pitch() >= lowestPitch() && note.pitch() <= highestPitch();
+    }
+
+    private Hit noteBounds(Overlay note) {
+        double left = x(note.interval().sourceStart());
+        double height = Math.max(3, Math.min(13, rowHeight() - 1));
+        return new Hit(note, left, y(note.pitch()) - height / 2,
+                Math.max(rolesView ? 4 : 2, x(note.interval().sourceEnd()) - left), height);
+    }
+
+    private void drawBox(GraphicsContext g) {
+        if (box == null || !dragged) return;
+        g.setFill(Color.web("#83abff", .20));
+        g.fillRect(box.left(), box.top(), box.width(), box.height());
+        g.setStroke(Color.web("#83abff"));
+        g.strokeRect(box.left(), box.top(), box.width(), box.height());
+    }
+
     private void drawNotes(GraphicsContext g, double width) {
         g.save();
-        clip(g, AXIS, sectionBottom(), width - AXIS, pitchBottom() - sectionBottom());
+        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
         var visible = visibleNotes(width);
         var labels = new ArrayList<LabelBounds>();
         for (var note : visible) {
-            if (note.part() < 0 || note.pitch() < low || note.pitch() > high) continue;
-            double left = x(note.interval().sourceStart());
-            double barWidth = Math.max(2, x(note.interval().sourceEnd()) - left);
-            double height = Math.max(3, Math.min(13, rowHeight() - 1));
-            double top = y(note.pitch()) - height / 2;
+            if (!inPitchRange(note)) continue;
+            var bounds = noteBounds(note);
+            double left = bounds.left(), barWidth = bounds.width(), height = bounds.height(), top = bounds.top();
+            g.setGlobalAlpha(voiceDimmed(note) ? .24 : 1);
             var color = color(note.role());
             boolean draft = pendingByNote.get(note.id()) == note;
             boolean deleted = draft && note.fate().equals("Pending deletion");
@@ -964,25 +1399,26 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 if (data != null) drawCurve(g, data.bend(), Color.GOLD, true);
             }
             if (pixelsPerSecond >= 24) {
-                double labelLeft = Math.max(left, AXIS) + 3;
+                double labelLeft = Math.max(left, axis()) + 3;
                 double space = Math.min(left + barWidth, width) - labelLeft;
                 String text = fitLabel(shortLabel(note), space);
                 double baseline = top - 7;
                 if (!text.isEmpty() && baseline >= sectionBottom() + 7) {
-                    var bounds = new LabelBounds(labelLeft, baseline - 7, text.length() * 6.7, 14);
-                    if (labels.stream().noneMatch(bounds::intersects)) {
-                        labels.add(bounds);
+                    var label = new LabelBounds(labelLeft, baseline - 7, text.length() * 6.7, 14);
+                    if (labels.stream().noneMatch(label::intersects)) {
+                        labels.add(label);
                         g.setFill(BACKGROUND.deriveColor(0, 1, 1, .83));
-                        g.fillRoundRect(bounds.x - 2, bounds.y, bounds.width + 4, bounds.height, 3, 3);
+                        g.fillRoundRect(label.x - 2, label.y, label.width + 4, label.height, 3, 3);
                         g.setFill(TEXT);
                         g.fillText(text, labelLeft, baseline);
                     }
                 }
             }
-            hits.add(new Hit(note, left, top, barWidth, height));
+            hits.add(bounds);
         }
+        g.setGlobalAlpha(1);
         var layers = model.layers().stream().filter(layer ->
-                layer.interval().sourceEnd() >= seconds(AXIS) && layer.interval().sourceStart() <= seconds(width)
+                layer.interval().sourceEnd() >= seconds(axis()) && layer.interval().sourceStart() <= seconds(width)
                         && roles.contains(layer.role())
                         && (layer.layer().lane() == null || visibleLanes.contains(layer.layer().lane()))).toList();
         for (var ghost : layers) {
@@ -1007,7 +1443,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.setLineDashes(4, 2);
         for (var proposal : proposals) {
             var mark = proposal.note();
-            if (mark.pitch() < low || mark.pitch() > high || mark.end() < seconds(AXIS) || mark.start() > seconds(width))
+            if (mark.pitch() < lowestPitch() || mark.pitch() > highestPitch()
+                    || mark.end() < seconds(axis()) || mark.start() > seconds(width))
                 continue;
             double left = x(mark.start());
             double barWidth = Math.max(5, x(mark.end()) - left);
@@ -1019,12 +1456,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
         g.setLineDashes();
         g.setLineWidth(1);
-        if (box != null && dragged) {
-            g.setFill(Color.LIGHTSKYBLUE.deriveColor(0, 1, 1, .2));
-            g.fillRect(box.left(), box.top(), box.width(), box.height());
-            g.setStroke(Color.LIGHTSKYBLUE);
-            g.strokeRect(box.left(), box.top(), box.width(), box.height());
-        }
+        drawBox(g);
         if (effect != null) {
             drawCurve(g, bendPreview, Color.GOLD, true);
             if (mode == Mode.CUT) {
@@ -1033,7 +1465,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 g.strokeLine(effect.x(), y(data.pitch() + .5), effect.x(), y(data.pitch() - .5));
             }
             if (effectReadout != null) {
-                double left = Math.clamp(effect.x() + 10, AXIS, Math.max(AXIS, width - 360));
+                double left = Math.clamp(effect.x() + 10, axis(), Math.max(axis(), width - 360));
                 double baseline = Math.max(sectionBottom() + 19, effect.y() - 16);
                 g.setFill(BACKGROUND);
                 g.fillRoundRect(left, baseline - 15, effectReadout.length() * 7 + 10, 21, 5, 5);
@@ -1047,9 +1479,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             if (!note.sounds()) continue;
             int lane = lanes.indexOf(note.lane());
             if (lane < 0) continue;
-            double left = Math.max(AXIS, x(note.interval().sourceStart()));
+            double left = Math.max(axis(), x(note.interval().sourceStart()));
             double barWidth = Math.max(2, x(note.interval().sourceEnd()) - left);
             double top = laneTop() + lane * LANE_HEIGHT + 2;
+            g.setGlobalAlpha(voiceDimmed(note) ? .24 : 1);
             var color = color(note.role());
             g.setFill(color.deriveColor(0, 1, 1, .45));
             g.fillRect(left, top, barWidth, LANE_HEIGHT - 4);
@@ -1064,12 +1497,13 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             }
             hits.add(new Hit(note, left, top, barWidth, LANE_HEIGHT - 4));
         }
+        g.setGlobalAlpha(1);
         for (var ghost : layers) {
             String lane = ghost.layer().lane();
             if (lane == null) continue;
             int row = lanes.indexOf(lane);
             if (row < 0) continue;
-            double left = Math.max(AXIS, x(ghost.interval().sourceStart()));
+            double left = Math.max(axis(), x(ghost.interval().sourceStart()));
             double right = Math.min(width, x(ghost.interval().sourceEnd()));
             g.setFill(layerColor(lane, .52));
             g.fillRect(left, laneTop() + row * LANE_HEIGHT + 4, Math.max(2, right - left), LANE_HEIGHT - 8);
@@ -1127,7 +1561,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private List<Overlay> visibleNotes(double width) {
-        double from = seconds(AXIS), to = seconds(width);
+        double from = seconds(axis()), to = seconds(width);
         int first = 0, last = endByIndex.length;
         while (first < last) {
             int middle = (first + last) >>> 1;
@@ -1140,14 +1574,25 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             var note = notes.get(i);
             if (note.interval().sourceStart() > to) break;
             if (!pendingByNote.containsKey(note.id()) && note.interval().sourceEnd() >= from && roles.contains(note.role())
-                    && visibleLanes.contains(note.lane() == null ? UNASSIGNED : note.lane()))
+                    && (rolesView || visibleLanes.contains(note.lane() == null ? UNASSIGNED : note.lane()))
+                    && voiceShown(note))
                 visible.add(note);
         }
         for (var note : pending) {
             if (!note.fate().equals("Superseded draft")
-                    && note.interval().sourceEnd() >= from && note.interval().sourceStart() <= to) visible.add(note);
+                    && note.interval().sourceEnd() >= from && note.interval().sourceStart() <= to && voiceShown(note)) visible.add(note);
         }
         return visible;
+    }
+
+    private boolean voiceShown(Overlay note) {
+        var voice = voices.byNote().get(note.id());
+        return voice == null || voiceVisible(voice.id());
+    }
+
+    private boolean voiceDimmed(Overlay note) {
+        var voice = voices.byNote().get(note.id());
+        return soloVoice != null && voice != null && !soloVoice.equals(voice.id()) && !selection.contains(note);
     }
 
     private record LabelBounds(double x, double y, double width, double height) {
@@ -1178,6 +1623,12 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     static String shortLabel(Overlay note) {
         return pitchName(note.pitch()) + " · " + (note.lane() == null ? UNASSIGNED : note.lane())
                 + (note.patch() == null ? "" : " · " + note.patch());
+    }
+
+    private String hoverDescription(Overlay note) {
+        var voice = voices.byNote().get(note.id());
+        return rolesView && voice != null ? voice.name() + "\n" + description(note)
+                : description(note);
     }
 
     static String description(Overlay note) {

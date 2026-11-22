@@ -291,10 +291,15 @@ artifacts and opens an editing workspace. It uses recorded WAV paths for the
 mix and mapped stems, and reads `render.wav` for the chip spectrogram and
 playback.
 
-- Choose a **Source** to change the spectrogram and playback together. Use
-  **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**
-  restores the overview. The ruler starts in source seconds. Toggle
-  **Project time** to see the steady project clock on the same aligned view.
+- Choose a **Source** to change the spectrogram and playback together. In
+  **Detail** and **Roles**, scroll over the plot to zoom time at the pointer.
+  Hold **Shift** while scrolling to zoom pitch at the pointer. With the plot
+  focused, hold **Space** and left-drag to pan time and pitch, or drag with
+  the middle mouse button. You can also use **Time zoom**, **Pitch zoom**
+  and the scrollbars. **Fit song** restores the overview. **Fit pitch**
+  follows the tonal notes in the visible time window with a small margin.
+  It starts enabled. The ruler starts in source seconds. Toggle **Project
+  time** to see the steady project clock on the same aligned view.
 - Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
   background detail. **Ridges** marks the three strongest spectral peaks in
   each analysis column. **Note opacity** controls the fill. Press **O** to
@@ -304,10 +309,11 @@ playback.
   competing note IDs. Click the pitch overlay or a note in the chip lane
   strip to read its full trace. For a bend, the curve shows the applied FM
   pitch when available and the stage pitch curve otherwise.
-- Click the ruler or a note to seek. Press **Space** in the plot or click
-  **Play**. Press **R** to switch between the chip and the last mix or stem
-  at the same aligned position. On tempo-warped projects, reference playback
-  follows the project clock. Shift-drag across the plot to loop a range.
+- Click the ruler or a note to seek. Tap **Space** in the plot or click
+  **Play** to toggle playback. Press **R** to switch between the chip and
+  the last mix or stem at the same aligned position. On tempo-warped
+  projects, reference playback follows the project clock. Shift-drag on
+  the ruler to loop a range.
   Click **Clear loop** or press **Esc** to remove the loop.
 - Click a lane or a sounding note, then choose **Solo lane** or **Solo note**
   to audition that lane through the chip renderer. **Solo note** loops the
@@ -507,3 +513,36 @@ explicitly overwrite the arrangement.
 Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records coverage for the retail importer and the remaining driver gaps.
+
+### Classify notes in Analysis
+
+Switch between **Detail** and **Roles** in the Analysis toolbar. Both views
+share the time and pitch viewport over the spectrogram. Roles uses voice
+colors and patterns that match the swatches in **Voices**. Notes show short
+tags when space allows. Hover for the full voice name and the note's role.
+Unassigned notes are grey with a **?** tag. Gold dots mark notes with detail
+edits.
+
+Drum hits are hidden when Roles opens. Turn on **Show drums** in **Voices**
+to see small, unlabelled hits in a separate strip beneath the pitch plot.
+Kick, snare and hat use different shapes. Drum hits stay available in Detail's
+chip lanes.
+
+Click a voice name in **Voices** to select all its notes. The checkbox hides
+or shows the voice, and **S** highlights it against the other voices.
+Drag from empty space to box-select notes. Use **Shift** to add and **Ctrl**
+to toggle. To assign the selection, click the destination voice's **→**
+button or drag the selected notes from the Roles plot onto its legend entry.
+
+Use **New voice** to create an empty tonal or drum voice or create a voice
+from selected notes. Use **⋯** to rename, split or merge a voice. Choose
+**Edit tag…** in the same menu to change its label, or clear the field to
+restore the automatic tag. Studio saves tags and swatches locally for the
+reconstruction. Use
+**Selection** to change a role or chip lane type in bulk. Studio checks
+whether a classification change would orphan a detail edit target before
+queuing the change.
+
+Both views share the selection, playhead, loop, zoom and undo history.
+Double-click a note in Roles to focus its selection in Detail. Choose
+**Apply** in either view to rebuild with the shared edits.

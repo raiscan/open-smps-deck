@@ -147,6 +147,10 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `reconstruct_view` returns a PNG and legend using fields such as `stem`,
   `harmonics`, `ridges`, `sections` and `colorBy`. Studio Analysis has
   a source picker, **Ridges**, section bands, and role and lane filters.
+  In **Detail** and **Roles**, scroll to zoom time at the pointer or
+  **Shift**-scroll to zoom pitch. Middle-drag or hold **Space** and
+  left-drag on the focused plot to pan. Tap **Space** to toggle playback
+  and Shift-drag on the ruler to set a loop.
 - **Voices** distinguish the source instrument and its musical functions.
   A line and chords from one part share a fitted sound by default. Use
   `reconstruct voices WORK_DIR` or `reconstruct_voices` to inspect identities
@@ -481,3 +485,14 @@ Use stable note IDs. After rebuilding, inspect `orphanedEdits` from
 `reconstruct describe WORK_DIR --json` or `reconstruct_describe` for
 targets that lost playable gates. Restore a compatible assignment, or remove
 the intent and add one with the corrected target.
+
+For the coarse classification pass, use `reconstruct describe WORK_DIR
+--roles --json` or `reconstruct_describe` with `roles: true`. This groups
+stable note IDs by voice and role. Use the same IDs for detail edits.
+In Studio, Roles shows voice colors, patterns and short tags over the same
+spectrogram viewport as Detail. Use **Fit pitch** to follow the visible tonal
+range or use the pitch zoom buttons and vertical scrollbar to set it manually.
+Enable **Show drums** in **Voices** for a separate drum-hit strip. Use the
+voice's **⋯ → Edit tag…** to change its tag locally. Click the voice name to
+select its notes. Click its assignment arrow, or drag a Roles selection onto
+the entry, to move the selection into that voice. Both views share edit history.

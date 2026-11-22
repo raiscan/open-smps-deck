@@ -1345,6 +1345,16 @@ class StudioWindowTest {
                 view.vibrato = note -> com.opensmpsdeck.headless.ReconstructionEditing.vibratoEnvelope(deeper);
                 modifierClick(plot, x, lowY, false, false, true);
                 assertEquals(1, gestures.getLast().getAsJsonArray("vibratoEnvelope").size());
+
+                int editsBeforePan = gestures.size();
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, lowY, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 10, lowY - 5, true);
+                view.holdSpace();
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 40, lowY - 15, true);
+                assertFalse(view.releaseSpace());
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 40, lowY - 15, false);
+                assertEquals(editsBeforePan, gestures.size(), "Space-pan cancels an active vibrato gesture");
+
                 var draft = new ReconstructionDraft(new com.google.gson.JsonArray());
                 gestures.forEach(edit -> {
                     assertEquals("human", edit.get("author").getAsString());
@@ -1392,8 +1402,7 @@ class StudioWindowTest {
         });
     }
 
-    @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
-        Path work = reconstructionFixture();
+    private static void addFixtureDrum(Path work) throws Exception {
         var score = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject();
         var notes = score.getAsJsonArray("notes");
         var kit = new JsonObject();
@@ -1413,7 +1422,11 @@ class StudioWindowTest {
                   {"note":%s,"role":"melody","lane":"FM1","startTick":30,"endTick":90,"outcome":"kept"},
                   {"note":%s,"role":"drums","lane":"DAC","startTick":30,"endTick":31,"outcome":"kept"}]}
                 """.formatted(notes.get(0), drum));
+    }
 
+    @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
+        Path work = reconstructionFixture();
+        addFixtureDrum(work);
         var pane = fx(() -> new ReconstructionPane(stage, work));
         var scene = pane.stage().getScene();
         try {
@@ -1545,6 +1558,279 @@ class StudioWindowTest {
                 down, false, false, false, false, true, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
     }
 
+    @Test void reconstructionRolesUseDetailCoordinatesForBoxSelectionAndJump() throws Exception {
+        Path work = reconstructionFixture();
+        var inspection = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
+        fx(() -> {
+            var view = new ReconstructionCanvas(inspection, message -> fail(message));
+            var kind = com.opensmpsdeck.headless.ReconstructionVoicePlan.Kind.tonal;
+            var lead = new ReconstructionBulk.Voice("lead", "Lead 1", kind, null);
+            var pad = new ReconstructionBulk.Voice("pad", "Pad", kind, null);
+            view.voices(ReconstructionVoices.of(inspection.overlays(), List.of(),
+                    Map.of("lead", lead, "pad", pad), Map.of("test-note", "lead"),
+                    new ReconstructionVoices.Palette(work)), Set.of("test-note"));
+            var host = new Stage();
+            host.setScene(new javafx.scene.Scene(view.scroll, 900, 520));
+            host.show();
+            try {
+                view.scroll.applyCss();
+                view.scroll.layout();
+                var plot = view.canvas;
+                double noteY = 85 + (plot.getHeight() - 105) * 4.5 / 8;
+                double x = (plot.getWidth() + 76) / 2;
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, noteY, false);
+                assertEquals("test-note", view.selectedNotes().getFirst().id());
+                view.select(null, null);
+
+                view.rolesView(true);
+                view.voiceVisible("lead", false);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, noteY, false);
+                assertTrue(view.selectedNotes().isEmpty());
+                view.voiceVisible("lead", true);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x - 15, noteY - 12, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, noteY + 12, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, noteY + 12, false);
+                assertEquals(List.of("test-note"), view.selectedNotes().stream()
+                        .map(com.opensmpsdeck.headless.ReconstructionInspection.Overlay::id).toList());
+
+                var jumped = new ArrayList<String>();
+                view.onDetailJump = notes -> {
+                    jumped.add(notes.getFirst().id());
+                    view.rolesView(false);
+                    assertTrue(view.detailZoom(notes) > 0);
+                };
+                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, x, noteY, x, noteY,
+                        MouseButton.PRIMARY, 2, false, false, false, false, false, false, false, false,
+                        false, true, new PickResult(plot, new javafx.geometry.Point3D(x, noteY, 0), 0)));
+                assertFalse(view.rolesView());
+                assertEquals(List.of("test-note"), jumped);
+                assertEquals("test-note", view.selectedNotes().getFirst().id());
+            } finally {
+                view.close();
+                host.close();
+            }
+            return null;
+        });
+    }
+
+    @Test void reconstructionPitchFitAndDrumTogglePreserveSharedCoordinates() throws Exception {
+        Path work = reconstructionFixture();
+        addFixtureDrum(work);
+        // Give the drum a visible DAC gate at the same onset as the tonal fixture.
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                var plot = (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas");
+                var view = (ReconstructionCanvas) plot.getParent();
+                var pitch = view.pitchScroll;
+                var toggle = (CheckBox) scene.lookup("#reconstruction-show-drums");
+                scene.getRoot().layout();
+                // The octave-spanning drum pitch must not widen the eight-semitone tonal fit.
+                assertEquals(120, pitch.getMax());
+                double fitted = pitch.getValue();
+                view.zoomPitch(.5);
+                assertEquals(122, pitch.getMax());
+                pitch.setValue(fitted - 12);
+                double panned = pitch.getValue();
+                ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                assertEquals(panned, pitch.getValue());
+                assertEquals(122, pitch.getMax());
+                assertTrue(toggle.isVisible());
+                assertFalse(toggle.isSelected());
+                ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
+                assertEquals(fitted, pitch.getValue());
+                assertEquals(120, pitch.getMax());
+
+                // One DAC row and one FM lane share the reserved strip in both views.
+                double drumX = 76 + (plot.getWidth() - 76) * .25;
+                double drumY = plot.getHeight() - 2 * 17 + 4.5;
+                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
+                assertTrue(view.selectedNotes().isEmpty());
+                toggle.setSelected(true);
+                assertEquals(fitted, pitch.getValue());
+                mouse(plot, MouseEvent.MOUSE_RELEASED, drumX, drumY, false);
+                assertEquals("drum-note", view.selectedNotes().getFirst().id());
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
+    @Test void reconstructionWheelZoomAnchorsTimeAndPitchInBothViews() throws Exception {
+        var work = reconstructionFixture();
+        for (boolean narrow : List.of(false, true)) {
+            withReconstructionPlot(work, narrow, StudioWindowTest::assertWheelZoomAnchors);
+        }
+    }
+
+    private static void assertWheelZoomAnchors(javafx.scene.Scene scene, ReconstructionCanvas view) {
+        var plot = view.canvas;
+        var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+        var pitch = view.pitchScroll;
+        var seeks = new ArrayList<Double>();
+        view.onSeek = seeks::add;
+        double width = scene.getWidth();
+        for (String mode : List.of("detail", "roles")) {
+            seeks.clear();
+            ((ToggleButton) scene.lookup("#reconstruction-" + mode + "-view")).fire();
+            zoom.setValue(0);
+            scene.getRoot().layout();
+            double x = 76 + (plot.getWidth() - 76) * .72;
+            var pointer = plot.localToScene(x, 12);
+            mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+            double anchor = seeks.getLast();
+
+            scrollPlot(plot, x, 12, 12, false);
+            double step = zoom.getValue();
+            assertTrue(step > 0 && step < 1);
+            scrollPlot(plot, plot.sceneToLocal(pointer).getX(), 12, 6, false);
+            assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+            scene.getRoot().layout();
+            x = plot.sceneToLocal(pointer).getX();
+            mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+            assertEquals(2, seeks.size());
+            assertEquals(anchor, seeks.getLast(), .005, mode + " at stage width " + width);
+
+            ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
+            double fraction = .25;
+            double y = 85 + (plot.getHeight() - 105) * fraction; // Ruler, sections and empty lane header.
+            double fittedSpan = 128 - pitch.getMax();
+            double startPitch = 127.5 - pitch.getValue() - fraction * fittedSpan;
+            scrollPlot(plot, x, y, 4, true);
+            scene.getRoot().layout();
+            double zoomedSpan = 128 - pitch.getMax();
+            assertTrue(zoomedSpan < fittedSpan && zoomedSpan > fittedSpan - 1);
+            assertEquals(startPitch, 127.5 - pitch.getValue() - fraction * zoomedSpan, .005,
+                    mode + " at stage width " + width);
+            assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+        }
+    }
+
+    @Test void reconstructionSpaceTapTogglesPlaybackOnceOnRelease() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            var play = (Button) scene.lookup("#reconstruction-play");
+            plot.requestFocus();
+            assertSame(plot, scene.getFocusOwner());
+            key(plot, KeyCode.SPACE, false);
+            key(plot, KeyCode.SPACE, false); // Key repeat while held.
+            assertEquals("Play", play.getText());
+            releaseSpace(plot);
+            assertNotEquals("Play", play.getText());
+            key(plot, KeyCode.SPACE, false);
+            releaseSpace(plot);
+            assertEquals("Play", play.getText());
+        });
+    }
+
+    @Test void reconstructionSpaceDragPansWithoutPlaybackSeekingOrEditing() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            var play = (Button) scene.lookup("#reconstruction-play");
+            var seek = new ArrayList<Double>();
+            view.onSeek = seek::add;
+            ((Slider) scene.lookup("#reconstruction-zoom")).setValue(1);
+            scene.getRoot().layout();
+
+            for (String tool : List.of("select", "insert", "cut", "bend", "vibrato", "roles")) {
+                if (tool.equals("roles")) ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                else ((ToggleButton) scene.lookup("#reconstruction-tool-" + tool)).fire();
+                view.scroll.setHvalue(.5);
+                view.fitPitch();
+                double pitch = view.pitchScroll.getValue();
+                double x = (plot.getWidth() + 76) / 2;
+                double y = 85 + (plot.getHeight() - 105) * 4.5 / 8;
+                plot.requestFocus();
+                key(plot, KeyCode.SPACE, false);
+                assertEquals(javafx.scene.Cursor.OPEN_HAND, plot.getCursor());
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, y, true);
+                assertEquals(javafx.scene.Cursor.CLOSED_HAND, plot.getCursor());
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 40, y + 30, true);
+                releaseSpace(plot); // The mouse grab outlives the modifier until button-up.
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 40, y + 30, false);
+                assertTrue(view.scroll.getHvalue() < .5);
+                assertTrue(view.pitchScroll.getValue() < pitch);
+                assertEquals("Play", play.getText());
+                assertTrue(seek.isEmpty());
+                assertTrue(view.selectedNotes().isEmpty());
+                assertTrue(scene.lookup("#reconstruction-apply").isDisabled());
+            }
+        });
+    }
+
+    @Test void reconstructionMiddleDragPansAndShiftDragOnRulerLoops() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            ((Slider) scene.lookup("#reconstruction-zoom")).setValue(1);
+            scene.getRoot().layout();
+            view.scroll.setHvalue(.5);
+            double pitch = view.pitchScroll.getValue();
+            middleMouse(plot, MouseEvent.MOUSE_PRESSED, 200, 170, true);
+            assertEquals(javafx.scene.Cursor.CLOSED_HAND, plot.getCursor());
+            middleMouse(plot, MouseEvent.MOUSE_DRAGGED, 160, 140, true);
+            middleMouse(plot, MouseEvent.MOUSE_RELEASED, 160, 140, false);
+            assertTrue(view.scroll.getHvalue() > .5);
+            assertTrue(view.pitchScroll.getValue() > pitch);
+            assertTrue(view.selectedNotes().isEmpty());
+
+            var ranges = new ArrayList<ReviewTransport.Range>();
+            view.onRange = ranges::add;
+            modifiedMouse(plot, MouseEvent.MOUSE_PRESSED, 150, 12, true, true, false, false);
+            modifiedMouse(plot, MouseEvent.MOUSE_DRAGGED, 200, 12, true, true, false, false);
+            modifiedMouse(plot, MouseEvent.MOUSE_RELEASED, 200, 12, false, true, false, false);
+            assertTrue(ranges.getLast().end() > ranges.getLast().start());
+        });
+    }
+
+    private void withReconstructionPlot(java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test)
+            throws Exception {
+        withReconstructionPlot(reconstructionFixture(), false, test);
+    }
+
+    private void withReconstructionPlot(Path work, boolean narrow,
+            java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test) throws Exception {
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            if (narrow) {
+                double originalWidth = fx(() -> {
+                    double width = scene.getWidth();
+                    pane.stage().setWidth(pane.stage().getMinWidth());
+                    return width;
+                });
+                await(() -> scene.getWidth() < originalWidth);
+            }
+            fx(() -> {
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                test.accept(scene, (ReconstructionCanvas) scene.lookup("#reconstruction-canvas").getParent());
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
+    private static void scrollPlot(Node plot, double x, double y, double delta, boolean shift) {
+        Event.fireEvent(plot, new ScrollEvent(ScrollEvent.SCROLL, x, y, x, y, shift, false, false, false,
+                false, false, 0, delta, 0, delta, ScrollEvent.HorizontalTextScrollUnits.NONE, 0,
+                ScrollEvent.VerticalTextScrollUnits.NONE, 0, 0,
+                new PickResult(plot, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
+    private static void releaseSpace(Node plot) {
+        Event.fireEvent(plot, new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.SPACE, false, false, false, false));
+    }
+
+    private static void middleMouse(Node plot, javafx.event.EventType<MouseEvent> type, double x, double y, boolean down) {
+        Event.fireEvent(plot, new MouseEvent(type, x, y, x, y, MouseButton.MIDDLE, 1, false, false, false, false,
+                false, down, false, false, false, true, new PickResult(plot, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));
@@ -1572,6 +1858,74 @@ class StudioWindowTest {
                     var image = pane.stage().getScene().snapshot(null);
                     ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", Path.of(target + ".reconstruction.png").toFile());
                 }
+                var scene = pane.stage().getScene();
+                var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+                zoom.setValue(.5);
+                ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                assertEquals(.5, zoom.getValue());
+                assertFalse(scene.lookup("#reconstruction-tool-insert").isVisible());
+                assertTrue(((Label) scene.lookup("#reconstruction-selection-count")).getText().contains("1 note"));
+                if (target != null) {
+                    scene.getRoot().applyCss();
+                    scene.getRoot().layout();
+                    ImageIO.write(SwingFXUtils.fromFXImage(scene.snapshot(null), null), "png",
+                            Path.of(target + ".roles.png").toFile());
+                }
+                var apply = (Button) scene.lookup("#reconstruction-apply");
+                assertTrue(apply.isDisabled());
+                var roleChoice = scene.getRoot().lookupAll(".combo-box").stream()
+                        .filter(ComboBox.class::isInstance).map(node -> (ComboBox<?>) node)
+                        .filter(combo -> "Role".equals(combo.getPromptText()) && combo.isVisible()).findFirst().orElseThrow();
+                roleChoice.getSelectionModel().select(roleChoice.getItems().indexOf("counter"));
+                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> button.getText().equals("Set role") && button.isVisible())
+                        .findFirst().orElseThrow().fire();
+                assertFalse(apply.isDisabled());
+                ((ToggleButton) scene.lookup("#reconstruction-detail-view")).fire();
+                assertEquals(.5, zoom.getValue());
+                assertTrue(scene.lookup("#reconstruction-tool-insert").isVisible());
+                assertTrue(trace.getText().contains("test-note"));
+                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> button.getText().equals("Undo"))
+                        .findFirst().orElseThrow().fire();
+                assertTrue(apply.isDisabled());
+
+                ((Button) scene.lookup("#reconstruction-voice-select-")).fire();
+                var newVoice = (MenuButton) scene.lookup("#reconstruction-new-voice");
+                nameNextVoice("Pad");
+                newVoice.getItems().get(1).fire(); // Empty tonal voice
+                var assign = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Assign selection to Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                assertFalse(assign.isDisabled());
+                assign.fire();
+                var pad = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Select all notes in Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                assertFalse(pad.isDisabled());
+                assertTrue(pad.getTooltip().getText().contains("1 note"));
+                var manage = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Manage Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                manage.fire();
+                var tagItem = javafx.stage.Window.getWindows().stream()
+                        .filter(javafx.scene.control.ContextMenu.class::isInstance)
+                        .map(javafx.scene.control.ContextMenu.class::cast).filter(javafx.stage.Window::isShowing)
+                        .flatMap(menu -> menu.getItems().stream()).filter(item -> item.getText().equals("Edit tag…"))
+                        .findFirst().orElseThrow();
+                Platform.runLater(() -> {
+                    var dialog = dialogPane("reconstruction-voice-tag");
+                    ((TextField) dialog.lookup(".text-field")).setText("PD");
+                    ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+                });
+                tagItem.fire();
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                assertTrue(scene.getRoot().lookupAll(".voice-name").stream().filter(Label.class::isInstance)
+                        .map(Label.class::cast).anyMatch(label -> label.getText().equals("PD · Pad")));
+                assertNull(scene.lookup("#reconstruction-voice-select-"));
+                ((Button) scene.lookup("#" + pad.getId())).fire();
+                assertTrue(trace.getText().contains("test-note"));
                 return null;
             });
             try (var files = Files.list(work)) {
@@ -1581,6 +1935,15 @@ class StudioWindowTest {
         } finally {
             fx(() -> { pane.close(); return null; });
         }
+    }
+
+    private static void nameNextVoice(String name) {
+        Platform.runLater(() -> {
+            var dialog = dialogPane("reconstruction-voice-name");
+            if (dialog == null) return;
+            ((TextField) dialog.lookup(".text-field")).setText(name);
+            ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+        });
     }
 
     @Test void snapshotRealEditor() throws Exception {

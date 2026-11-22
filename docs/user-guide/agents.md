@@ -226,3 +226,13 @@ See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
 equivalents, the [stage guide](../architecture/reconstruction-stages.md)
 for edit schemas and [Studio review protocol](../architecture/review-loop.md)
 for sharing feedback.
+
+### Inspect voice and role assignments
+
+Use `reconstruct describe WORK_DIR --roles --json` or
+`reconstruct_describe` with `roles: true` and `json: true` to get notes grouped
+by identified voice and effective role. Each group gives its note count,
+stable IDs, source-time gates, pitches, and parts. Use the normal part, bar,
+and section filters to narrow the result. Use those IDs for classification
+or detail intents in the shared edit journal, then rebuild from the stage
+reported by the edit command.

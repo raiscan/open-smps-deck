@@ -69,6 +69,7 @@ final class ReconstructionBulk extends VBox {
     private final TextField arpeggioRate = new TextField("2");
     private final ComboBox<String> arpeggioOrder = combo("Arpeggio order", List.of("up", "down", "up-down"));
     private final VBox actions = new VBox(10);
+    private final VBox detail = new VBox(10);
     private final ComboBox<String> layerMode = combo("Layer mode", List.of("Echo", "Chorus", "Double", "Off"));
     private final ComboBox<ReconstructionLaneType> layerTarget = combo("Target",
             List.of(ReconstructionLaneType.FM, ReconstructionLaneType.PSG));
@@ -96,6 +97,7 @@ final class ReconstructionBulk extends VBox {
         this.submit = submit;
         getStyleClass().add("inspector");
         count.getStyleClass().add("inspector-title");
+        count.setWrapText(true);
         issue.setWrapText(true);
         issue.setId("reconstruction-bulk-issue");
         issue.managedProperty().bind(issue.visibleProperty());
@@ -156,14 +158,14 @@ final class ReconstructionBulk extends VBox {
             if (!updating && value != null) filter.accept(note -> value.equals(laneName(note)));
         });
         actions.getChildren().addAll(
-                row(new Label("Transpose"),
-                        button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
-                        button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
-                layerControls(previewLayer, stop),
                 row(role, button("Set role", this::setRole)),
                 row(voice, button("Move to voice", this::move)),
                 row(voiceName, button("Create voice", this::create)),
-                row(type, route), row(lane, pin),
+                row(type, route), row(lane, pin), detail);
+        detail.getChildren().addAll(
+                row(new Label("Transpose"),
+                        button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
+                        button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
                 row(velocity, button("Set", () -> velocity(false)), button("Scale", () -> velocity(true))),
                 new SeparatorLabel("Instrument"),
                 row(scope, instrumentType), instrumentSearch, instrument,
@@ -173,7 +175,8 @@ final class ReconstructionBulk extends VBox {
                 row(new Label("Gate (ms)"), retriggerGate, retrigger),
                 new SeparatorLabel("Combine notes"),
                 row(collapse, glide), row(arpeggioOrder, arpeggioRate),
-                row(arpeggio, chord));
+                row(arpeggio, chord), layerControls(previewLayer, stop));
+        detail.managedProperty().bind(detail.visibleProperty());
         getChildren().addAll(count, row(roles, voices, lanes), issue, actions);
     }
 
@@ -425,30 +428,44 @@ final class ReconstructionBulk extends VBox {
 
     private void move() {
         var target = voice.getValue();
-        if (selected.isEmpty() || target == null) return;
+        if (target != null && !selected.isEmpty()) showIssue(moveTo(target));
+    }
+
+    String moveTo(Voice target) {
+        if (selected.isEmpty()) return "Select notes to assign to a voice.";
+        if (selected.stream().anyMatch(note -> kind(note) != target.kind()))
+            return "Move tonal and drum notes to separate voices.";
         var assignment = target.assignment();
         String invalid = assignment == null ? null : laneIssue(assignment.laneType(), null, selected);
-        if (invalid != null) {
-            showIssue(invalid);
-            return;
-        }
-        submit.accept(List.of(voiceEdit("move", target.id(), "Move selection to " + target.name(), body -> body.add("noteIds", noteIds()))));
+        if (invalid != null) return invalid;
+        if (selected.stream().anyMatch(note -> !target.equals(owners.get(note.id()))))
+            submit.accept(List.of(voiceEdit("move", target.id(), "Move selection to " + target.name(),
+                    body -> body.add("noteIds", noteIds()))));
+        return null;
     }
 
     private void create() {
         String name = voiceName.getText().strip();
         if (name.isEmpty() || selected.isEmpty()) return;
-        var kind = kind(selected.getFirst());
-        if (selected.stream().anyMatch(note -> kind(note) != kind)) {
-            showIssue("Create separate voices for tonal notes and drums.");
-            return;
-        }
+        String issue = createVoice(name, null);
+        showIssue(issue);
+        if (issue == null) voiceName.clear();
+    }
+
+    String createVoice(String name, Kind emptyKind) {
+        if (emptyKind == null && selected.isEmpty()) return "Select notes to create a voice from them.";
+        var kind = emptyKind == null ? kind(selected.getFirst()) : emptyKind;
+        if (emptyKind == null && selected.stream().anyMatch(note -> kind(note) != kind))
+            return "Create separate voices for tonal notes and drums.";
         String id = "studio-voice-" + UUID.randomUUID();
-        submit.accept(List.of(voiceEdit("create", id, "Create voice " + name, body -> {
+        var create = voiceEdit("create", id, "Create voice " + name, body -> {
             body.addProperty("name", name);
             body.addProperty("kind", kind.name());
-        }), voiceEdit("move", id, "Move selection to " + name, body -> body.add("noteIds", noteIds()))));
-        voiceName.clear();
+        });
+        if (emptyKind != null) submit.accept(List.of(create));
+        else submit.accept(List.of(create, voiceEdit("move", id, "Move selection to " + name,
+                body -> body.add("noteIds", noteIds()))));
+        return null;
     }
 
     private void velocity(boolean scale) {
@@ -509,7 +526,9 @@ final class ReconstructionBulk extends VBox {
 
     private List<String> ids() { return selected.stream().map(Overlay::id).toList(); }
 
-    private static JsonObject voiceEdit(String op, String voice, String reason, Consumer<JsonObject> properties) {
+    void rolesView(boolean roles) { detail.setVisible(!roles); }
+
+    static JsonObject voiceEdit(String op, String voice, String reason, Consumer<JsonObject> properties) {
         var edit = ReconstructionDraft.human("voiceEdit", reason);
         var body = new JsonObject();
         body.addProperty("op", op);

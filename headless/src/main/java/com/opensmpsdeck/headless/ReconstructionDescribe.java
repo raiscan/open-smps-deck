@@ -62,12 +62,16 @@ public final class ReconstructionDescribe {
     static void run(String[] args, PrintStream out) throws IOException {
         if (args.length == 0) throw new IllegalArgumentException("reconstruct describe expects WORK_DIR");
         var seen = new HashSet<String>();
-        boolean json = false;
+        boolean json = false, roles = false;
         String section = null, parts = null, bars = null;
         Path output = null;
         for (int i = 1; i < args.length; i++) {
             String flag = args[i];
             if (!seen.add(flag)) throw new IllegalArgumentException("Duplicate option " + flag);
+            if (flag.equals("--roles")) {
+                roles = true;
+                continue;
+            }
             if (flag.equals("--json")) {
                 json = true;
                 continue;
@@ -82,26 +86,32 @@ public final class ReconstructionDescribe {
                 default -> throw new IllegalArgumentException("Unknown describe option " + flag);
             }
         }
-        String description = describe(Path.of(args[0]), json, section, parts, bars);
+        String description = describe(Path.of(args[0]), json, section, parts, bars, roles);
         if (output == null) out.print(description);
         else Files.writeString(output, description, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
     }
 
     public static String describe(Path work, boolean json, String section, String parts, String bars) throws IOException {
+        return describe(work, json, section, parts, bars, false);
+    }
+
+    public static String describe(Path work, boolean json, String section, String parts, String bars,
+                                  boolean grouped) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
         var rolesFile = work.resolve("roles.json");
+        ReconstructionRoles.Result roleResult = null;
         Map<String, Role> roles = null;
         List<Note> effectiveNotes = structure.notes();
         ReconstructionLeadContinuity.Stats continuity = null;
         if (!Files.notExists(rolesFile, LinkOption.NOFOLLOW_LINKS)) {
-            var current = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
-            ReconstructionChecks.roles(current, score);
+            roleResult = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+            ReconstructionChecks.roles(roleResult, score);
             roles = new HashMap<>();
-            var stats = ReconstructionLeadContinuity.Stats.of(current.notes());
+            var stats = ReconstructionLeadContinuity.Stats.of(roleResult.notes());
             if (!stats.isEmpty()) continuity = stats;
-            effectiveNotes = describeNotes(structure.notes(), current.notes());
-            for (var decision : current.notes()) roles.put(decision.note().id(), decision.role());
+            effectiveNotes = describeNotes(structure.notes(), roleResult.notes());
+            for (var decision : roleResult.notes()) roles.put(decision.note().id(), decision.role());
         }
         var filter = new HashSet<Integer>();
         if (parts != null) {
@@ -116,6 +126,10 @@ public final class ReconstructionDescribe {
                 : ReconstructionRolePlan.BarRange.parse(bars, structure.bars().size(), "--bars");
         if (section != null && structure.sections().stream().noneMatch(s -> s.id().equals(section)))
             throw new IllegalArgumentException("Unknown section " + section);
+        if (grouped) {
+            if (roleResult == null) throw new IllegalArgumentException("Build the roles stage before describing voice groups");
+            return describeRoles(work, score, structure, roleResult, json, filter, span, section);
+        }
         var allocationFile = work.resolve("allocation.json");
         var audit = !Files.isRegularFile(allocationFile) ? null : ReconstructionChordReduction.audit(score,
                 ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class),
@@ -157,6 +171,54 @@ public final class ReconstructionDescribe {
             description.append("\nOrphaned edit ").append(issue.id()).append(" (").append(issue.op())
                     .append(") · ").append(issue.detail()).append('\n');
         return description.toString();
+    }
+
+    private record GroupNote(String id, int part, int pitch, double sourceStart, double sourceEnd) {}
+    private record VoiceRole(String voiceId, String name, String kind, Role role, int count, List<GroupNote> notes) {}
+
+    private static String describeRoles(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
+                                        ReconstructionRoles.Result roles, boolean json, Set<Integer> parts,
+                                        ReconstructionRolePlan.BarRange bars, String section) throws IOException {
+        var voices = ReconstructionVoicePlan.preview(work, score, roles);
+        var owners = voices.byNote();
+        var clock = ReconstructionTimeMap.of(score);
+        var sectionBars = section == null ? Set.<String>of() : Set.copyOf(structure.sections().stream()
+                .filter(item -> item.id().equals(section)).findFirst().orElseThrow().bars());
+        var windows = structure.bars().subList(bars.first() - 1, bars.last()).stream()
+                .filter(bar -> section == null || sectionBars.contains(bar.id())).toList();
+        record Key(ReconstructionVoicePlan.Voice voice, Role role) {}
+        var groups = new java.util.LinkedHashMap<Key, List<GroupNote>>();
+        for (var decision : roles.notes()) {
+            var note = decision.note();
+            double onset = roles.timeBase() == ReconstructionTimeMap.TimeBase.project ? note.start() : clock.project(note.start());
+            if (!parts.isEmpty() && !parts.contains(note.part())
+                    || windows.stream().noneMatch(bar -> bar.start() <= onset && onset < bar.end())) continue;
+            if (roles.timeBase() == ReconstructionTimeMap.TimeBase.project) note = clock.sourceNote(note);
+            groups.computeIfAbsent(new Key(owners.get(note.id()), decision.role()), key -> new ArrayList<>())
+                    .add(new GroupNote(note.id(), note.part(), note.pitch(), note.start(), note.end()));
+        }
+        var rows = groups.entrySet().stream().map(entry -> {
+            var key = entry.getKey();
+            var voice = key.voice();
+            var notes = entry.getValue();
+            return new VoiceRole(voice == null ? null : voice.id(), voice == null ? "Unassigned voice" : voice.name(),
+                    voice == null ? null : voice.kind().name(), key.role(), notes.size(), notes);
+        }).sorted(java.util.Comparator.comparing(VoiceRole::name)
+                .thenComparing(row -> java.util.Objects.toString(row.voiceId(), ""))
+                .thenComparing(VoiceRole::role)).toList();
+        if (json) return new GsonBuilder().disableHtmlEscaping().create()
+                .toJson(Map.of("voiceRoles", rows, "voiceEditIssues", voices.issues())) + "\n";
+        var out = new StringBuilder();
+        for (var row : rows) {
+            out.append(row.name()).append(" · ").append(row.role()).append(" · ").append(row.count()).append(" notes");
+            if (row.voiceId() != null) out.append(" (").append(row.voiceId()).append(')');
+            out.append('\n');
+            for (var note : row.notes()) out.append(String.format(Locale.ROOT, "  %s  %.3f–%.3f s  pitch %d  part %d%n",
+                    note.id(), note.sourceStart(), note.sourceEnd(), note.pitch(), note.part()));
+        }
+        for (var issue : voices.issues()) out.append(issue.id()).append(" · ").append(issue.status())
+                .append(" · ").append(issue.detail()).append('\n');
+        return out.toString();
     }
 
     private static List<Note> describeNotes(List<Note> structural, List<ReconstructionRoles.Decision> decisions) {
