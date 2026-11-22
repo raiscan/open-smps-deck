@@ -17,6 +17,8 @@ import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.headless.ReconstructionReview.EditResult;
 import com.opensmpsdeck.headless.ReconstructionReview.Revision;
+import com.opensmpsdeck.headless.ReconstructionLivePreview;
+import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.project.ProjectWatcher;
 import com.opensmpsdeck.project.ProjectDocument;
@@ -104,6 +106,16 @@ final class ReconstructionEditor implements AutoCloseable {
             task -> Thread.ofPlatform().daemon().name("reconstruction-editor").unstarted(task));
     private final List<ProjectWatcher> watchers = new ArrayList<>();
     private final ReconstructionDraft draft;
+    private ReconstructionTransport liveTransport;
+    private ReconstructionLivePreview live;
+    private String liveUnavailable;
+    private JsonArray liveBase;
+    private boolean liveSaving;
+    private long liveGeneration;
+    private LiveRequest queuedLiveEdit;
+
+    private record LiveRequest(long generation, long eventNanos, JsonArray entries,
+                               ReconstructionTransport.LiveEdit playback) {}
 
     private final MenuButton lanePolicies = new MenuButton("Lane policies");
     private final Button apply = new Button("Apply");
@@ -406,7 +418,7 @@ final class ReconstructionEditor implements AutoCloseable {
             var row = journal.getSelectionModel().getSelectedItem();
             if (row == null || row.index() < 0 || busy || external != null) return;
             draft.remove(row.index());
-            updateDraft();
+            journalChanged();
         });
         reviseEdit.setOnAction(event -> reviseJournalEdit());
         var editList = new VBox(8, journal, new FlowPane(5, 4, reviseEdit, remove));
@@ -878,7 +890,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 for (int i = entries.size() - 1; i >= 0; i--)
                     if (id.equals(targetId(entries.get(i)))) entries.remove(i);
             });
-            updateDraft();
+            journalChanged();
         } else if (snapshot.inspection().noteDetails(id).generated()) {
             target("setRole", "role", "drop", "Drop generated note in Studio");
         } else {
@@ -966,6 +978,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private void add(JsonObject intent) { addBatch(List.of(intent)); }
 
     private void addBatch(List<JsonObject> intents) {
+        long eventNanos = System.nanoTime();
         if (intents.isEmpty() || busy || external != null || externalError) return;
         for (var intent : intents) {
             var error = ReconstructionReview.validationIssue(intent);
@@ -980,12 +993,12 @@ final class ReconstructionEditor implements AutoCloseable {
                 })
                 && draft.entries().asList().stream().anyMatch(entry -> DETAIL_EDITS.contains(text(entry, "op", "")))) {
             previewClassification(intents);
-        } else stageBatch(intents);
+        } else stageBatch(intents, eventNanos);
     }
 
-    private void stageBatch(List<JsonObject> intents) {
+    private void stageBatch(List<JsonObject> intents, long eventNanos) {
         draft.change(entries -> intents.forEach(entries::add));
-        updateDraft();
+        journalChanged(eventNanos);
     }
 
     private void previewClassification(List<JsonObject> intents) {
@@ -1015,7 +1028,7 @@ final class ReconstructionEditor implements AutoCloseable {
                         }
                     }
                     status.accept("Classification queued");
-                    stageBatch(intents);
+                    stageBatch(intents, System.nanoTime());
                     readExternal();
                 });
             } catch (Throwable failure) {
@@ -1360,7 +1373,7 @@ final class ReconstructionEditor implements AutoCloseable {
             return;
         }
         draft.change(entries -> entries.set(row.index(), revised));
-        updateDraft();
+        journalChanged();
     }
 
     private void reviseProposal(ReconstructionProposals.Result proposal) {
@@ -1502,6 +1515,108 @@ final class ReconstructionEditor implements AutoCloseable {
                 }));
     }
 
+    void liveTransport(ReconstructionTransport transport) {
+        liveTransport = transport;
+        prepareLive();
+    }
+
+    private void prepareLive() {
+        live = null;
+        liveUnavailable = null;
+        var current = snapshot;
+        liveBase = accepted(current.revision().entries());
+        if (current.inspection().project() == null || current.inspection().target() != com.opensmpsdeck.project.TargetGame.S3K)
+            return;
+        worker.execute(() -> {
+            ReconstructionLivePreview prepared = null;
+            String problem = null;
+            try {
+                prepared = ReconstructionLivePreview.open(work, current.revision());
+            } catch (Exception failure) {
+                problem = describe(failure);
+            }
+            var result = prepared;
+            var detail = problem;
+            Platform.runLater(() -> {
+                if (closed || snapshot.inspection() != current.inspection()) return;
+                live = result;
+                liveUnavailable = detail;
+                if (queuedLiveEdit != null) saveLive();
+            });
+        });
+    }
+
+    private void journalChanged() { journalChanged(System.nanoTime()); }
+
+    private void journalChanged(long eventNanos) {
+        long generation = ++liveGeneration;
+        queuedLiveEdit = null;
+        if (liveTransport != null && liveTransport.chipPlaying()) {
+            var playback = view.rolesView() || view.reviewing() ? null : liveTransport.liveEdit();
+            if (playback == null) {
+                liveTransport.rebuildNeeded("Use Detail and a Chip range in the first 2.5 project seconds");
+            } else {
+                queuedLiveEdit = new LiveRequest(generation, eventNanos, draft.entries(), playback);
+                liveTransport.livePreparing();
+                saveLive();
+            }
+        } else if (liveTransport != null && liveTransport.hasSavedPreview() && draft.pending()) {
+            liveTransport.rebuildNeeded("Pending changes · Apply & rebuild");
+        }
+        updateDraft();
+    }
+
+    private void saveLive() {
+        if (liveSaving || queuedLiveEdit == null || busy || external != null || externalError) return;
+        if (live == null) {
+            if (liveUnavailable != null) {
+                queuedLiveEdit = null;
+                liveTransport.rebuildNeeded(liveUnavailable);
+            }
+            return;
+        }
+        var request = queuedLiveEdit;
+        queuedLiveEdit = null;
+        liveSaving = true;
+        var expected = snapshot.revision();
+        var reconstruction = live;
+        var entries = forApply(expected.entries(), request.entries());
+        worker.execute(() -> {
+            Revision written = null;
+            TargetPlayback playback = null;
+            String problem = null;
+            try {
+                var window = request.playback().window();
+                var prepared = reconstruction.prepare(entries, window.start(), window.end(), request.playback().playhead());
+                playback = prepared.playback();
+                written = prepared.save(expected);
+            } catch (Exception failure) {
+                problem = describe(failure);
+            }
+            var revision = written;
+            var result = playback;
+            var detail = problem;
+            Platform.runLater(() -> {
+                if (closed) return;
+                liveSaving = false;
+                if (revision != null) {
+                    snapshot = new Snapshot(snapshot.inspection(), revision, snapshot.outcomes(), snapshot.report(),
+                            snapshot.editing(), snapshot.voices(), snapshot.proposals());
+                    var accepted = accepted(revision.entries());
+                    draft.saved(accepted);
+                    externalUnbuilt = !liveBase.equals(accepted);
+                }
+                if (request.generation() == liveGeneration) {
+                    if (detail != null) liveTransport.rebuildNeeded(detail);
+                    else liveTransport.liveSaved(request.playback(), result, request.eventNanos(), externalUnbuilt);
+                }
+                saveLive();
+                updateDraft();
+                readExternal();
+            });
+        });
+    }
+
     private void updateDraft() {
         noteModulation.clear();
         var pitchEdits = new LinkedHashMap<String, List<JsonObject>>();
@@ -1527,7 +1642,8 @@ final class ReconstructionEditor implements AutoCloseable {
                     for (String noteId : targetIds(entry)) noteModulation.put(noteId, edit);
             }
             var results = snapshot.outcomes().getOrDefault(id, List.of());
-            String state = issue != null ? "invalid" : draft.changed(entry) || results.isEmpty() ? "pending"
+            String state = issue != null ? "invalid" : draft.changed(entry) || results.isEmpty()
+                    ? draft.saved(entry) ? "saved · rebuild needed" : "pending"
                     : results.stream().map(result -> result.status().equals("satisfied") ? "applied" : result.status())
                         .distinct().collect(Collectors.joining(", "));
             String detail = issue != null ? issue : results.stream().map(EditResult::reason).filter(Objects::nonNull)
@@ -1574,14 +1690,14 @@ final class ReconstructionEditor implements AutoCloseable {
         stopPreview.setDisable(!previewPlaying);
         var entries = draft.entries();
         boolean unbuilt = entries.asList().stream().anyMatch(e -> !snapshot.outcomes().containsKey(text(e, "id", "")));
-        apply.setDisable(!editing || !draft.pending() && !unbuilt && !externalUnbuilt);
-        lanePolicies.setDisable(!editing || snapshot.report() == null || draft.pending() || unbuilt || externalUnbuilt);
+        apply.setDisable(!editing || liveSaving || !draft.pending() && !unbuilt && !externalUnbuilt);
+        lanePolicies.setDisable(!editing || liveSaving || snapshot.report() == null || draft.pending() || unbuilt || externalUnbuilt);
         undo.setDisable(!editing || !draft.canUndo(false));
         redo.setDisable(!editing || !draft.canUndo(true));
         cancel.setVisible(busy);
         progress.setVisible(busy);
         conflict.setVisible(external != null);
-        long changes = entries.asList().stream().filter(draft::changed).count() + draft.removed().size();
+        long changes = draft.unsavedChanges();
         String count = changes + (changes == 1 ? " unsaved change" : " unsaved changes");
         history.setDisable(undo.isDisable() && redo.isDisable());
         history.setVisible(draft.canUndo(false) || draft.canUndo(true));
@@ -1590,8 +1706,8 @@ final class ReconstructionEditor implements AutoCloseable {
         nextStep.setText(busy ? "Rebuilding the arrangement…"
                 : external != null ? "Resolve the external edit conflict to continue."
                 : externalError ? "Fix the invalid external edits to continue."
-                : changes > 0 ? "Apply & rebuild to hear your changes."
-                : unbuilt || externalUnbuilt ? "Apply & rebuild to include the saved edits."
+                : draft.pending() ? "Rebuild needed · Apply & rebuild to hear pending changes."
+                : unbuilt || externalUnbuilt ? "Apply & rebuild to include the saved edits in exports."
                 : proposalCount > 0 ? "Open Review · " + proposalCount
                         + (proposalCount == 1 ? " agent proposal to review" : " agent proposals to review")
                 : snapshot.inspection().project() == null ? "Check which voices are assigned to your notes."
@@ -1607,8 +1723,10 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void history(boolean forward) {
         if (busy || external != null || externalError) return;
+        if (!draft.canUndo(forward)) return;
+        long eventNanos = System.nanoTime();
         draft.undo(forward);
-        updateDraft();
+        journalChanged(eventNanos);
     }
 
     boolean key(KeyEvent event) {
@@ -1717,6 +1835,8 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void setBusy() {
+        queuedLiveEdit = null;
+        liveGeneration++;
         busy = true;
         stopAudition();
         synchronized (jobLock) {
@@ -1769,7 +1889,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void readExternal() {
-        if (closed || busy) return;
+        if (closed || busy || liveSaving) return;
         if (refreshQueued) {
             checkAgain = true;
             return;
@@ -1791,7 +1911,11 @@ final class ReconstructionEditor implements AutoCloseable {
                         : proposalsOnly ? current.proposalsFromDisk(work, revision) : Snapshot.read(work);
                 Platform.runLater(() -> {
                     refreshQueued = false;
-                    if (closed || busy || snapshot != current) return;
+                    if (closed || busy) return;
+                    if (snapshot != current) {
+                        readExternal();
+                        return;
+                    }
                     externalError = false;
                     if (next == current) {
                         external = null;
@@ -1825,7 +1949,11 @@ final class ReconstructionEditor implements AutoCloseable {
             } catch (Throwable failure) {
                 Platform.runLater(() -> {
                     refreshQueued = false;
-                    if (closed || busy || snapshot != current) return;
+                    if (closed || busy) return;
+                    if (snapshot != current) {
+                        readExternal();
+                        return;
+                    }
                     externalError = true;
                     status.accept("External reconstruction update unavailable · " + describe(failure));
                     updateControls();
@@ -1840,8 +1968,12 @@ final class ReconstructionEditor implements AutoCloseable {
         snapshot = next;
         external = null;
         if (rebuilt) {
+            queuedLiveEdit = null;
+            liveGeneration++;
             sections = next.inspection().sections().sections();
             refresh.accept(next.inspection());
+            prepareLive();
+            if (externalUnbuilt) liveTransport.rebuildNeeded("Saved changes from disk · Apply & rebuild");
         }
         updateDraft();
     }
@@ -1920,7 +2052,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     boolean allowClose() {
-        if (busy) {
+        if (busy || liveSaving) {
             status.accept("Wait for the reconstruction job to finish, or cancel Apply.");
             return false;
         }

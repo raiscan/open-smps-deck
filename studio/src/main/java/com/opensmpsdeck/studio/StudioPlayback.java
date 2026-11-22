@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.ProjectRenderTiming;
+import com.opensmpsdeck.headless.ReconstructionLivePreview;
 import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.project.AudioReference;
 import com.opensmpsdeck.headless.TargetPlayback;
@@ -9,6 +10,7 @@ import com.opensmpsdeck.project.StudioProject;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.SourceDataLine;
+import javax.sound.sampled.LineUnavailableException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
@@ -39,10 +41,99 @@ final class StudioPlayback implements AutoCloseable {
 
     private final ExecutorService worker = worker("studio-audio");
     private final ExecutorService renderer = worker("studio-render");
+    private final ExecutorService edits = worker("studio-live-render");
+    private final LineFactory lines;
+    private LiveStream activeStream;
     private final AtomicLong generation = new AtomicLong();
     private SourceDataLine line;
     private Future<?> activePlayback;
     private volatile boolean playing;
+
+    @FunctionalInterface
+    interface LineFactory {
+        SourceDataLine open(AudioFormat format) throws LineUnavailableException;
+    }
+
+    StudioPlayback() { this(AudioSystem::getSourceDataLine); }
+    StudioPlayback(LineFactory lines) { this.lines = lines; }
+
+    /** Each handle belongs to one transport run. Retired handles cannot alter a new run. */
+    final class LiveStream {
+        private record Revision(RenderBuffer pcm, long eventNanos, Future<?> task) {}
+
+        private final Runnable renderFailed;
+        private Revision pending;
+        private Revision active;
+        private Revision built;
+        private int presentations;
+        private boolean closed;
+
+        LiveStream(Runnable renderFailed) { this.renderFailed = renderFailed; }
+
+        synchronized void initialize(RenderBuffer baseline) {
+            if (closed) return;
+            built = new Revision(baseline, 0, null);
+            presentations = Math.min(baseline.size(), (int) Math.ceil(ReconstructionLivePreview.WINDOW_END * RATE / BLOCK));
+            active = built;
+        }
+
+        synchronized boolean ready() { return built != null && !closed; }
+
+        synchronized void replace(TargetPlayback playback, long eventNanos) {
+            if (!ready()) return;
+            cancel(pending);
+            var pcm = new RenderBuffer(presentations);
+            var task = edits.submit(() -> pcm.render(playback, S3kRenderer.ChannelMask.NONE));
+            pending = new Revision(pcm, eventNanos, task);
+        }
+
+        synchronized void resume(TargetPlayback playback) {
+            replace(playback, 0);
+            active = pending;
+            pending = null;
+        }
+
+        synchronized void discardPending() {
+            cancel(pending);
+            pending = null;
+        }
+
+        synchronized void reset() {
+            if (!ready()) return;
+            cancel(pending);
+            pending = built;
+        }
+
+        synchronized Revision select(int index) {
+            if (index >= presentations) return built;
+            if (pending != null) {
+                if (pending.pcm().failed()) {
+                    discardPending();
+                    renderFailed.run();
+                } else if (pending.pcm().available(Math.min(index + 2, presentations - 1))) {
+                    cancel(active);
+                    active = pending;
+                    pending = null;
+                }
+            }
+            if (active != built && active.pcm().failed()) {
+                cancel(active);
+                active = built;
+                renderFailed.run();
+            }
+            return active;
+        }
+
+        synchronized void close() {
+            closed = true;
+            cancel(active);
+            cancel(pending);
+        }
+
+        private void cancel(Revision revision) {
+            if (revision != null && revision.task() != null) revision.task().cancel(true);
+        }
+    }
 
     private static ExecutorService worker(String name) {
         return Executors.newSingleThreadExecutor(task -> Thread.ofPlatform().name(name).daemon().unstarted(task));
@@ -61,7 +152,7 @@ final class StudioPlayback implements AutoCloseable {
         Samples samples = reference == null ? SILENCE
                 : (seconds, side) -> reference.wave().sample(seconds - reference.source().offsetSeconds(), side) * gain;
         long referenceEnd = reference == null ? 0 : reference.endFrame();
-        start(project, transport, mask, referenceEnd, () -> transport.referenceAudible() ? samples : null, status, position, null);
+        start(project, transport, mask, referenceEnd, () -> transport.referenceAudible() ? samples : null, status, position, null, null, null);
     }
 
     /** A null monitor source selects the live chip renderer. Resolve once per audio block. */
@@ -73,13 +164,21 @@ final class StudioPlayback implements AutoCloseable {
     void playMonitor(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
                      double duration, Supplier<Samples> monitor, Consumer<String> status, DoubleConsumer position,
                      ReviewTransport.Range span) {
-        start(project, transport, mask, frame(duration), monitor, status, position, span);
+        start(project, transport, mask, frame(duration), monitor, status, position, span, null, null);
+    }
+
+    synchronized void playEditable(StudioProject project, ReviewTransport transport, Supplier<Samples> monitor,
+                                   Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span,
+                                   LiveStream live, TargetPlayback initialPreview) {
+        start(project, transport, S3kRenderer.ChannelMask.NONE, 0, monitor, status, position, span, live, initialPreview);
     }
 
     private synchronized void start(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
                                     long monitorEnd, Supplier<Samples> monitor,
-                                    Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span) {
+                                    Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span,
+                                    LiveStream live, TargetPlayback initialPreview) {
         stop();
+        activeStream = live;
         long version = generation.get(), initial = frame(transport.seconds);
         playing = true;
         activePlayback = worker.submit(() -> {
@@ -87,9 +186,13 @@ final class StudioPlayback implements AutoCloseable {
             try {
                 int presentations = project == null ? 0 : presentationCount(project);
                 long end = span == null ? Math.max((long) presentations * BLOCK, monitorEnd) : frame(span.end());
+                if (live != null) {
+                    long last = transport.loop == null ? end : frame(transport.loop.end());
+                    presentations = Math.min(presentations, (int) Math.ceil(last / (double) BLOCK));
+                }
                 var rendered = new RenderBuffer(presentations);
                 var format = new AudioFormat(RATE, 16, 2, true, false);
-                var output = AudioSystem.getSourceDataLine(format);
+                var output = lines.open(format);
                 synchronized (this) {
                     if (version != generation.get()) return;
                     line = output;
@@ -97,13 +200,16 @@ final class StudioPlayback implements AutoCloseable {
                     output.start();
                 }
                 if (presentations > 0) renderTask = renderer.submit(() -> rendered.render(project, mask));
+                if (live != null) live.initialize(rendered);
+                if (initialPreview != null) live.resume(initialPreview);
                 status.accept("Playing");
-                stream(output, rendered, transport, monitor, initial, end, position, version);
+                stream(output, rendered, transport, monitor, initial, end, position, version, live);
                 if (version == generation.get()) status.accept("Playback finished");
             } catch (Exception error) {
                 if (version == generation.get()) status.accept("Preview unavailable: " + error.getMessage());
             } finally {
                 if (renderTask != null) renderTask.cancel(true);
+                if (live != null) live.close();
                 synchronized (this) {
                     if (version == generation.get()) {
                         releaseLine();
@@ -115,10 +221,13 @@ final class StudioPlayback implements AutoCloseable {
     }
 
     private void stream(SourceDataLine output, RenderBuffer render, ReviewTransport state, Supplier<Samples> monitor,
-                        long initial, long end, DoubleConsumer position, long version) throws Exception {
+                        long initial, long end, DoubleConsumer position, long version, LiveStream live) throws Exception {
         byte[] bytes = new byte[BLOCK * 4];
         var queued = new ArrayDeque<Segment>();
         long written = 0, cursor = initial < end ? initial : 0;
+        LiveStream.Revision heard = null;
+        RenderBuffer previous = render;
+        boolean measureChange = false;
         while (version == generation.get()) {
             var loop = state.loop;
             long boundary = end;
@@ -134,6 +243,7 @@ final class StudioPlayback implements AutoCloseable {
             int index = (int) (cursor % BLOCK);
             int count = (int) Math.min(BLOCK - index, boundary - cursor);
             var samples = monitor.get();
+            long changedFrame = -1;
             if (samples != null) {
                 for (int i = 0; i < count; i++) {
                     double time = (cursor + i) / (double) RATE;
@@ -144,11 +254,35 @@ final class StudioPlayback implements AutoCloseable {
                     }
                 }
             } else {
-                short[] pcm = cursor / BLOCK >= render.size()
-                        ? null : render.get((int) (cursor / BLOCK));
+                int presentation = (int) (cursor / BLOCK);
+                var revision = live == null ? null : live.select(presentation);
+                if (revision != heard) {
+                    previous = heard == null ? render : heard.pcm();
+                    heard = revision;
+                    measureChange = heard != null && heard.eventNanos() != 0;
+                }
+                var source = heard == null ? render : heard.pcm();
+                short[] pcm = presentation >= source.size() ? null : source.get(presentation);
                 for (int i = 0; i < count * 2; i++) put(bytes, i, pcm == null ? 0 : pcm[index * 2 + i]);
+                if (measureChange) {
+                    short[] before = previous.peek(presentation);
+                    for (int i = index * 2; before != null && pcm != null && i < (index + count) * 2; i++) {
+                        if (before[i] == pcm[i]) continue;
+                        changedFrame = cursor + (i / 2 - index);
+                        break;
+                    }
+                }
             }
-            if (version != generation.get() || output.write(bytes, 0, count * 4) != count * 4) return;
+            if (version != generation.get()) return;
+            long handed = changedFrame < 0 ? 0 : System.nanoTime();
+            if (output.write(bytes, 0, count * 4) != count * 4) return;
+            if (changedFrame >= 0) {
+                measureChange = false;
+                if (Boolean.getBoolean("opensmpsdeck.liveTiming"))
+                    System.getLogger(StudioPlayback.class.getName()).log(System.Logger.Level.INFO,
+                            String.format(java.util.Locale.ROOT, "Live PCM frame %d: %.3f ms", changedFrame,
+                                    (handed - heard.eventNanos()) / 1_000_000.0));
+            }
             queued.addLast(new Segment(written, cursor, count));
             written += count;
             cursor += count;
@@ -183,6 +317,8 @@ final class StudioPlayback implements AutoCloseable {
         generation.incrementAndGet();
         playing = false;
         if (activePlayback != null) activePlayback.cancel(true);
+        if (activeStream != null) activeStream.close();
+        activeStream = null;
         releaseLine();
     }
 
@@ -199,6 +335,7 @@ final class StudioPlayback implements AutoCloseable {
         stop();
         worker.shutdownNow();
         renderer.shutdownNow();
+        edits.shutdownNow();
     }
 
     /** Keep each rendered presentation for sample-aligned looping and monitor switches. */
@@ -212,14 +349,28 @@ final class StudioPlayback implements AutoCloseable {
 
         void render(StudioProject source, S3kRenderer.ChannelMask mask) {
             try {
-                TargetPlayback.prepare(source).render(size(), mask, this::append);
+                render(TargetPlayback.prepare(source), mask);
             } catch (Exception failure) {
-                synchronized (this) {
-                    error = failure;
-                    notifyAll();
-                }
+                failed(failure);
             }
         }
+
+        void render(TargetPlayback playback, S3kRenderer.ChannelMask mask) {
+            try {
+                playback.render(size(), mask, this::append);
+            } catch (Exception failure) {
+                failed(failure);
+            }
+        }
+
+        private synchronized void failed(Exception failure) {
+            error = failure;
+            notifyAll();
+        }
+
+        synchronized boolean failed() { return error != null; }
+        synchronized boolean available(int index) { return index < next; }
+        synchronized short[] peek(int index) { return available(index) ? frames[index] : null; }
 
         private synchronized void append(short[] pcm) throws IOException {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
