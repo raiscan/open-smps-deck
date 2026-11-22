@@ -27,6 +27,7 @@ import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.FlowPane;
@@ -182,6 +183,11 @@ final class ReconstructionEditor implements AutoCloseable {
             "splitNote", "mergeNotes", "retrigger", "bend", "glide", "noteVoicing", "layer", "arpeggio", "chordInstrument");
 
     private final Supplier<ProjectDocument> openProject;
+    private record CopiedNote(double offset, double length, int pitch, int velocity) {}
+    private List<CopiedNote> clipboard = List.of();
+    DoubleConsumer playFrom = ignored -> {};
+    // The separate agent-copy action can supply a command for the current selection.
+    java.util.function.Function<List<Overlay>, Runnable> copyForAgent = notes -> null;
 
     ReconstructionEditor(Path work, Window owner, ReconstructionCanvas view, Snapshot initial,
                          Consumer<String> status, Consumer<ReconstructionInspection> refresh,
@@ -207,6 +213,7 @@ final class ReconstructionEditor implements AutoCloseable {
         view.onPlacement = this::move;
         view.onSectionEdit = this::section;
         view.onSectionMenu = this::sectionMenu;
+        view.onContext = this::contextMenu;
         for (String filename : List.of("edits.json", "sections.json", ReconstructionVoicePlan.JOURNAL, "report.json")) {
             try {
                 watchers.add(new ProjectWatcher(work.resolve(filename), () -> Platform.runLater(this::readExternal)));
@@ -317,17 +324,14 @@ final class ReconstructionEditor implements AutoCloseable {
         role.setId("reconstruction-assign-role");
         role.setPromptText("Role");
         lane.setPromptText("Lane");
+        velocity.setId("reconstruction-velocity");
         velocity.setEditable(true);
         velocity.setPrefWidth(95);
         var setRole = new Button("Set role");
         setRole.setId("reconstruction-set-role");
         setRole.setOnAction(event -> {
-            if (role.getValue() == null) return;
-            var ids = view.selectedNotes().stream().filter(ReconstructionEditor::classifiable).map(Overlay::id).distinct().toList();
-            if (ids.isEmpty()) return;
-            var edit = ReconstructionDraft.target(ids.getFirst(), "setRole", "role", role.getValue(), "Set role in Studio");
-            ids.stream().skip(1).forEach(edit.getAsJsonArray("noteIds")::add);
-            add(edit);
+            if (role.getValue() != null)
+                setRole(view.selectedNotes().stream().filter(ReconstructionEditor::classifiable).toList(), role.getValue());
         });
         role.setConverter(new javafx.util.StringConverter<>() {
             @Override public String toString(String value) { return value == null ? "" : readableKey(value); }
@@ -742,9 +746,12 @@ final class ReconstructionEditor implements AutoCloseable {
     private int pendingVelocity(Overlay note, int fallback) {
         int value = fallback;
         for (var entry : draft.entries()) {
-            if (draft.changed(entry) && note.id().equals(targetId(entry)) && ReconstructionReview.validationIssue(entry) == null
-                    && entry.isJsonObject()
-                    && entry.getAsJsonObject().has("velocity")) value = entry.getAsJsonObject().get("velocity").getAsInt();
+            if (!draft.changed(entry) || !targetIds(entry).contains(note.id()) || ReconstructionReview.validationIssue(entry) != null)
+                continue;
+            var edit = entry.getAsJsonObject();
+            if (edit.has("velocity")) value = edit.get("velocity").getAsInt();
+            else if (text(edit, "op", "").equals("setVelocity") && edit.has("scale"))
+                value = (int) Math.clamp(Math.round(value * edit.get("scale").getAsDouble()), 1, 127);
         }
         return value;
     }
@@ -803,14 +810,18 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         var intent = ReconstructionDraft.insert(voice.part().id(), location.start(), location.end(), location.pitch());
         String id = targetId(intent);
-        if (voice.id() == null) add(intent);
-        else addBatch(List.of(intent, ReconstructionBulk.voiceEdit("move", voice.id(), "Assign inserted note to " + voice.label(),
-                body -> {
-                    var ids = new JsonArray();
-                    ids.add(id);
-                    body.add("noteIds", ids);
-                })));
+        var intents = new ArrayList<>(List.of(intent));
+        assignInsertedNotes(intents, voice);
+        addBatch(intents);
         overlays().stream().filter(note -> note.id().equals(id)).findFirst().ifPresent(note -> view.select(note, null));
+    }
+
+    private static void assignInsertedNotes(List<JsonObject> intents, InsertVoice voice) {
+        if (voice.id() == null) return;
+        var ids = new JsonArray();
+        intents.stream().map(ReconstructionEditor::targetId).forEach(ids::add);
+        intents.add(ReconstructionBulk.voiceEdit("move", voice.id(), "Assign inserted notes to " + voice.label(),
+                body -> body.add("noteIds", ids)));
     }
 
     private void move(Overlay note, Placement placement) {
@@ -835,20 +846,280 @@ final class ReconstructionEditor implements AutoCloseable {
         add(ReconstructionDraft.target(selected.id(), op, field, value, reason));
     }
 
+    private boolean editable() { return !busy && external == null && !externalError; }
+
+    private List<Overlay> deletableNotes() {
+        return view.selectedNotes().stream().filter(ReconstructionEditor::classifiable)
+                .filter(note -> editableScore(note) || snapshot.inspection().noteDetails(note.id()).generated())
+                .toList();
+    }
+
     private void delete() {
-        if (!selectableNote() || busy || external != null) return;
-        String id = selected.id();
-        if (localInsert(id)) {
-            draft.change(entries -> {
-                for (int i = entries.size() - 1; i >= 0; i--)
-                    if (id.equals(targetId(entries.get(i)))) entries.remove(i);
-            });
-            updateDraft();
-        } else if (snapshot.inspection().noteDetails(id).generated()) {
-            target("setRole", "role", "drop", "Drop generated note in Studio");
+        if (!editable()) return;
+        var notes = deletableNotes();
+        if (notes.isEmpty()) return;
+        stageBatch(notes.stream().map(note -> single("deleteNote", note, "Delete note in Studio")).toList());
+        int count = notes.size();
+        status.accept("Deleted " + count + (count == 1 ? " note" : " notes") + " · Undo");
+    }
+
+    private static JsonObject selectionEdit(List<Overlay> notes, String op, String reason) {
+        var edit = ReconstructionDraft.human(op, reason);
+        var ids = new JsonArray();
+        notes.forEach(note -> ids.add(note.id()));
+        edit.add("noteIds", ids);
+        return edit;
+    }
+
+    private void setRole(List<Overlay> notes, String value) {
+        if (notes.isEmpty()) return;
+        var edit = selectionEdit(notes, "setRole", "Set role in Studio");
+        edit.addProperty("role", value);
+        add(edit);
+    }
+
+    private String editIssue(String issue) {
+        return editable() ? issue : "Finish the rebuild or resolve external changes to edit.";
+    }
+
+    private void selectNotes(java.util.function.Predicate<Overlay> filter) {
+        view.selectNotes(view.selectableOverlays().stream().filter(filter).toList());
+        view.canvas.requestFocus();
+    }
+
+    private void contextMenu(ContextMenuEvent event, ReconstructionCanvas.ContextTarget target) {
+        StudioContextMenu menu;
+        if (view.reviewing()) {
+            if (target.proposal() == null) return;
+            var proposal = snapshot.proposals().stream().filter(item -> item.id().equals(target.proposal().id()))
+                    .findFirst().orElse(null);
+            if (proposal == null) return;
+            menu = proposalMenu(proposal);
+        } else if (target.note() != null) {
+            menu = noteMenu(target.note(), target.time());
+        } else if (!view.rolesView()) {
+            menu = new StudioContextMenu();
+            var place = target.insertion();
+            if (place != null) {
+                var voice = parts.getValue();
+                String issue = voice == null ? "Choose an insert voice first."
+                        : voice.part().drums() || place.pitch() >= 12 && place.pitch() <= 106
+                                ? null : "Choose a pitch between MIDI 12 and 106.";
+                menu.add("Insert note here", null, editIssue(issue), () -> insert(place))
+                        .add("Paste", StudioContextMenu.shortcut("V"), editIssue(pasteIssue(place.start())),
+                                () -> paste(place.start()));
+            }
+            menu.add("Play from here", () -> playFrom.accept(target.time()))
+                    .add("Zoom to fit", view::zoomToFit)
+                    .add("Select all", StudioContextMenu.shortcut("A"), null, () -> selectNotes(note -> true));
         } else {
-            add(single("deleteNote", selected, "Delete note in Studio"));
+            menu = new StudioContextMenu().add("Play from here", () -> playFrom.accept(target.time()));
         }
+        menu.show(view.canvas, event);
+    }
+
+    private StudioContextMenu noteMenu(Overlay hit, double time) {
+        var notes = view.selectedNotes().stream().filter(ReconstructionEditor::classifiable).toList();
+        var menu = new StudioContextMenu();
+        var roles = role.getItems().stream().filter(value -> !notes.isEmpty()).map(value -> {
+            var color = value.equals("drop") ? null : ReconstructionCanvas.color(Role.valueOf(value.toUpperCase(Locale.ROOT)));
+            String issue = value.equals("drop") || notes.stream().allMatch(note -> drumPart(note) == value.equals("drums"))
+                    ? null : "Select notes from compatible tonal or percussion parts.";
+            return StudioContextMenu.item(readableKey(value), null, editIssue(issue), color, () -> setRole(notes, value));
+        }).toList();
+        String deleteIssue = editIssue(deletableNotes().isEmpty() ? "Select a scored or generated note." : null);
+        if (view.rolesView()) {
+            var voices = view.voices().entries().stream().filter(entry -> entry.voice() != null && !notes.isEmpty())
+                    .map(entry -> StudioContextMenu.item(entry.shortName(), null, editIssue(bulk.moveIssue(entry.voice())),
+                            entry.style().color(), () -> assignVoice(entry.voice()))).toList();
+            return menu.submenu("Set role", roles)
+                    .submenu("Assign to voice", voices)
+                    .add("Delete", "Delete / Backspace", deleteIssue, this::delete)
+                    .add("Select all with this role", () -> { view.selectRole(hit.role(), false); view.canvas.requestFocus(); })
+                    .add("Play from here", () -> playFrom.accept(time));
+        }
+        menu.add("Delete", "Delete / Backspace", deleteIssue, this::delete);
+        var offsets = List.of(1, -1, 12, -12).stream().map(step -> StudioContextMenu.item(
+                "%+d".formatted(step), TransposeKeys.label(step), editIssue(transposeIssue(step)), null, () -> transpose(step))).toList();
+        menu.submenu("Transpose", offsets);
+        var data = attack(hit);
+        var model = snapshot.inspection();
+        long tick = Math.round(model.toProject(time) * 60);
+        boolean split = notes.size() == 1 && data != null && data.single()
+                && tick > Math.round(model.toProject(data.start()) * 60)
+                && tick < Math.round(model.toProject(data.end()) * 60);
+        boolean tonalAttacks = !notes.isEmpty() && notes.stream().allMatch(note -> {
+            var attack = attack(note);
+            return attack != null && attack.single() && !attack.drums();
+        });
+        boolean merge = tonalAttacks && notes.size() > 1 && notes.stream()
+                .allMatch(note -> note.part() == hit.part() && note.pitch() == hit.pitch());
+        boolean glide = tonalAttacks && notes.size() == 2 && notes.getFirst().part() == notes.getLast().part()
+                && notes.getFirst().pitch() != notes.getLast().pitch()
+                && Math.abs(attackTick(notes.getFirst()) - attackTick(notes.getLast())) >= 4;
+        menu.add("Split at cursor", null, editIssue(split ? null : "Point inside a single note, at least one tick from both ends."),
+                    () -> gesture(ReconstructionTools.cut(hit.id(), time, null)))
+                .add("Merge selected", null, editIssue(merge ? null : "Select two or more single tonal attacks of the same pitch and part."),
+                    () -> add(selectionEdit(notes, "mergeNotes", "Merge notes in Studio")))
+                .add("Set velocity…", null, editIssue(notes.isEmpty() || notes.stream().anyMatch(note -> !editableScore(note))
+                        ? "Select scored notes." : null), () -> setVelocity(notes))
+                .add("Add bend/glide…", null, editIssue(tonalAttacks && notes.size() == 1 || glide
+                        ? null : "Select one tonal attack or two different pitches in the same part at least four ticks apart."),
+                        () -> pitchMotion(notes))
+                .add("Vibrato…", null, editIssue(notes.size() == 1 && hit.sounds() && hit.lane() != null
+                        && hit.lane().startsWith("FM") && model.target() == com.opensmpsdeck.project.TargetGame.S3K
+                        ? null : "Select a single allocated S3K FM note."), () -> setVibrato(hit));
+        menu.submenu("Pin to lane", TimelineView.LANES.stream().filter(value -> !notes.isEmpty()).map(value -> {
+            String issue = notes.stream().map(note -> snapshot.editing().laneIssue(note, null, value))
+                    .filter(Objects::nonNull).findFirst().orElse(null);
+            return StudioContextMenu.item(value, null, editIssue(issue), null, () -> {
+                var edit = selectionEdit(notes, "pinLane", "Pin notes in Studio");
+                edit.addProperty("lane", value);
+                add(edit);
+            });
+        }).toList());
+        menu.submenu("Set role", roles)
+                .add("Select all in part", () -> selectNotes(note -> note.part() == hit.part()))
+                .add("Select all in bar", null, model.barStart(time).isPresent() ? null : "No bar at this position.",
+                        () -> selectNotes(note -> model.barStart(note.interval().sourceStart()).equals(model.barStart(time))))
+                .add("Play from here", () -> playFrom.accept(time));
+        if (notes.stream().anyMatch(this::editableScore))
+            menu.add("Copy notes", StudioContextMenu.shortcut("C"), null, this::copyNotes);
+        var copy = copyForAgent.apply(notes);
+        if (copy != null) menu.add("Copy for agent", copy);
+        return menu;
+    }
+
+    private boolean drumPart(Overlay note) {
+        return snapshot.inspection().parts().stream().anyMatch(part -> part.id() == note.part() && part.drums());
+    }
+
+    private long attackTick(Overlay note) {
+        return Math.round(snapshot.inspection().toProject(attack(note).start()) * 60);
+    }
+
+    private java.util.Optional<String> prompt(String title, String label, String initial) {
+        var dialog = new TextInputDialog(initial);
+        dialog.initOwner(owner);
+        dialog.setTitle(title);
+        dialog.setHeaderText(null);
+        dialog.setContentText(label);
+        return dialog.showAndWait().map(String::strip);
+    }
+
+    private void setVelocity(List<Overlay> notes) {
+        prompt("Set velocity", "MIDI velocity (1–127)", "96").ifPresent(value -> {
+            try {
+                int amount = Integer.parseInt(value);
+                if (amount < 1 || amount > 127) throw new NumberFormatException();
+                var edit = selectionEdit(notes, "setVelocity", "Set selection velocity in Studio");
+                edit.addProperty("velocity", amount);
+                add(edit);
+            } catch (NumberFormatException invalid) {
+                status.accept("Velocity must be a whole number from 1 to 127.");
+            }
+        });
+    }
+
+    private void pitchMotion(List<Overlay> notes) {
+        if (notes.size() == 2) {
+            var ordered = notes.stream().sorted(java.util.Comparator.comparingLong(this::attackTick)).toList();
+            prompt("Add glide", "Approach duration in source seconds (blank for automatic)", "").ifPresent(value -> {
+                var edit = ReconstructionDraft.human("glide", "Glide to selected pitch in Studio");
+                edit.addProperty("fromNoteId", ordered.getFirst().id());
+                edit.addProperty("toNoteId", ordered.getLast().id());
+                if (!value.isEmpty()) {
+                    try {
+                        double duration = Double.parseDouble(value);
+                        double gap = attack(ordered.getLast()).start() - attack(ordered.getFirst()).start();
+                        if (!Double.isFinite(duration) || duration <= 0 || duration > gap) throw new NumberFormatException();
+                        edit.addProperty("seconds", duration);
+                    } catch (NumberFormatException invalid) {
+                        status.accept("Glide duration must be positive and fit between the attacks.");
+                        return;
+                    }
+                }
+                add(edit);
+            });
+        } else {
+            var note = notes.getFirst();
+            var attack = attack(note);
+            prompt("Add bend", "Final pitch offset in semitones", "1").ifPresent(value -> {
+                try {
+                    double delta = Double.parseDouble(value);
+                    var range = TargetProfile.of(snapshot.inspection().target()).fm();
+                    double endPitch = attack.pitch() + delta;
+                    if (!Double.isFinite(delta) || endPitch < range.low() || endPitch > range.high())
+                        throw new NumberFormatException();
+                    gesture(ReconstructionTools.bend(note.id(), attack.pitch(), List.of(
+                            new BendPoint(attack.start(), attack.pitch()), new BendPoint(attack.end(), endPitch))));
+                } catch (NumberFormatException invalid) {
+                    status.accept("Enter a semitone offset that stays in the FM pitch range.");
+                }
+            });
+        }
+    }
+
+    private void setVibrato(Overlay note) {
+        var stages = vibrato(note);
+        var initial = stages.isEmpty() ? new ReconstructionEditing.VibratoSegment(0, 5, 25) : stages.getFirst();
+        prompt("Set vibrato", "Rate in Hz, depth in cents (comma separated)",
+                initial.rateHz() + ", " + initial.depthCents()).ifPresent(value -> {
+            try {
+                var fields = value.split(",", -1);
+                if (fields.length != 2) throw new NumberFormatException();
+                double hz = Double.parseDouble(fields[0]);
+                double depth = Double.parseDouble(fields[1]);
+                if (!Double.isFinite(hz) || !Double.isFinite(depth)) throw new NumberFormatException();
+                var next = new ArrayList<>(stages);
+                if (!next.isEmpty()) next.removeFirst();
+                next.addFirst(new ReconstructionEditing.VibratoSegment(initial.startOffset(), hz, depth));
+                add(ReconstructionTools.vibrato(note.id(), next));
+            } catch (NumberFormatException invalid) {
+                status.accept("Enter two numbers, for example 5, 25.");
+            }
+        });
+    }
+
+    private void copyNotes() {
+        var notes = view.selectedNotes().stream().filter(ReconstructionEditor::classifiable).filter(this::editableScore).toList();
+        if (notes.isEmpty()) return;
+        double start = notes.stream().mapToDouble(note -> note.interval().sourceStart()).min().orElseThrow();
+        clipboard = notes.stream().map(note -> {
+            var interval = note.interval();
+            var detail = snapshot.inspection().noteDetails(note.id());
+            return new CopiedNote(interval.sourceStart() - start, interval.sourceEnd() - interval.sourceStart(),
+                    note.pitch(), pendingVelocity(note, detail.velocity() == null ? 96 : detail.velocity()));
+        }).toList();
+        status.accept("Copied " + clipboard.size() + (clipboard.size() == 1 ? " note" : " notes"));
+    }
+
+    private String pasteIssue(double time) {
+        var voice = parts.getValue();
+        if (clipboard.isEmpty()) return "Copy notes first.";
+        if (voice == null) return "Choose an insert voice first.";
+        if (clipboard.stream().anyMatch(note -> time + note.offset() + note.length() > snapshot.inspection().duration() + 1e-7))
+            return "The copied notes extend beyond the song.";
+        if (!voice.part().drums() && clipboard.stream().anyMatch(note -> note.pitch() < 12 || note.pitch() > 106))
+            return "The insert voice requires MIDI pitches between 12 and 106.";
+        return null;
+    }
+
+    private void paste(double time) {
+        String issue = editIssue(pasteIssue(time));
+        if (issue != null) {
+            status.accept(issue);
+            return;
+        }
+        var intents = new ArrayList<JsonObject>();
+        for (var note : clipboard) {
+            double start = time + note.offset();
+            var edit = ReconstructionDraft.insert(parts.getValue().part().id(), start, start + note.length(), note.pitch());
+            edit.addProperty("velocity", note.velocity());
+            intents.add(edit);
+        }
+        assignInsertedNotes(intents, parts.getValue());
+        addBatch(intents);
     }
 
     private static JsonObject single(String op, Overlay note, String reason) {
@@ -872,7 +1143,6 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void transpose(int semitones) {
         if (busy || external != null || externalError) return;
-        var profile = TargetProfile.of(snapshot.inspection().target());
         var groups = new LinkedHashMap<ReconstructionLaneType, List<String>>();
         int percussion = 0;
         int unscored = 0;
@@ -888,12 +1158,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 unscored++;
                 continue;
             }
-            var range = type == ReconstructionLaneType.PSG ? profile.psg() : profile.fm();
-            int pitch = attack.pitch() + semitones;
-            String issue = snapshot.editing().transposeIssue(note.id(), pitch, type);
-            if (issue == null && note.bend().stream().anyMatch(point ->
-                    point.pitch() + semitones < range.low() || point.pitch() + semitones > range.high()))
-                issue = "Pitch curve must stay in MIDI " + range.low() + "–" + range.high();
+            String issue = transposeIssue(note, attack, type, semitones);
             if (issue != null) {
                 status.accept("Transpose refused · " + type + " · " + issue + " (" + note.id() + ")");
                 return;
@@ -910,6 +1175,30 @@ final class ReconstructionEditor implements AutoCloseable {
         if (percussion != 0) message += " · skipped drums or noise (" + percussion + ")";
         if (unscored != 0) message += " · skipped notes without an editable score attack (" + unscored + ")";
         status.accept(message);
+    }
+
+    private String transposeIssue(int semitones) {
+        boolean tonal = false;
+        for (var note : view.selectedNotes()) {
+            var attack = attack(note);
+            var type = transposeLane(note);
+            if (attack == null || attack.drums() || note.role() == Role.DRUMS
+                    || type == ReconstructionLaneType.DAC || type == ReconstructionLaneType.NOISE) continue;
+            tonal = true;
+            String issue = transposeIssue(note, attack, type, semitones);
+            if (issue != null) return issue;
+        }
+        return tonal ? null : "Select a scored tonal note.";
+    }
+
+    private String transposeIssue(Overlay note, ReconstructionEditing.Attack attack, ReconstructionLaneType type, int semitones) {
+        var profile = TargetProfile.of(snapshot.inspection().target());
+        var range = type == ReconstructionLaneType.PSG ? profile.psg() : profile.fm();
+        String issue = snapshot.editing().transposeIssue(note.id(), attack.pitch() + semitones, type);
+        if (issue == null && note.bend().stream().anyMatch(point ->
+                point.pitch() + semitones < range.low() || point.pitch() + semitones > range.high()))
+            return "Pitch curve must stay in MIDI " + range.low() + "–" + range.high();
+        return issue;
     }
 
     private ReconstructionLaneType transposeLane(Overlay note) {
@@ -1149,7 +1438,7 @@ final class ReconstructionEditor implements AutoCloseable {
             groups.computeIfAbsent(text(proposal.edit(), "group", null), ignored -> new ArrayList<>()).add(proposal);
             String reason = text(proposal.edit(), "reason", "");
             for (var marker : proposal.markers())
-                marks.add(new ReconstructionCanvas.ProposalMark(marker, "Agent proposal · " + reason));
+                marks.add(new ReconstructionCanvas.ProposalMark(marker, "Agent proposal · " + reason, proposal.id()));
         }
         view.proposals(marks);
         proposalList.getChildren().clear();
@@ -1250,6 +1539,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 revise.setOnAction(event -> reviseProposal(proposal));
                 var card = new VBox(7, title, reason, new FlowPane(5, 4, preview, revise, accept, reject), disclosure);
                 card.getStyleClass().add("reconstruction-proposal");
+                card.setOnContextMenuRequested(event -> proposalMenu(proposal).show(card, event));
                 proposalList.getChildren().add(card);
             }
         });
@@ -1267,6 +1557,21 @@ final class ReconstructionEditor implements AutoCloseable {
                 proposalList.getChildren().addAll(row, details);
             }
         }
+    }
+
+    private StudioContextMenu proposalMenu(ReconstructionProposals.Result proposal) {
+        var ids = new java.util.HashSet<>(targetIds(proposal.edit()));
+        proposal.markers().forEach(marker -> ids.add(marker.noteId()));
+        var notes = view.selectableOverlays().stream().filter(note -> ids.contains(note.id())).toList();
+        return new StudioContextMenu()
+                .add("Accept", null, editIssue(null), () -> acceptProposals(List.of(proposal)))
+                .add("Reject", null, editIssue(null), () -> rejectProposals(List.of(proposal)))
+                .add("Show in Detail", null, notes.isEmpty() && proposal.markers().isEmpty() ? "No note position is available." : null,
+                        () -> {
+                            view.selectNotes(notes);
+                            view.onDetailJump.accept(notes);
+                            if (notes.isEmpty()) view.center(proposal.markers().getFirst().start());
+                        });
     }
 
     private static String proposalAction(JsonObject edit) {
@@ -1531,7 +1836,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void updateControls() {
-        boolean editing = !busy && external == null && !externalError;
+        boolean editing = editable();
         view.editing(editing);
         bulk.setDisable(!editing);
         voiceLegend.controls(editing, view.selectedNotes().stream().anyMatch(ReconstructionEditor::classifiable));
@@ -1561,7 +1866,7 @@ final class ReconstructionEditor implements AutoCloseable {
                         + (proposalCount == 1 ? " agent proposal to review" : " agent proposals to review")
                 : snapshot.inspection().project() == null ? "Check which voices are assigned to your notes."
                 : "Ready to export · You can still adjust roles and notes.");
-        noteDelete.setDisable(!editing || !selectableNote() || selected.fate().equals("Pending deletion"));
+        noteDelete.setDisable(!editing || deletableNotes().isEmpty());
         role.setDisable(!editing || view.selectedNotes().stream().noneMatch(ReconstructionEditor::classifiable));
         lane.setDisable(!editing || !selectableNote());
         velocity.setDisable(!editing || selected == null || !editableScore(selected));
@@ -1576,15 +1881,24 @@ final class ReconstructionEditor implements AutoCloseable {
         updateDraft();
     }
 
-    boolean key(KeyEvent event) {
+    boolean key(KeyEvent event, boolean editorFocused) {
         int semitones = TransposeKeys.semitones(event);
+        var code = event.getCode();
         if (semitones != 0 && view.canvas.isFocused() && !view.reviewing()) {
             transpose(semitones);
-        } else if (event.isShortcutDown() && (event.getCode() == KeyCode.Z || event.getCode() == KeyCode.Y)) {
-            history(event.getCode() == KeyCode.Y || event.isShiftDown());
-        } else if (!event.isShortcutDown() && event.getCode() == KeyCode.DELETE && view.canvas.isFocused() && !view.reviewing()) {
+        } else if (event.isShortcutDown() && (code == KeyCode.Z || code == KeyCode.Y)) {
+            history(code == KeyCode.Y || event.isShiftDown());
+        } else if (editorFocused && !view.reviewing() && !event.isShortcutDown()
+                && (code == KeyCode.DELETE || code == KeyCode.BACK_SPACE)) {
             delete();
-        } else if (!event.isShortcutDown() && event.getCode() == KeyCode.O) {
+        } else if (view.canvas.isFocused() && !view.reviewing() && !view.rolesView() && event.isShortcutDown()) {
+            switch (code) {
+                case A -> selectNotes(note -> true);
+                case C -> copyNotes();
+                case V -> paste(view.playhead());
+                default -> { return false; }
+            }
+        } else if (!event.isShortcutDown() && code == KeyCode.O) {
             outline.setSelected(!outline.isSelected());
             view.outline(outline.isSelected());
         } else return false;

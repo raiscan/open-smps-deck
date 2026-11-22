@@ -5,6 +5,8 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.TargetProfile;
 import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.input.ContextMenuEvent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import java.util.UUID;
@@ -21,6 +23,7 @@ final class PianoRollView extends ViewportCanvas {
     Consumer<String> selection=ignored -> {};
     Consumer<NoteEvent> edit=ignored -> {};
     Consumer<NoteEvent> addition=ignored -> {};
+    BiConsumer<ContextMenuEvent, NoteEvent> onContext = (event, note) -> {};
     private final boolean readOnly;
     private NoteEvent dragging, ghost;
     private double pressX,pressY;
@@ -31,6 +34,7 @@ final class PianoRollView extends ViewportCanvas {
         this.readOnly=readOnly;
         dimensions(1000,400);
         canvas.setOnMousePressed(e -> {
+            if (e.getButton() != MouseButton.PRIMARY) return;
             canvas.requestFocus();
             if(sequence!=null&&e.getY()>=HEADER-4&&e.getY()<=HEADER+9){
                 var marker=sequence.commands().stream().filter(c->Math.abs(KEYBOARD+c.tick()*scale-offset-e.getX())<=5).findFirst();
@@ -41,8 +45,8 @@ final class PianoRollView extends ViewportCanvas {
             dragging=note; ghost=note; pressX=e.getX(); pressY=e.getY();
             resizing=note!=null&&e.getX()>=KEYBOARD+(note.tick()+note.duration())*scale-offset-8;
             if(note==null&&e.getClickCount()==2&&sequence!=null&&e.getX()>KEYBOARD&&e.getY()>HEADER) {
-                int tick=Math.max(0,snap((e.getX()-KEYBOARD+offset)/scale));
-                if(tick<sequence.lengthTicks()) addition.accept(new NoteEvent("note-"+UUID.randomUUID(),tick,Math.min(unit(),sequence.lengthTicks()-tick),pitchAt(e.getY())));
+                var noteHere = noteAt(e.getX(), e.getY());
+                if (noteHere != null) addition.accept(noteHere);
             }
             draw();
         });
@@ -53,7 +57,18 @@ final class PianoRollView extends ViewportCanvas {
                     :new NoteEvent(dragging.id(),(int)Math.clamp((long)dragging.tick()+delta,0,Integer.MAX_VALUE),dragging.duration(),Math.clamp(dragging.pitch()-(int)Math.round((e.getY()-pressY)/NOTE_ROW),minPitch(),maxPitch()));
             draw();
         });
-        canvas.setOnMouseReleased(e -> { var change=ghost; dragging=null; ghost=null; if(change!=null) edit.accept(change); draw(); });
+        canvas.setOnMouseReleased(e -> { if (e.getButton() != MouseButton.PRIMARY) return; canvas.requestFocus(); var change=ghost; dragging=null; ghost=null; if(change!=null) edit.accept(change); draw(); });
+        if (!readOnly) canvas.setOnContextMenuRequested(event -> {
+            if (event.isKeyboardTrigger() || sequence == null) return;
+            var point = canvas.sceneToLocal(event.getSceneX(), event.getSceneY());
+            if (point.getX() < KEYBOARD || point.getY() < HEADER) return;
+            canvas.requestFocus();
+            var note = hit(point.getX(), point.getY());
+            selected = note == null ? null : note.id();
+            selection.accept(selected);
+            onContext.accept(event, note == null ? noteAt(point.getX(), point.getY()) : null);
+            draw();
+        });
     }
     void transpose(int semitones, TargetProfile profile, Consumer<String> status) {
         if (readOnly || sequence == null || selected == null) return;
@@ -110,6 +125,12 @@ final class PianoRollView extends ViewportCanvas {
         scroll.setHvalue(scrollable==0?0:Math.clamp(previousOffset/scrollable,0,1));
         updateViewport();
     }
+    private NoteEvent noteAt(double x, double y) {
+        int tick = Math.max(0, snap((x - KEYBOARD + offset) / scale));
+        return tick >= sequence.lengthTicks() ? null : new NoteEvent("note-" + UUID.randomUUID(), tick,
+                Math.min(unit(), sequence.lengthTicks() - tick), pitchAt(y));
+    }
+
     private int unit(){return Math.max(1,ticksPerBeat/4);}
     private int snap(double tick){return (int)Math.clamp(Math.round(tick/unit())*unit(),Integer.MIN_VALUE,Integer.MAX_VALUE);}
     private int pitchAt(double y){return Math.clamp(topPitch-(int)((y-HEADER)/NOTE_ROW),minPitch(),maxPitch());}

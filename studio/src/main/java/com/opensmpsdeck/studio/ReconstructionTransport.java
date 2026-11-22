@@ -118,6 +118,7 @@ final class ReconstructionTransport implements AutoCloseable {
             selectedLane = lane;
             if (controlsReady && lane != null && lanes.getItems().contains(lane)) lanes.setValue(lane);
         };
+        view.onVoiceMonitor = this::transportChanged;
         view.onSeek = seconds -> {
             updatePosition(this.model.toProject(seconds), false);
             if (playing) startPlayback();
@@ -448,7 +449,10 @@ final class ReconstructionTransport implements AutoCloseable {
         transportChanged();
     }
 
-    private boolean liveChip() { return scopes.getValue() == Scope.Lane || scopes.getValue() == Scope.Voice; }
+    private boolean liveChip() {
+        return scopes.getValue() == Scope.Lane || scopes.getValue() == Scope.Voice
+                || view.voiceMonitorActive() && model.project() != null;
+    }
 
     private void updateTransport() {
         if (!controlsReady || updatingTargets) return;
@@ -467,6 +471,8 @@ final class ReconstructionTransport implements AutoCloseable {
                     : "Built voice · " + bounds(span);
             case Lane -> span == null ? "Choose a chip lane." : "Chip lane " + lanes.getValue() + " · " + bounds(span);
         };
+        if (view.voiceMonitorActive() && hearing.getValue() != Hearing.ORIGINAL && model.project() != null)
+            description += " · Chip voice mix";
         var original = original();
         if (span != null && hearing.getValue() != Hearing.CHIP && original != null && liveChip()) {
             description += original.kind() == AudioKind.STEM ? " · Original uses " + original.label()
@@ -571,6 +577,20 @@ final class ReconstructionTransport implements AutoCloseable {
         clock.setText(String.format(Locale.ROOT, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100));
     }
 
+    void playFrom(double sourceSeconds) {
+        stopPlayback();
+        if (!includes(span(), sourceSeconds)) scopes.setValue(Scope.Song);
+        var loop = effectiveLoop(span());
+        if (loop != null && !includes(loop, sourceSeconds)) clearLoop();
+        updatePosition(model.toProject(sourceSeconds), false);
+        prepareAudio();
+        startPlayback();
+    }
+
+    private static boolean includes(ReviewTransport.Range range, double position) {
+        return range != null && position >= range.start() && position < range.end();
+    }
+
     private void togglePlayback() {
         if (play.isDisabled()) return;
         if (playing || playWhenLoaded) stopPlayback();
@@ -607,8 +627,14 @@ final class ReconstructionTransport implements AutoCloseable {
         var project = chipAudible && liveChip() ? model.project() : null;
         var mask = ReconstructionView.laneMask(project == null || scopes.getValue() != Scope.Lane
                 ? List.of() : List.of(lanes.getValue()), List.of());
-        if (chipAudible && scopes.getValue() == Scope.Voice) {
-            var ids = voiceNotes().stream().map(Overlay::id).collect(Collectors.toSet());
+        if (project != null && (scopes.getValue() == Scope.Voice || view.voiceMonitorActive())) {
+            var notes = scopes.getValue() == Scope.Voice ? voiceNotes() : model.overlays();
+            var ids = notes.stream().filter(Overlay::sounds).filter(view::voiceAudible)
+                    .map(Overlay::id).collect(Collectors.toSet());
+            if (ids.isEmpty()) {
+                playAudio(request, null, mask, span, start);
+                return;
+            }
             double from = start;
             status.setText("Preparing voice playback…");
             voiceRender = loader.submit(() -> {

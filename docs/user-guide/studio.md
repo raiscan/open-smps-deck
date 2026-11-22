@@ -85,8 +85,11 @@ compatible lane. The snap is a quarter of the current beat, at least one tick.
 Drag its right edge to repeat or trim it; a partial final repeat is allowed.
 The inspector provides exact start/length and lane fields; press **Apply clip
 changes** to commit those fields. Duplicate creates another linked instance.
-Delete/Backspace with the arrangement focused removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
-for project undo/redo, outside text fields.
+Delete or Backspace with the timeline focused removes the selected clip.
+Right-click a clip to edit its source, duplicate it or delete it. Group
+placements offer **Edit inside** and **Ungroup**. Use **Play from here** on the
+timeline to start at the clicked position. Use Ctrl+Z or Ctrl+Shift+Z (Cmd on
+macOS) for project undo and redo outside text fields.
 
 ## Group clips into a sequence
 
@@ -129,8 +132,10 @@ Selecting a clip opens its source in the piano roll below. Notes are bars:
 horizontal position is time, vertical position is pitch, width is duration.
 Double-click empty space to add a note. Drag a note to change time/pitch; drag its
 right edge for duration. Select a note to edit exact tick, duration and MIDI pitch
-in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete with
-the piano roll focused removes a selected note. Press **+** or **=** (or
+in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete
+or Backspace with the piano roll focused removes a selected note. Right-click
+a note for **Delete** or **Transpose**, or right-click empty space to insert a
+note at that pitch and time. Press **+** or **=** (or
 **Numpad Add**) to raise its pitch one semitone, or **−** (or **Numpad
 Subtract**) to lower it. Hold **Shift** with any of those keys to move by an
 octave. Each move is undoable. The status line reports any move outside the
@@ -303,6 +308,33 @@ Selection, zoom, scrolling and playback survive a workspace change. The header
 counts unsaved changes. **Apply & rebuild** saves the edits and rebuilds the chip
 result. Use **Changes** to undo or redo drafts.
 
+### Reconstruction context menus
+
+- **Notes (Detail)**. Right-click a note to edit the selection. The menu offers
+  deletion, transposition, a split at the clicked time, merging, velocity,
+  pitch bend or glide, vibrato, lane pinning, and musical roles. It also offers
+  selection by part or bar and **Play from here**. Right-click empty pitch space
+  to insert or paste at that time, play, fit the view, or select all.
+- **Roles**. Right-click a note to set its role, assign its voice, delete the
+  selection, select all notes with that role, or play from that time. Right-click
+  a voice row to rename its tag, select its notes, or solo or mute it in Chip
+  playback. Solo highlights its notes. Mute hides them from the plot. The
+  Original reference remains available as recorded.
+- **Review → Proposals**. Right-click a proposal card or a proposed note outline
+  to accept or reject it, or use **Show in Detail** to jump to the affected
+  notes or the proposed insertion.
+
+Menus show available keyboard shortcuts and explain unavailable actions on
+hover. A right-click on an already selected note keeps the selection. A
+right-click on another note selects that note. **Play from here** uses the
+current listening range when it contains that time, and otherwise selects
+**Song**.
+
+With the **Notes** plot focused, use Ctrl+A to select all, Ctrl+C to copy
+scored notes and Ctrl+V to paste at the playhead (Cmd on macOS). Paste uses
+the selected **Insert voice** and preserves relative onset, duration, pitch
+and velocity. Right-click empty space to paste at the clicked position.
+
 ### Listen to the reconstruction
 
 In the bottom transport, choose **Play range** then click **Play**, or tap
@@ -447,9 +479,12 @@ composer stays available across a refresh. The
   **Alt-click** a marker to remove it. Drag down to zero depth to stop the
   vibrato from that point. **Note evidence** lists the stages in ticks, Hz, and
   cents.
-- Select a scored note to set its velocity or delete it with **Delete**.
-  Use **Set role** in Roles or **Pin lane** in Notes. Delete on a note generated
-  during role assignment records a drop. The trace shows the fate and reason,
+- Press **Delete** or **Backspace** in **Notes** or **Roles** to delete the
+  selected notes as one edit step. Click a note to focus the plot. These keys
+  keep their normal behavior in text fields and spinners. Use **Ctrl+Z** to
+  restore the selection's notes and **Ctrl+Y** or **Ctrl+Shift+Z** to redo
+  (Cmd on macOS). Deletions are staged in the draft and saved as `deleteNote`
+  edits when you choose **Apply & rebuild**. The trace shows the fate and reason,
   role, lane, instrument, both clocks, competing note IDs, and applied edits.
   Expand **Raw trace JSON** for detailed evidence.
 - Gold outlines mark pending edits. **Changes → Undo** and **Redo** change
@@ -551,7 +586,8 @@ snare and hat shapes in a separate strip. Drum hits are also available in the
 Notes chip lanes.
 
 Use the pointer icon to select a voice or role. The eye icon shows or hides
-it, and the target icon highlights it on the plot. Drag selected notes onto
+it, and the target icon highlights it on the plot. The voice controls also
+mute or solo that voice in Chip playback. Drag selected notes onto
 a voice row or click **Assign** to move them to that voice. Double-click a note
 to focus the selection in **Notes**.
 

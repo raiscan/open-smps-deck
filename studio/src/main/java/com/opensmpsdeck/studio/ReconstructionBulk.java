@@ -435,12 +435,16 @@ final class ReconstructionBulk extends VBox {
         if (target != null && !selected.isEmpty()) showIssue(moveTo(target));
     }
 
-    String moveTo(Voice target) {
+    String moveIssue(Voice target) {
         if (selected.isEmpty()) return "Select notes to assign to a voice.";
         if (selected.stream().anyMatch(note -> kind(note) != target.kind()))
             return "Move tonal and drum notes to separate voices.";
         var assignment = target.assignment();
-        String invalid = assignment == null ? null : laneIssue(assignment.laneType(), null, selected);
+        return assignment == null ? null : laneIssue(assignment.laneType(), null, selected);
+    }
+
+    String moveTo(Voice target) {
+        String invalid = moveIssue(target);
         if (invalid != null) return invalid;
         if (selected.stream().anyMatch(note -> !target.equals(owners.get(note.id()))))
             submit.accept(List.of(voiceEdit("move", target.id(), "Move selection to " + target.name(),
