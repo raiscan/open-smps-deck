@@ -50,7 +50,7 @@ class ReconstructionVoiceFitTest {
         var pcm = new java.util.ArrayList<float[]>();
         for (int i = 0; i < voices.size(); i++) {
             var project = CataloguePlayback.matchProbe(catalogue, voices.get(i), pitch + (i >= 2 ? 12 : 0), 18, true);
-            pcm.add(VoiceWindows.renderMono(com.opensmpsdeck.project.ProjectCompiler.compileWithAssets(project), 18));
+            pcm.add(VoiceWindows.renderMono(project, 18));
         }
         var mix = new float[pcm.getFirst().length];
         for (int i = 0; i < mix.length; i++) mix[i] = .32f * pcm.get(0)[i] + pcm.get(2)[i];

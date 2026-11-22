@@ -161,7 +161,7 @@ final class ReconstructionDrums {
         var notes = score.notes().stream().map(ReconstructionStages.Note::midi)
                 .filter(note -> uncertain.contains(new ReconstructionVoices.Key(note.partId(), note.pitch()))).toList();
         var legacy = ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
-                score.durationUs(), InstrumentCatalogue.Kind.FM_VOICE);
+                score.durationUs(), InstrumentCatalogue.Kind.FM_VOICE, Set.of(), score.inputs().targetGame());
         for (var key : uncertain) {
             var previous = legacy.get(key);
             if (previous == null || previous.assetId() == null) continue;

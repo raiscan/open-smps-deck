@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NativeCommand;
@@ -32,7 +34,7 @@ class ReconstructionChordsTest {
                 List.of(new NoteEvent("note", 0, 60, tuning.note())),
                 List.of(new CommandEvent("tune", 0, NativeCommand.DETUNE, List.of(tuning.detune() & 255))), "RESET");
         var project = new StudioProject(4, "Chord probe", "S3K", 30, 0, List.of(patch),
-                List.of(sequence), List.of(new Clip("probe", "held", "FM1", 0, 60)));
+                List.of(sequence), List.of(new Clip("probe", "held", "FM1", 0, 60)), TargetGame.S3K, null);
         double[] pcm = new double[S3kRenderer.SAMPLE_RATE];
         var offset = new AtomicInteger();
         S3kRenderer.render(ProjectCompiler.compileWithAssets(project), 60, stereo -> {

@@ -22,17 +22,6 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
         groupPlacements = List.copyOf(groupPlacements);
     }
 
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
-                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
-                         List<AudioReference> references, List<ReviewNote> notes, int arrangementVersion,
-                         List<GroupSequence> groupSequences, List<GroupPlacement> groupPlacements,
-                         boolean detachedFromReconstruction, RetailSongOrigin derivedFrom, TargetGame target) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips, envelopes, samples,
-                nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements,
-                detachedFromReconstruction, derivedFrom, target, null);
-    }
-
     public StudioProject withNativeTempo(Integer nativeTempo) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
@@ -43,32 +32,10 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
         return nativeTempo == null ? new TargetClock(TargetGame.S3K, tempo) : new TargetClock(target, nativeTempo);
     }
 
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
-                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
-                         List<AudioReference> references, List<ReviewNote> notes, int arrangementVersion,
-                         List<GroupSequence> groupSequences, List<GroupPlacement> groupPlacements,
-                         boolean detachedFromReconstruction, RetailSongOrigin derivedFrom) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips, envelopes, samples,
-                nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements,
-                detachedFromReconstruction, derivedFrom, TargetGame.S3K);
-    }
-
     public StudioProject withTarget(TargetGame target) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
                 groupPlacements, detachedFromReconstruction, derivedFrom, target, this.target == target ? nativeTempo : null);
-    }
-
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat,
-                            int tempo, List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                            List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
-                            List<AudioReference> references, List<ReviewNote> notes,
-                            int arrangementVersion, List<GroupSequence> groupSequences,
-                            List<GroupPlacement> groupPlacements, boolean detachedFromReconstruction) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
-                groupPlacements, detachedFromReconstruction, null);
     }
 
     public StudioProject withAssets(List<Voice> voices, List<Envelope> envelopes, List<DacSample> samples) {
@@ -83,28 +50,10 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
                 groupPlacements, detachedFromReconstruction, origin, target, nativeTempo);
     }
 
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
-                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
-                         List<AudioReference> references, List<ReviewNote> notes, int arrangementVersion,
-                         List<GroupSequence> groupSequences, List<GroupPlacement> groupPlacements) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
-                groupPlacements, false);
-    }
-
     public StudioProject withDetachedFromReconstruction(boolean detached) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
                 groupPlacements, detached, derivedFrom, target, nativeTempo);
-    }
-
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
-                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
-                         List<AudioReference> references, List<ReviewNote> notes) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, references, notes, formatVersion, List.of(), List.of());
     }
 
     StudioProject withArrangement(int version, List<Voice> voices, List<Sequence> sequences,
@@ -119,27 +68,59 @@ public record StudioProject(int formatVersion, String name, String mode, int tic
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements, detachedFromReconstruction, derivedFrom, target, this.tempo == tempo ? nativeTempo : null);
     }
 
-    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
-                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
-                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram) {
-        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
-                envelopes, samples, nativeProgram, List.of(), List.of());
-    }
-
     public StudioProject withReview(List<AudioReference> references, List<ReviewNote> notes) {
         return new StudioProject(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
                 envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences, groupPlacements, detachedFromReconstruction, derivedFrom, target, nativeTempo);
     }
-    public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
-                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes,List<DacSample> samples) {
-        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,envelopes,samples,null);
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat,
+                            int tempo, List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                            List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
+                            List<AudioReference> references, List<ReviewNote> notes,
+                            int arrangementVersion, List<GroupSequence> groupSequences,
+                            List<GroupPlacement> groupPlacements, boolean detachedFromReconstruction, TargetGame target, Integer nativeTempo) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
+                groupPlacements, detachedFromReconstruction, null, target, nativeTempo);
     }
-    public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
-                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes) {
-        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,envelopes,List.of());
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
+                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
+                         List<AudioReference> references, List<ReviewNote> notes, int arrangementVersion,
+                         List<GroupSequence> groupSequences, List<GroupPlacement> groupPlacements, TargetGame target, Integer nativeTempo) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, arrangementVersion, groupSequences,
+                groupPlacements, false, target, nativeTempo);
     }
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
+                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram,
+                         List<AudioReference> references, List<ReviewNote> notes, TargetGame target, Integer nativeTempo) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, references, notes, formatVersion, List.of(), List.of(), target, nativeTempo);
+    }
+
+    public StudioProject(int formatVersion, String name, String mode, int ticksPerBeat, int tempo,
+                         List<Voice> voices, List<Sequence> sequences, List<Clip> clips,
+                         List<Envelope> envelopes, List<DacSample> samples, NativeProgram nativeProgram, TargetGame target, Integer nativeTempo) {
+        this(formatVersion, name, mode, ticksPerBeat, tempo, voices, sequences, clips,
+                envelopes, samples, nativeProgram, List.of(), List.of(), target, nativeTempo);
+    }
+
     public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
-                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips) {
-        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,List.of());
+                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes,List<DacSample> samples, TargetGame target, Integer nativeTempo) {
+        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,envelopes,samples,null, target, nativeTempo);
+    }
+
+    public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
+                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips,List<Envelope> envelopes, TargetGame target, Integer nativeTempo) {
+        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,envelopes,List.of(), target, nativeTempo);
+    }
+
+    public StudioProject(int formatVersion,String name,String mode,int ticksPerBeat,int tempo,
+                         List<Voice> voices,List<Sequence> sequences,List<Clip> clips, TargetGame target, Integer nativeTempo) {
+        this(formatVersion,name,mode,ticksPerBeat,tempo,voices,sequences,clips,List.of(), target, nativeTempo);
     }
 }

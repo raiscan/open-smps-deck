@@ -208,7 +208,7 @@ class McpServerTest {
         var demo = DemoProject.create();
         var sequence = demo.sequences().getFirst();
         var large = new StudioProject(demo.formatVersion(), "Oversize", demo.mode(), demo.ticksPerBeat(), demo.tempo(),
-                demo.voices(), List.of(sequence), List.of(new Clip("clip", sequence.id(), "FM1", 0, Integer.MAX_VALUE)));
+                demo.voices(), List.of(sequence), List.of(new Clip("clip", sequence.id(), "FM1", 0, Integer.MAX_VALUE)), TargetGame.S3K, null);
         var limit = assertThrows(ProjectCompiler.BankLimitException.class, () -> ProjectCompiler.compile(large));
         Path source = directory.resolve("oversize.smps.json");
         Files.writeString(source, ProjectFormat.write(large));

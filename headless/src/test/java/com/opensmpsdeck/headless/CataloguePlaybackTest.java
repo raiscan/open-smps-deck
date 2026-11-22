@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Recipe;
@@ -49,6 +51,18 @@ class CataloguePlaybackTest {
             });
             assertTrue(heard[0], () -> "Silent probe for " + id);
         }
+    }
+
+    @Test void applyingAPlayableAssetPreservesSonic1Target() {
+        var builder = new InstrumentCatalogue.Builder();
+        String asset = builder.asset(Kind.PSG_VOLUME, "Test envelope", new byte[]{0, 1, (byte) 0x80});
+        String variant = builder.variant(asset, "Test envelope", Recipe.plain(), null);
+        var original = DemoProject.create().withSettings("S1", 12, 0)
+                .withTarget(com.opensmpsdeck.project.TargetGame.S1).withNativeTempo(37);
+        var edited = CataloguePlayback.apply(builder.build(), variant, original);
+        assertNotEquals(original, edited);
+        assertEquals(original.target(), edited.target());
+        assertEquals(original.nativeTempo(), edited.nativeTempo());
     }
 
     @Test void matchingProbeUsesOneRequestedAttackAndPreservesOnsetState() throws Exception {
@@ -115,7 +129,7 @@ class CataloguePlaybackTest {
         String slow = builder.variant(asset, "Slow", new Recipe(28, null, 127, 12,
                 null, null, List.of(), List.of()), null);
         var catalogue = builder.build();
-        var empty = new StudioProject(4, "Target", "S3K", 24, 0, List.of(), List.of(), List.of());
+        var empty = new StudioProject(4, "Target", "S3K", 24, 0, List.of(), List.of(), List.of(), TargetGame.S3K, null);
         var first = CataloguePlayback.apply(catalogue, fast, empty);
         var result = CataloguePlayback.apply(catalogue, slow, first);
         assertEquals(List.of(4, 28), result.samples().stream().map(sample -> sample.rate()).toList());
@@ -140,7 +154,7 @@ class CataloguePlaybackTest {
         var program = NativeProgram.of(0, 0, 0, 120, bank, List.of(),
                 List.of(new NativeProgram.DacSlot(0x81, sample.id(), sample.rate())));
         var source = new StudioProject(5, "Panned sample", "S3K", 24, 0, List.of(), List.of(), List.of(),
-                List.of(), List.of(sample), program);
+                List.of(), List.of(sample), program, TargetGame.S3K, null);
         var builder = new InstrumentCatalogue.Builder();
         CatalogueSources.scanProject(source, "sample.s3k", "test", builder);
         var catalogue = builder.build();
@@ -171,7 +185,7 @@ class CataloguePlaybackTest {
         byte[] bank = {0, 0, 1, 0, 1, 0, 10, (byte) 128, 0, 0, (byte) 0xF2};
         var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
         var nativeTarget = new StudioProject(5, "Native", "S3K", 15, 0, List.of(), List.of(),
-                List.of(), List.of(), List.of(), program);
+                List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
         var rejected = assertThrows(IllegalArgumentException.class,
                 () -> CataloguePlayback.apply(catalogue, variant, nativeTarget));
         assertTrue(rejected.getMessage().contains("editable copy"));

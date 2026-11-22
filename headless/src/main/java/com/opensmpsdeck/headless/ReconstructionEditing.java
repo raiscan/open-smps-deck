@@ -164,14 +164,12 @@ public final class ReconstructionEditing {
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
         var matches = ReconstructionCli.voicedMatches(catalogue, solo, voicing);
         var result = S3kReconstruction.arrangeAllocated("Selection", score.inputs().ticksPerBeat(), timeline.ticks(),
-                new S3kReconstruction.Score(score.source().parts(), List.of(), List.of()), solo, structure, catalogue,
+                new S3kReconstruction.Score(score.source().parts(), List.of(), List.of(), score.profile()), solo, structure, catalogue,
                 matches.byLane(), Map.of(), voicing.lanes(), false, true, scopes, Map.of(), Map.of(), null, assignments,
                 voicing.sourceInstruments());
         int start = selected.stream().mapToInt(ReconstructionAllocation.Entry::startTick).min().orElseThrow();
         int end = selected.stream().mapToInt(ReconstructionAllocation.Entry::endTick).max().orElseThrow();
-        var project = result.project().withTarget(score.profile().game());
-        if (timeline.clock().game() != com.opensmpsdeck.project.TargetGame.S3K)
-            project = project.withNativeTempo(timeline.clock().tempo());
+        var project = result.project();
         return new Audition(project, timeline.secondsAtTick(start),
                 Math.min(timeline.frames() / 60.0, timeline.secondsAtTick(end + 30)));
     }

@@ -439,6 +439,6 @@ class ReconstructionLanePoliciesTest {
                 new S3kReconstruction.Score(parts, List.of(), List.of()), new ReconstructionAllocation.Result(1, sorted),
                 null, catalogue, choices, Map.of(), vibrato == null ? Map.of() : Map.of("FM1", settings),
                 false, true, Map.of(), Map.of(), Map.of(),
-                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(), layers, false, decisions);
+                null, Map.of(), instruments, policies, new ReconstructionLanePolicies.Levels(com.opensmpsdeck.project.TargetProfile.S3K), layers, false, decisions);
     }
 }

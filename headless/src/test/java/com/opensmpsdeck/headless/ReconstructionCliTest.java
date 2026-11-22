@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
@@ -252,15 +253,29 @@ class ReconstructionCliTest {
                     "--steady-tempo", "off", "--lane-policy-preset", "off"}, System.out, new PrintStream(errors)),
                     errors.toString());
             var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
-            var compiled = ReconstructionCli.compileTarget(project);
+            assertEquals(255, project.nativeTempo());
+            var playback = TargetPlayback.prepare(project);
+            assertEquals(project.target(), playback.target());
+            var layout = driver.compile(project, project.nativeTempo());
+            var compiled = new com.opensmpsdeck.project.CompiledProject(layout.bytes(), project.envelopes(), project.samples());
+            driver.preflight(compiled);
+            Path expectedWav = directory.resolve(driver.id() + "-native-clock.wav");
+            driver.render(compiled, expectedWav, frames);
+            assertEquals(-1, Files.mismatch(expectedWav, output.resolve("render.wav")));
             var observed = new java.util.ArrayList<Integer>();
             int[] frame = {0};
-            driver.render(compiled, frames, ignored -> frame[0]++, new com.openggf.audio.synth.ChipWriteObserver() {
+            playback.render(frames, S3kRenderer.ChannelMask.NONE, ignored -> frame[0]++, new com.openggf.audio.synth.ChipWriteObserver() {
                 @Override public void onYm2612Write(int port, int register, int value) {
                     if (register == 0x28 && (value & 0xF7) == 0xF0) observed.add(frame[0]);
                 }
                 @Override public void onPsgWrite(int value) {}
             });
+            var clock = project.clock();
+            var expectedOnsets = project.clips().stream().filter(clip -> clip.lane().equals("FM1"))
+                    .flatMap(clip -> project.sequences().stream().filter(sequence -> sequence.id().equals(clip.sequenceId()))
+                            .flatMap(sequence -> sequence.notes().stream().map(note -> clip.startTick() + note.tick())))
+                    .sorted().map(tick -> Math.toIntExact(clock.frameAtTick(tick))).toList();
+            assertEquals(expectedOnsets, observed, driver.id());
             assertEquals(attacks.size(), observed.size(), driver.id());
             for (int i = 0; i < attacks.size(); i++)
                 assertEquals(attacks.get(i), observed.get(i), 1, driver.id() + " onset " + i);
@@ -270,6 +285,7 @@ class ReconstructionCliTest {
     private void assertTargetRoundTrip(Path midi, Path wav, Path index) throws Exception {
         Path staged = directory.resolve("target-s3k");
         Path classic = directory.resolve("target-s1");
+        Path sonic2 = directory.resolve("target-s2");
         Path replay = directory.resolve("target-replay");
         Path imported = directory.resolve("target-import");
         var errors = new ByteArrayOutputStream();
@@ -282,11 +298,29 @@ class ReconstructionCliTest {
         assertEquals("s2", artifact(imported, "import.json").getAsJsonObject("runRequest")
                 .getAsJsonObject("options").get("target").getAsString());
 
-        for (var target : List.of("s3k", "s1")) {
-            Path work = target.equals("s3k") ? staged : classic;
+        for (var target : TargetGame.values()) {
+            Path work = switch (target) {
+                case S3K -> staged;
+                case S1 -> classic;
+                case S2 -> sonic2;
+            };
             assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
                     index.toString(), work.toString(), "--seconds", ".5", "--fm-only", "--lane-policy-preset", "off",
-                    "--target", target}, System.out, err), errors.toString());
+                    "--target", target.id()}, System.out, err), errors.toString());
+            var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+            assertEquals(target, project.target());
+            assertEquals(target == TargetGame.S3K ? null : 255, project.nativeTempo());
+            if (target != TargetGame.S3K) {
+                var playback = TargetPlayback.prepare(project);
+                assertEquals(target, playback.target());
+                var expected = directory.resolve(target.id() + "-expected.wav");
+                ClassicPackageDriver.valueOf(target.name()).render(playback.compiled(), expected, 30);
+                assertEquals(-1, Files.mismatch(expected, work.resolve("render.wav")));
+                var pcm = ReferenceAudio.stereoPrefix(expected, 48_000, 24_000);
+                float peak = 0;
+                for (float sample : pcm) peak = Math.max(peak, Math.abs(sample));
+                assertTrue(peak > .01);
+            }
         }
         assertFalse(artifact(staged, "score.json").getAsJsonObject("inputs").has("target"));
         assertFalse(artifact(staged, "manifest.json").getAsJsonObject("options").has("target"));
@@ -306,6 +340,7 @@ class ReconstructionCliTest {
             assertEquals("s1", artifact(work, "score.json").getAsJsonObject("inputs").get("target").getAsString());
             assertEquals("s1", artifact(work, "manifest.json").getAsJsonObject("options").get("target").getAsString());
             assertEquals("s1", artifact(work, "arrangement.smps.json").get("target").getAsString());
+            assertEquals(255, artifact(work, "arrangement.smps.json").get("nativeTempo").getAsInt());
             try (var zip = new java.util.zip.ZipFile(work.resolve("arrangement.smps.zip").toFile());
                  var input = zip.getInputStream(zip.getEntry("manifest.json"))) {
                 assertEquals("s1", JsonParser.parseString(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))

@@ -103,22 +103,23 @@ public final class ProjectExport {
             var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
             return writePortable(project, output, options.format, settings, progress).exportWarnings();
         }
-        var compiled = ProjectCompiler.compileWithAssets(project);
         if (options.format == Format.SMPS) {
             progress.report(0, 1, "Writing raw S3K track");
-            Main.writeNewBinary(output, rawBytes(compiled));
+            Main.writeNewBinary(output, rawBytes(ProjectCompiler.compileWithAssets(project)));
             progress.report(1, 1, "Export complete");
             return List.of();
         }
 
+        var playback = TargetPlayback.prepare(project);
+        var compiled = playback.compiled();
         int length = length(project, work);
         NativeExportLength.Loop loop = null;
         if (compiled.nativeProgram() != null) {
-            var playback = NativeExportLength.measure(compiled, options.loops == null ? 1 : options.loops);
-            if (!playback.finished() && options.loops != null)
+            var nativeLength = NativeExportLength.measure(compiled, options.loops == null ? 1 : options.loops);
+            if (!nativeLength.finished() && options.loops != null)
                 throw new IllegalArgumentException("Native export could not complete the requested loop passes or reach the song end within ten minutes");
-            loop = playback.loop();
-            length = playback.end();
+            loop = nativeLength.loop();
+            length = nativeLength.end();
         } else if (options.loops != null) {
             throw new IllegalArgumentException("Loop count is available for native S3K banks");
         }
@@ -138,11 +139,11 @@ public final class ProjectExport {
         try {
             if (options.format == Format.VGM) {
                 var vgm = stage.resolve("track.vgm");
-                VgmFile.write(compiled, project.name(), range.end(), loop, vgm, progress);
+                VgmFile.write(playback, project.name(), range.end(), loop, vgm, progress);
                 publish(vgm, output);
             } else if (!options.stems) {
                 var file = stage.resolve("track." + options.format.extension());
-                audio(compiled, file, range, fadeSamples, S3kRenderer.ChannelMask.NONE, options.format,
+                audio(playback, file, range, fadeSamples, S3kRenderer.ChannelMask.NONE, options.format,
                         progress, 0, 1, options.format.name());
                 publish(file, output);
             } else {
@@ -150,7 +151,7 @@ public final class ProjectExport {
                 var names = new ArrayList<String>();
                 for (var stem : STEMS) {
                     String name = stem.name() + "." + options.format.extension();
-                    audio(compiled, folder.resolve(name), range, fadeSamples, stem.mask(), options.format,
+                    audio(playback, folder.resolve(name), range, fadeSamples, stem.mask(), options.format,
                             progress, names.size(), STEMS.size(), stem.name());
                     names.add(name);
                 }
@@ -274,17 +275,17 @@ public final class ProjectExport {
         return new Stem(name, new S3kRenderer.ChannelMask(0b111111, 0b1111 ^ (1 << channel)));
     }
 
-    private static void audio(CompiledProject compiled, Path output, WaveFile.Range range, int fade,
+    private static void audio(TargetPlayback playback, Path output, WaveFile.Range range, int fade,
                               S3kRenderer.ChannelMask mask, Format format, ReconstructionStages.Progress progress,
                               int index, int count, String name) throws IOException {
         var wav = output.resolveSibling(output.getFileName() + ".pcm.wav");
-        render(compiled, wav, range, fade, mask, progress, index, count, name);
+        render(playback, wav, range, fade, mask, progress, index, count, name);
         FfmpegAudio.encode(wav, output, format == Format.MP3);
         Files.delete(wav);
         progress.report((index + 1) * (range.end() + 1), audioProgressTotal(range, count), "Wrote " + name);
     }
 
-    private static void render(CompiledProject compiled, Path output, WaveFile.Range range, int fade,
+    private static void render(TargetPlayback playback, Path output, WaveFile.Range range, int fade,
                                S3kRenderer.ChannelMask mask, ReconstructionStages.Progress progress,
                                int index, int count, String label) throws IOException {
         int total = audioProgressTotal(range, count);
@@ -294,7 +295,7 @@ public final class ProjectExport {
         if (index == 0) progress.report(0, total, message);
         WaveFile.write(output, range.count(), sink -> {
             int[] frame = {0};
-            S3kRenderer.render(compiled, range.end(), mask, pcm -> {
+            playback.render(range.end(), mask, pcm -> {
                 if (Thread.currentThread().isInterrupted())
                     throw new java.io.InterruptedIOException("Export cancelled");
                 int current = frame[0]++;

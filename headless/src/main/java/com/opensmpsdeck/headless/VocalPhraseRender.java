@@ -2,7 +2,6 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
 import java.io.IOException;
@@ -37,8 +36,8 @@ public final class VocalPhraseRender {
         var phrase = data.spans().stream().filter(span -> span.id().equals(phraseId)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Unknown phrase ID: " + phraseId));
         var range = WaveFile.Range.seconds(data.time().project(phrase.start()), data.time().project(phrase.end()));
-        var project = ProjectCompiler.compileWithAssets(ProjectFiles.load(work.resolve("arrangement.smps.json")).project());
-        WaveFile.renderRange(project, output, range, ReconstructionView.soloMask(List.of("FM1")));
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        WaveFile.renderRange(TargetPlayback.prepare(project), output, range, ReconstructionView.soloMask(List.of("FM1")));
         var audio = new VocalStemEvidence(ReconstructionLeadAudio.readMono(output, range.count() / 60.0));
         double projectOffset = range.start() / 60.0;
         var attacks = new ArrayList<Double>();

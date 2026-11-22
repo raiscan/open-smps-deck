@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.StudioProject;
 import com.openggf.audio.synth.ChipWriteObserver;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -18,6 +19,11 @@ public final class WaveFile {
 
     public static void render(byte[] song, Path output, int presentations) throws IOException {
         render(new CompiledProject(S3kBinary.validateAndCopy(song), List.of()), output, presentations);
+    }
+
+    public static void render(StudioProject project, Path output, int presentations) throws IOException {
+        var playback = TargetPlayback.prepare(project);
+        playback.writeWave(output, presentations);
     }
 
     public static void render(CompiledProject project, Path output, int presentations) throws IOException {
@@ -40,6 +46,11 @@ public final class WaveFile {
                 throw new IllegalArgumentException("Expected 0 <= start < end <= 600 seconds");
             return new Range((int) Math.round(start * rate), (int) Math.round(end * rate));
         }
+    }
+
+    public static void renderRange(TargetPlayback playback, Path output, Range range, S3kRenderer.ChannelMask mask)
+            throws IOException {
+        writeRange(output, range, mask, sink -> playback.render(range.end(), mask, sink));
     }
 
     public static void renderRange(CompiledProject project, Path output, Range range, S3kRenderer.ChannelMask mask)

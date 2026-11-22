@@ -1,6 +1,6 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -24,19 +24,21 @@ final class VoicePatchShortlist {
     private static final int CACHE_LIMIT = 24_000;
 
     record RankedPatch(String id, double score) {}
-    private record Key(String asset, int pitch) {}
+    private record Key(String asset, int pitch, TargetGame target) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
     private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile) {}
     private static final Map<Key, Template> TEMPLATES = new ConcurrentHashMap<>();
 
     private final InstrumentCatalogue catalogue;
+    private final TargetGame target;
     private final List<InstrumentCatalogue.Variant> variants;
     private final VoiceSpectra spectra = new VoiceSpectra();
     private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
 
-    VoicePatchShortlist(InstrumentCatalogue catalogue) {
+    VoicePatchShortlist(InstrumentCatalogue catalogue, TargetGame target) {
         this.catalogue = catalogue;
+        this.target = target;
         var seen = new HashSet<>(CatalogueMatcher.inferredAzureLakeSlots(catalogue));
         variants = catalogue.variants().stream().sorted(Comparator.comparing(InstrumentCatalogue.Variant::id))
                 .filter(variant -> catalogue.asset(variant.assetId()).kind() == FM_VOICE && seen.add(variant.assetId()))
@@ -50,8 +52,8 @@ final class VoicePatchShortlist {
         for (var variant : variants) {
             if (!measured.add(variant.assetId())) continue;
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("lead synth selection cancelled");
-            var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ticks, true);
-            float[] audio = VoiceWindows.renderMono(ProjectCompiler.compileWithAssets(project), ticks);
+            var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ticks, true, target);
+            float[] audio = VoiceWindows.renderMono(project, ticks);
             double early = energy(audio, audio.length / 8, audio.length / 2);
             double held = energy(audio, audio.length / 2, audio.length);
             if (held < 1e-8) continue;
@@ -224,11 +226,11 @@ final class VoicePatchShortlist {
     }
 
     private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
-        var key = new Key(variant.assetId(), pitch);
+        var key = new Key(variant.assetId(), pitch, target);
         var cached = TEMPLATES.get(key);
         if (cached != null) return cached;
-        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true);
-        var rendered = VoiceWindows.renderMono(ProjectCompiler.compileWithAssets(project), ATTACK_TICKS);
+        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true, target);
+        var rendered = VoiceWindows.renderMono(project, ATTACK_TICKS);
         var features = new Template(spectra.average(rendered),
                 pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null);
         if (TEMPLATES.size() < CACHE_LIMIT) {

@@ -31,7 +31,7 @@ class ProjectPackageTest {
         var original = fixture();
         var voice = original.voices().getFirst().withOrigin(AssetOrigin.stock(null));
         var project = new StudioProject(3, original.name(), original.mode(), original.ticksPerBeat(),
-                original.tempo(), List.of(voice), original.sequences(), original.clips(), original.envelopes());
+                original.tempo(), List.of(voice), original.sequences(), original.clips(), original.envelopes(), TargetGame.S3K, null);
         String source = ProjectFormat.write(project);
         Path input = Files.writeString(directory.resolve("stock.json"), source);
         Path archive = directory.resolve("stock.smps.zip");
@@ -49,7 +49,7 @@ class ProjectPackageTest {
     @Test void projectAboveOneMiBSavesLoadsPackagesAndRendersIdentically() throws Exception {
         StudioProject small = fixture();
         var large = new StudioProject(3, "x".repeat(1_048_576), small.mode(), small.ticksPerBeat(),
-                small.tempo(), small.voices(), small.sequences(), small.clips(), small.envelopes());
+                small.tempo(), small.voices(), small.sequences(), small.clips(), small.envelopes(), TargetGame.S3K, null);
         Path smallSource = directory.resolve("small.json"), largeSource = directory.resolve("large.json");
         ProjectFiles.save(smallSource, small, null);
         ProjectFiles.save(largeSource, large, null);
@@ -122,7 +122,7 @@ class ProjectPackageTest {
         var project = new StudioProject(4, original.name(), "S3K", 24, 0, original.voices(),
                 List.of(original.sequences().getFirst(), drums),
                 List.of(original.clips().getFirst(), new Clip("drum-clip", "drums", "DAC", 0, 6)),
-                original.envelopes(), samples);
+                original.envelopes(), samples, TargetGame.S3K, null);
         Path archive = directory.resolve("dac.zip"), second = directory.resolve("dac-again.zip");
         ProjectPackage.write(project, archive);
         ProjectPackage.write(project, second);
@@ -156,7 +156,7 @@ class ProjectPackageTest {
             assertArrayEquals(sample.pcm(), entries.get(path));
         }
         var missing = new StudioProject(4, project.name(), project.mode(), project.ticksPerBeat(), project.tempo(),
-                project.voices(), project.sequences(), project.clips(), project.envelopes(), List.of(samples.getFirst()));
+                project.voices(), project.sequences(), project.clips(), project.envelopes(), List.of(samples.getFirst()), TargetGame.S3K, null);
         Path invalid = directory.resolve("missing-hit.zip");
         assertThrows(IllegalArgumentException.class, () -> ProjectPackage.write(missing, invalid));
         assertFalse(Files.exists(invalid));
@@ -174,7 +174,7 @@ class ProjectPackageTest {
     @Test void invalidResourcesFailBeforePublicationAndCancelledWritesCleanOnlyTheirOutput() throws Exception {
         var original = fixture();
         var invalid = new StudioProject(3, original.name(), "S3K", 24, 0, original.voices(), original.sequences(), original.clips(),
-                List.of(new Envelope("mod", "Unsafe", "MODULATION", List.of(0x80))));
+                List.of(new Envelope("mod", "Unsafe", "MODULATION", List.of(0x80))), TargetGame.S3K, null);
         Path absent = directory.resolve("invalid.zip");
         assertThrows(IllegalArgumentException.class, () -> ProjectPackage.write(invalid, absent));
         assertFalse(Files.exists(absent));
@@ -191,7 +191,7 @@ class ProjectPackageTest {
         var sequence = original.sequences().getFirst();
         var plain = new Sequence(sequence.id(), sequence.name(), sequence.type(), sequence.lengthTicks(), sequence.voiceId(),
                 sequence.volume(), sequence.notes(), sequence.commands(), sequence.repeatState(), null, null);
-        var project = new StudioProject(3, original.name(), "S3K", 24, 0, original.voices(), List.of(plain), original.clips(), original.envelopes());
+        var project = new StudioProject(3, original.name(), "S3K", 24, 0, original.voices(), List.of(plain), original.clips(), original.envelopes(), TargetGame.S3K, null);
         assertTrue(ProjectCompiler.compileWithAssets(project).requiresAssets());
         String source = ProjectFormat.write(project);
         Path input = Files.writeString(directory.resolve("source.json"), source);
@@ -237,7 +237,7 @@ class ProjectPackageTest {
                 List.of(new Clip("clip", "fm", "FM1", 0, 8)), List.of(
                 new Envelope("../../unused", "Unused / PSG ☃", "PSG_VOLUME", List.of(0, 1, 0x83)),
                 new Envelope("mod", "Pitch", "MODULATION", List.of(0, 2, 0x81)),
-                new Envelope("second", "PSG loop", "PSG_VOLUME", List.of(2, 1, 0x80))));
+                new Envelope("second", "PSG loop", "PSG_VOLUME", List.of(2, 1, 0x80))), TargetGame.S3K, null);
     }
 
     private static Result run(String... arguments) {

@@ -1,7 +1,6 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
 import com.google.gson.Gson;
@@ -165,7 +164,7 @@ final class CatalogueCli {
                     integer(options, "--gate-ticks", 60))
                 : CataloguePlayback.audition(catalogue, args[3]);
         int frames = integer(options, "--frames", ProjectRenderTiming.presentationCount(project));
-        WaveFile.render(ProjectCompiler.compileWithAssets(project), Path.of(args[4]), frames);
+        WaveFile.render(project, Path.of(args[4]), frames);
         print(out, new Output(VERSION, PROFILE, catalogue.match(args[3]).variant().id(), frames));
     }
 

@@ -14,7 +14,7 @@ class NativeCommandsTest {
         return new Sequence("s","Source",type,length,type.equals("FM")?"v":null,100,notes,commands,state);
     }
     static StudioProject project(Sequence sequence,int clipLength) {
-        return new StudioProject(2,"Commands","S3K",24,128,List.of(ProjectCompilerTest.VOICE),List.of(sequence),List.of(new Clip("c","s",sequence.type()+"1",0,clipLength)));
+        return new StudioProject(2,"Commands","S3K",24,128,List.of(ProjectCompilerTest.VOICE),List.of(sequence),List.of(new Clip("c","s",sequence.type()+"1",0,clipLength)), TargetGame.S3K, null);
     }
     static byte[] track(StudioProject project) {
         byte[] bank=ProjectCompiler.compile(project, ProjectCompiler.Encoding.LINEAR); return Arrays.copyOfRange(bank,word(bank,10),word(bank,0));
@@ -73,7 +73,7 @@ class NativeCommandsTest {
         assertArrayEquals(join(fmReset(),repetition,fmReset(),repetition,bytes(0xF2)),track(project(source("FM",4,notes,commands,"RESET"),8)));
         var carry=project(source("FM",4,notes,commands,"CARRY"),8);
         assertArrayEquals(join(fmReset(),repetition,repetition,bytes(0xF2)),track(carry));
-        var two=new StudioProject(2,carry.name(),carry.mode(),carry.ticksPerBeat(),carry.tempo(),carry.voices(),carry.sequences(),List.of(new Clip("c","s","FM1",0,8),new Clip("d","s","FM1",8,4)));
+        var two=new StudioProject(2,carry.name(),carry.mode(),carry.ticksPerBeat(),carry.tempo(),carry.voices(),carry.sequences(),List.of(new Clip("c","s","FM1",0,8),new Clip("d","s","FM1",8,4)), TargetGame.S3K, null);
         assertArrayEquals(join(fmReset(),repetition,repetition,fmReset(),repetition,bytes(0xF2)),track(two));
     }
 
@@ -107,7 +107,7 @@ class NativeCommandsTest {
         }
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(project(source("FM",12,source.notes(),List.of(event("dup",0,NativeCommand.PAN,0),event("dup",6,NativeCommand.PAN,0)),"RESET"),12)));
         var v1=ProjectFormatTest.fixture();
-        assertThrows(IllegalArgumentException.class,()->ProjectFormat.write(new StudioProject(1,v1.name(),v1.mode(),v1.ticksPerBeat(),v1.tempo(),v1.voices(),List.of(source),v1.clips())));
+        assertThrows(IllegalArgumentException.class,()->ProjectFormat.write(new StudioProject(1,v1.name(),v1.mode(),v1.ticksPerBeat(),v1.tempo(),v1.voices(),List.of(source),v1.clips(), TargetGame.S3K, null)));
     }
 
     @Test void immutableCommandsAndCatalogueCoverExactNativeWidths() {
@@ -143,7 +143,7 @@ class NativeCommandsTest {
             var p=new StudioProject(4,"Commands","S3K",24,128,
                     List.of(ProjectCompilerTest.VOICE,extraVoice),
                     List.of(source(type,12,List.of(new NoteEvent("n",0,12,60)),commands,"RESET")),
-                    List.of(new Clip("c","s",type+"1",0,12)),List.of(volume,modulation),List.of());
+                    List.of(new Clip("c","s",type+"1",0,12)),List.of(volume,modulation),List.of(), TargetGame.S3K, null);
             assertEquals(p,ProjectFormat.read(ProjectFormat.write(p)));
             byte[] compiled=track(p); assertEquals(0xF2,compiled[compiled.length-1]&255);
             assertThrows(IllegalArgumentException.class,()->ProjectEdits.deleteEnvelope(p,"mod"));
@@ -199,14 +199,14 @@ class NativeCommandsTest {
         for(int i=0;i<=128;i++) voices.add(new Voice("v"+i,"Voice "+i,ProjectCompilerTest.VOICE.bytes()));
         var source=new Sequence("s","Banked","FM",12,"v128",100,List.of(new NoteEvent("n",0,12,60)));
         var clips=List.of(new Clip("c","s","FM1",0,12));
-        var v2=new StudioProject(2,"Voices","S3K",24,128,voices,List.of(source),clips);
+        var v2=new StudioProject(2,"Voices","S3K",24,128,voices,List.of(source),clips, TargetGame.S3K, null);
         assertTrue(assertThrows(IllegalArgumentException.class,()->ProjectCompiler.compile(v2)).getMessage().contains("banked voice references need future asset support"));
-        var v1=new StudioProject(1,v2.name(),v2.mode(),v2.ticksPerBeat(),v2.tempo(),voices,List.of(source),clips);
+        var v1=new StudioProject(1,v2.name(),v2.mode(),v2.ticksPerBeat(),v2.tempo(),voices,List.of(source),clips, TargetGame.S3K, null);
         byte[] legacy=ProjectCompiler.compile(v1); assertEquals(128,legacy[word(legacy,10)+1]&255);
         var low=ProjectEdits.setSourceSettings(v2,"s","v0",100);
         byte[] bank=ProjectCompiler.compile(low); assertEquals(0,bank[word(bank,10)+1]);
         assertEquals(129*25,bank.length-word(bank,0));
         var unused=new Sequence("unused","Unused banked","FM",12,"v128",100,List.of());
-        assertDoesNotThrow(()->ProjectCompiler.compile(new StudioProject(2,v2.name(),v2.mode(),v2.ticksPerBeat(),v2.tempo(),voices,List.of(low.sequences().getFirst(),unused),clips)));
+        assertDoesNotThrow(()->ProjectCompiler.compile(new StudioProject(2,v2.name(),v2.mode(),v2.ticksPerBeat(),v2.tempo(),voices,List.of(low.sequences().getFirst(),unused),clips, TargetGame.S3K, null)));
     }
 }

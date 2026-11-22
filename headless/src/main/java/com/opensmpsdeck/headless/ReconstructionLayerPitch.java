@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.Voice;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -31,6 +32,11 @@ final class ReconstructionLayerPitch {
 
     static Copy copy(Fit dry, Voice voice, boolean targetFm, int duration, int sourcePitch, int targetPitch,
                      int detuneOffset) throws IOException {
+        return copy(dry, voice, targetFm, duration, sourcePitch, targetPitch, detuneOffset, TargetProfile.S3K);
+    }
+
+    static Copy copy(Fit dry, Voice voice, boolean targetFm, int duration, int sourcePitch, int targetPitch,
+                     int detuneOffset, TargetProfile profile) throws IOException {
         int transpose = targetPitch - sourcePitch;
         if (targetFm && detuneOffset == 0
                 && dry.notes().stream().allMatch(n -> n.pitch() + transpose >= 12 && n.pitch() + transpose <= 106)) {
@@ -60,7 +66,7 @@ final class ReconstructionLayerPitch {
 
         // Probe the rendered bend, rather than refitting the source annotation.
         // Each sample is local to the attack, so the copy can outlive the dry gate in project time.
-        int[] frequency = ReconstructionBendEncoding.frequencies(dry, voice, duration);
+        int[] frequency = ReconstructionBendEncoding.frequencies(dry, voice, duration, profile);
         int fnum = LeadEffectMatcher.fmFnum(sourcePitch);
         double ratio = Math.pow(2, transpose / 12.0) * (fnum + detuneOffset) / fnum;
         var held = new HashSet<Integer>();

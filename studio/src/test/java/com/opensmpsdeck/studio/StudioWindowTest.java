@@ -403,6 +403,9 @@ class StudioWindowTest {
         Path index = folder.resolve("instruments.json");
         builder.build().save(index);
         StudioProject original = fx(() -> {
+            var source = window.document().project();
+            window.document().edit(source.withSettings(source.name(), source.ticksPerBeat(), 0)
+                    .withTarget(TargetGame.S1).withNativeTempo(37));
             window.openCatalogue(index);
             return window.document().project();
         });
@@ -434,6 +437,8 @@ class StudioWindowTest {
             button("catalogue-apply").fire();
             assertEquals(original.clips(), window.document().project().clips());
             assertEquals(original.envelopes().size() + 1, window.document().project().envelopes().size());
+            assertEquals(TargetGame.S1, window.document().project().target());
+            assertEquals(37, window.document().project().nativeTempo());
             assertTrue(window.document().dirty());
             key(window.scene().getRoot(), KeyCode.Z, true);
             assertEquals(original, window.document().project());
@@ -451,7 +456,7 @@ class StudioWindowTest {
         byte[] bank = {0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
         var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
         var fixture = new StudioProject(5, "Imported fixture", "S3K", 12, 64,
-                List.of(), List.of(), List.of(), List.of(), List.of(), program);
+                List.of(), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
         ProjectFiles.save(imported, fixture, null);
         Stage importedStage = fx(() -> {
             assertTrue(window.scene().lookup("#import-s3k").isVisible());
@@ -483,7 +488,7 @@ class StudioWindowTest {
         });
         try {
             var refreshed = new StudioProject(5, "Imported watcher revision", "S3K", 12, 64,
-                    List.of(), List.of(), List.of(), List.of(), List.of(), program);
+                    List.of(), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
             ProjectFiles.save(imported, refreshed, ProjectFiles.load(imported).revision());
             await(() -> importedStage.getTitle().startsWith("Imported watcher revision"));
         } finally {
@@ -529,7 +534,7 @@ class StudioWindowTest {
         double before=fx(()->window.timeline.offset);
         StudioProject original=DemoProject.create();
         List<Clip> clips=new ArrayList<>(original.clips());clips.add(new Clip("far","seq-lead-a","FM5",700,96));
-        StudioProject changed=new StudioProject(1,"Agent revision","S3K",original.ticksPerBeat(),original.tempo(),original.voices(),original.sequences(),clips);
+        StudioProject changed=new StudioProject(1,"Agent revision","S3K",original.ticksPerBeat(),original.tempo(),original.voices(),original.sequences(),clips, TargetGame.S3K, null);
         replace(ProjectFormat.write(changed));
         await(()->window.document().project().name().equals("Agent revision"));
         // Wait for the FX refresh following background parsing, not merely model adoption.
@@ -544,7 +549,7 @@ class StudioWindowTest {
 
     @Test void dirtyConflictRetainsLocalEditsAndReloadWritesRecovery() throws Exception {
         fx(()->{window.document().edit(ProjectEdits.moveClip(window.document().project(),"clip-a1","FM2",0));return null;});
-        var p=DemoProject.create();var external=new StudioProject(1,"External version","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips());
+        var p=DemoProject.create();var external=new StudioProject(1,"External version","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(), TargetGame.S3K, null);
         replace(ProjectFormat.write(external));await(()->window.document().conflicted());
         assertEquals("FM2",window.document().project().clips().getFirst().lane());
         fx(()->{((Button)window.scene().lookup("#reload-file")).fire();return null;});
@@ -559,17 +564,17 @@ class StudioWindowTest {
     @Test void missingSelectedSourceClearsSelectionAndHugeUnusedSequencesStayBounded() throws Exception {
         fx(()->{mouse(window.timeline.canvas,MouseEvent.MOUSE_PRESSED,TimelineView.GUTTER+20,TimelineView.RULER+20,true);mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,TimelineView.GUTTER+20,TimelineView.RULER+20,false);return null;});
         var p=DemoProject.create();
-        var remaining=new StudioProject(1,"Source removed","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences().stream().filter(q->!q.id().equals("seq-lead-a")).toList(),p.clips().stream().filter(c->!c.sequenceId().equals("seq-lead-a")).toList());
+        var remaining=new StudioProject(1,"Source removed","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences().stream().filter(q->!q.id().equals("seq-lead-a")).toList(),p.clips().stream().filter(c->!c.sequenceId().equals("seq-lead-a")).toList(), TargetGame.S3K, null);
         replace(ProjectFormat.write(remaining));await(()->stage.getTitle().startsWith("Source removed"));
         fx(()->{assertNull(window.selectedClip());assertNull(window.piano.sequence);assertNull(((ListView<?>)window.scene().lookup("#sequence-browser")).getSelectionModel().getSelectedItem());return null;});
         var huge=new com.opensmpsdeck.project.Sequence("huge","Very long empty source","PSG",Integer.MAX_VALUE,null,100,List.of());
-        var longProject=new StudioProject(1,"Long source","S3K",24,0,List.of(),List.of(huge),List.of());
+        var longProject=new StudioProject(1,"Long source","S3K",24,0,List.of(),List.of(huge),List.of(), TargetGame.S3K, null);
         replace(ProjectFormat.write(longProject));await(()->stage.getTitle().startsWith("Long source"));
         fx(()->{((ListView<?>)window.scene().lookup("#sequence-browser")).getSelectionModel().select(0);window.piano.scroll.setHvalue(1);assertTrue(window.piano.canvas.getWidth()<2000);
             double x=window.piano.canvas.getWidth()-2,y=PianoRollView.HEADER+5*PianoRollView.NOTE_ROW;
             Event.fireEvent(window.piano.canvas,new MouseEvent(MouseEvent.MOUSE_PRESSED,x,y,x,y,MouseButton.PRIMARY,2,false,false,false,false,true,false,false,false,false,true,new PickResult(window.piano.canvas,new javafx.geometry.Point3D(x,y,0),0)));
             assertFalse(window.document().dirty(),"clicking padding past the huge source end must not wrap to tick zero");return null;});
-        replace(ProjectFormat.write(new StudioProject(1,"Huge beat","S3K",Integer.MAX_VALUE,0,List.of(),List.of(huge),List.of())));await(()->stage.getTitle().startsWith("Huge beat"));
+        replace(ProjectFormat.write(new StudioProject(1,"Huge beat","S3K",Integer.MAX_VALUE,0,List.of(),List.of(huge),List.of(), TargetGame.S3K, null)));await(()->stage.getTitle().startsWith("Huge beat"));
         fx(()->{window.timeline.scroll.setHvalue(1);window.piano.scroll.setHvalue(1);assertTrue(window.timeline.canvas.getWidth()<2000);return null;});
     }
 
@@ -582,7 +587,7 @@ class StudioWindowTest {
         });
         Platform.runLater(editing);assertTrue(reading.await(3,TimeUnit.SECONDS));
         try {
-            var p=DemoProject.create();replace(ProjectFormat.write(new StudioProject(1,"Concurrent agent","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips())));
+            var p=DemoProject.create();replace(ProjectFormat.write(new StudioProject(1,"Concurrent agent","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(), TargetGame.S3K, null)));
             Thread.sleep(250); // allow the real directory watcher to post its debounced event
             assertEquals("Lantern walk",window.document().project().name(),"background watcher must not mutate the FX-owned document");
         } finally {release.countDown();}
@@ -601,7 +606,7 @@ class StudioWindowTest {
         var seq=p.sequences().getFirst();
         var longer=new com.opensmpsdeck.project.Sequence(seq.id(),seq.name(),seq.type(),192,seq.voiceId(),seq.volume(),seq.notes());
         List<com.opensmpsdeck.project.Sequence> sequences=p.sequences().stream().map(q->q.id().equals(seq.id())?longer:q).toList();
-        replace(ProjectFormat.write(new StudioProject(1,"Agent changed drag target","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),sequences,clips)));
+        replace(ProjectFormat.write(new StudioProject(1,"Agent changed drag target","S3K",p.ticksPerBeat(),p.tempo(),p.voices(),sequences,clips, TargetGame.S3K, null)));
         await(()->stage.getTitle().startsWith("Agent changed drag target"));
         fx(()->{mouse(window.timeline.canvas,MouseEvent.MOUSE_RELEASED,TimelineView.GUTTER+20,TimelineView.RULER+20,false);assertEquals("FM2",clip("clip-a1").lane());assertEquals(144,clip("clip-a1").lengthTicks());assertFalse(window.document().dirty());assertEquals(before,window.piano.offset,1.0);return null;});
     }
@@ -874,7 +879,7 @@ class StudioWindowTest {
         byte[] bank={0,0,2,0,1,64,14,(byte)128,0,0,15,(byte)128,0,0,(byte)0xf2,(byte)0x99,12,(byte)0xf2};
         NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());
         var voice = new Voice("voice", "Original fixture voice", java.util.Collections.nCopies(25, 0));
-        StudioProject project=new StudioProject(5,"Native arrangement","S3K",12,64,List.of(voice),List.of(),List.of(),List.of(),List.of(),program);
+        StudioProject project=new StudioProject(5,"Native arrangement","S3K",12,64,List.of(voice),List.of(),List.of(),List.of(),List.of(),program, TargetGame.S3K, null);
         replace(ProjectFormat.write(project));
         await(()->window.nativeArrangement.timeline.project!=null);
         fx(()->{
@@ -902,7 +907,7 @@ class StudioWindowTest {
         var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
         var voice = new Voice("voice", "Fixture voice", Collections.nCopies(25, 0));
         var project = new StudioProject(5, "Editable copy fixture", "S3K", 12, 64,
-                List.of(voice), List.of(), List.of(), List.of(), List.of(), program);
+                List.of(voice), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
         replace(ProjectFormat.write(project));
         await(() -> window.nativeArrangement.timeline.project != null);
 
@@ -946,7 +951,7 @@ class StudioWindowTest {
     @Test void nativeBankKeepsExactAddressesThroughEditUndoAndExternalRefresh() throws Exception {
         byte[] bank={0,0,1,0,1,64,10,(byte)128,0,0,(byte)0xf2};
         NativeProgram program=NativeProgram.of(0x8000,0,0,120,bank,List.of(),List.of());
-        StudioProject project=new StudioProject(5,"Native fixture","S3K",12,64,List.of(),List.of(),List.of(),List.of(),List.of(),program);
+        StudioProject project=new StudioProject(5,"Native fixture","S3K",12,64,List.of(),List.of(),List.of(),List.of(),List.of(),program, TargetGame.S3K, null);
         replace(ProjectFormat.write(project));
         await(()->window.document().project().nativeProgram()!=null);
         fx(()->{

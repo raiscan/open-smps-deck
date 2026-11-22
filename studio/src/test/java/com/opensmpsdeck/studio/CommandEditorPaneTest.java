@@ -27,7 +27,7 @@ class CommandEditorPaneTest {
         assertThrows(IllegalArgumentException.class, () -> CommandEditorPane.guardSource(changed, captured));
         assertEquals(37, changed.sequences().getFirst().volume());
         // A project-wide edit does not make an otherwise unchanged source stale.
-        StudioProject renamed = new StudioProject(original.formatVersion(), "Renamed", original.mode(), original.ticksPerBeat(), original.tempo(), original.voices(), original.sequences(), original.clips());
+        StudioProject renamed = new StudioProject(original.formatVersion(), "Renamed", original.mode(), original.ticksPerBeat(), original.tempo(), original.voices(), original.sequences(), original.clips(), TargetGame.S3K, null);
         assertSame(renamed, CommandEditorPane.guardSource(renamed, captured));
     }
 
@@ -52,7 +52,7 @@ class CommandEditorPaneTest {
         List<Voice> voices = new ArrayList<>(demo.voices());
         voices.add(second);
         StudioProject original = new StudioProject(demo.formatVersion(), demo.name(), demo.mode(), demo.ticksPerBeat(), demo.tempo(),
-                voices, demo.sequences(), demo.clips());
+                voices, demo.sequences(), demo.clips(), TargetGame.S3K, null);
         original = ProjectEdits.addCommand(original, first.id(), new CommandEvent("pan", 0, NativeCommand.PAN, List.of(0xC0)));
         Sequence captured = original.sequences().getFirst();
         StudioProject external = ProjectEdits.setSourceSettings(original, first.id(), second.id(), first.volume());

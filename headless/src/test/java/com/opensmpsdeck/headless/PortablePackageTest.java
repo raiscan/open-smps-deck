@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.AssetOrigin;
@@ -153,7 +155,7 @@ class PortablePackageTest {
         var envelope = new Envelope("psg", "Stock PSG", Envelope.PSG_VOLUME,
                 StockAssets.unsigned(envelopeBytes), AssetOrigin.stock(psg));
         var project = new StudioProject(4, original.name(), original.mode(), original.ticksPerBeat(), original.tempo(),
-                List.of(patched, original.voices().get(1)), original.sequences(), original.clips(), List.of(envelope), List.of(sample));
+                List.of(patched, original.voices().get(1)), original.sequences(), original.clips(), List.of(envelope), List.of(sample), TargetGame.S3K, null);
         // Each image supplies only some assets. A mismatch in the first source
         // must not hide a matching payload in the second.
         StockAssets first = ref -> ref.equals(fm) ? new byte[25] : ref.equals(psg) ? envelopeBytes : null;
@@ -185,7 +187,7 @@ class PortablePackageTest {
 
         var bank = NativeProgram.of(0, 0, project.voices().size(), 60, ProjectCompiler.compile(project), List.of(), List.of());
         var nativeProject = new StudioProject(5, project.name(), "S3K", 24, bank.tempo(), List.of(patched),
-                List.of(), List.of(), List.of(), List.of(), bank);
+                List.of(), List.of(), List.of(), List.of(), bank, TargetGame.S3K, null);
         var nativeFile = directory.resolve("native.smps.zip");
         PortablePackageWriter.write(nativeProject, nativeFile, PortableOptions.DEFAULT);
         var nativeArtifact = PortablePackageReader.read(nativeFile);
@@ -379,7 +381,7 @@ class PortablePackageTest {
         edited[nativeProgram.headerOffset() + 5] ^= 1;
         var program = nativeProgram.withBank(edited);
         var project = new StudioProject(5, original.name(), original.mode(), original.ticksPerBeat(), program.tempo(),
-                original.voices(), List.of(), List.of(), original.envelopes(), original.samples(), program)
+                original.voices(), List.of(), List.of(), original.envelopes(), original.samples(), program, TargetGame.S3K, null)
                 .withDerivedFrom(original.derivedFrom());
         Path source = directory.resolve("edited.smps.json");
         ProjectFiles.save(source, project, null);

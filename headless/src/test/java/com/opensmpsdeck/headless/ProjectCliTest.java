@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.headless.rom.BpsPatch;
 import com.opensmpsdeck.project.Clip;
@@ -69,7 +71,7 @@ class ProjectCliTest {
                 List.of(), List.of(), "RESET", null, null, List.of(new SampleTrigger("hit", 0, sample.id())));
         ProjectFiles.save(project, new StudioProject(4, "Sonic 1 fixture", "S3K", 12, 192, List.of(),
                 List.of(psg, dac), List.of(new Clip("psg-clip", psg.id(), "PSG1", 0, 24),
-                        new Clip("dac-clip", dac.id(), "DAC", 0, 24)), List.of(envelope), List.of(sample)), null);
+                        new Clip("dac-clip", dac.id(), "DAC", 0, 24)), List.of(envelope), List.of(sample), TargetGame.S3K, null), null);
         var export = run("rom-patch", project.toString(), "--driver", "s1", "--rom", clean.toString(),
                 "--out", rom.toString(), "--bps", bps.toString(), "--no-demo");
         assertEquals(0, export.exit(), export.err());
@@ -155,7 +157,7 @@ class ProjectCliTest {
         var sequence = new Sequence("psg", "Middle C", "PSG", 96, null, 127,
                 List.of(new NoteEvent("middle-c", 0, 96, 60)));
         var project = new StudioProject(1, "PSG pitch", "S3K", 24, 0, List.of(),
-                List.of(sequence), List.of(new Clip("clip", "psg", "PSG1", 0, 96)));
+                List.of(sequence), List.of(new Clip("clip", "psg", "PSG1", 0, 96)), TargetGame.S3K, null);
         byte[] pcm = render(ProjectCompiler.compile(project), 60);
 
         // The middle half-second excludes key-on settling. A midpoint threshold

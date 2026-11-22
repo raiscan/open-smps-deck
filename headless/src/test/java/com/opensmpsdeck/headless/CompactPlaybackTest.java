@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
@@ -39,7 +41,7 @@ class CompactPlaybackTest {
         var sample = DacSample.of("kick", "Kick", 35, new byte[]{-128, -90, -70, -100, -128, 60, 100, -128});
         var project = new StudioProject(4, "Compact fixture", "S3K", 24, 0, List.of(voice), List.of(fm, dac),
                 List.of(new Clip("tones", "fm", "FM1", 0, 84), new Clip("drums", "dac", "DAC", 0, 84)),
-                List.of(), List.of(sample));
+                List.of(), List.of(sample), TargetGame.S3K, null);
         byte[] bank = ProjectCompiler.compile(project, COMPACT);
         int fmStart = word(bank, 10), voices = word(bank, 0);
         assertTrue(contains(bank, word(bank, 6), fmStart, 0xF7), "DAC loop");
@@ -75,7 +77,7 @@ class CompactPlaybackTest {
         var psg = new Sequence("s", "PSG", "PSG", 1, null, 96, List.of(new NoteEvent("n", 0, 1, 60)),
                 List.of(), "CARRY");
         var project = new StudioProject(2, "Long repeat", "S3K", 24, 0, List.of(), List.of(psg),
-                List.of(new Clip("clip", "s", "PSG1", 0, 9_000)));
+                List.of(new Clip("clip", "s", "PSG1", 0, 9_000)), TargetGame.S3K, null);
         byte[] bank = ProjectCompiler.compile(project, COMPACT);
         int loopCount = 0;
         for (int i = word(bank, 10); i < bank.length; i++) {

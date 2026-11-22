@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.NativeCommand;
@@ -80,7 +82,7 @@ class LeadEffectMatcherTest {
                 List.of(new NoteEvent("bass-0", 0, 11, 44), new NoteEvent("bass-1", 260, 10, 43)));
         return new StudioProject(2, "Held lead fixture", "S3K", 15, 0, List.of(voice),
                 List.of(lead, doubling, bass), List.of(new Clip("lead-clip", LEAD, "FM1", 0, span),
-                new Clip("double-clip", DOUBLE, "FM2", 0, span), new Clip("bass-clip", "bass", "FM3", 0, span)));
+                new Clip("double-clip", DOUBLE, "FM2", 0, span), new Clip("bass-clip", "bass", "FM3", 0, span)), TargetGame.S3K, null);
     }
 
     private Path render(StudioProject project, String filename) throws IOException {

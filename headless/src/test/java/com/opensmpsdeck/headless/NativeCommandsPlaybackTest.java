@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
@@ -105,7 +107,7 @@ class NativeCommandsPlaybackTest {
                         command("period", 0, NativeCommand.DETUNE,
                                 ReconstructionPitchedNoise.detune(pitch) & 255)), "RESET");
         var project = new StudioProject(4, "Periodic noise tuning", "S3K", 24, 0, List.of(),
-                List.of(sequence), List.of(new Clip("clip", "noise", "PSG3", 0, 60)));
+                List.of(sequence), List.of(new Clip("clip", "noise", "PSG3", 0, 60)), TargetGame.S3K, null);
         var pcm = java.nio.ByteBuffer.wrap(observe(ProjectCompiler.compile(project), 60).pcm())
                 .order(java.nio.ByteOrder.LITTLE_ENDIAN);
         double best = -1;
@@ -166,7 +168,7 @@ class NativeCommandsPlaybackTest {
             StudioProject source = project("FM", 4, List.of(new NoteEvent("note", 0, 4, 60)),
                     List.of(command("up", 0, NativeCommand.TRANSPOSE_ADD, 1)), state, 8);
             StudioProject project = new StudioProject(2, source.name(), "S3K", 24, 0, source.voices(),
-                    source.sequences(), List.of(source.clips().getFirst(), new Clip("independent", "sequence", "FM1", 8, 4)));
+                    source.sequences(), List.of(source.clips().getFirst(), new Clip("independent", "sequence", "FM1", 8, 4)), TargetGame.S3K, null);
             int[] repeat = {0xFB, 1, 0xB1, 4};
             byte[] expected = bank(concat(FM_RESET, repeat, state.equals("RESET") ? FM_RESET : new int[0],
                     repeat, FM_RESET, repeat, new int[]{0xF2}));
@@ -279,7 +281,7 @@ class NativeCommandsPlaybackTest {
         var sequence = new Sequence("sequence", "Commands", type, length, type.equals("FM") ? "voice" : null,
                 127, notes, commands, repeatState);
         return new StudioProject(2, "Native command fixture", "S3K", 24, 0, voices,
-                List.of(sequence), List.of(new Clip("clip", "sequence", type + "1", 0, clipLength)));
+                List.of(sequence), List.of(new Clip("clip", "sequence", type + "1", 0, clipLength)), TargetGame.S3K, null);
     }
 
     private static CommandEvent command(String id, int tick, NativeCommand command, int... arguments) {

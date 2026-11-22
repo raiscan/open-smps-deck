@@ -904,7 +904,7 @@ public final class StudioWindow implements AutoCloseable {
         // The catalogue installs assets against an arrangement profile. Fold those changes
         // back into the song, appending any audition clip after the group placements too.
         var profile=new StudioProject(project.arrangementVersion(),project.name(),project.mode(),project.ticksPerBeat(),
-                project.tempo(),project.voices(),project.sequences(),project.clips(),project.envelopes(),project.samples());
+                project.tempo(),project.voices(),project.sequences(),project.clips(),project.envelopes(),project.samples(), project.target(), project.nativeTempo());
         var updated=CataloguePlayback.apply(index,variantId,profile);
         if (updated.equals(profile)) return project;
         var clips=new ArrayList<>(project.clips());
@@ -972,7 +972,7 @@ public final class StudioWindow implements AutoCloseable {
                 reference.label(), AudioReference.pathFor(destination, reference.resolve(original)),
                 reference.offsetSeconds(), reference.gainDb(), reference.role())).toList(), project.notes());
     }
-    private void newProject(){if(!confirmLeave())return;var chooser=chooser("Create a shared project","json");chooser.setInitialFileName("untitled.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{StudioProject demo=DemoProject.create();ProjectFiles.save(file.toPath(),new StudioProject(1,"Untitled","S3K",demo.ticksPerBeat(),demo.tempo(),demo.voices(),List.of(),List.of()),null);selectedClip=null;selectedSequence=null;selectedNote=null;load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
+    private void newProject(){if(!confirmLeave())return;var chooser=chooser("Create a shared project","json");chooser.setInitialFileName("untitled.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{StudioProject demo=DemoProject.create();ProjectFiles.save(file.toPath(),new StudioProject(1,"Untitled","S3K",demo.ticksPerBeat(),demo.tempo(),demo.voices(),List.of(),List.of(), TargetGame.S3K, null),null);selectedClip=null;selectedSequence=null;selectedNote=null;load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
     private void chooseEditableCopy() {
         var output = chooser("Save editable copy (choose a new file)", "json");
         output.setInitialFileName("editable-copy.smps.json");

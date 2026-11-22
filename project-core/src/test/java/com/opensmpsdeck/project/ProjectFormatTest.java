@@ -66,7 +66,7 @@ class ProjectFormatTest {
         var voice = before.voices().getFirst();
         var ref = new StockRef("s3k", "global-fm", null, 3, null, null, "a".repeat(64));
         var declared = new StudioProject(1, before.name(), before.mode(), before.ticksPerBeat(),
-                before.tempo(), List.of(voice.withOrigin(AssetOrigin.stock(ref))), before.sequences(), before.clips())
+                before.tempo(), List.of(voice.withOrigin(AssetOrigin.stock(ref))), before.sequences(), before.clips(), TargetGame.S3K, null)
                 .withDerivedFrom(new RetailSongOrigin("retail-song", "s3k", 13, "b".repeat(64)));
         String json = ProjectFormat.write(declared);
         assertEquals(declared, ProjectFormat.read(json));
@@ -152,7 +152,7 @@ class ProjectFormatTest {
     }
     @Test void psgRequiresExplicitNullVoiceAndSupportsNoExternalEnvelope() {
         var s=ProjectCompilerTest.sequence("psg","PSG",24,List.of(new NoteEvent("n",0,12,60)));
-        var p=new StudioProject(1,"PSG","S3K",24,128,List.of(),List.of(s),List.of(new Clip("c","psg","PSG1",0,24)));
+        var p=new StudioProject(1,"PSG","S3K",24,128,List.of(),List.of(s),List.of(new Clip("c","psg","PSG1",0,24)), TargetGame.S3K, null);
         String json=ProjectFormat.write(p); assertTrue(json.contains("\"voiceId\": null")); assertEquals(p,ProjectFormat.read(json));
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.read(json.replace("\"voiceId\": null","\"voiceId\": \"envelope\"")));
     }

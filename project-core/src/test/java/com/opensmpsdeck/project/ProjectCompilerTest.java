@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProjectCompilerTest {
     static final Voice VOICE = new Voice("v", "Native slots", List.of(7,1,2,3,4,31,30,29,28,0,1,2,3,4,5,6,7,15,14,13,12,32,40,48,56));
     static StudioProject project(List<Sequence> sequences, List<Clip> clips) {
-        return new StudioProject(1,"Fixture","S3K",24,128,List.of(VOICE),sequences,clips);
+        return new StudioProject(1,"Fixture","S3K",24,128,List.of(VOICE),sequences,clips, TargetGame.S3K, null);
     }
     static Sequence sequence(String id, String type, int length, List<NoteEvent> notes) {
         return new Sequence(id,id,type,length,type.equals("FM") ? "v" : null,100,notes);
@@ -103,7 +103,7 @@ class ProjectCompilerTest {
         var s = new Sequence("s", "s", "FM", duration, "v", 100,
                 List.of(new NoteEvent("long", 0, duration, 60)));
         var song = new StudioProject(2, "Two long held notes", "S3K", 24, 0, List.of(VOICE), List.of(s),
-                List.of(new Clip("a", "s", "FM1", 0, duration), new Clip("b", "s", "FM2", 0, duration)));
+                List.of(new Clip("a", "s", "FM1", 0, duration), new Clip("b", "s", "FM2", 0, duration)), TargetGame.S3K, null);
         var error = assertThrows(ProjectCompiler.BankLimitException.class, () -> ProjectCompiler.compile(song));
         // Header, DAC stop, two channels (reset, attack, held durations, stop), voice.
         assertEquals(18 + 1 + 2 * (13 + 2 * 20_000 + 1) + 25, error.compiledBytes());
@@ -123,7 +123,7 @@ class ProjectCompilerTest {
                     new CommandEvent("change2", 10, command, List.of(67)));
             var s = new Sequence("s","s","FM",15,"v",100,notes,commands,"CARRY");
             var song = new StudioProject(2,"State","S3K",24,0,List.of(VOICE),List.of(s),
-                    List.of(new Clip("c","s","FM1",0,15)));
+                    List.of(new Clip("c","s","FM1",0,15)), TargetGame.S3K, null);
             assertArrayEquals(ProjectCompiler.compile(song, ProjectCompiler.Encoding.LINEAR),
                     ProjectCompiler.compile(song), command.name());
         }
@@ -134,7 +134,7 @@ class ProjectCompilerTest {
                 new NoteEvent("c", 1800, 900, 60));
         var s = new Sequence("s","s","FM",2700,"v",100,notes,List.of(),"CARRY");
         var song = new StudioProject(2,"Ties","S3K",24,0,List.of(VOICE),List.of(s),
-                List.of(new Clip("c","s","FM1",0,2700)));
+                List.of(new Clip("c","s","FM1",0,2700)), TargetGame.S3K, null);
         assertArrayEquals(ProjectCompiler.compile(song, ProjectCompiler.Encoding.LINEAR), ProjectCompiler.compile(song));
     }
 }

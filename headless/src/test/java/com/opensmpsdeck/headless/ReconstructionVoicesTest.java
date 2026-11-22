@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Recipe;
 import com.opensmpsdeck.project.DemoProject;
@@ -91,14 +92,14 @@ class ReconstructionVoicesTest {
             scoreNotes.add(new MidiScore.Note(0, 72, 100, time * 1_000_000L, time * 1_000_000L + 300_000));
         }
         var project = new com.opensmpsdeck.project.StudioProject(
-                4, "Alternate fixture", "S3K", 15, 0, sourceVoices, sequences, clips);
+                4, "Alternate fixture", "S3K", 15, 0, sourceVoices, sequences, clips, TargetGame.S3K, null);
         Path audio = directory.resolve("alternate.wav");
         WaveFile.render(ProjectCompiler.compileWithAssets(project), audio, 48 * 60);
         var score = new MidiScore(List.of(new MidiScore.Part(0, "Part", 0, false)), scoreNotes, List.of());
         var base = new ReconstructionVoices.Choice(first.assetId(), first.id(), first.name(), null,
                 "matched", List.of(), List.of());
         var plan = ReconstructionVoices.refineSections(catalogue, audio, Map.of(0, audio), score, scoreNotes,
-                48_000_000, Map.of(new ReconstructionVoices.Key(0, null), base));
+                48_000_000, Map.of(new ReconstructionVoices.Key(0, null), base), TargetGame.S3K);
         assertNull(plan.choices().get(new ReconstructionVoices.Key(0, null, 0L)));
         assertEquals(second.id(), plan.choices().get(new ReconstructionVoices.Key(0, null, 16_000_000L)).variantId());
         assertNull(plan.choices().get(new ReconstructionVoices.Key(0, null, 32_000_000L)));

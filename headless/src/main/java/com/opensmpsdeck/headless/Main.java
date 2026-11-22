@@ -5,6 +5,7 @@ import com.opensmpsdeck.headless.rom.RomCli;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.CompiledProject;
 
 import java.io.IOException;
@@ -261,6 +262,7 @@ public final class Main {
         Path output = Path.of(args[demo ? 1 : 2]);
         int projectEnd = presentations;
         CompiledProject song;
+        TargetPlayback playback = null;
         if (demo) {
             song = new CompiledProject(S3kDemo.song(), List.of());
         } else {
@@ -268,7 +270,8 @@ public final class Main {
             requireDifferentFiles(input, output);
             if (projectRender) {
                 var project = PortablePackages.openProject(input, roms, err);
-                song = ProjectCompiler.compileWithAssets(project);
+                playback = TargetPlayback.prepare(project);
+                song = playback.compiled();
                 if (start != null || end != null) projectEnd = ProjectRenderTiming.presentationCount(project);
                 if (!options.contains("--frames")) {
                     if (song.nativeProgram() != null) {
@@ -292,17 +295,20 @@ public final class Main {
         var mask = ReconstructionView.laneMask(solo, mute);
         try (var target = new ExportTarget(output, options.contains("--force"))) {
             if (previousPath == null) {
-                if (bounded || !mask.equals(S3kRenderer.ChannelMask.NONE)) WaveFile.renderRange(song, target.path(), range, mask);
+                if (playback != null) WaveFile.renderRange(playback, target.path(), range, mask);
+                else if (bounded || !mask.equals(S3kRenderer.ChannelMask.NONE)) WaveFile.renderRange(song, target.path(), range, mask);
                 else WaveFile.render(song, target.path(), presentations);
             } else {
                 requireDifferentFiles(previousPath, output);
-                var previous = ProjectCompiler.compileWithAssets(PortablePackages.openProject(previousPath, roms, err));
-                WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, target.path(), range, mask);
+                var previous = PortablePackages.openProject(previousPath, roms, err);
+                if ((playback != null && playback.target() != TargetGame.S3K) || previous.target() != TargetGame.S3K)
+                    throw new IllegalArgumentException("Previous-music restoration is available for S3K playback");
+                WaveFile.renderWithPreviousMusic(ProjectCompiler.compileWithAssets(previous), previousPresentations, song, target.path(), range, mask);
             }
             target.publish();
         }
         out.println("Rendered " + range.count() + " presentations to " + output
-                + " (48 kHz stereo, pinned OpenGGF S3K accurate core)");
+                + " (48 kHz stereo, pinned OpenGGF " + (playback == null ? "S3K" : playback.target().name()) + " accurate core)");
     }
 
     private static List<Path> parseRoms(String[] args, int at) {

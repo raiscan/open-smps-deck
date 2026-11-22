@@ -255,7 +255,7 @@ final class ReconstructionCli {
                 : select(catalogue, reference, options, score, prepared, durationUs, Kind.PSG_VOLUME);
         var sectionPlan = options.wholePartVoices() ? new ReconstructionVoices.SectionPlan(choices, List.of())
                 : matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
-                        score, prepared.notes(), durationUs, choices));
+                        score, prepared.notes(), durationUs, choices, options.target()));
         var evidence = new ArrayList<MatchEvidence>();
         recordMatches(evidence, null, Kind.FM_VOICE, sectionPlan.choices());
         recordMatches(evidence, null, Kind.PSG_VOLUME, spill);
@@ -456,7 +456,7 @@ final class ReconstructionCli {
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
         var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
-        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels();
+        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels(score.profile());
         var instruments = voicing.sourceInstruments();
         var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
@@ -624,7 +624,7 @@ final class ReconstructionCli {
             boolean echoBankLimit = false, bendSizeLimit = false;
             int bankPass = 0;
             S3kReconstruction.Result result;
-            com.opensmpsdeck.project.CompiledProject compiled;
+            TargetPlayback playback;
             Path source = target.resolve(OUTPUTS.get(0));
             Path packagePath = target.resolve(OUTPUTS.get(1));
             Path audio = target.resolve(OUTPUTS.get(2));
@@ -649,7 +649,7 @@ final class ReconstructionCli {
                     project = project.withReview(references, project.notes());
                 }
                 try {
-                    compiled = compileTarget(result.project());
+                    playback = TargetPlayback.prepare(result.project());
                 } catch (ProjectCompiler.BankLimitException failure) {
                     if (!result.bends().isEmpty()) bendSizeLimit = true;
                     else if (result.echoNotes() > 0) echoBankLimit = true;
@@ -680,11 +680,10 @@ final class ReconstructionCli {
             if (timeline.warped()) ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
             if (options.target() == TargetGame.S3K) {
                 ProjectPackage.write(result.project(), packagePath);
-                WaveFile.render(compiled, audio, frames);
             } else {
                 PortablePackageWriter.write(result.project(), packagePath, PortableOptions.defaults(options.target()));
-                PackageDriver.supported(options.target().id()).render(compiled, audio, frames);
             }
+            playback.writeWave(audio, frames);
             var inputEvidence = new LinkedHashMap<String, FileEvidence>();
             if (midi != null) inputEvidence.put("midi", evidence(midi));
             inputEvidence.put("wav", evidence(reference));
@@ -718,7 +717,7 @@ final class ReconstructionCli {
             var assembled = result.project();
             var legacySustain = assemblyInputs == null && options.target() == TargetGame.S3K
                     ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
-            var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
+            var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, playback.compiled().song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
                     matched.evidence(), score.warnings(), options.wholePartVoices(), matched.sectionTrials(),
@@ -748,7 +747,7 @@ final class ReconstructionCli {
                     row.addProperty("psgEnvelopeBytesDelta", psgEnvelopeBytes(result.project()) - psgEnvelopeBytes(without.project()));
                     try {
                         int withoutBytes = compileTarget(without.project()).song().length;
-                        row.addProperty("bankBytesDelta", compiled.song().length - withoutBytes);
+                        row.addProperty("bankBytesDelta", playback.compiled().song().length - withoutBytes);
                     } catch (ProjectCompiler.BankLimitException failure) {
                         row.addProperty("bankBytesDeltaUnavailable", "bank without this policy exceeds the " + options.target().name() + " limit");
                     }
@@ -786,7 +785,7 @@ final class ReconstructionCli {
             InstrumentCatalogue catalogue, Path reference, Options options, MidiScore score,
             S3kReconstruction.Score prepared, long durationUs, Kind kind) throws IOException {
         return matchQuietly(() -> ReconstructionVoices.select(catalogue, reference, options.stems(),
-                score, prepared.notes(), durationUs, kind));
+                score, prepared.notes(), durationUs, kind, java.util.Set.of(), options.target()));
     }
 
     private static <T> T matchQuietly(Matching<T> matching) throws IOException {
@@ -862,13 +861,7 @@ final class ReconstructionCli {
     }
 
     static com.opensmpsdeck.project.CompiledProject compileTarget(StudioProject project) {
-        if (project.target() == TargetGame.S3K) return ProjectCompiler.compileWithAssets(project);
-        var driver = (ClassicPackageDriver) PackageDriver.supported(project.target().id());
-        int tempo = driver.projectTempo(project).targetByte();
-        var layout = driver.compile(project, tempo);
-        var compiled = new com.opensmpsdeck.project.CompiledProject(layout.bytes(), project.envelopes(), project.samples());
-        driver.preflight(compiled);
-        return compiled;
+        return TargetPlayback.prepare(project).compiled();
     }
 
     static TargetGame parseTargetAssertion(String[] args) {

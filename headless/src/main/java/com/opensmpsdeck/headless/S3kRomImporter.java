@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.openggf.audio.smps.DacData;
 import com.openggf.data.Rom;
 import com.openggf.data.RomByteReader;
@@ -144,7 +146,7 @@ public final class S3kRomImporter {
                 new CompiledProject(bank, envelopes, samples, unmeasured, voices));
         var program = NativeProgram.of(BANK_SIZE, headerOffset, voiceCount, DEFAULT_PREVIEW_FRAMES, bank, envelopeSlots, dacSlots);
         var project = new StudioProject(5, name, "S3K", 24, program.tempo(), voices, List.of(), List.of(),
-                envelopes, samples, program);
+                envelopes, samples, program, TargetGame.S3K, null);
         ProjectFormat.validate(project);
         return project;
     }

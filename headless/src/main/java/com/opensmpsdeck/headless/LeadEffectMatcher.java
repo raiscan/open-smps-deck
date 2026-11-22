@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NativeCommand;
@@ -75,7 +76,7 @@ final class LeadEffectMatcher {
 
         var fit = describe(observed, partition.fit());
         var check = describe(observed, partition.check());
-        var baseline = score("baseline", read(render(ProjectCompiler.compileWithAssets(project), frames), probes),
+        var baseline = score("baseline", read(render(TargetPlayback.prepare(project), frames), probes),
                 partition, fit, check);
         var scores = new ArrayList<Score>();
         scores.add(baseline);
@@ -84,9 +85,9 @@ final class LeadEffectMatcher {
         for (var profile : PROFILES) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Effect matching interrupted");
             StudioProject trial = apply(project, lanes, profile);
-            com.opensmpsdeck.project.CompiledProject compiled;
+            TargetPlayback compiled;
             try {
-                compiled = ProjectCompiler.compileWithAssets(trial);
+                compiled = TargetPlayback.prepare(trial);
             } catch (ProjectCompiler.BankLimitException overflow) {
                 continue;
             }
@@ -180,8 +181,10 @@ final class LeadEffectMatcher {
             sequences.set(sequences.indexOf(s), new Sequence(s.id(), s.name(), s.type(), s.lengthTicks(), s.voiceId(),
                     volume, s.notes(), commands, s.repeatState(), s.psgEnvelopeId(), s.modulationEnvelopeId(), s.triggers()));
         }
+        if (project.target() == TargetGame.S1)
+            sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, project.voices()));
         return new StudioProject(Math.max(2, project.formatVersion()), project.name(), project.mode(), project.ticksPerBeat(),
-                project.tempo(), project.voices(), sequences, project.clips(), project.envelopes(), project.samples()).withTarget(project.target()).withNativeTempo(project.nativeTempo());
+                project.tempo(), project.voices(), sequences, project.clips(), project.envelopes(), project.samples(), project.target(), project.nativeTempo());
     }
 
     private static boolean startsWith(List<CommandEvent> commands, String prefix) {
@@ -191,8 +194,8 @@ final class LeadEffectMatcher {
     private static int quietFloor(StudioProject project, Sequence sequence) {
         return project.voices().stream().filter(v -> v.id().equals(sequence.voiceId()) ||
                 sequence.commands().stream().anyMatch(c -> c.command() == NativeCommand.FM_VOICE && v.id().equals(c.assetId())))
-                .flatMapToInt(v -> v.bytes().subList(21, 25).stream().filter(x -> (x & 128) != 0)
-                        .mapToInt(x -> x & 127)).max().orElse(0);
+                .mapToInt(v -> ReconstructionEcho.fmVolumeFloor(v.bytes()::get,
+                        com.opensmpsdeck.project.TargetProfile.of(project.target()))).max().orElse(0);
     }
 
     private static int attenuate(int volume, int floor, int attenuation) {
@@ -262,10 +265,10 @@ final class LeadEffectMatcher {
         return 440 * Math.pow(2, (midi - 69) / 12.0);
     }
 
-    private static float[] render(com.opensmpsdeck.project.CompiledProject compiled, int frames) throws IOException {
+    private static float[] render(TargetPlayback compiled, int frames) throws IOException {
         var audio = new float[frames * (RATE / FRAME_RATE) * 2];
         int[] cursor = {0};
-        S3kRenderer.render(compiled, frames, pcm -> {
+        compiled.render(frames, pcm -> {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Effect rendering interrupted");
             for (int i = 0; i < pcm.length; i += 8) {
                 audio[cursor[0]++] = (pcm[i] + pcm[i+2] + pcm[i+4] + pcm[i+6]) / 131072f;

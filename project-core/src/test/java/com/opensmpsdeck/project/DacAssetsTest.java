@@ -16,7 +16,7 @@ class DacAssetsTest {
         return new Sequence("drums","Drums","DAC",length,null,127,List.of(),List.of(),"RESET",null,null,triggers);
     }
     private static StudioProject project(Sequence sequence,List<Clip> clips,List<DacSample> samples) {
-        return new StudioProject(4,"DAC fixture","S3K",12,0,List.of(),List.of(sequence),clips,List.of(),samples);
+        return new StudioProject(4,"DAC fixture","S3K",12,0,List.of(),List.of(sequence),clips,List.of(),samples, TargetGame.S3K, null);
     }
     private static StudioProject fixture() {
         return project(dac(List.of(new SampleTrigger("hit",0,"kick")),12),List.of(new Clip("c","drums","DAC",0,12)),List.of(sample("kick",1,1)));
@@ -65,7 +65,7 @@ class DacAssetsTest {
         }
         String duplicate=json.replace("\"sampleId\": \"kick\"","\"sampleId\": \"kick\", \"sampleId\": \"kick\"");
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.read(duplicate));
-        var old=new StudioProject(3,"Old","S3K",12,0,List.of(),List.of(),List.of(),List.of());
+        var old=new StudioProject(3,"Old","S3K",12,0,List.of(),List.of(),List.of(),List.of(), TargetGame.S3K, null);
         String oldJson=ProjectFormat.write(old);assertFalse(oldJson.contains("samples"));assertFalse(oldJson.contains("triggers"));
         assertEquals(old,ProjectFormat.read(oldJson));assertArrayEquals(bytes(0,0,1,0,1,0,10,0,0,0,0xF2),ProjectCompiler.compile(old));
     }
@@ -84,11 +84,11 @@ class DacAssetsTest {
             assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(project(source,p.clips(),p.samples())));
         }
         assertThrows(IllegalArgumentException.class,()->ProjectEdits.moveClip(p,"c","FM6",0));
-        var old=new StudioProject(3,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples());
+        var old=new StudioProject(3,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples(), TargetGame.S3K, null);
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(old));
     }
     @Test void sampleAndTriggerEditsUpgradeVersionAndPreserveAllFields() {
-        var p=new StudioProject(3,"New","S3K",12,0,List.of(),List.of(),List.of(),List.of());
+        var p=new StudioProject(3,"New","S3K",12,0,List.of(),List.of(),List.of(),List.of(), TargetGame.S3K, null);
         p=ProjectEdits.addSample(p,sample("kick",1,1));assertEquals(4,p.formatVersion());
         p=ProjectEdits.addSequence(p,dac(List.of(),12));p=ProjectEdits.addTrigger(p,"drums",new SampleTrigger("hit",0,"kick"));
         p=ProjectEdits.addClip(p,new Clip("c","drums","DAC",0,12));
@@ -98,7 +98,7 @@ class DacAssetsTest {
         assertEquals(4,p.sequences().getFirst().triggers().getFirst().tick());assertEquals("Renamed",p.samples().getFirst().name());
         var referenced=p;assertThrows(IllegalArgumentException.class,()->ProjectEdits.deleteSample(referenced,"kick"));
         p=ProjectEdits.deleteTrigger(p,"drums","hit");p=ProjectEdits.deleteSample(p,"kick");assertTrue(p.samples().isEmpty());
-        var withDac=ProjectEdits.addSequence(new StudioProject(1,"Old","S3K",12,0,List.of(),List.of(),List.of()),dac(List.of(),12));
+        var withDac=ProjectEdits.addSequence(new StudioProject(1,"Old","S3K",12,0,List.of(),List.of(),List.of(), TargetGame.S3K, null),dac(List.of(),12));
         assertEquals(4,withDac.formatVersion());
     }
     @Test void dacSlotUsesSampleOrdinalsAndExplicitRestContinuationWithoutHoldOrBareDuration() {
@@ -133,7 +133,7 @@ class DacAssetsTest {
         assertEquals(3918,ticks);
         assertEquals(0xF2,song[at]&255);
 
-        var delayed=new StudioProject(4,p.name(),p.mode(),p.ticksPerBeat(),128,p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples());
+        var delayed=new StudioProject(4,p.name(),p.mode(),p.ticksPerBeat(),128,p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples(), TargetGame.S3K, null);
         assertEquals(1960,ProjectCompiler.dacEndTick(delayed));
         p=ProjectEdits.resizeClip(p,"c",8);
         assertEquals(12,ProjectCompiler.dacEndTick(p));
@@ -163,7 +163,7 @@ class DacAssetsTest {
         var source=new Sequence("tone","Tone","PSG",4,null,100,List.of(new NoteEvent("n",0,4,60)),
                 List.of(),"RESET","p","m");
         var old=new StudioProject(3,"Tone","S3K",12,0,List.of(),List.of(source),
-                List.of(new Clip("c","tone","PSG1",0,8)),List.of(modulation,volume));
+                List.of(new Clip("c","tone","PSG1",0,8)),List.of(modulation,volume), TargetGame.S3K, null);
         var kick=sample("kick",1,1);
         var upgraded=ProjectEdits.addSample(old,kick);
         assertArrayEquals(ProjectCompiler.compile(old),ProjectCompiler.compile(upgraded));

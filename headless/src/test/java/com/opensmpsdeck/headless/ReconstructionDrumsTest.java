@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DacSample;
@@ -424,7 +426,7 @@ class ReconstructionDrumsTest {
         var tone = new Sequence("tone", "Tone", "PSG", 16, null, 95,
                 List.of(new NoteEvent("note", 0, 16, 69)), List.of(), "RESET", envelope.id(), null);
         var project = new StudioProject(4, "Envelope isolation", "S3K", 30, 0, List.of(), List.of(tone),
-                List.of(new Clip("tone-clip", tone.id(), "PSG2", 0, 16)), List.of(envelope));
+                List.of(new Clip("tone-clip", tone.id(), "PSG2", 0, 16)), List.of(envelope), TargetGame.S3K, null);
         // Compare each presentation's settled waveform against the constant
         // hardware resting level rather than assuming silence is digital zero.
         boolean[] silent = {true};
