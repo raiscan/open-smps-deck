@@ -3,8 +3,9 @@
 Portable schema 4 targets Sonic 1 (`s1`), Sonic 2 (`s2`) or
 Sonic 3 & Knuckles (`s3k`, the default). Sonic CD's FM loader has no music
 or DAC implementation and `driver: scd` is rejected. Projects retain their
-`S3K` mode and editing clock. Target selection happens during portable or
-mod export. See the [package contract](portable-package.md) for the bank
+`S3K` mode and editing clock. Reconstruction can save a target before
+analysis. Portable and mod export default to that target and accept an
+explicit driver override. See the [package contract](portable-package.md) for the bank
 and asset wire format.
 
 | Arrangement or playback feature | S1 | S2 | S3K |

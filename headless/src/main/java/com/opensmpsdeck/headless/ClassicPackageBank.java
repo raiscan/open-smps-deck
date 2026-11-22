@@ -14,6 +14,10 @@ final class ClassicPackageBank {
 
     static void validateEnvelope(ClassicPackageDriver driver, Envelope envelope) {
         var bytes = envelope.bytes();
+        for (int value : bytes) {
+            driver.require(value <= 0x80, "PSG envelope '" + envelope.id() + "' uses S3K control byte "
+                    + Integer.toHexString(value).toUpperCase(java.util.Locale.ROOT) + "; PSG envelopes require a final 80 hold");
+        }
         driver.require(envelope.type().equals(Envelope.PSG_VOLUME) && bytes.size() >= 2
                 && bytes.getLast() == 0x80 && bytes.subList(0, bytes.size() - 1).stream().allMatch(value -> value < 0x80),
                 "envelope '" + envelope.id() + "' requires PSG attenuation bytes followed by a single 80 hold terminator");

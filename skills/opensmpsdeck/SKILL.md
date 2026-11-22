@@ -11,6 +11,13 @@ Run the examples from your private workspace. Set `jar` to the absolute
 path of the packaged JAR and `work` to the reconstruction work directory. Keep downloads, ROMs, catalogues derived
 from ROMs, work artifacts and renders outside public checkouts.
 
+Choose the target game before analysis. Use `--target s1|s2|s3k` on
+`reconstruct import` or a fresh `reconstruct run`. In MCP, use `target` on
+`reconstruct_import` or `options.target` on `reconstruct_run`. The default is
+`s3k`. Replays retain the saved target. S1 and S2 reconstruction are in
+progress and can stop at assembly on incompatible envelopes or commands.
+Portable and mod exports default to the saved project target.
+
 ## 1. Separate and check a local mix
 
 Start with a WAV or MP3. For FLAC, decode to WAV first

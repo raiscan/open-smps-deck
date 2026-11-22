@@ -9,7 +9,7 @@ public final class ProjectEdits {
     private ProjectEdits() {}
     public static StudioProject setNativeProgram(StudioProject p, NativeProgram program) {
         return checked(new StudioProject(5,p.name(),p.mode(),p.ticksPerBeat(),program.tempo(),
-                p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples(),program,p.references(),p.notes()).withDerivedFrom(p.derivedFrom()));
+                p.voices(),p.sequences(),p.clips(),p.envelopes(),p.samples(),program,p.references(),p.notes()).withDerivedFrom(p.derivedFrom()).withTarget(p.target()));
     }
 
     public static StudioProject addReference(StudioProject project, AudioReference reference) {

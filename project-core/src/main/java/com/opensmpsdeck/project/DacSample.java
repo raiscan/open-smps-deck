@@ -60,14 +60,20 @@ public record DacSample(String id, String name, int rate, String pcmBase64, Asse
 
     /** Native DJNZ rate zero means 256 loops, rather than the fastest rate. */
     public static double sampleRateHz(int rate) {
-        int cycles = periodCycles(rate);
+        return sampleRateHz(rate, BASE_CYCLES);
+    }
+
+    static double sampleRateHz(int rate, int baseCycles) {
+        int cycles = periodCycles(rate, baseCycles);
         return (53693175.0 / 15.0) * 2.0 / cycles;
     }
 
-    static int periodCycles(int rate) {
+    static int periodCycles(int rate) { return periodCycles(rate, BASE_CYCLES); }
+
+    private static int periodCycles(int rate, int baseCycles) {
         if (rate < 0 || rate > 255) throw new IllegalArgumentException("DAC sample rate must be in 0..255 (was " + rate + ")");
         int loops = rate == 0 ? 256 : rate;
-        return BASE_CYCLES + 26 * (loops - 1);
+        return baseCycles + 26 * (loops - 1);
     }
 
     public static void validateAll(List<DacSample> samples) {

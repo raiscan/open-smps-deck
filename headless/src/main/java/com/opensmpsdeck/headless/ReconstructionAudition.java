@@ -279,7 +279,7 @@ public final class ReconstructionAudition {
             }
         }
         return new StudioProject(project.arrangementVersion(), project.name(), project.mode(), project.ticksPerBeat(),
-                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples());
+                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples()).withTarget(project.target());
     }
 
     private static String uniqueSource(HashMap<String, Sequence> sources, int index) {

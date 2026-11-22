@@ -301,7 +301,7 @@ final class ReconstructionVoiceStage {
                 int partId = fitGroups.get(model.id()).getFirst().note().part();
                 var part = source.parts().stream().filter(item -> item.id() == partId).findFirst().orElseThrow();
                 if (fm.variantId() == null) continue;
-                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled);
+                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled, score.inputs().profile());
                 instruments.put(model.id(), new SourceSound(fm, psg.variantId(), psg.volumeOffset()));
             }
             byLane.forEach((lane, notes) -> result.putIfAbsent(lane,

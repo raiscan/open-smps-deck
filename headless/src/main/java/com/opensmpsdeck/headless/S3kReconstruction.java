@@ -11,6 +11,7 @@ import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -166,6 +167,13 @@ final class S3kReconstruction {
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices,
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> spillChoices,
                           Map<Integer, ReconstructionEcho.Estimate> echoes) {
+        return arrange(name, ticksPerBeat, frames, score, catalogue, choices, spillChoices, echoes, TargetProfile.S3K);
+    }
+
+    static Result arrange(String name, int ticksPerBeat, int frames, Score score, InstrumentCatalogue catalogue,
+                          Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices,
+                          Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> spillChoices,
+                          Map<Integer, ReconstructionEcho.Estimate> echoes, TargetProfile profile) {
         var parts = indexParts(score.parts());
         var reductions = new ArrayList<>(score.reductions());
         var tones = new ArrayList<Event>();
@@ -201,7 +209,7 @@ final class S3kReconstruction {
         List<Event> spill = new ArrayList<>();
         for (var event : unplacedFm) {
             var choice = spillChoices.get(new ReconstructionVoices.Key(event.note().partId(), null));
-            if (choice == null || choice.assetId() == null || event.note().pitch() < 45) {
+            if (choice == null || choice.assetId() == null || event.note().pitch() < profile.psg().low()) {
                 reductions.add(new Reduction(event.note(), Change.FM_BUSY));
                 continue;
             }
@@ -358,6 +366,25 @@ final class S3kReconstruction {
                                    Map<String, ReconstructionVoicing.SourceSound> sourceInstruments,
                                    List<ReconstructionLanePolicies.Scoped> policies, ReconstructionLanePolicies.Levels levels,
                                    Map<String, ReconstructionLayers.Request> layers, boolean fmOnly, boolean policyDecisions)
+            throws java.io.IOException {
+        return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue, matches,
+                echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, layout, assignments, sourceInstruments,
+                policies, levels, layers, fmOnly, policyDecisions, TargetProfile.S3K);
+    }
+
+    static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
+                                   ReconstructionAllocation.Result allocation, ReconstructionStructure.Result structure,
+                                   InstrumentCatalogue catalogue,
+                                   Map<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>> matches,
+                                   Map<Integer, ReconstructionEcho.Estimate> echoes,
+                                   Map<String, ReconstructionVoicing.Lane> voicing, boolean copies, boolean bends,
+                                   Map<String, List<ReconstructionOverrides.Span>> scopes, Map<String, String> origins,
+                                   Map<String, Double> scopedDrumGains, ReconstructionClipLinks.Layout layout,
+                                   Map<String, ReconstructionVoicePlan.Assignment> assignments,
+                                   Map<String, ReconstructionVoicing.SourceSound> sourceInstruments,
+                                   List<ReconstructionLanePolicies.Scoped> policies, ReconstructionLanePolicies.Levels levels,
+                                   Map<String, ReconstructionLayers.Request> layers, boolean fmOnly, boolean policyDecisions,
+                                   TargetProfile profile)
             throws java.io.IOException {
         var candidates = new ArrayList<PolicySource>();
         var applied = new ArrayList<ReconstructionBendEncoding.Applied>();
@@ -564,13 +591,13 @@ final class S3kReconstruction {
             throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
         int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
         var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, psg, candidates, voices, envelopes,
-                levels, catalogue, sourceInstruments, policyDecisions);
+                levels, catalogue, sourceInstruments, policyDecisions, profile);
         int echoNotes = addEchoes(fm, echoes, frames, 2);
         if (copies) echoNotes += addVoicingCopies(fm, frames);
         var lanePolicyCopies = new ArrayList<CopyWindow>();
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
         var coverage = applyLanePolicies(policies, levels, frames, fm, psg, candidates, voices, envelopes, gates,
-                catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions);
+                catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile);
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -594,12 +621,12 @@ final class S3kReconstruction {
             voices.keySet().retainAll(used);
             if (voices.size() > 128) {
                 String context = allocation.chords().isEmpty() ? "voicing.json: scoped voicing" : "Edits and scoped voicing";
-                throw new IllegalArgumentException(context + " requires " + voices.size()
-                        + " distinct FM voices (S3K local bank limit is 128)");
+                throw new VoiceLimitException(context + " requires " + voices.size()
+                        + " distinct FM voices (" + profile.game().name() + " local bank limit is 128)");
             }
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
-                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()));
+                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values())).withTarget(profile.game());
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
                 List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes,
                 coverage, layerResults, List.copyOf(lanePolicyCopies), decisions == null ? List.of() : List.copyOf(decisions));
@@ -748,6 +775,10 @@ final class S3kReconstruction {
         return placed;
     }
 
+    static final class VoiceLimitException extends IllegalArgumentException {
+        VoiceLimitException(String message) { super(message); }
+    }
+
     private record PolicySource(ReconstructionAllocation.Entry entry, String origin, Placement placed, int gate,
                                 boolean assigned) {}
 
@@ -760,7 +791,7 @@ final class S3kReconstruction {
             List<ArrayList<Placement>> fm, List<ArrayList<Placement>> psg, List<PolicySource> sources,
             Map<String, Voice> voices, Map<String, Envelope> envelopes, ReconstructionLanePolicies.Levels levels,
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
-            boolean describeBlockers) throws java.io.IOException {
+            boolean describeBlockers, TargetProfile profile) throws java.io.IOException {
         if (layers.isEmpty()) return List.of();
         var results = new ArrayList<ReconstructionLayers.Result>();
         var placedIds = new HashSet<String>();
@@ -785,7 +816,7 @@ final class S3kReconstruction {
             if (!targetFm && fmOnly) reason = "PSG disabled by FM-only reconstruction";
             else if (start >= end) reason = "Layer starts outside the render";
             else if (noiseKind(dry) != PsgMode.TONE) reason = "Source note uses a noise lane";
-            else if (dry.bend == null && (pitch < (targetFm ? 12 : 45) || pitch > (targetFm ? 106 : 117)))
+            else if (dry.bend == null && !(targetFm ? profile.fm() : profile.psg()).contains(pitch))
                 reason = "Pitch is outside the target chip range";
             else {
                 slot = freeSlot(targetFm ? fm : psg, names, source.entry().lane(), start, end);
@@ -806,7 +837,7 @@ final class S3kReconstruction {
                 var layerNote = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
                 var layer = targetFm
                         ? fmLayer(dry, tone, fmVoice, layerNote, settings, start, end, voices, catalogue, instruments)
-                        : psgLayer(dry, tone, fmVoice, psgVoice, layerNote, settings, start, end, envelopes, levels);
+                        : psgLayer(dry, tone, fmVoice, psgVoice, layerNote, settings, start, end, envelopes, levels, profile.psg());
                 if (layer != null) {
                     curve = copyBend(dry, layer, fmVoice, targetFm, settings.detune());
                     layer.noteId = dry.noteId;
@@ -873,8 +904,8 @@ final class S3kReconstruction {
 
     private static Placement psgLayer(Placement dry, Tone tone, Voice fm, Envelope psg, MidiScore.Note note,
                                       ReconstructionLayers.Settings settings, int start, int end, Map<String, Envelope> envelopes,
-                                      ReconstructionLanePolicies.Levels levels) throws java.io.IOException {
-        int volume = levels.volume(fm, psg, dry.event.note().pitch(), tone.volume(), dry.bend == null ? note.pitch() : Math.clamp(note.pitch(), 45, 115),
+                                      ReconstructionLanePolicies.Levels levels, TargetProfile.PitchRange range) throws java.io.IOException {
+        int volume = levels.volume(fm, psg, dry.event.note().pitch(), tone.volume(), dry.bend == null ? note.pitch() : Math.clamp(note.pitch(), range.low(), range.high() - 2),
                 LAYER_PSG,
                 end - start, -settings.attenuation() * ReconstructionLayers.DB_PER_TL);
         if (volume == 0) return null;
@@ -912,7 +943,7 @@ final class S3kReconstruction {
             Map<String, Voice> voices, Map<String, Envelope> envelopes, List<VoicedGate> gates,
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
             Map<Integer, MidiScore.Part> parts, int[] overlappingTone, Map<String, ReconstructionLayers.Request> layers,
-            List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions) throws java.io.IOException {
+            List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -959,7 +990,7 @@ final class S3kReconstruction {
                 String incompatibleReason = null;
                 if (end <= start) incompatibleReason = "Layer starts outside the render";
                 else if (pads && dry.bend != null) incompatibleReason = "Pad routing preserves the dry FM bend";
-                else if (!fmDouble && dry.bend == null && (pitch < 45 || pitch > 117))
+                else if (!fmDouble && dry.bend == null && !profile.psg().contains(pitch))
                     incompatibleReason = "Pitch is outside the target chip range";
                 else if (pads && (source.assigned() || entry.pinnedLane() != null || entry.laneType() != null
                         || noiseKind(dry) != PsgMode.TONE || dry.copy != null
@@ -1009,7 +1040,7 @@ final class S3kReconstruction {
                     }
                 } else {
                     int volume = levels.volume(voices.get(tone.asset()), envelopes.get(tone.asset()),
-                            dry.event.note().pitch(), tone.volume(), dry.bend == null ? pitch : Math.clamp(pitch, 45, 115),
+                            dry.event.note().pitch(), tone.volume(), dry.bend == null ? pitch : Math.clamp(pitch, profile.psg().low(), profile.psg().high() - 2),
                             envelope, end - start, rule.db());
                     if (volume == 0) {
                         incompatible++;

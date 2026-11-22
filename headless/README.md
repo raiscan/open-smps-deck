@@ -353,6 +353,26 @@ vocal and drum estimates, use the
 [bake-off environments and CLI](../experiments/extraction-bakeoff/README.md#run-basic-pitch-and-adtof-on-separated-stems).
 Those estimates are independent of the audio-only import.
 
+## Choose a reconstruction target
+
+Set `--target s1|s2|s3k` on `reconstruct import`, `run`, or `transcribe`
+to choose the game before analysis. The default is `s3k`. Import includes
+the selected target in its runnable request. Subsequent stages and
+`reconstruct rerun` inherit the saved target. You can also pass `--target`
+to those commands to assert the saved choice.
+
+S1 and S2 reconstruction are in progress. Analysis still uses the S3K
+fitting tools and a 60 Hz editing clock. Assembly uses the selected native
+compiler and reports incompatible assets or commands, such as S3K PSG
+control bytes or unsupported envelope and noise commands. A successful
+classic assembly writes a portable package and a render for the selected
+driver. Studio editing and its live preview use the S3K editing dialect.
+
+The target is saved as `inputs.target` in `score.json`, `options.target`
+in `manifest.json`, and `target` in the arrangement project. An omitted
+field means S3K. Portable and mod export default to the project target.
+An explicit `--driver` overrides that default.
+
 ## Import a Suno download
 
 ```sh
@@ -1229,7 +1249,7 @@ java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --dr
 
 Portable exports include redacted source by default. Pass `--no-source`
 to omit it. Choose `--driver s1|s2|s3k` for an editable arrangement.
-The default is `s3k`, also the only target for native v5 banks. Studio's
+Export defaults to the project target. Native v5 banks support `s3k`. Studio's
 **Portable SMPS package** export has the same driver choice. S1 and S2
 preserve the S3K duration tick rate as closely as their native clocks allow.
 `--speed-up-tempo BYTE` (decimal 0–255) uses the S3K clock for the optional

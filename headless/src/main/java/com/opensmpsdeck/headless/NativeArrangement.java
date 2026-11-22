@@ -85,7 +85,7 @@ public final class NativeArrangement {
                 "S3K", FRAMES_PER_SECOND, 0, assets == null ? List.of() : List.copyOf(assets.voices.values()),
                 sequences, clips, assets == null ? List.of() : List.copyOf(assets.envelopes.values()),
                 assets == null ? source.samples() : List.copyOf(assets.samples.values()))
-                .withDerivedFrom(ProjectProvenance.retailOrigin(source));
+                .withDerivedFrom(ProjectProvenance.retailOrigin(source)).withTarget(source.target());
     }
 
     private static final class Recorder extends Sonic3kCoordFlagHandler implements SmpsNoteListener {

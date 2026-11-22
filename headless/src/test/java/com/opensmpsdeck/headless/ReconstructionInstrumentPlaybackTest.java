@@ -4,6 +4,7 @@ import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -105,11 +106,11 @@ class ReconstructionInstrumentPlaybackTest {
         psgVariant(builder, "Delayed attack", new byte[]{15, 15, 0, 0, (byte) 0x83});
         psgVariant(builder, "Mute pulse", new byte[]{0, 15, 0, (byte) 0x80});
         psgVariant(builder, "Single-frame gate", new byte[]{2, (byte) 0x83});
-        assertNull(ReconstructionSpill.match(builder.build(), voice, part, notes).variantId());
+        assertNull(ReconstructionSpill.match(builder.build(), voice, part, notes, TargetProfile.S3K).variantId());
 
         byte[] audible = {4, 4, 4, (byte) 0x81};
         String variant = psgVariant(builder, "Audible attack", audible);
-        var match = ReconstructionSpill.match(builder.build(), voice, part, notes);
+        var match = ReconstructionSpill.match(builder.build(), voice, part, notes, TargetProfile.S3K);
         assertEquals(variant, match.variantId());
         var rawVolume = S3kReconstruction.volume(part, notes.getFirst().note().midi());
         var level = ReconstructionEcho.scaleVolume(Math.max(1, rawVolume - 24), voice.gain());

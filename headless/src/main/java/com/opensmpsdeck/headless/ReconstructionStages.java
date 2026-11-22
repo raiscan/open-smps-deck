@@ -1,6 +1,8 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonElement;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -20,8 +22,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.Set;
-
-import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 public final class ReconstructionStages {
     static final int VERSION = 1;
@@ -106,7 +106,22 @@ public final class ReconstructionStages {
                   @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes,
                   @Nullable Integer leadPart, @Nullable Boolean fastRunsOff,
                   @Nullable ReconstructionDrums.Source drumSource, @Nullable Boolean stemTemplateNotesOff,
-                  @Nullable ReconstructionAudioOnly.Provenance audioOnly) {
+                  @Nullable ReconstructionAudioOnly.Provenance audioOnly, @Nullable String target) {
+        TargetGame targetGame() { return target == null ? TargetGame.S3K : TargetGame.parse(target); }
+
+        TargetProfile profile() { return TargetProfile.of(targetGame()); }
+
+        Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
+               boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
+               String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats,
+               Map<Integer, ExternalTranscribers.PartNotes> externalNotes, Integer leadPart, Boolean fastRunsOff,
+               ReconstructionDrums.Source drumSource, Boolean stemTemplateNotesOff,
+               ReconstructionAudioOnly.Provenance audioOnly) {
+            this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems,
+                    candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, fastRunsOff, drumSource,
+                    stemTemplateNotesOff, audioOnly, null);
+        }
+
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
                boolean fmOnly, boolean wholePartVoices, boolean audioRefine, Map<Integer, String> stems,
                String candidates, double harmonyMaxHz, ReconstructionTempo.Options grid, Boolean audioRepeats) {
@@ -123,14 +138,14 @@ public final class ReconstructionStages {
         Inputs withLeadPart(Integer lead) {
             return new Inputs(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices,
                     audioRefine, stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, lead,
-                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly);
+                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly, target);
         }
 
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
             return new ReconstructionCli.Options(durationUs, name, ticksPerBeat, keepOctaves, fmOnly,
-                    wholePartVoices, audioRefine, paths);
+                    wholePartVoices, audioRefine, paths, targetGame());
         }
     }
 
@@ -160,6 +175,8 @@ public final class ReconstructionStages {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
                     pitchChanges, tempo, midiBars, beatMap, null, null, null);
         }
+        TargetProfile profile() { return inputs == null ? TargetProfile.S3K : inputs.profile(); }
+
         boolean usesBeatGrid() { return beatMap != null && tempo != null && tempo.source().equals("tracked"); }
 
         Score withInputs(Inputs inputs, List<ReconstructionStructure.Bar> bars, List<Note> notes,
@@ -243,7 +260,13 @@ public final class ReconstructionStages {
     }
 
     static void rerun(Path oldWork, Path work, List<Path> search, boolean keepVoicing, boolean overwriteDetached, PrintStream out, PrintStream err) throws IOException {
+        rerun(oldWork, work, search, keepVoicing, overwriteDetached, null, out, err);
+    }
+
+    static void rerun(Path oldWork, Path work, List<Path> search, boolean keepVoicing, boolean overwriteDetached,
+                      TargetGame requested, PrintStream out, PrintStream err) throws IOException {
         if (Files.exists(work) && Files.isSameFile(oldWork, work)) {
+            if (requested != null) requireSameTarget(readScore(work.resolve("score.json")).inputs(), requested);
             ReconstructionReview.requireAttached(work, overwriteDetached);
             if (!overwriteDetached || !search.isEmpty())
                 throw new IllegalArgumentException("In-place rerun requires --overwrite-detached and uses the existing score inputs");
@@ -256,6 +279,7 @@ public final class ReconstructionStages {
             throw new java.nio.file.FileAlreadyExistsException(work.toString());
         var replay = ReconstructionManifest.resolve(oldWork, work, search);
         var inputs = replay.inputs();
+        requireSameTarget(inputs, requested);
         Files.createDirectory(work);
         Path plan = oldWork.resolve("roleplan.json");
         if (Files.exists(plan)) Files.copy(plan, work.resolve("roleplan.json"));
@@ -389,9 +413,11 @@ public final class ReconstructionStages {
                         var chords = ReconstructionChords.select(edits.bindSections(work, score, null, stage, outcomes),
                                 score, roles, laneTypes, outcomes);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience, chordReduction);
+                                frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience,
+                                chordReduction, score.inputs.profile());
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
-                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience, chordReduction);
+                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
+                                chordReduction, score.inputs.profile());
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -626,7 +652,8 @@ public final class ReconstructionStages {
             var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                     ReconstructionTimeMap.of(score).frames(),
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
-                    ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience, chordReduction);
+                    ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience,
+                                chordReduction, score.inputs.profile());
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
             if (hasLayers) ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes, true, roles);
@@ -803,7 +830,8 @@ public final class ReconstructionStages {
                 options.audioRefine(), stems, extra.candidates == null ? null : extra.candidates.toString(), harmonyHz,
                 extra.grid, extra.audioRepeats, external, extra.leadPart != null || !audioOnly ? extra.leadPart : audio.leadPart(),
                 extra.fastRunsOff ? true : null, extra.drumSource, extra.stemTemplateNotesOff ? true : null,
-                audioOnly ? audio.provenance() : null);
+                audioOnly ? audio.provenance() : null,
+                options.target() == TargetGame.S3K ? null : options.target().id());
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz,
                 extra.lanes, extra.refitLevels, extra.keepVoicing, null, false, extra.lanePolicyPreset, extra.policyDecisions);
     }
@@ -835,7 +863,12 @@ public final class ReconstructionStages {
         if (extra.keepVoicing && (!chain || stage.ordinal() > Stage.VOICE.ordinal()
                 || extra.refitLevels || !extra.lanes.isEmpty()))
             throw new IllegalArgumentException("--keep-voicing requires a run through voice and cannot be combined with refit options");
-        if (extra.legacy.length != 0 || extra.candidates != null || extra.grid.force()
+        if (extra.legacy.length != 0) {
+            var target = ReconstructionCli.parseTargetAssertion(extra.legacy);
+            var saved = readScore(absolute(args[workIndex]).resolve("score.json")).inputs();
+            requireSameTarget(saved, target);
+        }
+        if (extra.candidates != null || extra.grid.force()
                 || extra.transcriber != null || extra.separatorConfig != null || !extra.transcriberFor.isEmpty() || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
@@ -997,7 +1030,7 @@ public final class ReconstructionStages {
                         if (duplicate) throw new IllegalArgumentException("Duplicate " + flag + " for " + label);
                     }
                 }
-                case "--seconds", "--name", "--ticks-per-beat" -> {
+                case "--seconds", "--name", "--ticks-per-beat", "--target" -> {
                     legacy.add(args[i]);
                     if (++i == args.length) throw new IllegalArgumentException("Missing argument to " + args[i - 1]);
                     legacy.add(args[i]);
@@ -1015,6 +1048,13 @@ public final class ReconstructionStages {
                 transcriber, transcriberConfig, device, parts, imports, unmapped, leadPart, fastRunsOff,
                 stemTemplateNotesOff, drumSource, java.util.Set.copyOf(lanes), refitLevels, keepVoicing, variant,
                 overwriteDetached, lanePolicyPreset, policyDecisions, audioStems, stemRoles, drumDetector, transcriberFor, separatorConfig);
+    }
+
+    private static void requireSameTarget(Inputs inputs, TargetGame requested) {
+        var saved = inputs.targetGame();
+        if (requested != null && requested != saved)
+            throw new IllegalArgumentException("Saved reconstruction target is " + saved.id()
+                    + ". Start a new reconstruction to choose " + requested.id() + ".");
     }
 
     private static Path absolute(String path) { return Path.of(path).toAbsolutePath().normalize(); }
@@ -1317,7 +1357,7 @@ public final class ReconstructionStages {
         long sourceDurationUs = ReferenceAudio.durationMicros(reference);
         long durationUs = options.durationUs() == null ? sourceDurationUs : options.durationUs();
         if (durationUs > sourceDurationUs) throw new IllegalArgumentException("--seconds exceeds reference WAV duration");
-        long presentations = (durationUs * PRESENTATIONS_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
+        long presentations = (durationUs * options.profile().ticksPerSecond() + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
         if (presentations < 1 || presentations > S3kRenderer.MAX_PRESENTATIONS)
             throw new IllegalArgumentException("Reconstruction interval must fit in "
                     + S3kRenderer.MAX_PRESENTATIONS + " presentations. Use --seconds for a shorter interval.");
@@ -1331,7 +1371,8 @@ public final class ReconstructionStages {
 
     private static Score prepare(MidiScore original, Path reference, ReconstructionCli.Options options,
                                  long durationUs, String source) throws IOException {
-        int frames = (int) ((durationUs * PRESENTATIONS_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND);
+        int tickRate = options.profile().ticksPerSecond();
+        int frames = (int) ((durationUs * tickRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND);
         for (int part : options.stems().keySet()) {
             if (original.parts().stream().noneMatch(p -> p.id() == part))
                 throw new IllegalArgumentException("Unknown MIDI part ID for --stem: " + part);
@@ -1362,7 +1403,7 @@ public final class ReconstructionStages {
                     note.startUs() / (double) MICROS_PER_SECOND, note.endUs() / (double) MICROS_PER_SECOND,
                     note.pitch(), note.velocity(), remaining == 0 ? "audio-refine" : source, remaining == 0 ? .85 : 1));
         }
-        return new Score(VERSION, durationUs, frames, PRESENTATIONS_PER_SECOND, null, List.of(), score, counts, notes,
+        return new Score(VERSION, durationUs, frames, tickRate, null, List.of(), score, counts, notes,
                 prepared.reductions(), refinement.changes(), null, null);
     }
 }

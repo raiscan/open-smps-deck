@@ -9,6 +9,7 @@ import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
@@ -152,6 +153,48 @@ class McpServerTest {
         assertToolError("render_clip", Map.of("project", score.toString(), "output", "clip.wav",
                 "start", "0", "end", 1), "expected number");
         assertEquals("{}", Files.readString(score));
+    }
+
+    @Test void reconstructionImportAndTranscribePassTheTargetThrough() throws Exception {
+        var folder = Files.createDirectory(directory.resolve("download"));
+        Path midi = folder.resolve("song.mid"), wav = folder.resolve("mix.wav");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        track.add(new javax.sound.midi.MidiEvent(
+                new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_ON, 0, 69, 96), 0));
+        track.add(new javax.sound.midi.MidiEvent(
+                new javax.sound.midi.ShortMessage(javax.sound.midi.ShortMessage.NOTE_OFF, 0, 69, 0), 480));
+        javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
+        com.opensmpsdeck.headless.WaveFile.write(wav, 60, sink -> {
+            var samples = new short[1_600];
+            java.util.Arrays.fill(samples, (short) 1024);
+            for (int i = 0; i < 60; i++) sink.accept(samples);
+        });
+        var initial = toolResult("reconstruct_import", Map.of("folder", folder.toString(),
+                "workDir", directory.resolve("import").toString(), "target", "s2"));
+        assertFalse(initial.get("isError").getAsBoolean(), initial::toString);
+        assertEquals("s2", initial.getAsJsonObject("structuredContent").getAsJsonObject("runRequest")
+                .getAsJsonObject("options").get("target").getAsString());
+
+        Path catalogue = directory.resolve("index.json");
+        Files.writeString(catalogue, "{}"); // Transcribe does not open the catalogue.
+        Path work = directory.resolve("work");
+        var build = toolResult("reconstruct_stage", Map.of("stage", "transcribe", "workDir", work.toString(),
+                "inputs", Map.of("midi", midi.toString(), "wav", wav.toString(), "catalogue", catalogue.toString()),
+                "options", Map.of("target", "s2")));
+        assertFalse(build.get("isError").getAsBoolean(), build::toString);
+        assertEquals("s2", JsonParser.parseString(Files.readString(work.resolve("score.json"))).getAsJsonObject()
+                .getAsJsonObject("inputs").get("target").getAsString());
+    }
+
+    @Test void portableProjectExportUsesTheSavedTargetByDefault() throws Exception {
+        Path source = directory.resolve("target.smps.json");
+        Files.writeString(source, ProjectFormat.write(DemoProject.create().withTarget(TargetGame.S1)));
+        var result = toolResult("project_export", Map.of("project", source.toString(), "format", "portable",
+                "output", "target.smps.zip"));
+        assertFalse(result.get("isError").getAsBoolean(), result::toString);
+        var manifest = com.opensmpsdeck.headless.PortablePackages.inspect(directory.resolve("target.smps.zip"));
+        assertEquals("s1", manifest.get("driver").getAsString());
     }
 
     @Test void bankLimitErrorsCarryTheCompiledAndLimitByteCounts() throws Exception {

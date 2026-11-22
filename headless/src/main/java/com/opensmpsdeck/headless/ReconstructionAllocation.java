@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -127,6 +128,7 @@ final class ReconstructionAllocation {
     private final Map<String, Entry> entries = new HashMap<>();
     private final Map<String, Entry> tail = new HashMap<>();
     private final boolean fmOnly;
+    private final TargetProfile profile;
     private final NavigableMap<Integer, Integer> cymbals = new TreeMap<>();
     private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
     private final Map<String, ReconstructionChordReduction.Tone> tones;
@@ -139,8 +141,9 @@ final class ReconstructionAllocation {
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
     private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
-                                     Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience) {
+                                     Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience, TargetProfile profile) {
         this.fmOnly = fmOnly;
+        this.profile = profile;
         this.previousLanes = previousLanes;
         this.tones = tones;
         this.salience = salience;
@@ -148,7 +151,7 @@ final class ReconstructionAllocation {
         for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
         pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
                 .thenComparing(a -> continuations.containsKey(a.note().id()))
-                .thenComparing(attackOrder())
+                .thenComparing(attackOrder(profile))
                 .thenComparingInt(a -> ordinal.getOrDefault(a.note().id(), Integer.MAX_VALUE))
                 .thenComparing(a -> a.note().id()));
         for (var attack : attacks) {
@@ -227,7 +230,7 @@ final class ReconstructionAllocation {
                                        Map<ReconstructionVoices.Key, Double> cymbalLevels,
                                        Map<String, ReconstructionLaneType> voiceTypes) {
         return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels,
-                voiceTypes, Map.of(), null, Map.of(), false);
+                voiceTypes, Map.of(), null, Map.of(), false, TargetProfile.S3K);
     }
 
     static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
@@ -235,7 +238,8 @@ final class ReconstructionAllocation {
                                        Map<ReconstructionVoices.Key, Double> cymbalLevels,
                                        Map<String, ReconstructionLaneType> voiceTypes,
                                        Map<String, ReconstructionChords.Group> chords,
-                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience, boolean chordReduction) {
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience, boolean chordReduction,
+                                       TargetProfile profile) {
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -252,7 +256,7 @@ final class ReconstructionAllocation {
             if (noise && pin != null && pin.laneType() == ReconstructionLaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
                 end = Math.min(frames, start + ReconstructionCymbals.gate(note.pitch()));
             return new Attack(decision, start, end, noise, pin, null, false);
-        }).sorted(attackOrder()).toList();
+        }).sorted(attackOrder(profile)).toList();
         // Pick the first attack in normal allocation priority as the representative.
         // Its peers share the same tick and can fall back to normal placement if it cannot fit.
         var anchors = new HashMap<ReconstructionChords.Group, String>();
@@ -271,7 +275,7 @@ final class ReconstructionAllocation {
         }).toList();
         var tones = chordReduction ? ReconstructionChordReduction.classify(attacks.stream().filter(a -> a.role() != Role.drums && a.role() != Role.drop)
                 .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList()) : Map.<String, ReconstructionChordReduction.Tone>of();
-        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience);
+        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, profile);
         var louderParts = new java.util.HashSet<Integer>();
         cymbalLevels.keySet().forEach(key -> louderParts.add(key.partId()));
         cymbalLevels.forEach((key, level) -> {
@@ -283,7 +287,7 @@ final class ReconstructionAllocation {
         for (var attack : attacks) {
             var voiceType = voiceTypes.get(attack.note().id());
             if (attack.role() != Role.drop && voiceType != null) {
-                var issue = ReconstructionEdits.laneTypeIssue(attack.note(), attack.role() == Role.drums, voiceType, fmOnly);
+                var issue = ReconstructionEdits.laneTypeIssue(attack.note(), attack.role() == Role.drums, voiceType, fmOnly, profile);
                 var pin = attack.pin;
                 if (issue == null && (pin.laneType() != null ? pin.laneType() != voiceType
                         : !voiceType.lanes().contains(pin.lane())))
@@ -305,7 +309,7 @@ final class ReconstructionAllocation {
                 if (cymbal != null) remaining.add(cymbal);
             }
         }
-        remaining.sort(attackOrder());
+        remaining.sort(attackOrder(profile));
         var placedChords = new TreeMap<String, ReconstructionChords.Group>();
         allocator.pending.addAll(remaining);
         while (!allocator.pending.isEmpty()) {
@@ -373,11 +377,11 @@ final class ReconstructionAllocation {
                 placedChords.isEmpty() ? null : placedChords);
     }
 
-    private static Comparator<Attack> attackOrder() {
+    private static Comparator<Attack> attackOrder(TargetProfile profile) {
         return Comparator.comparingInt(Attack::start)
                 .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
-                .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < 45 ? 0 : 1)
+                .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < profile.psg().low() ? 0 : 1)
                 .thenComparing(Comparator.comparingInt((Attack a) -> a.note().velocity()).reversed())
                 .thenComparingInt(a -> a.role() == Role.harmony || a.role() == Role.counter ? a.start - a.end : 0)
                 .thenComparing(Attack::note, ReconstructionStages.NOTE_ORDER);
@@ -627,7 +631,7 @@ final class ReconstructionAllocation {
 
     private List<String> spillLanes(Attack attack) {
         if (expectedLanes(attack.role(), attack.noise) != INNER_FM || fmOnly || attack.fmRequired
-                || attack.note().pitch() < 45 || attack.note().run() != null) return List.of();
+                || attack.note().pitch() < profile.psg().low() || attack.note().run() != null) return List.of();
         return attack.role() == Role.harmony && overlapsCymbal(attack.start, attack.end) ? PSG.subList(0, 2) : PSG;
     }
 
@@ -663,7 +667,7 @@ final class ReconstructionAllocation {
     private String freeFmForLowAttack(Attack attack) {
         for (String lane : INNER_FM.reversed()) {
             Entry prior = tail.get(lane);
-            if (prior == null || prior.pinnedLane != null || prior.note.pitch() < 45 || prior.note.run() != null
+            if (prior == null || prior.pinnedLane != null || prior.note.pitch() < profile.psg().low() || prior.note.run() != null
                     || fmChordAnchors.contains(prior.note.id())) continue;
             for (String destination : PSG) {
                 if (destination.equals("PSG3") && prior.role == Role.harmony && overlapsCymbal(prior.startTick, prior.endTick)) continue;

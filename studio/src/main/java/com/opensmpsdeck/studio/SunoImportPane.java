@@ -1,5 +1,6 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.headless.SunoImport;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.concurrent.Task;
@@ -43,6 +44,7 @@ final class SunoImportPane extends VBox {
     private final TableView<Row> files = new TableView<>();
     private final Button check = new Button("Re-check");
     private final Button start = new Button("Start reconstruction");
+    private final ComboBox<TargetGame> target = new ComboBox<>();
     private final Label status = new Label();
     private final ProgressBar progress = new ProgressBar();
     private SunoImport.Report report;
@@ -77,7 +79,13 @@ final class SunoImportPane extends VBox {
         progress.setMaxWidth(Double.MAX_VALUE);
         progress.managedProperty().bind(progress.visibleProperty());
         progress.setVisible(false);
-        getChildren().addAll(location, files, status, progress, new HBox(8, check, start));
+        target.setId("suno-import-target");
+        target.getItems().setAll(TargetGame.values());
+        target.setValue(TargetGame.S3K);
+        target.valueProperty().addListener((observable, oldValue, newValue) -> recheck());
+        var targetLabel = new Label("Target game");
+        targetLabel.setLabelFor(target);
+        getChildren().addAll(location, new HBox(8, targetLabel, target), files, status, progress, new HBox(8, check, start));
         recheck();
     }
 
@@ -142,12 +150,13 @@ final class SunoImportPane extends VBox {
     private void recheck() {
         var selected = Map.copyOf(assignments);
         var skipped = Set.copyOf(exclusions);
+        var game = target.getValue();
         Task<SunoImport.Report> task = new Task<>() {
             @Override protected SunoImport.Report call() throws Exception {
                 return SunoImport.inspect(source, work, null, selected, skipped, (done, total, message) -> {
                     updateProgress(done, total);
                     updateMessage(message);
-                });
+                }, game);
             }
         };
         launch(task, this::showReport);
@@ -210,6 +219,7 @@ final class SunoImportPane extends VBox {
     private <T> void launch(Task<T> task, Consumer<T> success) {
         active = task;
         files.setDisable(true);
+        target.setDisable(true);
         check.setDisable(true);
         start.setDisable(true);
         status.textProperty().bind(task.messageProperty());
@@ -235,6 +245,7 @@ final class SunoImportPane extends VBox {
         progress.progressProperty().unbind();
         progress.setVisible(false);
         files.setDisable(false);
+        target.setDisable(false);
         check.setDisable(false);
     }
 

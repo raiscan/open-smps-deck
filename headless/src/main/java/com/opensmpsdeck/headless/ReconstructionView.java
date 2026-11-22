@@ -232,7 +232,7 @@ public final class ReconstructionView {
                 span.seconds(span.start, TimeBase.source), span.seconds(span.end, TimeBase.source), timeline,
                 options.lanes.isEmpty() || options.lanes.contains("DAC") && options.lanes.contains("PSG3") ? null
                         : options.lanes.contains("DAC") ? "DAC" : options.lanes.contains("PSG3") ? "PSG3" : "",
-                options.parts(), score.inputs() != null && score.inputs().fmOnly());
+                options.parts(), score.inputs() != null && score.inputs().fmOnly(), score.profile());
 
         int minPitch = notes.stream().mapToInt(DrawnNote::pitch).min().orElse(51) - 3;
         int maxPitch = notes.stream().mapToInt(DrawnNote::pitch).max().orElse(81) + 3;

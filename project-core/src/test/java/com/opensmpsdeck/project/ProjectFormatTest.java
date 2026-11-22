@@ -9,6 +9,44 @@ class ProjectFormatTest {
     static StudioProject fixture() {
         return ProjectCompilerTest.project(List.of(ProjectCompilerTest.sequence("s","FM",24,List.of(new NoteEvent("n",0,12,60)))),List.of(new Clip("c","s","FM1",0,48)));
     }
+    @Test void targetRoundTripsWithoutChangingTheEditingDialect() {
+        var original = DemoProject.create();
+        var legacy = ProjectFormat.write(original);
+        assertEquals(TargetGame.S3K, ProjectFormat.read(legacy).target());
+        assertEquals(legacy, ProjectFormat.write(ProjectFormat.read(legacy)));
+        assertFalse(legacy.contains("\"target\""));
+        for (var game : List.of(TargetGame.S1, TargetGame.S2)) {
+            var tagged = original.withTarget(game);
+            var restored = ProjectFormat.read(ProjectFormat.write(tagged));
+            assertEquals(tagged, restored);
+            assertEquals("S3K", restored.mode());
+            assertEquals(game, restored.withSettings("New name", 24, 0).target());
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> ProjectFormat.read(legacy.replace("\"mode\":", "\"target\": \"scd\", \"mode\":")));
+    }
+
+    @Test void targetProfilesExposeDriverLimits() {
+        int[] cycles = {301, 295, 297};
+        for (var game : TargetGame.values()) {
+            var profile = TargetProfile.of(game);
+            boolean s3k = game == TargetGame.S3K;
+            assertEquals(new TargetProfile.PitchRange(s3k ? 45 : 48, s3k ? 117 : 116), profile.psg());
+            assertEquals(new TargetProfile.PitchRange(12, 106), profile.fm());
+            assertEquals(cycles[game.ordinal()], profile.dacBaseCycles());
+            assertEquals(s3k ? TargetProfile.EnvelopeGrammar.S3K_CONTROLS : TargetProfile.EnvelopeGrammar.HOLD_80,
+                    profile.envelopeGrammar());
+            assertEquals(s3k, profile.modulationEnvelopes());
+            assertEquals(s3k, profile.fmVolumeEnvelopes());
+            assertEquals(s3k, profile.ssgEg());
+            assertEquals(s3k ? TargetProfile.CarrierSelection.TL_HIGH_BIT : TargetProfile.CarrierSelection.ALGORITHM,
+                    profile.carrierSelection());
+            assertEquals(60, profile.ticksPerSecond());
+            assertEquals(32_768, profile.bankLimitBytes());
+        }
+        assertEquals(DacSample.sampleRateHz(0), TargetProfile.S3K.dacSampleRateHz(0));
+    }
+
     @Test void provenanceIsOptionalAndStrictWithoutChangingTheVersion() {
         var before = fixture();
         var voice = before.voices().getFirst();

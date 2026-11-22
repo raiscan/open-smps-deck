@@ -4,6 +4,7 @@ import com.openggf.audio.smps.DacData;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.openggf.game.sonic1.audio.smps.Sonic1SmpsData;
 import com.openggf.game.sonic2.audio.smps.Sonic2SmpsData;
+import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
@@ -17,6 +18,9 @@ import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
+import com.opensmpsdeck.project.DemoProject;
+import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,6 +42,58 @@ class ClassicPortablePackageTest {
     private static final byte[] PCM = bytes("80 90 82 7d 7a 80");
 
     @TempDir Path directory;
+
+    @Test void portableExportDefaultsToTheProjectTargetAndHonorsAnExplicitDriver() throws Exception {
+        Path source = directory.resolve("target.smps.json");
+        Files.writeString(source, ProjectFormat.write(DemoProject.create().withTarget(TargetGame.S2)));
+        Path portable = directory.resolve("target.smps.zip");
+        var errors = new java.io.ByteArrayOutputStream();
+        try (var err = new java.io.PrintStream(errors)) {
+            assertEquals(0, Main.run(new String[]{"export", source.toString(), portable.toString(),
+                    "--format", "portable"}, System.out, err), errors.toString());
+            assertEquals("s2", PortablePackages.inspect(portable).get("driver").getAsString());
+            Path override = directory.resolve("override.smps.zip");
+            assertEquals(0, Main.run(new String[]{"export", source.toString(), override.toString(),
+                    "--format", "portable", "--driver", "s1"}, System.out, err), errors.toString());
+            assertEquals("s1", PortablePackages.inspect(override).get("driver").getAsString());
+        }
+    }
+
+    @Test void allTargetsReportTypedBankOverflow() {
+        var demo = DemoProject.create();
+        int duration = 127 * 40_000;
+        var voice = demo.voices().getFirst();
+        var sequence = new Sequence("s", "Held note", "FM", duration, voice.id(), 100,
+                List.of(new NoteEvent("held", 0, duration, 60)));
+        var project = new StudioProject(2, "Oversize", "S3K", 24, 0, List.of(voice), List.of(sequence),
+                List.of(new Clip("clip", sequence.id(), "FM1", 0, duration)));
+        for (var game : TargetGame.values()) {
+            var failure = assertThrows(ProjectCompiler.BankLimitException.class,
+                    () -> ReconstructionCli.compileTarget(project.withTarget(game)), game.id());
+            assertTrue(failure.compiledBytes() > failure.limitBytes());
+            assertEquals(32_768, failure.limitBytes());
+        }
+    }
+
+    @Test void testInGameDefaultsToProjectTargetAndAcceptsAnExplicitDriver() {
+        var demo = DemoProject.create();
+        assertEquals(RomGame.S3K, TestInGame.game(demo));
+        assertEquals(RomGame.S1, TestInGame.game(demo.withTarget(TargetGame.S1)));
+        var project = demo.withTarget(TargetGame.S2);
+        assertEquals(RomGame.S2, RomPatchInput.compile(project, null).game());
+        assertEquals(RomGame.S3K, RomPatchInput.compile(project, RomGame.S3K).game());
+    }
+
+    @Test void targetAssemblyNamesTheUnsupportedEnvelope() {
+        var base = DemoProject.create().withTarget(TargetGame.S2);
+        var project = new StudioProject(3, base.name(), base.mode(), base.ticksPerBeat(), base.tempo(),
+                base.voices(), base.sequences(), base.clips(),
+                List.of(new Envelope("psg-closed-cymbal", "Cymbal", Envelope.PSG_VOLUME, List.of(0, 0x83))))
+                .withTarget(base.target());
+        var error = assertThrows(IllegalArgumentException.class, () -> ReconstructionCli.compileTarget(project));
+        assertTrue(error.getMessage().contains("s2: PSG envelope 'psg-closed-cymbal' uses S3K control byte 83"),
+                error::getMessage);
+    }
 
     @Test void rendersConvertedTempoAndEquivalentFmVoiceLoads() throws Exception {
         for (int tempo : List.of(64, 31)) {

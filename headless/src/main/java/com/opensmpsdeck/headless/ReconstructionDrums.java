@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -81,16 +82,17 @@ final class ReconstructionDrums {
         var matched = new LinkedHashMap<ReconstructionVoices.Key, Fit>();
         boolean hasStem = classes.keySet().stream().anyMatch(key -> stems.containsKey(key.partId()));
         boolean needsMix = classes.keySet().stream().anyMatch(key -> !stems.containsKey(key.partId()));
-        var acoustics = new DacAcoustics(catalogue);
-        var mixProbes = needsMix ? probes(catalogue, acoustics, LEGACY_TUNING, Set.of()) : List.<Rated>of();
+        var profile = score.inputs().profile();
+        var acoustics = new DacAcoustics(catalogue, profile);
+        var mixProbes = needsMix ? probes(catalogue, acoustics, LEGACY_TUNING, Set.of(), profile) : List.<Rated>of();
         var filters = new HashSet<Integer>();
         classes.keySet().stream().filter(key -> stems.containsKey(key.partId()))
                 .map(key -> cutoff(key.drumPitch())).filter(hz -> hz > 0).forEach(filters::add);
-        var stemProbes = hasStem ? probes(catalogue, acoustics, STEM_TUNING, filters) : List.<Rated>of();
+        var stemProbes = hasStem ? probes(catalogue, acoustics, STEM_TUNING, filters, profile) : List.<Rated>of();
         var families = families(catalogue);
         var labels = hasStem ? labels(catalogue, families, acoustics) : Map.<String, DrumClass>of();
         if (!timeline.warped()) {
-            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched);
+            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile);
         } else {
             Path scratch = Files.createTempDirectory("drum-reference-");
             var files = new ArrayList<Path>();
@@ -110,7 +112,7 @@ final class ReconstructionDrums {
                     }
                     warpedStems.put(part, warped);
                 }
-                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched);
+                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile);
             } finally {
                 for (Path file : files) Files.deleteIfExists(file);
                 Files.deleteIfExists(scratch);
@@ -119,13 +121,13 @@ final class ReconstructionDrums {
         preserveUnisolatedMixChoices(score, catalogue, mix, stems, mixProbes, matched);
         var source = score.inputs().drumSource();
         return selectKit(catalogue, matched, hasStem ? kits(catalogue) : Map.of(),
-                timeline.timeBase(), source == null ? Source.catalogue : source, !score.inputs().fmOnly());
+                timeline.timeBase(), source == null ? Source.catalogue : source, !score.inputs().fmOnly(), profile);
     }
 
     private static void analyze(Map<ReconstructionVoices.Key, List<MidiScore.Note>> classes,
             List<MidiScore.Note> notes, List<Integer> drumParts, Path mix, Map<Integer, Path> stems,
             List<Rated> mixProbes, List<Rated> stemProbes, Map<String, S3kDacFamily> families,
-            Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched) throws IOException {
+            Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched, TargetProfile profile) throws IOException {
         for (var entry : classes.entrySet()) {
             var key = entry.getKey();
             Path stem = stems.get(key.partId());
@@ -142,7 +144,7 @@ final class ReconstructionDrums {
                 else if (stem == null || cutoff(pitch) == 0 || probe.filtered().containsKey(cutoff(pitch))) allowed.add(probe);
             }
             var ranked = rank(hits, allowed, families, labels, pitch, stem != null);
-            DacSample sample = stem == null || hits.isEmpty() ? null : slice(hits.getFirst().samples(), key);
+            DacSample sample = stem == null || hits.isEmpty() ? null : slice(hits.getFirst().samples(), key, profile);
             matched.put(key, new Fit(hits, ranked, sample, stem != null, null, List.copyOf(exclusions.values()), !allowed.isEmpty()));
         }
     }
@@ -291,7 +293,7 @@ final class ReconstructionDrums {
                 contrast - 1.1 * overlaps);
     }
 
-    private static List<Rated> probes(InstrumentCatalogue catalogue, DacAcoustics acoustics, int[] tuning, Set<Integer> filters)
+    private static List<Rated> probes(InstrumentCatalogue catalogue, DacAcoustics acoustics, int[] tuning, Set<Integer> filters, TargetProfile target)
             throws IOException {
         var result = new ArrayList<Rated>();
         var seen = new HashSet<AssetRate>();
@@ -299,15 +301,15 @@ final class ReconstructionDrums {
             var asset = catalogue.asset(variant.assetId());
             if (asset.kind() != InstrumentCatalogue.Kind.DAC_SAMPLE) continue;
             int nativeRate = variant.recipe().rate();
-            double nativeHz = DacSample.sampleRateHz(nativeRate);
+            double nativeHz = target.dacSampleRateHz(nativeRate);
             float[] pcm = DacAcoustics.pcm(asset.bytes());
             var assetProfile = acoustics.asset(asset.id());
             for (int semitones : tuning) {
                 if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
                 double targetHz = nativeHz * Math.pow(2, semitones / 12.0);
-                int rate = nearestRate(targetHz);
+                int rate = nearestRate(targetHz, target);
                 if (!seen.add(new AssetRate(asset.id(), rate))) continue;
-                float[] audio = resample(pcm, DacSample.sampleRateHz(rate), ANALYSIS_RATE);
+                float[] audio = resample(pcm, target.dacSampleRateHz(rate), ANALYSIS_RATE);
                 var profile = acoustics.profile(asset.id(), rate, audio);
                 if (audio.length < ANALYSIS_RATE / 100) audio = Arrays.copyOf(audio, ANALYSIS_RATE / 100);
                 try {
@@ -349,11 +351,11 @@ final class ReconstructionDrums {
         };
     }
 
-    private static int nearestRate(double hz) {
+    private static int nearestRate(double hz, TargetProfile target) {
         int best = 0;
         double distance = Double.POSITIVE_INFINITY;
         for (int rate = 0; rate <= 255; rate++) {
-            double error = Math.abs(Math.log(DacSample.sampleRateHz(rate) / hz));
+            double error = Math.abs(Math.log(target.dacSampleRateHz(rate) / hz));
             if (error < distance) {
                 best = rate;
                 distance = error;
@@ -573,7 +575,7 @@ final class ReconstructionDrums {
 
     private static Map<ReconstructionVoices.Key, Selection> selectKit(InstrumentCatalogue catalogue,
             Map<ReconstructionVoices.Key, Fit> fitted, Map<Kit, Set<String>> kits,
-            ReconstructionTimeMap.TimeBase clock, Source mode, boolean allowNoise) {
+            ReconstructionTimeMap.TimeBase clock, Source mode, boolean allowNoise, TargetProfile profile) {
         Kit preferred = preferredKit(fitted, kits);
         var kitAssets = preferred == null ? Set.<String>of() : kits.get(preferred);
         var usage = new HashMap<String, Integer>();
@@ -598,7 +600,7 @@ final class ReconstructionDrums {
                     && (chosen == null || chosen.distance() > AUTO_THRESHOLD));
             var exclusions = fit.exclusions();
             if (useSlice && mode == Source.auto) {
-                var sampleClass = DacAcoustics.profile(sliced).sampleClass();
+                var sampleClass = DacAcoustics.profile(sliced, profile).sampleClass();
                 String exclusion = exclusionReason(sampleClass, entry.getKey().drumPitch());
                 if (exclusion != null) {
                     useSlice = false;
@@ -716,11 +718,11 @@ final class ReconstructionDrums {
         return (values[values.length / 2] + values[(values.length - 1) / 2]) / 2;
     }
 
-    private static DacSample slice(float[] signal, ReconstructionVoices.Key key) {
-        float[] audio = resample(signal, ANALYSIS_RATE, DacSample.sampleRateHz(SLICE_RATE));
+    private static DacSample slice(float[] signal, ReconstructionVoices.Key key, TargetProfile profile) {
+        float[] audio = resample(signal, ANALYSIS_RATE, profile.dacSampleRateHz(SLICE_RATE));
         double peak = 1e-6;
         for (float value : audio) peak = Math.max(peak, Math.abs(value));
-        int fade = (int) (DacSample.sampleRateHz(SLICE_RATE) * .003);
+        int fade = (int) (profile.dacSampleRateHz(SLICE_RATE) * .003);
         var bytes = new byte[audio.length];
         for (int i = 0; i < audio.length; i++) {
             double edge = Math.min(1, Math.min(i, audio.length - 1 - i) / (double) fade);

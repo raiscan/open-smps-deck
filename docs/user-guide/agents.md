@@ -176,7 +176,15 @@ supplies a progress token. Keep input paths and path-bearing artifacts private.
 
 ## MCP tools
 
-The packaged server exposes **34 tools** through `tools/list`. Use the
+For a new reconstruction, set `target` on `reconstruct_import` or
+`options.target` on `reconstruct_run` and `reconstruct_stage` (transcribe).
+The values are `s1`, `s2` and `s3k`. The default is `s3k`.
+Resumed stages and `reconstruct_rerun` use the saved target. S1 and S2
+are in progress and assembly reports incompatible features with the
+target driver's error. For portable and mod output, `project_export`
+defaults its `driver` to the project's target.
+
+The packaged server exposes **35 tools** through `tools/list`. Use the
 returned schemas for optional fields and types.
 
 | Task | Tools |
