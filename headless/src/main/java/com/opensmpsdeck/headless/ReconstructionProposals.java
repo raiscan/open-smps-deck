@@ -173,6 +173,11 @@ public final class ReconstructionProposals {
         var object = new JsonObject();
         object.add("proposals", JSON.toJsonTree(results(work, journal).stream()
                 .filter(row -> selected.contains(row.id()) && (ids.isEmpty() || ids.contains(row.id()))).toList()));
+        if (ids.isEmpty() && op == null && (group == null || group.equals("held-notes"))) {
+            var held = ReconstructionHeldNotes.read(work);
+            if (held != null && !held.findings().isEmpty())
+                object.add("heldNoteReviews", JSON.toJsonTree(held.findings()));
+        }
         if (showDecided) object.add("decided", JSON.toJsonTree(journal.intents().stream()
                 .filter(edit -> !edit.proposed() && edit.json().has("status"))
                 .filter(edit -> ids.isEmpty() || ids.contains(edit.id()))

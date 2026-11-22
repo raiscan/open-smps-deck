@@ -102,6 +102,6 @@ class ReconstructionInspectionTest {
                 List.of("FM1"), lane, lane == null ? null : GATE, ReconstructionAllocation.Outcome.kept,
                 null, null, competitor, null, null, List.of());
         return new ReconstructionTrace.Row("note", 0, "Synth", 60, ORIGINAL, GATE, null, null, null, null, null,
-                allocation, voiced, fate, "allocate", "kept elsewhere", null, null, null, null, null);
+                allocation, voiced, fate, "allocate", "kept elsewhere", null, null, null, null, null, null);
     }
 }

@@ -134,13 +134,25 @@ public final class ReconstructionDescribe {
                 section == null && bars == null, continuity, audit, envelopes);
         var orphaned = ReconstructionEdits.Journal.read(work).all().stream()
                 .filter(outcome -> outcome.status() == ReconstructionEdits.Status.orphaned).toList();
+        var held = ReconstructionHeldNotes.read(work);
+        var timeMap = ReconstructionTimeMap.of(score);
+        var findings = held == null ? List.<ReconstructionHeldNotes.Finding>of() : held.findings().stream()
+                .filter(note -> filter.isEmpty() || filter.contains(note.part()))
+                .filter(note -> view.sections().stream().anyMatch(row -> {
+                    double time = timeMap.project(note.sourceTailTime());
+                    return time >= row.startSeconds() && time < row.endSeconds();
+                })).toList();
         if (json) {
             var gson = new GsonBuilder().disableHtmlEscaping().create();
             var result = gson.toJsonTree(view).getAsJsonObject();
+            if (!findings.isEmpty()) result.add("heldNotes", gson.toJsonTree(findings));
             if (!orphaned.isEmpty()) result.add("orphanedEdits", gson.toJsonTree(orphaned));
             return gson.toJson(result) + "\n";
         }
         var description = new StringBuilder(text(view));
+        for (var finding : findings)
+            description.append("\n").append(finding.kind()).append(" · ").append(finding.noteId())
+                    .append(" · ").append(finding.proposal()).append('\n');
         for (var issue : orphaned)
             description.append("\nOrphaned edit ").append(issue.id()).append(" (").append(issue.op())
                     .append(") · ").append(issue.detail()).append('\n');

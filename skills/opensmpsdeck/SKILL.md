@@ -137,6 +137,10 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `--by-onset` groups nearby attacks by part. MCP `reconstruct_trace` takes
   `byOnset: true`. In Studio, click a note or lane gate to inspect its trace
   and expand **Raw trace JSON**.
+- **Held notes** appear in describe and trace when a mapped stem sustains
+  through a missing, shortened, silent or heavily decayed chip gate. Use
+  `reconstruct proposals list WORK_DIR --group held-notes` for review
+  suggestions and `part-render` to audition the assembled part.
 - **View** aligns source and rendered spectrograms with note and lane gates.
   Use `--stem PART` for a mapped stem, `--harmonics NOTE_ID` to trace a
   note's partials and `--ridges` for numerical trajectories. MCP

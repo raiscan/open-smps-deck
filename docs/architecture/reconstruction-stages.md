@@ -1207,6 +1207,18 @@ its full gate.
 A fresh written attack still bounds a lead's inferred legato extension when
 it carries a backing role.
 
+For long notes with a mapped stem, the fitter measures pitch-band energy
+near the attack and in the hold. It screens the FM attack shortlist on
+representative long gates using the pinned chip. For shared FM guitar
+profiles (General MIDI guitar programs with a mapped stem), it also
+compares the first 50 ms of exposed attacks for changes in relative level
+and spectral brightness. It fits the surviving choices jointly with the
+other instruments. The PSG spill fit includes a long-hold probe alongside
+its short FM contour probes. If an attack would
+steal most of a stem-supported hold from another source part, allocation
+first tries moving the whole hold to a free inner FM lane. It can also route
+the new attack around the hold when another compatible lane is free.
+
 The `lanes` map retains DAC and PSG3 drum settings and explicit lane
 overrides. New tonal lanes start with unity gain and inherit their source
 profile. A lane-wide FM `variantId`, a PSG part entry in `lanes.*.instruments`,
@@ -1646,6 +1658,16 @@ Repeat clips for a lane share one sequence ID when the relative note timing,
 pitch, articulation and instrument commands agree. Releases crossing a
 bar edge keep their continuity. The package compiler bakes source reuse
 into the playback bank.
+
+`report.json` records `heldNotes` when the source contains measurable holds.
+It compares pitch-band stem energy with the assembled gates and solo lane
+energy around the tail. `held-but-silent` includes tails whose measured
+decay materially exceeds the source. `truncated` and `missing` identify
+notes without an assembled gate at the stem-supported tail. Trace attaches
+the evidence to the note ID and describe lists findings in the selected
+part and span. `reconstruct proposals list WORK_DIR --group held-notes`
+shows review suggestions under `heldNoteReviews`. These suggestions use
+the assembled output and do not make automatic edits.
 
 ### Inspect external evidence
 

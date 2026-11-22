@@ -393,9 +393,13 @@ final class ReconstructionChecks {
                     : entry.laneType().lanes().contains(lane) && ReconstructionEdits.laneTypeIssue(
                             entry.note(), entry.role() == Role.drums, entry.laneType(), score.inputs().fmOnly(), score.inputs().profile()) == null);
             require(entry.laneType() == null || entry.pinnedLane() != null, where, "lane type requires a pinned placement");
+            boolean holdAlternate = lane != null && entry.relocatedFrom() != null
+                    && ReconstructionAllocation.expectedLanes(entry.role(), false).contains(entry.relocatedFrom())
+                    && (ReconstructionAllocation.INNER_FM.contains(lane) || !score.inputs().fmOnly()
+                        && ReconstructionAllocation.PSG.contains(lane) && entry.note().pitch() >= score.profile().psg().low() && entry.note().pitch() <= score.profile().psg().high());
             require(lane != null && (entry.pinnedLane() != null ? pinned : switch (entry.role()) {
-                case melody -> lane.equals("FM1");
-                case bass -> lane.equals("FM2");
+                case melody -> lane.equals("FM1") || holdAlternate;
+                case bass -> lane.equals("FM2") || holdAlternate;
                 case drums -> lane.equals("DAC") || lane.equals("PSG3") && !score.inputs().fmOnly();
                 case harmony, counter -> ReconstructionAllocation.INNER_FM.contains(lane)
                         || ReconstructionAllocation.PSG.contains(lane) && !score.inputs().fmOnly() && entry.note().pitch() >= score.inputs().profile().psg().low();
