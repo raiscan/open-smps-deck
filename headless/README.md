@@ -184,11 +184,16 @@ external envelope or DAC sample assets.
 addressed bank, bindings, resources and source required for integration with
 the pinned OpenGGF S3K driver. OpenGGF has no direct ZIP loader.
 
-Use `--format disasm` for an S3K skdisasm kit from a project, work
-directory or embedded-bank portable `.smps.zip`. A `.zip` output wraps the files in a kit
-directory. Use `--rom PATH` to materialise stock assets for personal use.
+Use `--format disasm` with a project, work directory or embedded-bank
+portable `.smps.zip`.
+Portable packages target s1disasm, s2disasm or skdisasm according to their
+driver. For a classic kit, first use `compile-package --portable --driver s1`
+or `--driver s2`. A `.zip` output wraps the files in a kit directory.
+Use `--rom PATH` to materialise stock assets for personal use.
 `--dpcm-closed` changes the WAVs to DPCM-representable PCM. Repeat
-`--replace-dac NN` (hexadecimal) to repurpose audited retail notes. See the
+`--replace-dac NN` (hexadecimal) to repurpose audited retail notes. S1 custom
+DAC requires explicit kick or snare replacement. S2 can also extend the DAC
+playlist. See the
 [disassembly kit integration guide](../docs/architecture/disassembly-kit.md).
 
 MCP exposes `project_export` with exactly one of `project` or `workDir`, plus

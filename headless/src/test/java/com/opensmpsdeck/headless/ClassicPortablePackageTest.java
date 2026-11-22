@@ -334,7 +334,7 @@ class ClassicPortablePackageTest {
         return new PortableOptions(driver.id(), true, null, null, null, List.of(), List.of(), 208);
     }
 
-    private static StudioProject project(NativeCommand command, int psgPitch) {
+    static StudioProject project(NativeCommand command, int psgPitch) {
         var fm = new Sequence("fm", "FM", "FM", 6, "v", 121, List.of(new NoteEvent("n", 0, 6, 60)),
                 List.of(new CommandEvent("change", 2, command, command == NativeCommand.DETUNE ? List.of(1) : command.defaultArguments())), "RESET");
         var psg = new Sequence("psg", "PSG", "PSG", 4, null, 112, List.of(new NoteEvent("p", 0, 4, psgPitch)),

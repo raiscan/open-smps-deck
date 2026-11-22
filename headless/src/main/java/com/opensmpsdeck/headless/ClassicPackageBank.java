@@ -10,6 +10,11 @@ import java.util.TreeSet;
 
 /** Bounds-checks the finite S1/S2 portable stream profile before entering the sequencer. */
 final class ClassicPackageBank {
+    @FunctionalInterface
+    interface StreamUnit {
+        void read(int offset, int count, boolean dac);
+    }
+
     private ClassicPackageBank() {}
 
     static void validateEnvelope(ClassicPackageDriver driver, Envelope envelope) {
@@ -30,18 +35,7 @@ final class ClassicPackageBank {
         driver.validateBase(base);
         driver.require(nativeBank == null || nativeBank.headerOffset() == 0, "bank.headerOffset must be 0");
         driver.require(project.globalVoices().isEmpty(), "global FM voices are unsupported");
-        int fm = bytes[2] & 255, psg = bytes[3] & 255;
-        driver.require((bytes[4] & 255) != 0, "header timing divisor must be nonzero");
-        driver.validateTempo(bytes[5] & 255);
-        int headerEnd = 6 + 4 * fm + 6 * psg;
-        int voicePointer = driver.word(bytes, 0);
-        int voices = nativeBank == null ? (voicePointer == 0 ? 0 : (bytes.length - voicePointer) / 25)
-                : nativeBank.localVoiceCount();
-        int streamEnd = voices == 0 ? bytes.length : voicePointer - base;
-        driver.require(voices == 0 ? voicePointer == 0 : streamEnd >= headerEnd
-                        && bytes.length - streamEnd == voices * 25,
-                "invalid local FM voice table");
-
+        driver.require(bytes.length >= 6, "truncated song header");
         for (var envelope : project.envelopes()) validateEnvelope(driver, envelope);
         Set<Integer> psgSlots = project.psgEnvelopes().keySet();
         Set<Integer> dacNotes = new HashSet<>();
@@ -51,6 +45,27 @@ final class ClassicPackageBank {
             for (var slot : nativeBank.dacSlots()) dacNotes.add(slot.note());
         }
         DacSample.validateAll(project.samples());
+        int voicePointer = driver.word(bytes, 0);
+        int voices = nativeBank == null ? (voicePointer == 0 ? 0 : (bytes.length - voicePointer) / 25)
+                : nativeBank.localVoiceCount();
+        walk(driver, bytes, base, voices, psgSlots, dacNotes, (offset, count, dac) -> {});
+    }
+
+    static void walk(ClassicPackageDriver driver, byte[] bytes, int base, int voices,
+                     Set<Integer> psgSlots, Set<Integer> dacNotes, StreamUnit unit) {
+        driver.require(bytes.length >= 6, "truncated song header");
+        int fm = bytes[2] & 255, psg = bytes[3] & 255;
+        driver.require((bytes[4] & 255) != 0, "header timing divisor must be nonzero");
+        driver.validateTempo(bytes[5] & 255);
+        int headerEnd = 6 + 4 * fm + 6 * psg;
+        int voicePointer = driver.word(bytes, 0);
+        int streamEnd = voices == 0 ? bytes.length : voicePointer - base;
+        driver.require(voices == 0 ? voicePointer == 0 : streamEnd >= headerEnd
+                        && bytes.length - streamEnd == voices * 25,
+                "invalid local FM voice table");
+
+        driver.require(fm >= 1 && fm <= 7 && psg <= 3 && headerEnd <= bytes.length,
+                "invalid song header channel counts");
         int[] starts = new int[fm + psg];
         var boundaries = new TreeSet<Integer>();
         boundaries.add(streamEnd);
@@ -66,20 +81,24 @@ final class ClassicPackageBank {
             }
         }
         for (int i = 0; i < starts.length; i++) {
-            scan(driver, bytes, starts[i], boundaries.higher(starts[i]), i, fm, voices, psgSlots, dacNotes);
+            scan(driver, bytes, starts[i], boundaries.higher(starts[i]), i, fm, voices, psgSlots, dacNotes, unit);
         }
     }
 
     private static void scan(ClassicPackageDriver driver, byte[] bytes, int at, int end, int channel,
-                             int fm, int voices, Set<Integer> psgSlots, Set<Integer> dacNotes) {
+                             int fm, int voices, Set<Integer> psgSlots, Set<Integer> dacNotes, StreamUnit unit) {
         boolean dac = channel == 0;
         boolean psg = channel >= fm;
         boolean haveNote = false;
         while (at < end) {
             int command = bytes[at++] & 255;
-            if (command == 0xF2) return;
+            if (command == 0xF2) {
+                unit.read(at - 1, 1, dac);
+                return;
+            }
             if (command < 0x80) {
                 driver.require(!dac && haveNote && command != 0, "invalid duration-only stream unit");
+                unit.read(at - 1, 1, dac);
                 continue;
             }
             if (command < 0xE0) {
@@ -88,6 +107,7 @@ final class ClassicPackageBank {
                 else if (!psg && command != 0x80) driver.require(voices > 0, "FM notes require a local voice table");
                 driver.require(at < end && (bytes[at] & 255) > 0 && (bytes[at] & 255) < 0x80,
                         "note/rest requires explicit duration in 1..127");
+                unit.read(at - 1, 2, dac);
                 at++;
                 haveNote = true;
                 continue;
@@ -105,6 +125,7 @@ final class ClassicPackageBank {
             driver.require(at + arity <= end, "truncated stream command %02X".formatted(command));
             if (command == 0xEF) driver.require((bytes[at] & 255) < voices, "undefined FM voice " + (bytes[at] & 255));
             if (command == 0xF5) requireEnvelope(driver, psgSlots, bytes[at] & 255);
+            unit.read(at - 1, arity + 1, dac);
             at += arity;
         }
         driver.require(false, "track has no F2 stop before the next track or voice table");

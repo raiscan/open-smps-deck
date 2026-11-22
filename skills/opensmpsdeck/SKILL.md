@@ -311,13 +311,16 @@ support project-second spans, fades and channel stems (`--stems`, optionally
 `--zip`). VGM exports the full chip-write stream. Raw S3K SMPS targets
 a compatible driver with local voices. Use the package for projects with
 external envelope or DAC assets. It preserves bindings, resources and source.
-For a [skdisasm kit](../../docs/architecture/disassembly-kit.md), use
+For an [SMPS2ASM kit](../../docs/architecture/disassembly-kit.md), use
 `disasm` with a project, work directory or embedded-bank portable `.smps.zip`.
-Use a `.zip` output for an archive. Stock DAC notes are reused when the
-asset and retail playback rate match. `--rom PATH` materialises stock
-assets for personal use. `--dpcm-closed` quantises the WAVs. Repeat `--replace-dac NN`
-(hex) to repurpose unused retail slots. The MCP options are `roms`,
-`dpcmClosed` and `replaceDac` (integer note numbers). Read the output warnings.
+For s1disasm or s2disasm, first compile a portable package with `--driver s1`
+or `--driver s2`. Use a `.zip` output for an archive. Stock DAC notes are
+reused when the asset and retail playback rate match. `--rom PATH`
+materialises stock assets for personal use. `--dpcm-closed` quantises the WAVs. Repeat `--replace-dac NN`
+(hex) to repurpose unused retail slots. S1 requires `81` or `82` for
+each custom DAC binding. S2 extends its playlist by default. The MCP
+options are `roms`, `dpcmClosed` and `replaceDac` (integer note numbers).
+Read the output warnings.
 
 For timeline and piano-roll handoff, choose **Open as arrangement**. Saving
 a musical hand edit detaches the arrangement. Export uses the detached

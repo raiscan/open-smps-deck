@@ -22,8 +22,12 @@ final class DisassemblyKit {
         void emit(DisassemblyKit kit) throws IOException;
 
         static Emitter forDriver(String driver) {
-            if (driver.equals("s3k")) return S3kDisasmEmitter::emit;
-            throw new IllegalArgumentException("Disassembly kit not yet supported for driver " + driver);
+            return switch (driver) {
+                case "s1" -> kit -> ClassicDisasmEmitter.emit(kit, ClassicPackageDriver.S1);
+                case "s2" -> kit -> ClassicDisasmEmitter.emit(kit, ClassicPackageDriver.S2);
+                case "s3k" -> S3kDisasmEmitter::emit;
+                default -> throw new IllegalArgumentException("Disassembly kit not yet supported for driver " + driver);
+            };
         }
     }
 
@@ -54,7 +58,8 @@ final class DisassemblyKit {
             readme.append("**Personal use only. Do not redistribute this ROM-materialised kit.**\n\n");
         } else {
             readme.append("To materialise stock assets, re-run the original export with `--rom PATH` ")
-                    .append("using your own S3/S&K ROM. Use the same DAC options.\n\n");
+                    .append("using your own ").append(manifest.driver().equals("s3k") ? "S3/S&K"
+                            : manifest.driver().toUpperCase(Locale.ROOT)).append(" ROM. Use the same DAC options.\n\n");
         }
         readme.append("The portable manifest records source metadata, rights, provenance and original bindings. ")
                 .append("The kit contains only the build files.\n\n");
@@ -69,12 +74,12 @@ final class DisassemblyKit {
         PortablePackageReader.Package artifact = null;
         if (input.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".smps.zip")) {
             artifact = PortablePackageReader.read(input);
-            Emitter.forDriver(artifact.manifest().driver());
             if (artifact.manifest().bank().form().equals("patch"))
                 throw new IllegalArgumentException("Disassembly export requires an embedded portable bank");
         }
+        var driver = PackageDriver.supported(artifact == null ? "s3k" : artifact.manifest().driver());
         for (Path path : romPaths) {
-            var image = S3kPackageDriver.INSTANCE.openRom(path);
+            var image = driver.openRom(path);
             roms.add(image.assets());
             if (!image.known()) romWarnings.add("UNKNOWN_ROM_IMAGE");
         }
