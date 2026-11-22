@@ -143,6 +143,9 @@ class ReconstructionEditsTest {
             }
             assertTrue(ReconstructionReview.revision(work).entries().asList().containsAll(edits.asList()));
         }
+        var overlays = ReconstructionInspection.open(work).overlays();
+        assertTrue(overlays.stream().anyMatch(note -> note.id().equals("n-0-4500000-72")
+                && note.style() == ReconstructionInspection.Style.DASHED && !note.sounds()));
         var notes = ReconstructionStages.readScore(work.resolve("score.json")).notes();
         assertEquals(41, notes.stream().filter(note -> note.id().equals("n-0-2500000-68")).findFirst().orElseThrow().velocity());
         assertEquals(90, notes.stream().filter(note -> note.id().equals("edit-cut-left")).findFirst().orElseThrow().velocity());
