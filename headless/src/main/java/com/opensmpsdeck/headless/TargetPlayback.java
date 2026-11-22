@@ -75,7 +75,7 @@ public final class TargetPlayback {
                 : classic.openPlayback(compiled, mask, observer);
     }
 
-    SmpsSequencer timeline(MusicRestoreSink restore, Sonic3kCoordFlagHandler handler) {
+    public SmpsSequencer timeline(MusicRestoreSink restore, Sonic3kCoordFlagHandler handler) {
         return classic == null ? S3kRenderer.timelineSequencer(compiled, restore, handler)
                 : classic.timeline(compiled, restore);
     }

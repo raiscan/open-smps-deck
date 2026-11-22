@@ -33,8 +33,9 @@ For a Suno MIDI and stem download, use `reconstruct import` or Studio's
   `allocation.json`. Propose edits by default while a human is reviewing.
 - Before submitting, run `mvn -B -pl headless -am verify` and the
   [MCP smoke test](headless/README.md#embedding-and-verification). Pipeline code
-  changes must pass the [quick benchmark gate](docs/architecture/benchmark.md)
-  with `bench compare --tolerance 0` for unchanged default behavior.
+  changes must pass the [per-target quick benchmark gates](docs/architecture/benchmark.md#per-target-quick-gates)
+  with `bench compare --tolerance 0` for unchanged S3K default behavior and
+  no headline regressions against the S1 and S2 baselines.
 
 ## smps-bytecode-helper
 

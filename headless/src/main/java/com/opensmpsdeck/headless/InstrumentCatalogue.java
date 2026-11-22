@@ -262,7 +262,7 @@ public final class InstrumentCatalogue {
         return open(path).forTarget(target);
     }
 
-    InstrumentCatalogue forTarget(TargetGame target) {
+    public InstrumentCatalogue forTarget(TargetGame target) {
         if (scope == target) return this;
         var filtered = index.variants().stream().filter(variant -> variant.target() == target).toList();
         // Preserve unbound assets from legacy S3K scans. They are available for

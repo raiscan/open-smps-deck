@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.project.TargetClock;
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.project.DacSample;
 import org.junit.jupiter.api.Test;
@@ -58,9 +61,21 @@ class BenchMetricsTest {
         var skippedLayer = event("FM2", .2, 60);
         var events = List.of(dryBefore, octaveCopy, copyBendStep, dryAtEnd, otherLane, authoredCopy, skippedLayer);
 
-        assertEquals(List.of(dryBefore, dryAtEnd, otherLane, skippedLayer), report.excludeLayers(events));
+        assertEquals(List.of(dryBefore, dryAtEnd, otherLane, skippedLayer), report.excludeLayers(events, TargetClock.FRAME_CLOCK));
         var legacy = BenchFiles.JSON.fromJson("{}", BenchReconstruction.Report.class);
-        assertEquals(events, legacy.excludeLayers(events));
+        assertEquals(events, legacy.excludeLayers(events, TargetClock.FRAME_CLOCK));
+    }
+
+    @Test void layerWindowsIncludeAttacksDelayedByClassicTempoHolds() {
+        var report = BenchFiles.JSON.fromJson("""
+                {"lanePolicyCopies":[{"lane":"PSG1","startTick":270,"endTick":271}]}
+                """, BenchReconstruction.Report.class);
+        for (var target : List.of(TargetGame.S1, TargetGame.S2)) {
+            var clock = new TargetClock(target, 255);
+            var copy = event("PSG1", 271 / 60.0, 84);
+            var followingNote = event("PSG1", 272 / 60.0, 84);
+            assertEquals(List.of(followingNote), report.excludeLayers(List.of(copy, followingNote), clock));
+        }
     }
 
     @Test void findsMaximumRatherThanGreedyMatching() {
