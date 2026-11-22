@@ -159,7 +159,7 @@ final class ReconstructionEdits {
 
         Journal record(Path work, Stage stage, List<Outcome> outcomes, ReconstructionEdits edits) throws IOException {
             if (!outcomes.isEmpty()) stages.put(stage.name().toLowerCase(java.util.Locale.ROOT), List.copyOf(outcomes));
-            var journal = stage == Stage.TRANSCRIBE ? new Journal(version, stages, edits.scoreRecipe()) : this;
+            var journal = stage == Stage.TRANSCRIBE ? new Journal(version, stages, edits.scoreRecipe(work)) : this;
             Path file = work.resolve(RESULTS);
             if (stages.isEmpty() && journal.scoreRecipe == null) Files.deleteIfExists(file);
             else ReconstructionArtifacts.write(file, journal);
@@ -192,10 +192,15 @@ final class ReconstructionEdits {
                 : new ReconstructionEdits(intents.stream().filter(edit -> !edit.inactive()).toList());
     }
 
-    String scoreRecipe() {
-        var scoreIntents = intents.stream().filter(edit -> edit.firstStage() == Stage.TRANSCRIBE)
-                .map(Intent::json).toList();
-        return scoreIntents.isEmpty() ? null : ReconstructionArtifacts.fingerprint(scoreIntents);
+    String scoreRecipe(Path work) throws IOException {
+        var scoreIntents = intents.stream().filter(edit -> edit.firstStage() == Stage.TRANSCRIBE).toList();
+        if (scoreIntents.isEmpty()) return null;
+        var json = scoreIntents.stream().map(Intent::json).toList();
+        if (scoreIntents.stream().noneMatch(edit -> usesSection(edit, Stage.TRANSCRIBE)))
+            return ReconstructionArtifacts.fingerprint(json);
+        var sections = work.resolve(ReconstructionSections.FILE);
+        return ReconstructionArtifacts.fingerprint(List.of(json,
+                Files.exists(sections) ? ReconstructionArtifacts.readTree(sections) : new JsonObject()));
     }
 
     static ReconstructionEdits read(Path work) throws IOException {
@@ -542,7 +547,7 @@ final class ReconstructionEdits {
                         : new Span(selected.sourceStart(), selected.sourceEnd());
                 bound.add(edit.withSpan(range));
             } catch (IllegalArgumentException error) {
-                outcomes.add(new Outcome(edit.id, edit.kind, Status.invalid, List.of(), null, error.getMessage(), null));
+                outcomes.add(new Outcome(edit.id, edit.kind, Status.orphaned, List.of(), null, error.getMessage(), null));
             }
         }
         return new ReconstructionEdits(bound);
@@ -601,6 +606,7 @@ final class ReconstructionEdits {
                         : edit.noteIds.stream().filter(notes::containsKey).toList();
                 var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id)).toList();
                 for (String id : affected) notes.computeIfPresent(id, (key, note) -> edit.level(note));
+                if (!affected.isEmpty() && !missing.isEmpty()) outcomes.add(orphan(edit, missing));
                 outcomes.add(affected.isEmpty() ? orphan(edit, missing)
                         : new Outcome(edit.id, edit.kind, Status.applied, affected, missing.isEmpty() ? null : missing, null, null));
                 continue;
@@ -995,6 +1001,7 @@ final class ReconstructionEdits {
         var deleted = new LinkedHashSet<String>();
         var scoreResults = new LinkedHashMap<String, Outcome>();
         for (var outcome : scoreOutcomes) scoreResults.put(outcome.id, outcome);
+        var successors = splitSuccessors(scoreOutcomes);
         int order = 0;
         for (Intent edit : intents) {
             order++;
@@ -1067,7 +1074,11 @@ final class ReconstructionEdits {
                     requested = List.copyOf(matching);
                 }
             } else {
-                requested = edit.noteIds.stream().filter(id -> !decisions.containsKey(id)
+                var targets = switch (edit.kind) {
+                    case setRole, pinLane, unmerge -> reanchor(edit.noteIds, successors);
+                    default -> edit.noteIds;
+                };
+                requested = targets.stream().filter(id -> !decisions.containsKey(id)
                         || matchesRole(edit, decisions.get(id).role(), edit.role)).toList();
             }
             var affected = new LinkedHashSet<String>();
@@ -1165,6 +1176,65 @@ final class ReconstructionEdits {
                 affected.add(member);
             }
         }
+    }
+
+    static boolean shapesSound(Kind kind) {
+        return switch (kind) {
+            case insertNote, setNote, splitNote, retrigger, mergeNotes, bend, glide, setVelocity, noteVoicing -> true;
+            default -> false;
+        };
+    }
+
+    // The score outcome remains provenance for the next rebuild. Record downstream losses separately.
+    static void reportLostSound(ReconstructionAllocation.Result allocation, List<Outcome> resolved,
+                                S3kReconstruction.Result rendered, List<Outcome> outcomes) {
+        var shaped = resolved.stream().filter(row -> row.status == Status.applied && shapesSound(row.op)).toList();
+        if (shaped.isEmpty()) return;
+        var entries = new LinkedHashMap<String, ReconstructionAllocation.Entry>();
+        allocation.notes().forEach(entry -> entries.put(entry.note().id(), entry));
+        var gates = new java.util.HashSet<String>();
+        var bends = new java.util.HashSet<String>();
+        var reductions = new LinkedHashMap<String, String>();
+        if (rendered != null) {
+            rendered.voicedGates().forEach(gate -> gates.add(gate.id()));
+            rendered.bends().forEach(bend -> bends.add(bend.id()));
+            for (var loss : rendered.reductions())
+                if (loss.id() != null && loss.reason() != null) reductions.put(loss.id(), loss.reason());
+        }
+        var successors = splitSuccessors(resolved);
+        for (var outcome : shaped) {
+            for (String id : reanchor(outcome.noteIds, successors)) {
+                var entry = entries.get(id);
+                boolean pitchMotion = outcome.op == Kind.bend || outcome.op == Kind.glide
+                        || outcome.op == Kind.mergeNotes && entry != null && entry.note().bend() != null
+                        && outcome.tag().equals(entry.note().bend().editReason());
+                String reason = null;
+                if (entry == null) reason = "note no longer reaches allocation";
+                else if (entry.lane() == null && !gates.contains(id))
+                    reason = entry.reason() == null ? "note has no allocated lane" : entry.reason();
+                else if (rendered != null && !gates.contains(id))
+                    reason = reductions.getOrDefault(id, "note has no playable gate after voicing");
+                else if (pitchMotion && (rendered == null ? entry.lane() == null || !entry.lane().startsWith("FM") : !bends.contains(id)))
+                    reason = "authored pitch motion cannot play on the current gate"
+                            + (entry.lane() == null ? "" : " (" + entry.lane() + ")");
+                if (reason != null)
+                    outcomes.add(new Outcome(outcome.id, outcome.op, Status.orphaned, List.of(), List.of(id),
+                            id + ": " + reason, null));
+            }
+        }
+    }
+
+    static Map<String, List<String>> splitSuccessors(List<Outcome> scoreOutcomes) {
+        var successors = new LinkedHashMap<String, List<String>>();
+        for (var outcome : scoreOutcomes.reversed()) {
+            if (outcome.op == Kind.splitNote && outcome.status == Status.applied && outcome.removedNotes != null)
+                successors.put(outcome.removedNotes.getFirst().id(), reanchor(outcome.noteIds, successors));
+        }
+        return successors;
+    }
+
+    static List<String> reanchor(List<String> ids, Map<String, List<String>> successors) {
+        return ids.stream().flatMap(id -> successors.getOrDefault(id, List.of(id)).stream()).distinct().toList();
     }
 
     List<Outcome> allocationOutcomes(ReconstructionAllocation.Result allocation, Map<String, Pin> pins) {

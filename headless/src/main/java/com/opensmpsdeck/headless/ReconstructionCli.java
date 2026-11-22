@@ -409,6 +409,9 @@ final class ReconstructionCli {
             if (policyDecisions) report.add("policyDecisions", json.toJsonTree(rendered.policyDecisions()));
             for (var layer : rendered.layers()) layer.report(outcomes);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).all());
+            var resolved = new ArrayList<>(edits);
+            resolved.addAll(outcomes);
+            ReconstructionEdits.reportLostSound(allocation, resolved, rendered, outcomes);
             edits.addAll(outcomes);
             var losses = json.fromJson(report.getAsJsonArray("reductions"), S3kReconstruction.Reduction[].class);
             report.add("chordAudit", json.toJsonTree(ReconstructionChordReduction.audit(score, allocation,
@@ -500,14 +503,11 @@ final class ReconstructionCli {
 
     static void previewLayers(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
                               ReconstructionAllocation.Result allocation, ReconstructionEdits edits,
-                              List<ReconstructionEdits.Outcome> outcomes, boolean reallocated,
-                              ReconstructionRoles.Result roles) throws IOException {
+                              List<ReconstructionEdits.Outcome> outcomes,
+                              Map<String, ReconstructionVoicePlan.Assignment> assignments) throws IOException {
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
-        if (reallocated) {
-            voicing = keepVoicing(score, allocation, voicing, ignored -> {});
-            var plan = ReconstructionVoicePlan.preview(work, score, roles, edits);
-            voicing = voicing.withAssignments(plan.assignments(allocation, roles.lanePins()));
-        }
+        if (assignments != null)
+            voicing = keepVoicing(score, allocation, voicing, ignored -> {}).withAssignments(assignments);
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true);
         var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);

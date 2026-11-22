@@ -1712,3 +1712,27 @@ The runner also retains
 [benchmark guide](benchmark.md) for the corpus, holdout and gold commands.
 The legacy positional `reconstruct MIDI WAV INDEX OUTPUT_DIR` command
 continues to use the original allocation policy for comparisons.
+
+### Preserving note edits when classification changes
+
+Note IDs identify attacks independently of their role, voice and chip lane.
+A rebuild from roles, voices, allocation or voicing retains the score edits
+and re-evaluates note voicing and layers against the new allocation. Explicit
+role, lane and voice membership edits follow both child IDs after a cut.
+
+A score operation can succeed while its target fails to sound downstream.
+Assembly records these losses as orphaned edit outcomes with the note ID and
+the allocation or voicing reason. An incompatible instrument or vibrato
+setting is reported per target. Other compatible notes in the same edit
+still receive the setting. The original edit stays in the journal and can
+apply again if the note regains a compatible gate.
+
+`reconstruct describe --json` and `reconstruct_describe` include
+`orphanedEdits` when present. The text description lists them after the
+score. In Studio, use **Edits → Revise selected edit…** to change the
+note IDs or selector, or remove the edit and apply the draft. Agents can
+remove the entry and add the corrected intent.
+
+Change the first stage as needed when moving a section boundary. A chained
+run automatically goes back to transcription when the score edit recipe
+changes, including the sections journal for a score edit that uses a section.

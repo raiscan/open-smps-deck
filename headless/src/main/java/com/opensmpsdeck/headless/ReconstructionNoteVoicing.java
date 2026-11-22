@@ -51,7 +51,7 @@ final class ReconstructionNoteVoicing {
         if (edits.stream().noneMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing))
             return new Resolved(assignments, scopes);
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
-        for (var entry : allocation.notes()) if (entry.lane() != null) entries.put(entry.note().id(), entry);
+        for (var entry : allocation.notes()) entries.put(entry.note().id(), entry);
         var instruments = new LinkedHashMap<>(assignments);
         var modulation = new LinkedHashMap<String, ReconstructionOverrides.Span>();
         for (var edit : edits) {
@@ -68,15 +68,17 @@ final class ReconstructionNoteVoicing {
                 if (instrument != null) instrument.validate(catalogue, edit.id());
                 for (String id : edit.noteIds()) {
                     var entry = entries.get(id);
-                    if (entry == null) {
+                    String reason = entry == null ? "note has no current allocation"
+                            : entry.lane() == null ? java.util.Objects.toString(entry.reason(), "note has no allocated lane")
+                            : instrument != null && !type.accepts(entry) ? "instrument cannot play on " + entry.lane()
+                            : (off || bend != null) && !entry.lane().startsWith("FM") ? "vibrato requires FM"
+                            : null;
+                    if (reason == null) hits.add(id);
+                    else {
                         misses.add(id);
-                        continue;
+                        outcomes.add(new ReconstructionEdits.Outcome(edit.id(), edit.kind(), ReconstructionEdits.Status.orphaned,
+                                List.of(), List.of(id), id + ": " + reason, null));
                     }
-                    require(instrument == null || type.accepts(entry),
-                            edit.id(), "instrument cannot play on " + entry.lane() + " for " + id);
-                    require(!(off || bend != null) || entry.lane().startsWith("FM"),
-                            edit.id(), "vibrato requires FM for " + id);
-                    hits.add(id);
                 }
                 for (String id : hits) {
                     if (instrument != null) instruments.put(id, instrument);
@@ -91,6 +93,7 @@ final class ReconstructionNoteVoicing {
                 issue = invalid.getMessage();
                 hits.clear();
             }
+            if (hits.isEmpty() && issue == null && !misses.isEmpty()) continue;
             var status = issue != null ? ReconstructionEdits.Status.invalid : hits.isEmpty()
                     ? ReconstructionEdits.Status.orphaned : ReconstructionEdits.Status.applied;
             outcomes.add(new ReconstructionEdits.Outcome(edit.id(), edit.kind(), status, List.copyOf(hits),

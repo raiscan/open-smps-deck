@@ -256,7 +256,8 @@ final class ReconstructionAllocation {
             int end = drum && !noise ? start + 1 : note.endTick(frames, profile.clock());
             if (noise && pin != null && pin.laneType() == ReconstructionLaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
                 end = Math.min(frames, start + ReconstructionCymbals.gate(note.pitch()));
-            return new Attack(decision, start, end, noise, pin, null, false);
+            boolean authoredBend = note.bend() != null && note.bend().editReason() != null;
+            return new Attack(decision, start, end, noise, pin, null, authoredBend);
         }).sorted(attackOrder(profile)).toList();
         // Pick the first attack in normal allocation priority as the representative.
         // Its peers share the same tick and can fall back to normal placement if it cannot fit.

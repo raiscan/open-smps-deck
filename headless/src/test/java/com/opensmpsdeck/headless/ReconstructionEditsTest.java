@@ -24,6 +24,30 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionEditsTest {
+    @Test void detailEditReportsDropAndRecoversOnRoleRebuild(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2");
+        add(work, """
+                {"id":"shape","reason":"quiet attack","op":"setVelocity","noteIds":["n-0-0-60"],"velocity":41}
+                """, true);
+        add(work, """
+                {"id":"drop","reason":"classify attack","op":"setRole","noteIds":["n-0-0-60"],"role":"drop"}
+                """, true);
+        var issue = ReconstructionReview.outcomes(work).get("shape").stream()
+                .filter(row -> row.status().equals("orphaned")).findFirst().orElseThrow();
+        assertTrue(issue.reason().contains("edit:drop"), issue.toString());
+        assertTrue(cli("reconstruct", "describe", work.toString(), "--json").contains("orphanedEdits"));
+        assertEquals(2, ReconstructionReview.revision(work).entries().size());
+        cli("reconstruct", "edit", work.toString(), "remove", "drop");
+        cli("reconstruct", "run", "--from", "roles", work.toString(), "--keep-voicing");
+        assertTrue(ReconstructionReview.outcomes(work).get("shape").stream().allMatch(row -> row.status().equals("applied")));
+        assertEquals(41, ReconstructionStages.readScore(work.resolve("score.json")).notes().getFirst().velocity());
+    }
+
     @Test void retriggerKeepsTheFirstIdAndReplaysStableIndependentAttacks() {
         var original = note("held", .10, .55, 68);
         var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
