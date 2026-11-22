@@ -189,7 +189,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         this.error = error;
         refresh(model);
         canvas.setId("reconstruction-canvas");
-        scroll.setFitToHeight(false);
+        scroll.setFitToHeight(true);
         pitchScroll.setId("reconstruction-pitch-scroll");
         pitchScroll.setAccessibleText("Scroll pitch");
         pitchScroll.setOrientation(Orientation.VERTICAL);
@@ -922,6 +922,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 double seconds = seconds(anchorX);
                 zoom = value;
                 resizePlot();
+                scroll.layout();
                 scrollTo(seconds * pixelsPerSecond - (anchorX - axis()));
                 onTimeZoom.accept(zoom);
             }
@@ -932,10 +933,12 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private void resizePlot() {
         if (!ready) return;
         pixelsPerSecond = plotWidth() / Math.max(.001, model.duration()) * Math.pow(2, zoom);
-        double content = 145 + stripHeight();
-        double height = Math.max(sectionBottom() + content, scroll.getViewportBounds().getHeight());
-        double width = axis() + pixelsPerSecond * model.duration();
-        if (Math.abs(height - contentHeight) >= .5 || Math.abs(width - contentWidth) >= .5) dimensions(width, height);
+        // Let the ScrollPane fill spare height. Using the old viewport height as the
+        // minimum makes a new horizontal scrollbar create vertical overflow.
+        double minHeight = sectionBottom() + 145 + stripHeight();
+        // Match the skin's layout width so it doesn't renormalize hvalue after zoom.
+        double width = snapSizeX(axis() + pixelsPerSecond * model.duration());
+        if (minHeight != getMinHeight() || width != contentWidth) dimensions(width, minHeight);
     }
 
     void center(double sourceSeconds) {

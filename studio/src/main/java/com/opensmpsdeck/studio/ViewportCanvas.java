@@ -32,11 +32,16 @@ abstract class ViewportCanvas extends Region {
         setMinSize(contentWidth, height); setPrefSize(contentWidth, height);
         // Publish the new content bounds before restoring a scroll anchor.
         // Otherwise ScrollPane normalizes hvalue again on the next layout pass.
-        resize(contentWidth, height);
+        resize(contentWidth, viewportHeight(height));
         updateViewport(); requestLayout();
     }
+    private double viewportHeight(double minimumHeight) {
+        return scroll.isFitToHeight() ? Math.max(minimumHeight, scroll.getViewportBounds().getHeight()) : minimumHeight;
+    }
+
     final void updateViewport() {
         double width = Math.max(100, scroll.getViewportBounds().getWidth());
+        if (scroll.isFitToHeight()) contentHeight = viewportHeight(getMinHeight());
         offset = scroll.getHvalue() * Math.max(0, contentWidth - width);
         canvas.setTranslateX(offset);
         canvas.setWidth(width); canvas.setHeight(contentHeight);

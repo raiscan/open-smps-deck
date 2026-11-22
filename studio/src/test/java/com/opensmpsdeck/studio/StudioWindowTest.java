@@ -1635,42 +1635,53 @@ class StudioWindowTest {
     }
 
     @Test void reconstructionWheelZoomAnchorsTimeAndPitchInBothViews() throws Exception {
-        withReconstructionPlot((scene, view) -> {
-            var plot = view.canvas;
-            var zoom = (Slider) scene.lookup("#reconstruction-zoom");
-            var pitch = view.pitchScroll;
+        var work = reconstructionFixture();
+        for (boolean narrow : List.of(false, true)) {
+            withReconstructionPlot(work, narrow, StudioWindowTest::assertWheelZoomAnchors);
+        }
+    }
+
+    private static void assertWheelZoomAnchors(javafx.scene.Scene scene, ReconstructionCanvas view) {
+        var plot = view.canvas;
+        var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+        var pitch = view.pitchScroll;
+        var seeks = new ArrayList<Double>();
+        view.onSeek = seeks::add;
+        double width = scene.getWidth();
+        for (String mode : List.of("detail", "roles")) {
+            seeks.clear();
+            ((ToggleButton) scene.lookup("#reconstruction-" + mode + "-view")).fire();
+            zoom.setValue(0);
+            scene.getRoot().layout();
             double x = 76 + (plot.getWidth() - 76) * .72;
+            var pointer = plot.localToScene(x, 12);
+            mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+            double anchor = seeks.getLast();
+
+            scrollPlot(plot, x, 12, 12, false);
+            double step = zoom.getValue();
+            assertTrue(step > 0 && step < 1);
+            scrollPlot(plot, plot.sceneToLocal(pointer).getX(), 12, 6, false);
+            assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+            scene.getRoot().layout();
+            x = plot.sceneToLocal(pointer).getX();
+            mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+            assertEquals(2, seeks.size());
+            assertEquals(anchor, seeks.getLast(), .005, mode + " at stage width " + width);
+
+            ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
             double fraction = .25;
-            double y = 85 + (plot.getHeight() - 105) * fraction;
-            var seeks = new ArrayList<Double>();
-            view.onSeek = seeks::add;
-
-            for (String mode : List.of("detail", "roles")) {
-                ((ToggleButton) scene.lookup("#reconstruction-" + mode + "-view")).fire();
-                zoom.setValue(0);
-                ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
-                double startPitch = 127.5 - pitch.getValue() - fraction * (128 - pitch.getMax());
-                scene.getRoot().layout();
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
-                double anchor = seeks.getLast();
-
-                scrollPlot(plot, x, y, 12, false);
-                double step = zoom.getValue();
-                assertTrue(step > 0 && step < 1);
-                scrollPlot(plot, x, y, 6, false);
-                assertEquals(step * 1.5, zoom.getValue(), 1e-9);
-                scene.getRoot().layout();
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
-                assertEquals(anchor, seeks.getLast(), .005);
-
-                double fittedSpan = 128 - pitch.getMax();
-                scrollPlot(plot, x, y, 4, true);
-                double zoomedSpan = 128 - pitch.getMax();
-                assertTrue(zoomedSpan < fittedSpan && zoomedSpan > fittedSpan - 1);
-                assertEquals(startPitch, 127.5 - pitch.getValue() - fraction * zoomedSpan, .005);
-                assertEquals(step * 1.5, zoom.getValue(), 1e-9);
-            }
-        });
+            double y = 85 + (plot.getHeight() - 105) * fraction; // Ruler, sections and empty lane header.
+            double fittedSpan = 128 - pitch.getMax();
+            double startPitch = 127.5 - pitch.getValue() - fraction * fittedSpan;
+            scrollPlot(plot, x, y, 4, true);
+            scene.getRoot().layout();
+            double zoomedSpan = 128 - pitch.getMax();
+            assertTrue(zoomedSpan < fittedSpan && zoomedSpan > fittedSpan - 1);
+            assertEquals(startPitch, 127.5 - pitch.getValue() - fraction * zoomedSpan, .005,
+                    mode + " at stage width " + width);
+            assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+        }
     }
 
     @Test void reconstructionSpaceTapTogglesPlaybackOnceOnRelease() throws Exception {
@@ -1751,11 +1762,23 @@ class StudioWindowTest {
 
     private void withReconstructionPlot(java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test)
             throws Exception {
-        var work = reconstructionFixture();
+        withReconstructionPlot(reconstructionFixture(), false, test);
+    }
+
+    private void withReconstructionPlot(Path work, boolean narrow,
+            java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test) throws Exception {
         var pane = fx(() -> new ReconstructionPane(stage, work));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
+            if (narrow) {
+                double originalWidth = fx(() -> {
+                    double width = scene.getWidth();
+                    pane.stage().setWidth(pane.stage().getMinWidth());
+                    return width;
+                });
+                await(() -> scene.getWidth() < originalWidth);
+            }
             fx(() -> {
                 scene.getRoot().applyCss();
                 scene.getRoot().layout();
