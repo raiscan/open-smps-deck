@@ -1245,8 +1245,11 @@ class StudioWindowTest {
         return work;
     }
 
-    @Test void reconstructionMenuTransposeAndDeleteDuringPlaybackKeepTheAudioLine() throws Exception {
-        var work = assembledLiveFixture();
+    @Test void reconstructionMenuTransposeAndDeleteDuringLatePlaybackKeepTheAudioLine() throws Exception {
+        var work = assembledLiveFixture(4800, 6100, 7);
+        var loop = new ReviewTransport.Range(5, 7);
+        int blockInLoop = 20;
+        int projectBlock = (int) Math.round(loop.start() * 60) + blockInLoop;
         var original = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
         var prepared = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
                 com.opensmpsdeck.headless.ReconstructionReview.revision(work));
@@ -1264,14 +1267,15 @@ class StudioWindowTest {
                 var note = pane.inspection().overlays().stream().filter(n -> n.sounds() && n.lane().equals("FM1"))
                         .findFirst().orElseThrow();
                 canvas.select(note, note.lane());
-                canvas.onRange.accept(new ReviewTransport.Range(0, 2));
+                assertTrue(note.interval().projectStart() > 2.5);
+                canvas.onRange.accept(loop);
                 canvas.canvas.requestFocus();
                 return canvas;
             });
             await(() -> !scene.lookup("#reconstruction-play").isDisabled());
             fx(() -> { ((Button) scene.lookup("#reconstruction-play")).fire(); return null; });
-            await(() -> sink.blocks.size() > 20);
-            var playedBefore = sink.blocks.get(20);
+            await(() -> sink.blocks.size() > blockInLoop);
+            var playedBefore = sink.blocks.get(blockInLoop);
             fx(() -> {
                 var menu = contextNote(view, view.selectedNotes().getFirst().id());
                 var transpose = (javafx.scene.control.Menu) menuItem(menu, "Transpose");
@@ -1286,11 +1290,11 @@ class StudioWindowTest {
             await(() -> liveStatus(scene).contains("Saved edits"));
             var journal = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
             assertEquals("transpose", journal.entries().get(0).getAsJsonObject().get("op").getAsString());
-            var changed = prepared.prepare(journal.entries(), 0, 2, 0.5).playback();
+            var changed = prepared.prepare(journal.entries(), loop.start(), loop.end(), 5.5).playback();
             var expected = new ArrayList<byte[]>();
-            changed.render(120, samples -> expected.add(pcmBytes(samples)));
-            assertFalse(Arrays.equals(expected.get(20), playedBefore));
-            await(() -> sink.blocks.stream().anyMatch(block -> Arrays.equals(block, expected.get(20))));
+            changed.render(projectBlock + 1, samples -> expected.add(pcmBytes(samples)));
+            assertFalse(Arrays.equals(expected.get(projectBlock), playedBefore));
+            await(() -> sink.blocks.stream().anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
             fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
             await(() -> liveStatus(scene).isEmpty());
             assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
@@ -1300,9 +1304,9 @@ class StudioWindowTest {
             fx(() -> { key(view.canvas, KeyCode.Y, true); return null; });
             await(() -> liveStatus(scene).contains("Saved edits"));
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
-            await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(20))));
+            await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
             fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; });
-            await(() -> liveStatus(scene).startsWith("Rebuild needed"));
+            await(() -> liveStatus(scene).equals("Rebuild needed · This change needs a full rebuild"));
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             fx(() -> {
                 assertEquals("Pending deletion", view.selectedNotes().getFirst().fate());
@@ -1317,7 +1321,7 @@ class StudioWindowTest {
             fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
             await(() -> liveStatus(scene).contains("Saved edits"));
             await(() -> sink.blocks.stream().skip(beforeDeleteUndo)
-                    .anyMatch(block -> Arrays.equals(block, expected.get(20))));
+                    .anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             var external = journal.entries();
             var entry = external.get(0).getAsJsonObject().deepCopy();
@@ -1342,17 +1346,60 @@ class StudioWindowTest {
         }
     }
 
+    @Test void unloopedLateShortEditCanBeHeardAfterItsGateHasPassed() throws Exception {
+        var work = assembledLiveFixture(4800, 4970, 6);
+        var project = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
+        var edits = new com.google.gson.JsonArray();
+        var entries = com.google.gson.JsonParser.parseString("""
+                {"id":"late","op":"transpose","reason":"fixture","noteIds":["n-0-5000000-69"],"semitones":2}
+                """);
+        edits.add(entries);
+        var preview = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
+                com.opensmpsdeck.headless.ReconstructionReview.revision(work));
+        var prepared = preview.prepare(edits, 0, 6, 5.01);
+        var gate = prepared.changedGates(null).getFirst();
+        assertTrue(gate.start() > 2.5);
+        var expected = new ArrayList<byte[]>();
+        prepared.playback().render(360, pcm -> expected.add(pcmBytes(pcm)));
+        var block = expected.get((int) Math.round(gate.start() * 60) + 2);
+
+        var sink = new CapturedAudio();
+        try (var player = new StudioPlayback(sink::open)) {
+            var cursor = new java.util.concurrent.atomic.AtomicReference<>(0.0);
+            var transport = new ReviewTransport();
+            var stream = player.new LiveStream(() -> fail("Could not render the late edit"));
+            player.playEditable(project, transport, () -> null, message -> {}, cursor::set,
+                    new ReviewTransport.Range(0, 6), stream, null);
+            await(stream::ready);
+            assertTrue(stream.seek(gate.start()));
+            await(() -> cursor.get() >= gate.start());
+            stream.beginEdit();
+            // The renderer is deliberately late. The old note has already passed.
+            await(() -> cursor.get() >= gate.end());
+            int firstNewBlock = sink.blocks.size();
+            stream.replace(prepared, System.nanoTime(), gate.start() + .01, false);
+            await(() -> sink.blocks.stream().skip(firstNewBlock).anyMatch(bytes -> Arrays.equals(bytes, block)));
+            assertEquals(1, sink.opens.get());
+        }
+    }
+
     private static String liveStatus(javafx.scene.Scene scene) {
         return ((Label) scene.lookup("#reconstruction-live-status")).getText();
     }
 
-    private Path assembledLiveFixture() throws Exception {
+    private Path assembledLiveFixture(int start, int end, int seconds) throws Exception {
         var inputs = reconstructionFixture();
+        if (seconds > 2) {
+            int rate = 12_000;
+            int[] pcm = new int[seconds * rate];
+            for (int i = 0; i < pcm.length; i++) pcm[i] = (int) (22000 * Math.sin(i * 440 * Math.TAU / rate));
+            ReferenceWaveTest.wav(inputs.resolve("mix.wav"), 16, 1, rate, pcm);
+        }
         var midi = inputs.resolve("tone.mid");
         var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
         var track = sequence.createTrack();
-        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), 0));
-        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), 1300));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), start));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), end));
         javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
         var catalogue = inputs.resolve("index.json");
         var voice = DemoProject.create().voices().getFirst();
@@ -1365,7 +1412,7 @@ class StudioWindowTest {
         var work = folder.resolve("live-assembly");
         com.opensmpsdeck.headless.ReconstructionStages.runForReview("run", new String[]{
                 midi.toString(), inputs.resolve("mix.wav").toString(), catalogue.toString(), work.toString(),
-                "--seconds", "2"}, (done, total, message) -> {});
+                "--seconds", Integer.toString(seconds)}, (done, total, message) -> {});
         return work;
     }
 

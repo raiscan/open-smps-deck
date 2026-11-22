@@ -1,5 +1,6 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.headless.CheckpointPlayback;
 import com.opensmpsdeck.headless.ProjectRenderTiming;
 import com.opensmpsdeck.headless.ReconstructionLivePreview;
 import com.opensmpsdeck.headless.S3kRenderer;
@@ -18,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
 import java.util.function.Supplier;
@@ -42,7 +44,9 @@ final class StudioPlayback implements AutoCloseable {
     private final ExecutorService worker = worker("studio-audio");
     private final ExecutorService renderer = worker("studio-render");
     private final ExecutorService edits = worker("studio-live-render");
+    private final ExecutorService warming = worker("studio-checkpoints");
     private final LineFactory lines;
+    private Song editableSong;
     private LiveStream activeStream;
     private final AtomicLong generation = new AtomicLong();
     private SourceDataLine line;
@@ -57,81 +61,190 @@ final class StudioPlayback implements AutoCloseable {
     StudioPlayback() { this(AudioSystem::getSourceDataLine); }
     StudioPlayback(LineFactory lines) { this.lines = lines; }
 
-    /** Each handle belongs to one transport run. Retired handles cannot alter a new run. */
+    private record CachedRevision(ReconstructionLivePreview.Prepared edit, CheckpointPlayback audio) {}
+
+    private final class Song {
+        final StudioProject project;
+        final Future<CheckpointPlayback> built;
+        volatile CachedRevision latest;
+        Future<?> baselineWarmup;
+        Future<?> editedWarmup;
+
+        Song(StudioProject project) {
+            this.project = project;
+            built = renderer.submit(() -> TargetPlayback.prepare(project).checkpoints());
+            baselineWarmup = warming.submit(() -> {
+                built.get().warmThrough(presentationCount(project));
+                return null;
+            });
+        }
+
+        synchronized void warm(CachedRevision revision) {
+            cancelEditedWarmup();
+            editedWarmup = warming.submit(() -> {
+                revision.audio().warmThrough(presentationCount(project));
+                return null;
+            });
+        }
+
+        synchronized void cancelEditedWarmup() {
+            if (editedWarmup != null) {
+                editedWarmup.cancel(true);
+                editedWarmup = null;
+            }
+        }
+
+        synchronized void close() {
+            built.cancel(true);
+            baselineWarmup.cancel(true);
+            cancelEditedWarmup();
+        }
+    }
+
+    synchronized void prepareEditable(StudioProject project) {
+        if (editableSong != null && editableSong.project == project) return;
+        if (editableSong != null) editableSong.close();
+        editableSong = project == null ? null : new Song(project);
+    }
+
+    /** Each handle belongs to one transport run. The playback thread owns its readers. */
     final class LiveStream {
-        private record Revision(RenderBuffer pcm, long eventNanos, Future<?> task) {}
+        private record Handoff(CachedRevision revision, CheckpointPlayback.Bookmark bookmark,
+                               long eventNanos, long replayAt, long replayEnd) {}
 
         private final Runnable renderFailed;
-        private Revision pending;
-        private Revision active;
-        private Revision built;
-        private int presentations;
+        private Song song;
+        private CachedRevision built;
+        private CachedRevision active;
+        private Future<Handoff> pending;
+        private boolean preparing;
+        private boolean reset;
         private boolean closed;
+        private volatile long nextFrame;
+        private long requestedSeek = -1;
+        private long rangeStart;
 
         LiveStream(Runnable renderFailed) { this.renderFailed = renderFailed; }
 
-        synchronized void initialize(RenderBuffer baseline) {
+        synchronized void initialize(Song song, CheckpointPlayback baseline, long initial, long rangeStart) {
             if (closed) return;
-            built = new Revision(baseline, 0, null);
-            presentations = Math.min(baseline.size(), (int) Math.ceil(ReconstructionLivePreview.WINDOW_END * RATE / BLOCK));
+            this.song = song;
+            built = new CachedRevision(null, baseline);
             active = built;
+            nextFrame = initial;
+            this.rangeStart = rangeStart;
         }
 
         synchronized boolean ready() { return built != null && !closed; }
 
-        synchronized void replace(TargetPlayback playback, long eventNanos) {
+        synchronized void replace(ReconstructionLivePreview.Prepared edit, long eventNanos,
+                                  double gesture, boolean looped) {
             if (!ready()) return;
-            cancel(pending);
-            var pcm = new RenderBuffer(presentations);
-            var task = edits.submit(() -> pcm.render(playback, S3kRenderer.ChannelMask.NONE));
-            pending = new Revision(pcm, eventNanos, task);
+            cancelPending();
+            preparing = false;
+            reset = false;
+            var previous = active;
+            var original = built;
+            var cached = song.latest;
+            pending = edits.submit(() -> {
+                var changes = edit.changedGates(previous.edit());
+                int cutoff = changes.isEmpty() ? Integer.MAX_VALUE : presentation(frame(changes.getFirst().start()));
+                var audio = edit.isBuilt() ? original : cached != null && cached.edit() == edit ? cached
+                        : new CachedRevision(edit, previous.audio().revise(edit.playback(), cutoff));
+
+                long replayAt = -1, replayEnd = -1;
+                if (!looped && eventNanos != 0) {
+                    long heard = frame(gesture);
+                    for (var gate : changes) {
+                        if (frame(gate.end()) <= heard || frame(gate.start()) > heard + RATE / 8) continue;
+                        // Re-cue only an edit heard at the gesture or just ahead of it.
+                        replayAt = Math.max(rangeStart, Math.max(heard - RATE / 8, frame(gate.start())));
+                        replayEnd = frame(gate.end());
+                        break;
+                    }
+                }
+                long target = replayAt >= 0 ? Math.min(replayAt, nextFrame) : nextFrame;
+                int at = Math.min(presentation(target), S3kRenderer.MAX_PRESENTATIONS);
+                try (var reader = audio.audio().reader()) {
+                    return new Handoff(audio, reader.bookmark(at), eventNanos, replayAt, replayEnd);
+                }
+            });
+            notifyAll();
         }
 
-        synchronized void resume(TargetPlayback playback) {
-            replace(playback, 0);
-            active = pending;
-            pending = null;
-        }
-
-        synchronized void discardPending() {
-            cancel(pending);
-            pending = null;
+        synchronized void beginEdit() {
+            cancelPending();
+            if (song != null) song.cancelEditedWarmup();
+            preparing = true;
         }
 
         synchronized void reset() {
-            if (!ready()) return;
-            cancel(pending);
-            pending = built;
+            cancelPending();
+            preparing = false;
+            reset = true;
+            notifyAll();
         }
 
-        synchronized Revision select(int index) {
-            if (index >= presentations) return built;
-            if (pending != null) {
-                if (pending.pcm().failed()) {
-                    discardPending();
-                    renderFailed.run();
-                } else if (pending.pcm().available(Math.min(index + 2, presentations - 1))) {
-                    cancel(active);
-                    active = pending;
+        synchronized boolean seek(double seconds) {
+            if (!ready()) return false;
+            requestedSeek = frame(seconds);
+            return true;
+        }
+
+        synchronized long takeSeek() {
+            long frame = requestedSeek;
+            requestedSeek = -1;
+            return frame;
+        }
+
+        synchronized boolean editInFlight() {
+            return preparing || pending != null;
+        }
+
+        Handoff take(boolean waitForEdit) throws InterruptedException {
+            Future<Handoff> task;
+            synchronized (this) {
+                while (waitForEdit && preparing && !closed) wait();
+                if (reset) {
+                    reset = false;
+                    active = built;
+                    return new Handoff(built, null, 0, -1, -1);
+                }
+                task = pending;
+                if (closed || task == null || !waitForEdit && !task.isDone()) return null;
+            }
+            Handoff handoff;
+            try {
+                handoff = task.get();
+            } catch (java.util.concurrent.CancellationException cancelled) {
+                return null;
+            } catch (java.util.concurrent.ExecutionException failure) {
+                synchronized (this) {
+                    if (pending != task || closed) return null;
                     pending = null;
                 }
-            }
-            if (active != built && active.pcm().failed()) {
-                cancel(active);
-                active = built;
                 renderFailed.run();
+                return null;
             }
-            return active;
+            synchronized (this) {
+                if (closed || pending != task) return null;
+                pending = null;
+                active = handoff.revision();
+                song.latest = active;
+                if (active != built) song.warm(active);
+            }
+            return handoff;
         }
 
         synchronized void close() {
             closed = true;
-            cancel(active);
-            cancel(pending);
+            cancelPending();
+            notifyAll();
         }
 
-        private void cancel(Revision revision) {
-            if (revision != null && revision.task() != null) revision.task().cancel(true);
+        private void cancelPending() {
+            if (pending != null) pending.cancel(true);
+            pending = null;
         }
     }
 
@@ -169,15 +282,17 @@ final class StudioPlayback implements AutoCloseable {
 
     synchronized void playEditable(StudioProject project, ReviewTransport transport, Supplier<Samples> monitor,
                                    Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span,
-                                   LiveStream live, TargetPlayback initialPreview) {
+                                   LiveStream live, ReconstructionLivePreview.Prepared initialPreview) {
         start(project, transport, S3kRenderer.ChannelMask.NONE, 0, monitor, status, position, span, live, initialPreview);
     }
 
     private synchronized void start(StudioProject project, ReviewTransport transport, S3kRenderer.ChannelMask mask,
                                     long monitorEnd, Supplier<Samples> monitor,
                                     Consumer<String> status, DoubleConsumer position, ReviewTransport.Range span,
-                                    LiveStream live, TargetPlayback initialPreview) {
+                                    LiveStream live, ReconstructionLivePreview.Prepared initialPreview) {
         stop();
+        if (live != null) prepareEditable(project);
+        var song = live == null ? null : editableSong;
         activeStream = live;
         long version = generation.get(), initial = frame(transport.seconds);
         playing = true;
@@ -186,11 +301,12 @@ final class StudioPlayback implements AutoCloseable {
             try {
                 int presentations = project == null ? 0 : presentationCount(project);
                 long end = span == null ? Math.max((long) presentations * BLOCK, monitorEnd) : frame(span.end());
-                if (live != null) {
-                    long last = transport.loop == null ? end : frame(transport.loop.end());
-                    presentations = Math.min(presentations, (int) Math.ceil(last / (double) BLOCK));
+                if (song != null) {
+                    live.initialize(song, song.built.get(), initial, span == null ? 0 : frame(span.start()));
+                    if (initialPreview != null) live.replace(initialPreview, 0, 0, true);
                 }
-                var rendered = new RenderBuffer(presentations);
+                var rendered = live == null ? new RenderBuffer(presentations) : null;
+                if (rendered != null && presentations > 0) renderTask = renderer.submit(() -> rendered.render(project, mask));
                 var format = new AudioFormat(RATE, 16, 2, true, false);
                 var output = lines.open(format);
                 synchronized (this) {
@@ -199,11 +315,8 @@ final class StudioPlayback implements AutoCloseable {
                     output.open(format, BLOCK * 8);
                     output.start();
                 }
-                if (presentations > 0) renderTask = renderer.submit(() -> rendered.render(project, mask));
-                if (live != null) live.initialize(rendered);
-                if (initialPreview != null) live.resume(initialPreview);
                 status.accept("Playing");
-                stream(output, rendered, transport, monitor, initial, end, position, version, live);
+                stream(output, rendered, transport, monitor, initial, end, position, version, live, initialPreview != null);
                 if (version == generation.get()) status.accept("Playback finished");
             } catch (Exception error) {
                 if (version == generation.get()) status.accept("Preview unavailable: " + error.getMessage());
@@ -221,80 +334,156 @@ final class StudioPlayback implements AutoCloseable {
     }
 
     private void stream(SourceDataLine output, RenderBuffer render, ReviewTransport state, Supplier<Samples> monitor,
-                        long initial, long end, DoubleConsumer position, long version, LiveStream live) throws Exception {
+                        long initial, long end, DoubleConsumer position, long version, LiveStream live,
+                        boolean resumeEdit) throws Exception {
         byte[] bytes = new byte[BLOCK * 4];
         var queued = new ArrayDeque<Segment>();
         long written = 0, cursor = initial < end ? initial : 0;
-        LiveStream.Revision heard = null;
-        RenderBuffer previous = render;
-        boolean measureChange = false;
-        while (version == generation.get()) {
-            var loop = state.loop;
-            long boundary = end;
-            if (loop != null) {
-                long first = frame(loop.start());
-                boundary = Math.max(first + 1, frame(loop.end()));
-                if (cursor >= boundary || cursor < first) cursor = first;
-            } else if (cursor >= end) {
-                output.drain();
-                position.accept(end / (double) RATE);
-                return;
-            }
-            int index = (int) (cursor % BLOCK);
-            int count = (int) Math.min(BLOCK - index, boundary - cursor);
-            var samples = monitor.get();
-            long changedFrame = -1;
-            if (samples != null) {
-                for (int i = 0; i < count; i++) {
-                    double time = (cursor + i) / (double) RATE;
-                    for (int channel = 0; channel < 2; channel++) {
-                        double sample = samples.sample(time, channel);
-                        int pcm = sample == 0 ? 0 : (int) Math.round(Math.clamp(sample * 32768.0, -32768, 32767));
-                        put(bytes, i * 2 + channel, pcm);
+        try (var audio = new EditableReader(live)) {
+            while (version == generation.get()) {
+                var loop = state.loop;
+                long boundary = end;
+                long seek = live == null ? -1 : live.takeSeek();
+                if (seek >= 0) {
+                    output.flush();
+                    queued.clear();
+                    written = output.getLongFramePosition();
+                    cursor = seek;
+                    audio.clearTiming();
+                }
+                if (live != null && seek < 0 && (loop != null || cursor < end)
+                        && written - output.getLongFramePosition() >= BLOCK) {
+                    // Some mixers accept more queued PCM than the requested line buffer.
+                    // Keep at most two presentations ahead of the device for live swaps.
+                    LockSupport.parkNanos(750_000);
+                    continue;
+                }
+                if (loop != null) {
+                    long first = frame(loop.start());
+                    boundary = Math.max(first + 1, frame(loop.end()));
+                    if (cursor >= boundary || cursor < first) cursor = first;
+                }
+                if (live != null) {
+                    live.nextFrame = cursor;
+                    var handoff = live.take(resumeEdit);
+                    resumeEdit = false;
+                    if (handoff != null) {
+                        if (loop == null && seek < 0 && monitor.get() == null && handoff.replayAt() >= 0
+                                && cursor >= handoff.replayEnd())
+                            cursor = handoff.replayAt();
+                        audio.swap(handoff);
                     }
                 }
-            } else {
-                int presentation = (int) (cursor / BLOCK);
-                var revision = live == null ? null : live.select(presentation);
-                if (revision != heard) {
-                    previous = heard == null ? render : heard.pcm();
-                    heard = revision;
-                    measureChange = heard != null && heard.eventNanos() != 0;
-                }
-                var source = heard == null ? render : heard.pcm();
-                short[] pcm = presentation >= source.size() ? null : source.get(presentation);
-                for (int i = 0; i < count * 2; i++) put(bytes, i, pcm == null ? 0 : pcm[index * 2 + i]);
-                if (measureChange) {
-                    short[] before = previous.peek(presentation);
-                    for (int i = index * 2; before != null && pcm != null && i < (index + count) * 2; i++) {
-                        if (before[i] == pcm[i]) continue;
-                        changedFrame = cursor + (i / 2 - index);
-                        break;
+                if (cursor >= end && loop == null) {
+                    if (live != null) {
+                        long played = output.getLongFramePosition();
+                        audio.report(played);
+                        // The last queued block may still be audible and editable.
+                        if (played < written || live.editInFlight()) {
+                            LockSupport.parkNanos(750_000);
+                            continue;
+                        }
                     }
+                    output.drain();
+                    audio.report(output.getLongFramePosition());
+                    position.accept(end / (double) RATE);
+                    return;
                 }
+                int index = (int) (cursor % BLOCK);
+                int count = (int) Math.min(BLOCK - index, boundary - cursor);
+                var samples = monitor.get();
+                if (samples != null) {
+                    for (int i = 0; i < count; i++) {
+                        double time = (cursor + i) / (double) RATE;
+                        for (int channel = 0; channel < 2; channel++) {
+                            double sample = samples.sample(time, channel);
+                            int pcm = sample == 0 ? 0 : (int) Math.round(Math.clamp(sample * 32768.0, -32768, 32767));
+                            put(bytes, i * 2 + channel, pcm);
+                        }
+                    }
+                } else {
+                    int presentation = presentation(cursor);
+                    short[] pcm = live != null ? audio.at(presentation)
+                            : presentation >= render.size() ? null : render.get(presentation);
+                    for (int i = 0; i < count * 2; i++) put(bytes, i, pcm == null ? 0 : pcm[index * 2 + i]);
+                    audio.compare(pcm, cursor, index, count, written);
+                }
+                if (version != generation.get() || output.write(bytes, 0, count * 4) != count * 4) return;
+                queued.addLast(new Segment(written, cursor, count));
+                written += count;
+                cursor += count;
+                long played = output.getLongFramePosition();
+                audio.report(played);
+                while (queued.size() > 1 && played >= queued.getFirst().deviceStart() + queued.getFirst().length()) {
+                    queued.removeFirst();
+                }
+                var playingSegment = queued.getFirst();
+                long progress = Math.clamp(played - playingSegment.deviceStart(), 0, playingSegment.length());
+                position.accept((playingSegment.projectStart() + progress) / (double) RATE);
             }
-            if (version != generation.get()) return;
-            long handed = changedFrame < 0 ? 0 : System.nanoTime();
-            if (output.write(bytes, 0, count * 4) != count * 4) return;
-            if (changedFrame >= 0) {
-                measureChange = false;
-                if (Boolean.getBoolean("opensmpsdeck.liveTiming"))
-                    System.getLogger(StudioPlayback.class.getName()).log(System.Logger.Level.INFO,
-                            String.format(java.util.Locale.ROOT, "Live PCM frame %d: %.3f ms", changedFrame,
-                                    (handed - heard.eventNanos()) / 1_000_000.0));
-            }
-            queued.addLast(new Segment(written, cursor, count));
-            written += count;
-            cursor += count;
-            long played = output.getLongFramePosition();
-            while (queued.size() > 1 && played >= queued.getFirst().deviceStart() + queued.getFirst().length()) {
-                queued.removeFirst();
-            }
-            var playingSegment = queued.getFirst();
-            long progress = Math.clamp(played - playingSegment.deviceStart(), 0, playingSegment.length());
-            position.accept((playingSegment.projectStart() + progress) / (double) RATE);
         }
     }
+
+    private static final class EditableReader implements AutoCloseable {
+        private CheckpointPlayback.Reader current;
+        private CheckpointPlayback.Reader previous;
+        private long eventNanos;
+        private long changedFrame = -1;
+        private long changedDeviceFrame;
+        private long handed;
+
+        EditableReader(LiveStream live) {
+            if (live != null) current = live.built.audio().reader();
+        }
+
+        short[] at(int presentation) throws InterruptedIOException { return current.at(presentation); }
+
+        void swap(LiveStream.Handoff handoff) {
+            clearTiming();
+            if (handoff.eventNanos() != 0 && Boolean.getBoolean("opensmpsdeck.liveTiming")) {
+                previous = current;
+                eventNanos = handoff.eventNanos();
+            } else current.close();
+            current = handoff.bookmark() == null ? handoff.revision().audio().reader() : handoff.bookmark().reader();
+        }
+
+        void compare(short[] pcm, long cursor, int index, int count, long written) throws InterruptedIOException {
+            if (previous == null) return;
+            short[] before = previous.at(presentation(cursor));
+            for (int i = index * 2; i < (index + count) * 2; i++) {
+                if (before[i] == pcm[i]) continue;
+                int offset = i / 2 - index;
+                changedFrame = cursor + offset;
+                changedDeviceFrame = written + offset;
+                handed = System.nanoTime();
+                previous.close();
+                previous = null;
+                break;
+            }
+        }
+
+        void report(long played) {
+            if (changedFrame < 0 || played <= changedDeviceFrame) return;
+            System.getLogger(StudioPlayback.class.getName()).log(System.Logger.Level.INFO,
+                    String.format(java.util.Locale.ROOT, "Live PCM frame %d: %.3f ms write, %.3f ms device cursor",
+                            changedFrame, (handed - eventNanos) / 1_000_000.0,
+                            (System.nanoTime() - eventNanos) / 1_000_000.0));
+            changedFrame = -1;
+        }
+
+        void clearTiming() {
+            changedFrame = -1;
+            if (previous != null) previous.close();
+            previous = null;
+        }
+
+        @Override public void close() {
+            clearTiming();
+            if (current != null) current.close();
+        }
+    }
+
+    private static int presentation(long frame) { return (int) (frame / BLOCK); }
 
     private static void put(byte[] bytes, int index, int value) {
         bytes[index * 2] = (byte) value;
@@ -336,6 +525,8 @@ final class StudioPlayback implements AutoCloseable {
         worker.shutdownNow();
         renderer.shutdownNow();
         edits.shutdownNow();
+        prepareEditable(null);
+        warming.shutdownNow();
     }
 
     /** Keep each rendered presentation for sample-aligned looping and monitor switches. */
@@ -367,10 +558,6 @@ final class StudioPlayback implements AutoCloseable {
             error = failure;
             notifyAll();
         }
-
-        synchronized boolean failed() { return error != null; }
-        synchronized boolean available(int index) { return index < next; }
-        synchronized short[] peek(int index) { return available(index) ? frames[index] : null; }
 
         private synchronized void append(short[] pcm) throws IOException {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();

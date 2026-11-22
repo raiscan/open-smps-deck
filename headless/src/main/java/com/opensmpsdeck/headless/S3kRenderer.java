@@ -131,9 +131,17 @@ public final class S3kRenderer {
     }
 
     static SmpsDriverSession openPlayback(CompiledProject project, ChannelMask mask, ChipWriteObserver observer) {
-        var prepared = prepare(project, 0, false, () -> {
+        return openPlayback(preparePlayback(project), mask, observer);
+    }
+
+    static PreparedSmpsMusicActivation preparePlayback(CompiledProject project) {
+        return prepare(project, 0, false, () -> {
             throw new IllegalStateException("music restoration requires a previous project");
         });
+    }
+
+    static SmpsDriverSession openPlayback(PreparedSmpsMusicActivation prepared, ChannelMask mask,
+                                          ChipWriteObserver observer) {
         return openPlayback(prepared, Sonic3kSmpsPhysicalPolicy.INSTANCE, "s3k", mask, observer);
     }
 

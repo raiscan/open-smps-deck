@@ -377,25 +377,24 @@ or press **Esc** to remove it.
 
 ### Audition note edits while playing
 
-In an S3K reconstruction, open **Notes** and choose **Chip** or switch A/B
-to the Chip side. Start playback in the first 2.5 project seconds. Use
-**Set loop…** to repeat a range within that window. With **Project time**
-enabled, the ruler shows the clock used for the 2.5-second limit. The
-built and new note must both fit in the audition range.
+In an attached S3K reconstruction, open **Notes** and choose **Chip** or
+switch A/B to the Chip side. Play or seek to any part of the song with
+the **Song**, **Section** or **Selection** range.
 
-Drag pitch or length, transpose, or draw a bend. The note menu can also
-transpose or add a bend or glide. **Live preview · Saved edits** means
-Studio has saved the edit to `edits.json` and is auditioning it with the
-fitted patches. **Changes → Undo** and **Redo** update the
-journal and playback in the same window. Listen on the next loop pass
-if playback has already passed the edit.
+Drag pitch or length, transpose, or draw a supported bend. The note menu
+can also transpose or add a bend or glide. **Live preview · Saved edits**
+means Studio saved the edit to `edits.json` and is auditioning it with the
+fitted patches. **Changes → Undo** and **Redo** update playback and the
+journal. An edit ahead of the playhead is heard when playback reaches it.
+A loop plays a passed note on the next pass. If an unlooped short note passes
+while its edit is preparing, Studio can briefly re-cue it so you can hear
+the change.
 
-Studio shows **Rebuild needed** for deletions, splits, merges, changes that
-need new roles, lanes or instruments, and edits outside the window. Use
-**Apply & rebuild** to build the new result for playback and export. After
-a live preview, use the same button to include the saved edits in the built
-arrangement and exports. In normal playback, Studio returns to the built
-arrangement after the live window.
+Studio prepares playback checkpoints in the background. A late seek or
+edit can take longer on the first pass. Deletions, splits, merges, and changes
+that need new roles, lanes or instruments display **Rebuild needed**.
+Use **Apply & rebuild** to hear those changes and include all saved edits
+in the built arrangement and exports.
 
 ### Adjust the view
 
