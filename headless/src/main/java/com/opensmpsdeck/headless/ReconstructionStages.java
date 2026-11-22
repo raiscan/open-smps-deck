@@ -455,7 +455,7 @@ public final class ReconstructionStages {
                                 ? ReconstructionCli.keepVoicing(score, allocation, previous, report)
                                 : ReconstructionCli.fitVoicing(score, allocation, previousWork.equals(work) ? previous : null,
                                         request.lanes, request.refitLevels, previousAllocation, request.variant);
-                        var policy = previous != null ? previous.lanePolicies() : initialLanePolicy(work);
+                        var policy = previous != null ? previous.lanePolicies() : initialLanePolicy(work, score.inputs().targetGame());
                         fitted = ReconstructionVoicing.withPercussionEvidence(fitted.withLanePolicies(policy), allocation);
                         if (voicePlan == null) voicePlan = ReconstructionVoicePlan.saved(work);
                         if (voicePlan != null && !voicePlan.laneTypes().isEmpty()) {
@@ -729,12 +729,12 @@ public final class ReconstructionStages {
         }
     }
 
-    private static ReconstructionLanePolicies.Configuration initialLanePolicy(Path work) throws IOException {
+    private static ReconstructionLanePolicies.Configuration initialLanePolicy(Path work, TargetGame target) throws IOException {
         Path file = work.resolve(ReconstructionManifest.FILE);
         String preset = Files.exists(file)
                 ? ReconstructionArtifacts.read(file, ReconstructionManifest.Manifest.class).initialLanePolicyPreset() : null;
         return "off".equals(preset) ? null
-                : ReconstructionLanePolicies.Configuration.preset(ReconstructionLanePolicies.S3K_LAYERING);
+                : ReconstructionLanePolicies.Configuration.preset(preset == null ? ReconstructionLanePolicies.defaultPreset(target) : preset);
     }
 
     private static Request request(String command, String[] args, Progress progress, PrintStream err,
@@ -1017,8 +1017,8 @@ public final class ReconstructionStages {
                 case "--policy-decisions" -> policyDecisions = true;
                 case "--lane-policy-preset" -> {
                     if (lanePolicyPreset != null || ++i == args.length
-                            || !java.util.Set.of(ReconstructionLanePolicies.S3K_LAYERING, "off").contains(args[i]))
-                        throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
+                            || !("off".equals(args[i]) || ReconstructionLanePolicies.PRESETS.contains(args[i])))
+                        throw new IllegalArgumentException("--lane-policy-preset expects s1-layering, s2-layering, s3k-layering or off");
                     lanePolicyPreset = args[i];
                 }
                 case "--harmony-max-hz" -> {

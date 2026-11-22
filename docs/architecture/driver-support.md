@@ -46,9 +46,9 @@ Reconstruction uses this path for patch and articulation probes, level and
 drum balance, lead effects, bend traces, timeline and PSG-tail comparisons,
 and final, vocal phrase and audition WAVs. Studio uses it for playback and reconstruction
 monitoring. Catalogue audition uses the driver saved with each variant.
-The S3K PSG cymbal calibration also uses S3K projects because the cymbal
-envelopes and noise setup are specific to that driver. Raw S3K banks and
-native S3K-to-editable conversion retain their existing native reader.
+PSG cymbal calibration uses the target's noise clock, envelope grammar and
+native duration clock. Raw S3K banks and native S3K-to-editable conversion
+retain their existing native reader.
 
 ## Reconstruction DAC kits
 
@@ -135,6 +135,38 @@ A same-target portable or mod export writes that byte directly, including
 in strict-tempo mode. Explicit cross-target exports use the arrangement's
 fallback S3K `tempo`. Earlier arrangements without `nativeTempo` keep
 their existing S3K tempo conversion.
+
+### PSG reconstruction on S1 and S2
+
+Reconstruction converts the generated and catalogue PSG volume programs to
+plain attenuation steps followed by a single `80` hold. S3K `81` parks at the
+last level and becomes a hold. `83` explicitly silences the channel and
+becomes `0F 80` if reached during a sounding gate. S3K `80` rewinds to the
+start and `82 xx` jumps to byte offset `xx`. Both are expanded for the
+longest sounding use of the envelope, up to 254 steps plus the hold byte.
+The pinned PSG volume interpreter consumes and ignores `84 xx`. Unknown,
+incomplete and non-yielding commands fall back to a hold with a reason in
+the reconstruction report. The classic package compiler still validates
+hand-authored and imported projects against the native grammar.
+
+Classic catalogue variants already use `80` as a hold, including custom
+envelopes without a stock reference. Fitting and assembly preserve that
+interpretation. Identical programs share a slot. A flat zero envelope uses the driver's
+envelope-disabled setting. Exact stock envelopes reuse their stock identity.
+With `OPENSMPSDECK_S2_ROM` set, reconstruction can reuse an S2 stock envelope
+within one attenuation step during the sounding gate, with silence
+preserved. `report.json` records custom envelope count and bytes, stock
+count, and any approximation. Test in game still applies the ROM's own
+space limit and reports any further substitutions.
+
+A classic reconstruction reserves PSG3 for noise when drums or a noise
+assignment need it. Assembly writes one PSG3 noise clip, with rests and
+timed volume, envelope and clock changes. The driver stays in noise mode
+throughout this clip. The pinned drivers use `F3 E7` for white noise and
+`F3 E3` for periodic noise, with both modes clocked by tone 3. S1 and S2
+use MIDI 116 with base period 17 for the clock note. Signed detune adjusts
+it to the intended period, including the closed hat's two clock rates.
+Tonal layers use the remaining two PSG lanes while PSG3 is reserved.
 
 ## Arrangement commands
 

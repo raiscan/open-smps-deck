@@ -226,8 +226,9 @@ final class ReconstructionEditor implements AutoCloseable {
         apply.setId("reconstruction-apply");
         apply.setOnAction(event -> apply(null));
         lanePolicies.setId("reconstruction-lane-policies");
-        var layering = new MenuItem("S3K layering");
-        layering.setOnAction(event -> apply("s3k-layering"));
+        var target = snapshot.inspection().target();
+        var layering = new MenuItem(target.name() + " layering");
+        layering.setOnAction(event -> apply(target.id() + "-layering"));
         var off = new MenuItem("Off");
         off.setOnAction(event -> apply("off"));
         lanePolicies.getItems().setAll(layering, off);

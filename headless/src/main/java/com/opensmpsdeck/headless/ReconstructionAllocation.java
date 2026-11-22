@@ -130,6 +130,7 @@ final class ReconstructionAllocation {
     private final Map<String, Entry> tail = new HashMap<>();
     private final boolean fmOnly;
     private final TargetProfile profile;
+    private boolean reservePsg3;
     private final NavigableMap<Integer, Integer> cymbals = new TreeMap<>();
     private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
     private final Map<String, ReconstructionChordReduction.Tone> tones;
@@ -310,6 +311,10 @@ final class ReconstructionAllocation {
                 if (cymbal != null) remaining.add(cymbal);
             }
         }
+        allocator.reservePsg3 = profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
+                && remaining.stream().anyMatch(attack -> attack.role() != Role.drop
+                        && (attack.noise || attack.cymbalRoute != null
+                        || attack.pin != null && attack.pin.laneType() == ReconstructionLaneType.NOISE));
         remaining.sort(attackOrder(profile));
         var placedChords = new TreeMap<String, ReconstructionChords.Group>();
         allocator.pending.addAll(remaining);
@@ -498,7 +503,7 @@ final class ReconstructionAllocation {
             lane = shorten(primary, attack);
             if (lane == null) lane = shorten(secondary, attack);
         }
-        if (lane == null && secondary.size() == 2 && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
+        if (lane == null && !reservePsg3 && secondary.size() == 2 && attack.end - attack.start >= SUSTAINED_SPILL_TICKS)
             lane = sustainedSpill(attack);
         if (lane == null) {
             drop(attack, switch (attack.role()) {
@@ -585,6 +590,10 @@ final class ReconstructionAllocation {
             return;
         }
         String lane = attack.pin.lane();
+        if (reservePsg3 && lane.equals("PSG3") && !attack.noise) {
+            drop(attack, attack.pin.tag() + " PSG3 is reserved for noise");
+            return;
+        }
         Entry last = tail.get(lane);
         if (last != null && last.endTick > attack.start) {
             if (last.pinnedLane != null || last.startTick >= attack.start) {
@@ -598,7 +607,7 @@ final class ReconstructionAllocation {
 
     private void placeByType(Attack attack) {
         var type = attack.pin.laneType();
-        var lanes = type.lanes();
+        var lanes = reservePsg3 && type == ReconstructionLaneType.PSG ? PSG.subList(0, 2) : type.lanes();
         String previous = previousLanes.get(attack.note().id());
         String lane = null;
         if (attack.role() == Role.melody && type == ReconstructionLaneType.FM
@@ -617,7 +626,7 @@ final class ReconstructionAllocation {
         if (lane == null) lane = free(lanes, attack);
         if (lane == null) {
             drop(attack, attack.pin.tag() + " " + type + " lanes busy",
-                    lanes.stream().map(tail::get).map(entry -> entry.note().id()).toList());
+                    lanes.stream().map(tail::get).filter(java.util.Objects::nonNull).map(entry -> entry.note().id()).toList());
         } else {
             keep(attack, lane, attack.pin.tag() + " laneType=" + type);
         }
@@ -641,7 +650,8 @@ final class ReconstructionAllocation {
     private List<String> spillLanes(Attack attack) {
         if (expectedLanes(attack.role(), attack.noise) != INNER_FM || fmOnly || attack.fmRequired
                 || attack.note().pitch() < profile.psg().low() || attack.note().run() != null) return List.of();
-        return attack.role() == Role.harmony && overlapsCymbal(attack.start, attack.end) ? PSG.subList(0, 2) : PSG;
+        return reservePsg3 || attack.role() == Role.harmony && overlapsCymbal(attack.start, attack.end)
+                ? PSG.subList(0, 2) : PSG;
     }
 
     private boolean overlapsCymbal(int start, int end) {
@@ -678,7 +688,7 @@ final class ReconstructionAllocation {
             Entry prior = tail.get(lane);
             if (prior == null || prior.pinnedLane != null || prior.note.pitch() < profile.psg().low() || prior.note.run() != null
                     || fmChordAnchors.contains(prior.note.id())) continue;
-            for (String destination : PSG) {
+            for (String destination : reservePsg3 ? PSG.subList(0, 2) : PSG) {
                 if (destination.equals("PSG3") && prior.role == Role.harmony && overlapsCymbal(prior.startTick, prior.endTick)) continue;
                 Entry psg = tail.get(destination);
                 if (psg != null && psg.endTick > prior.startTick) continue;

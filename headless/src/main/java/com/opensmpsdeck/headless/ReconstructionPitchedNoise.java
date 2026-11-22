@@ -1,8 +1,9 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.synth.PsgChip;
+import com.opensmpsdeck.project.TargetProfile;
 
-/** S3K F3 E3 clocks the 16-bit periodic noise register from PSG tone 3. */
+/** F3 E3 clocks the 16-bit periodic noise register from PSG tone 3. */
 final class ReconstructionPitchedNoise {
     static final int COMMAND = 0xe3;
 
@@ -23,6 +24,10 @@ final class ReconstructionPitchedNoise {
     }
 
     static int detune(int pitch) {
-        return ReconstructionCymbals.detune((int) Math.round(idealPeriod(pitch)));
+        return detune(pitch, TargetProfile.S3K);
+    }
+
+    static int detune(int pitch, TargetProfile profile) {
+        return ReconstructionCymbals.detune((int) Math.round(idealPeriod(pitch)), profile);
     }
 }

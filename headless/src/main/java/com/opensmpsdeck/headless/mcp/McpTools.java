@@ -85,7 +85,7 @@ final class McpTools {
                     field("transcriber", "string", "Configured transcriber for audio-only import").optional(),
                     field("transcriberFor", McpReconstruction.STEM_ROLES, "Map of stem roles to configured transcriber names").optional(),
                     field("drumDetector", "string", "Select an audio-only drum detector").optional(),
-                    choice("lanePolicyPreset", "Override the S3K layering default", "s3k-layering", "off").optional(),
+                    choice("lanePolicyPreset", "Override the target-specific layering default", "s1-layering", "s2-layering", "s3k-layering", "off").optional(),
                     field("transcriberDevice", "string", "Device passed to external transcribers").optional(),
                     field("stemRoles", McpReconstruction.STEM_ROLES, "Map of folder-relative stem files to audio-only role overrides").optional(),
                     field("transcribeUnmapped", "string", "Configured polyphonic transcriber for unmatched tonal stems").optional()),

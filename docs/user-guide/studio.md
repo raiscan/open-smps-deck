@@ -309,8 +309,9 @@ playback.
   to audition that lane through the chip renderer. **Solo note** loops the
   selected gate. Turn it off to return to your previous loop selection.
 
-- Choose **Lane policies → S3K layering** to rebuild with octave-up PSG
-  doubling and a 14-frame FM echo on available channels. The echo uses
+- Choose the target's preset under **Lane policies** (**S1 layering**,
+  **S2 layering**, or **S3K layering**) to rebuild with octave-up PSG doubling
+  and a 14-tick FM echo on available channels. The echo uses
   11 carrier TL steps of attenuation relative to the dry note by default.
   Choose **Off** to clear the lane policies. Both choices replace any
   custom lane policies. [Adjust the echo level](../architecture/reconstruction-stages.md#optional-lane-policies)

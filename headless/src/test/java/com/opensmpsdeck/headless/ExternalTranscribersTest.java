@@ -190,8 +190,10 @@ class ExternalTranscribersTest {
         java.util.Arrays.fill(kick, (byte) 0x80);
         kick[0] = (byte) 0xff;
         String sample = catalogue.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Kick", kick);
-        catalogue.variant(sample, "Kick", new InstrumentCatalogue.Recipe(0x14, null, 127, 60,
-                null, null, List.of(), List.of()), null);
+        var kickRecipe = new InstrumentCatalogue.Recipe(0x14, null, 127, 60, null, null, List.of(), List.of());
+        catalogue.variant(sample, "Kick", kickRecipe, null);
+        ReconstructionCliTest.classicVariants(catalogue, asset, patch.name(), InstrumentCatalogue.Recipe.plain());
+        ReconstructionCliTest.classicVariants(catalogue, sample, "Kick", kickRecipe);
         Path index = directory.resolve("index.json");
         catalogue.build().save(index);
 
@@ -249,6 +251,13 @@ class ExternalTranscribersTest {
                 "--tempo", "105", "--bar-offset", "0.125", "--transcriber-config", config.toString(),
                 "--transcriber-device", "cuda:0", "--fm-only", "--transcriber", "fixture");
         run(0, args);
+        for (var target : ReconstructionCliTest.classicTargets()) {
+            var classic = directory.resolve("audio-only-" + target.id());
+            var classicArgs = new java.util.ArrayList<>(args);
+            classicArgs.set(5, classic.toString());
+            classicArgs.addAll(List.of("--target", target.id()));
+            ReconstructionCliTest.classicRun(classicArgs, classic, target);
+        }
 
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         assertNull(score.inputs().midi());
