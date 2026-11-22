@@ -14,7 +14,7 @@ the full image against these revisions.
 
 | Game | Retail revision | Size (bytes) | CRC32 | Test in game |
 | --- | --- | ---: | --- | --- |
-| `s1` | Sonic 1 World REV01 | 524,288 | `AFE05EEE` | Coming soon |
+| `s1` | Sonic 1 World REV01 | 524,288 | `AFE05EEE` | Coming soon. [Cartridge engine](../architecture/s1-rom-patch.md) awaits project compiler integration. |
 | `s2` | Sonic 2 World REV01 | 1,048,576 | `7B905383` | Coming soon |
 | `s3k` | Sonic 3 & Knuckles (locked-on) | 4,194,304 | `63522553` | Available |
 
