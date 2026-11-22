@@ -14,6 +14,7 @@ import static com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionVoicing.*;
 import com.opensmpsdeck.headless.VoicePatchShortlist.RankedPatch;
+import com.opensmpsdeck.project.TargetGame;
 
 final class ReconstructionVoiceStage {
     private static final double ARTICULATION_MARGIN = .004;
@@ -131,7 +132,7 @@ final class ReconstructionVoiceStage {
                     sustainExamples.put(lane, examples);
                     patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
                 }
-                if (instrument) {
+                if (instrument && options.target() == TargetGame.S3K) {
                     int part = entry.getValue().getFirst().note().part();
                     var stem = options.stems().get(part);
                     if (stem != null && !mix.equals(stem))

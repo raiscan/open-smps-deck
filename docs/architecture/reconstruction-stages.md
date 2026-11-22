@@ -1278,8 +1278,8 @@ For long notes with a mapped stem, the fitter measures pitch-band energy
 near the attack and in the hold. It screens the FM attack shortlist on
 representative long gates using the pinned chip. For shared FM guitar
 profiles, the hold screen compares each stock patch with the stem.
-Exposed attacks with a mapped stem also compare time to near-peak level
-in 5 ms bins and energy above 2 and 5 kHz. Guitar profiles use a narrower
+On S3K, exposed attacks with a mapped stem also compare time to near-peak
+level in 5 ms bins and energy above 2 and 5 kHz. Guitar profiles use a narrower
 acceptance margin. It fits the surviving stock choices jointly with the
 other instruments. The PSG spill fit includes a long-hold probe alongside
 its short FM contour probes. If an attack would

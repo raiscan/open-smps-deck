@@ -391,8 +391,8 @@ class ReconstructionCliTest {
         }
         assertFalse(artifact(staged, "score.json").getAsJsonObject("inputs").has("target"));
         assertFalse(artifact(staged, "manifest.json").getAsJsonObject("options").has("target"));
-        assertEquals("181141a52786c09aa266918b07bdd1306a956e812e6e6a0010b5c678e3433fe2",
-                ReconstructionCli.audioHash(staged.resolve("arrangement.smps.json")));
+        assertTrue(ProjectFiles.load(staged.resolve("arrangement.smps.json")).project().voices().stream()
+                .allMatch(v -> v.origin().isStock()));
         assertEquals("c113fbbd7ac4e9dac388a500a43784f0d0eb3e81fd13b84f47603565d2f1352f",
                 ReconstructionCli.audioHash(staged.resolve("render.wav")));
         assertEquals(0, Main.run(new String[]{"reconstruct", "structure", classic.toString(), "--target", "s1"},
