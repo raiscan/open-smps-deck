@@ -31,10 +31,12 @@ record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
         try {
             return new RomPatchInput(game, new S3kRomTarget.Song(ProjectCompiler.compileWithAssets(project), List.of()));
         } catch (IllegalArgumentException failure) {
-            if (!failure.getMessage().contains("32 KiB")) throw failure;
-            throw new IllegalArgumentException(("Compiled song exceeds the 32,768-byte (32 KB) per-song limit. "
-                    + "The largest S3K bank has %d free bytes before assets. Shorten the song or reduce layering.")
-                    .formatted(RomPatch.largestBankCapacity()), failure);
+            var limit = ProjectCompiler.BankLimitException.from(failure);
+            if (limit == null) throw failure;
+            throw new IllegalArgumentException(("Compiled song is %,d bytes, over the 32,768-byte (32 KB) per-song limit, "
+                    + "after loops and calls. The largest S3K bank has %,d free bytes before assets. "
+                    + "Shorten the song or reduce layering.")
+                    .formatted(limit.compiledBytes(), RomPatch.largestBankCapacity()), failure);
         }
     }
 
