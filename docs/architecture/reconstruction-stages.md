@@ -1719,6 +1719,8 @@ Note IDs identify attacks independently of their role, voice and chip lane.
 A rebuild from roles, voices, allocation or voicing retains the score edits
 and re-evaluates note voicing and layers against the new allocation. Explicit
 role, lane and voice membership edits follow both child IDs after a cut.
+When a merge combines notes classified together by a single edit, that
+classification follows the retained attack.
 
 A score operation can succeed while its target fails to sound downstream.
 Assembly records these losses as orphaned edit outcomes with the note ID and

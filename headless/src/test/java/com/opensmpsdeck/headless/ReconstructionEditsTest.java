@@ -34,9 +34,19 @@ class ReconstructionEditsTest {
         add(work, """
                 {"id":"shape","reason":"quiet attack","op":"setVelocity","noteIds":["n-0-0-60"],"velocity":41}
                 """, true);
-        add(work, """
+        var drop = json("""
                 {"id":"drop","reason":"classify attack","op":"setRole","noteIds":["n-0-0-60"],"role":"drop"}
-                """, true);
+                """);
+        var before = ReconstructionReview.revision(work).entries();
+        var after = before.deepCopy();
+        after.add(drop);
+        var predicted = ReconstructionReview.newOrphanedDetails(work, before, after);
+        assertEquals(1, predicted.size());
+        assertTrue(predicted.getFirst().contains("shape"));
+        ReconstructionEditCommand.run(work, "add", drop, null, true, (a, b, c) -> {});
+        cli("reconstruct", "run", "--from", "assemble", work.toString());
+        assertEquals(1, ReconstructionReview.outcomes(work).get("shape").stream()
+                .filter(row -> row.status().equals("orphaned")).count());
         var issue = ReconstructionReview.outcomes(work).get("shape").stream()
                 .filter(row -> row.status().equals("orphaned")).findFirst().orElseThrow();
         assertTrue(issue.reason().contains("edit:drop"), issue.toString());
@@ -73,7 +83,7 @@ class ReconstructionEditsTest {
               {"id":"lead","op":"setRole","reason":"Identify lead","role":"melody","noteIds":["n-0-0-60","n-0-500000-64"]},
               {"id":"pin","op":"pinLane","reason":"Lead on FM","laneType":"FM","noteIds":["n-0-0-60"]},
               {"id":"create","op":"voiceEdit","reason":"Define lead voice","voiceEdit":{"op":"create","voiceId":"lead-a","name":"Lead A","kind":"tonal"}},
-              {"id":"move","op":"voiceEdit","reason":"Assign lead","voiceEdit":{"op":"move","voiceId":"lead-a","noteIds":["n-0-0-60"]}},
+              {"id":"move","op":"voiceEdit","reason":"Assign lead","voiceEdit":{"op":"move","voiceId":"lead-a","noteIds":["n-0-0-60","n-0-3500000-71","n-0-4000000-71"]}},
               {"id":"cut","op":"splitNote","reason":"Separate attacks","noteId":"n-0-0-60","at":0.12},
               {"id":"bend","op":"bend","reason":"Shape onset","noteId":"n-0-500000-64","points":[[0.52,0],[0.65,1]]},
               {"id":"retrigger","op":"retrigger","reason":"Separate pulses","noteId":"n-0-1000000-62","rate":0.08,"count":2,"gate":0.05},
@@ -81,6 +91,7 @@ class ReconstructionEditsTest {
               {"id":"vibrato","op":"noteVoicing","reason":"Add motion","noteIds":["n-0-2000000-67"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}},
               {"id":"scope","op":"setVelocity","reason":"Soften section","part":0,"span":{"section":"region"},"velocity":41},
               {"id":"timing","op":"setNote","reason":"Lengthen note","noteId":"n-0-3000000-69","end":3.35},
+              {"id":"merge-role","op":"setRole","reason":"Classify both held notes","role":"counter","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
               {"id":"merge","op":"mergeNotes","reason":"Sustain pitch","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
               {"id":"delete","op":"deleteNote","reason":"Remove attack","noteId":"n-0-4500000-72"},
               {"id":"insert","op":"insertNote","reason":"Add attack","part":0,"pitch":66,"start":5,"end":5.25,"role":"counter"},
@@ -95,7 +106,7 @@ class ReconstructionEditsTest {
         assertEquals(java.util.EnumSet.allOf(ReconstructionEdits.Kind.class),
                 ReconstructionEdits.read(work).intents().stream().map(ReconstructionEdits.Intent::kind)
                     .collect(java.util.stream.Collectors.toSet()));
-        assertEquals(List.of("edit-cut-left", "edit-cut-right"),
+        assertEquals(List.of("edit-cut-left", "edit-cut-right", "n-0-3500000-71"),
                 ReconstructionVoicePlan.load(work).voices().stream().filter(voice -> voice.id().equals("lead-a"))
                         .findFirst().orElseThrow().noteIds());
 

@@ -605,7 +605,11 @@ final class ReconstructionEdits {
                 var affected = edit.noteIds.isEmpty() ? List.copyOf(register(edit, notes.values().stream()
                         .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(), id -> true).keySet())
                         : edit.noteIds.stream().filter(notes::containsKey).toList();
-                var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id)).toList();
+                var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id))
+                        .filter(id -> {
+                            var prior = retired.get(id);
+                            return prior == null || prior.op != Kind.mergeNotes || !affected.contains(prior.noteIds.getFirst());
+                        }).toList();
                 for (String id : affected) notes.computeIfPresent(id, (key, note) -> edit.level(note));
                 if (!affected.isEmpty() && !missing.isEmpty()) outcomes.add(orphan(edit, missing));
                 outcomes.add(affected.isEmpty() ? orphan(edit, missing)
@@ -888,9 +892,13 @@ final class ReconstructionEdits {
                     || other.lane != null && !ReconstructionLaneType.FM.lanes().contains(other.lane))
                     && (targets(other, first, timeline) || targets(other, origins.get(first.id()), timeline)))
                 return "glide requires FM and conflicts with " + other.tag() + " targeting " + first.id();
-            // A uniform span edit can still be applied to the resulting sustain.
-            if ((other.kind == Kind.setVelocity || other.kind == Kind.setRole || other.kind == Kind.swapRoles)
-                    && other.span != null && other.voice == null && other.fromRole == null
+            // A uniform choice already targeting every member also targets the surviving sustain.
+            boolean uniform = switch (other.kind) {
+                case setVelocity, setRole, pinLane -> true;
+                case swapRoles -> other.span != null;
+                default -> false;
+            };
+            if (uniform && other.voice == null && other.fromRole == null
                     && members.stream().allMatch(note -> targets(other, note, timeline))) continue;
             boolean changesAnchorGate = switch (other.kind) {
                 case deleteNote, splitNote, retrigger, bend, glide, unmerge -> true;
@@ -1003,6 +1011,7 @@ final class ReconstructionEdits {
         var scoreResults = new LinkedHashMap<String, Outcome>();
         for (var outcome : scoreOutcomes) scoreResults.put(outcome.id, outcome);
         var successors = splitSuccessors(scoreOutcomes);
+        var collapsed = mergeSuccessors(scoreOutcomes);
         int order = 0;
         for (Intent edit : intents) {
             order++;
@@ -1076,7 +1085,7 @@ final class ReconstructionEdits {
                 }
             } else {
                 var targets = switch (edit.kind) {
-                    case setRole, pinLane, unmerge -> reanchor(edit.noteIds, successors);
+                    case setRole, pinLane, unmerge -> classificationTargets(edit.noteIds, successors, collapsed);
                     default -> edit.noteIds;
                 };
                 requested = targets.stream().filter(id -> !decisions.containsKey(id)
@@ -1234,7 +1243,27 @@ final class ReconstructionEdits {
         return successors;
     }
 
-    static List<String> reanchor(List<String> ids, Map<String, List<String>> successors) {
+    static Map<String, String> mergeSuccessors(List<Outcome> scoreOutcomes) {
+        var successors = new LinkedHashMap<String, String>();
+        for (var outcome : scoreOutcomes.reversed()) {
+            if (outcome.op != Kind.mergeNotes || outcome.status != Status.applied || outcome.removedNotes == null) continue;
+            String survivor = outcome.noteIds.getFirst();
+            for (var removed : outcome.removedNotes) successors.put(removed.id(), successors.getOrDefault(survivor, survivor));
+        }
+        return successors;
+    }
+
+    static List<String> classificationTargets(List<String> ids, Map<String, List<String>> splits, Map<String, String> merges) {
+        var targets = reanchor(ids, splits);
+        var selected = Set.copyOf(targets);
+        // Discard collapsed targets only when the edit already classified the survivor.
+        return targets.stream().filter(id -> {
+            String survivor = merges.get(id);
+            return survivor == null || !selected.containsAll(splits.getOrDefault(survivor, List.of(survivor)));
+        }).toList();
+    }
+
+    private static List<String> reanchor(List<String> ids, Map<String, List<String>> successors) {
         return ids.stream().flatMap(id -> successors.getOrDefault(id, List.of(id)).stream()).distinct().toList();
     }
 
