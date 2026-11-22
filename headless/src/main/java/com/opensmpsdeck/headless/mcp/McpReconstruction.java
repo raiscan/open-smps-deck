@@ -285,6 +285,14 @@ final class McpReconstruction {
         return ReconstructionEditCommand.run(work, propose ? "propose" : action, edit, id, rerun, dryRun, progress);
     }
 
+    static JsonObject vocalReview(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE))
+            McpPaths.managed(work, file);
+        return com.opensmpsdeck.headless.ReconstructionVocalReview.review(work, optional(args, "phrase"),
+                args.has("propose") && args.get("propose").getAsBoolean());
+    }
+
     static JsonObject trace(JsonObject args) throws IOException {
         var cli = new ArrayList<String>();
         options(cli, args, "start", "end", "part", "pitch", "pitchMin", "pitchMax", "lane", "status", "time");

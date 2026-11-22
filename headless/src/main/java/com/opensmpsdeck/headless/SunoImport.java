@@ -1035,7 +1035,7 @@ public final class SunoImport {
         String drum = config.drumName(transcribersByRole.getOrDefault("drums", drumDetector));
         AudioDrumDetector.select(config, drum, device == null ? "auto" : device);
         for (String role : activeRoles) {
-            if (!role.equals("drums")) selected.put(role, config.forRole(role, fallback, transcribersByRole, transcriber != null));
+            if (!role.equals("drums")) selected.put(role, config.audioRole(role, fallback, transcribersByRole, transcriber != null));
         }
         if (activeRoles.contains("drums")) selected.put("drums", drum);
         issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only transcribers by role " + selected));

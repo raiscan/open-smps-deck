@@ -1135,6 +1135,7 @@ public final class ReconstructionStages {
                     joined = selection.notes();
                     boolean pinned = Boolean.TRUE.equals(inputs.audioOnly.explicitLead())
                             && java.util.Objects.equals(lead, part);
+                    if (pinned) imported.provenance().metadata().put("vocalGate", "pinned");
                     if (!pinned) {
                         if (otherTonalRms == null) {
                             otherTonalRms = 0.0;
@@ -1145,7 +1146,9 @@ public final class ReconstructionStages {
                                         Path.of(inputs.stems.get(other.getKey())), limit));
                             }
                         }
-                        if (joined.isEmpty() || !selection.supportsLead(limit, otherTonalRms)) {
+                        boolean passed = !joined.isEmpty() && selection.supportsLead(limit, otherTonalRms);
+                        imported.provenance().metadata().put("vocalGate", passed ? "passed" : "rejected");
+                        if (!passed) {
                             if (java.util.Objects.equals(lead, part)) lead = null;
                             for (var note : joined) reductions.add(new S3kReconstruction.Reduction(note.midi(),
                                     S3kReconstruction.Change.ROLE_OVERFLOW, note.id(), "residual-vocal-stem"));
