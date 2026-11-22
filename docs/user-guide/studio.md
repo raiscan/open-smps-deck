@@ -503,3 +503,21 @@ explicitly overwrite the arrangement.
 Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records coverage for the retail importer and the remaining driver gaps.
+
+### Classify notes in Analysis
+
+Switch between **Detail** and **Roles** in the Analysis toolbar. Roles shows
+compact notes grouped by identified voice and role on the same time axis.
+Gold dots mark notes with detail edits. Both views share the selection,
+playhead, loop, zoom, and draft history.
+
+Drag from empty space to box-select. Use **Shift** to add and **Ctrl** to
+toggle. Drag a note or selected set to another row to take its voice and role.
+Use **Selection** for bulk voice, role, and chip lane type changes and to create
+a voice. Right-click a voice row to rename it, split the selected notes into
+a new voice, or merge the voice into another. Studio checks for detail edit
+targets that would become orphaned before queuing the classification.
+
+Double-click a row label to open its notes in Detail, or double-click a note
+inside a selection to zoom to that selection. Choose **Apply** in either view
+to rebuild with the same shared edits.

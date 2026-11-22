@@ -24,6 +24,7 @@ import javafx.scene.control.MenuButton;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -211,7 +212,34 @@ final class ReconstructionPane implements AutoCloseable {
         clearRange.setOnAction(event -> view.clearRange());
         clearRange.setDisable(true);
 
-        root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls()));
+        var detail = new ToggleButton("Detail");
+        detail.setId("reconstruction-detail-view");
+        var roles = new ToggleButton("Roles");
+        roles.setId("reconstruction-roles-view");
+        var views = new ToggleGroup();
+        detail.setToggleGroup(views);
+        roles.setToggleGroup(views);
+        views.selectToggle(detail);
+        var roleControls = roleControls();
+        views.selectedToggleProperty().addListener((ignored, old, next) -> {
+            if (next == null) {
+                views.selectToggle(old);
+                return;
+            }
+            boolean showRoles = next == roles;
+            view.rolesView(showRoles);
+            editor.rolesView(showRoles);
+            laneFilters.setVisible(!showRoles);
+        });
+        view.onDetailJump = notes -> {
+            views.selectToggle(detail);
+            zoom.setValue(view.detailZoom(notes));
+            double start = notes.stream().mapToDouble(note -> note.interval().sourceStart()).min().orElse(0);
+            double end = notes.stream().mapToDouble(note -> note.interval().sourceEnd()).max().orElse(start);
+            view.center((start + end) / 2);
+        };
+        playback.getChildren().addAll(detail, roles);
+        root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls));
         root.setRight(editor.inspector());
         root.setCenter(view.scroll);
         stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
@@ -325,7 +353,11 @@ final class ReconstructionPane implements AutoCloseable {
         }
         laneFilters = new MenuButton("Lanes");
         refreshLaneFilters();
-        roles.getChildren().addAll(laneFilters, editor.visibility());
+        laneFilters.managedProperty().bind(laneFilters.visibleProperty());
+        var detail = editor.visibility();
+        detail.visibleProperty().bind(laneFilters.visibleProperty());
+        detail.managedProperty().bind(detail.visibleProperty());
+        roles.getChildren().addAll(laneFilters, detail);
         roles.getStyleClass().addAll("panelbar", "reconstruction-controls");
         return roles;
     }

@@ -468,3 +468,8 @@ Use stable note IDs. After rebuilding, inspect `orphanedEdits` from
 `reconstruct describe WORK_DIR --json` or `reconstruct_describe` for
 targets that lost playable gates. Restore a compatible assignment, or remove
 the intent and add one with the corrected target.
+
+For the coarse classification pass, use `reconstruct describe WORK_DIR
+--roles --json` or `reconstruct_describe` with `roles: true`. This groups
+stable note IDs by voice and role. Use the same IDs for detail edits or open
+the shared Roles and Detail views in Studio.

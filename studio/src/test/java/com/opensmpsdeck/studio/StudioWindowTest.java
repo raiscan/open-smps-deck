@@ -1530,6 +1530,59 @@ class StudioWindowTest {
                 down, false, false, false, false, true, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
     }
 
+    @Test void reconstructionRolesBoxDragAndDetailJumpShareSelection() throws Exception {
+        Path work = reconstructionFixture();
+        var inspection = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
+        fx(() -> {
+            var view = new ReconstructionCanvas(inspection, message -> fail(message));
+            var kind = com.opensmpsdeck.headless.ReconstructionVoicePlan.Kind.tonal;
+            var lead = new ReconstructionBulk.Voice("lead", "Lead 1", kind, null);
+            var pad = new ReconstructionBulk.Voice("pad", "Pad", kind, null);
+            view.roleRows(Map.of("lead", lead, "pad", pad), Map.of("test-note", "lead"), Set.of("test-note"));
+            var host = new Stage();
+            host.setScene(new javafx.scene.Scene(view.scroll, 900, 520));
+            host.show();
+            try {
+                view.rolesView(true);
+                view.scroll.applyCss();
+                view.scroll.layout();
+                var plot = view.canvas;
+                double row = Math.clamp((plot.getHeight() - 85) / 2, 31, 56);
+                double leadY = 85 + row / 2;
+                double x = (plot.getWidth() + 154) / 2;
+                mouse(plot, MouseEvent.MOUSE_PRESSED, 160, leadY - 10, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, leadY + 10, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, leadY + 10, false);
+                assertEquals(List.of("test-note"), view.selectedNotes().stream()
+                        .map(com.opensmpsdeck.headless.ReconstructionInspection.Overlay::id).toList());
+
+                var targets = new ArrayList<String>();
+                view.onRoleDrop = (target, notes) -> targets.add(target.voice().id() + "/" + notes.getFirst().id());
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, leadY, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x, leadY + row, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, leadY + row, false);
+                assertEquals(List.of("pad/test-note"), targets);
+
+                var jumped = new ArrayList<String>();
+                view.onDetailJump = notes -> {
+                    jumped.add(notes.getFirst().id());
+                    view.rolesView(false);
+                    assertTrue(view.detailZoom(notes) > 0);
+                };
+                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, 42, leadY, 42, leadY,
+                        MouseButton.PRIMARY, 2, false, false, false, false, false, false, false, false,
+                        false, true, new PickResult(plot, new javafx.geometry.Point3D(42, leadY, 0), 0)));
+                assertFalse(view.rolesView());
+                assertEquals(List.of("test-note"), jumped);
+                assertEquals("test-note", view.selectedNotes().getFirst().id());
+            } finally {
+                view.close();
+                host.close();
+            }
+            return null;
+        });
+    }
+
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));
@@ -1557,6 +1610,23 @@ class StudioWindowTest {
                     var image = pane.stage().getScene().snapshot(null);
                     ImageIO.write(SwingFXUtils.fromFXImage(image, null), "png", Path.of(target + ".reconstruction.png").toFile());
                 }
+                var scene = pane.stage().getScene();
+                var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+                zoom.setValue(.5);
+                ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                assertEquals(.5, zoom.getValue());
+                assertFalse(scene.lookup("#reconstruction-tool-insert").isVisible());
+                assertTrue(((Label) scene.lookup("#reconstruction-selection-count")).getText().contains("1 note"));
+                if (target != null) {
+                    scene.getRoot().applyCss();
+                    scene.getRoot().layout();
+                    ImageIO.write(SwingFXUtils.fromFXImage(scene.snapshot(null), null), "png",
+                            Path.of(target + ".roles.png").toFile());
+                }
+                ((ToggleButton) scene.lookup("#reconstruction-detail-view")).fire();
+                assertEquals(.5, zoom.getValue());
+                assertTrue(scene.lookup("#reconstruction-tool-insert").isVisible());
+                assertTrue(trace.getText().contains("test-note"));
                 return null;
             });
             try (var files = Files.list(work)) {

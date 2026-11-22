@@ -69,6 +69,7 @@ final class ReconstructionBulk extends VBox {
     private final TextField arpeggioRate = new TextField("2");
     private final ComboBox<String> arpeggioOrder = combo("Arpeggio order", List.of("up", "down", "up-down"));
     private final VBox actions = new VBox(10);
+    private final VBox detail = new VBox(10);
     private final ComboBox<String> layerMode = combo("Layer mode", List.of("Echo", "Chorus", "Double", "Off"));
     private final ComboBox<ReconstructionLaneType> layerTarget = combo("Target",
             List.of(ReconstructionLaneType.FM, ReconstructionLaneType.PSG));
@@ -156,14 +157,14 @@ final class ReconstructionBulk extends VBox {
             if (!updating && value != null) filter.accept(note -> value.equals(laneName(note)));
         });
         actions.getChildren().addAll(
-                row(new Label("Transpose"),
-                        button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
-                        button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
-                layerControls(previewLayer, stop),
                 row(role, button("Set role", this::setRole)),
                 row(voice, button("Move to voice", this::move)),
                 row(voiceName, button("Create voice", this::create)),
-                row(type, route), row(lane, pin),
+                row(type, route), row(lane, pin), detail);
+        detail.getChildren().addAll(
+                row(new Label("Transpose"),
+                        button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
+                        button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
                 row(velocity, button("Set", () -> velocity(false)), button("Scale", () -> velocity(true))),
                 new SeparatorLabel("Instrument"),
                 row(scope, instrumentType), instrumentSearch, instrument,
@@ -173,7 +174,8 @@ final class ReconstructionBulk extends VBox {
                 row(new Label("Gate (ms)"), retriggerGate, retrigger),
                 new SeparatorLabel("Combine notes"),
                 row(collapse, glide), row(arpeggioOrder, arpeggioRate),
-                row(arpeggio, chord));
+                row(arpeggio, chord), layerControls(previewLayer, stop));
+        detail.managedProperty().bind(detail.visibleProperty());
         getChildren().addAll(count, row(roles, voices, lanes), issue, actions);
     }
 
@@ -509,7 +511,9 @@ final class ReconstructionBulk extends VBox {
 
     private List<String> ids() { return selected.stream().map(Overlay::id).toList(); }
 
-    private static JsonObject voiceEdit(String op, String voice, String reason, Consumer<JsonObject> properties) {
+    void rolesView(boolean roles) { detail.setVisible(!roles); }
+
+    static JsonObject voiceEdit(String op, String voice, String reason, Consumer<JsonObject> properties) {
         var edit = ReconstructionDraft.human("voiceEdit", reason);
         var body = new JsonObject();
         body.addProperty("op", op);

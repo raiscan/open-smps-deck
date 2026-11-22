@@ -524,6 +524,10 @@ for stem in stems:
         rpc.call("artifact_write", workDir=work, artifact="roleplan",
                  value={"version": 1, "rules": [{"section": "answer-period", "part": 0, "role": "melody"}]})
         report = rpc.call("reconstruct_stage", workDir=work, stage="roles")
+        grouped = rpc.call("reconstruct_describe", workDir=work, json=True, roles=True, parts="0")
+        assert grouped["voiceRoles"]
+        assert all(row["count"] == len(row["notes"]) and row["role"] for row in grouped["voiceRoles"])
+        assert all(note["part"] == 0 and note["id"] for row in grouped["voiceRoles"] for note in row["notes"])
         assert report["rolePlanTimes"][0]["sourceEnd"] == 0.75
         (work / "roleplan.json").unlink()
         changed = {"id": "chorus-1", "author": "agent", "reason": "Correct label", "name": "Refrain"}

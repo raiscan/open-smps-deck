@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -156,6 +157,11 @@ final class ReconstructionEditor implements AutoCloseable {
     private long auditionEpoch;
     private boolean previewPlaying;
     private List<String> inspectedSelection = List.of();
+    private final List<Control> detailTools = new ArrayList<>();
+    private Map<String, ReconstructionBulk.Voice> draftVoices = Map.of();
+    private Map<String, String> draftMembership = Map.of();
+    private static final Set<String> DETAIL_EDITS = Set.of("insertNote", "deleteNote", "setNote", "setVelocity",
+            "splitNote", "mergeNotes", "retrigger", "bend", "glide", "noteVoicing", "layer", "arpeggio", "chordInstrument");
 
     private final Supplier<ProjectDocument> openProject;
 
@@ -182,6 +188,8 @@ final class ReconstructionEditor implements AutoCloseable {
         view.onPlacement = this::move;
         view.onSectionEdit = this::section;
         view.onSectionMenu = this::sectionMenu;
+        view.onRoleDrop = this::dropOnRole;
+        view.onRoleMenu = this::roleMenu;
         for (String filename : List.of("edits.json", "sections.json", ReconstructionVoicePlan.JOURNAL, "report.json")) {
             try {
                 watchers.add(new ProjectWatcher(work.resolve(filename), () -> Platform.runLater(this::readExternal)));
@@ -208,6 +216,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 case VIBRATO -> "Drag horizontally for rate and vertically for depth on an FM note.";
             }));
             bar.getChildren().add(button);
+            detailTools.add(button);
         }
         buttons.selectToggle(buttons.getToggles().getFirst());
         buttons.selectedToggleProperty().addListener((ignored, old, next) -> {
@@ -242,6 +251,8 @@ final class ReconstructionEditor implements AutoCloseable {
         conflict.setOnAction(event -> resolve());
         progress.setPrefWidth(108);
         for (Control control : List.of(progress, cancel, conflict)) control.managedProperty().bind(control.visibleProperty());
+        detailTools.addAll(List.of(parts, grid));
+        detailTools.forEach(control -> control.managedProperty().bind(control.visibleProperty()));
         bar.getChildren().addAll(parts, grid, apply, cancel, progress, undo, redo, lanePolicies, pendingLabel, conflict);
         return bar;
     }
@@ -407,7 +418,7 @@ final class ReconstructionEditor implements AutoCloseable {
         inspectedSelection = selectedIds;
     }
 
-    private void updateBulk() {
+    private void updateVoiceProjection() {
         var voices = new LinkedHashMap<String, ReconstructionBulk.Voice>();
         var membership = new LinkedHashMap<String, String>();
         for (var voice : snapshot.voices().voices()) {
@@ -415,14 +426,48 @@ final class ReconstructionEditor implements AutoCloseable {
             for (String id : voice.noteIds()) membership.put(id, voice.id());
         }
         for (var entry : draft.entries()) {
-            if (!draft.changed(entry) || !"voiceEdit".equals(text(entry, "op", ""))
-                    || ReconstructionReview.validationIssue(entry) != null) continue;
+            if (!draft.changed(entry) || ReconstructionReview.validationIssue(entry) != null) continue;
+            String op = text(entry, "op", "");
+            if (op.equals("splitNote")) {
+                String owner = membership.get(targetId(entry));
+                String prefix = "edit-" + text(entry, "id", "");
+                if (owner != null) {
+                    membership.put(prefix + "-left", owner);
+                    membership.put(prefix + "-right", owner);
+                }
+            }
+            if (!op.equals("voiceEdit")) continue;
             var body = entry.getAsJsonObject().getAsJsonObject("voiceEdit");
             String id = body.get("voiceId").getAsString();
             switch (body.get("op").getAsString()) {
                 case "create" -> voices.put(id, new ReconstructionBulk.Voice(id, body.get("name").getAsString(),
                         ReconstructionVoicePlan.Kind.valueOf(body.get("kind").getAsString()), null));
-                case "move" -> body.getAsJsonArray("noteIds").forEach(note -> membership.put(note.getAsString(), id));
+                case "move" -> {
+                    if (body.has("noteIds")) body.getAsJsonArray("noteIds").forEach(note -> membership.put(note.getAsString(), id));
+                }
+                case "rename" -> {
+                    var voice = voices.get(id);
+                    if (voice != null) voices.put(id, new ReconstructionBulk.Voice(id, body.get("name").getAsString(),
+                            voice.kind(), voice.assignment()));
+                }
+                case "merge" -> {
+                    String target = body.get("targetId").getAsString();
+                    var source = voices.get(id);
+                    var destination = voices.get(target);
+                    if (source == null || destination == null) continue;
+                    if (destination.assignment() == null)
+                        voices.put(target, new ReconstructionBulk.Voice(target, destination.name(), destination.kind(), source.assignment()));
+                    voices.remove(id);
+                    membership.replaceAll((note, owner) -> owner.equals(id) ? target : owner);
+                }
+                case "split" -> {
+                    var source = voices.get(id);
+                    if (source == null || !body.has("noteIds")) continue;
+                    String target = body.get("targetId").getAsString();
+                    voices.put(target, new ReconstructionBulk.Voice(target, body.get("name").getAsString(),
+                            source.kind(), source.assignment()));
+                    body.getAsJsonArray("noteIds").forEach(note -> membership.put(note.getAsString(), target));
+                }
                 case "assign" -> {
                     var voice = voices.get(id);
                     if (voice == null) continue;
@@ -435,14 +480,101 @@ final class ReconstructionEditor implements AutoCloseable {
                 default -> { }
             }
         }
+        draftVoices = Map.copyOf(voices);
+        draftMembership = Map.copyOf(membership);
+    }
+
+    private void updateBulk() {
         var owners = new LinkedHashMap<String, ReconstructionBulk.Voice>();
         var notes = view.selectedNotes().stream().filter(note -> note.part() >= 0
                 && !note.fate().equals("Pending deletion") && !note.fate().equals("Superseded draft")).toList();
         for (var note : notes) {
-            var owner = voices.get(membership.get(note.id()));
+            String ownerId = draftMembership.get(note.id());
+            var owner = ownerId == null ? null : draftVoices.get(ownerId);
             if (owner != null) owners.put(note.id(), owner);
         }
-        bulk.show(notes, List.copyOf(voices.values()), owners, snapshot.editing(), snapshot.inspection()::laneType);
+        bulk.show(notes, draftVoices.values().stream().sorted(java.util.Comparator.comparing(ReconstructionBulk.Voice::name)).toList(), owners, snapshot.editing(), snapshot.inspection()::laneType);
+    }
+
+    void rolesView(boolean roles) {
+        detailTools.forEach(control -> control.setVisible(!roles));
+        bulk.rolesView(roles);
+        if (roles) tabs.getSelectionModel().select(bulkTab);
+    }
+
+    private void dropOnRole(ReconstructionRoleRows.Row row, List<Overlay> notes) {
+        var voice = row.voice();
+        if (voice != null && notes.stream().anyMatch(note -> noteKind(note) != voice.kind())) {
+            status.accept("Move tonal and drum notes to separate voices");
+            return;
+        }
+        var ids = new JsonArray();
+        for (var note : notes) if (note.part() >= 0) ids.add(note.id());
+        if (ids.isEmpty()) return;
+        var edits = new ArrayList<JsonObject>();
+        if (voice != null && notes.stream().anyMatch(note -> !voice.id().equals(draftMembership.get(note.id()))))
+            edits.add(ReconstructionBulk.voiceEdit("move", voice.id(), "Move notes to " + voice.name(),
+                    body -> body.add("noteIds", ids)));
+        if (row.role() != null && notes.stream().anyMatch(note -> note.role() != row.role())) {
+            String role = row.role() == Role.UNASSIGNED ? "drop" : row.role().name().toLowerCase(Locale.ROOT);
+            if (notes.stream().anyMatch(note -> !role.equals("drop")
+                    && (noteKind(note) == ReconstructionVoicePlan.Kind.drum) != role.equals("drums"))) {
+                status.accept("The drums role requires a MIDI percussion part");
+                return;
+            }
+            var edit = ReconstructionDraft.human("setRole", "Classify notes as " + role);
+            edit.addProperty("role", role);
+            edit.add("noteIds", ids);
+            edits.add(edit);
+        }
+        addBatch(edits);
+    }
+
+    private ReconstructionVoicePlan.Kind noteKind(Overlay note) {
+        boolean drums = snapshot.inspection().parts().stream().anyMatch(part -> part.id() == note.part() && part.drums());
+        return drums ? ReconstructionVoicePlan.Kind.drum : ReconstructionVoicePlan.Kind.tonal;
+    }
+
+    private void roleMenu(ReconstructionCanvas.RoleMenu point) {
+        var voice = point.row().voice();
+        if (voice == null || busy || external != null) return;
+        var rename = new MenuItem("Rename voice…");
+        rename.setOnAction(event -> voiceName("Rename voice", voice.name()).ifPresent(name ->
+                add(ReconstructionBulk.voiceEdit("rename", voice.id(), "Rename voice to " + name,
+                        body -> body.addProperty("name", name)))));
+        var notes = new JsonArray();
+        for (var note : view.selectedNotes()) if (voice.id().equals(draftMembership.get(note.id()))) notes.add(note.id());
+        var split = new MenuItem("Split selected notes to new voice…");
+        split.setDisable(notes.isEmpty());
+        split.setOnAction(event -> voiceName("Split voice", "").ifPresent(name ->
+                add(ReconstructionBulk.voiceEdit("split", voice.id(), "Split voice " + voice.name(),
+                        body -> {
+                            body.add("noteIds", notes);
+                            body.addProperty("name", name);
+                            body.addProperty("targetId", "studio-voice-" + java.util.UUID.randomUUID());
+                        }))));
+        var merge = new Menu("Merge voice into");
+        draftVoices.values().stream().filter(target -> !target.id().equals(voice.id()) && target.kind() == voice.kind())
+                .sorted(java.util.Comparator.comparing(ReconstructionBulk.Voice::name)).forEach(target -> {
+                    var item = new MenuItem(target.name());
+                    item.setDisable(voice.assignment() != null && target.assignment() != null
+                            && !voice.assignment().equals(target.assignment()));
+                    item.setOnAction(event -> add(ReconstructionBulk.voiceEdit("merge", voice.id(),
+                            "Merge " + voice.name() + " into " + target.name(),
+                            body -> body.addProperty("targetId", target.id()))));
+                    merge.getItems().add(item);
+                });
+        merge.setDisable(merge.getItems().isEmpty());
+        new ContextMenu(rename, split, merge).show(owner, point.x(), point.y());
+    }
+
+    private java.util.Optional<String> voiceName(String title, String value) {
+        var dialog = new TextInputDialog(value);
+        dialog.initOwner(owner);
+        dialog.setTitle(title);
+        dialog.setHeaderText(null);
+        dialog.setContentText("Voice name");
+        return dialog.showAndWait().map(String::strip).filter(name -> !name.isEmpty());
     }
 
     private ReconstructionEditing.Attack attack(Overlay note) {
@@ -686,7 +818,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private void add(JsonObject intent) { addBatch(List.of(intent)); }
 
     private void addBatch(List<JsonObject> intents) {
-        if (busy || external != null || externalError) return;
+        if (intents.isEmpty() || busy || external != null || externalError) return;
         for (var intent : intents) {
             var error = ReconstructionReview.validationIssue(intent);
             if (error != null) {
@@ -694,8 +826,58 @@ final class ReconstructionEditor implements AutoCloseable {
                 return;
             }
         }
+        if (view.rolesView() && intents.stream().anyMatch(intent ->
+                Set.of("setRole", "pinLane", "voiceEdit").contains(text(intent, "op", "")))
+                && draft.entries().asList().stream().anyMatch(entry -> DETAIL_EDITS.contains(text(entry, "op", "")))) {
+            previewClassification(intents);
+        } else stageBatch(intents);
+    }
+
+    private void stageBatch(List<JsonObject> intents) {
         draft.change(entries -> intents.forEach(entries::add));
         updateDraft();
+    }
+
+    private void previewClassification(List<JsonObject> intents) {
+        var before = draft.entries();
+        var after = before.deepCopy();
+        intents.forEach(after::add);
+        setBusy();
+        cancel.setDisable(true);
+        status.accept("Checking detail edits against the proposed classification…");
+        worker.execute(() -> {
+            try {
+                var issues = ReconstructionReview.newOrphanedDetails(work, before, after);
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    busy = false;
+                    if (!issues.isEmpty()) {
+                        var proceed = new ButtonType("Queue classification", ButtonBar.ButtonData.OK_DONE);
+                        var alert = new Alert(Alert.AlertType.CONFIRMATION, String.join("\n", issues.stream().limit(8).toList())
+                                + (issues.size() > 8 ? "\nAnd " + (issues.size() - 8) + " more." : ""), proceed, ButtonType.CANCEL);
+                        alert.initOwner(owner);
+                        alert.setHeaderText("This change would orphan " + issues.size() + " detail edit target(s)");
+                        if (alert.showAndWait().orElse(ButtonType.CANCEL) != proceed) {
+                            status.accept("Classification cancelled");
+                            updateControls();
+                            readExternal();
+                            return;
+                        }
+                    }
+                    status.accept("Classification queued");
+                    stageBatch(intents);
+                    readExternal();
+                });
+            } catch (Exception failure) {
+                Platform.runLater(() -> {
+                    if (closed) return;
+                    busy = false;
+                    status.accept("Classification check failed · " + failure.getMessage());
+                    updateControls();
+                    readExternal();
+                });
+            }
+        });
     }
 
     private static String targetId(JsonElement entry) {
@@ -1127,7 +1309,20 @@ final class ReconstructionEditor implements AutoCloseable {
                 pitchEdits.computeIfAbsent(id, ignored -> new ArrayList<>()).add(entry.getAsJsonObject());
         }
         draftPitchEdits = pitchEdits;
+        updateVoiceProjection();
         view.pending(overlays());
+        var edited = new java.util.HashSet<String>();
+        for (var entry : draft.entries()) if (DETAIL_EDITS.contains(text(entry, "op", ""))) {
+            edited.addAll(targetIds(entry));
+            var outcomes = snapshot.outcomes().getOrDefault(text(entry, "id", ""), List.of());
+            for (var result : outcomes) edited.addAll(result.noteIds());
+            if (text(entry, "op", "").equals("splitNote")) {
+                String prefix = "edit-" + text(entry, "id", "");
+                edited.add(prefix + "-left");
+                edited.add(prefix + "-right");
+            }
+        }
+        view.roleRows(draftVoices, draftMembership, Set.copyOf(edited));
         var rows = new ArrayList<EditRow>();
         var entries = draft.entries();
         var idCounts = entries.asList().stream().collect(Collectors.groupingBy(e -> text(e, "id", ""), Collectors.counting()));
