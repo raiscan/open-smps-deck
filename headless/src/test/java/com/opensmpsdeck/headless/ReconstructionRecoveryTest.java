@@ -41,7 +41,7 @@ class ReconstructionRecoveryTest {
     @Test void letsAQuietBackingAttackYieldTwoTicksWhenEveryLaneIsOccupied() {
         var notes = List.of(note("clear", 60, 0, 32, Role.harmony),
                 note("two", 64, 0, 60, Role.harmony), note("three", 67, 0, 60, Role.harmony),
-                note("next", 61, 30, 60, Role.counter), note("lead", 80, 0, 60, Role.melody),
+                note("next", 61, 30, 60, Role.harmony), note("lead", 80, 0, 60, Role.melody),
                 note("bass", 35, 0, 60, Role.bass));
         var entries = allocate(notes, true, Map.of("clear", .04, "next", .005));
         assertEquals(32, entries.get("clear").endTick());
