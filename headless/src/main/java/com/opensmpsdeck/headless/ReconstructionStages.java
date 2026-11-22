@@ -255,6 +255,16 @@ public final class ReconstructionStages {
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
             Request request = request(command, args, progress, err, capture);
+            if (request.chain && request.from != Stage.TRANSCRIBE) {
+                var edits = ReconstructionEdits.read(request.work).accepted();
+                var built = ReconstructionEdits.Journal.read(request.work);
+                if (!java.util.Objects.equals(edits.scoreRecipe(request.work), built.scoreRecipe())) {
+                    out.println("Rebuilding from transcribe because the score edit recipe changed");
+                    request = new Request(request.work, Stage.TRANSCRIBE, true, null, request.harmonyHz,
+                            request.lanes, request.refitLevels, request.keepVoicing, request.variant,
+                            request.overwriteDetached, request.lanePolicyPreset, request.policyDecisions);
+                }
+            }
             if (request.chain || request.from == Stage.ASSEMBLE)
                 ReconstructionReview.requireAttached(request.work, request.overwriteDetached);
             var run = new ReconstructionManifest.Run(stageName(request.from), request.harmonyHz);
@@ -583,13 +593,14 @@ public final class ReconstructionStages {
             var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
             if (ReconstructionLayers.present(edits))
                 ReconstructionCli.previewLayers(work, score, readStructure(structureFile, score), allocation, edits,
-                        outcomes, false, currentRoles);
+                        outcomes, null);
             else previewNoteVoicing(edits, score, allocation, outcomes);
             return;
         }
         if (from.ordinal() >= Stage.VOICES.ordinal() && currentRoles != null) {
             var structure = ReconstructionLayers.present(edits) ? readStructure(structureFile, score) : null;
-            previewAllocationEdits(work, edits, score, structure, currentRoles, outcomes, resolvedNotes != null);
+            previewAllocationEdits(work, edits, score, structure, currentRoles, outcomes, resolvedNotes != null,
+                    prior.stages().getOrDefault("transcribe", List.of()));
             return;
         }
         List<ReconstructionEdits.Outcome> scoreEdits;
@@ -615,7 +626,7 @@ public final class ReconstructionStages {
             for (var row : roles.notes()) resolvedNotes.put(row.note().id(), row.note().mapTime(clock::source));
             for (var note : score.notes()) resolvedNotes.put(note.id(), note);
         }
-        previewAllocationEdits(work, edits, score, structure, roles, outcomes, resolvedNotes != null);
+        previewAllocationEdits(work, edits, score, structure, roles, outcomes, resolvedNotes != null, scoreEdits);
         if (from != Stage.TRANSCRIBE) return;
         var previous = new HashMap<String, ReconstructionRoles.Decision>();
         if (currentRoles != null) for (var row : currentRoles.notes()) previous.put(row.note().id(), row);
@@ -642,7 +653,7 @@ public final class ReconstructionStages {
     private static void previewAllocationEdits(Path work, ReconstructionEdits edits, Score score,
                                                ReconstructionStructure.Result structure, ReconstructionRoles.Result roles,
                                                List<ReconstructionEdits.Outcome> outcomes,
-                                               boolean allPins)
+                                               boolean allPins, List<ReconstructionEdits.Outcome> scoreEdits)
             throws IOException {
         var pins = roles.lanePins();
         var bound = edits.bindSections(work, score, null, Stage.ALLOCATE, outcomes);
@@ -651,15 +662,17 @@ public final class ReconstructionStages {
         boolean hasNoteVoicing = edits.intents().stream().anyMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing);
         boolean checkPins = pins != null && pins.values().stream().anyMatch(pin -> allPins || pin.laneType() != null);
         boolean hasLayers = ReconstructionLayers.present(edits);
-        if (!hasChordEdits && !checkPins && !hasVoiceEdits && !hasNoteVoicing && !hasLayers) return;
+        boolean hasShaping = scoreEdits.stream().anyMatch(edit -> ReconstructionEdits.shapesSound(edit.op()));
+        if (!hasChordEdits && !checkPins && !hasVoiceEdits && !hasNoteVoicing && !hasLayers && !hasShaping) return;
+        ReconstructionVoicePlan.Result voices = null;
         var laneTypes = Map.<String, ReconstructionLaneType>of();
         if (hasVoiceEdits || Files.isRegularFile(work.resolve(ReconstructionVoicePlan.JOURNAL))) {
-            var voices = ReconstructionVoicePlan.preview(work, score, roles, edits);
+            voices = ReconstructionVoicePlan.preview(work, score, roles, edits, scoreEdits);
             laneTypes = voices.laneTypes();
             ReconstructionVoicePlan.reviewOutcomes(edits, voices, outcomes);
         }
         var chords = ReconstructionChords.select(bound, score, roles, laneTypes, outcomes);
-        if (chords.isEmpty() && !checkPins && !hasNoteVoicing && !hasLayers) return;
+        if (chords.isEmpty() && !checkPins && !hasNoteVoicing && !hasLayers && !hasShaping) return;
         try (var silent = new PrintStream(java.io.OutputStream.nullOutputStream())) {
             var previous = previousAllocation(work.resolve("allocation.json"), silent);
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
@@ -671,7 +684,12 @@ public final class ReconstructionStages {
                                 chordReduction, score.profile());
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
-            if (hasLayers) ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes, true, roles);
+            ReconstructionEdits.reportLostSound(allocation, scoreEdits, null, outcomes);
+            if (hasLayers) {
+                if (voices == null) voices = ReconstructionVoicePlan.preview(work, score, roles, edits, scoreEdits);
+                ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes,
+                        voices.assignments(allocation, pins));
+            }
             else if (hasNoteVoicing) previewNoteVoicing(edits, score, allocation, outcomes);
         }
     }

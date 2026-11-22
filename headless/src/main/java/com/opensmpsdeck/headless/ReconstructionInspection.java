@@ -318,8 +318,8 @@ public final class ReconstructionInspection {
         int pitch = effective == null ? row.pitch() : effective.note().pitch();
         String lane = allocation == null ? null : allocation.lane();
         boolean sounds = !lost && lane != null && allocation.placement() != null;
-        return List.of(drawable(row, row.id(), lane, pitch, row.effectiveTiming(), color, patches, bend,
-                sounds, lost, competitors));
+        var timing = java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing());
+        return List.of(drawable(row, row.id(), lane, pitch, timing, color, patches, bend, sounds, lost, competitors));
     }
 
     private static Overlay drawable(ReconstructionTrace.Row row, String eventId, String lane, int pitch,

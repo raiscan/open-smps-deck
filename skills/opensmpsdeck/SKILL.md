@@ -420,3 +420,9 @@ Use `package_inspect` to see the patch form and base song and
 even when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)
+
+When reclassifying notes, keep detail intents in the shared `edits.json`.
+Use stable note IDs. After rebuilding, inspect `orphanedEdits` from
+`reconstruct describe WORK_DIR --json` or `reconstruct_describe` for
+targets that lost playable gates. Restore a compatible assignment, or remove
+the intent and add one with the corrected target.

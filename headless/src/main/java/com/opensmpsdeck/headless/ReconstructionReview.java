@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -106,6 +107,39 @@ public final class ReconstructionReview {
         return new ReconstructionEdits(intents);
     }
 
+    /** Preview new orphaned detail targets before accepting a classification edit. */
+    public static List<String> newOrphanedDetails(Path work, JsonArray before, JsonArray after) throws IOException {
+        var prior = ReconstructionEdits.Journal.read(work);
+        var previous = orphans(preview(work, before, prior));
+        return orphans(preview(work, after, prior)).entrySet().stream()
+                .filter(entry -> !previous.containsKey(entry.getKey())).map(Map.Entry::getValue).toList();
+    }
+
+    private static List<ReconstructionEdits.Outcome> preview(Path work, JsonArray entries,
+                                                             ReconstructionEdits.Journal prior) throws IOException {
+        var changes = changes(revision(work).entries(), entries);
+        if (changes.isEmpty()) return prior.all();
+        var edits = parse(entries).accepted();
+        var from = ReconstructionStages.Stage.parse(stage(work, changes, edits));
+        var results = new ArrayList<ReconstructionEdits.Outcome>();
+        ReconstructionStages.previewEdits(work, from, edits, prior, results, new ArrayList<>(), new java.util.HashMap<>());
+        return results;
+    }
+
+    private static Map<List<String>, String> orphans(List<ReconstructionEdits.Outcome> outcomes) {
+        var result = new java.util.LinkedHashMap<List<String>, String>();
+        for (var outcome : outcomes) {
+            if (outcome.status() != ReconstructionEdits.Status.orphaned
+                    || !(ReconstructionEdits.shapesSound(outcome.op()) || outcome.op() == ReconstructionEdits.Kind.layer))
+                continue;
+            var targets = outcome.missingNoteIds();
+            if (targets == null || targets.isEmpty()) targets = outcome.noteIds();
+            if (targets.isEmpty()) targets = List.of("");
+            for (String target : targets) result.put(List.of(outcome.id(), target), outcome.id() + " · " + outcome.detail());
+        }
+        return result;
+    }
+
     public static String firstStage(Path work, JsonArray before, JsonArray after) throws IOException {
         return stage(work, changes(before, after), parse(after));
     }
@@ -123,7 +157,7 @@ public final class ReconstructionReview {
     private static String stage(Path work, List<ReconstructionEdits.Intent> changed, ReconstructionEdits edits)
             throws IOException {
         var prior = ReconstructionEdits.Journal.read(work);
-        if (!Objects.equals(prior.scoreRecipe(), edits.accepted().scoreRecipe())) return "transcribe";
+        if (!Objects.equals(prior.scoreRecipe(), edits.accepted().scoreRecipe(work))) return "transcribe";
         return changed.stream().map(ReconstructionEdits.Intent::firstStage).min(Comparator.naturalOrder())
                 .orElse(ReconstructionStages.Stage.ROLES).name().toLowerCase(Locale.ROOT);
     }
@@ -286,7 +320,7 @@ public final class ReconstructionReview {
         var selected = ReconstructionProposals.select(journal, id, group);
         ReconstructionArtifacts.require(!selected.isEmpty(), "proposals", "no matching proposals");
         var shadow = ReconstructionProposals.shadow(journal, selected);
-        var from = ReconstructionProposals.from(shadow, selected, ReconstructionEdits.Journal.read(work));
+        var from = ReconstructionProposals.from(work, shadow, selected, ReconstructionEdits.Journal.read(work));
         if (start != null && start.ordinal() < from.ordinal()) from = start;
         return preview(work, expected, selected, shadow, from, progress);
     }

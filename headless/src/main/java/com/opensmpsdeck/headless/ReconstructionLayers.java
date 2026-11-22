@@ -73,9 +73,12 @@ public final class ReconstructionLayers {
             var editStatus = switch (status) {
                 case applied -> ReconstructionEdits.Status.applied;
                 case off -> ReconstructionEdits.Status.satisfied;
-                case skipped -> ReconstructionEdits.Status.conflict;
+                case skipped -> "Source has no independent playable tonal gate".equals(reason)
+                        ? ReconstructionEdits.Status.orphaned : ReconstructionEdits.Status.conflict;
             };
-            outcomes.add(new Outcome(editId, Kind.layer, editStatus, List.of(noteId), null, reason,
+            var missing = editStatus == ReconstructionEdits.Status.orphaned ? List.of(noteId) : null;
+            outcomes.add(new Outcome(editId, Kind.layer, editStatus, List.of(noteId), missing,
+                    missing == null ? reason : noteId + ": " + reason,
                     null, null, null, laneType, lane, this));
         }
     }
