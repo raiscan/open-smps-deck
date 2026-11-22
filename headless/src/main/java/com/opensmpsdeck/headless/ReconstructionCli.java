@@ -119,9 +119,10 @@ final class ReconstructionCli {
         out.println("       reconstruct voices WORK_DIR [list | create|rename|merge|split|move|assign JSON]");
         out.println("       reconstruct voice WORK_DIR [--lane LANE ...] [--refit-levels] [--variant ID]");
         out.println("       reconstruct describe WORK_DIR [--json] [--section ID] [--parts IDS] [--bars FROM-TO] [--out FILE]");
-        out.println("       reconstruct edit WORK_DIR add [--dry-run] JSON | add [--dry-run] --file BATCH | list | remove ID");
+        out.println("       reconstruct edit WORK_DIR add [--dry-run] [--verbose] JSON | add [--dry-run] --file BATCH | list | remove ID");
         out.println("       reconstruct edit propose WORK_DIR [--dry-run] JSON | [--dry-run] --file BATCH");
-        out.println("       reconstruct proposals list|accept|reject WORK_DIR [ID | --group GROUP]");
+        out.println("       reconstruct proposals list|accept|reject WORK_DIR [ID ... | --file FILE | --group GROUP | --op OP]");
+        out.println("       reconstruct proposals revise WORK_DIR ID --file INTENT.json");
         out.println("       reconstruct run WORK_DIR --with-proposals [--id ID | --group GROUP]");
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
@@ -129,7 +130,8 @@ final class ReconstructionCli {
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--target s1|s2|s3k] [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
-        out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose]");
+        out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose] [--show-decided] [--json]");
+        out.println("       reconstruct vocal-render WORK_DIR --phrase ID OUT.wav");
         out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [--color-by voice] [options] OUT.png");
         out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
         out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
@@ -170,6 +172,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("vocal-review")) {
             ReconstructionVocalReview.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("vocal-render")) {
+            VocalPhraseRender.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("proposals")) {

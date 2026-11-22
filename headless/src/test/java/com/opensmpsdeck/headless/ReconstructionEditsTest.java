@@ -241,12 +241,34 @@ class ReconstructionEditsTest {
         assertArrayEquals(journal, Files.readAllBytes(work.resolve("edits.json")));
         assertArrayEquals(render, Files.readAllBytes(work.resolve("render.wav")));
 
-        cli("reconstruct", "proposals", "accept", work.toString(), "keep");
-        cli("reconstruct", "proposals", "reject", work.toString(), "--group", "phrase");
+        cli("reconstruct", "proposals", "revise", work.toString(), "keep", "--file", reviseFile(dir, """
+                {"reason":"move the approved attack","op":"insertNote","part":0,"start":0.65,"end":0.8,"pitch":69}
+                """).toString());
+        assertEquals(.65, ReconstructionProposals.results(work).stream().filter(row -> row.id().equals("keep"))
+                .findFirst().orElseThrow().edit().get("start").getAsDouble());
+        cli("reconstruct", "edit", work.toString(), "propose", """
+                {"id":"second","reason":"second approved attack","op":"insertNote","part":0,"start":1.25,"end":1.4,"pitch":71}
+                """);
+        var ids = dir.resolve("accept.ids");
+        Files.writeString(ids, "[\"keep\",\"second\"]");
+        var accepted = json(cli("reconstruct", "proposals", "accept", work.toString(), "--file", ids.toString()));
+        assertEquals("accepted", accepted.get("status").getAsString());
+        assertEquals(2, accepted.getAsJsonArray("ids").size());
+        assertFalse(accepted.has("proposals"));
+        cli("reconstruct", "proposals", "reject", work.toString(), "--group", "phrase", "--op", "insertNote");
+        var history = json(cli("reconstruct", "proposals", "list", work.toString(), "--show-decided"));
+        assertEquals(3, history.getAsJsonArray("decided").size());
+        assertTrue(history.getAsJsonArray("proposals").isEmpty());
         assertArrayEquals(score, Files.readAllBytes(work.resolve("score.json")));
         cli("reconstruct", "run", "--from", "transcribe", work.toString());
         assertTrue(ReconstructionTrace.read(work).containsKey("edit-keep"));
         assertFalse(ReconstructionTrace.read(work).containsKey("edit-reject"));
+    }
+
+    private static Path reviseFile(Path work, String intent) throws Exception {
+        var path = work.resolve("revision.json");
+        Files.writeString(path, intent);
+        return path;
     }
 
     @Test void authoredLayersReplayAndSharePlacementEvidenceWithDryRunsAndProposals(@TempDir Path dir) throws Exception {
@@ -509,7 +531,7 @@ class ReconstructionEditsTest {
                 {"id":"register","reason":"bring out the chord top","op":"setRole","part":0,"span":[0.7,0.8],
                  "timeBase":"project","voice":"top","fromRole":"counter","role":"melody","others":"harmony"}
                 """;
-        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", register));
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--verbose", register));
         assertEquals(saved, Files.readString(work.resolve("edits.json")));
         assertFalse(Files.exists(work.resolve("edit-results.json")));
         var results = preview.getAsJsonArray("notes").asList().stream().map(row -> row.getAsJsonObject()).toList();
@@ -548,7 +570,7 @@ class ReconstructionEditsTest {
                 {"id":"cut","op":"splitNote","reason":"re-attack","selector":{"at":0,"pitch":60,"part":0},
                  "at":0.3,"timeBase":"project","pitch":61}
                 """;
-        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", split));
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--verbose", split));
         assertFalse(Files.exists(work.resolve("edits.json")));
         assertFalse(Files.exists(work.resolve("edit-results.json")));
         var result = preview.getAsJsonArray("outcomes").get(0).getAsJsonObject().getAsJsonArray("resultNotes");
@@ -719,7 +741,11 @@ class ReconstructionEditsTest {
                    "noteIds":["n-0-500000-63"],"laneType":"FM"}
                 ]
                 """);
-        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--file", batch.toString()));
+        var compact = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--file", batch.toString()));
+        assertEquals(5, compact.getAsJsonArray("results").size());
+        assertFalse(compact.has("notes"));
+        assertFalse(compact.has("outcomes"));
+        var preview = json(cli("reconstruct", "edit", work.toString(), "add", "--dry-run", "--verbose", "--file", batch.toString()));
         assertEquals("transcribe", preview.get("from").getAsString());
         var previewRows = preview.getAsJsonArray("outcomes").asList().stream().map(row -> row.getAsJsonObject()).toList();
         for (String id : List.of("split-tone", "merge-tone", "fm-chord")) {
@@ -728,7 +754,18 @@ class ReconstructionEditsTest {
         }
         assertEquals(2, previewRows.stream().filter(row -> row.get("id").getAsString().equals("noise-arp")
                 && row.has("lane") && row.get("lane").getAsString().equals("PSG3")).count());
-        cli("reconstruct", "edit", work.toString(), "add", "--file", batch.toString());
+        var added = json(cli("reconstruct", "edit", work.toString(), "add", "--file", batch.toString()));
+        assertTrue(added.get("journalSaved").getAsBoolean());
+        assertEquals("applied", added.getAsJsonArray("results").get(0).getAsJsonObject().get("status").getAsString());
+        var invalid = dir.resolve("invalid-batch.json");
+        Files.writeString(invalid, """
+                [{"id":"bad","reason":"missing selector","op":"deleteNote"}, {"id":"malformed"}]
+                """);
+        var rejected = json(cli("reconstruct", "edit", work.toString(), "add", "--file", invalid.toString()));
+        assertFalse(rejected.get("journalSaved").getAsBoolean());
+        assertEquals(2, rejected.getAsJsonArray("results").size());
+        assertTrue(rejected.getAsJsonArray("results").asList().stream().allMatch(row ->
+                row.getAsJsonObject().get("status").getAsString().equals("rejected")));
         cli("reconstruct", "run", "--from", "transcribe", work.toString());
 
         var editedTrace = ReconstructionTrace.read(work);

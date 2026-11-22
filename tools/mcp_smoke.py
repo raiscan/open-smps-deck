@@ -171,7 +171,7 @@ for stem in stems:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_vocal_review reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
+            reconstruct_audition reconstruct_vocal_review reconstruct_vocal_render reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect rom_patch
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare rom_list rom_set
@@ -320,14 +320,14 @@ for stem in stems:
         clusters = rpc.call("reconstruct_trace", workDir=work, start=0, end=2, part=0, byOnset=True)["clusters"]
         assert clusters and all("sourceStart" in cluster and "projectStart" in cluster for cluster in clusters)
         target = trace[0]["id"]
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True,
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, verbose=True,
                            edit={"id": "preview", "reason": "Confirm current role", "op": "setRole",
                                  "noteIds": [target], "fromRole": "counter", "role": "melody"})
         assert preview["notes"][0]["noteId"] == target and preview["notes"][0]["satisfied"]
         assert preview["outcomes"][0]["status"] == "satisfied" and not (work / "edits.json").exists()
         echo = {"id": "echo-preview", "reason": "Echo one attack", "op": "layer",
                 "mode": "echo", "laneType": "FM", "delayFrames": 10, "levelDb": -9, "noteIds": [target]}
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=echo)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, verbose=True, edit=echo)
         layer = preview["outcomes"][0]["layer"]
         assert preview["from"] == "assemble" and layer["noteId"] == target
         assert layer["status"] == "applied" and layer["attenuation"] == 12 and layer["delayFrames"] == 10
@@ -336,17 +336,17 @@ for stem in stems:
         source = scored["note"]
         cut_at = (source["start"] + source["end"]) / 2
         split = {"id": "split-preview", "reason": "Synthetic cut", "op": "splitNote", "noteId": target, "at": cut_at}
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=split, dryRun=True)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=split, dryRun=True, verbose=True)
         assert [n["id"] for n in preview["outcomes"][0]["resultNotes"]] == [
             "edit-split-preview-left", "edit-split-preview-right"]
         merge = {"id": "merge-preview", "reason": "Synthetic join", "op": "mergeNotes",
                  "noteIds": ["edit-split-preview-left", "edit-split-preview-right"]}
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edits=[split, merge], dryRun=True)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edits=[split, merge], dryRun=True, verbose=True)
         assert preview["outcomes"][1]["resultNotes"][0]["id"] == "edit-split-preview-left"
         assert preview["outcomes"][1]["removedNotes"][0]["id"] == "edit-split-preview-right"
         pin = {"id": "type-preview", "reason": "Keep existing FM type", "op": "pinLane",
                "noteIds": [target], "laneType": "FM"}
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=pin, dryRun=True)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=pin, dryRun=True, verbose=True)
         assert preview["outcomes"][-1]["laneType"] == "FM" and preview["outcomes"][-1]["lane"] == "FM1"
         assert not (work / "edits.json").exists()
         artifact_hashes = {name: hashlib.sha256(Path(path).read_bytes()).digest()
@@ -485,7 +485,7 @@ for stem in stems:
         assert pair["splitSeconds"] == 0.5
         scoped = {"id": "scoped", "reason": "Synthetic passage", "op": "setRole", "part": 0,
                   "span": {"section": "chorus-1"}, "role": "melody"}
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=scoped)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, verbose=True, edit=scoped)
         assert preview["notes"] and all(0.25 <= note["sourceStart"] < 0.75 for note in preview["notes"])
         period = dict(span, id="answer-period", name="Answer", level="period")
         rpc.call("reconstruct_sections", workDir=work, action="add", entries=[period])
@@ -500,7 +500,7 @@ for stem in stems:
         del changed["name"]
         form = rpc.call("reconstruct_sections", workDir=work, action="remove", entries=[changed])
         assert all(row["id"] != "chorus-1" for row in form["sections"])
-        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, edit=scoped)
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, verbose=True, edit=scoped)
         assert preview["outcomes"][0]["status"] == "invalid"
         assert [n["id"] for n in rpc.call("notes_list", project=project, openOnly=True)["notes"]] == [note]
         rpc.call("notes_resolve", project=project, id=note, reply="Raised the melody gain.", author="Agent")
@@ -537,8 +537,16 @@ for stem in stems:
         assert preview["ids"] == ["answer"] and Path(preview["workDir"]).parent == work.parent
         pair = preview["comparisons"][0]
         assert pair["order"] == ["built", "with-proposals"] and Path(pair["output"]).is_file()
-        assert rpc.call("reconstruct_edit", workDir=work, action="accept", id="answer")["from"] == "transcribe"
-        assert rpc.call("reconstruct_edit", workDir=work, action="reject", group="phrase")["ids"] == ["alternate"]
+        revised = rpc.call("reconstruct_edit", workDir=work, action="revise", id="answer",
+                           edit={**edit, "pitch": 68})
+        assert revised["edit"]["pitch"] == 68 and revised["edit"]["group"] == "phrase"
+        accepted = rpc.call("reconstruct_edit", workDir=work, action="accept", ids=["answer"])
+        assert accepted["from"] == "transcribe" and "proposals" not in accepted
+        reject_file = root / "reject.ids"
+        reject_file.write_text("alternate\n")
+        assert rpc.call("reconstruct_edit", workDir=work, action="reject", file=reject_file)["ids"] == ["alternate"]
+        history = rpc.call("reconstruct_edit", workDir=work, action="proposals", group="phrase", showDecided=True)
+        assert history["proposals"] == [] and [row["status"] for row in history["decided"]] == ["accepted", "rejected"]
         assert Path(files["render.wav"]).read_bytes() == built_wave
         steady = root / "steady"
         files = rpc.call("reconstruct_run", workDir=steady, inputs=inputs,

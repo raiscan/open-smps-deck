@@ -13,6 +13,7 @@ import java.util.List;
 
 /** Fixed-length stereo PCM WAV written one presentation at a time. */
 public final class WaveFile {
+    private static final int YM2612_IDLE_PCM = 288;
     private WaveFile() {}
 
     public static void render(byte[] song, Path output, int presentations) throws IOException {
@@ -44,7 +45,7 @@ public final class WaveFile {
     public static void renderRange(CompiledProject project, Path output, Range range, S3kRenderer.ChannelMask mask)
             throws IOException {
         S3kBinary.validateAndCopy(project);
-        writeRange(output, range, sink -> S3kRenderer.render(project, range.end(), mask, sink));
+        writeRange(output, range, mask, sink -> S3kRenderer.render(project, range.end(), mask, sink));
     }
 
     public static void renderWithPreviousMusic(CompiledProject previous, int previousPresentations,
@@ -59,15 +60,21 @@ public final class WaveFile {
         S3kBinary.validateAndCopy(previous);
         if (cue.nativeProgram() == null) S3kBinary.validateAndCopy(cue);
         else S3kBinary.inspectNative(cue, true);
-        writeRange(output, range, sink -> S3kRenderer.renderWithPreviousMusic(previous, previousPresentations, cue,
+        writeRange(output, range, mask, sink -> S3kRenderer.renderWithPreviousMusic(previous, previousPresentations, cue,
                 range.end(), mask, sink, ChipWriteObserver.NONE));
     }
 
-    private static void writeRange(Path output, Range range, Renderer renderer) throws IOException {
+    private static void writeRange(Path output, Range range, S3kRenderer.ChannelMask mask, Renderer renderer) throws IOException {
         write(output, range.count(), sink -> {
             int[] frame = {0};
             renderer.render(samples -> {
-                if (frame[0]++ >= range.start()) sink.accept(samples);
+                if (frame[0]++ < range.start()) return;
+                // YM2612 mode rests at +576 at chip scale and the driver mixer halves it.
+                // Remove the resting level from isolated WAVs while retaining chip parity in raw renders.
+                if (!mask.equals(S3kRenderer.ChannelMask.NONE))
+                    for (int i = 0; i < samples.length; i++)
+                        samples[i] = (short) Math.max(Short.MIN_VALUE, samples[i] - YM2612_IDLE_PCM);
+                sink.accept(samples);
             });
         });
     }

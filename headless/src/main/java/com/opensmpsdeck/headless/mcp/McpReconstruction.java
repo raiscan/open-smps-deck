@@ -278,22 +278,53 @@ final class McpReconstruction {
         var group = optional(args, "group");
         boolean rerun = args.has("rerun") && args.get("rerun").getAsBoolean();
         boolean dryRun = args.has("dryRun") && args.get("dryRun").getAsBoolean();
+        boolean verbose = args.has("verbose") && args.get("verbose").getAsBoolean();
+        if (action.equals("revise")) {
+            if (propose || rerun || dryRun || edit == null || !edit.isJsonObject() || id == null)
+                throw new IllegalArgumentException("Revise requires id and an intent object in edit");
+            return ReconstructionEditCommand.revise(work, id, edit.getAsJsonObject(), null);
+        }
         if (List.of("accept", "reject", "proposals").contains(action)) {
             if (propose || rerun || dryRun || edit != null)
-                throw new IllegalArgumentException("Proposal review takes only an optional id or group");
-            return ReconstructionEditCommand.proposals(work, action.equals("proposals") ? "list" : action, id, group);
+                throw new IllegalArgumentException("Proposal review takes IDs, a file, or selectors");
+            var ids = new ArrayList<String>();
+            if (id != null) ids.add(id);
+            if (args.has("ids")) args.getAsJsonArray("ids").forEach(value -> ids.add(value.getAsString()));
+            if (args.has("file")) ids.addAll(ReconstructionProposals.idsFile(McpPaths.input(string(args, "file"))));
+            return ReconstructionEditCommand.proposalBatch(work, action.equals("proposals") ? "list" : action,
+                    ids, group, optional(args, "op"), args.has("showDecided") && args.get("showDecided").getAsBoolean(), verbose);
         }
         if (group != null || propose && !action.equals("add"))
             throw new IllegalArgumentException("Use propose with add and include the group on each intent");
-        return ReconstructionEditCommand.run(work, propose ? "propose" : action, edit, id, rerun, dryRun, progress);
+        JsonObject result;
+        try {
+            result = ReconstructionEditCommand.run(work, propose ? "propose" : action, edit, id, rerun, dryRun, progress);
+        } catch (ReconstructionEditCommand.BatchValidation failure) {
+            result = failure.response();
+        }
+        return !verbose && !rerun && result.has("results") && (dryRun || edit != null && edit.isJsonArray()) ? ReconstructionEditCommand.compact(result) : result;
     }
 
     static JsonObject vocalReview(JsonObject args) throws IOException {
-        Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "structure.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE))
-            McpPaths.managed(work, file);
+        Path work = vocalWork(args);
         return com.opensmpsdeck.headless.ReconstructionVocalReview.review(work, optional(args, "phrase"),
-                args.has("propose") && args.get("propose").getAsBoolean());
+                args.has("propose") && args.get("propose").getAsBoolean(),
+                args.has("showDecided") && args.get("showDecided").getAsBoolean());
+    }
+
+    static JsonObject vocalRender(JsonObject args) throws IOException {
+        Path work = vocalWork(args);
+        McpPaths.managed(work, "arrangement.smps.json");
+        return com.opensmpsdeck.headless.VocalPhraseRender.render(work, string(args, "phrase"),
+                McpPaths.output(work, string(args, "output")));
+    }
+
+    private static Path vocalWork(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", "allocation.json", ReconstructionSections.FILE,
+                ReconstructionEditCommand.FILE, ReconstructionEditCommand.LOCK))
+            McpPaths.managed(work, file);
+        return work;
     }
 
     static JsonObject trace(JsonObject args) throws IOException {

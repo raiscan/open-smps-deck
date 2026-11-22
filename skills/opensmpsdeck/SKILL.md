@@ -169,28 +169,26 @@ when a mapped or unmatched stem needs a separate transcriber.
 
 ### Clean up a vocal-derived lead
 
-1. Run `reconstruct vocal-review "$work"` or call
-   `reconstruct_vocal_review` with `workDir`. Find the phrase you want
-   and pass `--phrase ID` (MCP `phrase`). Each note includes source and
-   project times, the nearby syllable onset, other boundary evidence, and
-   its RMVPE median and slope in the selected register. Vibrato is the
-   RMS variation around the linear pitch trend. Pitch confidence is the
-   fraction of voiced frames within 0.7 semitones of the note. Voicing
-   fraction counts the whole gate.
-2. Listen with MCP `render_clip` on the built project, using that phrase's
-   project seconds and `solo: ["FM1"]`. Audition the returned vocal
-   `stem` path over the corresponding **source** seconds. Compare the
-   attacks, releases and pitch before choosing edits.
-3. Add `--propose` or MCP `propose: true` to save the suggested intents
-   under the `vocal-lead-review` group. The same intents are returned in
-   `edits` so you can revise them before sending them to
-   `reconstruct edit propose`. Accept or reject individual proposals
-   with `reconstruct proposals`, `reconstruct_edit`, or Studio
-   **Proposals**. Audition overlapping suggestions individually.
+1. Run `reconstruct vocal-review "$work" --json` or call
+   `reconstruct_vocal_review` with `workDir`. Scope to a phrase with
+   `--phrase ID` (MCP `phrase`). The review includes decoded syllables,
+   kept FM1 gates, and per-note contour, harmonic and repeat evidence.
+   Subharmonic support can expose an RMVPE octave error. Loud, stable
+   notes or notes consistent across repeats can be valid register leaps.
+2. Use `reconstruct vocal-render "$work" --phrase ID OUT.wav` or MCP
+   `reconstruct_vocal_render` for a built FM1 excerpt and metrics against
+   the vocal stem. Check onset alignment and voiced gaps. Pitch agreement
+   compares audible FM1 gates with the saved stem contour. Audition the
+   returned `stem` over the corresponding source seconds.
+3. Add `--propose` or MCP `propose: true` to save suggested intents under
+   `vocal-lead-review`. Revise an intent with
+   `reconstruct proposals revise "$work" ID --file INTENT.json` or
+   **Revise** in Studio. Accept or reject an ordered set of IDs or use
+   `--file`, `--group` or `--op`. Use `--show-decided` to inspect
+   earlier decisions alongside the pending suggestions.
 4. Run `reconstruct run --from transcribe "$work"` (MCP
-   `reconstruct_run` with `from: "transcribe"`). Re-check the phrase
-   with the review view and another solo render. The rebuild uses the
-   saved contour and boundaries.
+   `reconstruct_run` with `from: "transcribe"`). Review the rebuilt
+   phrase and audition the FM1 excerpt again.
 
 ## 4. Propose or apply a scoped edit
 
