@@ -1092,9 +1092,51 @@ arrangement with linked instances and partial repeats.
 
 Package exports warn when they embed assets derived from the ROM or
 copyrighted retail song data. Keep these packages for personal use and do
-not redistribute them. A shareable portable mode is planned. The warnings
-go to stderr for CLI package writers and appear in the `warnings` array for
+not redistribute them. Portable mode can reference eligible stock assets.
+Warnings go to stderr for CLI package writers and appear in the `warnings` array for
 MCP package exports and reconstruction runs. Export still succeeds.
 
 `stock-table build ROM OUT.json` rebuilds the public stock hash and locator
 table from a verified locked-on S3&K image. Choose a new output path.
+
+## Portable song packages
+
+Schema 4 stores an S3K bank with relocations and references to known game
+assets. Original payloads remain embedded. Stock matches are resolved
+from the player's own ROM at playback. Retail songs remain embedded and
+carry a redistribution warning.
+
+```sh
+java -jar "$deck_jar" compile-package PROJECT.smps.json song.smps.zip --portable
+java -jar "$deck_jar" export WORK_DIR song.smps.zip --format portable --no-source
+java -jar "$deck_jar" inspect-package song.smps.zip
+java -jar "$deck_jar" validate-package song.smps.zip --rom locked-on.gen --render verified.wav --frames 3600
+java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --replace 13
+```
+
+Portable exports include redacted source by default. Pass `--no-source`
+to omit it. `--driver s3k` is the default and the only supported writer
+driver. The package ID defaults to a lowercase slug of the project name,
+the version to `1.0.0`, the author list to empty, and the license to null.
+Use `--package-id`, `--package-version`, repeatable `--author`, and
+`--license` with an SPDX expression to set these fields. A mod JAR requires
+at least one decimal `--replace` stock music ID. Repeat the flag to map
+several IDs to the exported song. Its required mod author defaults to
+`Unknown` when no author was supplied.
+
+`inspect-package` returns the validated schema 4 manifest and warnings.
+`validate-package` returns a JSON report with `structureValidated` and
+`playbackValidated`. Repeat `--rom` to supply several images. Without a ROM,
+packages with references are checked structurally. `--render` writes a new
+48 kHz WAV after resolution and native preflight. `--frames` overrides
+the stored preview length. When using an extracted redacted source, pass
+`--rom PATH` to `validate-project`, `render-project`, `compile-package`
+or `export` to resolve its stock assets. Studio reports the missing assets
+when opening that source. The Studio ROM picker is a follow-up.
+
+MCP `project_export` accepts `format: "portable"` or `"mod"` and optional
+`driver`, `noSource`, `license`, `packageId`, `packageVersion`, `authors`,
+and `roms`. Use an integer `replace` array for mod export.
+`package_validate` takes `package`, optional `roms` and a new `render` path
+beside the package with optional `frames`. `package_inspect` takes `package`.
+See the [normative portable package contract](../docs/architecture/portable-package.md).

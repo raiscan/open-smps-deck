@@ -76,9 +76,9 @@ public final class Main {
                     if (id == 0x2A) out.println("Extra Life restores prior music. Render with --previous-project and --previous-frames.");
                 }
                 case "validate-project", "validate" -> {
-                    requireArguments(args, 2);
+                    if (args.length < 2) throw new IllegalArgumentException("validate-project expects PROJECT");
                     Path input = Path.of(args[1]);
-                    var project = ProjectFiles.load(input).project();
+                    var project = PortablePackages.openProject(input, parseRoms(args, 2));
                     var compiled = ProjectCompiler.compileWithAssets(project);
                     byte[] song = S3kBinary.validateAndCopy(compiled);
                     if (compiled.nativeProgram() != null) {
@@ -110,11 +110,26 @@ public final class Main {
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
                 }
                 case "compile-package" -> {
-                    requireArguments(args, 3);
+                    if (args.length < 3) throw new IllegalArgumentException("compile-package expects PROJECT OUTPUT");
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
-                    ProjectProvenance.printWarnings(ProjectPackage.write(ProjectFiles.load(input).project(), output), err);
+                    var flags = new PortableOptions.Cli();
+                    for (int at = 3; at < args.length;) at = flags.read(args, at);
+                    var options = flags.options();
+                    if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires export --format mod");
+                    if (!flags.portable() && flags.hasPackageOptions())
+                        throw new IllegalArgumentException("Portable package options require --portable");
+                    var project = PortablePackages.openProject(input, flags.roms());
+                    if (flags.portable()) {
+                        var payload = PortablePackageWriter.write(project, output, options);
+                        PortablePackages.printWriteWarnings(payload, err);
+                    } else {
+                        ProjectProvenance.printWarnings(ProjectPackage.write(project, output), err);
+                    }
                     out.println("Exported S3K bank and declared resources to " + output);
+                }
+                case "validate-package", "inspect-package" -> {
+                    return PortablePackages.cli(args, out, err);
                 }
                 case "demo-project" -> {
                     requireArguments(args, 2);
@@ -166,12 +181,13 @@ public final class Main {
         int presentations = 120;
         int previousPresentations = 0;
         Path previousPath = null;
+        var roms = new java.util.ArrayList<Path>();
         Double start = null, end = null;
         List<String> solo = List.of(), mute = List.of();
         var options = new HashSet<String>();
         for (int at = positional; at < args.length;) {
             String option = args[at++];
-            if (!options.add(option)) throw new IllegalArgumentException("duplicate option " + option);
+            if (!options.add(option) && !option.equals("--rom")) throw new IllegalArgumentException("duplicate option " + option);
             if (option.equals("--force")) {
                 if (!projectRender) throw new IllegalArgumentException("--force requires render-project");
                 continue;
@@ -189,6 +205,10 @@ public final class Main {
                         case "--end" -> end = Double.parseDouble(value);
                         default -> throw new AssertionError(option);
                     }
+                }
+                case "--rom" -> {
+                    if (!projectRender) throw new IllegalArgumentException("--rom requires render-project");
+                    roms.add(Path.of(value));
                 }
                 case "--previous-project" -> {
                     if (!projectRender) throw new IllegalArgumentException(option + " requires render-project");
@@ -215,7 +235,7 @@ public final class Main {
             Path input = Path.of(args[1]);
             requireDifferentFiles(input, output);
             if (projectRender) {
-                var project = ProjectFiles.load(input).project();
+                var project = PortablePackages.openProject(input, roms);
                 song = ProjectCompiler.compileWithAssets(project);
                 if (start != null || end != null) projectEnd = ProjectRenderTiming.presentationCount(project);
                 if (!options.contains("--frames")) {
@@ -244,13 +264,23 @@ public final class Main {
                 else WaveFile.render(song, target.path(), presentations);
             } else {
                 requireDifferentFiles(previousPath, output);
-                var previous = ProjectCompiler.compileWithAssets(ProjectFiles.load(previousPath).project());
+                var previous = ProjectCompiler.compileWithAssets(PortablePackages.openProject(previousPath, roms));
                 WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, target.path(), range, mask);
             }
             target.publish();
         }
         out.println("Rendered " + range.count() + " presentations to " + output
                 + " (48 kHz stereo, pinned OpenGGF S3K accurate core)");
+    }
+
+    private static List<Path> parseRoms(String[] args, int at) {
+        var roms = new java.util.ArrayList<Path>();
+        while (at < args.length) {
+            if (!args[at++].equals("--rom") || at == args.length)
+                throw new IllegalArgumentException("Expected --rom PATH");
+            roms.add(Path.of(args[at++]));
+        }
+        return roms;
     }
 
     private static int parsePresentations(String option, String value) {
@@ -270,11 +300,11 @@ public final class Main {
         }
     }
 
-    private static void requireArguments(String[] args, int count) {
+    static void requireArguments(String[] args, int count) {
         if (args.length != count) throw new IllegalArgumentException("wrong number of arguments for " + args[0]);
     }
 
-    private static void requireDifferentFiles(Path input, Path output) throws IOException {
+    static void requireDifferentFiles(Path input, Path output) throws IOException {
         if (input.toAbsolutePath().normalize().equals(output.toAbsolutePath().normalize())
                 || (Files.exists(output) && Files.isSameFile(input, output))) {
             throw new IllegalArgumentException("input and output must be different files");
@@ -294,6 +324,8 @@ public final class Main {
     }
 
     private static void usage(PrintStream out) {
+        out.println("  validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]");
+        out.println("  inspect-package PKG");
         out.println("  stock-table build ROM OUT.json");
         out.println("Usage: java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
@@ -307,7 +339,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group ungroup PROJECT.json PLACEMENT_ID [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
@@ -320,7 +352,7 @@ public final class Main {
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
-        out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package");
+        out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package|portable|mod");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
         out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }

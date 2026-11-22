@@ -671,7 +671,10 @@ final class S3kReconstruction {
         }
         for (int release : releases) {
             var patch = ReconstructionChords.patch(asset.name(), source, tuning, active);
-            voices.putIfAbsent(patch.id(), patch);
+            // Chord instruments copy operators from the catalogue voice, so they
+            // remain stock material described as a patch of that voice.
+            voices.putIfAbsent(patch.id(), patch.withOrigin(
+                    patchedOrigin(catalogue, asset, StockTable.bytes(patch.bytes()))));
             int floor = patch.bytes().subList(21, 25).stream().filter(tl -> (tl & 128) != 0)
                     .mapToInt(tl -> tl & 127).max().orElse(0);
             var placement = chordPlacement(note, tuning.note(), start, release, patch.id(), Math.max(level, floor), tuning.detune());

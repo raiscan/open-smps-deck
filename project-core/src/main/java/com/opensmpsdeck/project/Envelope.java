@@ -13,5 +13,5 @@ public record Envelope(String id,String name,String type,List<Integer> bytes, As
     }
 
     public static final String PSG_VOLUME="PSG_VOLUME", MODULATION="MODULATION";
-    public Envelope { bytes=List.copyOf(bytes); }
+    public Envelope { if (bytes != null) bytes=List.copyOf(bytes); }
 }

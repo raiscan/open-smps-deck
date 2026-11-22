@@ -31,6 +31,13 @@
         </dependency>
     </dependencies>
     <build>
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <resource>
+                <directory>${project.basedir}/../upstream</directory>
+                <includes><include>openggf-audio.lock.json</include></includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>io.github.git-commit-id</groupId>

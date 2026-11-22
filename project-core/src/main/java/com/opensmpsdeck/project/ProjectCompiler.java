@@ -19,7 +19,23 @@ public final class ProjectCompiler {
                 project.nativeProgram(),project.nativeProgram()==null?List.of():project.voices());
     }
 
+    public record BankLayout(byte[] bytes, List<Integer> relocations) {
+        public BankLayout { bytes = bytes.clone(); relocations = List.copyOf(relocations); }
+        @Override public byte[] bytes() { return bytes.clone(); }
+    }
+
+    public static BankLayout compileArrangementLayout(StudioProject project) {
+        if (project.nativeProgram() != null) throw new IllegalArgumentException("Expected an editable arrangement");
+        var relocations = new java.util.TreeSet<Integer>();
+        byte[] bytes = compile(project, relocations);
+        return new BankLayout(bytes, List.copyOf(relocations));
+    }
+
     public static byte[] compile(StudioProject project) {
+        return compile(project, null);
+    }
+
+    private static byte[] compile(StudioProject project, java.util.Set<Integer> relocations) {
         List<Clip> clips = ProjectFormat.validatedClips(project);
         if (project.nativeProgram()!=null) return project.nativeProgram().bank();
         if (project.formatVersion() == 6) {
@@ -43,7 +59,7 @@ public final class ProjectCompiler {
             else if(c.lane().startsWith("PSG")) psg=Math.max(psg,Integer.parseInt(c.lane().substring(3)));
         }
         int header=6+4*fm+6*psg;
-        Bank out=new Bank(); for(int i=0;i<header;i++) out.put(0);
+        Bank out=new Bank(relocations); for(int i=0;i<header;i++) out.put(0);
         out.set(2,fm); out.set(3,psg); out.set(4,1); out.set(5,project.tempo());
         dacLane(out,project,sources); // DAC must always be the first positional slot.
         for(int channel=1;channel<fm;channel++) lane(out,project,"FM"+channel,6+4*channel,sources,notes,voices,psgEnvelopes,modulationEnvelopes);
@@ -269,11 +285,14 @@ public final class ProjectCompiler {
 
     /** Fixed-size writer bounds work even for billion-tick input; no expanded event list. */
     private static final class Bank {
+        private final java.util.Set<Integer> relocations;
+        Bank(java.util.Set<Integer> relocations) { this.relocations = relocations; }
         private final byte[] data=new byte[MAX_BANK_BYTES]; private int size;
         int size() { return size; }
         void put(int value) { if(size==data.length) throw new IllegalArgumentException("Compiled project exceeds one 32 KiB S3K bank; shorten clips or reduce notes/voices"); data[size++]=(byte)value; }
         void set(int at,int value) { data[at]=(byte)value; }
         void word(int at,int value) {
+            if (relocations != null) relocations.add(at);
             if(value<0 || value>=MAX_BANK_BYTES) throw new IllegalArgumentException("Compiled project pointer exceeds one 32 KiB S3K bank");
             set(at,value); set(at+1,value>>>8);
         }
