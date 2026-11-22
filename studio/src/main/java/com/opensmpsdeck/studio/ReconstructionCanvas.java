@@ -1041,7 +1041,14 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             g.setFill(row.color());
             g.fillRect(0, y + 4, selected ? 4 : 2, height - 8);
             g.setFill(selected ? Color.WHITE : TEXT);
-            g.fillText(fitLabel(row.label(), axis() - 18), 10, y + height / 2);
+            double middle = y + height / 2;
+            if (row.voice() == null || row.role() == null) {
+                g.fillText(fitLabel(row.label(), axis() - 18), 10, middle);
+            } else {
+                g.fillText(fitLabel(row.voice().name(), axis() - 18), 10, middle - 6);
+                g.setFill(selected ? TEXT : SUBTLE);
+                g.fillText(roleName(row.role()), 10, middle + 7);
+            }
         }
     }
 

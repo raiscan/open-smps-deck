@@ -1623,10 +1623,24 @@ class StudioWindowTest {
                     ImageIO.write(SwingFXUtils.fromFXImage(scene.snapshot(null), null), "png",
                             Path.of(target + ".roles.png").toFile());
                 }
+                var apply = (Button) scene.lookup("#reconstruction-apply");
+                assertTrue(apply.isDisabled());
+                var roleChoice = scene.getRoot().lookupAll(".combo-box").stream()
+                        .filter(ComboBox.class::isInstance).map(node -> (ComboBox<?>) node)
+                        .filter(combo -> "Role".equals(combo.getPromptText()) && combo.isVisible()).findFirst().orElseThrow();
+                roleChoice.getSelectionModel().select(roleChoice.getItems().indexOf("counter"));
+                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> button.getText().equals("Set role") && button.isVisible())
+                        .findFirst().orElseThrow().fire();
+                assertFalse(apply.isDisabled());
                 ((ToggleButton) scene.lookup("#reconstruction-detail-view")).fire();
                 assertEquals(.5, zoom.getValue());
                 assertTrue(scene.lookup("#reconstruction-tool-insert").isVisible());
                 assertTrue(trace.getText().contains("test-note"));
+                scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> button.getText().equals("Undo"))
+                        .findFirst().orElseThrow().fire();
+                assertTrue(apply.isDisabled());
                 return null;
             });
             try (var files = Files.list(work)) {

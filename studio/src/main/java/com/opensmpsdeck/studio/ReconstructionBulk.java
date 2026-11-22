@@ -97,6 +97,7 @@ final class ReconstructionBulk extends VBox {
         this.submit = submit;
         getStyleClass().add("inspector");
         count.getStyleClass().add("inspector-title");
+        count.setWrapText(true);
         issue.setWrapText(true);
         issue.setId("reconstruction-bulk-issue");
         issue.managedProperty().bind(issue.visibleProperty());
