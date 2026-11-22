@@ -8,6 +8,7 @@ import com.opensmpsdeck.headless.rom.RomExport;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.headless.rompatch.RomPatch;
+import com.opensmpsdeck.headless.rompatch.S1RomPatch;
 import com.opensmpsdeck.headless.rompatch.S2RomPatch;
 import com.opensmpsdeck.project.StudioProject;
 
@@ -40,11 +41,16 @@ public final class TestInGame {
     public record Options(Integer slot, boolean titleMusic, boolean noDemo, boolean loop) {
         public Options {
             if (slot != null && !(slot >= 1 && slot <= 0x33 || slot >= 0x81 && slot <= 0x9F))
-                throw new IllegalArgumentException("Music ID must be in 0x01–0x33 for S3K or 0x81–0x9F for S2");
+                throw new IllegalArgumentException("Music ID must be in 0x01–0x33 for S3K, 0x81–0x93 for S1, or 0x81–0x9F for S2");
         }
 
         RomPatch.Options s3k() {
             return new RomPatch.Options(slot == null ? RomPatch.DEFAULT_SLOT : slot, titleMusic, noDemo, loop);
+        }
+
+        S1RomPatch.Options s1() {
+            if (loop) throw new IllegalArgumentException("Sonic 1 Test in game does not support --loop.");
+            return new S1RomPatch.Options(slot == null ? S1RomPatch.DEFAULT_SLOT : slot, titleMusic, noDemo);
         }
 
         S2RomPatch.Options s2() {
@@ -67,12 +73,7 @@ public final class TestInGame {
     }
 
     public static boolean available(RomGame game) {
-        // S1 waits for project compiler integration (the cartridge engine is in rompatch.S1RomPatch).
-        return game == RomGame.S3K || game == RomGame.S2;
-    }
-
-    static void requireAvailable(RomGame game) {
-        if (!available(game)) throw unavailable(game.id());
+        return game != null;
     }
 
     private static IllegalArgumentException unavailable(String id) {
@@ -107,7 +108,7 @@ public final class TestInGame {
                                     Options options) throws IOException {
         // Validate game-specific IDs before resolving or opening a cartridge.
         switch (input.game()) {
-            case S1 -> throw unavailable("s1");
+            case S1 -> options.s1();
             case S2 -> options.s2();
             case S3K -> options.s3k();
         }

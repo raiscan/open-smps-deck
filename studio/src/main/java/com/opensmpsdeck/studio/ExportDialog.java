@@ -173,7 +173,7 @@ final class ExportDialog {
             var target = new ChoiceBox<RomGame>();
             target.setId("test-in-game-driver");
             target.setAccessibleText("Test in game target");
-            target.getItems().setAll(RomGame.S3K, RomGame.S2);
+            target.getItems().setAll(RomGame.S3K, RomGame.S1, RomGame.S2);
             target.setConverter(new javafx.util.StringConverter<>() {
                 @Override public String toString(RomGame value) { return TestInGameDialog.gameName(value); }
                 @Override public RomGame fromString(String value) { throw new UnsupportedOperationException(); }
@@ -188,10 +188,6 @@ final class ExportDialog {
             latest.set(null);
             var game = gameSelection.get();
             test.setDisable(true);
-            if (!TestInGame.available(game)) {
-                hint.setText("Test in game for " + game.id() + " is not available yet.");
-                return;
-            }
             hint.setText("Checking the ROM library…");
             var job = new Task<RomLibrary.Entry>() {
                 @Override protected RomLibrary.Entry call() throws Exception {

@@ -3,7 +3,7 @@
 The patched ROM is derived from the player's retail ROM and contains
 copyrighted data. **Personal use only. Do not redistribute.**
 
-The [headless command](../../headless/README.md#test-an-arrangement-in-sonic-2-or-sonic-3--knuckles),
+The [headless command](../../headless/README.md#test-an-arrangement-in-game),
 the MCP tool and Studio's Test in game action use a `RomTarget.Engine` adapter
 over the same in-memory patcher. The ROM library supplies the verified clean
 image. The output writer reapplies a staged BPS to that image and verifies

@@ -50,6 +50,13 @@ class McpServerTest {
                 "out", directory.resolve("song.gen").toString(), "slot", 37), "Sonic 2 music ID");
     }
 
+    @Test void romPatchAcceptsSonic1AndValidatesItsSlotRange() throws Exception {
+        Path source = directory.resolve("song.smps.json");
+        ProjectFiles.save(source, DemoProject.create(), null);
+        assertToolError("rom_patch", Map.of("project", source.toString(), "driver", "s1",
+                "out", directory.resolve("song.gen").toString(), "slot", 0x94), "Sonic 1 music ID must be in 0x81–0x93");
+    }
+
     @Test void stdioUsesOneUtf8JsonMessagePerLineAndRecoversFromInvalidFrames() throws Exception {
         var responses = exchange("""
                 Content-Length: 12

@@ -58,7 +58,8 @@ final class TestInGameDialog {
         loop.setId("rom-loop");
         var note = new Label("Choose one or both outputs. Your song plays on the title screen.");
         note.setWrapText(true);
-        var body = new VBox(12, note, rom.row, bps.row, noDemo, loop);
+        var body = new VBox(12, note, rom.row, bps.row, noDemo);
+        if (game != RomGame.S1) body.getChildren().add(loop);
         body.setPadding(new Insets(8, 6, 4, 6));
         pane.setContent(body);
 
@@ -129,7 +130,7 @@ final class TestInGameDialog {
         var job = new Task<String>() {
             @Override protected String call() throws Exception {
                 var project = source.call().project();
-                return summary(project, TestInGame.export(library, project, sourcePath, outputs, game, options));
+                return summary(game, project, TestInGame.export(library, project, sourcePath, outputs, game, options));
             }
         };
         job.setOnSucceeded(event -> {
@@ -176,16 +177,25 @@ final class TestInGameDialog {
         progress.close();
     }
 
-    private static String summary(StudioProject project, JsonObject result) {
+    private static String summary(RomGame game, StudioProject project, JsonObject result) {
         var report = result.getAsJsonObject("report");
-        int bank = report.get("bank").getAsInt();
-        int free = report.getAsJsonObject("freeBytesByBank").get(Integer.toString(bank)).getAsInt();
-        var text = new StringBuilder(("Bank 0x%02X · Music slot 0x%02X%n"
-                + "Compiled song: %,d bytes · 32,768-byte limit%n"
-                + "Bank free space before assets: %,d bytes%n")
-                .formatted(bank, report.get("slot").getAsInt(), report.get("compiledSize").getAsInt(), free));
+        var text = new StringBuilder();
+        if (game != RomGame.S1) {
+            int bank = report.get("bank").getAsInt();
+            int free = report.getAsJsonObject("freeBytesByBank").get(Integer.toString(bank)).getAsInt();
+            text.append("Bank 0x%02X · Music slot 0x%02X%n".formatted(bank, report.get("slot").getAsInt()));
+            text.append("Bank free space before assets: %,d bytes%n".formatted(free));
+        } else {
+            text.append("Music slot 0x%02X · Title slot 0x%02X%n"
+                    .formatted(report.get("slot").getAsInt(), report.get("titleSlot").getAsInt()));
+        }
+        text.append("Compiled song: %,d bytes · 32,768-byte limit%n".formatted(report.get("compiledSize").getAsInt()));
         if (result.has("out")) text.append("\nPatched ROM\n").append(result.get("out").getAsString()).append('\n');
         if (result.has("bps")) text.append("\nBPS patch\n").append(result.get("bps").getAsString()).append('\n');
+        if (game == RomGame.S1) {
+            appendS1Details(text, report, result);
+            return text.toString();
+        }
 
         var drums = report.getAsJsonArray("dacNoteMap");
         if (!drums.isEmpty()) text.append("\nDrums (4-bit DPCM)\n");
@@ -213,5 +223,38 @@ final class TestInGameDialog {
         approximations.forEach(entry -> text.append("Envelope ").append(entry.get("index").getAsInt())
                 .append(" → stock envelope ").append(entry.get("mappedIndex").getAsInt()).append('\n'));
         return text.toString();
+    }
+
+    private static void appendS1Details(StringBuilder text, JsonObject report, JsonObject result) {
+        var drums = report.getAsJsonArray("dacNoteMap");
+        if (!drums.isEmpty()) {
+            text.append("%nDAC · Custom slots $84/$85 · %,d-byte Z80 sample budget%n"
+                    .formatted(report.get("z80CustomDpcmCapacity").getAsInt()));
+        }
+        drums.forEach(value -> {
+            var drum = value.getAsJsonObject();
+            text.append("Note $%02X → $%02X · ".formatted(drum.get("note").getAsInt(), drum.get("mappedNote").getAsInt()));
+            if (drum.get("kind").getAsString().equals("custom")) {
+                text.append("custom 4-bit DPCM (%,d bytes)".formatted(drum.get("dpcmBytes").getAsInt()));
+            } else {
+                text.append("stock ").append(drum.get("stockSample").getAsString());
+                if (!drum.get("exact").getAsBoolean())
+                    text.append(String.format(Locale.ROOT, " (distance %.4f)", drum.get("distance").getAsDouble()));
+            }
+            text.append('\n');
+        });
+
+        var envelopes = report.getAsJsonArray("envelopeMap");
+        if (!envelopes.isEmpty()) {
+            text.append(report.has("psgTable") ? "\nRelocated PSG envelope table\n" : "\nPSG envelopes\n");
+            envelopes.forEach(value -> {
+                var envelope = value.getAsJsonObject();
+                text.append("Envelope %d → %s envelope %d%n".formatted(envelope.get("index").getAsInt(),
+                        envelope.get("stock").getAsBoolean() ? "stock" : "custom", envelope.get("mappedIndex").getAsInt()));
+            });
+        }
+        var warnings = result.getAsJsonArray("warnings");
+        if (!warnings.isEmpty()) text.append("\nWarnings\n");
+        warnings.forEach(warning -> text.append(warning.getAsString()).append('\n'));
     }
 }

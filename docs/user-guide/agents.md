@@ -206,12 +206,13 @@ changes. `render_clip` remains available for an excerpt of an existing
 project, with project-time `start` and `end` and optional `solo` or `mute`
 lanes. Use `render_compare` for a reconstruction against its aligned source.
 
-For S3K Test in game, set the clean ROM with `rom_set` or pass a one-off
+For Test in game, set the clean ROM with `rom_set` or pass a one-off
 absolute `rom` path to `rom_patch`. Supply an absolute `project` path and
 at least one absolute `out` (personal-use ROM) or `bps` (shareable patch)
-path. The optional fields are `slot`, `titleMusic`, `noDemo`, `loop`, and
-`force`. Read the returned `report` and `warnings` before handing off a patch.
-[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-sonic-2-or-sonic-3--knuckles)
+path. The optional fields include `driver` (`s1`, `s2` or `s3k`), `slot`,
+`titleMusic`, `noDemo`, `loop`, and `force`. Read the returned `report` and
+`warnings` before handing off a patch.
+[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-game)
 
 See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
 equivalents, the [stage guide](../architecture/reconstruction-stages.md)
