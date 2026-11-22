@@ -262,6 +262,11 @@ for stem in stems:
         inspected = rpc.call("package_inspect", package=portable["output"])
         assert inspected["schemaVersion"] == 4 and inspected["package"]["id"] == "smoke"
         assert inspected["source"] is None
+        kit = rpc.call("project_export", project=work / "portable.smps.zip", output="disasm-kit",
+                       format="disasm", dpcmClosed=True)
+        assert kit["format"] == "disasm" and "DPCM_CLOSED" in kit["warnings"]
+        assert (work / "disasm-kit" / "README.md").is_file()
+        assert (work / "disasm-kit" / "manifest.json").is_file()
         verified = rpc.call("package_validate", package=portable["output"], render="verified.wav", frames=30)
         assert verified["valid"] and verified["playbackValidated"]
         assert Path(verified["render"]).is_file()

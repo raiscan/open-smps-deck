@@ -387,7 +387,7 @@ public final class Main {
         out.println("Previous-project warm-up sets the state restored by a cue. WAV starts at the cue.");
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
-        out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package|portable|mod");
+        out.println("       export PROJECT.json|WORK_DIR|PACKAGE.smps.zip OUTPUT --format wav|mp3|vgm|smps|package|portable|mod|disasm");
         out.println("              Portable/mod: [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
         out.println("       export PROJECT OUTPUT --format rom|bps [ROM patch options]");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
