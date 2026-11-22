@@ -222,11 +222,16 @@ public final class StudioWindow implements AutoCloseable {
         commands.voiceEditor=id->{showAssets();assetKinds.getSelectionModel().select(0);if(id!=null)voices.selectVoice(id);};
         commands.envelopeEditor=id->{showEnvelopes();if(id!=null)envelopes.selectEnvelope(id);};
         piano.selection=id->{selectedNote=id;refreshNoteInspector();};
-        piano.onContext = this::pianoMenu;
         piano.edit=n->change(p->ProjectEdits.updateNote(p,selectedSequence,n));
         piano.addition=n->{if(change(p->ProjectEdits.addNote(p,selectedSequence,n))){selectedNote=n.id();refreshView();}};
         detail.getStyleClass().add("section");linked.getStyleClass().add("muted");
-        HBox pianoHeader=new HBox(12,detail,spacer(),linked);pianoHeader.getStyleClass().add("panelbar");
+        var screenshotLasso = new ScreenshotLasso(piano, this::lassoNotesForAgent, status::setText, () -> false);
+        piano.onContext = (event, insertion) -> pianoMenu(event, insertion, screenshotLasso);
+        var lasso = screenshotLasso.controls();
+        lasso.visibleProperty().bind(sourceModes.getSelectionModel().selectedItemProperty().isEqualTo(noteMode)
+                .and(piano.scroll.visibleProperty()));
+        lasso.managedProperty().bind(lasso.visibleProperty());
+        HBox pianoHeader=new HBox(12,detail,spacer(),linked,lasso);pianoHeader.getStyleClass().add("panelbar");
         noteInspector.getStyleClass().add("note-inspector");
         noteBody=new VBox(piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
         Tab fmAssets=new Tab("FM voices",voices),envAssets=new Tab("Envelopes",envelopes),dacAssets=new Tab("DAC samples",samples);
@@ -669,7 +674,7 @@ public final class StudioWindow implements AutoCloseable {
         menu.add("Play from here", () -> { setPosition(time); play(); }).show(timeline.canvas, event);
     }
 
-    private void pianoMenu(ContextMenuEvent event, NoteEvent insertion) {
+    private void pianoMenu(ContextMenuEvent event, NoteEvent insertion, ScreenshotLasso lasso) {
         var menu = new StudioContextMenu();
         if (selectedNote != null && source() != null) {
             menu.add("Delete", "Delete / Backspace", null, this::deleteNote);
@@ -682,7 +687,11 @@ public final class StudioWindow implements AutoCloseable {
                     psg && PianoRollView.usesNoise(source(), note) ? "PSG noise hits have no tonal pitch."
                             : range.contains(note.pitch() + step) ? null : "Outside the chip pitch range.",
                     null, () -> piano.transpose(step, profile, status::setText))).toList());
-        } else if (insertion != null) menu.add("Insert note here", () -> piano.addition.accept(insertion));
+            AgentClipboard.addTo(menu, this::copyNotesForAgent);
+        } else {
+            if (insertion != null) menu.add("Insert note here", () -> piano.addition.accept(insertion));
+            ScreenshotLasso.addTo(menu, lasso::toggle);
+        }
         menu.show(piano.canvas, event);
     }
 
@@ -700,6 +709,27 @@ public final class StudioWindow implements AutoCloseable {
         stop();
         refreshView();
     }
+    private boolean copyNotesForAgent() {
+        var notes = piano.selectedNotes();
+        if (notes.isEmpty()) return false;
+        return AgentClipboard.copy(com.opensmpsdeck.headless.ArrangementNoteContext.copy(document.path(),
+                document.project(), document.dirty(), selectedSequence, clipPath(), notes), status::setText);
+    }
+
+    private com.opensmpsdeck.headless.NoteHandoff.Capture lassoNotesForAgent(javafx.geometry.Rectangle2D box) {
+        if (piano.sequence == null) return null;
+        return com.opensmpsdeck.headless.ArrangementNoteContext.capture(document.path(), document.project(),
+                document.dirty(), selectedSequence, clipPath(), piano.lassoNotes(box), piano.lassoRange(box));
+    }
+
+    private List<String> clipPath() {
+        if (clip() == null) return List.of();
+        var path = new ArrayList<String>();
+        groupPath.forEach(frame -> path.add(frame.placementId()));
+        path.add(selectedClip);
+        return path;
+    }
+
     private void key(KeyEvent e){
         if(e.isShortcutDown()&&e.getCode()==KeyCode.S){save();e.consume();return;}
         if(e.getCode()==KeyCode.ESCAPE && !groupPath.isEmpty() && document.project().nativeProgram()==null) {
@@ -724,7 +754,8 @@ public final class StudioWindow implements AutoCloseable {
             e.consume();
             return;
         }
-        if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
+        if (piano.canvas.isFocused() && AgentClipboard.shortcut(e) && copyNotesForAgent()) e.consume();
+        else if(e.isShortcutDown()&&e.getCode()==KeyCode.Z){undo(!e.isShiftDown());e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.Y){undo(false);e.consume();}
         else if(e.isShortcutDown()&&e.getCode()==KeyCode.G && document.project().nativeProgram()==null){
             if(e.isShiftDown())ungroupSelected();else groupSelected();

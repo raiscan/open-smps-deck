@@ -186,8 +186,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private record CopiedNote(double offset, double length, int pitch, int velocity) {}
     private List<CopiedNote> clipboard = List.of();
     DoubleConsumer playFrom = ignored -> {};
-    // The separate agent-copy action can supply a command for the current selection.
-    java.util.function.Function<List<Overlay>, Runnable> copyForAgent = notes -> null;
+    Runnable screenshotLasso = () -> {};
 
     ReconstructionEditor(Path work, Window owner, ReconstructionCanvas view, Snapshot initial,
                          Consumer<String> status, Consumer<ReconstructionInspection> refresh,
@@ -743,6 +742,41 @@ final class ReconstructionEditor implements AutoCloseable {
         audition.stop();
     }
 
+    private boolean copyForAgent() {
+        var notes = view.selectedNotes();
+        if (notes.isEmpty() || view.reviewing()) return false;
+        var local = noteDraft();
+        return AgentClipboard.copy(snapshot.inspection().copyNotes(notes, view.rolesView(), draft.pending(),
+                snapshot.revision(), draftMembership, local.velocities(), local.entries(), snapshot.outcomes(), snapshot.proposals()), status);
+    }
+
+    com.opensmpsdeck.headless.NoteHandoff.Capture lasso(javafx.geometry.Rectangle2D box) {
+        var notes = view.lassoNotes(box);
+        var local = noteDraft();
+        return snapshot.inspection().captureNotes(notes, view.rolesView(), draft.pending(), snapshot.revision(),
+                draftMembership, local.velocities(), local.entries(), snapshot.outcomes(), snapshot.proposals(),
+                view.lassoRange(box, notes));
+    }
+
+    private record NoteDraft(JsonArray entries, Map<String, Integer> velocities) {}
+
+    private NoteDraft noteDraft() {
+        var entries = draft.entries();
+        var velocities = new java.util.HashMap<String, Integer>();
+        if (draft.pending()) {
+            for (var entry : entries) {
+                if (!draft.changed(entry) || !entry.isJsonObject()) continue;
+                var edit = entry.getAsJsonObject();
+                if (edit.has("velocity") && ReconstructionReview.validationIssue(entry) == null) {
+                    for (String target : targetIds(entry)) velocities.put(target, edit.get("velocity").getAsInt());
+                    if ("insertNote".equals(edit.get("op").getAsString()))
+                        velocities.put("edit-" + edit.get("id").getAsString(), edit.get("velocity").getAsInt());
+                }
+            }
+        }
+        return new NoteDraft(forApply(snapshot.revision().entries(), entries), velocities);
+    }
+
     private int pendingVelocity(Overlay note, int fallback) {
         int value = fallback;
         for (var entry : draft.entries()) {
@@ -915,6 +949,8 @@ final class ReconstructionEditor implements AutoCloseable {
         } else {
             menu = new StudioContextMenu().add("Play from here", () -> playFrom.accept(target.time()));
         }
+        if (!view.reviewing() && target.note() == null)
+            ScreenshotLasso.addTo(menu, screenshotLasso);
         menu.show(view.canvas, event);
     }
 
@@ -932,11 +968,13 @@ final class ReconstructionEditor implements AutoCloseable {
             var voices = view.voices().entries().stream().filter(entry -> entry.voice() != null && !notes.isEmpty())
                     .map(entry -> StudioContextMenu.item(entry.shortName(), null, editIssue(bulk.moveIssue(entry.voice())),
                             entry.style().color(), () -> assignVoice(entry.voice()))).toList();
-            return menu.submenu("Set role", roles)
+            menu.submenu("Set role", roles)
                     .submenu("Assign to voice", voices)
                     .add("Delete", "Delete / Backspace", deleteIssue, this::delete)
                     .add("Select all with this role", () -> { view.selectRole(hit.role(), false); view.canvas.requestFocus(); })
                     .add("Play from here", () -> playFrom.accept(time));
+            AgentClipboard.addTo(menu, this::copyForAgent);
+            return menu;
         }
         menu.add("Delete", "Delete / Backspace", deleteIssue, this::delete);
         var offsets = List.of(1, -1, 12, -12).stream().map(step -> StudioContextMenu.item(
@@ -984,9 +1022,8 @@ final class ReconstructionEditor implements AutoCloseable {
                         () -> selectNotes(note -> model.barStart(note.interval().sourceStart()).equals(model.barStart(time))))
                 .add("Play from here", () -> playFrom.accept(time));
         if (notes.stream().anyMatch(this::editableScore))
-            menu.add("Copy notes", StudioContextMenu.shortcut("C"), null, this::copyNotes);
-        var copy = copyForAgent.apply(notes);
-        if (copy != null) menu.add("Copy for agent", copy);
+            menu.add("Copy notes", this::copyNotes);
+        AgentClipboard.addTo(menu, this::copyForAgent);
         return menu;
     }
 
@@ -1891,10 +1928,12 @@ final class ReconstructionEditor implements AutoCloseable {
         } else if (editorFocused && !view.reviewing() && !event.isShortcutDown()
                 && (code == KeyCode.DELETE || code == KeyCode.BACK_SPACE)) {
             delete();
+        } else if (view.canvas.isFocused() && !view.reviewing() && AgentClipboard.shortcut(event)) {
+            if (!view.rolesView()) copyNotes();
+            return copyForAgent();
         } else if (view.canvas.isFocused() && !view.reviewing() && !view.rolesView() && event.isShortcutDown()) {
             switch (code) {
                 case A -> selectNotes(note -> true);
-                case C -> copyNotes();
                 case V -> paste(view.playhead());
                 default -> { return false; }
             }

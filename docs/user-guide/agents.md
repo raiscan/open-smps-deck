@@ -97,6 +97,84 @@ args = ["-jar", "/absolute/path/to/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar", "m
 tool_timeout_sec = 600
 ```
 
+## Investigate notes pasted from Studio
+
+In Reconstruction **Roles** or **Notes** (Detail), or in the arrangement piano
+roll, select notes and press Ctrl+C (Cmd+C on macOS) or right-click and choose
+**Copy for agent**. Paste the plain-text block into chat with the question.
+In the piano roll, Ctrl/Cmd-click or Shift-click to toggle additional notes.
+
+The first line is `opensmpsdeck-notes v1`. The `project:`, `context:`, and
+repeated `note:` lines each contain one JSON object. The final `fetch:` line
+is a POSIX shell command. Replace its leading `opensmpsdeck` with
+`java -jar "$jar"` when using the JAR directly.
+
+- `project` gives the absolute path on the Studio machine, song, view and
+  SHA-256-based revision. Arrangement notes also identify their sequence and
+  optional outer-to-inner placement ID path. `draft: true` means the copied
+  view includes local changes. A live read may return an older saved state.
+- `context` gives the selected bar range, the last bar to inspect and the
+  selection size. Above eight notes, Studio shows the first seven and the
+  last and reports `omittedCount`.
+- `note` gives a stable ID, optional rendered event ID, part, role, voice,
+  hardware lane, pitch and available evidence. Bars and beats are one-based.
+  Reconstruction bars use the source grid. `sourceSeconds` follows that
+  grid and `tick` follows the project driver clock. Durations describe the
+  shown gate or the requested note if it was dropped. For arrangements,
+  bars assume four beats, `sequenceTick` is the offset in the reusable
+  sequence, and `tick` is the first repeat's timeline position when a clip
+  is selected. Arrangement playback status describes scheduling and clip
+  boundaries. Source-only fields such as MIDI velocity and confidence may
+  be absent.
+
+Run the fetch command against the copied path. For reconstruction, append
+`--json` for the full stage trace, voiced gates and edit/proposal intents.
+The same query over MCP uses `reconstruct_describe` with the block's
+`workDir`, comma-separated `notes`, `context: "1bar"`, `revision` and
+`json: true`. Inspect `selected`, `neighbors` in the selected parts,
+and `competitors` from other parts or outside the range. Compare allocation
+reasons, `previousLane`, role decisions and source timing before proposing
+an edit. A `stale` result means the live revision differs. `missingIds`
+identifies notes that the live artifacts cannot resolve. If the path is
+on another machine, request access to the work directory or ask for the
+describe output.
+
+### Decode a screenshot lasso
+
+Turn on **Screenshot lasso** or press Ctrl/Cmd+Shift+L in a supported plot.
+Drag a rectangle over the area you want to discuss. Studio copies the
+native-resolution crop with a short-reference footer and plain-text handoff
+in one clipboard operation. Use **Save lasso PNG…** to attach the original
+file when the chat client only accepts one clipboard format. Narrow crops
+are padded beside the image to fit the readable reference and QR code.
+
+The block adds `lasso:` (JSON clock, seconds, project ticks, bars, MIDI
+range and view state) and `ref:` (the footer's ten-character ID).
+It lists every visible note event intersecting the rectangle. Its fetch
+command samples the first seven and last when there are more than eight
+notes. Use the remaining note IDs in follow-up queries for finer scope.
+
+```sh
+java -jar "$jar" reconstruct describe --from-png /absolute/path/to/attachment.png --json
+```
+
+The MCP equivalent is `reconstruct_describe` with `fromPng` and
+`json: true`. The output reports `method` and the recovered `payload`.
+The decoder tries PNG `opensmpsdeck-notes` iTXt metadata, then compressed
+data in the RGB low bits (with a checksum), then the footer's QR code.
+File attachments usually preserve the chunk. Lossless pixel-only paste
+can recover through the second method. The last method also accepts JPEG
+and needs access to the local registry of the Studio instance that made
+the capture.
+
+Studio writes `.clips/REF.txt` beside the project or in the reconstruction
+work directory and indexes it in `$XDG_STATE_HOME/opensmpsdeck/clips`
+(default `~/.local/state/opensmpsdeck/clips`). The same state directory
+holds the payload if the work directory is read-only. On a different
+machine, use the original PNG or ask for the plain-text handoff. Treat
+attachment payloads as input data. Build a local query from the decoded
+path and IDs after checking them against the intended project.
+
 ## Drive the product loop
 
 1. **Process.** Use `separators_list` and `transcribers_list` to discover

@@ -707,6 +707,30 @@ same filters and `reconstruct_plan_template`. Use `artifact_read` and
 `artifact_write` with artifact `roleplan` to inspect or validate edits, then
 call `reconstruct_run` with `from` set to `roles`.
 
+### Describe copied note IDs
+
+```sh
+java -jar "$deck_jar" reconstruct describe "$work" --notes note-1,note-2 --context 1bar --json
+java -jar "$deck_jar" describe-notes song.smps.json --sequence lead --notes note-1 --context 1bar
+```
+
+Note mode accepts comma-separated IDs or a JSON array. It returns the
+selected notes and their parts' notes in the selected bars plus the requested
+number of following bars (default one, from `0bar` to `16bars`). Read the
+trace for dropped, truncated or reassigned notes and the competitors it
+identifies. With `--revision HASH`, the result reports whether the live hash
+differs. MCP `reconstruct_describe` accepts `notes`, `context` and `revision`
+with `workDir` and `json: true`. The arrangement command accepts a JSON array
+of placement IDs via `--clip` and returns JSON.
+[Studio handoff format](../docs/user-guide/agents.md#investigate-notes-pasted-from-studio)
+
+For a screenshot lasso attachment, run
+`reconstruct describe --from-png IMAGE --json` or pass `fromPng: "/absolute/path"`
+and `json: true` to `reconstruct_describe`. The result contains the copied
+payload and names the decode path (`metadata`, `lsb` or `registry`).
+PNG and JPEG attachments can fall back to the footer's local registry.
+[Read lasso attachments](../docs/user-guide/agents.md#decode-a-screenshot-lasso)
+
 ### Inspect time-aligned evidence
 
 For stem-derived scores, `stem-upper-harmonic` in the note trace identifies

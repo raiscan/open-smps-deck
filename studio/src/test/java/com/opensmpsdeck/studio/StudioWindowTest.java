@@ -1441,6 +1441,81 @@ class StudioWindowTest {
         });
     }
 
+    @Test void pianoRollCopyForAgentIncludesTheProjectAndSelectedNotes() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var note = piano.sequence.notes().getFirst();
+            var second = piano.sequence.notes().get(1);
+            for (var picked : List.of(note, second)) {
+                double x = PianoRollView.KEYBOARD + picked.tick() * piano.scale - piano.offset + 3;
+                double y = PianoRollView.HEADER + (piano.topPitch - picked.pitch()) * PianoRollView.NOTE_ROW + 5;
+                modifierClick(piano.canvas, x, y, picked.equals(second), false, false);
+            }
+            key(piano.canvas, KeyCode.C, true);
+            var clipboard = Clipboard.getSystemClipboard();
+            var text = clipboard.getString();
+            assertNotNull(text);
+            assertTrue(text.startsWith("opensmpsdeck-notes v1\n"), text);
+            assertTrue(text.contains(file.toString()), text);
+            for (var picked : List.of(note, second)) assertTrue(text.contains(picked.id()), text);
+
+            var cleared = new ClipboardContent();
+            cleared.putString("before context menu");
+            clipboard.setContent(cleared);
+            double x = PianoRollView.KEYBOARD + note.tick() * piano.scale - piano.offset + 3;
+            double y = PianoRollView.HEADER + (piano.topPitch - note.pitch()) * PianoRollView.NOTE_ROW + 5;
+            var menu = context(piano.canvas, x, y);
+            try {
+                var action = menuItem(menu, "Copy for agent");
+                assertEquals(StudioContextMenu.shortcut("C"), ((Label) action.getGraphic()).getText());
+                action.fire();
+                assertEquals(text, clipboard.getString());
+            } finally {
+                menu.hide();
+            }
+            return null;
+        });
+    }
+
+    @Test void screenshotLassoCopiesPngAndTextForOnlyTheNotesItIntersects() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var first = piano.sequence.notes().getFirst();
+            double x = PianoRollView.KEYBOARD + first.tick() * piano.scale - piano.offset + 2;
+            double y = PianoRollView.HEADER + (piano.topPitch - first.pitch()) * PianoRollView.NOTE_ROW + 2;
+            var box = new javafx.geometry.Rectangle2D(x, y, 10, 7);
+            assertEquals(List.of(first), piano.lassoNotes(box));
+            var toggle = (ToggleButton) window.scene().lookup("#screenshot-lasso");
+            var menu = context(piano.canvas, x, y - PianoRollView.NOTE_ROW);
+            menuItem(menu, "Screenshot lasso").fire();
+            menu.hide();
+            assertTrue(toggle.isSelected());
+            Event.fireEvent(piano.canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.L, true, true, false, false));
+            assertFalse(toggle.isSelected());
+            Event.fireEvent(piano.canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.L, true, true, false, false));
+            assertTrue(toggle.isSelected());
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_PRESSED, x, y, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_DRAGGED, x + 10, y + 7, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_RELEASED, x + 10, y + 7, false, false, false, false);
+            var clipboard = Clipboard.getSystemClipboard();
+            assertTrue(window.scene().lookup("#save-lasso-png").isVisible());
+            assertTrue(clipboard.hasImage(), clipboard.getContentTypes()::toString);
+            assertTrue(clipboard.hasString());
+            assertTrue(clipboard.hasContent(DataFormat.lookupMimeType("image/png")), clipboard.getContentTypes()::toString);
+            var text = clipboard.getString();
+            assertTrue(text.contains("lasso: "), text);
+            assertTrue(text.contains(first.id()), text);
+            assertEquals(1, text.lines().filter(line -> line.startsWith("note: ")).count());
+            return null;
+        });
+    }
+
     @Test void pianoRollTransposesWithUndoOnlyWhenTheCanvasHasFocus() throws Exception {
         fx(() -> {
             ((ListView<?>) window.scene().lookup("#sequence-browser")).getSelectionModel().select(0);
@@ -1508,6 +1583,10 @@ class StudioWindowTest {
                 var melody = (Button) scene.lookup("#reconstruction-role-melody");
                 melody.fire();
                 assertEquals(plot, scene.getFocusOwner());
+                key(plot, KeyCode.C, true);
+                var copied = javafx.scene.input.Clipboard.getSystemClipboard().getString();
+                assertTrue(copied.startsWith("opensmpsdeck-notes v1\n"), copied);
+                assertTrue(copied.contains("test-note"), copied);
                 key(plot, KeyCode.EQUALS, false);
                 var title = (Label) scene.lookup("#reconstruction-note-title");
                 assertTrue(title.getText().startsWith("A♯4"), title::getText);
@@ -1524,6 +1603,10 @@ class StudioWindowTest {
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-role-selection")).getText());
                 reconstructionWorkspace(scene, "detail");
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-selection-count")).getText());
+                key(plot, KeyCode.C, true);
+                var detailCopy = Clipboard.getSystemClipboard().getString();
+                assertTrue(detailCopy.contains("reconstruction/detail"), detailCopy);
+                assertEquals(2, detailCopy.lines().filter(line -> line.startsWith("note: ")).count());
                 key(plot, KeyCode.SUBTRACT, false);
                 var status = (Label) scene.lookup("#reconstruction-status");
                 assertTrue(status.getText().contains("skipped drums or noise (1)"), status::getText);
@@ -2028,21 +2111,42 @@ class StudioWindowTest {
             var note = contextNote(view, "test-note");
             assertEquals(List.of("Delete", "Transpose", "Split at cursor", "Merge selected", "Set velocity…",
                     "Add bend/glide…", "Vibrato…", "Pin to lane", "Set role", "Select all in part",
-                    "Select all in bar", "Play from here", "Copy notes"), labels(note));
+                    "Select all in bar", "Play from here", "Copy notes", "Copy for agent"), labels(note));
             assertTrue(menuItem(note, "Merge selected").isDisable());
             assertFalse(menuItem(note, "Split at cursor").isDisable());
+            assertAgentCopy(note, "reconstruction/detail", 1);
             note.hide();
 
             var empty = context(plot, 96, 98);
-            assertEquals(List.of("Insert note here", "Paste", "Play from here", "Zoom to fit", "Select all"), labels(empty));
+            assertEquals(List.of("Insert note here", "Paste", "Play from here", "Zoom to fit", "Select all",
+                    "Screenshot lasso"), labels(empty));
             assertTrue(menuItem(empty, "Paste").isDisable());
+            menuItem(empty, "Screenshot lasso").fire();
+            empty.hide();
+            var lasso = (ToggleButton) scene.lookup("#screenshot-lasso");
+            assertTrue(lasso.isSelected());
+            // Space-drag should pan even while the lasso is armed.
+            key(plot, KeyCode.SPACE, false);
+            mouse(plot, MouseEvent.MOUSE_PRESSED, 96, 98, true);
+            mouse(plot, MouseEvent.MOUSE_DRAGGED, 150, 125, true);
+            assertFalse(view.releaseSpace(), "Space-drag should be recorded as a pan");
+            mouse(plot, MouseEvent.MOUSE_RELEASED, 150, 125, false);
+            assertFalse(scene.lookup("#save-lasso-png").isVisible());
+            assertTrue(lasso.isSelected());
+            lasso.fire();
+
+            key(plot, KeyCode.C, true);
+            empty = context(plot, 96, 98);
+            assertFalse(menuItem(empty, "Paste").isDisable());
             menuItem(empty, "Select all").fire();
             empty.hide();
             assertEquals(2, view.selectedNotes().size());
 
             reconstructionWorkspace(scene, "roles");
             var roles = contextNote(view, "test-note");
-            assertEquals(List.of("Set role", "Delete", "Select all with this role", "Play from here"), labels(roles));
+            assertEquals(List.of("Set role", "Delete", "Select all with this role", "Play from here", "Copy for agent"),
+                    labels(roles));
+            assertAgentCopy(roles, "reconstruction/roles", 2);
             menuItem(roles, "Delete").fire();
             roles.hide();
             assertEquals(2, view.selectedNotes().stream().filter(noteHit -> noteHit.fate().equals("Pending deletion")).count());
@@ -2141,7 +2245,7 @@ class StudioWindowTest {
             double x = PianoRollView.KEYBOARD + note.tick() * window.piano.scale + 12;
             double y = PianoRollView.HEADER + (window.piano.topPitch - note.pitch()) * PianoRollView.NOTE_ROW + 5;
             var piano = context(window.piano.canvas, x, y);
-            assertEquals(List.of("Delete", "Transpose"), labels(piano));
+            assertEquals(List.of("Delete", "Transpose", "Copy for agent"), labels(piano));
             var transpose = (Menu) menuItem(piano, "Transpose");
             transpose.getItems().getFirst().fire();
             piano.hide();
@@ -2180,6 +2284,19 @@ class StudioWindowTest {
 
     private static List<String> labels(ContextMenu menu) {
         return menu.getItems().stream().map(MenuItem::getText).toList();
+    }
+
+    private static void assertAgentCopy(ContextMenu menu, String workspace, long noteCount) {
+        var clipboard = Clipboard.getSystemClipboard();
+        var marker = new ClipboardContent();
+        marker.putString("before agent copy");
+        assertTrue(clipboard.setContent(marker));
+        var copy = menuItem(menu, "Copy for agent");
+        assertEquals(StudioContextMenu.shortcut("C"), ((Label) copy.getGraphic()).getText());
+        copy.fire();
+        var text = clipboard.getString();
+        assertTrue(text.contains(workspace), text);
+        assertEquals(noteCount, text.lines().filter(line -> line.startsWith("note: ")).count());
     }
 
     private static MenuItem menuItem(ContextMenu menu, String text) {

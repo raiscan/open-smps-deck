@@ -49,6 +49,23 @@ Choose **Open reconstruction…** and select the generated
 `import-work/reconstruction` directory to inspect the aligned stems,
 audition the result and make or review edits.
 
+### Copy notes into chat
+
+Select notes in Analysis **Roles** or **Notes**, or in the arrangement
+piano roll. Press Ctrl+C (Cmd+C on macOS) or right-click and choose
+**Copy for agent**. The clipboard text gives the project, note IDs,
+timing, playback evidence and a command an agent can use to inspect the
+following bar. In the piano roll, Ctrl/Cmd-click or Shift-click adds or
+removes a note from the selection. [Clipboard format](agents.md#investigate-notes-pasted-from-studio)
+
+Turn on **Screenshot lasso** in the toolbar or the empty-space menu, or press
+Ctrl/Cmd+Shift+L with the plot focused. Drag to select an image region and
+release to copy the crop and a plain-text handoff for the visible notes inside
+it. In Analysis, hold Space while dragging to pan with the lasso armed. The
+image includes a short reference in its footer. **Save lasso PNG…** saves
+the most recent capture for attachment.
+[Decode a lasso attachment](agents.md#decode-a-screenshot-lasso)
+
 ## Import a Suno folder
 
 Choose **Import Suno folder…**, select the download, then select a separate
@@ -134,8 +151,8 @@ Double-click empty space to add a note. Drag a note to change time/pitch; drag i
 right edge for duration. Select a note to edit exact tick, duration and MIDI pitch
 in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete
 or Backspace with the piano roll focused removes a selected note. Right-click
-a note for **Delete** or **Transpose**, or right-click empty space to insert a
-note at that pitch and time. Press **+** or **=** (or
+a note for **Delete**, **Transpose**, or **Copy for agent**, or right-click
+empty space to insert a note at that pitch and time. Press **+** or **=** (or
 **Numpad Add**) to raise its pitch one semitone, or **−** (or **Numpad
 Subtract**) to lower it. Hold **Shift** with any of those keys to move by an
 octave. Each move is undoable. The status line reports any move outside the
@@ -313,13 +330,16 @@ result. Use **Changes** to undo or redo drafts.
 - **Notes (Detail)**. Right-click a note to edit the selection. The menu offers
   deletion, transposition, a split at the clicked time, merging, velocity,
   pitch bend or glide, vibrato, lane pinning, and musical roles. It also offers
-  selection by part or bar and **Play from here**. Right-click empty pitch space
-  to insert or paste at that time, play, fit the view, or select all.
+  selection by part or bar, **Copy notes** for pasting in Studio, **Copy for
+  agent**, and **Play from here**. Right-click empty pitch space to insert or
+  paste at that time, play, fit the view, select all, or turn on **Screenshot
+  lasso**.
 - **Roles**. Right-click a note to set its role, assign its voice, delete the
-  selection, select all notes with that role, or play from that time. Right-click
-  a voice row to rename its tag, select its notes, or solo or mute it in Chip
-  playback. Solo highlights its notes. Mute hides them from the plot. The
-  Original reference remains available as recorded.
+  selection, select all notes with that role, use **Copy for agent**, or play
+  from that time. Right-click empty plot space for **Screenshot lasso**.
+  Right-click a voice row to rename its tag, select its notes, or solo or mute
+  it in Chip playback. Solo highlights its notes. Mute hides them from the
+  plot. The Original reference remains available as recorded.
 - **Review → Proposals**. Right-click a proposal card or a proposed note outline
   to accept or reject it, or use **Show in Detail** to jump to the affected
   notes or the proposed insertion.
@@ -330,10 +350,11 @@ right-click on another note selects that note. **Play from here** uses the
 current listening range when it contains that time, and otherwise selects
 **Song**.
 
-With the **Notes** plot focused, use Ctrl+A to select all, Ctrl+C to copy
-scored notes and Ctrl+V to paste at the playhead (Cmd on macOS). Paste uses
-the selected **Insert voice** and preserves relative onset, duration, pitch
-and velocity. Right-click empty space to paste at the clicked position.
+With the **Notes** plot focused, use Ctrl+A to select all and Ctrl+V to paste
+at the playhead (Cmd on macOS). Ctrl+C also prepares the selected scored
+notes for pasting in Studio when it copies the agent handoff. Paste uses the
+selected **Insert voice** and preserves relative onset, duration, pitch and
+velocity. Right-click empty space to paste at the clicked position.
 
 ### Listen to the reconstruction
 
