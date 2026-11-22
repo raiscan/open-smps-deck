@@ -2,6 +2,8 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.ReconstructionEditing;
 import com.opensmpsdeck.headless.ReconstructionInspection;
+import com.opensmpsdeck.headless.ReconstructionLivePreview;
+import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.headless.ReconstructionInspection.AudioKind;
 import com.opensmpsdeck.headless.ReconstructionInspection.AudioSource;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
@@ -58,7 +60,13 @@ final class ReconstructionTransport implements AutoCloseable {
     private final Runnable stopAudition;
     private final ExecutorService loader = worker("reconstruction-audio-load");
     private final Label clock = new Label();
-    private final StudioPlayback player = new StudioPlayback();
+    private final StudioPlayback player;
+    private final Label liveStatus = new Label();
+    private StudioPlayback.LiveStream liveStream;
+    private ReviewTransport.Range liveWindow;
+    private TargetPlayback preview;
+    private boolean rebuildNeeded;
+    private boolean previewJournal;
     private final ReviewTransport transport = new ReviewTransport();
     private final ExecutorService audioControl = worker("reconstruction-audio-control");
     // Only the loader touches this cache. Playback holds the current immutable waveform.
@@ -92,6 +100,8 @@ final class ReconstructionTransport implements AutoCloseable {
     private boolean controlsReady;
     private String selectedLane;
     private String voiceAnchorNote;
+    private List<String> selectedEvents = List.of();
+    private ReviewTransport.Range selectionRange;
     private Future<?> waveRead;
     private Future<?> voiceRender;
     private AudioSource requestedOriginal;
@@ -99,6 +109,7 @@ final class ReconstructionTransport implements AutoCloseable {
     private StudioPlayback.Samples originalSamples;
     private StudioPlayback.Samples chipSamples;
     private volatile StudioPlayback.Samples monitorSamples;
+    private volatile StudioPlayback.Samples liveMonitor;
     private volatile double devicePosition = Double.NaN;
     private double projectPosition;
     private volatile long epoch;
@@ -107,7 +118,8 @@ final class ReconstructionTransport implements AutoCloseable {
     private boolean closed;
 
     ReconstructionTransport(Stage stage, Path work, ReconstructionCanvas view,
-                            ReconstructionInspection model, Label status, Runnable stopAudition) {
+                            ReconstructionInspection model, Label status, Runnable stopAudition, StudioPlayback.LineFactory lines) {
+        player = new StudioPlayback(lines);
         this.stage = stage;
         this.work = work;
         this.view = view;
@@ -162,7 +174,13 @@ final class ReconstructionTransport implements AutoCloseable {
     void refresh(ReconstructionInspection next) {
         double sourcePosition = model.toSource(projectPosition);
         stopPlayback();
+        preview = null;
+        previewJournal = false;
+        rebuildNeeded = false;
+        liveMessage("");
         model = next;
+        selectedEvents = List.of();
+        selectionRange = null;
         if (waveRead != null) waveRead.cancel(true);
         requestedOriginal = null;
         requestedChip = null;
@@ -279,7 +297,10 @@ final class ReconstructionTransport implements AutoCloseable {
         HBox.setHgrow(controls, Priority.ALWAYS);
         var transportRow = new HBox(12, controls, clock);
         transportRow.setAlignment(Pos.CENTER_LEFT);
-        var hintRow = new HBox(10, scopeHint, spacer(), status);
+        liveStatus.setId("reconstruction-live-status");
+        liveStatus.managedProperty().bind(liveStatus.visibleProperty());
+        liveMessage("");
+        var hintRow = new HBox(10, scopeHint, spacer(), liveStatus, status);
         status.setMinWidth(0);
         scopeHint.setMinWidth(0);
         var footer = new VBox(5, transportRow, hintRow);
@@ -326,10 +347,16 @@ final class ReconstructionTransport implements AutoCloseable {
     void selectionChanged() {
         if (!controlsReady) return;
         var selection = view.selectedNotes();
+        var events = selection.stream().map(Overlay::eventId).sorted().toList();
+        boolean changed = !events.equals(selectedEvents);
+        if (changed || !playing) {
+            selectedEvents = events;
+            selectionRange = span(selection);
+        }
         voiceAnchorNote = selection.size() == 1 ? selection.getFirst().id() : null;
         var owner = voiceAnchorNote == null ? null : view.voices().byNote().get(voiceAnchorNote);
         if (owner != null && voices.getItems().contains(owner.id())) voices.setValue(owner.id());
-        if (scopes.getValue() == Scope.Selection) transportChanged();
+        if (scopes.getValue() == Scope.Selection && changed) transportChanged();
         else updateTransport();
     }
 
@@ -380,7 +407,7 @@ final class ReconstructionTransport implements AutoCloseable {
             case Lane -> lanes.getValue() == null ? null : sourceRange(0, model.duration());
             case Section -> section == null ? null : sourceRange(section.sourceStart(), section.sourceEnd());
             case Voice -> span(voiceNotes());
-            case Selection -> span(view.selectedNotes());
+            case Selection -> playing && selectionRange != null ? selectionRange : span(view.selectedNotes());
         };
     }
 
@@ -562,11 +589,15 @@ final class ReconstructionTransport implements AutoCloseable {
         boolean reference = hearing.getValue() == Hearing.ORIGINAL
                 || hearing.getValue() == Hearing.AB && !abSide.isSelected();
         monitorSamples = reference ? originalSamples : chipSamples;
+        liveMonitor = reference ? originalSamples : null;
         abSide.setText(reference ? "A · Original" : "B · Chip");
     }
 
     private void updatePosition(double seconds, boolean follow) {
         projectPosition = Math.clamp(seconds, 0, model.projectDuration());
+        if (previewJournal && !rebuildNeeded && liveStream != null && transport.loop == null
+                && projectPosition >= ReconstructionLivePreview.WINDOW_END)
+            liveMessage("Live window ended · Playing the built arrangement");
         view.movePlayhead(model.toSource(projectPosition), follow);
         updateClock();
     }
@@ -611,6 +642,8 @@ final class ReconstructionTransport implements AutoCloseable {
             return;
         }
         if (voiceRender != null) voiceRender.cancel(true);
+        liveStream = null;
+        if (scopes.getValue() == Scope.Selection) selectionRange = sourceSpan;
         playWhenLoaded = false;
         long request = ++epoch;
         playing = true;
@@ -651,7 +684,93 @@ final class ReconstructionTransport implements AutoCloseable {
                     });
                 }
             });
-        } else playAudio(request, project, mask, span, start);
+        } else if (chipAudible && projectWindow(span, start) != null && model.project() != null
+                && model.target() == com.opensmpsdeck.project.TargetGame.S3K && scopes.getValue() != Scope.Lane
+                && !model.project().detachedFromReconstruction()) {
+            playEditable(request, span, start);
+        } else {
+            if (previewJournal) liveMessage("Rebuild needed · Playing the built arrangement");
+            playAudio(request, project, mask, span, start);
+        }
+    }
+
+    private ReviewTransport.Range projectWindow(ReviewTransport.Range span, double start) {
+        var loop = transport.loop;
+        double from = loop == null ? span.start() : loop.start();
+        double to = loop == null ? Math.min(span.end(), ReconstructionLivePreview.WINDOW_END) : loop.end();
+        return start >= from && start < to && to <= ReconstructionLivePreview.WINDOW_END
+                ? new ReviewTransport.Range(from, to) : null;
+    }
+
+    record LiveEdit(StudioPlayback.LiveStream stream, ReviewTransport.Range window, double playhead) {}
+
+    LiveEdit liveEdit() {
+        if (!playing || liveStream == null || !liveStream.ready()) return null;
+        double seconds = Double.isFinite(devicePosition) ? devicePosition : projectPosition;
+        return seconds >= liveWindow.start() && seconds < liveWindow.end()
+                ? new LiveEdit(liveStream, liveWindow, seconds) : null;
+    }
+
+    boolean chipPlaying() { return (playing || playWhenLoaded) && hearing.getValue() != Hearing.ORIGINAL; }
+    boolean hasSavedPreview() { return previewJournal; }
+
+    void livePreparing() {
+        if (liveStream != null) liveStream.discardPending();
+        liveMessage("Preparing live preview…");
+    }
+
+    void liveSaved(LiveEdit edit, TargetPlayback playback, long eventNanos, boolean hasUnbuiltEdits) {
+        preview = hasUnbuiltEdits ? playback : null;
+        previewJournal = hasUnbuiltEdits;
+        rebuildNeeded = false;
+        if (edit.stream() == liveStream) {
+            liveStream.replace(playback, eventNanos);
+            liveMessage(hasUnbuiltEdits ? "Live preview · Saved edits" : "");
+        } else if (playing) {
+            rebuildNeeded("Playback range changed");
+        } else liveMessage(hasUnbuiltEdits ? "Live preview · Saved edits" : "");
+    }
+
+    void rebuildNeeded(String detail) {
+        rebuildNeeded = true;
+        preview = null;
+        if (liveStream != null) liveStream.reset();
+        liveMessage("Rebuild needed · " + detail);
+    }
+
+    void liveMessage(String message) {
+        liveStatus.setText(message);
+        liveStatus.setVisible(!message.isEmpty());
+    }
+
+    private void playEditable(long request, ReviewTransport.Range span, double start) {
+        var stream = player.new LiveStream(() -> Platform.runLater(() -> {
+            if (!closed && request == epoch) rebuildNeeded("Could not render the edited bank");
+        }));
+        liveStream = stream;
+        liveWindow = projectWindow(span, start);
+        var ready = preview;
+        var project = model.project();
+        audioControl.execute(() -> {
+            if (request != epoch) return;
+            transport.seconds = start;
+            player.playEditable(project, transport, () -> liveMonitor, playbackStatus(request), position -> {
+                if (request == epoch) devicePosition = position;
+            }, span, stream, ready);
+        });
+        if (previewJournal && !rebuildNeeded) liveMessage("Live preview · Saved edits");
+        playheadTimer.start();
+    }
+
+    private java.util.function.Consumer<String> playbackStatus(long request) {
+        return message -> Platform.runLater(() -> {
+            if (closed || request != epoch) return;
+            status.setText(message);
+            if (!message.startsWith("Playing")) {
+                if (Double.isFinite(devicePosition)) updatePosition(devicePosition, false);
+                playbackStopped();
+            }
+        });
     }
 
     private void playAudio(long request, StudioProject project,
@@ -661,14 +780,7 @@ final class ReconstructionTransport implements AutoCloseable {
             if (request != epoch) return;
             transport.seconds = start;
             player.playMonitor(project, transport, mask, span.end(), () -> monitorSamples,
-                    message -> Platform.runLater(() -> {
-                        if (closed || request != epoch) return;
-                        status.setText(message);
-                        if (!message.startsWith("Playing")) {
-                            if (Double.isFinite(devicePosition)) updatePosition(devicePosition, false);
-                            playbackStopped();
-                        }
-                    }), position -> {
+                    playbackStatus(request), position -> {
                         if (request == epoch) devicePosition = position;
                     }, span);
         });
@@ -683,6 +795,7 @@ final class ReconstructionTransport implements AutoCloseable {
     }
 
     private void playbackStopped() {
+        liveStream = null;
         playing = false;
         playWhenLoaded = false;
         play.setText("Play");

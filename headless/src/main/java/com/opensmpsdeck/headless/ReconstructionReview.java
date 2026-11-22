@@ -96,7 +96,7 @@ public final class ReconstructionReview {
         return ReconstructionEdits.parse(entry.getAsJsonObject(), ReconstructionEdits.FILE);
     }
 
-    private static ReconstructionEdits parse(JsonArray entries) {
+    static ReconstructionEdits parse(JsonArray entries) {
         var ids = new HashSet<String>();
         var intents = new ArrayList<ReconstructionEdits.Intent>();
         for (var entry : entries) {
@@ -172,7 +172,7 @@ public final class ReconstructionReview {
         return new SectionUpdate(result, revision[0]);
     }
 
-    private static void requireRevision(Path work, Revision expected) throws IOException {
+    static void requireRevision(Path work, Revision expected) throws IOException {
         if (!expected.equals(revision(work))) throw new Changed();
     }
 
