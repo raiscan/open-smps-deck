@@ -143,6 +143,10 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `reconstruct_view` returns a PNG and legend using fields such as `stem`,
   `harmonics`, `ridges`, `sections` and `colorBy`. Studio Analysis has
   a source picker, **Ridges**, section bands, and role and lane filters.
+  In **Detail** and **Roles**, scroll to zoom time at the pointer or
+  **Shift**-scroll to zoom pitch. Middle-drag or hold **Space** and
+  left-drag on the focused plot to pan. Tap **Space** to toggle playback
+  and Shift-drag on the ruler to set a loop.
 - **Voices** distinguish the source instrument and its musical functions.
   A line and chords from one part share a fitted sound by default. Use
   `reconstruct voices WORK_DIR` or `reconstruct_voices` to inspect identities

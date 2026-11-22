@@ -1634,6 +1634,152 @@ class StudioWindowTest {
         }
     }
 
+    @Test void reconstructionWheelZoomAnchorsTimeAndPitchInBothViews() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            var zoom = (Slider) scene.lookup("#reconstruction-zoom");
+            var pitch = view.pitchScroll;
+            double x = 76 + (plot.getWidth() - 76) * .72;
+            double fraction = .25;
+            double y = 85 + (plot.getHeight() - 105) * fraction;
+            var seeks = new ArrayList<Double>();
+            view.onSeek = seeks::add;
+
+            for (String mode : List.of("detail", "roles")) {
+                ((ToggleButton) scene.lookup("#reconstruction-" + mode + "-view")).fire();
+                zoom.setValue(0);
+                ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
+                double startPitch = 127.5 - pitch.getValue() - fraction * (128 - pitch.getMax());
+
+                scrollPlot(plot, x, y, 12, false);
+                double step = zoom.getValue();
+                assertTrue(step > 0 && step < 1);
+                scrollPlot(plot, x, y, 6, false);
+                assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+                scene.getRoot().layout();
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+                assertEquals(1.44, seeks.getLast(), .005);
+
+                double fittedSpan = 128 - pitch.getMax();
+                scrollPlot(plot, x, y, 4, true);
+                double zoomedSpan = 128 - pitch.getMax();
+                assertTrue(zoomedSpan < fittedSpan && zoomedSpan > fittedSpan - 1);
+                assertEquals(startPitch, 127.5 - pitch.getValue() - fraction * zoomedSpan, .005);
+                assertEquals(step * 1.5, zoom.getValue(), 1e-9);
+            }
+        });
+    }
+
+    @Test void reconstructionSpaceTapTogglesPlaybackOnceOnRelease() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            var play = (Button) scene.lookup("#reconstruction-play");
+            plot.requestFocus();
+            assertSame(plot, scene.getFocusOwner());
+            key(plot, KeyCode.SPACE, false);
+            key(plot, KeyCode.SPACE, false); // Key repeat while held.
+            assertEquals("Play", play.getText());
+            releaseSpace(plot);
+            assertNotEquals("Play", play.getText());
+            key(plot, KeyCode.SPACE, false);
+            releaseSpace(plot);
+            assertEquals("Play", play.getText());
+        });
+    }
+
+    @Test void reconstructionSpaceDragPansWithoutPlaybackSeekingOrEditing() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            var play = (Button) scene.lookup("#reconstruction-play");
+            var seek = new ArrayList<Double>();
+            view.onSeek = seek::add;
+            ((Slider) scene.lookup("#reconstruction-zoom")).setValue(1);
+            scene.getRoot().layout();
+
+            for (String tool : List.of("select", "insert", "cut", "bend", "vibrato", "roles")) {
+                if (tool.equals("roles")) ((ToggleButton) scene.lookup("#reconstruction-roles-view")).fire();
+                else ((ToggleButton) scene.lookup("#reconstruction-tool-" + tool)).fire();
+                view.scroll.setHvalue(.5);
+                view.fitPitch();
+                double pitch = view.pitchScroll.getValue();
+                double x = (plot.getWidth() + 76) / 2;
+                double y = 85 + (plot.getHeight() - 105) * 4.5 / 8;
+                plot.requestFocus();
+                key(plot, KeyCode.SPACE, false);
+                assertEquals(javafx.scene.Cursor.OPEN_HAND, plot.getCursor());
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x, y, true);
+                assertEquals(javafx.scene.Cursor.CLOSED_HAND, plot.getCursor());
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 40, y + 30, true);
+                releaseSpace(plot); // The mouse grab outlives the modifier until button-up.
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 40, y + 30, false);
+                assertTrue(view.scroll.getHvalue() < .5);
+                assertTrue(view.pitchScroll.getValue() < pitch);
+                assertEquals("Play", play.getText());
+                assertTrue(seek.isEmpty());
+                assertTrue(view.selectedNotes().isEmpty());
+                assertTrue(scene.lookup("#reconstruction-apply").isDisabled());
+            }
+        });
+    }
+
+    @Test void reconstructionMiddleDragPansAndShiftDragOnRulerLoops() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            ((Slider) scene.lookup("#reconstruction-zoom")).setValue(1);
+            scene.getRoot().layout();
+            view.scroll.setHvalue(.5);
+            double pitch = view.pitchScroll.getValue();
+            middleMouse(plot, MouseEvent.MOUSE_PRESSED, 200, 170, true);
+            assertEquals(javafx.scene.Cursor.CLOSED_HAND, plot.getCursor());
+            middleMouse(plot, MouseEvent.MOUSE_DRAGGED, 160, 140, true);
+            middleMouse(plot, MouseEvent.MOUSE_RELEASED, 160, 140, false);
+            assertTrue(view.scroll.getHvalue() > .5);
+            assertTrue(view.pitchScroll.getValue() > pitch);
+            assertTrue(view.selectedNotes().isEmpty());
+
+            var ranges = new ArrayList<ReviewTransport.Range>();
+            view.onRange = ranges::add;
+            modifiedMouse(plot, MouseEvent.MOUSE_PRESSED, 150, 12, true, true, false, false);
+            modifiedMouse(plot, MouseEvent.MOUSE_DRAGGED, 200, 12, true, true, false, false);
+            modifiedMouse(plot, MouseEvent.MOUSE_RELEASED, 200, 12, false, true, false, false);
+            assertTrue(ranges.getLast().end() > ranges.getLast().start());
+        });
+    }
+
+    private void withReconstructionPlot(java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test)
+            throws Exception {
+        var work = reconstructionFixture();
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                scene.getRoot().applyCss();
+                scene.getRoot().layout();
+                test.accept(scene, (ReconstructionCanvas) scene.lookup("#reconstruction-canvas").getParent());
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
+    private static void scrollPlot(Node plot, double x, double y, double delta, boolean shift) {
+        Event.fireEvent(plot, new ScrollEvent(ScrollEvent.SCROLL, x, y, x, y, shift, false, false, false,
+                false, false, 0, delta, 0, delta, ScrollEvent.HorizontalTextScrollUnits.NONE, 0,
+                ScrollEvent.VerticalTextScrollUnits.NONE, 0, 0,
+                new PickResult(plot, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
+    private static void releaseSpace(Node plot) {
+        Event.fireEvent(plot, new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.SPACE, false, false, false, false));
+    }
+
+    private static void middleMouse(Node plot, javafx.event.EventType<MouseEvent> type, double x, double y, boolean down) {
+        Event.fireEvent(plot, new MouseEvent(type, x, y, x, y, MouseButton.MIDDLE, 1, false, false, false, false,
+                false, down, false, false, false, true, new PickResult(plot, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
         var pane = fx(() -> new ReconstructionPane(stage, work));

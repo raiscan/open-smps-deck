@@ -70,7 +70,7 @@ final class ReconstructionPane implements AutoCloseable {
     private final ToggleButton soloNote = new ToggleButton("Solo note");
     private final Button clearRange = new Button("Clear loop");
     private final Label loopLabel = new Label("Shift-drag to loop");
-    private final Slider zoom = new Slider(0, 9, 0);
+    private final Slider zoom = new Slider(0, ReconstructionCanvas.MAX_TIME_ZOOM, 0);
     private final AnimationTimer playheadTimer = new AnimationTimer() {
         @Override public void handle(long now) {
             if (playing && Double.isFinite(devicePosition) && devicePosition != projectPosition)
@@ -242,7 +242,21 @@ final class ReconstructionPane implements AutoCloseable {
         root.setTop(new VBox(title, playback, editor.toolbar(), displayControls(), roleControls));
         root.setRight(editor.inspector());
         root.setCenter(new BorderPane(view.scroll, null, view.pitchScroll, null, null));
-        stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, this::key);
+        var scene = stage.getScene();
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, this::key);
+        scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> {
+            if (event.getCode() == KeyCode.SPACE
+                    && !(scene.getFocusOwner() instanceof javafx.scene.control.Control)) {
+                if (view.releaseSpace()) togglePlayback();
+                event.consume();
+            }
+        });
+        scene.focusOwnerProperty().addListener((ignored, old, next) -> {
+            if (next instanceof javafx.scene.control.Control) view.releaseSpace();
+        });
+        stage.focusedProperty().addListener((ignored, old, focused) -> {
+            if (!focused) view.cancelNavigation();
+        });
         updatePosition(0, false);
         refreshSolo();
         loadBends(model);
@@ -296,6 +310,7 @@ final class ReconstructionPane implements AutoCloseable {
         zoom.setPrefWidth(160);
         zoom.setBlockIncrement(1);
         zoom.valueProperty().addListener((ignored, previous, next) -> view.zoom(next.doubleValue()));
+        view.onTimeZoom = zoom::setValue;
         var fit = new Button("Fit song");
         fit.setOnAction(event -> zoom.setValue(0));
         var pitchOut = new Button("−");
@@ -393,7 +408,7 @@ final class ReconstructionPane implements AutoCloseable {
         }
         if (event.isShortcutDown()) return;
         if (event.getCode() == KeyCode.SPACE && !(stage.getScene().getFocusOwner() instanceof javafx.scene.control.Control))
-            togglePlayback();
+            view.holdSpace();
         else if (event.getCode() == KeyCode.R) {
             var current = sources.getValue();
             if (current != null && current.kind() == AudioKind.CHIP) {

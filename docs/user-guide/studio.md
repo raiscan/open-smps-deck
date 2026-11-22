@@ -291,13 +291,15 @@ artifacts and opens an editing workspace. It uses recorded WAV paths for the
 mix and mapped stems, and reads `render.wav` for the chip spectrogram and
 playback.
 
-- Choose a **Source** to change the spectrogram and playback together. Use
-  **Time zoom** and the horizontal scrollbar to inspect a passage. **Fit song**
-  restores the overview. **Fit pitch** follows the tonal notes in the visible
-  time window with a small margin. It starts enabled. Use the **Pitch zoom**
-  buttons and the vertical scrollbar to set a manual range. The ruler starts
-  in source seconds. Toggle
-  **Project time** to see the steady project clock on the same aligned view.
+- Choose a **Source** to change the spectrogram and playback together. In
+  **Detail** and **Roles**, scroll over the plot to zoom time at the pointer.
+  Hold **Shift** while scrolling to zoom pitch at the pointer. With the plot
+  focused, hold **Space** and left-drag to pan time and pitch, or drag with
+  the middle mouse button. You can also use **Time zoom**, **Pitch zoom**
+  and the scrollbars. **Fit song** restores the overview. **Fit pitch**
+  follows the tonal notes in the visible time window with a small margin.
+  It starts enabled. The ruler starts in source seconds. Toggle **Project
+  time** to see the steady project clock on the same aligned view.
 - Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
   background detail. **Ridges** marks the three strongest spectral peaks in
   each analysis column. **Note opacity** controls the fill. Press **O** to
@@ -307,10 +309,11 @@ playback.
   competing note IDs. Click the pitch overlay or a note in the chip lane
   strip to read its full trace. For a bend, the curve shows the applied FM
   pitch when available and the stage pitch curve otherwise.
-- Click the ruler or a note to seek. Press **Space** in the plot or click
-  **Play**. Press **R** to switch between the chip and the last mix or stem
-  at the same aligned position. On tempo-warped projects, reference playback
-  follows the project clock. Shift-drag across the plot to loop a range.
+- Click the ruler or a note to seek. Tap **Space** in the plot or click
+  **Play** to toggle playback. Press **R** to switch between the chip and
+  the last mix or stem at the same aligned position. On tempo-warped
+  projects, reference playback follows the project clock. Shift-drag on
+  the ruler to loop a range.
   Click **Clear loop** or press **Esc** to remove the loop.
 - Click a lane or a sounding note, then choose **Solo lane** or **Solo note**
   to audition that lane through the chip renderer. **Solo note** loops the
