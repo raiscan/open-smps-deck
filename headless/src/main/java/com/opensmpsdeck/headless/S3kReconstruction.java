@@ -39,7 +39,7 @@ final class S3kReconstruction {
 
     enum Change {
         OCTAVE_DOUBLE, PITCH_OUT_OF_RANGE, NO_MATCH, FM_BUSY, PSG_BUSY, SHORTENED, CUT_AT_END,
-        DAC_SIMULTANEOUS, DAC_TAIL, HARMONY_THINNED, ROLE_OVERFLOW, CHORD_ABSORBED, STEM_FRAGMENT
+        DAC_SIMULTANEOUS, DAC_TAIL, HARMONY_THINNED, ROLE_OVERFLOW, CHORD_ABSORBED, STEM_FRAGMENT, STEM_HARMONIC
     }
 
     record Reduction(MidiScore.Note note, Change change, @ReconstructionStages.Nullable String id,

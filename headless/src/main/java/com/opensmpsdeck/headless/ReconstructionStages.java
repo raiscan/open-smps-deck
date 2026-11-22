@@ -1271,7 +1271,7 @@ public final class ReconstructionStages {
                     joined = ReconstructionMonophonicStem.join(part, imported, ReconstructionLeadAudio.Track.read(stemPath, limit),
                             spectrum, limit, reductions);
                 } else {
-                    candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit));
+                    candidates.addAll(ReconstructionStemParts.upperVoicing(part, imported.notes(), spectrum, limit, reductions));
                     joined = ReconstructionStemParts.joinHolds(candidates, spectrum, reductions);
                 }
                 for (var note : joined) {

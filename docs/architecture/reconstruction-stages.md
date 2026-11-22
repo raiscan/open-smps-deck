@@ -83,6 +83,11 @@ candidate and their union against the aligned stem, then routes the
 selected monophonic contour to the lead. The vocal patch probe ranks
 sustained FM timbres independently of the singer's timbre.
 
+In polyphonic stem recovery, a generated upper note is excluded when its
+frequency, relative phase and amplitude envelope follow a concurrent
+decoded lower note's second, third or fourth harmonic. The score reduction
+and note trace report `stem-upper-harmonic`. Raw decoder notes are retained.
+
 ## Recover missed notes from stems
 
 The transcribe stage records sustained excess at partials 2–4 using a

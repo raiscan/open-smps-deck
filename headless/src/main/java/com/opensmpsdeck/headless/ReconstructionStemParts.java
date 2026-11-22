@@ -16,6 +16,8 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 final class ReconstructionStemParts {
     private static final int MAX_MISSING_FRAMES = 3;
     private static final int MIN_VOICING_FRAMES = 15;
+    static final String HARMONIC_GHOST = "stem-upper-harmonic";
+    private static final int[] HARMONIC_INTERVALS = {12, 19, 24};
 
     private ReconstructionStemParts() {}
 
@@ -108,10 +110,11 @@ final class ReconstructionStemParts {
     }
 
     static List<Note> upperVoicing(int part, List<ExternalTranscribers.RawNote> raw, Spectrum spectrum,
-                                   double duration) {
+                                   double duration, List<S3kReconstruction.Reduction> reductions) {
         if (raw.isEmpty()) return List.of();
-        var track = new ReconstructionLeadAudio.Track(spectrum.audio);
+        var track = new ReconstructionLeadAudio.Track(spectrum.audio, true);
         var ordered = raw.stream().sorted(Comparator.comparingDouble(ExternalTranscribers.RawNote::start)).toList();
+        var byPitch = ordered.stream().collect(java.util.stream.Collectors.groupingBy(ExternalTranscribers.RawNote::pitch));
         var sounding = new ArrayList<ExternalTranscribers.RawNote>();
         var recovered = new ArrayList<Note>();
         var supported = new boolean[128];
@@ -144,15 +147,38 @@ final class ReconstructionStemParts {
                         || decoded[pitch] || frame == track.frames())) {
                     int onset = since[pitch], release = latest[pitch] + 1;
                     if (release - onset >= MIN_VOICING_FRAMES) {
-                        recovered.add(new Note("transcriber-" + part + "-upper-" + pitch + "-" + onset, part,
+                        var note = new Note("transcriber-" + part + "-upper-" + pitch + "-" + onset, part,
                                 onset * ReconstructionLeadAudio.HOP, Math.min(duration, release * ReconstructionLeadAudio.HOP),
-                                pitch, 80, "audio-transcribed", .8));
+                                pitch, 80, "audio-transcribed", .8);
+                        if (harmonicGhost(note, byPitch, track)) {
+                            reductions.add(new S3kReconstruction.Reduction(note.midi(),
+                                    S3kReconstruction.Change.STEM_HARMONIC, note.id(), HARMONIC_GHOST));
+                        } else {
+                            recovered.add(note);
+                        }
                     }
                     since[pitch] = -1;
                 }
             }
         }
         return recovered;
+    }
+
+    private static boolean harmonicGhost(Note note, Map<Integer, List<ExternalTranscribers.RawNote>> byPitch,
+                                         ReconstructionLeadAudio.Track track) {
+        for (int i = 0; i < HARMONIC_INTERVALS.length; i++) {
+            int lower = note.pitch() - HARMONIC_INTERVALS[i];
+            if (lower < ReconstructionLeadAudio.LOW) continue;
+            // Decoder gates need not land on the acoustic attack or release.
+            var sounding = byPitch.getOrDefault(lower, List.of()).stream()
+                    .filter(n -> n.end() + .040 > note.start() && n.start() - .055 < note.end()).toList();
+            if (sounding.isEmpty()) continue;
+            if (track.followsHarmonic(note, lower, i + 2, frame -> {
+                double time = frame * ReconstructionLeadAudio.HOP;
+                return sounding.stream().anyMatch(n -> n.start() - .055 <= time && time < n.end() + .040);
+            })) return true;
+        }
+        return false;
     }
 
     static boolean doubling(Note note, Map<Integer, List<MidiScore.Note>> midi, Spectrum spectrum) {

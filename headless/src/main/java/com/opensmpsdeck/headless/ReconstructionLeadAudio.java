@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.IntPredicate;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 
@@ -50,6 +51,7 @@ final class ReconstructionLeadAudio {
     static final class Track {
         private final float[][] peaks = new float[(HIGH - LOW + 1) * HARMONICS][];
         private final float[][] cents = new float[peaks.length][];
+        private final float[][] fundamentalPhase;
         private final float[] rms;
         private final float[] mono;
         private final double rate;
@@ -60,10 +62,15 @@ final class ReconstructionLeadAudio {
         }
 
         Track(ReferenceAudio audio) {
+            this(audio, false);
+        }
+
+        Track(ReferenceAudio audio, boolean keepPhase) {
             int stride = Math.max(1, audio.sampleRate() / 12_000);
             rate = audio.sampleRate() / (double) stride;
             duration = audio.samples().length / (double) audio.sampleRate();
             rms = new float[(int) Math.ceil(duration / HOP)];
+            fundamentalPhase = keepPhase ? new float[HIGH - LOW + 1][rms.length] : null;
             for (int i = 0; i < peaks.length; i++) {
                 peaks[i] = new float[rms.length];
                 cents[i] = new float[rms.length];
@@ -97,7 +104,9 @@ final class ReconstructionLeadAudio {
                             double a = Math.log(Math.max(left, 1e-20)), b = Math.log(middle);
                             double c = Math.log(Math.max(right, 1e-20));
                             double frequency = (k + .5 * (a - c) / (a - 2 * b + c)) * binHz;
-                            addPeak(frame, frequency, amplitude);
+                            double phase = keepPhase ? Math.atan2(spectrum.imag[k], spectrum.real[k])
+                                    + Math.TAU * k * (window.length / 2) / spectrum.real.length : 0;
+                            addPeak(frame, frequency, amplitude, phase);
                         }
                     }
                     left = middle;
@@ -106,7 +115,7 @@ final class ReconstructionLeadAudio {
             }
         }
 
-        private void addPeak(int frame, double frequency, float amplitude) {
+        private void addPeak(int frame, double frequency, float amplitude, double phase) {
             double midi = 69 + CENTS / 100 * Math.log(frequency / 440);
             for (int h = 1; h <= HARMONICS; h++) {
                 double fundamental = midi - HARMONIC_OFFSETS[h];
@@ -116,7 +125,43 @@ final class ReconstructionLeadAudio {
                 if (amplitude <= peaks[index][frame]) continue;
                 peaks[index][frame] = amplitude;
                 cents[index][frame] = (float) (100 * (fundamental - pitch));
+                if (h == 1 && fundamentalPhase != null) fundamentalPhase[pitch - LOW][frame] = (float) phase;
             }
+        }
+
+        /**
+         * Require both harmonic phase lock and a shared envelope. Pitch coincidence
+         * alone cannot distinguish an independently attacked octave from a partial.
+         */
+        boolean followsHarmonic(Note upper, int lower, int harmonic, IntPredicate decoded) {
+            int first = first(upper.start()), last = first(upper.end());
+            double offset = 1200 * Math.log(harmonic) / Math.log(2) - 100 * (upper.pitch() - lower);
+            double cosine = 0, sine = 0;
+            double sumLower = 0, sumUpper = 0, squaresLower = 0, squaresUpper = 0, product = 0;
+            int matched = 0;
+            for (int frame = first; frame < last; frame++) {
+                double a = partialLevel(lower, 1, frame), b = partialLevel(upper.pitch(), 1, frame);
+                if (!decoded.test(frame) || Math.min(a, b) < .0012
+                        || Math.abs(partialCents(upper.pitch(), 1, frame) - partialCents(lower, 1, frame) - offset) > 18)
+                    continue;
+                double phase = fundamentalPhase[upper.pitch() - LOW][frame] - harmonic * fundamentalPhase[lower - LOW][frame];
+                cosine += Math.cos(phase);
+                sine += Math.sin(phase);
+                double x = Math.log(a), y = Math.log(b);
+                sumLower += x;
+                sumUpper += y;
+                squaresLower += x * x;
+                squaresUpper += y * y;
+                product += x * y;
+                matched++;
+            }
+            if (matched < .85 * (last - first) || matched < 12 || Math.hypot(cosine, sine) < .965 * matched)
+                return false;
+            double varianceLower = squaresLower - sumLower * sumLower / matched;
+            double varianceUpper = squaresUpper - sumUpper * sumUpper / matched;
+            double covariance = product - sumLower * sumUpper / matched;
+            return Math.min(varianceLower, varianceUpper) >= .01 * matched
+                    && covariance >= .80 * Math.sqrt(varianceLower * varianceUpper);
         }
 
         /**

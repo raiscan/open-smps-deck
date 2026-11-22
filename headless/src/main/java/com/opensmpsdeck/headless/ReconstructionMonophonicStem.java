@@ -51,7 +51,7 @@ record ReconstructionMonophonicStem(String adapter, @Nullable List<Double> span,
         if (split > 0) {
             var raw = imported.notes().subList(0, split);
             var poly = ReconstructionStemParts.notes(part, raw, duration, true);
-            poly.addAll(ReconstructionStemParts.upperVoicing(part, raw, spectrum, duration));
+            poly.addAll(ReconstructionStemParts.upperVoicing(part, raw, spectrum, duration, reductions));
             var outside = new ArrayList<Note>();
             for (var note : poly) {
                 if (note.end() <= from || note.start() >= to || from >= to) {
