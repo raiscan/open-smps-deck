@@ -157,10 +157,10 @@ final class VoicePatchShortlist {
 
         var attacks = new java.util.LinkedHashMap<String, AttackMatch>();
         for (var candidate : candidates)
-            attacks.put(candidate.id(), matchAttack(candidate, probes));
+            attacks.put(candidate.id(), matchAttack(candidate, probes, null));
         for (var variant : variants) {
             if (!attacks.containsKey(variant.id()))
-                attacks.put(variant.id(), matchAttack(new RankedPatch(variant.id(), 0), probes));
+                attacks.put(variant.id(), matchAttack(new RankedPatch(variant.id(), 0), probes, null));
         }
         var ordered = attacks.values().stream().sorted(Comparator.comparingDouble(AttackMatch::loss)
                 .thenComparing(match -> match.patch().id())).toList();
@@ -175,6 +175,16 @@ final class VoicePatchShortlist {
         // The contextual fit breaks near ties among patches with the same median rise error.
         return timely.stream().filter(match -> match.loss() <= bestLoss + GUITAR_ATTACK_MARGIN)
                 .map(match -> new RankedPatch(match.patch().id(), 1 / (1 + match.loss()))).toList();
+    }
+
+    boolean keepsGuitarAttack(List<ReconstructionAllocation.Entry> part, Path stem, VoiceWindows windows,
+                              TargetProfile profile, RankedPatch original, RankedPatch candidate,
+                              ReconstructionVoicing.FmTimbre timbre) throws IOException {
+        var probes = attackProbes(part, stem, windows, profile);
+        if (probes.size() < 3) return true;
+        var before = matchAttack(original, probes, null);
+        var after = matchAttack(candidate, probes, timbre);
+        return after.medianRise() <= before.medianRise() && after.loss() <= before.loss() + GUITAR_ATTACK_MARGIN;
     }
 
     private List<AttackProbe> attackProbes(List<ReconstructionAllocation.Entry> part, Path stem,
@@ -212,7 +222,8 @@ final class VoicePatchShortlist {
         return probes;
     }
 
-    private AttackMatch matchAttack(RankedPatch patch, List<AttackProbe> probes) throws IOException {
+    private AttackMatch matchAttack(RankedPatch patch, List<AttackProbe> probes,
+                                    ReconstructionVoicing.FmTimbre timbre) throws IOException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("attack fitting cancelled");
         var rendered = new java.util.HashMap<Integer, VoiceAttackShape.Profile>();
         var variant = catalogue.match(patch.id(), target).variant();
@@ -222,8 +233,8 @@ final class VoicePatchShortlist {
             var probe = probes.get(i);
             var shape = rendered.get(probe.pitch());
             if (shape == null) {
-                var project = CataloguePlayback.matchProbe(catalogue, variant.id(), probe.pitch(),
-                        GUITAR_ATTACK_TICKS, true, target);
+                var project = CataloguePlayback.fmTimbreProbe(catalogue, variant.id(), probe.pitch(),
+                        GUITAR_ATTACK_TICKS, target, timbre);
                 shape = attackShape.measure(VoiceWindows.renderMono(project, GUITAR_ATTACK_TICKS));
                 rendered.put(probe.pitch(), shape);
             }

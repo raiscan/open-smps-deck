@@ -253,6 +253,11 @@ For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`
 or `--lane PSG3`. Review the busy intervals and competing notes in
 `drums.droppedHits`. Dry-run a suggested `pinLane` to move a tonal blocker.
 
+S3K fresh voicing checks isolated stem attacks and held bodies for
+excess FM brightness. `sourceInstruments.*.fm.articulation.fmTimbre`
+contains any fitted feedback and modulator TL offsets. Keep the saved
+voicing to replay those settings during later arrangement edits.
+
 Use `edits.json` for musical intent. For a repeated pitch inside a held
 note, use `retrigger` with `attacks: [{"offset":0,"gate":0.06}, …]` or
 `rate` and `count` with an optional `gate`. Offsets, interval and gates are

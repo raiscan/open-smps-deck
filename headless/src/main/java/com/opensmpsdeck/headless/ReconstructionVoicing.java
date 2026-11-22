@@ -97,7 +97,8 @@ final class ReconstructionVoicing {
         Lane settings(Lane lane, boolean isFm) {
             return new Lane(lane.role(), isFm ? fm.variantId() : null, fm.shortlist(),
                     fm.gain() * lane.gain(),
-                    lane.articulation().equals(WRITTEN) ? fm.articulation() : lane.articulation(),
+                    lane.articulation().equals(WRITTEN) ? fm.articulation()
+                            : lane.articulation().withTimbre(fm.articulation().fmTimbre()),
                     lane.effects().equals(DRY) ? fm.effects() : lane.effects(),
                     fm.patchReason(), fm.articulationReason(), fm.effectReason(), List.of(),
                     lane.partGains(), lane.overrides(), null, null, null);
@@ -246,7 +247,37 @@ final class ReconstructionVoicing {
             this(part, drumPitch, variantId, null);
         }
     }
-    record Articulation(String preset, double gate, int minimumReleaseRate) {
+    record FmTimbre(String assetId, List<Integer> modulatorOffsets, int feedback) {
+        static boolean modulator(byte[] bytes, int slot) {
+            return !ReconstructionEcho.algorithmCarrier(bytes[0], slot);
+        }
+
+        void apply(byte[] bytes) {
+            bytes[0] = (byte) ((bytes[0] & ~0x38) | (feedback << 3));
+            for (int slot = 0; slot < 4; slot++) if (modulator(bytes, slot)) {
+                int offset = 21 + slot;
+                bytes[offset] = (byte) ((bytes[offset] & 128)
+                        | Math.clamp((bytes[offset] & 127) + modulatorOffsets.get(slot), 0, 127));
+            }
+        }
+
+        void validate(String at) {
+            require(assetId != null && !assetId.isBlank() && feedback >= 0 && feedback <= 7
+                    && modulatorOffsets != null && modulatorOffsets.size() == 4
+                    && modulatorOffsets.stream().allMatch(value -> value != null && value >= -127 && value <= 127),
+                    at, "invalid FM timbre settings");
+        }
+    }
+
+    record Articulation(String preset, double gate, int minimumReleaseRate, @Nullable FmTimbre fmTimbre) {
+        Articulation(String preset, double gate, int minimumReleaseRate) {
+            this(preset, gate, minimumReleaseRate, null);
+        }
+
+        Articulation withTimbre(FmTimbre timbre) {
+            return new Articulation(preset, gate, minimumReleaseRate, timbre);
+        }
+
         int duration(int ticks) { return Math.max(1, (int) Math.round(ticks * gate)); }
     }
     record Vibrato(int delay, int rate, int delta, int steps) {
@@ -281,6 +312,8 @@ final class ReconstructionVoicing {
 
     static byte[] patchBytes(InstrumentCatalogue.Asset asset, Articulation articulation) {
         byte[] bytes = asset.bytes();
+        var timbre = articulation.fmTimbre();
+        if (timbre != null && asset.id().equals(timbre.assetId())) timbre.apply(bytes);
         // S3K stores D1L/RR for its four operators in bytes 17–20.
         for (int i = 17; i < 21; i++)
             bytes[i] = (byte) ((bytes[i] & 0xf0) | Math.max(bytes[i] & 15, articulation.minimumReleaseRate()));
@@ -550,6 +583,10 @@ final class ReconstructionVoicing {
             require(articulation.gate() > 0 && articulation.gate() <= 1, at + ".articulation.gate", "expected (0,1]");
             require(articulation.minimumReleaseRate() >= 0 && articulation.minimumReleaseRate() <= (fm ? 15 : 0),
                     at + ".articulation.minimumReleaseRate", "expected 0–15 for FM or 0 for other lanes");
+            if (articulation.fmTimbre() != null) {
+                require(fm, at + ".articulation.fmTimbre", "requires FM");
+                articulation.fmTimbre().validate(at + ".articulation.fmTimbre");
+            }
             if (lane.variantId() != null) {
                 require(fm, at + ".variantId", "lane-wide patches are FM only");
                 kind(catalogue, lane.variantId(), Kind.FM_VOICE, at + ".variantId");
@@ -600,6 +637,7 @@ final class ReconstructionVoicing {
             kind(catalogue, fm.variantId(), Kind.FM_VOICE, at);
             for (var patch : fm.shortlist()) kind(catalogue, patch.variantId(), Kind.FM_VOICE, at + ".shortlist");
             var art = fm.articulation();
+            if (art.fmTimbre() != null) art.fmTimbre().validate(at + ".fm.articulation.fmTimbre");
             require(art.gate() > 0 && art.gate() <= 1 && art.minimumReleaseRate() >= 0
                     && art.minimumReleaseRate() <= 15, at, "invalid articulation");
             detune(fm.effects().detune(), at);

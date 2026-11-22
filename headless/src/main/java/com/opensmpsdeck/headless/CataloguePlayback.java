@@ -92,6 +92,17 @@ public final class CataloguePlayback {
         return renderProbe(catalogue, match, controlled, rawAsset, target);
     }
 
+    static StudioProject fmTimbreProbe(InstrumentCatalogue catalogue, String id, int pitch, int ticks,
+                                      TargetGame target, ReconstructionVoicing.FmTimbre timbre) {
+        var project = matchProbe(catalogue, id, pitch, ticks, true, target);
+        if (timbre == null) return project;
+        var voice = project.voices().getFirst();
+        var bytes = catalogue.match(id, target).asset().bytes();
+        timbre.apply(bytes);
+        return project.withAssets(List.of(new Voice(voice.id(), voice.name(), unsigned(bytes))),
+                project.envelopes(), project.samples());
+    }
+
     private static StudioProject renderProbe(InstrumentCatalogue catalogue, Match match, Recipe recipe, boolean rawAsset, TargetGame target) {
         requirePlayable(match, recipe, rawAsset, target);
         var base = new StudioProject(4, name(match), "S3K", 15, 0, List.of(), List.of(), List.of(), target, null);

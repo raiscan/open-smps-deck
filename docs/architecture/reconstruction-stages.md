@@ -1243,6 +1243,25 @@ shortlist still has to pass the sustain screen. Among sustaining candidates,
 it keeps the patches with the lowest median rise error and comparable
 attack-shape loss for the joint fit with the other instruments. In this case,
 the shortlist score is one divided by one plus the attack-shape loss.
+In S3K reconstruction, a shared FM patch with an isolated stem
+also gets a spectral balance check. The check compares full-band energy
+above 2 and 5 kHz and low harmonics relative to the fundamental, using
+exposed key-ons and bodies when an isolated gate lasts long enough.
+A patch within the 6 dB upper-band tolerance keeps its existing fit.
+When the fit has excess upper-band energy, the fitter first auditions
+changes to feedback and individual modulator total levels on the selected
+patch. Comparable feedback fits favor the smaller change. If register
+changes fall short, it considers other sustaining patches. Guitar changes
+must preserve the screened attack rise and shape. Carrier levels and operator ratios stay as defined in the
+selected patch.
+
+When applied, `fm.articulation.fmTimbre` records the catalogue asset ID,
+feedback (0–7), and four signed `modulatorOffsets` in native stored
+operator order. The offsets add to the original total levels, raise
+attenuation when positive, and apply only to modulators. The asset binding
+keeps the settings local to that patch when a scoped override substitutes
+another one. Saved voicing replays these settings with `--keep-voicing`.
+
 The PSG spill fit includes a long-hold probe alongside its short FM contour
 probes. If an attack would
 steal most of a stem-supported hold from another source part, allocation

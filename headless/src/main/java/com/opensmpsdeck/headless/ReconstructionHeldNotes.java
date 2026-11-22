@@ -120,25 +120,7 @@ final class ReconstructionHeldNotes {
         double bestLoss = Double.POSITIVE_INFINITY;
         var best = candidates.getFirst();
         for (var candidate : candidates) {
-            double loss = 0;
-            for (var example : examples) {
-                // Use the pinned synth so carrier masks, key scaling, decay,
-                // sustain level and release agree with the selected driver.
-                var clock = profile.clock();
-                double tail = Math.min(example.tailSeconds(), clock.secondsAtTick(176));
-                int pitch = Math.clamp(example.pitch(), profile.fm().low(), profile.fm().high());
-                int ticks = Math.clamp((int) clock.nearestTick((tail + .05) * 60), 1, 180);
-                var raw = CataloguePlayback.matchProbe(catalogue, candidate.id(), pitch, ticks, true, profile.game());
-                var probe = new StudioProject(4, raw.name(), "S3K", raw.ticksPerBeat(),
-                        raw.tempo(), raw.voices(), raw.sequences(), raw.clips(), raw.envelopes(), raw.samples(),
-                        profile.game(), profile.game() == TargetGame.S3K ? null : clock.tempo());
-                double[] levels = power(TargetPlayback.prepare(probe),
-                        Math.max(1, (int) clock.frameAtTick(ticks)), S3kRenderer.ChannelMask.NONE);
-                double end = windowDb(levels, tail);
-                double decay = end - windowDb(levels, example.earlySeconds());
-                loss += Math.max(0, example.source().minimumDecayDb() - decay)
-                        + Math.max(0, MIN_RENDER_DB - end);
-            }
+            double loss = patchLoss(catalogue, profile, candidate.id(), examples, null);
             if (loss == 0) compatible.add(candidate);
             if (loss < bestLoss) {
                 bestLoss = loss;
@@ -146,6 +128,30 @@ final class ReconstructionHeldNotes {
             }
         }
         return compatible.isEmpty() ? List.of(best) : List.copyOf(compatible);
+    }
+
+    static double patchLoss(InstrumentCatalogue catalogue, TargetProfile profile, String variant,
+                            List<Example> examples, ReconstructionVoicing.FmTimbre timbre) throws IOException {
+        double loss = 0;
+        for (var example : examples) {
+            // Use the pinned synth so carrier masks, key scaling, decay,
+            // sustain level and release agree with the selected driver.
+            var clock = profile.clock();
+            double tail = Math.min(example.tailSeconds(), clock.secondsAtTick(176));
+            int pitch = Math.clamp(example.pitch(), profile.fm().low(), profile.fm().high());
+            int ticks = Math.clamp((int) clock.nearestTick((tail + .05) * 60), 1, 180);
+            var raw = CataloguePlayback.fmTimbreProbe(catalogue, variant, pitch, ticks, profile.game(), timbre);
+            var probe = new StudioProject(4, raw.name(), "S3K", raw.ticksPerBeat(),
+                    raw.tempo(), raw.voices(), raw.sequences(), raw.clips(), raw.envelopes(), raw.samples(),
+                    profile.game(), profile.game() == TargetGame.S3K ? null : clock.tempo());
+            double[] levels = power(TargetPlayback.prepare(probe),
+                    Math.max(1, (int) clock.frameAtTick(ticks)), S3kRenderer.ChannelMask.NONE);
+            double end = windowDb(levels, tail);
+            double decay = end - windowDb(levels, example.earlySeconds());
+            loss += Math.max(0, example.source().minimumDecayDb() - decay)
+                    + Math.max(0, MIN_RENDER_DB - end);
+        }
+        return loss;
     }
 
     static double db(double power) { return 10 * Math.log10(Math.max(1e-12, power)); }

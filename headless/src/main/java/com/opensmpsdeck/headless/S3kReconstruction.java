@@ -600,7 +600,7 @@ final class S3kReconstruction {
                         String selectedId = selected.id();
                         if (isFm) {
                             var activeArt = scoped.minimumReleaseRate() == null ? articulation
-                                    : new ReconstructionVoicing.Articulation("scoped", articulation.gate(), scoped.minimumReleaseRate());
+                                    : new ReconstructionVoicing.Articulation("scoped", articulation.gate(), scoped.minimumReleaseRate(), articulation.fmTimbre());
                             var patch = assignment == null ? ReconstructionVoicing.patchBytes(selected, activeArt) : selected.bytes();
                             selectedId = ReconstructionVoicing.patchId(selected, patch);
                             voices.putIfAbsent(selectedId, new Voice(selectedId, selected.name(), unsigned(patch), patchedOrigin(catalogue, selected, patch)));
@@ -738,7 +738,7 @@ final class S3kReconstruction {
             psgOffset = 0;
         }
         if (settings != null && settings.minimumReleaseRate() != null)
-            articulation = new ReconstructionVoicing.Articulation("scoped", articulation.gate(), settings.minimumReleaseRate());
+            articulation = new ReconstructionVoicing.Articulation("scoped", articulation.gate(), settings.minimumReleaseRate(), articulation.fmTimbre());
         var note = anchor.note().midi();
         int level = Math.max(1, volume(part, note) - (fm ? 0 : 24));
         if (voice != null) {

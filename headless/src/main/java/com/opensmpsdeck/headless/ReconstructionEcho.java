@@ -32,8 +32,12 @@ final class ReconstructionEcho {
 
     private ReconstructionEcho() {}
 
-    // Algorithm masks in the editable patch's 4/3/2/1 operator order.
+    // Algorithm carrier masks in native stored order (op1, op3, op2, op4).
     private static final int[] CARRIERS = {8, 8, 8, 8, 10, 14, 14, 15};
+
+    static boolean algorithmCarrier(int algorithm, int storedSlot) {
+        return (CARRIERS[algorithm & 7] & (1 << storedSlot)) != 0;
+    }
 
     static int fmVolumeFloor(byte[] patch, TargetProfile profile) {
         return fmVolumeFloor(i -> patch[i] & 255, profile);
@@ -42,12 +46,12 @@ final class ReconstructionEcho {
     static int fmVolumeFloor(java.util.function.IntUnaryOperator patch,
                              TargetProfile profile) {
         int floor = 0;
-        int carriers = CARRIERS[patch.applyAsInt(0) & 7];
+        int algorithm = patch.applyAsInt(0) & 7;
         for (int i = 0; i < 4; i++) {
             int tl = patch.applyAsInt(21 + i);
             boolean carrier = switch (profile.carrierSelection()) {
                 case TL_HIGH_BIT -> (tl & 128) != 0;
-                case ALGORITHM -> (carriers & (1 << i)) != 0;
+                case ALGORITHM -> algorithmCarrier(algorithm, i);
             };
             if (carrier) floor = Math.max(floor, tl & 127);
         }

@@ -14,6 +14,7 @@ import static com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionVoicing.*;
 import com.opensmpsdeck.headless.VoicePatchShortlist.RankedPatch;
+import com.opensmpsdeck.project.TargetGame;
 
 final class ReconstructionVoiceStage {
     private static final double ARTICULATION_MARGIN = .004;
@@ -316,6 +317,37 @@ final class ReconstructionVoiceStage {
                     selected.articulation(), lane.effects(), "low-register stem harmonics",
                     selected.changedArticulation() ? "low-register stem harmonics" : lane.articulationReason(),
                     lane.effectReason(), lane.instruments()));
+        }
+        // Only a mapped stem can distinguish the instrument's own upper band
+        // from cymbals, transients, or other sources in the mix.
+        if (shared && !stems.isEmpty() && options.target() == TargetGame.S3K) {
+            var timbreWindows = windows;
+            for (int i = 0; i < models.size(); i++) {
+                var model = models.get(i);
+                var lane = result.get(model.id());
+                if (!model.shared() || model.id().equals(vocalGroup) || lane.variantId() == null || model.stem() == 0)
+                    continue;
+                var part = fitGroups.get(model.id());
+                int partId = part.getFirst().note().part();
+                var stem = options.stems().get(partId);
+                var timbreFit = new VoiceTimbreFit(catalogue, stem, part, windows);
+                var original = model.patches().stream().filter(patch -> patch.id().equals(lane.variantId()))
+                        .findFirst().orElse(new RankedPatch(lane.variantId(), 0));
+                var examples = sustainExamples.getOrDefault(model.id(), List.of());
+                double sustainLoss = ReconstructionHeldNotes.patchLoss(catalogue, score.profile(), original.id(), examples, null);
+                var choice = timbreFit.refine(original, model.patches(), candidate ->
+                        ReconstructionHeldNotes.patchLoss(catalogue, score.profile(), candidate.patch().id(),
+                                examples, candidate.timbre()) <= sustainLoss
+                        && (!guitarParts.contains(partId) || screening.keepsGuitarAttack(part, stem, timbreWindows,
+                                score.profile(), original, candidate.patch(), candidate.timbre())));
+                if (choice == null) continue;
+                var adjusted = new Lane(lane.role(), choice.patch().id(), lane.shortlist(), lane.gain(),
+                        lane.articulation().withTimbre(choice.timbre()), lane.effects(), "stem spectral balance",
+                        lane.articulationReason(), lane.effectReason(), lane.instruments());
+                var trial = render(windows, references, source, catalogue, model, "", adjusted);
+                double gain = fit.trial(i, trial).selection().gain();
+                result.put(model.id(), adjusted.withGain(gain > 0 ? gain : lane.gain()));
+            }
         }
         if (shared) {
             var instruments = new LinkedHashMap<String, SourceSound>();

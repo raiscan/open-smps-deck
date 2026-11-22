@@ -575,6 +575,12 @@ available. When source stems support it, drum-to-tonal level fitting uses
 gated K-weighted loudness. RMS in the reports and audition output describes
 signal level.
 
+S3K fits with isolated stems screen shared FM patches for
+excess upper-band energy. When the chosen patch is too bright, the fitter
+can select a different catalogue voice or tune feedback and modulator
+levels while checking hold and guitar attack behavior. The fitted settings
+travel with the source instrument in `voicing.json`.
+
 Use `reconstruct voice WORK_DIR --lane FM1` to refit only FM1. Refits preserve
 existing gains for unchanged lane material and retain scoped overrides.
 A new role label alone does not trigger a level change. Use

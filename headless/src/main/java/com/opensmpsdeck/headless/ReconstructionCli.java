@@ -707,7 +707,7 @@ final class ReconstructionCli {
                     evidence.add(new MatchEvidence(kind, id, key, choice.report()));
                 }
             }
-            if (lane.variantId() != null && lane.articulation().minimumReleaseRate() > 0) {
+            if (lane.variantId() != null && (lane.articulation().minimumReleaseRate() > 0 || lane.articulation().fmTimbre() != null)) {
                 var asset = catalogue.match(lane.variantId()).asset();
                 String emitted = ReconstructionVoicing.patchId(asset, ReconstructionVoicing.patchBytes(asset, lane.articulation()));
                 choices.forEach((key, choice) -> evidence.add(new MatchEvidence(kind, id, key,
