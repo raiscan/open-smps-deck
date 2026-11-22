@@ -13,25 +13,29 @@ Two private audio-only S3K reconstructions, A (153 s) and B (163 s), on a
 Ryzen 9 9950X with OpenJDK 25. Measurements use the pipeline at
 `fdf20f45`, with an unchanged score and the same initial affinity and saved
 voicing each pass. Each case ran in its own JVM with one discarded warm-up and
-two measured runs for A and one completed measured run for B. The jobs
-overlapped on the same host. Stage figures are wall seconds (median for A). Indented rows are
+two measured runs. The jobs overlapped on the same host. Stage figures are
+median wall seconds. Indented rows are
 components of the preceding stage. The edit probe adds a single pitch change
 without rebuilding or rendering and resets the journal between samples.
 
 | Stage or operation | A (s) | B (s) |
 | --- | ---: | ---: |
-| Roles | 1.76 | 3.96 |
-| ↳ Lead continuity | 1.55 | 3.32 |
-| Voices (voice identification) | 0.33 | 0.94 |
-| Allocation | 0.42 | 1.28 |
-| Voicing stage | 49.93 | 138.45 |
-| ↳ Fitting call | 37.15 | 70.01 |
-| Assembly, including reports and WAV | 142.09 | 158.03 |
-| ↳ Prepare arrangement and compile bank | 0.043 | 0.022 |
-| ↳ Full-song WAV render and write | 14.36 | 7.39 |
-| ↳ Held-note report | 125.39 | 147.84 |
-| Edit journal validation and write | 5.80 | 15.00 |
-| In-memory apply of the score intent | 0.0013 | 0.0034 |
+| Roles | 1.76 | 6.51 |
+| ↳ Lead continuity | 1.55 | 5.58 |
+| Voices (voice identification) | 0.33 | 1.82 |
+| Allocation | 0.42 | 2.89 |
+| Voicing stage | 49.93 | 355.60 |
+| ↳ Fitting call | 37.15 | 191.24 |
+| Assembly, including reports and WAV | 142.09 | 166.21 |
+| ↳ Prepare arrangement and compile bank | 0.043 | 0.052 |
+| ↳ Full-song WAV render and write | 14.36 | 12.78 |
+| ↳ Held-note report | 125.39 | 146.77 |
+| Edit journal validation and write | 5.80 | 13.36 |
+| In-memory apply of the score intent | 0.0013 | 0.0043 |
+
+Host load varied sharply. In case B the two warm passes took 138–573 s for
+voicing and 158–174 s for full assembly. Use the numbers to identify
+where time goes on this host.
 
 The voice stage searches and probes FM patches and calibrates levels. That
 work has value when fitting sound. A pitch, gate or bend tweak can usually
