@@ -100,10 +100,16 @@ public final class S3kRenderer {
     static void renderPackageMusic(String game, AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
                                    SmpsPhysicalPolicy policy, int presentations, PcmSink sink, ChipWriteObserver observer)
             throws IOException {
+        renderPackageMusic(game, data, dac, config, policy, presentations, ChannelMask.NONE, sink, observer);
+    }
+
+    static void renderPackageMusic(String game, AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
+                                   SmpsPhysicalPolicy policy, int presentations, ChannelMask mask, PcmSink sink,
+                                   ChipWriteObserver observer) throws IOException {
         var prepared = prepare(data, dac, config, () -> {
             throw new IllegalStateException("music restoration requires a previous project");
         }, true);
-        renderPrepared(prepared, policy, presentations, ChannelMask.NONE, sink, observer, game);
+        renderPrepared(prepared, policy, presentations, mask, sink, observer, game);
     }
 
     private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,

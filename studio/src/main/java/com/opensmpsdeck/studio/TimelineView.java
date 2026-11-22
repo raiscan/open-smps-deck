@@ -205,7 +205,7 @@ final class TimelineView extends ViewportCanvas {
         if (reference != null && referenceLane.wave() != null) {
             reviewEnd = Math.max(reviewEnd, reference.offsetSeconds() + referenceLane.wave().duration());
         }
-        double reviewTicks = Math.min(reviewEnd * ticksPerSecond(), 10_000_000 / scale);
+        double reviewTicks = Math.min(ReviewTransport.tickAt(readOnly ? null : project, reviewEnd), 10_000_000 / scale);
         dimensions(GUTTER+(Math.max(Math.max(minimum,end), reviewTicks)+project.ticksPerBeat()*4.0)*scale,
                 RULER+LANES.size()*ROW+20);
         double scrollable=Math.max(0,contentWidth-scroll.getViewportBounds().getWidth());
@@ -225,7 +225,7 @@ final class TimelineView extends ViewportCanvas {
     }
 
     void reveal(double seconds) {
-        double x = seconds * ticksPerSecond() * scale;
+        double x = ReviewTransport.tickAt(readOnly ? null : project, seconds) * scale;
         double width = canvas.getWidth() - GUTTER;
         double scrollable = Math.max(0, contentWidth - canvas.getWidth());
         if ((x < offset || x > offset + width) && scrollable > 0) {
@@ -238,11 +238,11 @@ final class TimelineView extends ViewportCanvas {
     }
 
     private double secondsAt(double x) {
-        return Math.max(0, (x - GUTTER + offset) / (scale * ticksPerSecond()));
+        return ReviewTransport.secondsAt(readOnly ? null : project, Math.max(0, (x - GUTTER + offset) / scale));
     }
 
     private double reviewX(double seconds) {
-        return GUTTER + seconds * scale * ticksPerSecond() - offset;
+        return GUTTER + ReviewTransport.tickAt(readOnly ? null : project, seconds) * scale - offset;
     }
 
     private ReviewTransport.Range range(double other) {
@@ -341,7 +341,7 @@ final class TimelineView extends ViewportCanvas {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
         g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
         var shownLoop = loopDrag == null ? loop : loopDrag;
-        referenceLane.viewport(w, offset, scale * ticksPerSecond(), playhead / ticksPerSecond(), shownLoop);
+        referenceLane.viewport(w, offset, scale * ticksPerSecond(), ReviewTransport.secondsAt(readOnly ? null : project, playhead), shownLoop);
         if(project==null) return;
         g.setFont(Font.font("System",13));
         for(int row=0;row<LANES.size();row++) {

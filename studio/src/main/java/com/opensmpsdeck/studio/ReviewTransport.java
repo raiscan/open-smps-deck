@@ -34,7 +34,27 @@ final class ReviewTransport {
     void ab(boolean referenceSide) { monitor = new Monitor(Mode.AB, referenceSide); }
 
     static double ticksPerSecond(StudioProject project) {
-        return project == null || project.nativeProgram() != null ? 60 : 60 * (256 - project.tempo()) / 256.0;
+        return project == null || project.nativeProgram() != null ? 60 : project.clock().ticksPerSecond();
+    }
+
+    static double tickAt(StudioProject project, double seconds) {
+        if (project == null || project.nativeTempo() == null || seconds < 0)
+            return seconds * ticksPerSecond(project);
+        var clock = project.clock();
+        double frame = seconds * 60;
+        long next = clock.ticksAfterFrames((long) Math.floor(frame) + 1);
+        if (next == 0) return 0;
+        long origin = clock.frameAtTick(next - 1);
+        return next - 1 + (frame - origin) / (clock.frameAtTick(next) - origin);
+    }
+
+    static double secondsAt(StudioProject project, double tick) {
+        if (project == null || project.nativeTempo() == null || tick < 0)
+            return tick / ticksPerSecond(project);
+        var clock = project.clock();
+        long prior = (long) tick;
+        long origin = clock.frameAtTick(prior);
+        return (origin + (tick - prior) * (clock.frameAtTick(prior + 1) - origin)) / 60.0;
     }
 
     static final class Lanes {

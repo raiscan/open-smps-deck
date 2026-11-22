@@ -71,7 +71,7 @@ final class ReconstructionSustain {
         }
         String warning = String.format(Locale.ROOT, "FM1 patch %s dips %.1f dB mid-note on %s (project %.2f s). %s",
                 lane.variantId(), worst, ReconstructionDescribe.pitch(dipped.note().pitch()),
-                dipped.startTick() / (double) PRESENTATIONS_PER_SECOND,
+                score.profile().clock().secondsAtTick(dipped.startTick()),
                 alternative == null ? "No audible shortlist alternative."
                         : String.format(Locale.ROOT, "Flattest shortlist alternative is %s (%.1f dB RMS spread).",
                                 alternative, flattest));
@@ -114,7 +114,7 @@ final class ReconstructionSustain {
             if (dip > MIN_DIP_DB) warning = String.format(Locale.ROOT,
                     "FM1 patch %s dips %.1f dB mid-note on %s (project %.2f s).",
                     note.voice.id(), dip, ReconstructionDescribe.pitch(note.pitch),
-                    note.start / (double) PRESENTATIONS_PER_SECOND);
+                    project.clock().secondsAtTick(note.start));
         }
         return new Probe(longest.size(), held.size(), total, worst, warning);
     }

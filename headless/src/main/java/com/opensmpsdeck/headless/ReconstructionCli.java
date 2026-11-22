@@ -238,7 +238,7 @@ final class ReconstructionCli {
                                        Options options, ReconstructionStages.Score transcription,
                                        PrintStream out) throws IOException {
         long durationUs = transcription.durationUs();
-        int frames = transcription.frames();
+        int frames = (int) options.profile().clock().ticksAfterFrames(transcription.frames());
         MidiScore score = transcription.source();
         var prepared = new S3kReconstruction.Score(score.parts(),
                 transcription.notes().stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
@@ -292,7 +292,7 @@ final class ReconstructionCli {
         var result = previous == null || refitLevels || !levelTargets.isEmpty()
                 ? ReconstructionLevels.calibrate(score, catalogue, allocation, retained, levelTargets) : retained;
         if (previous != null)
-            ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score).frames());
+            ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score));
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
                 result.representative("FM1", allocated.get("FM1"))));
         return new ReconstructionVoicing.Result(result.version(), result.lanes(), result.fitWindows(), warning,
@@ -336,7 +336,7 @@ final class ReconstructionCli {
         }
         result = ReconstructionVoicing.withCymbalGains(result,
                 ReconstructionCymbals.gains(score, allocated.getOrDefault("PSG3", List.of())));
-        ReconstructionVoicing.validate(result, allocation, catalogue, timeline.frames());
+        ReconstructionVoicing.validate(result, allocation, catalogue, timeline);
         return result;
     }
 
@@ -441,8 +441,8 @@ final class ReconstructionCli {
         var timeline = ReconstructionTimeMap.of(score);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
-                        ? entry.note().startTick(timeline.frames()) : entry.startTick())).toList());
-        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline.frames());
+                        ? timeline.startTick(entry.note()) : entry.startTick())).toList());
+        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline);
         var voiceAssignments = voicing.voiceAssignments() == null
                 ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
         var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
@@ -459,13 +459,13 @@ final class ReconstructionCli {
         var bankFit = score.inputs().audioOnly() == null ? List.<ReconstructionAllocation.Entry>of()
                 : bankFitCandidates(articulated, playback.origins(), authored, layers.keySet());
         Arrangement arrange = (echoes, copies, bends, omitPolicy, bankPass) -> S3kReconstruction.arrangeAllocated(
-                options.name(), options.ticksPerBeat(), timeline.frames(),
+                options.name(), options.ticksPerBeat(), timeline.ticks(),
                 new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()),
                 compactForBank(articulated, bankFit, bankPass),
                 structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
                 authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
                 omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
-                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0, score.inputs().profile());
+                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0, score.profile());
         return new Assembly(matched, ordered, layout, playback, arrange);
     }
 
@@ -608,7 +608,8 @@ final class ReconstructionCli {
                                List<ReconstructionAllocation.RunPlacement> fastRuns, List<String> copyLanes,
                                Arrangement arrangement, PrintStream out, LoadedProject existing, Map<String, String> assemblyInputs) throws IOException {
         long durationUs = transcription.durationUs();
-        var timeline = ReconstructionTimeMap.of(transcription);
+        var timeline = ReconstructionTimeMap.of(transcription,
+                transcription.inputs() == null ? options.profile().clock() : transcription.profile().clock());
         int frames = timeline.frames();
         MidiScore score = transcription.source();
         boolean audioOnly = transcription.inputs() != null && transcription.inputs().audioOnly() != null;
@@ -857,7 +858,7 @@ final class ReconstructionCli {
     static com.opensmpsdeck.project.CompiledProject compileTarget(StudioProject project) {
         if (project.target() == TargetGame.S3K) return ProjectCompiler.compileWithAssets(project);
         var driver = (ClassicPackageDriver) PackageDriver.supported(project.target().id());
-        int tempo = driver.convertTempo(project.tempo()).targetByte();
+        int tempo = driver.projectTempo(project).targetByte();
         var layout = driver.compile(project, tempo);
         var compiled = new com.opensmpsdeck.project.CompiledProject(layout.bytes(), project.envelopes(), project.samples());
         driver.preflight(compiled);

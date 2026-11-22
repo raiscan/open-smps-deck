@@ -49,16 +49,16 @@ final class DrumEvidence {
         var psg3 = placements.getOrDefault("PSG3", List.of());
         var busy = psg3.stream().map(row -> row.allocation().placement())
                 .sorted(Comparator.comparingLong(Timing::startTick)).toList();
-        int first = (int) Math.clamp(Math.ceil(timeline.project(start) * 60 - 1e-8), 0, timeline.frames());
-        int limit = (int) Math.clamp(Math.floor(timeline.project(end) * 60 + 1e-8), first, timeline.frames());
+        int first = Math.clamp((int) timeline.clock().ticksAfterFrames((long) Math.ceil(timeline.project(start) * 60 - 1e-8)), 0, timeline.ticks());
+        int limit = Math.clamp((int) timeline.clock().ticksAfterFrames((long) Math.floor(timeline.project(end) * 60 + 1e-8)), first, timeline.ticks());
         var losses = new ArrayList<Loss>();
         var dropped = new ArrayList<DroppedHit>();
         for (var row : lost) {
             var allocation = row.allocation();
             var effective = allocation.effective().timing();
             if (effective.sourceEnd() <= start || effective.sourceStart() >= end) continue;
-            int from = (int) Math.clamp(effective.startTick(), 0, timeline.frames() - 1);
-            int to = (int) Math.clamp(effective.endTick(), from + 1, timeline.frames());
+            int from = (int) Math.clamp(effective.startTick(), 0, timeline.ticks() - 1);
+            int to = (int) Math.clamp(effective.endTick(), from + 1, timeline.ticks());
             String reason = allocation.reason();
             String blocked = blockedLane(row, all);
             boolean simultaneous = reason.equals("simultaneous-dac-hit");
@@ -71,7 +71,7 @@ final class DrumEvidence {
             if (blocked.equals("PSG3") && ReconstructionCymbals.eligible(row.pitch())
                     && (allocation.laneType() == ReconstructionLaneType.NOISE
                     || reason.equals("psg-noise-lane-busy") && allocation.expectedLanes().contains("DAC"))) {
-                gate = ticks(from, Math.min(timeline.frames(), from + ReconstructionCymbals.gate(row.pitch())), timeline);
+                gate = ticks(from, Math.min(timeline.ticks(), from + ReconstructionCymbals.gate(row.pitch())), timeline);
             }
             var requested = blocked.equals("DAC") ? ticks(from, from + 1, timeline) : gate;
 
@@ -85,7 +85,7 @@ final class DrumEvidence {
                 var placement = opponent.allocation().placement();
                 if (reason.equals("protect-dac-tail"))
                     placement = ticks((int) placement.startTick(),
-                            Math.min(timeline.frames(), (int) placement.startTick() + ReconstructionAllocation.DAC_PROTECTED_TICKS), timeline);
+                            Math.min(timeline.ticks(), (int) placement.startTick() + ReconstructionAllocation.DAC_PROTECTED_TICKS), timeline);
                 opponents.add(competitor(opponent, placement, placements, fmOnly, timeline, profile));
             }
             if ((simultaneous || blocked.equals("PSG3")) && !fmOnly) {
@@ -109,7 +109,7 @@ final class DrumEvidence {
             var note = source.note();
             // A new pin requests the authored role gate, which can be longer than the current placement.
             var gate = ticks((int) Math.min(interval.startTick(), source.timing().startTick()),
-                    (int) Math.min(timeline.frames(), Math.max(interval.endTick(), source.timing().endTick())), timeline);
+                    (int) Math.min(timeline.ticks(), Math.max(interval.endTick(), source.timing().endTick())), timeline);
             for (var lane : Stream.concat(ReconstructionAllocation.FM.stream(), ReconstructionAllocation.PSG.stream()).toList()) {
                 if (lane.equals(allocation.lane()) || !ReconstructionEdits.pinCompatible(note, false, lane, fmOnly, profile)
                         || lane.startsWith("PSG") && ReconstructionEdits.laneTypeIssue(note, false, ReconstructionLaneType.PSG, fmOnly, profile) != null)

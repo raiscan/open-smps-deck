@@ -89,7 +89,7 @@ final class PortablePackageWriter {
         int tempo = project.tempo();
         Integer speedUpTempo = options.speedUpTempo();
         if (driver instanceof ClassicPackageDriver classic) {
-            tempo = convertTempo(classic, "Normal tempo", tempo);
+            tempo = reportTempo(classic, "Normal tempo", tempo, classic.projectTempo(project));
             if (speedUpTempo != null) speedUpTempo = convertTempo(classic, "Speed-shoes tempo", speedUpTempo);
             if (!tempoWarnings.isEmpty() && options.strictTempo())
                 throw new IllegalArgumentException(String.join("\n", tempoWarnings));
@@ -267,7 +267,11 @@ final class PortablePackageWriter {
     }
 
     private int convertTempo(ClassicPackageDriver classic, String field, int sourceByte) {
-        var conversion = classic.convertTempo(sourceByte);
+        return reportTempo(classic, field, sourceByte, classic.convertTempo(sourceByte));
+    }
+
+    private int reportTempo(ClassicPackageDriver classic, String field, int sourceByte,
+                            ClassicPackageDriver.TempoConversion conversion) {
         if (!conversion.exact()) {
             warnings.add("TEMPO_APPROXIMATED");
             tempoWarnings.add(conversion.warning(field, sourceByte, classic));

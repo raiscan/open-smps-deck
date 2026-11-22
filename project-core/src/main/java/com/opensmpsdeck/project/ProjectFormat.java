@@ -58,6 +58,7 @@ public final class ProjectFormat {
                 root.remove("arrangementVersion");
             }
             var target = root.remove("target");
+            var nativeTempo = root.remove("nativeTempo");
             TargetGame game = target == null ? TargetGame.S3K : TargetGame.parse(string(target, "target"));
             JsonObject o = version==5 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "voices", "envelopes", "samples", "nativeProgram")
                     : arrangement==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
@@ -70,7 +71,8 @@ public final class ProjectFormat {
                     version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     arrangement>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
                     arrangement>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes,arrangement,groups,placements,
-                    detached != null && detached.getAsBoolean(), retailSongOrigin(derivedFrom), game);
+                    detached != null && detached.getAsBoolean(), retailSongOrigin(derivedFrom), game,
+                    nativeTempo == null ? null : integer(nativeTempo, "nativeTempo"));
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -156,6 +158,7 @@ public final class ProjectFormat {
         JsonObject o = new JsonObject();
         o.addProperty("formatVersion",project.formatVersion()); o.addProperty("name",project.name()); o.addProperty("mode",project.mode());
         if (project.target() != TargetGame.S3K) o.addProperty("target", project.target().id());
+        if (project.nativeTempo() != null) o.addProperty("nativeTempo", project.nativeTempo());
         o.addProperty("ticksPerBeat",project.ticksPerBeat());
         if (project.nativeProgram()==null) o.addProperty("tempo",project.tempo());
         JsonArray voices = new JsonArray();
@@ -265,6 +268,11 @@ public final class ProjectFormat {
         if (!"S3K".equals(project.mode())) throw invalid("mode", "only S3K is supported");
         range(project.ticksPerBeat(),1,Integer.MAX_VALUE,"ticksPerBeat"); range(project.tempo(),0,255,"tempo");
         NativeProgram nativeProgram = project.nativeProgram();
+        if (project.nativeTempo() != null) {
+            if (nativeProgram != null || project.target() == TargetGame.S3K || project.tempo() != 0)
+                throw invalid("nativeTempo", "requires a classic target arrangement with fallback tempo zero");
+            range(project.nativeTempo(), project.target() == TargetGame.S1 ? 2 : 1, 255, "nativeTempo");
+        }
         if ((project.formatVersion()==5) != (nativeProgram!=null))
             throw invalid("nativeProgram","required only in formatVersion 5");
         if (nativeProgram!=null) {

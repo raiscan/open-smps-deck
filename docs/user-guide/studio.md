@@ -58,7 +58,9 @@ unmapped file, and a cross marks an error that blocks reconstruction.
 Choose the **Target game** before starting. The default is Sonic 3 & Knuckles
 (S3K). Sonic 1 and Sonic 2 reconstruction are in progress, and assembly can
 stop if the selected driver cannot play an envelope or command used by the
-arrangement. The project keeps its target for portable export.
+arrangement. S1 and S2 builds place notes on their respective driver clocks
+(about 59.76 ticks per second), accounting for the frames where each driver
+holds durations. The project keeps its target and native tempo for export.
 
 Use a stem's **Override** dropdown to select a MIDI part, exclude the stem,
 or restore automatic mapping. Choose **Re-check** to apply your changes and

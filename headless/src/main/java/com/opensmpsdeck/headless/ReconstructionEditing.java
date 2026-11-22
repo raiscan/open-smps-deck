@@ -149,7 +149,7 @@ public final class ReconstructionEditing {
         var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()));
-        var scopes = ReconstructionVoicing.validate(voicing, allocation, catalogue, timeline.frames());
+        var scopes = ReconstructionVoicing.validate(voicing, allocation, catalogue, timeline);
         var candidateAssignment = new ReconstructionVoicePlan.Assignment(candidate.type(), candidate.id());
         candidateAssignment.validate(catalogue, "Audition");
         var selected = allocation.notes().stream().filter(entry -> entry.lane() != null && noteIds.contains(entry.note().id())).toList();
@@ -163,12 +163,16 @@ public final class ReconstructionEditing {
         var solo = new ReconstructionAllocation.Result(allocation.version(), selected);
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
         var matches = ReconstructionCli.voicedMatches(catalogue, solo, voicing);
-        var result = S3kReconstruction.arrangeAllocated("Selection", score.inputs().ticksPerBeat(), timeline.frames(),
+        var result = S3kReconstruction.arrangeAllocated("Selection", score.inputs().ticksPerBeat(), timeline.ticks(),
                 new S3kReconstruction.Score(score.source().parts(), List.of(), List.of()), solo, structure, catalogue,
                 matches.byLane(), Map.of(), voicing.lanes(), false, true, scopes, Map.of(), Map.of(), null, assignments,
                 voicing.sourceInstruments());
         int start = selected.stream().mapToInt(ReconstructionAllocation.Entry::startTick).min().orElseThrow();
         int end = selected.stream().mapToInt(ReconstructionAllocation.Entry::endTick).max().orElseThrow();
-        return new Audition(result.project(), start / 60.0, Math.min(timeline.frames(), end + 30) / 60.0);
+        var project = result.project().withTarget(score.profile().game());
+        if (timeline.clock().game() != com.opensmpsdeck.project.TargetGame.S3K)
+            project = project.withNativeTempo(timeline.clock().tempo());
+        return new Audition(project, timeline.secondsAtTick(start),
+                Math.min(timeline.frames() / 60.0, timeline.secondsAtTick(end + 30)));
     }
 }

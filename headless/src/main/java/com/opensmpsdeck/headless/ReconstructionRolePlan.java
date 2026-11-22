@@ -55,7 +55,7 @@ record ReconstructionRolePlan(int version, List<ReconstructionRolePlan.Rule> rul
             double end = rule.endSeconds == null ? timeline.projectDuration() : rule.endSeconds;
             // Rules test continuous attack time. The half-open bounds below identify the eligible tick interval.
             result.add(new ResolvedTime(i, timeline.source(start), timeline.source(end), start, end,
-                    (long) Math.ceil(start * 60 - 1e-9), (long) Math.ceil(end * 60 - 1e-9)));
+                    timeline.firstTickAtOrAfter(start), timeline.firstTickAtOrAfter(end)));
         }
         return result;
     }

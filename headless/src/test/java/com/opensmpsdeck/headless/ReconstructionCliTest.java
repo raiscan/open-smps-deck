@@ -213,6 +213,60 @@ class ReconstructionCliTest {
         assertEquals(goodReport, Files.readString(work.resolve("report.json")));
     }
 
+    @Test void classicReconstructionKeepsLongClickTrackOnsetsWithinOneFrame() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        var patch = DemoProject.create().voices().getFirst();
+        byte[] bytes = new byte[patch.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
+        builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        Path index = directory.resolve("click-index.json");
+        builder.build().save(index);
+
+        int frames = 10_320;
+        int samplesPerFrame = 200;
+        var pcm = new byte[frames * samplesPerFrame * 2];
+        var midi = new Sequence(Sequence.PPQ, 30);
+        var track = midi.createTrack();
+        var attacks = new java.util.ArrayList<Integer>();
+        // With default MIDI tempo, one PPQ unit here is one NTSC presentation.
+        // Revisit both sides of a hold, then sample the full song.
+        for (int at : new int[]{0, 125, 254, 509, 768, 1021, 2047, 4095, 8191, 10_200}) {
+            attacks.add(at);
+            pcm[at * samplesPerFrame * 2 + 1] = 0x70;
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 72, 96), at));
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 72, 0), at + 12));
+        }
+        Path wav = directory.resolve("click.wav"), score = directory.resolve("click.mid");
+        try (var audio = new javax.sound.sampled.AudioInputStream(new java.io.ByteArrayInputStream(pcm),
+                new javax.sound.sampled.AudioFormat(12_000, 16, 1, true, false), pcm.length / 2)) {
+            javax.sound.sampled.AudioSystem.write(audio, javax.sound.sampled.AudioFileFormat.Type.WAVE, wav.toFile());
+        }
+        MidiSystem.write(midi, 0, score.toFile());
+
+        for (var driver : ClassicPackageDriver.values()) {
+            var output = directory.resolve(driver.id());
+            var errors = new ByteArrayOutputStream();
+            assertEquals(0, Main.run(new String[]{"reconstruct", "run", score.toString(), wav.toString(),
+                    index.toString(), output.toString(), "--target", driver.id(), "--fm-only",
+                    "--steady-tempo", "off", "--lane-policy-preset", "off"}, System.out, new PrintStream(errors)),
+                    errors.toString());
+            var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
+            var compiled = ReconstructionCli.compileTarget(project);
+            var observed = new java.util.ArrayList<Integer>();
+            int[] frame = {0};
+            driver.render(compiled, frames, ignored -> frame[0]++, new com.openggf.audio.synth.ChipWriteObserver() {
+                @Override public void onYm2612Write(int port, int register, int value) {
+                    if (register == 0x28 && (value & 0xF7) == 0xF0) observed.add(frame[0]);
+                }
+                @Override public void onPsgWrite(int value) {}
+            });
+            assertEquals(attacks.size(), observed.size(), driver.id());
+            for (int i = 0; i < attacks.size(); i++)
+                assertEquals(attacks.get(i), observed.get(i), 1, driver.id() + " onset " + i);
+        }
+    }
+
     private void assertTargetRoundTrip(Path midi, Path wav, Path index) throws Exception {
         Path staged = directory.resolve("target-s3k");
         Path classic = directory.resolve("target-s1");

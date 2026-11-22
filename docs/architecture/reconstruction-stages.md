@@ -314,7 +314,7 @@ project-clock bounds. Clusters report both clocks.
 
 `reconstruct trace WORK_DIR` joins source, score, structure, roles,
 allocation, and voicing evidence by stable note ID. Source and project
-seconds accompany 60 Hz ticks. Ticks on allocation and voiced gates
+seconds accompany arrangement ticks. Ticks on allocation and voiced gates
 are the actual intervals. Earlier ticks are rounded views of unquantized
 notes. Top-level `timing` retains the original gate. `effectiveTiming`
 uses the primary voiced gate, spanning the voiced steps of a figure.
@@ -780,7 +780,7 @@ the phrase ID.
 
 | Field | Contents |
 | --- | --- |
-| `durationUs`, `frames`, `ticksPerSecond` | Requested interval in microseconds, its ceiling in presentations, and the 60 Hz placement grid. |
+| `durationUs`, `frames`, `ticksPerSecond` | Requested interval in microseconds, its ceiling in 60 Hz presentations, and the target clock’s nominal tick rate. |
 | `inputs` | Absolute `midi`, `wav` and `catalogue` paths. Also stores `name`, `ticksPerBeat`, `keepOctaves`, `fmOnly`, `wholePartVoices`, `audioRefine`, `stems` (part ID to absolute WAV path), optional `candidates`, and `harmonyMaxHz`. |
 | `bars` | Musical grid in elapsed seconds. Each bar has `id`, `start`, `end`, and `complete`. A pickup, meter change between nominal boundaries, or cut at the requested end can produce a partial bar. |
 | `tempo` (optional) | Grid summary with BPM, beat phase, bar offset, beats per bar, and evidence. `source` is `tracked`, `estimated`, `override`, or `midi` when the PPQ grid is retained. |
@@ -851,8 +851,10 @@ When warping applies, structure maps the score's notes, candidates and bar
 boundaries into project seconds using
 `(beatIndex(source) - beatIndex(0)) * 60 / steadyBpm`. The origin stays at
 zero, including for pieces with pickups. Structure, roles and allocation
-then share the project clock. Allocation rounds to the nearest 60 Hz
-presentation, clamps releases, and gives each note at least one tick.
+then share the project clock. Allocation selects the arrangement tick whose
+playable presentation is nearest, clamps releases, and gives each note at
+least one tick. S3K ticks on every presentation. S1 and S2 skip periodic
+duration updates according to the [target clocks](driver-support.md#target-built-reconstructions).
 Stable IDs tie downstream decisions to the source score. Structure maps audio
 comparison windows back to source seconds, and the voice stage maps the
 allocated notes back before fitting the original mix and stems. The inverse
@@ -1132,7 +1134,7 @@ strictly inside the gap so a same-pitch reattack cannot supply all the
 evidence. Motion-based releases retain priority. Legato only changes the
 earlier note's end and records `lead-legato` in the roles and continuity
 counts. With stems, `stages.fm1InterNoteGaps` reports the counts of each
-FM1 gap length in 60 Hz project frames, including zero-length gaps,
+FM1 gap length in arrangement ticks, including zero-length gaps,
 before and after legato on the allocated lane.
 
 Rapid re-attacks on close, similarly accented notes of the same inner
@@ -1312,7 +1314,7 @@ Optional `effects.vibrato` holds the four native F0 parameters `delay`,
 accumulator update, and signed `delta` is a native packed-frequency increment
 per update. `steps` counts sustain ticks per direction, starting at
 `floor(steps / 2)` on attack. The sign reverses every `steps` ticks
-thereafter. At reconstruction tempo zero each tick is 1/60 s. When `rate`
+thereafter. At S3K reconstruction tempo zero each tick is 1/60 s. When `rate`
 divides `steps`, a full cycle is `2 × steps` ticks and the peak-to-peak
 accumulator excursion is `abs(delta) × steps / rate` native units.
 The cents change depends on the pitch. For example, `rate: 2, steps: 12`
@@ -1412,8 +1414,8 @@ changes. DAC sample amplitude is independent of MIDI velocity.
 
 Optional `overrides` entries change an allocated tonal lane within a passage.
 An entry may supply `startTick` and `endTick` or `startSeconds` and
-`endSeconds`. Project time uses 60 ticks per second, with seconds rounded to
-the nearest tick. Ranges include their start and exclude their end. An entry
+`endSeconds`. Seconds round to the nearest playable tick on the project's
+target clock. Ranges include their start and exclude their end. An entry
 can also supply `noteIds` from `allocation.json`. IDs alone select whole
 notes. Combining IDs and a time range selects their intersection.
 
@@ -1475,7 +1477,7 @@ preset default. The delay stays at 14 frames.
 
 For custom settings, set `lanePolicies` to an array of rules. Each rule
 applies to the whole song by default. Use `section` for a section ID or unique label, or `span` for
-`[startTick, endTick]` in 60 Hz project time. Use `voice` with an ID from
+`[startTick, endTick]` in arrangement ticks. Use `voice` with an ID from
 `voices.json` to narrow the selection further. Selection uses the dry note's
 attack on a half-open interval. Its gate and delayed copies can extend past
 that interval up to the project end.

@@ -11,7 +11,7 @@ import java.util.Set;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStructure.Bar;
 
-/** The bar-local attack grid shared by score inspection and role plans. */
+/** The bar-local grid in beat fractions, shared by score inspection and role plans. */
 public final class ReconstructionAttackGrid {
     static final int STEPS = 16;
 

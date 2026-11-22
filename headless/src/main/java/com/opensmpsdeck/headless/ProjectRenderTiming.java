@@ -10,6 +10,10 @@ public final class ProjectRenderTiming {
 
     public static int presentationCount(StudioProject project) {
         if (project.nativeProgram() != null) return project.nativeProgram().previewFrames();
+        if (project.nativeTempo() != null) {
+            var driver = PackageDriver.supported(project.target().id());
+            return driver.previewFrames(project, project.nativeTempo());
+        }
         long end = GroupArrangement.flatten(project).stream().mapToInt(clip -> clip.endTick()).max().orElse(0);
         end = Math.max(end, ProjectCompiler.dacEndTick(project));
         // Header-tempo phase/load allowance plus one second of chip/mixer tail.

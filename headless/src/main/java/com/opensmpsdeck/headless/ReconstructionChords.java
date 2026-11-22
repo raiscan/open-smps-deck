@@ -75,7 +75,6 @@ final class ReconstructionChords {
                                      List<ReconstructionEdits.Outcome> outcomes) {
         if (edits.intents().stream().noneMatch(edit -> edit.firstStage() == Stage.ALLOCATE)) return Map.of();
         var timeline = ReconstructionTimeMap.of(score);
-        int frames = timeline.frames();
         var decisions = new LinkedHashMap<String, ReconstructionRoles.Decision>();
         roles.notes().forEach(row -> decisions.put(row.note().id(), row));
         var bursts = new HashSet<String>();
@@ -90,7 +89,7 @@ final class ReconstructionChords {
                     .filter(row -> row.role() != Role.drop && row.role() != Role.drums).toList();
             for (var row : targets) {
                 var note = row.note();
-                attacks.computeIfAbsent(new Attack(note.part(), note.startTick(frames)), key -> new ArrayList<>()).add(row);
+                attacks.computeIfAbsent(new Attack(note.part(), timeline.startTick(note)), key -> new ArrayList<>()).add(row);
             }
             var missing = edit.noteIds().stream().filter(id -> !decisions.containsKey(id)).toList();
             if (attacks.isEmpty() || !missing.isEmpty())
@@ -113,7 +112,7 @@ final class ReconstructionChords {
                                 || row.note().bend() != null && row.note().bend().editReason() != null)
                             throw new IllegalArgumentException(row.note().id() + " has a figure, retrigger or authored bend");
                     }
-                    var group = group(edit, rows, frames);
+                    var group = group(edit, rows, timeline);
                     String conflict = ids.stream().anyMatch(voiceTypes::containsKey)
                             ? "a chord member has a source voice instrument assignment"
                             : pinConflict(group, roles.lanePins());
@@ -160,10 +159,10 @@ final class ReconstructionChords {
                 : edit.timeBase() == ReconstructionTimeMap.TimeBase.source ? timeline.source(time) : timeline.project(time);
     }
 
-    private static Group group(ReconstructionEdits.Intent edit, List<ReconstructionRoles.Decision> rows, int frames) {
+    private static Group group(ReconstructionEdits.Intent edit, List<ReconstructionRoles.Decision> rows, ReconstructionTimeMap timeline) {
         var members = rows.stream().map(ReconstructionRoles.Decision::note)
                 .sorted(Comparator.comparingInt(ReconstructionStages.Note::pitch))
-                .map(note -> new Member(note.id(), note.pitch(), note.endTick(frames))).toList();
+                .map(note -> new Member(note.id(), note.pitch(), timeline.endTick(note))).toList();
         var pitches = members.stream().map(Member::pitch).toList();
         if (pitches.stream().distinct().count() < 2)
             throw new IllegalArgumentException("needs at least two distinct pitches in one part at the same driver tick");
@@ -179,14 +178,14 @@ final class ReconstructionChords {
             default -> Order.up;
         } : Order.up;
         var group = new Group(edit.id(), rate, order, null, members);
-        int start = rows.getFirst().note().startTick(frames);
+        int start = timeline.startTick(rows.getFirst().note());
         if (steps(group, start, Math.min(group.endTick(), start + rate * (2 * members.size() - 2))).stream().map(Step::member).distinct().count() < members.size())
             throw new IllegalArgumentException("gate is too short to sound every tone at " + rate + " ticks per arpeggio step");
         return group;
     }
 
     static Set<String> validate(Map<String, Group> groups, Map<String, ReconstructionAllocation.Entry> entries,
-                                int frames) {
+                                ReconstructionTimeMap timeline) {
         var absorbed = new HashSet<String>();
         var seen = new HashSet<String>();
         for (var row : groups.entrySet()) {
@@ -197,7 +196,7 @@ final class ReconstructionChords {
             ReconstructionArtifacts.require(anchor != null && anchor.lane() != null && anchor.startTick() != null
                             && anchor.endTick() != null && anchor.role() != Role.drums && anchor.role() != Role.drop
                             && group.members().size() >= 2 && group.members().stream().anyMatch(m -> m.id().equals(id))
-                            && anchor.startTick() == anchor.note().startTick(frames) && anchor.endTick() <= group.endTick()
+                            && anchor.startTick() == timeline.startTick(anchor.note()) && anchor.endTick() <= group.endTick()
                             && (!group.fmOnly() || anchor.lane().startsWith("FM")
                                 || group.arpeggio() && anchor.laneType() == ReconstructionLaneType.NOISE)
                             && (anchor.laneType() != ReconstructionLaneType.NOISE || group.members().stream()
@@ -207,9 +206,9 @@ final class ReconstructionChords {
             for (var member : group.members()) {
                 var entry = entries.get(member.id());
                 ReconstructionArtifacts.require(entry != null && member.pitch() > pitch
-                                && member.pitch() == entry.note().pitch() && member.endTick() == entry.note().endTick(frames)
+                                && member.pitch() == entry.note().pitch() && member.endTick() == timeline.endTick(entry.note())
                                 && entry.note().part() == anchor.note().part() && entry.role() != Role.drums
-                                && entry.role() != Role.drop && entry.note().startTick(frames) == anchor.startTick()
+                                && entry.role() != Role.drop && timeline.startTick(entry.note()) == anchor.startTick()
                                 && seen.add(member.id()), at, "invalid or overlapping chord member " + member.id());
                 pitch = member.pitch();
                 if (member.id().equals(id)) continue;

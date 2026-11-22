@@ -131,6 +131,52 @@ class ClassicPortablePackageTest {
         }
     }
 
+    @Test void nativeClockMatchesEveryDurationUpdateAcrossTenThousandFrames() throws Exception {
+        int ticks = 10_040;
+        var notes = java.util.stream.IntStream.range(0, ticks)
+                .mapToObj(tick -> new NoteEvent("n" + tick, tick, 1, 60 + tick % 2)).toList();
+        var sequence = new Sequence("psg", "Clock fixture", "PSG", ticks, null, 127, notes);
+        for (var driver : ClassicPackageDriver.values()) {
+            var game = com.opensmpsdeck.project.TargetGame.parse(driver.id());
+            var clock = com.opensmpsdeck.project.TargetProfile.of(game).clock();
+            var project = new StudioProject(4, "Native clock fixture", "S3K", 30, 0, List.of(),
+                    List.of(sequence), List.of(new Clip("psg-c", "psg", "PSG1", 0, ticks)))
+                    .withTarget(game).withNativeTempo(clock.tempo());
+            project = com.opensmpsdeck.project.ProjectFormat.read(com.opensmpsdeck.project.ProjectFormat.write(project));
+            var strict = new PortableOptions(driver.id(), false, null, null, null, List.of(), List.of(), null, true);
+            var payload = PortablePackageWriter.build(project, strict);
+            var compiled = PortablePackageReader.assemble(archive(payload), List.of());
+            assertEquals(255, Byte.toUnsignedInt(compiled.song()[5]), driver.id());
+            int[] frame = {0};
+            var observed = new ArrayList<Integer>();
+            driver.render(compiled, (int) clock.frameAtTick(ticks) + 1, ignored -> frame[0]++, new ChipWriteObserver() {
+                private int previousPitch = -1;
+                @Override public void onYm2612Write(int port, int register, int value) {}
+                @Override public void onPsgWrite(int value) {
+                    if ((value & 0xF0) == 0x80 && value != previousPitch) {
+                        observed.add(frame[0]);
+                        previousPitch = value;
+                    }
+                }
+            });
+            assertEquals(ticks, observed.size(), driver.id());
+            assertEquals(0, observed.getFirst(), driver.id() + " load service");
+            int hold = driver == ClassicPackageDriver.S1 ? 254 : 255;
+            assertEquals(hold - 1, observed.get(hold - 1), driver.id());
+            assertEquals(hold + 1, observed.get(hold), driver.id());
+            assertTrue(observed.getLast() >= 10_000);
+            for (int tick = 0; tick < ticks; tick++) {
+                int at = observed.get(tick);
+                assertEquals(at, clock.frameAtTick(tick), driver.id() + " tick " + tick);
+                assertEquals(tick, clock.ticksAfterFrames(at));
+                assertEquals(tick + 1, clock.ticksAfterFrames(at + 1));
+                assertEquals(tick, clock.nearestTick(at));
+            }
+            assertEquals(hold - 1, clock.nearestTick(hold - .25));
+            assertEquals(hold, clock.nearestTick(hold + .25));
+        }
+    }
+
     private static StudioProject timingProject(int tempo) {
         var voices = new ArrayList<Voice>();
         for (int i = 0; i < 3; i++) {

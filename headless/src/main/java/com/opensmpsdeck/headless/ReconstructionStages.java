@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless;
 import com.google.gson.JsonElement;
 import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.TargetClock;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -91,12 +92,20 @@ public final class ReconstructionStages {
         }
 
         int startTick(int frames) {
-            return Math.min(frames - 1, S3kReconstruction.toTicks(Math.round(start * MICROS_PER_SECOND)));
+            return startTick(frames, TargetClock.FRAME_CLOCK);
+        }
+
+        int startTick(int ticks, TargetClock clock) {
+            return Math.min(ticks - 1, S3kReconstruction.toTicks(Math.round(start * MICROS_PER_SECOND), clock));
         }
 
         int endTick(int frames) {
-            return Math.min(frames, Math.max(startTick(frames) + 1,
-                    S3kReconstruction.toTicks(Math.round(end * MICROS_PER_SECOND))));
+            return endTick(frames, TargetClock.FRAME_CLOCK);
+        }
+
+        int endTick(int ticks, TargetClock clock) {
+            return Math.min(ticks, Math.max(startTick(ticks, clock) + 1,
+                    S3kReconstruction.toTicks(Math.round(end * MICROS_PER_SECOND), clock)));
         }
     }
 
@@ -151,7 +160,7 @@ public final class ReconstructionStages {
 
     record ScoreDecision(Note note, String reason, String successorId) {}
 
-    record Score(int version, long durationUs, int frames, int ticksPerSecond, @Nullable Inputs inputs,
+    record Score(int version, long durationUs, int frames, Number ticksPerSecond, @Nullable Inputs inputs,
                  List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
                  List<Note> notes, List<S3kReconstruction.Reduction> reductions,
                  List<ReconstructionPitchRefinement.Change> pitchChanges,
@@ -159,7 +168,7 @@ public final class ReconstructionStages {
                  @Nullable Map<String, List<ReconstructionFigureVoices.Voice>> figureVoices,
                  @Nullable List<ReconstructionRetriggers.Burst> retriggers,
                  @Nullable List<ScoreDecision> scoreDecisions) {
-        Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
+        Score(int version, long durationUs, int frames, Number ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
               List<Note> notes, List<S3kReconstruction.Reduction> reductions,
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
@@ -167,7 +176,7 @@ public final class ReconstructionStages {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
                     pitchChanges, tempo, midiBars, null, null, null, null);
         }
-        Score(int version, long durationUs, int frames, int ticksPerSecond, Inputs inputs,
+        Score(int version, long durationUs, int frames, Number ticksPerSecond, Inputs inputs,
               List<ReconstructionStructure.Bar> bars, MidiScore source, Map<Integer, Integer> sourceCounts,
               List<Note> notes, List<S3kReconstruction.Reduction> reductions,
               List<ReconstructionPitchRefinement.Change> pitchChanges, ReconstructionTempo.Estimate tempo,
@@ -175,7 +184,12 @@ public final class ReconstructionStages {
             this(version, durationUs, frames, ticksPerSecond, inputs, bars, source, sourceCounts, notes, reductions,
                     pitchChanges, tempo, midiBars, beatMap, null, null, null);
         }
-        TargetProfile profile() { return inputs == null ? TargetProfile.S3K : inputs.profile(); }
+        TargetProfile profile() {
+            var profile = inputs == null ? TargetProfile.S3K : inputs.profile();
+            // R1 tagged classic projects still used a 60 Hz arrangement grid.
+            return profile.game() != TargetGame.S3K && ticksPerSecond != null && ticksPerSecond.doubleValue() == 60
+                    ? profile.withClock(TargetClock.FRAME_CLOCK) : profile;
+        }
 
         boolean usesBeatGrid() { return beatMap != null && tempo != null && tempo.source().equals("tracked"); }
 
@@ -405,7 +419,7 @@ public final class ReconstructionStages {
                         var laneTypes = voicePlan.laneTypes();
                         var savedAffinity = previousWork.equals(work) ? null : ReconstructionAllocation.Affinity.read(previousWork);
                         var seed = savedAffinity == null ? ReconstructionAllocation.lanes(previousAllocation) : savedAffinity.seed();
-                        int frames = ReconstructionTimeMap.of(score).frames();
+                        int frames = ReconstructionTimeMap.of(score).ticks();
                         boolean stems = !score.inputs.stems.isEmpty();
                         var cymbalLevels = ReconstructionCymbals.measure(score);
                         boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
@@ -414,10 +428,10 @@ public final class ReconstructionStages {
                                 score, roles, laneTypes, outcomes);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                                 frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience,
-                                chordReduction, score.inputs.profile());
+                                chordReduction, score.profile());
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
                                 score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
-                                chordReduction, score.inputs.profile());
+                                chordReduction, score.profile());
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -650,10 +664,10 @@ public final class ReconstructionStages {
             boolean chordReduction = !ReconstructionStemParts.addedParts(score.inputs()).isEmpty();
             var salience = chordReduction ? ReconstructionStemParts.salience(score, roles) : Map.<String, Double>of();
             var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
-                    ReconstructionTimeMap.of(score).frames(),
+                    ReconstructionTimeMap.of(score).ticks(),
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience,
-                                chordReduction, score.inputs.profile());
+                                chordReduction, score.profile());
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
             if (hasLayers) ReconstructionCli.previewLayers(work, score, structure, allocation, edits, outcomes, true, roles);
@@ -685,7 +699,7 @@ public final class ReconstructionStages {
                     ReconstructionChecks.allocation(allocation, score);
                     var voicing = ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value);
                     ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue)),
-                            ReconstructionTimeMap.of(score).frames());
+                            ReconstructionTimeMap.of(score));
                     if (voicing.lanePolicies() != null && !voicing.lanePolicies().rules().isEmpty())
                         ReconstructionLanePolicies.resolve(work, score, readStructure(work.resolve("structure.json"), score),
                                 voicing.lanePolicies());
@@ -1357,7 +1371,7 @@ public final class ReconstructionStages {
         long sourceDurationUs = ReferenceAudio.durationMicros(reference);
         long durationUs = options.durationUs() == null ? sourceDurationUs : options.durationUs();
         if (durationUs > sourceDurationUs) throw new IllegalArgumentException("--seconds exceeds reference WAV duration");
-        long presentations = (durationUs * options.profile().ticksPerSecond() + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
+        long presentations = (durationUs * TargetClock.FRAMES_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND;
         if (presentations < 1 || presentations > S3kRenderer.MAX_PRESENTATIONS)
             throw new IllegalArgumentException("Reconstruction interval must fit in "
                     + S3kRenderer.MAX_PRESENTATIONS + " presentations. Use --seconds for a shorter interval.");
@@ -1371,8 +1385,9 @@ public final class ReconstructionStages {
 
     private static Score prepare(MidiScore original, Path reference, ReconstructionCli.Options options,
                                  long durationUs, String source) throws IOException {
-        int tickRate = options.profile().ticksPerSecond();
-        int frames = (int) ((durationUs * tickRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND);
+        Number tickRate = TargetClock.FRAMES_PER_SECOND;
+        if (options.target() != TargetGame.S3K) tickRate = options.profile().ticksPerSecond();
+        int frames = (int) ((durationUs * TargetClock.FRAMES_PER_SECOND + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND);
         for (int part : options.stems().keySet()) {
             if (original.parts().stream().noneMatch(p -> p.id() == part))
                 throw new IllegalArgumentException("Unknown MIDI part ID for --stem: " + part);

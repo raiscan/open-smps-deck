@@ -360,7 +360,11 @@ public final class StudioWindow implements AutoCloseable {
     private void refreshInspector(){
         inspector.getChildren().clear();inspector.getChildren().add(label("CLIP INSPECTOR","section"));
         StudioProject p=document.project();
-        inspector.getChildren().add(label(String.format(Locale.ROOT,"≈ %.1f BPM · native delay %d\n%d ticks / beat · 4 beats / bar",3600.0*(256-p.tempo())/(256.0*p.ticksPerBeat()),p.tempo(),p.ticksPerBeat()),"muted"));
+        var clock = p.clock();
+        String tempoLabel = p.nativeTempo() == null ? "native delay" : p.target().name() + " native tempo";
+        inspector.getChildren().add(label(String.format(Locale.ROOT,
+                "≈ %.1f BPM · %s %d\n%d ticks / beat · 4 beats / bar",
+                60 * clock.ticksPerSecond() / p.ticksPerBeat(), tempoLabel, clock.tempo(), p.ticksPerBeat()), "muted"));
         if (groupPlacement()!=null) {
             groupInspector(groupPlacement());
             return;
@@ -613,14 +617,19 @@ public final class StudioWindow implements AutoCloseable {
 
     private void settings(){
         StudioProject baseline=document.project();
-        TextField name=new TextField(baseline.name()),tempo=field(baseline.tempo(),"song-tempo"),beat=field(baseline.ticksPerBeat(),"song-beat");
+        boolean classicClock = baseline.nativeTempo() != null;
+        String tempoLabel = classicClock ? baseline.target().name() + " native tempo byte (larger is faster)"
+                : "Native S3K tempo delay (0–255; larger is slower)";
+        TextField name=new TextField(baseline.name()),tempo=field(baseline.clock().tempo(),"song-tempo"),beat=field(baseline.ticksPerBeat(),"song-beat");
         Dialog<ButtonType> dialog=new Dialog<>();dialog.setTitle("Song settings");dialog.initOwner(stage);
-        dialog.getDialogPane().setContent(new VBox(10,new Label("Song name"),name,new Label("Native S3K tempo delay (0–255; larger is slower)"),tempo,new Label("Ticks per beat (changes ruler, not note durations)"),beat));
+        dialog.getDialogPane().setContent(new VBox(10,new Label("Song name"),name,new Label(tempoLabel),tempo,new Label("Ticks per beat (changes ruler, not note durations)"),beat));
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK,ButtonType.CANCEL);
         if(dialog.showAndWait().orElse(ButtonType.CANCEL)!=ButtonType.OK)return;
         if(document.project()!=baseline){error(new IllegalArgumentException("Project changed while settings were open; reopen settings to edit the current version"));return;}
         try {int nativeTempo=Integer.parseInt(tempo.getText()),ticks=Integer.parseInt(beat.getText());
-            change(p->p.withSettings(name.getText(),ticks,nativeTempo));
+            change(p -> classicClock
+                    ? p.withSettings(name.getText(), ticks, p.tempo()).withNativeTempo(nativeTempo)
+                    : p.withSettings(name.getText(), ticks, nativeTempo));
         }catch(IllegalArgumentException e){error(e);}
     }
 
@@ -736,10 +745,13 @@ public final class StudioWindow implements AutoCloseable {
                 return;
             }
             var c = selectedTimelinePlacement();
-            double rate = ReviewTransport.ticksPerSecond(document.project());
+            var project = document.project();
             var range = selectedRange;
-            if (range == null && c != null) range = new ReviewTransport.Range((activeTimeline().origin + c.startTick()) / rate,
-                    (activeTimeline().origin + c.startTick() + (double) c.lengthTicks()) / rate);
+            if (range == null && c != null) {
+                double start = activeTimeline().origin + c.startTick();
+                range = new ReviewTransport.Range(ReviewTransport.secondsAt(project, start),
+                        ReviewTransport.secondsAt(project, start + c.lengthTicks()));
+            }
             if (range == null) {
                 status.setText("Shift-drag the ruler or select a clip to set a loop.");
                 return;
@@ -792,10 +804,11 @@ public final class StudioWindow implements AutoCloseable {
         var c = selectedTimelinePlacement();
         boolean onLane = activeTimeline().laneSelected;
         var range = transport.loop;
-        double rate = ReviewTransport.ticksPerSecond(document.project());
-        double start = range != null ? range.start() : c != null ? (activeTimeline().origin + c.startTick()) / rate : transport.seconds;
+        var project = document.project();
+        double tick = c == null ? 0 : activeTimeline().origin + c.startTick();
+        double start = range != null ? range.start() : c != null ? ReviewTransport.secondsAt(project, tick) : transport.seconds;
         Double end = range != null ? Double.valueOf(range.end())
-                : c == null ? null : Double.valueOf((activeTimeline().origin + c.startTick() + (double) c.lengthTicks()) / rate);
+                : c == null ? null : Double.valueOf(ReviewTransport.secondsAt(project, tick + c.lengthTicks()));
         review.compose(new ReviewPane.Location(start, end, c instanceof Clip clip ? clip.lane()
                 : onLane ? activeTimeline().selectedLane : null, c == null ? null : c.id()));
     }
@@ -821,7 +834,7 @@ public final class StudioWindow implements AutoCloseable {
     private void setPosition(double seconds) {
         transport.seconds = seconds;
         if (document == null) return;
-        timeline.playhead = seconds * ReviewTransport.ticksPerSecond(document.project());
+        timeline.playhead = ReviewTransport.tickAt(document.project(), seconds);
         timeline.draw();
         nativeArrangement.setPlayhead(seconds * 60);
     }
@@ -905,7 +918,7 @@ public final class StudioWindow implements AutoCloseable {
         var result=new StudioProject(6,project.name(),project.mode(),project.ticksPerBeat(),project.tempo(),
                 updated.voices(),updated.sequences(),clips,updated.envelopes(),updated.samples(),null,
                 project.references(),project.notes(),updated.formatVersion(),project.groupSequences(),project.groupPlacements(),
-                project.detachedFromReconstruction(), project.derivedFrom(), project.target());
+                project.detachedFromReconstruction(), project.derivedFrom(), project.target(), project.nativeTempo());
         ProjectCompiler.compile(result);
         return result;
     }

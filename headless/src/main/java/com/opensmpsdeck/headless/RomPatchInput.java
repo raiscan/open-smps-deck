@@ -66,7 +66,7 @@ record RomPatchInput(RomGame game, Song song) {
                 || project.samples().stream().anyMatch(sample -> sample.pcmBase64() == null))
             project = StockAssets.resolveProject(project, stock(game, clean));
         var driver = game == RomGame.S1 ? ClassicPackageDriver.S1 : ClassicPackageDriver.S2;
-        var tempo = driver.convertTempo(project.tempo());
+        var tempo = driver.projectTempo(project);
         ProjectCompiler.BankLayout layout;
         try {
             layout = driver.compile(project, tempo.targetByte());

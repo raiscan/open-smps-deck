@@ -52,7 +52,7 @@ final class StudioPlayback implements AutoCloseable {
 
     void play(StudioProject project, Consumer<String> status, DoubleConsumer position) {
         play(project, new ReviewTransport(), null, S3kRenderer.ChannelMask.NONE, status,
-                seconds -> position.accept(seconds * ReviewTransport.ticksPerSecond(project)));
+                seconds -> position.accept(ReviewTransport.tickAt(project, seconds)));
     }
 
     synchronized void play(StudioProject project, ReviewTransport transport, Reference reference,
@@ -170,7 +170,7 @@ final class StudioPlayback implements AutoCloseable {
     }
 
     static double tickAtPresentation(StudioProject project, int presentations) {
-        return presentations / 60.0 * ReviewTransport.ticksPerSecond(project);
+        return ReviewTransport.tickAt(project, presentations / 60.0);
     }
 
     synchronized void stop() {

@@ -229,8 +229,8 @@ public final class ReconstructionVocalReview {
     private static boolean canSplit(Note note, double onset, ReconstructionTimeMap time) {
         if (note.run() != null || note.bend() != null && note.bend().editReason() != null) return false;
         var gate = time.projectNote(note);
-        int tick = time.projectNote(note.withTiming(onset, note.end())).startTick(time.frames());
-        return tick > gate.startTick(time.frames()) && tick < gate.endTick(time.frames());
+        int tick = time.startTick(time.projectNote(note.withTiming(onset, note.end())));
+        return tick > time.startTick(gate) && tick < time.endTick(gate);
     }
 
     private static int voicedEnd(double[] f0, int start) {

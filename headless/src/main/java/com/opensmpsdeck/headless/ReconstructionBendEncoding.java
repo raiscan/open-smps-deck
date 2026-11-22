@@ -8,6 +8,7 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetClock;
 import com.opensmpsdeck.project.Voice;
 
 import java.io.IOException;
@@ -50,12 +51,22 @@ final class ReconstructionBendEncoding {
     static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
                    ReconstructionVoicing.Vibrato vibrato, java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes)
             throws IOException {
+        return fit(note, startTick, duration, detune, voice, vibrato, changes, TargetClock.FRAME_CLOCK);
+    }
+
+    static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
+                   ReconstructionVoicing.Vibrato vibrato, java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes,
+                   TargetClock clock) throws IOException {
         var bend = note.bend();
         if (bend == null || duration < 4
-                || Math.abs(bend.points().getFirst().time() - startTick / 60.0) > .025) return null;
+                || Math.abs(bend.points().getFirst().time() - clock.secondsAtTick(startTick)) > .025) return null;
         // Precision beyond the last tracked frame is irrelevant to a shorter compiled gate.
         double[] desired = new double[duration];
-        for (int i = 0; i < duration; i++) desired[i] = bend.cents((startTick + i + .5) / 60.0);
+        for (int i = 0; i < duration; i++) {
+            int at = startTick + i;
+            double midpoint = (clock.frameAtTick(at) + clock.frameAtTick(at + 1)) / 120.0;
+            desired[i] = bend.cents(midpoint);
+        }
         int pitch = note.pitch();
         double base = linear(packed(new Pitch(pitch, detune)));
         double baseline = 0, excursion = 0;

@@ -86,7 +86,7 @@ final class ReconstructionRetriggers {
             attacks.put(first, anchor.id());
             for (var figure : figures) {
                 if (anchor.pitch() != figure.pitch() || anchor.part() != figure.part()) continue;
-                int from = figure.startTick(timeline.frames()), to = figure.endTick(timeline.frames());
+                int from = timeline.startTick(figure), to = timeline.endTick(figure);
                 // The selected lead must cover the whole burst. Honor shortened releases and lead splits.
                 if (from < first || to > end) continue;
                 var retained = new java.util.LinkedHashMap<Integer, Integer>();

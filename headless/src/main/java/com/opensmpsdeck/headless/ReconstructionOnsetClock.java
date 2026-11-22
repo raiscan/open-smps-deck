@@ -6,7 +6,9 @@ import java.util.Set;
 /**
  * A MIDI export from a frame-clocked source can preserve its original clock
  * in the microtiming of drum hits. Where that independent evidence is strong,
- * refine an already detected tempo ramp to sub-frame precision.
+ * refine an already detected tempo ramp to sub-frame precision. These
+ * candidate rates describe the input. The output clock is applied after the
+ * beat map maps source seconds into project seconds.
  */
 final class ReconstructionOnsetClock {
     private static final int[] CLOCK_RATES = {24, 25, 30, 48, 50, 60, 100, 120};
