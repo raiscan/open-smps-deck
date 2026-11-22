@@ -2,11 +2,14 @@ package com.opensmpsdeck.headless.rompatch;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static com.opensmpsdeck.headless.rompatch.S2Revision.*;
 
@@ -26,6 +29,17 @@ public final class S2RomPatch {
     private record Z80Range(int start, int end, String purpose) {}
 
     private S2RomPatch() {}
+
+    /** Native DAC rates from the same decompressed playlist used for cartridge patching. */
+    public static Map<Integer, Integer> stockDacRates(VerifiedRom rom) {
+        if (rom.revision() != ROM) throw new IllegalArgumentException("Expected a verified Sonic 2 REV01 ROM");
+        byte[] driver = decompress(rom.bytes());
+        verifyRetailPlaylist(driver);
+        var rates = new TreeMap<Integer, Integer>();
+        for (int note = DAC_FIRST_NOTE; note <= DAC_LAST_NOTE; note++)
+            rates.put(note, S2Dac.stockRate(driver, note));
+        return Map.copyOf(rates);
+    }
 
     public static Result patch(byte[] cleanRom, S2Song song, Options options) {
         byte[] rom = cleanRom.clone();

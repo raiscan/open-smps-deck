@@ -121,10 +121,8 @@ final class ReconstructionArtifacts {
                 String name = field.getName();
                 keys.add(name);
                 JsonElement member = object.get(name);
-                // Voicing stores a slice as an intermediate value. Its origin is
-                // assigned when the slice enters the project, keeping old voicing files readable.
-                if (clazz == com.opensmpsdeck.project.DacSample.class && name.equals("origin") && member == null)
-                    continue;
+                // Embedded project samples use the project format's optional provenance fields.
+                if (member == null && optionalProjectField(clazz, name)) continue;
                 if (field.isAnnotationPresent(ReconstructionStages.Nullable.class)
                         && (member == null || member.isJsonNull())) continue;
                 shape(at + "." + name, field.getGenericType(), member);
@@ -150,6 +148,14 @@ final class ReconstructionArtifacts {
                 }
             }
         }
+    }
+
+    private static boolean optionalProjectField(Class<?> type, String name) {
+        if (type == com.opensmpsdeck.project.DacSample.class) return name.equals("origin");
+        if (type == com.opensmpsdeck.project.AssetOrigin.class) return !name.equals("type");
+        if (type == com.opensmpsdeck.project.StockRef.class)
+            return java.util.Set.of("songId", "slot", "index", "note").contains(name);
+        return false;
     }
 
     static void require(boolean condition, String at, String message) {

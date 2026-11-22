@@ -197,15 +197,19 @@ final class S3kReconstruction {
                 reductions.add(new Reduction(note, Change.NO_MATCH));
                 continue;
             }
-            var asset = catalogue.asset(choice.assetId());
             int start = Math.min(frames - 1, toTicks(note.startUs(), profile.clock()));
             int end = Math.min(frames, Math.max(start + 1, toTicks(note.endUs(), profile.clock())));
             if (part.drums()) {
-                String sampleId = asset.id() + "-" + choice.sampleRate();
-                samples.computeIfAbsent(sampleId, id -> DacSample.of(id, choice.name(),
-                        choice.sampleRate(), asset.bytes()).withOrigin(catalogue.origin(asset)));
+                var stock = choice.slice();
+                String sampleId = stock == null ? choice.assetId() + "-" + choice.sampleRate() : stock.id();
+                samples.computeIfAbsent(sampleId, id -> {
+                    if (stock != null) return stock;
+                    var asset = catalogue.asset(choice.assetId());
+                    return DacSample.of(id, choice.name(), choice.sampleRate(), asset.bytes()).withOrigin(catalogue.origin(asset));
+                });
                 drumHits.add(new Event(note, start, start + 1, drumPriority(note.pitch()), sampleId, 0));
             } else {
+                var asset = catalogue.asset(choice.assetId());
                 voices.computeIfAbsent(asset.id(), id -> {
                     return new Voice(id, part.name() + " / " + choice.name(), unsigned(asset.bytes()), catalogue.origin(asset));
                 });
@@ -459,10 +463,12 @@ final class S3kReconstruction {
             if (lane.equals("DAC")) {
                 var slice = choice.slice();
                 String id = slice == null ? choice.assetId() + "-" + choice.sampleRate() : slice.id();
-                double gain = scopedDrumGains.getOrDefault(entry.note().id(),
+                boolean stock = ReconstructionDrums.isTargetStock(slice, profile.game());
+                double gain = stock ? 1 : scopedDrumGains.getOrDefault(entry.note().id(),
                         voice == null ? 1 : voice.drumGain(note.pitch()));
                 String gainedId = gain == 1 ? id : id + "-gain-" + Double.toHexString(gain);
                 samples.computeIfAbsent(gainedId, key -> {
+                    if (stock) return slice;
                     if (gain == 1 && slice != null) return slice.withOrigin(AssetOrigin.sourceAudio());
                     var asset = slice == null ? catalogue.asset(choice.assetId()) : null;
                     var sampleOrigin = slice == null ? catalogue.origin(asset) : AssetOrigin.sourceAudio();

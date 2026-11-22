@@ -115,7 +115,8 @@ public final class ReconstructionStages {
                   @Nullable Boolean audioRepeats, @Nullable Map<Integer, ExternalTranscribers.PartNotes> externalNotes,
                   @Nullable Integer leadPart, @Nullable Boolean fastRunsOff,
                   @Nullable ReconstructionDrums.Source drumSource, @Nullable Boolean stemTemplateNotesOff,
-                  @Nullable ReconstructionAudioOnly.Provenance audioOnly, @Nullable String target) {
+                  @Nullable ReconstructionAudioOnly.Provenance audioOnly, @Nullable String target,
+                  @Nullable ReconstructionDrums.KitMode drumKit) {
         TargetGame targetGame() { return target == null ? TargetGame.S3K : TargetGame.parse(target); }
 
         TargetProfile profile() { return TargetProfile.of(targetGame()); }
@@ -128,7 +129,7 @@ public final class ReconstructionStages {
                ReconstructionAudioOnly.Provenance audioOnly) {
             this(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems,
                     candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, leadPart, fastRunsOff, drumSource,
-                    stemTemplateNotesOff, audioOnly, null);
+                    stemTemplateNotesOff, audioOnly, null, null);
         }
 
         Inputs(String midi, String wav, String catalogue, String name, int ticksPerBeat, boolean keepOctaves,
@@ -147,14 +148,14 @@ public final class ReconstructionStages {
         Inputs withLeadPart(Integer lead) {
             return new Inputs(midi, wav, catalogue, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices,
                     audioRefine, stems, candidates, harmonyMaxHz, grid, audioRepeats, externalNotes, lead,
-                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly, target);
+                    fastRunsOff, drumSource, stemTemplateNotesOff, audioOnly, target, drumKit);
         }
 
         ReconstructionCli.Options options(long durationUs) {
             var paths = new java.util.TreeMap<Integer, Path>();
             stems.forEach((key, value) -> paths.put(key, Path.of(value)));
             return new ReconstructionCli.Options(durationUs, name, ticksPerBeat, keepOctaves, fmOnly,
-                    wholePartVoices, audioRefine, paths, targetGame());
+                    wholePartVoices, audioRefine, paths, targetGame(), drumKit);
         }
     }
 
@@ -774,6 +775,8 @@ public final class ReconstructionStages {
         String filename = (audioOnly ? reference : midi).getFileName().toString();
         if (audioOnly) filename = filename.replaceFirst("(?i)\\.wav$", "");
         var options = ReconstructionCli.parseOptions(legacy, filename);
+        if (options.stockDrums() && extra.drumSource != null)
+            throw new IllegalArgumentException("--drum-source on s1 or s2 requires --drum-kit custom");
         double harmonyHz = extra.harmonyHz == null ? ReconstructionRoles.DEFAULT_HARMONY_HZ : extra.harmonyHz;
         var stems = new java.util.TreeMap<Integer, String>();
         options.stems().forEach((id, file) -> stems.put(id, file.toAbsolutePath().normalize().toString()));
@@ -845,7 +848,7 @@ public final class ReconstructionStages {
                 extra.grid, extra.audioRepeats, external, extra.leadPart != null || !audioOnly ? extra.leadPart : audio.leadPart(),
                 extra.fastRunsOff ? true : null, extra.drumSource, extra.stemTemplateNotesOff ? true : null,
                 audioOnly ? audio.provenance() : null,
-                options.target() == TargetGame.S3K ? null : options.target().id());
+                options.target() == TargetGame.S3K ? null : options.target().id(), options.drumKit());
         return new Request(work, stage, chain, attach(score, inputs), extra.harmonyHz,
                 extra.lanes, extra.refitLevels, extra.keepVoicing, null, false, extra.lanePolicyPreset, extra.policyDecisions);
     }
@@ -882,7 +885,7 @@ public final class ReconstructionStages {
             var saved = readScore(absolute(args[workIndex]).resolve("score.json")).inputs();
             requireSameTarget(saved, target);
         }
-        if (extra.candidates != null || extra.grid.force()
+        if (extra.candidates != null || extra.grid.force() || extra.drumSource != null
                 || extra.transcriber != null || extra.separatorConfig != null || !extra.transcriberFor.isEmpty() || !extra.imports.isEmpty() || extra.leadPart != null || extra.fastRunsOff || extra.stemTemplateNotesOff
                 || extra.grid.bpm() != null || extra.grid.steady() != null || extra.audioRepeats
                 || (!extra.lanes.isEmpty() || extra.refitLevels) && (chain ? stage.ordinal() > Stage.VOICE.ordinal() : stage != Stage.VOICE)
@@ -989,6 +992,7 @@ public final class ReconstructionStages {
                         throw new IllegalArgumentException("Expected one --drum-source catalogue|sliced|auto");
                     try {
                         drumSource = ReconstructionDrums.Source.valueOf(args[i]);
+                        if (drumSource == ReconstructionDrums.Source.stock) throw new IllegalArgumentException();
                     } catch (IllegalArgumentException invalid) {
                         throw new IllegalArgumentException("--drum-source expects catalogue, sliced or auto");
                     }

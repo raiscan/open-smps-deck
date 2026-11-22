@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 import com.opensmpsdeck.project.TargetGame;
 
 import com.google.gson.JsonParser;
@@ -11,9 +14,12 @@ import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 
 import javax.sound.midi.MidiEvent;
@@ -24,11 +30,13 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role.drums;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -384,6 +392,157 @@ class ReconstructionDrumsTest {
         assertTrue(project.samples().stream().anyMatch(dac -> java.util.Arrays.equals(sample, dac.pcm())));
         assertTrue(project.samples().stream().anyMatch(dac -> Byte.toUnsignedInt(dac.pcm()[0]) == 64));
         assertTrue(project.samples().stream().anyMatch(dac -> Byte.toUnsignedInt(dac.pcm()[0]) == 96));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"s1", "s2"})
+    void classicStockKitSurvivesPortableExportAndRomPatch(String target) throws Exception {
+        String configured = System.getenv("OPENSMPSDECK_" + target.toUpperCase(java.util.Locale.ROOT) + "_ROM");
+        assumeTrue(configured != null && !configured.isBlank());
+        var set = isolatedCommand("rom", "set", target, configured);
+        assertEquals(0, set.status(), set.output());
+        var fixture = classicFixture(true);
+        var run = isolatedCommand("reconstruct", "run", fixture[0], fixture[1], fixture[2],
+                directory.resolve("work").toString(), "--steady-tempo", "off", "--target", target);
+        assertEquals(0, run.status(), run.output());
+        var work = directory.resolve("work");
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        assertFalse(project.samples().isEmpty());
+        for (var sample : project.samples()) {
+            assertEquals(target, sample.origin().ref().game());
+            assertEquals(StockTable.hash(sample.pcm()), sample.origin().ref().sha256());
+        }
+        assertTrue(project.samples().stream().anyMatch(s -> s.origin().ref().note() == 0x81));
+        assertTrue(project.samples().stream().anyMatch(s ->
+                DacFamily.slot(TargetGame.parse(target), s.origin().ref().note()) == DacFamily.TOM));
+
+        var portable = work.resolve("arrangement.smps.zip");
+        try (var zip = new java.util.zip.ZipFile(portable.toFile())) {
+            var manifest = JsonParser.parseReader(new java.io.InputStreamReader(
+                    zip.getInputStream(zip.getEntry("manifest.json")), java.nio.charset.StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            assertTrue(manifest.getAsJsonObject("requires").get("stockAssets").getAsBoolean());
+            assertTrue(zip.stream().noneMatch(entry -> entry.getName().endsWith(".pcm")));
+        }
+        for (Path input : List.of(work.resolve("arrangement.smps.json"), portable)) {
+            var patch = isolatedCommand("rom-patch", input.toString(), "--driver", target, "--bps",
+                    directory.resolve(input.getFileName() + ".bps").toString());
+            assertEquals(0, patch.status(), patch.output());
+            var result = JsonParser.parseString(patch.output()).getAsJsonObject();
+            var report = result.getAsJsonObject("report");
+            if (report.has("approximations")) assertTrue(report.getAsJsonArray("approximations").isEmpty());
+            assertTrue(result.getAsJsonArray("warnings").asList().stream()
+                    .noneMatch(item -> item.getAsString().contains("substitutes stock DAC")));
+            var mappings = report.getAsJsonArray("dacNoteMap");
+            assertEquals(project.samples().size(), mappings.size());
+            for (var item : mappings) {
+                var binding = item.getAsJsonObject();
+                assertTrue(binding.get("exact").getAsBoolean(), binding.toString());
+                assertEquals(0.0, binding.get("distance").getAsDouble());
+                int slot = binding.get("note").getAsInt() - DacSample.FIRST_NOTE;
+                assertEquals(project.samples().get(slot).origin().ref().note().intValue(),
+                        binding.get("mappedNote").getAsInt());
+            }
+        }
+    }
+
+    @Test void everySonic2StockRateMatchesTheDecompressedDriver() throws Exception {
+        String configured = System.getenv("OPENSMPSDECK_S2_ROM");
+        assumeTrue(configured != null && !configured.isBlank());
+        Path rom = Path.of(configured);
+        var samples = List.copyOf(ReconstructionStockDrums.load(VerifiedRom.read(RomGame.S2, rom)).values());
+        assertEquals(17, samples.size());
+        var triggers = new ArrayList<SampleTrigger>();
+        for (int i = 0; i < samples.size(); i++)
+            triggers.add(new SampleTrigger("hit-" + i, i * 60, samples.get(i).id()));
+        int length = 60 * samples.size();
+        var seq = new Sequence("drums", "Drums", "DAC", length, null, 127, List.of(), List.of(),
+                "RESET", null, null, triggers);
+        var project = new StudioProject(4, "Stock rate coverage", "S3K", 30, 0, List.of(),
+                List.of(seq), List.of(new Clip("clip", "drums", "DAC", 0, length)),
+                List.of(), samples, TargetGame.S2, 255);
+        Path portable = directory.resolve("stock.smps.zip");
+        PortablePackageWriter.write(project, portable, PortableOptions.defaults(TargetGame.S2));
+        var result = TestInGame.export(new RomLibrary(directory.resolve("roms.json")), portable, rom,
+                new TestInGame.Outputs(null, directory.resolve("stock.bps"), false), RomGame.S2,
+                new TestInGame.Options(null, false, false, false));
+        var mappings = result.getAsJsonObject("report").getAsJsonArray("dacNoteMap");
+        assertEquals(samples.size(), mappings.size());
+        for (var item : mappings) {
+            var binding = item.getAsJsonObject();
+            int slot = binding.get("note").getAsInt() - DacSample.FIRST_NOTE;
+            assertEquals(samples.get(slot).origin().ref().note().intValue(), binding.get("mappedNote").getAsInt());
+            assertTrue(binding.get("exact").getAsBoolean(), binding.toString());
+            assertEquals(0.0, binding.get("distance").getAsDouble());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"s1", "s2"})
+    void classicStockNeedsRomAndCustomSlicesUseTargetRate(String target) throws Exception {
+        var fixture = classicFixture(false);
+        var missing = isolatedCommand("reconstruct", "run", fixture[0], fixture[1], fixture[2],
+                directory.resolve("missing").toString(), "--target", target);
+        assertEquals(2, missing.status(), missing.output());
+        assertTrue(missing.output().contains("rom set " + target), missing.output());
+
+        Path custom = directory.resolve("custom");
+        var run = isolatedCommand("reconstruct", "run", fixture[0], fixture[1], fixture[2], custom.toString(),
+                "--steady-tempo", "off", "--target", target, "--drum-kit", "custom",
+                "--drum-source", "sliced", "--stem", "0=" + fixture[1]);
+        assertEquals(0, run.status(), run.output());
+        assertTrue(run.output().contains("Test in game may approximate"), run.output());
+        var project = ProjectFiles.load(custom.resolve("arrangement.smps.json")).project();
+        var kick = project.samples().getFirst();
+        assertEquals("source-audio", kick.origin().type());
+        assertEquals(2, kick.rate());
+        var evidence = ReconstructionArtifacts.readTree(custom.resolve("voicing.json")).getAsJsonObject()
+                .getAsJsonObject("lanes").getAsJsonObject("DAC").getAsJsonArray("instruments")
+                .get(0).getAsJsonObject().getAsJsonObject("drumSelection").getAsJsonObject("evidence");
+        double base = target.equals("s1") ? 301 : 295;
+        double hz = (2 * 53_693_175.0 / 15) / (base + 26);
+        double clipSeconds = evidence.getAsJsonArray("hits").get(0).getAsJsonObject().get("length").getAsDouble();
+        assertEquals((int) Math.ceil(clipSeconds * hz), kick.pcm().length);
+    }
+
+    private String[] classicFixture(boolean tuned) throws Exception {
+        var index = directory.resolve("index.json");
+        var catalogue = new InstrumentCatalogue.Builder();
+        catalogue.asset(InstrumentCatalogue.Kind.DAC_SAMPLE, "Synthetic placeholder", new byte[]{(byte) 128});
+        catalogue.build().save(index);
+        var midi = directory.resolve("drums.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var drums = sequence.createTrack();
+        for (int i = 0; i < 6; i++) midiNote(drums, 9, tuned && i % 2 == 1 ? 45 : 36, 192 + 480 * i);
+        MidiSystem.write(sequence, 0, midi.toFile());
+        var wav = directory.resolve("drums.wav");
+        WaveFile.write(wav, 192, sink -> {
+            var frame = new short[1600];
+            for (int tick = 0; tick < 192; tick++) {
+                for (int i = 0; i < 800; i++) {
+                    double t = (tick * 800 + i) / 48_000.0 - .2;
+                    double pitch = tuned && (int) (t / .5) % 2 == 1 ? 180 : 75;
+                    frame[2 * i] = frame[2 * i + 1] = (short) (t < 0 ? 0 : 16_000 * kick(t % .5, pitch));
+                }
+                sink.accept(frame);
+            }
+        });
+        return new String[]{midi.toString(), wav.toString(), index.toString()};
+    }
+
+    private record CommandResult(int status, String output) {}
+
+    private CommandResult isolatedCommand(String... args) throws Exception {
+        var argv = new java.util.ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("surefire.test.class.path"), Main.class.getName()));
+        argv.addAll(List.of(args));
+        var stdout = directory.resolve("stdout.txt");
+        var stderr = directory.resolve("stderr.txt");
+        var command = new ProcessBuilder(argv).redirectOutput(stdout.toFile()).redirectError(stderr.toFile());
+        command.environment().put("XDG_CONFIG_HOME", directory.resolve("config").toString());
+        var process = command.start();
+        int status = process.waitFor();
+        return new CommandResult(status, Files.readString(stdout) + (status == 0 ? "" : Files.readString(stderr)));
     }
 
     private static void midiNote(javax.sound.midi.Track track, int channel, int pitch, int tick) throws Exception {

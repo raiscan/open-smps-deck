@@ -55,8 +55,12 @@ final class DacAcoustics {
         this(catalogue, TargetProfile.S3K);
     }
 
-    DacAcoustics(InstrumentCatalogue catalogue, TargetProfile target) {
+    DacAcoustics(TargetProfile target) {
         this.target = target;
+    }
+
+    DacAcoustics(InstrumentCatalogue catalogue, TargetProfile target) {
+        this(target);
         var variants = new LinkedHashMap<String, List<InstrumentCatalogue.Variant>>();
         for (var variant : catalogue.variants()) {
             if (catalogue.asset(variant.assetId()).kind() == InstrumentCatalogue.Kind.DAC_SAMPLE)

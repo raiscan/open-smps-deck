@@ -39,7 +39,13 @@ final class ReconstructionCli {
             "render.wav", "report.json");
 
     record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
-                           Map<Integer, Path> stems, TargetGame target) {
+                           Map<Integer, Path> stems, TargetGame target, ReconstructionDrums.KitMode drumKit) {
+        Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly,
+                boolean wholePartVoices, boolean audioRefine, Map<Integer, Path> stems, TargetGame target) {
+            this(durationUs, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, target, null);
+        }
+
+        boolean stockDrums() { return target != TargetGame.S3K && drumKit != ReconstructionDrums.KitMode.custom; }
         Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly,
                 boolean wholePartVoices, boolean audioRefine, Map<Integer, Path> stems) {
             this(durationUs, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, TargetGame.S3K);
@@ -97,7 +103,7 @@ final class ReconstructionCli {
     static void usage(PrintStream out) {
         out.println("       reconstruct separate MIX OUT_DIR --separator NAME [--device auto|cpu|rocm|cuda]");
         out.println("           [--separator-config FILE]");
-        out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k] [--assign FILE=PART ...] [--exclude FILE ...]");
+        out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k] [--drum-kit stock|custom] [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
         out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--target s1|s2|s3k] [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
         out.println("           [--transcriber-config FILE] [--stem-role FILE=ROLE] [--run]");
@@ -111,7 +117,7 @@ final class ReconstructionCli {
         out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-for ROLE=NAME ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
         out.println("           [--estimate-tempo | --tempo BPM [--bar-offset S]] [--audio-repeats]");
-        out.println("           [--steady-tempo off|auto|BPM] [--drum-source catalogue|sliced|auto]");
+        out.println("           [--steady-tempo off|auto|BPM] [--drum-kit stock|custom] [--drum-source catalogue|sliced|auto]");
         out.println("       reconstruct time-map WORK_DIR --source S | --project S");
         out.println("       reconstruct structure|roles|allocate WORK_DIR");
         out.println("       reconstruct assemble WORK_DIR [--policy-decisions]");
@@ -138,7 +144,7 @@ final class ReconstructionCli {
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing] [--overwrite-detached]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
-        out.println("           [--target s1|s2|s3k] [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
+        out.println("           [--target s1|s2|s3k] [--drum-kit stock|custom] [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
@@ -250,12 +256,26 @@ final class ReconstructionCli {
                 transcription.notes().stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
         InstrumentCatalogue catalogue = InstrumentCatalogue.open(index);
-        var choices = select(catalogue, reference, options, score, prepared, durationUs, Kind.FM_VOICE);
+        var forCatalogue = prepared;
+        if (options.stockDrums()) {
+            var drumParts = score.parts().stream().filter(MidiScore.Part::drums).map(MidiScore.Part::id).toList();
+            forCatalogue = new S3kReconstruction.Score(prepared.parts(),
+                    prepared.notes().stream().filter(note -> !drumParts.contains(note.partId())).toList(),
+                    prepared.reductions());
+        }
+        var choices = select(catalogue, reference, options, score, forCatalogue, durationUs, Kind.FM_VOICE);
+        if (options.stockDrums()) {
+            var stock = ReconstructionDrums.matchLegacy(transcription, catalogue, reference, options);
+            var combined = new LinkedHashMap<>(choices);
+            stock.forEach((key, selection) -> combined.put(key, ReconstructionVoiceStage.drumChoice(selection)));
+            choices = combined;
+        }
         var spill = options.fmOnly() ? Map.<ReconstructionVoices.Key, ReconstructionVoices.Choice>of()
-                : select(catalogue, reference, options, score, prepared, durationUs, Kind.PSG_VOLUME);
+                : select(catalogue, reference, options, score, forCatalogue, durationUs, Kind.PSG_VOLUME);
+        var initialChoices = choices;
         var sectionPlan = options.wholePartVoices() ? new ReconstructionVoices.SectionPlan(choices, List.of())
                 : matchQuietly(() -> ReconstructionVoices.refineSections(catalogue, reference, options.stems(),
-                        score, prepared.notes(), durationUs, choices, options.target()));
+                        score, prepared.notes(), durationUs, initialChoices, options.target()));
         var evidence = new ArrayList<MatchEvidence>();
         recordMatches(evidence, null, Kind.FM_VOICE, sectionPlan.choices());
         recordMatches(evidence, null, Kind.PSG_VOLUME, spill);
@@ -288,15 +308,18 @@ final class ReconstructionCli {
         var selected = chosen;
         var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
         var changedMaterial = ReconstructionVoicing.changedMaterial(previousAllocation, allocation);
-        var retained = previous == null ? ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
+        boolean stock = score.inputs().options(score.durationUs()).stockDrums();
+        var retained = previous == null ? stock ? fitted : ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
                 : ReconstructionVoicing.preserveRefit(fitted, previous, targets, refitLevels, changedMaterial, allocated);
         // Patch-only refits retain saved gains except on lanes with new material.
         var levelTargets = targets;
         if (previous != null && !refitLevels)
             levelTargets = changedMaterial.stream().filter(id -> targets.isEmpty() || targets.contains(id))
                     .collect(java.util.stream.Collectors.toSet());
-        var result = previous == null || refitLevels || !levelTargets.isEmpty()
+        var calibrated = previous == null || refitLevels || !levelTargets.isEmpty()
                 ? ReconstructionLevels.calibrate(score, catalogue, allocation, retained, levelTargets) : retained;
+        var result = stock && (previous == null || refitLevels && targets.isEmpty())
+                ? ReconstructionDrumBalance.fit(score, catalogue, allocation, calibrated) : calibrated;
         if (previous != null)
             ReconstructionVoicing.validate(result, allocation, catalogue, ReconstructionTimeMap.of(score));
         String warning = matchQuietly(() -> ReconstructionSustain.check(score, catalogue, allocated.get("FM1"),
@@ -715,6 +738,10 @@ final class ReconstructionCli {
             if (transcription.retriggers() != null)
                 for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
             var assembled = result.project();
+            if (options.target() != TargetGame.S3K && assembled.samples().stream()
+                    .anyMatch(sample -> !ReconstructionDrums.isTargetStock(sample, options.target()))) {
+                out.println("Warning: Test in game may approximate custom PCM drums on " + options.target().name() + ".");
+            }
             var legacySustain = assemblyInputs == null && options.target() == TargetGame.S3K
                     ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, playback.compiled().song().length,
@@ -728,13 +755,15 @@ final class ReconstructionCli {
                     result.echoNotes() == 0 ? List.of() : copyLanes, timeline.summary(), external,
                     runEvidence.isEmpty() ? null : runEvidence, fastRuns, transcription.figureVoices(),
                     result.bends().isEmpty() ? null : result.bends(), bendSizeLimit ? true : null,
-                    drumSource(transcription, result.dacHits()),
+                    drumSource(transcription, options, result.dacHits()),
                     assemblyInputs == null ? null : result.voicedGates(), assemblyInputs, legacySustain,
                     legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()),
                     result.assignmentClipCost() == 0 ? null : result.assignmentClipCost(),
                     result.arpeggioExtraNoteBytes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
+            if (options.target() != TargetGame.S3K)
+                reportJson.addProperty("drumKit", options.stockDrums() ? "stock" : "custom");
             if (!result.layers().isEmpty()) reportJson.add("noteLayers", json.toJsonTree(result.layers()));
             if (!result.lanePolicyCopies().isEmpty())
                 reportJson.add("lanePolicyCopies", json.toJsonTree(result.lanePolicyCopies()));
@@ -775,7 +804,8 @@ final class ReconstructionCli {
                 .mapToInt(e -> e.bytes().size()).sum();
     }
 
-    private static ReconstructionDrums.Source drumSource(ReconstructionStages.Score score, int hits) {
+    private static ReconstructionDrums.Source drumSource(ReconstructionStages.Score score, Options options, int hits) {
+        if (options.stockDrums()) return hits > 0 ? ReconstructionDrums.Source.stock : null;
         if (score.inputs() == null) return null;
         var requested = score.inputs().drumSource();
         return requested == null && hits > 0 ? ReconstructionDrums.Source.catalogue : requested;
@@ -809,6 +839,7 @@ final class ReconstructionCli {
         boolean wholePartVoices = false;
         boolean audioRefine = false;
         TargetGame target = TargetGame.S3K;
+        String drumKit = null;
         var stems = new java.util.TreeMap<Integer, Path>();
         var seen = new java.util.HashSet<String>();
         for (int i = 5; i < args.length; i++) {
@@ -841,6 +872,7 @@ final class ReconstructionCli {
                 }
                 case "--name" -> name = value;
                 case "--target" -> target = TargetGame.parse(value);
+                case "--drum-kit" -> drumKit = value;
                 case "--ticks-per-beat" -> {
                     ticksPerBeat = Integer.parseInt(value);
                     if (ticksPerBeat < 1) throw new IllegalArgumentException("--ticks-per-beat must be positive");
@@ -857,7 +889,8 @@ final class ReconstructionCli {
             }
         }
         if (name.isBlank()) throw new IllegalArgumentException("Project name must not be blank");
-        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, target);
+        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems,
+                target, ReconstructionDrums.KitMode.forTarget(drumKit, target));
     }
 
     static com.opensmpsdeck.project.CompiledProject compileTarget(StudioProject project) {

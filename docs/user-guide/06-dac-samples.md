@@ -63,8 +63,16 @@ Up to 19 samples total can be addressed from the keyboard. The tracker grid disp
 
 ## Drum sources in headless reconstruction
 
-Use `reconstruct run … --stem 2=drums.wav --drum-source MODE` to fit the kit
-against an isolated drum stem. Replace `2` with the MIDI percussion part ID.
+Sonic 1 and Sonic 2 reconstructions use the game's stock drum kit by
+default. Register your clean ROM with `rom set s1 PATH` or `rom set s2 PATH`.
+Studio plays each selected drum at its cartridge rate. Portable packages
+use stock references, which are resolved from a local ROM.
+
+Use `reconstruct run … --drum-kit custom --drum-source MODE --stem 2=drums.wav`
+to fit custom PCM against an isolated drum stem. S3K already defaults to
+catalogue PCM, so it can omit `--drum-kit custom`. Test in game reports
+approximations when a custom sample needs DPCM quantization or a stock
+substitute. Replace `2` with the MIDI percussion part ID.
 The stem and mix must share a source clock. With steady tempo enabled, the
 matcher stretches the drum reference with the mix's alignment and measures
 the hits on the project clock.
@@ -77,11 +85,13 @@ the hits on the project clock.
   audible in the probe. When a mixed reference has insufficient isolated
   hits, the report records use of the legacy source-clock vote.
 - `sliced` extracts a one-shot from the best isolated hit on the supplied stem.
-  It trims the tail and converts the sample to unsigned 8-bit PCM at an S3K
-  DAC rate. It uses the catalogue when a class has no usable stem excerpt.
+  It trims the tail and converts the sample to unsigned 8-bit PCM at the selected
+  driver's DAC rate. It uses the catalogue when a class has no usable stem excerpt.
 - `auto` uses a slice when the catalogue fit is weak and a stem slice is
   available. The report records the chosen source, catalogue distance,
   compared hits, and alternative samples per class.
 
-Each choice plays through the existing single DAC lane. Simultaneous-hit and
-tail-protection limits apply in all three modes.
+Each choice plays through the single DAC lane. Simultaneous-hit and
+tail-protection limits apply to both stock and custom kits. With mapped
+drum and instrument stems, stock-kit balance adjusts tonal lane volumes
+around the fixed DAC level.

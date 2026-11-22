@@ -208,6 +208,18 @@ public final class SunoImport {
                                  String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
                                  String drumDetector, String device, Path configFile, String lanePolicyPreset,
                                  Path separatorConfig, TargetGame target, ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, transcriber, audioOnly, audioTranscriber,
+                stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig,
+                target, null, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, boolean audioOnly,
+                                 String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
+                                 String drumDetector, String device, Path configFile, String lanePolicyPreset,
+                                 Path separatorConfig, TargetGame target, String drumKit,
+                                 ReconstructionStages.Progress progress) throws IOException {
+        ReconstructionDrums.KitMode.forTarget(drumKit, target);
         if (lanePolicyPreset != null && !Set.of("off", ReconstructionLanePolicies.S3K_LAYERING).contains(lanePolicyPreset))
             throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
         Path source = folder.toRealPath();
@@ -298,9 +310,10 @@ public final class SunoImport {
         if (!gaps.isEmpty() && status == Status.ok) status = Status.warning;
         var request = audioOnly ? (status == Status.error ? null : audioRequest)
                 : runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
-        if (request != null && (lanePolicyPreset != null || separatorConfig != null || target != TargetGame.S3K)) {
+        if (request != null && (lanePolicyPreset != null || separatorConfig != null || target != TargetGame.S3K || drumKit != null)) {
             var options = new LinkedHashMap<>(request.options);
             if (target != TargetGame.S3K) options.put("target", target.id());
+            if (drumKit != null) options.put("drumKit", drumKit);
             if (lanePolicyPreset != null) options.put("lanePolicyPreset", lanePolicyPreset);
             if (separatorConfig != null) options.put("separatorConfig", separatorConfig.toString());
             request = new RunRequest(request.workDir, request.inputs, options);
@@ -349,7 +362,7 @@ public final class SunoImport {
         String transcriber = null, audioTranscriber = null;
         var stemRoles = new LinkedHashMap<String, String>();
         var transcriberFor = new TreeMap<String, String>();
-        String drumDetector = null, device = null, lanePolicyPreset = null;
+        String drumDetector = null, device = null, lanePolicyPreset = null, drumKit = null;
         Path configFile = null, separatorConfig = null;
         TargetGame target = null;
         var assignments = new LinkedHashMap<String, Integer>();
@@ -370,6 +383,10 @@ public final class SunoImport {
                 case "--target" -> {
                     if (target != null) throw new IllegalArgumentException("Duplicate option --target");
                     target = TargetGame.parse(value);
+                }
+                case "--drum-kit" -> {
+                    if (drumKit != null) throw new IllegalArgumentException("Duplicate option --drum-kit");
+                    drumKit = value;
                 }
                 case "--catalogue" -> catalogue = Path.of(value);
                 case "--exclude" -> exclusions.add(value);
@@ -406,7 +423,7 @@ public final class SunoImport {
         }
         var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber,
                 audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig,
-                target == null ? TargetGame.S3K : target, (a, b, c) -> {});
+                target == null ? TargetGame.S3K : target, drumKit, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -1127,7 +1144,8 @@ public final class SunoImport {
             });
         }
         for (String[] option : List.of(new String[]{"lanePolicyPreset", "--lane-policy-preset"},
-                new String[]{"separatorConfig", "--separator-config"}, new String[]{"target", "--target"})) {
+                new String[]{"separatorConfig", "--separator-config"}, new String[]{"target", "--target"},
+                new String[]{"drumKit", "--drum-kit"})) {
             if (!request.options.containsKey(option[0])) continue;
             args.add(option[1]);
             args.add(request.options.get(option[0]).toString());

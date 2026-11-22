@@ -61,6 +61,10 @@ stop if the selected driver cannot play an envelope or command used by the
 arrangement. S1 and S2 builds place notes on their respective driver clocks
 (about 59.76 ticks per second), accounting for the frames where each driver
 holds durations. The project keeps its target and native tempo for export.
+For an S1 or S2 song with DAC drums, register the clean cartridge in the
+ROM library before starting. Reconstruction fits the game's stock kit.
+The [headless drum kit options](06-dac-samples.md#drum-sources-in-headless-reconstruction)
+also support custom PCM for portable projects.
 
 Use a stem's **Override** dropdown to select a MIDI part, exclude the stem,
 or restore automatic mapping. Choose **Re-check** to apply your changes and

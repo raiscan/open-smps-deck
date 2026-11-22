@@ -52,6 +52,8 @@ final class McpReconstruction {
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
             field("policyDecisions", "boolean", "Include per-note lane policy decisions and blockers in the assembly report").optional(),
+            choice("drumKit", "DAC kit selection. S1 and S2 default to stock", "stock", "custom").optional(),
+            choice("drumSource", "Custom kit source", "catalogue", "sliced", "auto").optional(),
             choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
@@ -111,7 +113,8 @@ final class McpReconstruction {
                 optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, transcriberFor,
                 optional(args, "drumDetector"), optional(args, "transcriberDevice"), null,
                 optional(args, "lanePolicyPreset"), null,
-                args.has("target") ? TargetGame.parse(string(args, "target")) : TargetGame.S3K, progress).json();
+                args.has("target") ? TargetGame.parse(string(args, "target")) : TargetGame.S3K,
+                optional(args, "drumKit"), progress).json();
     }
 
 
@@ -165,7 +168,7 @@ final class McpReconstruction {
         }
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
-            options(cli, options, "target", "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
+            options(cli, options, "target", "drumKit", "drumSource", "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
                     "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset", "policyDecisions");
