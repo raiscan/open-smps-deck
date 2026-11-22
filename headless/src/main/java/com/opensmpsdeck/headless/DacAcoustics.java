@@ -9,18 +9,23 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 
 /** Rate-specific acoustic evidence derived from decoded DAC PCM. */
 final class DacAcoustics {
-    static final int VERSION = 1;
+    static final int VERSION = 2;
     static final int ANALYSIS_RATE = 24_000;
     private static final int SPECTRAL_RATE = ANALYSIS_RATE / 2;
     private static final int FFT_SIZE = ReconstructionRhythmAudio.FFT_SIZE;
     private static final int FRAME = 384; // 32 ms at the spectral rate
     private static final int HOP = 120;
     private static final int[] BAND_EDGES = {250, 500, 800, 1200, 1800, 2600, 3600, 5000};
+    private static final double MIN_SYLLABLE_MS = 100;
+    private static final double MIN_SYLLABLE_F0_SPREAD = .04; // About half a semitone of median deviation.
+    private static final Set<Integer> VERIFIED_SPEECH_SLOTS = Set.of(0xA5, 0xA9, 0xAA, 0xBE);
+    private static final String SPEECH_CURATION_SOURCE = "user listening 2026-11-22";
 
     enum SampleClass {
         SPEECH_LIKE, PITCHED_TONAL, NOISE_LIKE, MEMBRANE_BODY, UNCLASSIFIED;
@@ -33,6 +38,7 @@ final class DacAcoustics {
                    double envelopeMovement, double upperFlatness, double lowEnergy, double upperEnergy) {}
     record RateProfile(int rate, String variantId, Profile profile) {}
     record AssetProfile(String assetId, String name, SampleClass sampleClass, boolean excludeFromDrumFit,
+                        @Nullable String curationSource,
                         List<String> playedRoles, List<RateProfile> nativeRates) {}
     record Report(int profileVersion, List<AssetProfile> samples) {}
     private record Key(String assetId, int rate) {}
@@ -50,11 +56,15 @@ final class DacAcoustics {
         }
         variants.forEach((id, sounds) -> {
             var asset = catalogue.asset(id);
-            var playedRoles = sounds.stream().flatMap(variant -> variant.occurrences().stream())
-                    .filter(usage -> usage.played() && usage.slot() != null && "dac".equals(usage.table())
+            var lockedOnSlots = sounds.stream().flatMap(variant -> variant.occurrences().stream())
+                    .filter(usage -> usage.slot() != null && "dac".equals(usage.table())
                             && CatalogueMatcher.LOCKED_ON_S3K.equals(usage.revision()))
+                    .toList();
+            var playedRoles = lockedOnSlots.stream().filter(InstrumentCatalogue.Occurrence::played)
                     .map(usage -> S3kDacFamily.slot(usage.slot())).filter(family -> family != S3kDacFamily.OTHER)
                     .map(Enum::name).distinct().sorted().toList();
+            boolean curatedSpeech = lockedOnSlots.stream()
+                    .anyMatch(usage -> "S3K".equalsIgnoreCase(usage.driver()) && VERIFIED_SPEECH_SLOTS.contains(usage.slot()));
             float[] pcm = pcm(asset.bytes());
             var rates = new LinkedHashMap<Integer, RateProfile>();
             for (var variant : sounds) {
@@ -65,10 +75,12 @@ final class DacAcoustics {
             var nativeRates = List.copyOf(rates.values());
             // A different pan or native rate must not let a speech or tonal
             // asset through by shortening its voiced portion during playback.
-            SampleClass sampleClass = nativeRates.stream().map(row -> row.profile().sampleClass())
+            SampleClass sampleClass = curatedSpeech ? SampleClass.SPEECH_LIKE
+                    : nativeRates.stream().map(row -> row.profile().sampleClass())
                     .min(Comparator.naturalOrder()).orElse(SampleClass.UNCLASSIFIED);
             assets.put(id, new AssetProfile(id, asset.name(), sampleClass,
-                    Boolean.TRUE.equals(asset.excludeFromDrumFit()), playedRoles, nativeRates));
+                    curatedSpeech || Boolean.TRUE.equals(asset.excludeFromDrumFit()),
+                    curatedSpeech ? SPEECH_CURATION_SOURCE : null, playedRoles, nativeRates));
         });
     }
 
@@ -138,13 +150,15 @@ final class DacAcoustics {
         double low = frames.stream().mapToDouble(Frame::low).average().orElseThrow();
         double upper = frames.stream().mapToDouble(Frame::upper).average().orElseThrow();
         SampleClass sampleClass;
-        if (duration >= 65 && harmonicity >= .32 && fraction >= .42 && movement >= .21
-                && spread <= .55 && low < .70) {
+        if (spread != null && duration >= MIN_SYLLABLE_MS && harmonicity >= .32 && fraction >= .42
+                && spread >= MIN_SYLLABLE_F0_SPREAD && spread <= .55 && movement >= .21 && low < .70) {
             sampleClass = SampleClass.SPEECH_LIKE;
         } else if (f0 != null && harmonicity >= .42 && fraction >= .62 && spread <= .11
                 && (low < .78 || duration >= 320 || tail >= .45)) {
-            // The stable modes of short, decaying low drums are body resonance.
-            sampleClass = SampleClass.PITCHED_TONAL;
+            // A bright, quickly decaying hit can ring at a stable pitch and
+            // still have enough broadband energy for a hat or cymbal.
+            boolean brightTransient = duration < MIN_SYLLABLE_MS && tail <= .30 && flatness >= .12 && upper >= .33;
+            sampleClass = brightTransient ? SampleClass.NOISE_LIKE : SampleClass.PITCHED_TONAL;
         } else if (harmonicity < .27 && flatness >= .20 && upper >= .44) {
             sampleClass = SampleClass.NOISE_LIKE;
         } else {
