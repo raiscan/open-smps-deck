@@ -314,9 +314,10 @@ support project-second spans, fades and channel stems (`--stems`, optionally
 a compatible driver with local voices. Use the package for projects with
 external envelope or DAC assets. It preserves bindings, resources and source.
 For a [skdisasm kit](../../docs/architecture/disassembly-kit.md), use
-`disasm` with a project, work directory or portable `.smps.zip`. Use a
-`.zip` output for an archive. `--rom PATH` materialises stock assets for
-personal use. `--dpcm-closed` quantises the WAVs. Repeat `--replace-dac NN`
+`disasm` with a project, work directory or embedded-bank portable `.smps.zip`.
+Use a `.zip` output for an archive. Stock DAC notes are reused when the
+asset and retail playback rate match. `--rom PATH` materialises stock
+assets for personal use. `--dpcm-closed` quantises the WAVs. Repeat `--replace-dac NN`
 (hex) to repurpose unused retail slots. The MCP options are `roms`,
 `dpcmClosed` and `replaceDac` (integer note numbers). Read the output warnings.
 

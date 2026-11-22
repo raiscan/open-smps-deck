@@ -182,7 +182,7 @@ addressed bank, bindings, resources and source required for integration with
 the pinned OpenGGF S3K driver. OpenGGF has no direct ZIP loader.
 
 Use `--format disasm` for an S3K skdisasm kit from a project, work
-directory or portable `.smps.zip`. A `.zip` output wraps the files in a kit
+directory or embedded-bank portable `.smps.zip`. A `.zip` output wraps the files in a kit
 directory. Use `--rom PATH` to materialise stock assets for personal use.
 `--dpcm-closed` changes the WAVs to DPCM-representable PCM. Repeat
 `--replace-dac NN` (hexadecimal) to repurpose audited retail notes. See the
@@ -191,7 +191,7 @@ directory. Use `--rom PATH` to materialise stock assets for personal use.
 MCP exposes `project_export` with exactly one of `project` or `workDir`, plus
 `output`, `format`, and the optional `start`, `end`, `fade`, `loops`, `stems`
 and `zip` fields. Use a new output inside the project or work directory.
-For `format: "disasm"`, `project` can also point to a portable package.
+For `format: "disasm"`, `project` can also point to an embedded-bank portable package.
 Use optional `roms`, `dpcmClosed` and `replaceDac` (integer note array).
 Inspect the returned `warnings`.
 

@@ -1,7 +1,7 @@
 # S3K disassembly kits
 
 `export INPUT OUTPUT --format disasm` accepts an arrangement, a
-reconstruction work directory, or a schema-4 `.smps.zip`. Use a new
+reconstruction work directory, or an embedded-bank schema-4 `.smps.zip`. Use a new
 output directory or a `.zip`, which wraps the same files in a kit directory.
 The format dispatches by package driver. S1 and S2 kits are pending.
 
@@ -118,9 +118,9 @@ For zero, use the interval where the integer division in the macro
 produces −1, before it adds one. Byte zero is emitted literally and the Z80's `DJNZ` executes 256 delay
 iterations. For secondary bindings, `DAC_Setup ptr, scale` uses a
 12-decimal scale padded inside the target integer's rounding interval.
-Retail rate checks use the SHA-256 of two unsigned bytes, note then rate,
-from the pinned locked-on loader's DAC mapping. The resource stores
-hashes and note locators.
+Stock DAC note reuse compares the binding's rate byte with the retail
+playback rate in `stock/s3k-dac-rates.txt`. Each row gives the note byte
+and rate byte in hexadecimal from the pinned locked-on loader's DAC mapping.
 
 DPCM cannot reproduce arbitrary 8-bit PCM. The kit reports
 `DPCM_INEXACT` per sample when encoding and decoding changes any byte or

@@ -1,9 +1,6 @@
 package com.opensmpsdeck.headless;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -49,12 +46,12 @@ final class S3kDisasmSamples {
         var notes = new LinkedHashMap<Integer, Note>();
         var custom = new ArrayList<PackageManifest.DacBinding>();
         var usedRetail = new HashSet<Integer>();
-        var hashes = kit.manifest.dacBindings().isEmpty() ? Map.<Integer, String>of() : retailRateHashes();
+        var rates = kit.manifest.dacBindings().isEmpty() ? Map.<Integer, Integer>of() : DisasmDacRates.read("s3k");
         for (var binding : kit.manifest.dacBindings()) {
             var asset = kit.assets.get(binding.asset());
             var ref = asset.ref();
             boolean nativeSample = ref != null && asset.transforms().isEmpty()
-                    && hashes.getOrDefault(ref.note(), "").equals(rateHash(ref.note(), binding.rate()))
+                    && rates.getOrDefault(ref.note(), -1) == binding.rate()
                     && StockTable.entries().stream().anyMatch(entry ->
                             entry.kind().equals("DAC_SAMPLE") && entry.ref().equals(ref));
             if (nativeSample) {
@@ -190,21 +187,5 @@ final class S3kDisasmSamples {
     private static String retailName(int number, String prefix) {
         String name = RETAIL_NOTES.get(number - FIRST_RETAIL);
         return name.endsWith("EchoedClapHit") ? prefix + "_" + name : name;
-    }
-
-    private static Map<Integer, String> retailRateHashes() throws IOException {
-        try (var stream = S3kDisasmSamples.class.getResourceAsStream("/stock/s3k-dac-rate-sha256.txt");
-             var reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.US_ASCII))) {
-            var result = new HashMap<Integer, String>();
-            for (var line : reader.lines().toList()) {
-                var parts = line.split(" ");
-                result.put(Integer.parseInt(parts[0], 16), parts[1]);
-            }
-            return result;
-        }
-    }
-
-    static String rateHash(int note, int rate) {
-        return StockTable.hash(new byte[] {(byte) note, (byte) rate});
     }
 }
