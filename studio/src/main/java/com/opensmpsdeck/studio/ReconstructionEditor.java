@@ -211,7 +211,7 @@ final class ReconstructionEditor implements AutoCloseable {
             try {
                 watchers.add(new ProjectWatcher(work.resolve(filename), () -> Platform.runLater(this::readExternal)));
             } catch (IOException failure) {
-                status.accept("Could not watch " + filename + " · " + failure.getMessage());
+                status.accept("Could not watch " + filename + " · " + describe(failure));
             }
         }
     }
@@ -726,7 +726,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 });
             } catch (IOException | IllegalArgumentException failure) {
                 Platform.runLater(() -> {
-                    if (!closed && request == auditionEpoch) status.accept("Audition unavailable · " + failure.getMessage());
+                    if (!closed && request == auditionEpoch) status.accept("Audition unavailable · " + describe(failure));
                 });
             }
         });
@@ -983,11 +983,11 @@ final class ReconstructionEditor implements AutoCloseable {
                     stageBatch(intents);
                     readExternal();
                 });
-            } catch (Exception failure) {
+            } catch (Throwable failure) {
                 Platform.runLater(() -> {
                     if (closed) return;
                     busy = false;
-                    status.accept("Classification check failed · " + failure.getMessage());
+                    status.accept("Classification check failed · " + describe(failure));
                     updateControls();
                     readExternal();
                 });
@@ -1341,7 +1341,7 @@ final class ReconstructionEditor implements AutoCloseable {
                 ReconstructionEditCommand.revise(work, proposal.id(), intent, expected);
                 message = "Proposal revised";
             } catch (IOException | IllegalArgumentException failure) {
-                message = "Revision failed · " + failure.getMessage();
+                message = "Revision failed · " + describe(failure);
             }
             String detail = message;
             Platform.runLater(() -> {
@@ -1384,7 +1384,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     if (closed) return;
                     busy = false;
                     updateControls();
-                    status.accept("Reject failed · " + failure.getMessage());
+                    status.accept("Reject failed · " + describe(failure));
                     readExternal();
                 });
             }
@@ -1422,8 +1422,8 @@ final class ReconstructionEditor implements AutoCloseable {
                 var result = preview.run(expected);
                 for (var comparison : result.comparisons())
                     audio.add(new PreviewAudio(comparison, ReferenceWave.read(Path.of(comparison.output()))));
-            } catch (Exception error) {
-                failure = cancelling ? "Preview cancelled" : "Preview unavailable · " + error.getMessage();
+            } catch (Throwable error) {
+                failure = cancelling ? "Preview cancelled" : "Preview unavailable · " + describe(error);
             } finally {
                 synchronized (jobLock) { running = null; }
                 Thread.interrupted();
@@ -1598,7 +1598,7 @@ final class ReconstructionEditor implements AutoCloseable {
             if (decision.isEmpty() || closed || (lanePolicyPreset == null ? apply : lanePolicies).isDisabled()) return;
             approval = decision.get();
         } catch (IOException | IllegalArgumentException failure) {
-            status.accept("Apply blocked · " + failure.getMessage());
+            status.accept("Apply blocked · " + describe(failure));
             return;
         }
         setBusy();
@@ -1607,7 +1607,7 @@ final class ReconstructionEditor implements AutoCloseable {
         worker.execute(() -> {
             JsonObject diff = null;
             Snapshot next = null;
-            Exception failure = null;
+            Throwable failure = null;
             try {
                 synchronized (jobLock) {
                     running = Thread.currentThread();
@@ -1617,7 +1617,7 @@ final class ReconstructionEditor implements AutoCloseable {
                         ? ReconstructionReview.apply(work, expected, intents, approval.revision(), this::reportProgress)
                         : ReconstructionReview.applyLanePolicyPreset(work, expected, lanePolicyPreset, approval.revision(), this::reportProgress);
                 next = Snapshot.read(work);
-            } catch (Exception error) {
+            } catch (Throwable error) {
                 failure = error;
             } finally {
                 synchronized (jobLock) { running = null; }
@@ -1645,7 +1645,7 @@ final class ReconstructionEditor implements AutoCloseable {
         });
     }
 
-    private void finish(JsonObject diff, Snapshot next, Exception error) {
+    private void finish(JsonObject diff, Snapshot next, Throwable error) {
         if (closed) return;
         busy = false;
         if (diff != null) {
@@ -1656,12 +1656,19 @@ final class ReconstructionEditor implements AutoCloseable {
             tabs.getSelectionModel().select(diffTab);
             if (next != null) adopt(next);
             status.accept(error == null ? "Reconstruction applied from " + diff.get("from").getAsString()
-                    : "Applied, but refresh failed · " + error.getMessage());
+                    : "Applied, but refresh failed · " + describe(error));
         } else if (error != null) {
-            status.accept(cancelling ? "Apply cancelled · edits are still pending" : "Apply failed · " + error.getMessage());
+            status.accept(cancelling ? "Apply cancelled · edits are still pending" : "Apply failed · " + describe(error));
         }
         updateDraft();
         readExternal();
+    }
+
+    /** A readable message for any worker failure, including errors whose own message is null. */
+    static String describe(Throwable failure) {
+        var root = failure;
+        while (root.getMessage() == null && root.getCause() != null && root.getCause() != root) root = root.getCause();
+        return root.getMessage() != null ? root.getMessage() : root.getClass().getSimpleName();
     }
 
     private void cancel() {
@@ -1780,12 +1787,12 @@ final class ReconstructionEditor implements AutoCloseable {
                     }
                     if (checkAgain) readExternal();
                 });
-            } catch (Exception failure) {
+            } catch (Throwable failure) {
                 Platform.runLater(() -> {
                     refreshQueued = false;
                     if (closed || busy || snapshot != current) return;
                     externalError = true;
-                    status.accept("External reconstruction update unavailable · " + failure.getMessage());
+                    status.accept("External reconstruction update unavailable · " + describe(failure));
                     updateControls();
                     if (checkAgain) readExternal();
                 });
@@ -1865,11 +1872,11 @@ final class ReconstructionEditor implements AutoCloseable {
                     updateDraft();
                     readExternal();
                 });
-            } catch (Exception failure) {
+            } catch (Throwable failure) {
                 Platform.runLater(() -> {
                     if (closed) return;
                     busy = false;
-                    status.accept("Section change failed · " + failure.getMessage());
+                    status.accept("Section change failed · " + describe(failure));
                     updateControls();
                     readExternal();
                 });

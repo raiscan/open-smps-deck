@@ -14,6 +14,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Standalone verifier loaded against the finished desktop JAR, not reactor classes. */
 public final class PackagedStudioSmoke {
     public static void main(String[] args) throws Exception {
+        for(String resource:new String[]{"/stock/s1.json","/stock/s2.json","/stock/s3k.json","/stock/s1-dac-rates.txt",
+                "/stock/s2-dac-rates.txt","/stock/s3k-dac-rates.txt","/spdx-identifiers.txt"})
+            if(PackagedStudioSmoke.class.getResource(resource)==null)
+                throw new AssertionError("Packaged Studio is missing headless resource "+resource);
         CountDownLatch done=new CountDownLatch(1);AtomicReference<Throwable> failure=new AtomicReference<>();
         Platform.startup(()->{
             try {
