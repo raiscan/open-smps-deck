@@ -130,7 +130,11 @@ horizontal position is time, vertical position is pitch, width is duration.
 Double-click empty space to add a note. Drag a note to change time/pitch; drag its
 right edge for duration. Select a note to edit exact tick, duration and MIDI pitch
 in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete with
-the piano roll focused removes a selected note.
+the piano roll focused removes a selected note. Press **+** or **=** (or
+**Numpad Add**) to raise its pitch one semitone, or **−** (or **Numpad
+Subtract**) to lower it. Hold **Shift** with any of those keys to move by an
+octave. Each move is undoable. The status line reports any move outside the
+chip's pitch range or skipped PSG noise note.
 
 **These are linked sources:** changing a source changes all its instances.
 Editing a clip's repeated length leaves the source unchanged. The header shows
@@ -309,8 +313,9 @@ playback.
   to audition that lane through the chip renderer. **Solo note** loops the
   selected gate. Turn it off to return to your previous loop selection.
 
-- Choose **Lane policies → S3K layering** to rebuild with octave-up PSG
-  doubling and a 14-frame FM echo on available channels. The echo uses
+- Choose the target's preset under **Lane policies** (**S1 layering**,
+  **S2 layering**, or **S3K layering**) to rebuild with octave-up PSG doubling
+  and a 14-tick FM echo on available channels. The echo uses
   11 carrier TL steps of attenuation relative to the dry note by default.
   Choose **Off** to clear the lane policies. Both choices replace any
   custom lane policies. [Adjust the echo level](../architecture/reconstruction-stages.md#optional-lane-policies)
@@ -365,8 +370,19 @@ composer stays available across a refresh. The
 - In **Select**, drag from empty space to box-select. Hold **Shift** to add
   or **Ctrl** to toggle notes, including when the box starts on an overlay.
   A plain drag on a note still moves or resizes it. In **Selection**, filter
-  the current selection by role, identified voice or lane. Shift-drag on
-  the ruler still sets a loop.
+  the current selection by role, identified voice or lane. Click a colored
+  role name above the plot to select that role across the whole song.
+  Shift-click, Ctrl-click or Cmd-click adds the role to the selection.
+  The checkbox next to each role name controls its visibility. Shift-drag
+  on the ruler still sets a loop.
+- With the reconstruction plot focused, press **+**, **=** or **Numpad
+  Add** for one semitone up, and **−** or **Numpad Subtract** for one down.
+  Hold **Shift** to move by an octave. The **Selection** tab also has
+  **−1**, **+1**, **−Oct** and **+Oct** buttons. Each step previews immediately
+  and can be undone separately. Studio skips drums, noise and generated
+  notes without a score attack. If a pitched note would leave its chip's
+  range, Studio refuses the move and
+  explains why in the status line. Use **Apply** to rebuild with the new pitches.
 - Use **Selection** to set roles, move notes to a voice, create a named voice,
   choose FM, PSG tone, PSG noise or DAC, pin an exact lane, or set or scale
   velocity. An incompatible chip choice shows the reason. **This voice**
@@ -398,9 +414,13 @@ composer stays available across a refresh. The
   drag up or down. Drag farther right for a longer slide. Hold **Shift**
   to snap to semitones. Drag a handle on the selected curve to revise it.
   The driver plays authored bends on FM.
-- In **Vibrato**, drag right to increase rate and up to increase depth
-  on an FM note. The readout shows the achievable Hz and cents. Drag down
-  to zero depth to turn modulation off for that note.
+- In **Vibrato**, start a drag where you want a stage to begin within an
+  S3K FM note. Drag right for a faster oscillation and up for more depth.
+  Start inside the note to leave the opening plain, then add another stage
+  farther right to deepen it. Drag from a gold marker to edit that stage.
+  **Alt-click** a marker to remove it. Drag down to zero depth to stop the
+  vibrato from that point. The Note tab lists the stages in ticks, Hz, and
+  cents.
 - Select a scored note to set its velocity or delete it with **Delete**.
   Set a role or pin a lane from the **Note** tab. Delete on a note generated
   during role assignment records a drop. The trace shows the fate and reason,

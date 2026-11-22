@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -61,6 +62,7 @@ public final class ReconstructionInspection {
     private final ReconstructionTimeMap clock;
     private final Map<String, ReconstructionTrace.Row> trace;
     private final StudioProject project;
+    private final TargetGame target;
     private final List<AudioSource> sources;
     private final List<Overlay> overlays;
     private final List<LayerOverlay> layers;
@@ -73,6 +75,7 @@ public final class ReconstructionInspection {
         this.clock = ReconstructionTimeMap.of(score);
         this.trace = ReconstructionTrace.read(work, score);
         this.project = project;
+        this.target = score.profile().game();
         this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
         this.sources = sources(work, score);
         var span = new ReconstructionView.Span(0, duration(), TimeBase.source, clock);
@@ -109,6 +112,7 @@ public final class ReconstructionInspection {
     public double projectDuration() { return clock.projectDuration(); }
     public double toSource(double project) { return clock.source(project); }
     public double toProject(double source) { return clock.project(source); }
+    public TargetGame target() { return target; }
     public StudioProject project() { return project; }
     public List<AudioSource> sources() { return sources; }
     public List<Overlay> overlays() { return overlays; }
@@ -314,8 +318,8 @@ public final class ReconstructionInspection {
         int pitch = effective == null ? row.pitch() : effective.note().pitch();
         String lane = allocation == null ? null : allocation.lane();
         boolean sounds = !lost && lane != null && allocation.placement() != null;
-        return List.of(drawable(row, row.id(), lane, pitch, row.effectiveTiming(), color, patches, bend,
-                sounds, lost, competitors));
+        var timing = java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing());
+        return List.of(drawable(row, row.id(), lane, pitch, timing, color, patches, bend, sounds, lost, competitors));
     }
 
     private static Overlay drawable(ReconstructionTrace.Row row, String eventId, String lane, int pitch,

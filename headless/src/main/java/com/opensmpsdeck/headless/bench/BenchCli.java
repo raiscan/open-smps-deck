@@ -5,7 +5,7 @@ import com.openggf.audio.MusicRestoreSink;
 import com.openggf.audio.smps.SmpsSequencer;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
 import com.opensmpsdeck.project.CompiledProject;
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.headless.LeadGap;
 import com.opensmpsdeck.headless.BenchCartridge;
@@ -42,11 +42,11 @@ public final class BenchCli {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--stems] [--profile suno-like [--drift N]]");
         out.println("           --ladder [--game s1|s2|s3k] [--effects room|lofi] [--full-length [--loops N]]");
         out.println("           [--torture] [--transcriber NAME [--transcriber-config FILE] [--transcriber-device DEVICE]]");
-        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--quick] [--holdout] [--audio-refine] [--jobs N]");
+        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
         out.println("       bench ladder-report OUT_DIRS... [--out REPORT_DIR]");
-        out.println("       bench compare OLD.json NEW.json [--tolerance N] [--alternate-midi OLD_MANIFEST NEW_MANIFEST]");
+        out.println("       bench compare OLD.json NEW.json [--tolerance N] [--cross-target] [--alternate-midi OLD_MANIFEST NEW_MANIFEST]");
     }
 
     public static int run(String[] args, PrintStream out, Hooks hooks) throws IOException {
@@ -170,6 +170,7 @@ public final class BenchCli {
         require(args, 5);
         Path gold = null;
         Integer jobs = null;
+        TargetGame target = TargetGame.S3K;
         String steadyTempo = "auto";
         BenchRolePlan.Mode rolePlan = null;
         var seen = new HashSet<String>();
@@ -177,6 +178,7 @@ public final class BenchCli {
             String flag = unique(seen, args[i]);
             switch (flag) {
                 case "--quick", "--holdout", "--audio-refine", "--gold-only" -> { }
+                case "--target" -> target = TargetGame.parse(value(args, ++i, flag));
                 case "--steady-tempo" -> {
                     steadyTempo = value(args, ++i, flag);
                     if (!List.of("off", "auto").contains(steadyTempo))
@@ -203,7 +205,7 @@ public final class BenchCli {
             throw new IllegalArgumentException("--role-plan requires native corpus cases");
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
-                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo), out, hooks);
+                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo, target), out, hooks);
     }
 
     private static int ladderReport(String[] args, PrintStream out) throws IOException {
@@ -227,13 +229,13 @@ public final class BenchCli {
         Path work = Path.of(args[2]);
         var report = BenchFiles.read(work.resolve("report.json"), BenchReconstruction.Report.class);
         var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
-        var notes = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer());
+        var notes = BenchTimeline.read(project, report.presentations(), hooks.sequencer(), false);
         var tones = notes.channels().stream().filter(channel -> channel.kind().equals("FM1"))
                 .flatMap(channel -> channel.notes().stream().map(note ->
                         new BenchMetrics.Event(channel.kind(), note.start(), note.end(), note.pitch(), note.voiceHash(), null)))
                 .toList();
         var gates = BenchRun.melodyGates(report.excludeLayers(
-                BenchReconstruction.excludeEffectCopies(tones, report.effectCopyLanes())));
+                BenchReconstruction.excludeEffectCopies(tones, report.effectCopyLanes()), project.clock()));
         Path reference = Path.of(args[4]);
         var measurement = args[3].equals("--gold")
                 ? BenchGold.leadGap(work, BenchGold.read(reference), gates)
@@ -250,6 +252,7 @@ public final class BenchCli {
         for (int i = 4; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
+                case "--cross-target" -> { }
                 case "--tolerance" -> tolerance = Double.parseDouble(value(args, ++i, flag));
                 case "--alternate-midi" -> {
                     oldManifest = Path.of(value(args, ++i, flag));
@@ -259,18 +262,17 @@ public final class BenchCli {
             }
         }
         Path old = Path.of(args[2]), current = Path.of(args[3]);
-        if (oldManifest == null) return BenchScorecard.print(compareCards(old, current, tolerance), out);
         validateTolerance(tolerance);
         var before = BenchFiles.read(old, BenchScorecard.Card.class);
         var after = BenchFiles.read(current, BenchScorecard.Card.class);
-        if (!before.manifestSha256().equals(BenchFiles.hash(oldManifest))
+        if (oldManifest != null && (!before.manifestSha256().equals(BenchFiles.hash(oldManifest))
                 || !after.manifestSha256().equals(BenchFiles.hash(newManifest))
                 || !before.catalogueSha256().equals(after.catalogueSha256())
                 || before.audioRefine() != after.audioRefine()
-                || !withoutMidi(oldManifest).equals(withoutMidi(newManifest))) {
+                || !withoutMidi(oldManifest).equals(withoutMidi(newManifest)))) {
             throw new IllegalArgumentException("Alternate MIDI comparison requires verified manifests differing only in MIDI");
         }
-        return BenchScorecard.print(BenchScorecard.compare(before, after, tolerance, true), out);
+        return BenchScorecard.print(BenchScorecard.compare(before, after, tolerance, oldManifest != null, seen.contains("--cross-target")), out);
     }
 
     private static com.google.gson.JsonObject withoutMidi(Path path) throws IOException {

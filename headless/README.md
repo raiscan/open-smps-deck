@@ -310,7 +310,7 @@ java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
 - On S2 and S3K, `--loop` replaces each channel's final stop with a jump to
   its start when the active channels reach their stops on the same tick and
   loop control is supported. S2 loop generation requires tracks without
-  existing branches and is unavailable for the Extra Life slot.
+  existing `F6` jumps and is unavailable for the Extra Life slot.
 - `--force` allows replacing existing output files. Keep outputs separate from
   the source project and clean ROM.
 
@@ -776,6 +776,7 @@ and `pitchPreset`.
 java -jar "$jar" reconstruct edit "$work" add   '{"id":"answer","reason":"second attack audible in stem","op":"insertNote","part":0,"start":12.5,"end":12.8,"pitch":68,"lane":"FM1","role":"melody"}'
 java -jar "$jar" reconstruct run --from transcribe "$work"
 java -jar "$jar" reconstruct edit "$work" add --file batch.json
+java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"register","reason":"raise the lead","op":"transpose","noteIds":["NOTE_ID"],"semitones":12}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"cut","reason":"mark the second attack","op":"splitNote","noteId":"NOTE_ID","at":12.75}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"sustain","reason":"join repeated attacks","op":"mergeNotes","part":0,"pitch":64,"span":[15.2,16.8]}'
 java -jar "$jar" reconstruct edit "$work" add --dry-run '{"id":"backing","reason":"use PSG tone","op":"pinLane","noteIds":["NOTE_ID"],"laneType":"PSG"}'
@@ -833,6 +834,14 @@ whitespace-separated list), or the `--group` and `--op` selectors. MCP
 and records it as a batch if it resolves. Rebuild from the returned `from`
 stage. Reject records the decision without rebuilding. Use `--verbose`
 (MCP `verbose: true`) to include the full acceptance preview.
+
+A `transpose` intent adds a signed, nonzero integer `semitones` offset to
+each stable score ID in `noteIds` and rebuilds from `transcribe`. Offsets
+compose in journal order. The optional `laneType` checks the target's
+`FM` (default) or `PSG` tone range. PSG pitches above the FM range require a
+PSG tone lane. The intent skips drum parts and refuses the batch if a tonal
+target would exceed its range. MCP `reconstruct_edit` accepts the same
+intent in `edit` or `edits`.
 
 `reconstruct edit WORK_DIR add --file BATCH` and `--dry-run` return one
 result per intent. `applied` and `satisfied` describe the journal's
@@ -1208,6 +1217,119 @@ For `reconstruct_import`, put those options and `audioOnly` at the top level
 and use file-based `stemRoles`. The MCP server reads its own local configuration. Its `runRequest` can be passed to
 `reconstruct_run` once a catalogue is supplied.
 
+## Arrange for cleanliness
+
+Save the rules you want under `arrangement` in the work directory's
+`voicing.json`. Use part IDs from `reconstruct describe WORK_DIR`. MCP
+`artifact_read` can fetch the current voicing. Add the object below as its
+`arrangement` member and submit the whole result through `artifact_write`
+with `artifact: "voicing"`. The rules persist through voice refits,
+staged rebuilds and manifest replays. Omit any control you do not use.
+
+```json
+{
+  "partChips": [{"part": 3, "chip": "FM", "lanes": ["FM3", "FM4", "FM5"]}],
+  "polyphony": [{"part": 3, "maxVoices": 3, "span": [8, 24]}],
+  "bassHarmonics": [{"part": 3, "bassPart": 1, "intervals": [12, 19, 24],
+                    "pitchTolerance": 0, "minOverlap": 0.6, "minLevelDb": 6}],
+  "hats": "all",
+  "drumDynamics": {"part": 0, "levels": true, "dropBelowDb": -15},
+  "sectionFit": [{"part": 3, "maxJumpDb": 3}]
+}
+```
+
+- **Part chip.** Choose `FM` or `PSG`, optionally with a subset of its tonal
+  lanes and a source-time `span`. The last matching chip rule applies at each
+  attack. An incompatible pitch or conflicting explicit lane/voice assignment
+  is reported as a dropped note. Explicit layers are separate from dry placement.
+- **Polyphony.** Cap simultaneous source gates at hardware tick resolution.
+  The cap counts held notes as well as new attacks. At one voice it preserves
+  the top note. At two or more it preserves top and bottom while preferring
+  stronger, longer inner notes. It drops whole notes, including a sustained
+  note crossing the start of an optional span if it conflicts there.
+- **Bass partials.** `bassPart` defaults to `part`. Choose another part ID
+  to use a separate bass line. Defaults are intervals 12, 19 and 24,
+  exact semitone alignment, and 60% overlap of the candidate's gate.
+  `pitchTolerance: 1` allows a one-semitone miss. When both parts have aligned
+  stems, compare fundamental levels in the overlap (`minLevelDb`, default 6).
+  Otherwise compare velocities (`minVelocityDelta`, default 10).
+- **Hats.** `all` sends GM 42, 44 and 46 to PSG3 noise. `overflow` sends
+  only hats rejected by simultaneous DAC hits or protected DAC tails.
+  PSG3 collisions with explicit placements or other simultaneous hats can
+  still drop a hit. These modes require PSG to be enabled.
+- **Drum dynamics.** Map an isolated drum stem and choose its part, optionally
+  restricting attack times with `span`. Attack band RMS is measured relative
+  to the median for the drum class in the selected scope. `dropBelowDb`
+  deletes hits below that relative level. `levels: true` adjusts kept DAC
+  and PSG hits in 2 dB increments between −10 and +2 dB relative to the
+  existing class level. A DAC `drumGainOverrides` entry takes precedence.
+  S1/S2 stock DAC samples retain their stock levels.
+- **Section fit.** Map a stem for each listed tonal part. Assembly probes the
+  built part across its lanes, including layers, and measures level error over
+  active stem frames within effective sections. It limits fitted adjustments
+  to ±12 dB and limits the change between sections to `maxJumpDb`. Each new
+  attack takes the gain for its section. Unmeasurable sections carry the
+  previous adjustment (zero if there is none). Consult `report.json.sectionGains`
+  for measured and applied dB values, and `drumHitGains` for hit multipliers.
+
+Spans are half-open `[start, end)` in source seconds. Rebuild with
+`reconstruct run --from allocate WORK_DIR` after changing allocation controls
+or the drum drop threshold. Use `reconstruct assemble WORK_DIR` for
+section fit or level-only changes. The MCP equivalents are `reconstruct_run`
+with `from: "allocate"` and `reconstruct_stage` with `stage: "assemble"`.
+Inspect `reconstruct trace WORK_DIR --part ID --json` and the report's
+`reductions` for dropped IDs, reasons and allocation blockers.
+
+For an aligned solo of a built part, run
+`reconstruct part-render WORK_DIR --part ID OUT.wav` or use
+`reconstruct_part_render` with `workDir`, `part` and `output`.
+The WAV plays from zero on the project clock, including PSG spills and
+layers on any lane. Its JSON identifies the lanes and the mapped stem
+if available. Use the saved time map to compare project time with source
+time if steady tempo is active.
+
+For a vocal transcribed at another register, set `vocalLead.registerShift`
+in `transcribers.json` on the fresh run. Review uses the saved semitone
+shift, including values such as +24. If you transpose already-transcribed
+notes through edits, set `arrangement.vocalRegisterShift` in `voicing.json`
+to tell review their new register.
+
+For a non-vocal monophonic stem, add a rule by stem label in
+`transcribers.json` and use the usual audio-only CLI or MCP run/import:
+
+```json
+"monophonicStems": {
+  "guitar": {"adapter": "rmvpe", "span": [8, 24], "registerShift": 12}
+}
+```
+
+Use a configured F0 adapter that emits notes and a `f0Cents10ms` sidecar
+such as the RMVPE syllable adapter. The adapter receives the `vocals` prompt
+and runs against the aligned stem. The arrangement part retains its own
+role. Outside the optional span the normal polyphonic adapter still
+supplies notes. Omit the span to use F0 for the entire stem. The default
+register shift is zero. The run captures the transcriptions for replay.
+Use the role plan to place a solo span on the lead lane when needed.
+
+### Shortlist sustained FM patches
+
+Combine role and held-note filters before auditioning. FM role hints
+`lead`, `bass` and `backing` use observed playback on FM1, FM2 and FM3–5
+respectively. They supplement existing catalogue tags and work with
+existing indices. For example:
+
+```sh
+java -jar "$CLI" catalog search catalogue.json --kind fm-voice --role lead \
+  --min-centroid-hz 500 --max-centroid-hz 2600 --max-decay-db 4
+```
+
+The MCP `catalog_search` equivalents are `role`, `minCentroidHz`,
+`maxCentroidHz` and `maxDecayDb`. With any acoustic filter, search probes
+raw FM voices at A4 for 0.8 seconds and returns `heldNote.centroidHz`
+and `heldNote.decayDb`. Decay is the early RMS level minus the late
+held RMS level in dB, so smaller values favor sustain. The centroid is
+measured on the held portion of the note. Filtering happens before pagination.
+
 ## Source voices
 
 Use `reconstruct voices WORK_DIR` to list identified instruments, or append
@@ -1268,8 +1390,14 @@ rejection history.
 
 ## Reconstruction layering
 
-New staged runs, including import and MCP, use the `s3k-layering` preset.
-It adds octave-up PSG doubling and a 14-frame FM echo on spare channels.
+New staged runs, including import and MCP, choose `s1-layering`,
+`s2-layering`, or `s3k-layering` from the target game.
+These presets add octave-up PSG doubling and a 14-tick FM echo on spare channels.
+S1 and S2 use hold-terminated volume envelopes and reserve PSG3 for the
+whole noise track when it is needed. On S2, set `OPENSMPSDECK_S2_ROM` to a
+local ROM to consider close stock envelope matches. Check `psgEnvelopes`
+in `report.json` for stock and custom counts, custom bytes, and approximations.
+[PSG driver rules](../docs/architecture/driver-support.md#psg-reconstruction-on-s1-and-s2)
 FM-only runs use the FM echo. The echo defaults to 11
 carrier TL steps below the dry note (8.25 dB nominal), or 3 dB quieter than
 the original 7-TL echo.
@@ -1277,7 +1405,7 @@ Set `lanePolicies.echoAttenuation` in `voicing.json` to override that level,
 then assemble using the saved policy. Existing work directories and their
 reruns keep the saved voicing policy. Use `--lane-policy-preset off` when
 starting a run or import, or pass it to `reconstruct assemble WORK_DIR` to
-clear an existing policy. Passing `s3k-layering` restores the preset.
+clear an existing policy. Pass the target's preset name to restore layering.
 For MCP `reconstruct_stage`, pass `stage: "assemble"` and
 `options.lanePolicyPreset` to set or clear the preset. See the
 [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)
@@ -1287,6 +1415,22 @@ For individual attacks, use the [`layer` edit](../docs/architecture/reconstructi
 or Studio **Selection → Layer**. Choose echo, chorus, double or off, then
 rebuild from `assemble`. The selected notes' layer intents override the
 preset. Inspect `report.json.noteLayers` for applied and skipped copies.
+
+### Staged vibrato
+
+On an allocated S3K FM note, a `noteVoicing` edit can set
+`vibratoEnvelope` to an ordered array such as
+`[{"startOffset":18,"rateHz":5,"depthCents":20},{"startOffset":32,"rateHz":5,"depthCents":48}]`.
+The opening is flat. These offsets are driver ticks from the note attack.
+A zero-depth stage stops vibrato. Submit the edit with `reconstruct edit`
+or MCP `reconstruct_edit` and rebuild from `assemble`. Use `trace` or
+`describe` to check the assembled stages.
+
+Run `reconstruct vibrato-review WORK_DIR [--part ID] [--propose]` or
+`reconstruct_vibrato_review` over MCP to detect delayed or changing vibrato
+in mapped stems. Omit `--propose` (MCP `propose`) for read-only detection.
+Review or accept the proposals in Studio or with `reconstruct proposals`.
+See the [envelope contract](../docs/architecture/reconstruction-stages.md#per-note-vibrato-envelopes).
 
 ## Reconstruction benchmark
 

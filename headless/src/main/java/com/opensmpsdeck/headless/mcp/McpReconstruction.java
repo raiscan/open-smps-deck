@@ -54,7 +54,7 @@ final class McpReconstruction {
             field("policyDecisions", "boolean", "Include per-note lane policy decisions and blockers in the assembly report").optional(),
             choice("drumKit", "DAC kit selection. S1 and S2 default to stock", "stock", "custom").optional(),
             choice("drumSource", "Custom kit source", "catalogue", "sliced", "auto").optional(),
-            choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
+            choice("lanePolicyPreset", "Layering defaults to the target game. Choose off to disable or select a preset to replace saved policies", "s1-layering", "s2-layering", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),
@@ -308,21 +308,34 @@ final class McpReconstruction {
         return !verbose && !rerun && result.has("results") && (dryRun || edit != null && edit.isJsonArray()) ? ReconstructionEditCommand.compact(result) : result;
     }
 
+    static JsonObject vibratoReview(JsonObject args) throws IOException {
+        return com.opensmpsdeck.headless.ReconstructionVibratoEnvelope.review(reviewWork(args),
+                args.has("part") ? args.get("part").getAsInt() : null, args.has("propose") && args.get("propose").getAsBoolean());
+    }
+
     static JsonObject vocalReview(JsonObject args) throws IOException {
-        Path work = vocalWork(args);
+        Path work = reviewWork(args);
         return com.opensmpsdeck.headless.ReconstructionVocalReview.review(work, optional(args, "phrase"),
                 args.has("propose") && args.get("propose").getAsBoolean(),
                 args.has("showDecided") && args.get("showDecided").getAsBoolean());
     }
 
     static JsonObject vocalRender(JsonObject args) throws IOException {
-        Path work = vocalWork(args);
+        Path work = reviewWork(args);
         McpPaths.managed(work, "arrangement.smps.json");
         return com.opensmpsdeck.headless.VocalPhraseRender.render(work, string(args, "phrase"),
                 McpPaths.output(work, string(args, "output")));
     }
 
-    private static Path vocalWork(JsonObject args) throws IOException {
+    static JsonObject partRender(JsonObject args) throws IOException {
+        Path work = reviewWork(args);
+        for (String file : List.of("arrangement.smps.json", "report.json", "voicing.json"))
+            McpPaths.managed(work, file);
+        return ReconstructionStages.renderPart(work, args.get("part").getAsInt(),
+                McpPaths.output(work, string(args, "output")));
+    }
+
+    private static Path reviewWork(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : List.of("score.json", "structure.json", "allocation.json", ReconstructionSections.FILE,
                 ReconstructionEditCommand.FILE, ReconstructionEditCommand.LOCK))
@@ -350,7 +363,7 @@ final class McpReconstruction {
 
     static JsonObject describe(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE)) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE, "edit-results.json")) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
                 optional(args, "parts"), optional(args, "bars"));

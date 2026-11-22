@@ -2,8 +2,10 @@ package com.opensmpsdeck.headless.bench;
 
 import com.google.gson.JsonElement;
 import com.opensmpsdeck.headless.ReconstructionLayers;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.TargetClock;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -30,7 +32,7 @@ final class BenchReconstruction {
                   List<Reduction> reductions, List<String> effectCopyLanes, TempoCurve tempoCurve, Stages stages,
                   List<CopyWindow> lanePolicyCopies, List<ReconstructionLayers.Result> noteLayers,
                   List<VoicedGate> voicedGates) {
-        List<BenchMetrics.Event> excludeLayers(List<BenchMetrics.Event> events) {
+        List<BenchMetrics.Event> excludeLayers(List<BenchMetrics.Event> events, TargetClock clock) {
             var windows = new HashMap<String, NavigableMap<Integer, Integer>>();
             if (lanePolicyCopies != null) for (var copy : lanePolicyCopies)
                 addWindow(windows, copy.lane(), copy.startTick(), copy.endTick());
@@ -39,12 +41,13 @@ final class BenchReconstruction {
                     addWindow(windows, layer.lane(), layer.startTick(), layer.endTick());
             }
             if (windows.isEmpty()) return events;
-            // Reconstructed projects have tempo zero and divider one. A bend
-            // may emit several attacks inside one copy's reserved lane window.
+            // A bend may emit several attacks inside one copy's reserved window.
+            // Compare on the same presentation clock as the sequencer walk.
             return events.stream().filter(event -> {
                 var lane = windows.get(event.lane());
                 if (lane == null || event.drum() != null) return true;
-                int tick = (int) Math.round(event.start() * 60);
+                long frame = Math.round(event.start() * TargetClock.FRAMES_PER_SECOND);
+                int tick = (int) clock.ticksAfterFrames(frame + 1) - 1;
                 var window = lane.floorEntry(tick);
                 return window == null || tick >= window.getValue();
             }).toList();
@@ -66,7 +69,7 @@ final class BenchReconstruction {
     record Candidate(String assetId) {}
     record Result(List<BenchMetrics.Event> events, List<BenchMetrics.Event> eventsWithLayers,
                   Attribution attribution, Path audio, long referenceUs,
-                  Map<String, Long> reductions, boolean warped, Map<String, byte[]> voices) {}
+                  Map<String, Long> reductions, boolean warped, Map<String, byte[]> voices, TargetClock clock) {}
 
     private static final long SECTION_US = 16_000_000L;
     private static final PrintStream QUIET = new PrintStream(OutputStream.nullOutputStream());
@@ -75,17 +78,14 @@ final class BenchReconstruction {
 
     static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
                       Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
-                      BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes, String steadyTempo) throws IOException {
-        return run(midi, audio, catalogue, output, refine, seconds, stems, drums, hooks,
-                rolePlan, truthNotes, steadyTempo, null, false);
-    }
-
-    static Result run(Path midi, Path audio, Path catalogue, Path output, boolean refine, Double seconds,
-                      Map<Integer, Path> stems, BenchDrums drums, BenchCli.Hooks hooks,
                       BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes, String steadyTempo,
-                      Integer leadPart, boolean captureVoices) throws IOException {
+                      Integer leadPart, boolean captureVoices, TargetGame target) throws IOException {
         var args = new ArrayList<>(List.of("reconstruct", rolePlan == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
+        if (target != TargetGame.S3K) {
+            args.add("--target");
+            args.add(target.id());
+        }
         if (steadyTempo.equals("off")) {
             args.add("--steady-tempo");
             args.add("off");
@@ -106,14 +106,19 @@ final class BenchReconstruction {
         hooks.reconstruction().run(args.toArray(String[]::new), QUIET);
         if (rolePlan != null) {
             hooks.reconstruction().run(new String[]{"reconstruct", "structure", output.toString()}, QUIET);
-            BenchRolePlan.write(output, truthNotes, rolePlan, hooks.reconstruction(), QUIET);
+            BenchRolePlan.write(output, truthNotes, rolePlan, hooks.reconstruction(), QUIET, TargetProfile.of(target).clock());
             hooks.reconstruction().run(new String[]{"reconstruct", "run", "--from", "roles", output.toString()}, QUIET);
         }
         var report = BenchFiles.read(output.resolve("report.json"), Report.class);
         var project = ProjectFiles.load(output.resolve("arrangement.smps.json")).project();
-        var truth = BenchTimeline.read(ProjectCompiler.compileWithAssets(project), report.presentations(), hooks.sequencer(), captureVoices);
-        var noiseClasses = truth.channels().stream().anyMatch(channel -> channel.kind().equals("noise"))
-                ? noiseClasses(BenchFiles.read(output.resolve("allocation.json"), Allocation.class), report.voicedGates()) : Map.<Integer, BenchDrums.Drum>of();
+        var truth = BenchTimeline.read(project, report.presentations(), hooks.sequencer(), captureVoices);
+        var clock = project.clock();
+        var noiseClasses = new HashMap<Integer, BenchDrums.Drum>();
+        if (truth.channels().stream().anyMatch(channel -> channel.kind().equals("noise"))) {
+            var allocation = BenchFiles.read(output.resolve("allocation.json"), Allocation.class);
+            noiseClasses(allocation, report.voicedGates()).forEach((tick, drum) ->
+                    noiseClasses.put((int) clock.frameAtTick(tick), drum));
+        }
         var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses,
                 drums.gainAliases(project.samples())), report.effectCopyLanes());
         JsonElement source = hooks.midi().read(midi);
@@ -126,8 +131,8 @@ final class BenchReconstruction {
             report.stages().leadContinuity().forEach((key, count) -> {
                 if (count > 0) reductions.put(key.startsWith("lead-") ? key : "lead-" + key, count);
             });
-        return new Result(report.excludeLayers(events), events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
-                output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices());
+        return new Result(report.excludeLayers(events, clock), events, new Attribution(BenchFiles.JSON.fromJson(source, Midi.class), report),
+                output.resolve("render.wav"), report.referenceUs(), reductions, report.tempoCurve() != null && report.tempoCurve().warped(), truth.voices(), clock);
     }
 
     static Map<Integer, BenchDrums.Drum> noiseClasses(Allocation allocation, List<VoicedGate> voiced) {

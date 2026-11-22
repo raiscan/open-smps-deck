@@ -12,7 +12,8 @@ and asset wire format.
 | Editable versions 1–4 and 6 | Supported | Supported | Supported |
 | v5 native banks, global voices and native control flow | Rejected | Rejected | Existing S3K native profile |
 | Compiled lanes | DAC, FM1–FM5, PSG1–PSG3 | Same | Same |
-| Clip gaps, partial repeats, reset/carry state and nested groups | Linearized | Linearized | Linearized |
+| Clip gaps, partial repeats, reset/carry state and nested groups | Flattened into timed events | Same | Same |
+| Repeated material in editable arrangements | Compacted into finite loops and calls | Same | Same |
 | Local FM table | Up to 128 voices, order 4/3/2/1 | Up to 128 voices, order 4/2/3/1 | Up to 128 voices, order 4/3/2/1 |
 | FM carrier selection | Algorithm | Algorithm | TL high bit |
 | Note pitch | MIDI 12–106 FM, 48–116 PSG | Same | MIDI 12–106 FM, 45–117 PSG |
@@ -46,9 +47,9 @@ Reconstruction uses this path for patch and articulation probes, level and
 drum balance, lead effects, bend traces, timeline and PSG-tail comparisons,
 and final, vocal phrase and audition WAVs. Studio uses it for playback and reconstruction
 monitoring. Catalogue audition uses the driver saved with each variant.
-The S3K PSG cymbal calibration also uses S3K projects because the cymbal
-envelopes and noise setup are specific to that driver. Raw S3K banks and
-native S3K-to-editable conversion retain their existing native reader.
+PSG cymbal calibration uses the target's noise clock, envelope grammar and
+native duration clock. Raw S3K banks and native S3K-to-editable conversion
+retain their existing native reader.
 
 ## Reconstruction DAC kits
 
@@ -136,6 +137,38 @@ in strict-tempo mode. Explicit cross-target exports use the arrangement's
 fallback S3K `tempo`. Earlier arrangements without `nativeTempo` keep
 their existing S3K tempo conversion.
 
+### PSG reconstruction on S1 and S2
+
+Reconstruction converts the generated and catalogue PSG volume programs to
+plain attenuation steps followed by a single `80` hold. S3K `81` parks at the
+last level and becomes a hold. `83` explicitly silences the channel and
+becomes `0F 80` if reached during a sounding gate. S3K `80` rewinds to the
+start and `82 xx` jumps to byte offset `xx`. Both are expanded for the
+longest sounding use of the envelope, up to 254 steps plus the hold byte.
+The pinned PSG volume interpreter consumes and ignores `84 xx`. Unknown,
+incomplete and non-yielding commands fall back to a hold with a reason in
+the reconstruction report. The classic package compiler still validates
+hand-authored and imported projects against the native grammar.
+
+Classic catalogue variants already use `80` as a hold, including custom
+envelopes without a stock reference. Fitting and assembly preserve that
+interpretation. Identical programs share a slot. A flat zero envelope uses the driver's
+envelope-disabled setting. Exact stock envelopes reuse their stock identity.
+With `OPENSMPSDECK_S2_ROM` set, reconstruction can reuse an S2 stock envelope
+within one attenuation step during the sounding gate, with silence
+preserved. `report.json` records custom envelope count and bytes, stock
+count, and any approximation. Test in game still applies the ROM's own
+space limit and reports any further substitutions.
+
+A classic reconstruction reserves PSG3 for noise when drums or a noise
+assignment need it. Assembly writes one PSG3 noise clip, with rests and
+timed volume, envelope and clock changes. The driver stays in noise mode
+throughout this clip. The pinned drivers use `F3 E7` for white noise and
+`F3 E3` for periodic noise, with both modes clocked by tone 3. S1 and S2
+use MIDI 116 with base period 17 for the clock note. Signed detune adjusts
+it to the intended period, including the closed hat's two clock rates.
+Tonal layers use the remaining two PSG lanes while PSG3 is reserved.
+
 ## Arrangement commands
 
 | Arrangement command | S1 and S2 encoding and restrictions |
@@ -150,12 +183,45 @@ their existing S3K tempo conversion.
 | PSG_NOISE | `F3 byte`, restricted to nonzero noise on PSG3. Resetting a noise track to tone or resetting its state on a subsequent clip or repeat is rejected. A tone must rest before switching to noise |
 | MODULATION_ENVELOPE, FM_VOLUME_ENVELOPE, SSG_EG | Rejected with the target and command in the error |
 
-The S1/S2 reader validates the finite stream subset, including explicit
-note/rest durations, duration-only continuations and an `F2` stop on
-every track. Retail loops, calls, and hardware/SFX-only commands have no
-editable portable representation in those dialects. Headless preview tests
-exercise NTSC activation and native writes. PAL, gameplay speed transitions,
-SFX arbitration and retail ROM patch execution are outside these preview tests.
+## Loops and calls
+
+S1 and S2 compact repeated timed events by default, using the same repeat
+search as S3K. The search compares event bytes, transposition and attenuation,
+keeps hold boundaries inline, and excludes source-relative state changes.
+Use `render-project PROJECT OUTPUT.wav --linear` to compare playback with
+the uncompressed stream. The compiler checks the final size against the
+32,768-byte bank limit.
+
+The classic portable profile uses `F7 index count pointer` for backward
+loops to event starts and `F8 pointer` for calls to standalone routines
+after the track's `F2` stop. A routine ends with `E3`. The `F9` return
+opcode is specific to S3K among these targets. Classic banks may also use
+`F6 pointer` to jump forward to an event in the same track. The reader
+validates finite flow, explicit note/rest durations and duration-only
+continuations. It reserves counter 0 for non-nested loops and uses one
+call level, with no branches inside a loop or subroutine.
+
+| Target | Control-flow pointer | Retail storage per track |
+|---|---|---|
+| S1 | Signed big-endian word relative to the second operand byte | 12 shared bytes. Up to 12 counters without calls, three return addresses without loops, or two return addresses with counter 0 reserved |
+| S2 | Little-endian absolute Z80 address from the bank base | 10 shared bytes. Up to 10 counters without calls, five return addresses without loops, or four return addresses with counter 0 reserved |
+
+Each counter occupies one byte. Counters grow up from the start of the
+shared region. Return addresses grow down from its end, using four bytes
+each on S1 and two on S2.
+
+The S1 limits come from `SMPS_Track.LoopCounters` in
+`s1.sounddriver.ram.asm` and `cfRepeatAtPos`, `cfJumpToGosub` and
+`cfJumpReturn` in `s1.sounddriver.asm`. See `zTrack.LoopCounters` and
+`zTrack.GoSubStack` in `s2.sounddriver.asm` for S2.
+Schema 4 includes S2 branch pointer operands in `bank.relocations`.
+Test in game installs S2 at Z80 address `$8000` in bank `$20` and
+relocates those words alongside the header. S1 branch words move with their
+tracks.
+
+Headless preview tests compare NTSC PCM and native chip writes with the
+linear encoding. ROM-gated tests patch a retail image and render the
+installed bank through the pinned driver.
 
 The pinned [Sonic1SmpsData](../../openggf-audio/src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsData.java),
 [Sonic2SmpsData](../../openggf-audio/src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SmpsData.java) and

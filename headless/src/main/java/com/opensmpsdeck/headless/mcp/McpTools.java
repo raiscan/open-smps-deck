@@ -86,7 +86,7 @@ final class McpTools {
                     field("transcriber", "string", "Configured transcriber for audio-only import").optional(),
                     field("transcriberFor", McpReconstruction.STEM_ROLES, "Map of stem roles to configured transcriber names").optional(),
                     field("drumDetector", "string", "Select an audio-only drum detector").optional(),
-                    choice("lanePolicyPreset", "Override the S3K layering default", "s3k-layering", "off").optional(),
+                    choice("lanePolicyPreset", "Override the target-specific layering default", "s1-layering", "s2-layering", "s3k-layering", "off").optional(),
                     field("transcriberDevice", "string", "Device passed to external transcribers").optional(),
                     field("stemRoles", McpReconstruction.STEM_ROLES, "Map of folder-relative stem files to audio-only role overrides").optional(),
                     field("transcribeUnmapped", "string", "Configured polyphonic transcriber for unmatched tonal stems").optional()),
@@ -196,7 +196,7 @@ final class McpTools {
                     choice("action", "Edit command (defaults to list, or add with propose)", "add", "list", "remove", "proposals", "accept", "reject", "revise").optional(),
                     field("propose", "boolean", "Save as an agent proposal and dry-run it without rebuilding").optional(),
                     field("group", "string", "Select a proposal group for proposals, accept or reject").optional(),
-                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, retrigger (attacks with second offsets and gates, or rate in seconds and count), mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down). layer uses noteIds, point selectors or a filtered span with mode echo, chorus, double or off; copies specify laneType FM or PSG and can set attenuation (TL) or levelDb. Off can mask a list of named policies.").optional(),
+                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, retrigger (attacks with second offsets and gates, or rate in seconds and count), mergeNotes and pinLane (lane or laneType). transpose takes noteIds, signed integer semitones and optional laneType FM (default) or PSG. noteVoicing accepts vibratoEnvelope segments with startOffset, rateHz, and depthCents. arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down). layer uses noteIds, point selectors or a filtered span with mode echo, chorus, double or off; copies specify laneType FM or PSG and can set attenuation (TL) or levelDb. Off can mask a list of named policies.").optional(),
                     field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove or review").optional(),
@@ -208,6 +208,10 @@ final class McpTools {
                     field("verbose", "boolean", "Include detailed edit outcomes and markers").optional(),
                     field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional(),
                     field("dryRun", "boolean", "Resolve proposed edits without writing artifacts").optional()),
+            tool("reconstruct_vibrato_review", "Detect staged vibrato from held notes in mapped stems.",
+                    (args, progress) -> McpReconstruction.vibratoReview(args), WORK,
+                    field("part", "integer", "Limit to one mapped part ID").optional(),
+                    field("propose", "boolean", "Save candidates as reviewable edits.json proposals").optional()),
             tool("reconstruct_vocal_review", "Review a vocal lead against captured syllables and RMVPE pitch.",
                     (args, progress) -> McpReconstruction.vocalReview(args), WORK,
                     field("phrase", "string", "Limit to one phrase ID").optional(),
@@ -216,6 +220,9 @@ final class McpTools {
             tool("reconstruct_vocal_render", "Render an FM1-only phrase and compare it with the vocal stem.",
                     (args, progress) -> McpReconstruction.vocalRender(args), WORK,
                     field("phrase", "string", "Phrase ID from vocal review"), OUTPUT),
+            tool("reconstruct_part_render", "Render all placed lanes and layers of one source part to a WAV.",
+                    (args, progress) -> McpReconstruction.partRender(args), WORK, OUTPUT,
+                    field("part", "integer", "Source part ID")),
             tool("reconstruct_trace", "Follow source notes through voicing, including saved policy decisions and drum lane blockers.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
                     field("start", "number", "Inclusive start in the selected time base").optional(),
@@ -298,6 +305,9 @@ final class McpTools {
                     field("role", "string", "Role filter").optional(),
                     field("source", "string", "Source filter").optional(),
                     field("variant", "string", "Variant ID filter").optional(),
+                    field("minCentroidHz", "number", "Minimum held-note centroid in Hz").optional(),
+                    field("maxCentroidHz", "number", "Maximum held-note centroid in Hz").optional(),
+                    field("maxDecayDb", "number", "Maximum held-note decay in dB").optional(),
                     field("offset", "integer", "Page start").optional(),
                     field("limit", "integer", "Page size").optional()),
             tool("catalog_audition", "Render a catalogue variant to a new WAV inside the work directory.",
@@ -370,7 +380,8 @@ final class McpTools {
         var index = McpPaths.input(string(args, "catalogue"));
         var command = new ArrayList<>(List.of("catalog", audition ? "audition" : "search", index.toString()));
         if (!audition) {
-            options(command, args, "query", "kind", "driver", "target", "role", "source", "variant", "offset", "limit");
+            options(command, args, "query", "kind", "driver", "target", "role", "source", "variant", "offset", "limit",
+                    "minCentroidHz", "maxCentroidHz", "maxDecayDb");
             return McpJson.parse(cli(command)).getAsJsonObject();
         }
         var work = McpPaths.directory(string(args, "workDir"));

@@ -90,7 +90,8 @@ final class ReconstructionBulk extends VBox {
     private boolean updating;
 
     ReconstructionBulk(Consumer<Predicate<Overlay>> filter, Consumer<List<JsonObject>> submit,
-                       BiConsumer<List<String>, Instrument> play, Runnable stop, Consumer<JsonObject> previewLayer) {
+                       java.util.function.IntConsumer transpose, BiConsumer<List<String>, Instrument> play,
+                       Runnable stop, Consumer<JsonObject> previewLayer) {
         super(10);
         this.submit = submit;
         getStyleClass().add("inspector");
@@ -155,6 +156,9 @@ final class ReconstructionBulk extends VBox {
             if (!updating && value != null) filter.accept(note -> value.equals(laneName(note)));
         });
         actions.getChildren().addAll(
+                row(new Label("Transpose"),
+                        button("−1", () -> transpose.accept(-1)), button("+1", () -> transpose.accept(1)),
+                        button("−Oct", () -> transpose.accept(-12)), button("+Oct", () -> transpose.accept(12))),
                 layerControls(previewLayer, stop),
                 row(role, button("Set role", this::setRole)),
                 row(voice, button("Move to voice", this::move)),

@@ -27,7 +27,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -60,7 +60,7 @@ final class ReconstructionEdits {
 
         Stage firstStage() {
             return switch (kind) {
-                case insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, bend, glide, setVelocity -> Stage.TRANSCRIBE;
+                case insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, transpose, bend, glide, setVelocity -> Stage.TRANSCRIBE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
                 case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
@@ -159,7 +159,7 @@ final class ReconstructionEdits {
 
         Journal record(Path work, Stage stage, List<Outcome> outcomes, ReconstructionEdits edits) throws IOException {
             if (!outcomes.isEmpty()) stages.put(stage.name().toLowerCase(java.util.Locale.ROOT), List.copyOf(outcomes));
-            var journal = stage == Stage.TRANSCRIBE ? new Journal(version, stages, edits.scoreRecipe()) : this;
+            var journal = stage == Stage.TRANSCRIBE ? new Journal(version, stages, edits.scoreRecipe(work)) : this;
             Path file = work.resolve(RESULTS);
             if (stages.isEmpty() && journal.scoreRecipe == null) Files.deleteIfExists(file);
             else ReconstructionArtifacts.write(file, journal);
@@ -192,10 +192,15 @@ final class ReconstructionEdits {
                 : new ReconstructionEdits(intents.stream().filter(edit -> !edit.inactive()).toList());
     }
 
-    String scoreRecipe() {
-        var scoreIntents = intents.stream().filter(edit -> edit.firstStage() == Stage.TRANSCRIBE)
-                .map(Intent::json).toList();
-        return scoreIntents.isEmpty() ? null : ReconstructionArtifacts.fingerprint(scoreIntents);
+    String scoreRecipe(Path work) throws IOException {
+        var scoreIntents = intents.stream().filter(edit -> edit.firstStage() == Stage.TRANSCRIBE).toList();
+        if (scoreIntents.isEmpty()) return null;
+        var json = scoreIntents.stream().map(Intent::json).toList();
+        if (scoreIntents.stream().noneMatch(edit -> usesSection(edit, Stage.TRANSCRIBE)))
+            return ReconstructionArtifacts.fingerprint(json);
+        var sections = work.resolve(ReconstructionSections.FILE);
+        return ReconstructionArtifacts.fingerprint(List.of(json,
+                Files.exists(sections) ? ReconstructionArtifacts.readTree(sections) : new JsonObject()));
     }
 
     static ReconstructionEdits read(Path work) throws IOException {
@@ -247,7 +252,8 @@ final class ReconstructionEdits {
             case voiceEdit -> List.of("voiceEdit");
             case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
                     "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay", "policies");
-            case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "modulationOff");
+            case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "vibratoEnvelope", "modulationOff");
+            case transpose -> List.of("noteIds", "semitones", "laneType");
             case setVelocity -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",
                     "pitchMax", "voice", "lane", "laneType");
@@ -400,6 +406,13 @@ final class ReconstructionEdits {
                 ids = noteIds(json, at, 1);
                 ReconstructionNoteVoicing.validate(json, laneType, at);
             }
+            case transpose -> {
+                ids = noteIds(json, at, 1);
+                Integer semitones = integer(json, "semitones", at, -127, 127);
+                require(semitones != null && semitones != 0, at + ".semitones", "expected a nonzero pitch offset");
+                require(laneType == null || laneType == ReconstructionLaneType.FM || laneType == ReconstructionLaneType.PSG,
+                        at + ".laneType", "expected FM or PSG tone");
+            }
             case setVelocity -> {
                 require((velocity == null) != (scale == null), at, "choose velocity or scale");
                 require(scale == null || scale >= 0, at + ".scale", "expected a nonnegative factor");
@@ -543,7 +556,8 @@ final class ReconstructionEdits {
                         : new Span(selected.sourceStart(), selected.sourceEnd());
                 bound.add(edit.withSpan(range));
             } catch (IllegalArgumentException error) {
-                outcomes.add(new Outcome(edit.id, edit.kind, Status.invalid, List.of(), null, error.getMessage(), null));
+                var status = shapesSound(edit.kind) || edit.kind == Kind.layer ? Status.orphaned : Status.invalid;
+                outcomes.add(new Outcome(edit.id, edit.kind, status, List.of(), null, error.getMessage(), null));
             }
         }
         return new ReconstructionEdits(bound);
@@ -596,12 +610,23 @@ final class ReconstructionEdits {
                 }
                 continue;
             }
+            if (edit.kind == Kind.transpose) {
+                var outcome = transpose(edit, score, notes);
+                outcomes.add(outcome);
+                if (outcome.status == Status.applied) changed.addAll(outcome.noteIds);
+                continue;
+            }
             if (edit.kind == Kind.setVelocity) {
                 var affected = edit.noteIds.isEmpty() ? List.copyOf(register(edit, notes.values().stream()
                         .filter(note -> edit.matchesSpan(note, edit.inBase(note.start(), timeline))).toList(), id -> true).keySet())
                         : edit.noteIds.stream().filter(notes::containsKey).toList();
-                var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id)).toList();
+                var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id))
+                        .filter(id -> {
+                            var prior = retired.get(id);
+                            return prior == null || prior.op != Kind.mergeNotes || !affected.contains(prior.noteIds.getFirst());
+                        }).toList();
                 for (String id : affected) notes.computeIfPresent(id, (key, note) -> edit.level(note));
+                if (!affected.isEmpty() && !missing.isEmpty()) outcomes.add(orphan(edit, missing));
                 outcomes.add(affected.isEmpty() ? orphan(edit, missing)
                         : new Outcome(edit.id, edit.kind, Status.applied, affected, missing.isEmpty() ? null : missing, null, null));
                 continue;
@@ -724,6 +749,59 @@ final class ReconstructionEdits {
                 .filter(decision -> notes.containsKey(decision.successorId())).toList();
         return score.withInputs(score.inputs(), score.bars(), notes.values().stream().sorted(NOTE_ORDER).toList(),
                 score.tempo(), score.midiBars(), score.beatMap(), voices, bursts, activeDecisions);
+    }
+
+    private static Outcome transpose(Intent edit, Score score, Map<String, Note> notes) {
+        var profile = score.inputs().profile();
+        int offset = edit.json.get("semitones").getAsInt();
+        var missing = new ArrayList<String>();
+        var before = new ArrayList<Note>();
+        var after = new ArrayList<Note>();
+        int drums = 0;
+        for (String id : edit.noteIds) {
+            var note = notes.get(id);
+            if (note == null) {
+                missing.add(id);
+                continue;
+            }
+            if (part(score, note.part()).drums()) {
+                drums++;
+                continue;
+            }
+            int pitch = note.pitch() + offset;
+            String issue = transposeIssue(note, pitch, edit.laneType, profile, score.inputs().fmOnly());
+            if (issue != null) return new Outcome(edit.id, edit.kind, Status.invalid, List.of(id), null,
+                    id + " · " + issue, null);
+            var steps = note.run() == null ? null : note.run().stream()
+                    .map(step -> new ReconstructionFastRuns.Step(step.pitch() + offset, step.start(), step.end())).toList();
+            before.add(note);
+            after.add(new Note(id, note.part(), note.start(), note.end(), pitch, note.velocity(),
+                    note.source(), note.confidence(), note.motion(), steps, note.bend()));
+        }
+        if (after.isEmpty() && drums == 0) return orphan(edit, missing);
+        String detail = drums == 0 ? null : "Skipped drum notes (" + drums + ")";
+        var absent = missing.isEmpty() ? null : List.copyOf(missing);
+        if (after.isEmpty()) return new Outcome(edit.id, edit.kind, Status.satisfied, List.of(), absent, detail, null);
+        after.forEach(note -> notes.put(note.id(), note));
+        return new Outcome(edit.id, edit.kind, Status.applied, after.stream().map(Note::id).toList(),
+                absent, detail, null, List.copyOf(before), List.copyOf(after));
+    }
+
+    static String transposeIssue(Note note, int pitch, ReconstructionLaneType type, TargetProfile profile, boolean fmOnly) {
+        boolean psg = type == ReconstructionLaneType.PSG;
+        if (psg && fmOnly) return "PSG tone is disabled in FM-only mode";
+        if (psg && note != null && note.run() != null) return "PSG tone requires a single attack";
+        if (psg && note != null && note.bend() != null && note.bend().editReason() != null)
+            return "Authored bends require FM";
+        var range = psg ? profile.psg() : profile.fm();
+        if (!range.contains(pitch) || note != null && note.bend() != null && note.bend().points().stream()
+                .anyMatch(point -> pitch * 100 + point.cents() < range.low() * 100
+                        || pitch * 100 + point.cents() > range.high() * 100))
+            return "MIDI pitch must stay in " + range.low() + "–" + range.high();
+        if (note != null && note.run() != null && note.run().stream()
+                .anyMatch(step -> !profile.fm().contains(step.pitch() + (pitch - note.pitch()))))
+            return "The run would leave the FM MIDI pitch range " + profile.fm().low() + "–" + profile.fm().high();
+        return null;
     }
 
     private record RetriggerAttack(double offset, double gate, Integer velocity) {}
@@ -888,14 +966,21 @@ final class ReconstructionEdits {
             if (scoped.contains(note.id())) return "voicing.json has a scoped override for " + note.id();
         }
         for (var other : intents) {
-            if (other == merge || other.kind == Kind.mergeNotes || other.kind == Kind.insertNote) continue;
+            // Relative pitch edits are resolved in score order. Earlier ones
+            // have already updated the members, and later ones resolve against the survivor.
+            if (other == merge || other.kind == Kind.mergeNotes || other.kind == Kind.insertNote
+                    || other.kind == Kind.transpose) continue;
             if (sliding && (other.laneType != null && other.laneType != ReconstructionLaneType.FM
                     || other.lane != null && !ReconstructionLaneType.FM.lanes().contains(other.lane))
                     && (targets(other, first, timeline) || targets(other, origins.get(first.id()), timeline)))
                 return "glide requires FM and conflicts with " + other.tag() + " targeting " + first.id();
-            // A uniform span edit can still be applied to the resulting sustain.
-            if ((other.kind == Kind.setVelocity || other.kind == Kind.setRole || other.kind == Kind.swapRoles)
-                    && other.span != null && other.voice == null && other.fromRole == null
+            // A uniform choice already targeting every member also targets the surviving sustain.
+            boolean uniform = switch (other.kind) {
+                case setVelocity, setRole, pinLane -> true;
+                case swapRoles -> other.span != null;
+                default -> false;
+            };
+            if (uniform && other.voice == null && other.fromRole == null
                     && members.stream().allMatch(note -> targets(other, note, timeline))) continue;
             boolean changesAnchorGate = switch (other.kind) {
                 case deleteNote, splitNote, retrigger, bend, glide, unmerge -> true;
@@ -1016,11 +1101,24 @@ final class ReconstructionEdits {
         var deleted = new LinkedHashSet<String>();
         var scoreResults = new LinkedHashMap<String, Outcome>();
         for (var outcome : scoreOutcomes) scoreResults.put(outcome.id, outcome);
+        var successors = splitSuccessors(scoreOutcomes);
+        var collapsed = mergeSuccessors(scoreOutcomes);
         int order = 0;
         for (Intent edit : intents) {
             order++;
             if (edit.firstStage().ordinal() > Stage.ROLES.ordinal()) continue;
             var scoreResult = scoreResults.get(edit.id);
+            if (edit.kind == Kind.transpose) {
+                if (scoreResult != null && scoreResult.status == Status.applied) {
+                    var profile = score.inputs().profile();
+                    for (String id : scoreResult.noteIds) {
+                        var decision = decisions.get(id);
+                        if (decision != null && decision.role() != Role.drop && decision.note().pitch() > profile.fm().high())
+                            pins.putIfAbsent(id, new Pin(null, edit.id, order, ReconstructionLaneType.PSG));
+                    }
+                }
+                continue;
+            }
             if (edit.kind == Kind.mergeNotes && edit.mergeGlide && scoreResult != null
                     && scoreResult.status == Status.applied) {
                 String id = scoreResult.noteIds.getFirst();
@@ -1088,7 +1186,11 @@ final class ReconstructionEdits {
                     requested = List.copyOf(matching);
                 }
             } else {
-                requested = edit.noteIds.stream().filter(id -> !decisions.containsKey(id)
+                var targets = switch (edit.kind) {
+                    case setRole, pinLane, unmerge -> classificationTargets(edit.noteIds, successors, collapsed);
+                    default -> edit.noteIds;
+                };
+                requested = targets.stream().filter(id -> !decisions.containsKey(id)
                         || matchesRole(edit, decisions.get(id).role(), edit.role)).toList();
             }
             var affected = new LinkedHashSet<String>();
@@ -1186,6 +1288,88 @@ final class ReconstructionEdits {
                 affected.add(member);
             }
         }
+    }
+
+    static boolean shapesSound(Kind kind) {
+        return switch (kind) {
+            case insertNote, setNote, splitNote, retrigger, mergeNotes, transpose, bend, glide, setVelocity, noteVoicing -> true;
+            default -> false;
+        };
+    }
+
+    // The score outcome remains provenance for the next rebuild. Record downstream losses separately.
+    static void reportLostSound(ReconstructionAllocation.Result allocation, List<Outcome> resolved,
+                                S3kReconstruction.Result rendered, List<Outcome> outcomes) {
+        var shaped = resolved.stream().filter(row -> row.status == Status.applied && shapesSound(row.op)).toList();
+        if (shaped.isEmpty()) return;
+        var entries = new LinkedHashMap<String, ReconstructionAllocation.Entry>();
+        allocation.notes().forEach(entry -> entries.put(entry.note().id(), entry));
+        var gates = new java.util.HashSet<String>();
+        var bends = new java.util.HashSet<String>();
+        var reductions = new LinkedHashMap<String, String>();
+        if (rendered != null) {
+            rendered.voicedGates().forEach(gate -> gates.add(gate.id()));
+            rendered.bends().forEach(bend -> bends.add(bend.id()));
+            for (var loss : rendered.reductions())
+                if (loss.id() != null && loss.reason() != null) reductions.put(loss.id(), loss.reason());
+        }
+        var successors = splitSuccessors(resolved);
+        var collapsed = mergeSuccessors(resolved);
+        for (var outcome : shaped) {
+            var targets = outcome.op == Kind.transpose ? classificationTargets(outcome.noteIds, successors, collapsed)
+                    : reanchor(outcome.noteIds, successors);
+            for (String id : targets) {
+                var entry = entries.get(id);
+                boolean pitchMotion = outcome.op == Kind.bend || outcome.op == Kind.glide
+                        || outcome.op == Kind.mergeNotes && entry != null && entry.note().bend() != null
+                        && outcome.tag().equals(entry.note().bend().editReason());
+                String reason = null;
+                if (entry == null) reason = "note no longer reaches allocation";
+                else if (entry.lane() == null && !gates.contains(id))
+                    reason = entry.reason() == null ? "note has no allocated lane" : entry.reason();
+                else if (rendered != null && !gates.contains(id))
+                    reason = reductions.getOrDefault(id, "note has no playable gate after voicing");
+                else if (pitchMotion && (rendered == null ? entry.lane() == null || !entry.lane().startsWith("FM") : !bends.contains(id)))
+                    reason = "authored pitch motion cannot play on the current gate"
+                            + (entry.lane() == null ? "" : " (" + entry.lane() + ")");
+                if (reason != null)
+                    outcomes.add(new Outcome(outcome.id, outcome.op, Status.orphaned, List.of(), List.of(id),
+                            id + ": " + reason, null));
+            }
+        }
+    }
+
+    static Map<String, List<String>> splitSuccessors(List<Outcome> scoreOutcomes) {
+        var successors = new LinkedHashMap<String, List<String>>();
+        for (var outcome : scoreOutcomes.reversed()) {
+            if (outcome.op == Kind.splitNote && outcome.status == Status.applied && outcome.removedNotes != null)
+                successors.put(outcome.removedNotes.getFirst().id(), reanchor(outcome.noteIds, successors));
+        }
+        return successors;
+    }
+
+    static Map<String, String> mergeSuccessors(List<Outcome> scoreOutcomes) {
+        var successors = new LinkedHashMap<String, String>();
+        for (var outcome : scoreOutcomes.reversed()) {
+            if (outcome.op != Kind.mergeNotes || outcome.status != Status.applied || outcome.removedNotes == null) continue;
+            String survivor = outcome.noteIds.getFirst();
+            for (var removed : outcome.removedNotes) successors.put(removed.id(), successors.getOrDefault(survivor, survivor));
+        }
+        return successors;
+    }
+
+    static List<String> classificationTargets(List<String> ids, Map<String, List<String>> splits, Map<String, String> merges) {
+        var targets = reanchor(ids, splits);
+        var selected = Set.copyOf(targets);
+        // Discard collapsed targets only when the edit already classified the survivor.
+        return targets.stream().filter(id -> {
+            String survivor = merges.get(id);
+            return survivor == null || !selected.containsAll(splits.getOrDefault(survivor, List.of(survivor)));
+        }).toList();
+    }
+
+    private static List<String> reanchor(List<String> ids, Map<String, List<String>> successors) {
+        return ids.stream().flatMap(id -> successors.getOrDefault(id, List.of(id)).stream()).distinct().toList();
     }
 
     List<Outcome> allocationOutcomes(ReconstructionAllocation.Result allocation, Map<String, Pin> pins) {
@@ -1312,7 +1496,7 @@ final class ReconstructionEdits {
 
     static boolean pinCompatible(Note note, boolean drums, String lane, boolean fmOnly, TargetProfile profile) {
         if (drums) return lane.equals("DAC") || !fmOnly && lane.equals("PSG3");
-        return ReconstructionAllocation.FM.contains(lane)
+        return ReconstructionAllocation.FM.contains(lane) && profile.fm().contains(note.pitch())
                 || !fmOnly && note.pitch() >= profile.psg().low() && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
     }
 
@@ -1322,7 +1506,11 @@ final class ReconstructionEdits {
 
     static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly, TargetProfile profile) {
         return switch (type) {
-            case FM -> drums ? "FM percussion voicing is not supported for MIDI drum parts" : null;
+            case FM -> {
+                if (drums) yield "FM percussion voicing is not supported for MIDI drum parts";
+                if (!profile.fm().contains(note.pitch())) yield "pitch is outside the FM range";
+                yield null;
+            }
             case DAC -> drums ? null : "DAC requires a MIDI drum part and sampled drum voicing";
             case PSG -> {
                 if (drums) yield "PSG tone cannot voice MIDI drums; use NOISE or DAC";

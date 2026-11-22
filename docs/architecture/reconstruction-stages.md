@@ -470,6 +470,7 @@ removes only the selected proposals. See the
 | `insertNote` | `part`, `start`, `end`, `pitch`, optional `velocity` (default 96), `role`, `lane`. The effective note has ID `edit-<id>` and source `edit`. | `transcribe` |
 | `deleteNote` | `noteId` or a point selector. When the score has no match, roles can remove a generated note such as a `lead-audio-added` attack. | `transcribe` |
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
+| `transpose` | `noteIds` and a signed, nonzero integer `semitones`. Applies in journal order and keeps note IDs and timing. Skips drum parts and rejects moves outside the optional `laneType` range (`FM` by default, or `PSG` for tone lanes). PSG pitches above the FM limit are allocated to PSG. | `transcribe` |
 | `splitNote` | `noteId` or a point selector and `at` strictly inside the gate. Both halves need a project tick. Optional `pitch` retunes the second attack. The source attack is replaced by `edit-<id>-left` and `edit-<id>-right`. | `transcribe` |
 | `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each generated pitch change needs four project ticks between attacks. With `glide: true`, supply explicit `points` to use the last note’s pitch as the base for the measured curve. The resulting slide is routed to FM. | `transcribe` |
 | `setVelocity` | `noteIds`, or `span` with `part` and optional `pitchMin` and `pitchMax`. Choose either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
@@ -482,7 +483,7 @@ removes only the selected proposals. See the
 | `arpeggio` | `noteIds` or `span` with `part` and optional pitch bounds. `rate` is 1–127 driver ticks per step (default 2). `order` is `up`, `down`, or `up-down` (default `up`). | `allocate` |
 | `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
 | `voiceEdit` | A `voiceEdit` object with the fields of a [voice journal entry](#identify-and-assign-voices), including its own `op` and `voiceId`. The outer intent supplies `id` and `author`. The voices stage replays these after `voice-edits.json`. | `voices` |
-| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
+| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, `vibratoEnvelope` for staged S3K vibrato, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
 | `layer` | `noteIds`, point `selector` or `selectors`, or `span` with `part` and optional `pitchMin`, `pitchMax` and `fromRole` filters. Set `mode` to `echo`, `chorus`, `double` or `off`. Copies require `laneType` (`FM` or `PSG`). | `assemble` |
 
 At assembly, `noteVoicing` resolves each ID on its current chip, reports
@@ -1039,6 +1040,7 @@ with a weaker ridge or slightly later transcribed onset. Each voice
 needs its own matching ridge through the rise and landing. The anchor
 uses FM, and the other chord voices can use FM or PSG tone. PSG plays
 the measured approach as tied period changes.
+A staged vibrato envelope takes precedence over an inferred bend on the same FM gate.
 Other candidates enter `edits.json` as
 `stem-pitch-approach` proposals. Use
 `reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect
@@ -1469,9 +1471,9 @@ voices and a 32 KiB total bank.
 
 #### Optional lane policies
 
-New reconstructions save `"lanePolicies": {"preset": "s3k-layering"}` in
-`voicing.json`. The preset adds an octave-up PSG double and a 14-frame FM
-echo on spare channels. FM-only runs retain the FM echo. Existing work and
+New reconstructions save the target's layering preset in `voicing.json`.
+The `s1-layering`, `s2-layering` and `s3k-layering` presets add an octave-up
+PSG double and a 14-tick FM echo on spare channels. FM-only runs retain the FM echo. Existing work and
 replays reuse their saved policy. Set `--lane-policy-preset off` on a fresh
 run, or rebuild an existing work directory with a replacement preset:
 
@@ -1481,7 +1483,7 @@ java -jar "$jar" reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering
 
 In MCP, call `reconstruct_stage` with `stage: "assemble"` and
 `options: {"lanePolicyPreset": "s3k-layering"}`. In Studio's reconstruction
-editor, choose **Lane policies → S3K layering**. These actions replace any
+editor, choose the target’s preset under **Lane policies**. These actions replace any
 previous lane policy configuration. Use `off` or choose **Off** to clear it.
 
 The preset FM echo adds 11 carrier total-level (TL) steps relative to the
@@ -1557,40 +1559,44 @@ compare the compiled arrangement with the indexed rule omitted while
 keeping the other rules enabled. The report gives bank bytes and PSG envelope asset bytes. An omitted or empty array leaves
 assembly behavior unchanged.
 
-### Studio vibrato gesture
+### Per-note vibrato envelopes
 
-Studio writes a `noteVoicing` intent by allocated FM note ID and resolves its
-scope against the current allocation on each build. The underlying settings
-also work directly under `lanes.<lane>.overrides` in `voicing.json`. For example,
-this scope sets about 48 cents of depth at 5 Hz for MIDI 65:
+An S3K `noteVoicing` edit can replace the allocated FM note's vibrato with a
+series of stages. These are project driver ticks relative to its allocated
+attack, even when the source and project timelines differ.
 
 ```json
-{"noteIds":["LEAD_ID"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}
+{"id":"lead-vibrato","reason":"Match the held lead's widening vibrato","op":"noteVoicing","noteIds":["LEAD_ID"],"vibratoEnvelope":[{"startOffset":0,"depthCents":0},{"startOffset":18,"rateHz":5,"depthCents":20},{"startOffset":32,"rateHz":5,"depthCents":48}]}
 ```
 
-Depth here is half the peak-to-peak pitch swing. To map a drag in cents and
-Hz to F0 on an FM note:
+Offsets are strictly increasing integers within the allocated note. Depth
+is half the peak-to-peak excursion, from 0 to 200 cents. Use 0.12–15 Hz for
+moving segments. A zero-depth segment can omit `rateHz`. The opening stays
+flat when the first offset is greater than zero. `vibratoEnvelope`,
+`vibrato` (raw F0 fields), and `modulationOff` are mutually exclusive.
+The envelope applies to one held attack at a time and supersedes inferred
+bends and scoped vibrato on that attack. Authored bends, chord figures, PSG,
+and S1/S2 targets are rejected. The normal articulation gate is extended
+only if needed to reach an authored boundary within the allocation.
 
-1. Pick the even `steps` in 2–254 that minimizes the error from the requested
-   rate. Actual Hz is `30 / steps`, so the centered range is about 0.118–15 Hz.
-   Set `delay: 1` to start immediately. Pick a `rate` divisor of `steps / 2`
-   (including 1) to keep the two halves symmetric.
-2. Let `F` be the note's S3K F-number plus lane detune. The cents-to-frequency
-   conversion is local to the current octave block. The F-number table
-   from C through B is 644, 683, 723, 766, 813, 860, 911, 965, 1023, 1084,
-   1148, 1216. For desired depth `D`, compute
-   `A = F × tanh(D × ln(2) / 1200)`.
-3. With `k = steps / (2 × rate)`, choose integer `delta` nearest `A / k`
-   in 1–127, keeping `F ± k × delta` inside 1–2047. Try the divisors if
-   a finer depth step or more headroom is needed. With
-   `a = k × delta`, the achieved depth is
-   `600 × log2((F + a) / (F - a))`. The minimum nonzero and maximum
-   depth therefore depend on pitch and rate. At MIDI 65 and 5 Hz with
-   `rate:1`, the depth ranges from about 6 to 824 cents in discrete steps.
-   Very slow settings need a long gate to complete a cycle.
-4. Save `modulationOff: true` in place of `vibrato` for an explicit zero
-   depth. Studio resolves the lane automatically. When editing
-   `voicing.json` directly, move the override if allocation changes.
+The compiler prepares the first moving stage with F0 on the original attack
+when its onset fits the driver's delay range. Reissuing F0 under E7 does
+not reload the live modulation delta. Later stages therefore stop custom
+modulation and use native detune and pitch updates under E7, including
+for onset offsets outside the F0 delay range. These continuations retain
+one FM key-on. The first stage's Hz and depth are quantized to native F0
+values. Later stages are sampled at 60 Hz and consume bytes in the music
+bank.
+
+`reconstruct vibrato-review WORK_DIR [--part ID] [--propose]` examines the
+mapped stems of allocated FM notes. It estimates rate and depth from
+consecutive alternating pitch excursions. It looks for a quiet opening
+before sustained oscillation and for sustained changes in cycle depth or
+period. The command prints candidates and the number of examined notes.
+With `--propose`, it saves candidates for review in the `staged-vibrato`
+group. Accept a proposal and rebuild assembly to hear it. Trace and describe
+show the stages on the rebuilt gate. The default reconstruction does not
+run this review or change its output.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,
@@ -1736,3 +1742,29 @@ The runner also retains
 [benchmark guide](benchmark.md) for the corpus, holdout and gold commands.
 The legacy positional `reconstruct MIDI WAV INDEX OUTPUT_DIR` command
 continues to use the original allocation policy for comparisons.
+
+### Preserving note edits when classification changes
+
+Note IDs identify attacks independently of their role, voice and chip lane.
+A rebuild from roles, voices, allocation or voicing retains the score edits
+and re-evaluates note voicing and layers against the new allocation. Explicit
+role, lane and voice membership edits follow both child IDs after a cut.
+When a merge combines notes classified together by a single edit, that
+classification follows the retained attack.
+
+A score operation can succeed while its target fails to sound downstream.
+Assembly records these losses as orphaned edit outcomes with the note ID and
+the allocation or voicing reason. An incompatible instrument or vibrato
+setting is reported per target. Other compatible notes in the same edit
+still receive the setting. The original edit stays in the journal and can
+apply again if the note regains a compatible gate.
+
+`reconstruct describe --json` and `reconstruct_describe` include
+`orphanedEdits` when present. The text description lists them after the
+score. In Studio, use **Edits → Revise selected edit…** to change the
+note IDs or selector, or remove the edit and apply the draft. Agents can
+remove the entry and add the corrected intent.
+
+Change the first stage as needed when moving a section boundary. A chained
+run automatically goes back to transcription when the score edit recipe
+changes, including the sections journal for a score edit that uses a section.

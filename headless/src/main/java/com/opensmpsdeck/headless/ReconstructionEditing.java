@@ -26,6 +26,14 @@ public final class ReconstructionEditing {
 
     public record Vibrato(double hz, double cents, double minCents, double maxCents, int rate, int delta, int steps) {}
 
+    /** Start measured in project driver ticks from the allocated note onset. */
+    public record VibratoSegment(int startOffset, double rateHz, double depthCents) {}
+
+    public static List<VibratoSegment> vibratoEnvelope(com.google.gson.JsonObject edit) {
+        var segments = ReconstructionNoteVoicing.envelope(edit, "noteVoicing");
+        return segments == null ? List.of() : segments;
+    }
+
     public record Audition(StudioProject project, double start, double end) {}
 
     private final ReconstructionStages.Score score;
@@ -75,6 +83,10 @@ public final class ReconstructionEditing {
                 .toList();
         return new Attack(note.start(), note.end(), note.pitch(), drums.getOrDefault(note.part(), false),
                 single(note), bend);
+    }
+
+    public String transposeIssue(String id, int pitch, ReconstructionLaneType type) {
+        return ReconstructionEdits.transposeIssue(notes.get(id), pitch, type, score.inputs().profile(), score.inputs().fmOnly());
     }
 
     public String laneIssue(ReconstructionInspection.Overlay overlay, ReconstructionLaneType type, String lane) {

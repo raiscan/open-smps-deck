@@ -24,6 +24,189 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionEditsTest {
+    @Test void detailEditReportsDropAndRecoversOnRoleRebuild(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2");
+        add(work, """
+                {"id":"shape","reason":"quiet attack","op":"setVelocity","noteIds":["n-0-0-60"],"velocity":41}
+                """, true);
+        var drop = json("""
+                {"id":"drop","reason":"classify attack","op":"setRole","noteIds":["n-0-0-60"],"role":"drop"}
+                """);
+        var before = ReconstructionReview.revision(work).entries();
+        var after = before.deepCopy();
+        after.add(drop);
+        var predicted = ReconstructionReview.newOrphanedDetails(work, before, after);
+        assertEquals(1, predicted.size());
+        assertTrue(predicted.getFirst().contains("shape"));
+        ReconstructionEditCommand.run(work, "add", drop, null, true, (a, b, c) -> {});
+        cli("reconstruct", "run", "--from", "assemble", work.toString());
+        assertEquals(1, ReconstructionReview.outcomes(work).get("shape").stream()
+                .filter(row -> row.status().equals("orphaned")).count());
+        var issue = ReconstructionReview.outcomes(work).get("shape").stream()
+                .filter(row -> row.status().equals("orphaned")).findFirst().orElseThrow();
+        assertTrue(issue.reason().contains("edit:drop"), issue.toString());
+        assertTrue(cli("reconstruct", "describe", work.toString(), "--json").contains("orphanedEdits"));
+        assertEquals(2, ReconstructionReview.revision(work).entries().size());
+        cli("reconstruct", "edit", work.toString(), "remove", "drop");
+        cli("reconstruct", "run", "--from", "roles", work.toString(), "--keep-voicing");
+        assertTrue(ReconstructionReview.outcomes(work).get("shape").stream().allMatch(row -> row.status().equals("applied")));
+        assertEquals(41, ReconstructionStages.readScore(work.resolve("score.json")).notes().getFirst().velocity());
+    }
+
+    @Test void classificationRebuildsReplayEveryEditKind(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        for (int[] attack : new int[][]{{60, 0}, {64, 480}, {62, 960}, {65, 1440}, {67, 1920},
+                {68, 2400}, {69, 2880}, {71, 3360}, {71, 3840}, {72, 4320}, {74, 5280}, {76, 5760},
+                {60, 6240}, {64, 6240}, {67, 6240}, {62, 6720}, {65, 6720}, {69, 6720}, {70, 7200}}) {
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, attack[0], 90), attack[1]));
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, attack[0], 0), attack[1] + 280));
+        }
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav, true, 480);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "8");
+        var region = json("""
+                {"id":"region","level":"section","name":"Opening","sourceStart":0,"sourceEnd":0.4,
+                 "author":"human","reason":"Test section"}
+                """);
+        cli("reconstruct", "sections", "add", work.toString(), region.toString());
+        var edits = com.google.gson.JsonParser.parseString("""
+            [
+              {"id":"lead","op":"setRole","reason":"Identify lead","role":"melody","noteIds":["n-0-0-60","n-0-500000-64"]},
+              {"id":"pin","op":"pinLane","reason":"Lead on FM","laneType":"FM","noteIds":["n-0-0-60"]},
+              {"id":"create","op":"voiceEdit","reason":"Define lead voice","voiceEdit":{"op":"create","voiceId":"lead-a","name":"Lead A","kind":"tonal"}},
+              {"id":"move","op":"voiceEdit","reason":"Assign lead","voiceEdit":{"op":"move","voiceId":"lead-a","noteIds":["n-0-0-60","n-0-3500000-71","n-0-4000000-71"]}},
+              {"id":"cut","op":"splitNote","reason":"Separate attacks","noteId":"n-0-0-60","at":0.12},
+              {"id":"bend","op":"bend","reason":"Shape onset","noteId":"n-0-500000-64","points":[[0.52,0],[0.65,1]]},
+              {"id":"retrigger","op":"retrigger","reason":"Separate pulses","noteId":"n-0-1000000-62","rate":0.08,"count":2,"gate":0.05},
+              {"id":"layer","op":"layer","reason":"Add echo","noteIds":["n-0-1500000-65"],"mode":"echo","laneType":"FM"},
+              {"id":"vibrato","op":"noteVoicing","reason":"Add motion","noteIds":["n-0-2000000-67"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}},
+              {"id":"scope","op":"setVelocity","reason":"Soften section","part":0,"span":{"section":"region"},"velocity":41},
+              {"id":"register","op":"transpose","reason":"Lift the middle attack","noteIds":["n-0-2500000-68"],"semitones":2},
+              {"id":"timing","op":"setNote","reason":"Lengthen note","noteId":"n-0-3000000-69","end":3.35},
+              {"id":"merge-role","op":"setRole","reason":"Classify both held notes","role":"counter","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
+              {"id":"merge","op":"mergeNotes","reason":"Sustain pitch","noteIds":["n-0-3500000-71","n-0-4000000-71"]},
+              {"id":"delete","op":"deleteNote","reason":"Remove attack","noteId":"n-0-4500000-72"},
+              {"id":"insert","op":"insertNote","reason":"Add attack","part":0,"pitch":66,"start":5,"end":5.25,"role":"counter"},
+              {"id":"glide","op":"glide","reason":"Lead into pitch","fromNoteId":"n-0-5500000-74","toNoteId":"n-0-6000000-76"},
+              {"id":"arp","op":"arpeggio","reason":"Roll first chord","noteIds":["n-0-6500000-60","n-0-6500000-64","n-0-6500000-67"],"rate":2},
+              {"id":"chord","op":"chordInstrument","reason":"Consolidate second chord","noteIds":["n-0-7000000-62","n-0-7000000-65","n-0-7000000-69"]},
+              {"id":"restore","op":"unmerge","reason":"Retain written gate","noteIds":["n-0-7500000-70"]},
+              {"id":"swap","op":"swapRoles","reason":"Move earlier line to counter","part":0,"span":[2.45,2.9],"from":"melody","to":"counter"}
+            ]
+            """).getAsJsonArray();
+        ReconstructionReview.apply(work, ReconstructionReview.revision(work), edits, (a, b, c) -> {});
+        assertEquals(java.util.EnumSet.allOf(ReconstructionEdits.Kind.class),
+                ReconstructionEdits.read(work).intents().stream().map(ReconstructionEdits.Intent::kind)
+                    .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(List.of("edit-cut-left", "edit-cut-right", "n-0-3500000-71"),
+                ReconstructionVoicePlan.load(work).voices().stream().filter(voice -> voice.id().equals("lead-a"))
+                        .findFirst().orElseThrow().noteIds());
+
+        for (String mutation : List.of("role", "voice", "lane", "section", "voicing")) {
+            switch (mutation) {
+                case "role" -> add(work, """
+                        {"id":"retag","op":"setRole","reason":"Role reassignment","noteIds":["n-0-3000000-69"],"role":"bass"}
+                        """, false);
+                case "voice" -> add(work, """
+                        {"id":"rename","op":"voiceEdit","reason":"Voice reassignment","voiceEdit":{"op":"rename","voiceId":"lead-a","name":"Lead B"}}
+                        """, false);
+                case "lane" -> add(work, """
+                        {"id":"reroute","op":"pinLane","reason":"Chip reassignment","noteIds":["n-0-3000000-69"],"laneType":"PSG"}
+                        """, false);
+                case "section" -> {
+                    region.addProperty("sourceStart", 2.45);
+                    region.addProperty("sourceEnd", 2.9);
+                    cli("reconstruct", "sections", "set", work.toString(), region.toString());
+                }
+                default -> { }
+            }
+            String stage = switch (mutation) {
+                case "voice" -> "voices";
+                case "voicing" -> "voice";
+                default -> "roles";
+            };
+            cli("reconstruct", "run", "--from", stage, work.toString(), "--keep-voicing");
+            var outcomes = ReconstructionReview.outcomes(work);
+            for (var entry : edits) {
+                String id = entry.getAsJsonObject().get("id").getAsString();
+                assertNotNull(outcomes.get(id), mutation + ": " + id);
+                assertTrue(outcomes.get(id).stream().allMatch(row -> List.of("applied", "satisfied").contains(row.status())),
+                        mutation + ": " + id + " " + outcomes.get(id));
+            }
+            assertTrue(ReconstructionReview.revision(work).entries().asList().containsAll(edits.asList()));
+        }
+        var overlays = ReconstructionInspection.open(work).overlays();
+        assertTrue(overlays.stream().anyMatch(note -> note.id().equals("n-0-4500000-72")
+                && note.style() == ReconstructionInspection.Style.DASHED && !note.sounds()));
+        var notes = ReconstructionStages.readScore(work.resolve("score.json")).notes();
+        var shifted = notes.stream().filter(note -> note.id().equals("n-0-2500000-68")).findFirst().orElseThrow();
+        assertEquals(41, shifted.velocity());
+        assertEquals(70, shifted.pitch());
+        assertEquals(90, notes.stream().filter(note -> note.id().equals("edit-cut-left")).findFirst().orElseThrow().velocity());
+    }
+
+    @Test void transposeComposesAndLeavesDrumsAndOutOfRangeBatchesAlone() {
+        var lead = note("lead", .1, .2, 60);
+        var low = note("low", .25, .35, 45);
+        var drum = new Note("drum", 1, .4, .5, 36, 96, "midi", 1);
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false),
+                        new MidiScore.Part(1, "Kit", 0, true)), List.of(), List.of()),
+                Map.of(), List.of(lead, low, drum), List.of(), List.of(), null, null);
+        var edits = new ReconstructionEdits(List.of(intent("""
+                {"op":"transpose","id":"up","reason":"register","noteIds":["lead","drum","absent"],"semitones":12}
+                """), intent("""
+                {"op":"transpose","id":"down","reason":"step","noteIds":["lead"],"semitones":-1}
+                """), intent("""
+                {"op":"transpose","id":"out","reason":"step","noteIds":["lead","low"],"semitones":-1,"laneType":"PSG"}
+                """)));
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var rebuilt = edits.applyScore(score, outcomes);
+        assertEquals(List.of(71, 45, 36), rebuilt.notes().stream().map(Note::pitch).toList());
+        assertEquals(List.of("lead"), outcomes.getFirst().noteIds());
+        assertEquals(List.of("absent"), outcomes.getFirst().missingNoteIds());
+        assertTrue(outcomes.getFirst().detail().contains("drum"));
+        assertEquals(ReconstructionEdits.Status.invalid, outcomes.getLast().status());
+        assertTrue(outcomes.getLast().detail().contains("45–117"));
+        assertEquals(rebuilt, edits.applyScore(score, new ArrayList<>()));
+        for (String value : List.of("0", "1.5", "\"12\""))
+            assertThrows(IllegalArgumentException.class, () -> intent("""
+                    {"op":"transpose","id":"bad","reason":"invalid","noteIds":["lead"],"semitones":%s}
+                    """.formatted(value)));
+    }
+
+    @Test void cliTransposeSupportsTheHighPsgRegisterAndRebuildsRelatively(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("theme.mid");
+        writeMidi(midi, false);
+        Path catalogue = dir.resolve("catalogue.json");
+        Path wav = dir.resolve("mix.wav");
+        writeAudio(catalogue, wav, true);
+        Path work = dir.resolve("work");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--lane-policy-preset", "off");
+        String id = "n-0-0-60";
+        cli("reconstruct", "edit", work.toString(), "add", """
+                {"op":"transpose","id":"register","reason":"synthetic high tone","noteIds":["n-0-0-60"],
+                 "semitones":57,"laneType":"PSG"}
+                """);
+        for (String from : List.of("transcribe", "roles", "transcribe")) {
+            cli("reconstruct", "run", "--from", from, work.toString());
+            var row = ReconstructionTrace.read(work).get(id);
+            assertEquals(117, row.score().note().pitch());
+            assertTrue(row.allocation().lane().startsWith("PSG"));
+            assertEquals(117, row.voiced().getFirst().pitch());
+        }
+    }
+
     @Test void retriggerKeepsTheFirstIdAndReplaysStableIndependentAttacks() {
         var original = note("held", .10, .55, 68);
         var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
@@ -56,6 +239,37 @@ class ReconstructionEditsTest {
         assertThrows(IllegalArgumentException.class, () -> intent("""
                 {"op":"layer","id":"mask","reason":"keep octave","noteIds":["held"],
                  "mode":"off","policies":["unknown"]}
+                """));
+    }
+
+    @Test void resolvesVibratoEnvelopeOnlyOnAnS3kFmHold() {
+        var edit = intent("""
+                {"op":"noteVoicing","id":"stages","reason":"evidence","noteIds":["held"],
+                 "vibratoEnvelope":[{"startOffset":0,"depthCents":0},
+                   {"startOffset":12,"rateHz":5,"depthCents":20},{"startOffset":24,"rateHz":6,"depthCents":42}]}
+                """);
+        var held = note("held", 0, .5, 60);
+        var score = new ReconstructionStages.Score(1, 500_000, 30, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false)), List.of(), List.of()),
+                Map.of(), List.of(held), List.of(), List.of(), null, null);
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var allocated = new ReconstructionAllocation.Entry(held, Role.melody, "FM1", 0, 30,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var resolved = ReconstructionNoteVoicing.resolve(List.of(edit), new ReconstructionAllocation.Result(1, List.of(allocated)),
+                null, score, Map.of(), Map.of(), outcomes);
+        assertEquals(ReconstructionEdits.Status.applied, outcomes.getFirst().status());
+        assertEquals(List.of(0, 12, 24), resolved.scopes().get("held").getFirst().settings().vibratoEnvelope()
+                .stream().map(ReconstructionEditing.VibratoSegment::startOffset).toList());
+
+        outcomes.clear();
+        var shortened = new ReconstructionAllocation.Entry(held, Role.melody, "FM1", 0, 24,
+                ReconstructionAllocation.Outcome.shortened, null, null);
+        ReconstructionNoteVoicing.resolve(List.of(edit), new ReconstructionAllocation.Result(1, List.of(shortened)),
+                null, score, Map.of(), Map.of(), outcomes);
+        assertEquals(ReconstructionEdits.Status.orphaned, outcomes.getFirst().status());
+        assertThrows(IllegalArgumentException.class, () -> intent("""
+                {"op":"noteVoicing","id":"bad-order","reason":"evidence","noteIds":["held"],
+                 "vibratoEnvelope":[{"startOffset":12,"rateHz":4,"depthCents":20},{"startOffset":12,"depthCents":0}]}
                 """));
     }
 
@@ -858,6 +1072,10 @@ class ReconstructionEditsTest {
     }
 
     private static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
+        writeAudio(index, wav, psg, 120);
+    }
+
+    private static void writeAudio(Path index, Path wav, boolean psg, int frames) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var patch = DemoProject.create().voices().getFirst();
         var bytes = new byte[patch.bytes().size()];
@@ -871,6 +1089,6 @@ class ReconstructionEditsTest {
         }
         var catalogue = builder.build();
         catalogue.save(index);
-        WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, variant, 68, 24)), wav, 120);
+        WaveFile.render(ProjectCompiler.compileWithAssets(CataloguePlayback.matchProbe(catalogue, variant, 68, 24)), wav, frames);
     }
 }

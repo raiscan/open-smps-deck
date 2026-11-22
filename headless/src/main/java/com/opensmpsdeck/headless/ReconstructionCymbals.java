@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 
 import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.Envelope;
@@ -21,6 +22,7 @@ import java.util.Map;
 /** Native-style noise substitutes and source-clock measurements for GM cymbals. */
 final class ReconstructionCymbals {
     static final String COLLISION = "psg-cymbal-dac-collision";
+    static final String HAT_ROUTE = "arrangement:psg-hat";
     static final String QUIET = "psg-cymbal-quiet-stem";
     static final int PITCH = 117;
     static final int TONE_PERIOD = 16; // S3K PSG period at pitch 117.
@@ -52,7 +54,7 @@ final class ReconstructionCymbals {
     }
 
     static boolean automatic(String reason) {
-        return COLLISION.equals(reason) || QUIET.equals(reason);
+        return COLLISION.equals(reason) || QUIET.equals(reason) || HAT_ROUTE.equals(reason);
     }
 
     static boolean voiced(ReconstructionAllocation.Entry entry) {
@@ -76,8 +78,14 @@ final class ReconstructionCymbals {
         return envelope(pitch).bytes().size() - 1;
     }
 
-    static int detune(int period) {
-        return period - TONE_PERIOD;
+    static int pitch(TargetProfile profile) {
+        return profile.psg().clamp(PITCH);
+    }
+
+    static int detune(int period, TargetProfile profile) {
+        // The pinned classic 68K-frequency table ends at MIDI 116 with period 17.
+        int basePeriod = profile.game() == TargetGame.S3K ? TONE_PERIOD : 17;
+        return period - basePeriod;
     }
 
     static ReconstructionVoices.Key key(ReconstructionStages.Note note) {
@@ -170,7 +178,6 @@ final class ReconstructionCymbals {
 
     static Map<Integer, Double> gains(ReconstructionStages.Score score, List<ReconstructionAllocation.Entry> entries)
             throws IOException {
-        if (score.inputs().targetGame() != TargetGame.S3K) return Map.of();
         if (entries.stream().noneMatch(entry -> automatic(entry.reason()))) return Map.of();
         var levels = measure(score, true);
         var byPitch = new HashMap<Integer, List<Double>>();
@@ -179,18 +186,21 @@ final class ReconstructionCymbals {
             Double rms = levels.get(key(entry.note()));
             if (rms != null) byPitch.computeIfAbsent(entry.note().pitch(), ignored -> new ArrayList<>()).add(rms);
         }
+        if (byPitch.isEmpty()) return Map.of();
         var gains = new java.util.TreeMap<Integer, Double>();
+        var profile = score.profile();
+        var calibration = Calibration.LEVELS.computeIfAbsent(profile,
+                key -> Map.of(CLOSED.id(), Calibration.render(CLOSED, key), OPEN.id(), Calibration.render(OPEN, key)));
         for (var entry : byPitch.entrySet()) {
             var targets = entry.getValue();
             targets.sort(Double::compare);
-            int level = nearestLevel(entry.getKey(), targets.get(targets.size() / 2));
+            int level = nearestLevel(calibration.get(envelope(entry.getKey()).id()), targets.get(targets.size() / 2));
             gains.put(entry.getKey(), Math.pow(10, (level - NATIVE_LEVEL) / 10.0));
         }
         return gains;
     }
 
-    private static int nearestLevel(int pitch, double rms) {
-        double[] powers = envelope(pitch) == CLOSED ? Calibration.CLOSED_LEVELS : Calibration.OPEN_LEVELS;
+    private static int nearestLevel(double[] powers, double rms) {
         double target = Math.log(Math.max(1e-12, rms * rms));
         int best = 1; // Zero is hardware silence.
         for (int level = 2; level <= 15; level++) {
@@ -201,33 +211,54 @@ final class ReconstructionCymbals {
     }
 
     private static final class Calibration {
-        static final double[] CLOSED_LEVELS = render(CLOSED);
-        static final double[] OPEN_LEVELS = render(OPEN);
+        static final Map<TargetProfile, Map<String, double[]>> LEVELS = new java.util.concurrent.ConcurrentHashMap<>();
 
-        private static double[] render(Envelope envelope) {
+        private static double[] render(Envelope envelope, TargetProfile profile) {
+            boolean classic = profile.game() != TargetGame.S3K;
+            var clock = profile.clock().game() == profile.game()
+                    ? profile.clock() : TargetProfile.of(profile.game()).clock();
             int spacing = 16;
             var sequences = new ArrayList<Sequence>();
             var clips = new ArrayList<Clip>();
+            var notes = new ArrayList<NoteEvent>();
+            var setup = new ArrayList<CommandEvent>();
+            int ticks = envelope.bytes().size() - 1;
+            int period = envelope == CLOSED ? 8 : TONE_PERIOD;
             for (int level = 1; level <= 15; level++) {
                 String id = "level-" + level;
-                int ticks = envelope.bytes().size() - 1;
+                if (classic) {
+                    int start = level * spacing;
+                    notes.add(new NoteEvent(id, start, ticks, pitch(profile)));
+                    setup.add(new CommandEvent(id, start, NativeCommand.VOLUME, List.of(level << 3)));
+                    continue;
+                }
                 var commands = new ArrayList<CommandEvent>();
                 commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE,
                         List.of(ReconstructionVoicing.PSG_PERCUSSION.noiseByte())));
                 if (envelope == CLOSED) {
                     // Keep the fixed 14 kHz fit reference so clock edits do not move the attack level.
                     // The selected two-rate voicing adds one step to this fit in assembly.
-                    commands.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(8) & 255)));
+                    commands.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(period, profile) & 255)));
                 }
                 sequences.add(new Sequence(id, id, "PSG", ticks, null, level << 3,
-                        List.of(new NoteEvent("hit", 0, ticks, PITCH)),
+                        List.of(new NoteEvent("hit", 0, ticks, pitch(profile))),
                         commands,
                         "RESET", envelope.id(), null));
                 clips.add(new Clip(id, id, "PSG3", level * spacing, ticks));
             }
+            int length = spacing * 16;
+            if (classic) {
+                setup.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE,
+                        List.of(ReconstructionVoicing.PSG_PERCUSSION.noiseByte())));
+                setup.add(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune(period, profile) & 255)));
+                sequences.add(new Sequence("levels", "Levels", "PSG", length, null, 0,
+                        notes, setup, "RESET", envelope.id(), null));
+                clips.add(new Clip("levels", "levels", "PSG3", 0, length));
+            }
             var project = new StudioProject(4, "PSG calibration", "S3K", 30, 0, List.of(),
-                    sequences, clips, List.of(envelope), TargetGame.S3K, null);
-            int frames = spacing * 16;
+                    sequences, clips, List.of(ReconstructionPsgEnvelopes.forProbe(envelope, profile.game(), ticks)), List.of(),
+                    profile.game(), classic ? clock.tempo() : null);
+            int frames = Math.toIntExact(clock.frameAtTick(length));
             float[] audio = new float[frames * 800];
             int[] frame = {0};
             try {
@@ -240,7 +271,7 @@ final class ReconstructionCymbals {
             }
             double[] result = new double[16];
             for (int level = 1; level <= 15; level++)
-                result[level] = bandPower(audio, 48_000, level * spacing / 60.0 - ATTACK_LEAD, ATTACK_WINDOW,
+                result[level] = bandPower(audio, 48_000, clock.secondsAtTick(level * spacing) - ATTACK_LEAD, ATTACK_WINDOW,
                         envelope == CLOSED);
             return result;
         }

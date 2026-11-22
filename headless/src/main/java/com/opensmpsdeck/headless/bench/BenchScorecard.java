@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +20,11 @@ final class BenchScorecard {
     record Group(int cases, Map<String, Double> mean, Map<String, Integer> measured) {}
     record Card(int version, String manifestSha256, String catalogueSha256, boolean holdout, boolean audioRefine,
                 Map<String, String> goldInputs, List<Case> cases, Group overall, Map<String, Group> profiles,
-                Map<String, Group> variants, Group gold) {}
+                Map<String, Group> variants, Group gold, String target) {
+        TargetGame targetGame() {
+            return target == null ? TargetGame.S3K : TargetGame.parse(target);
+        }
+    }
 
     private static final List<String> LOWER = List.of("logMelDistance", "releaseEnergy", "voiceSpectralDistance", "leadGap");
     private static final List<String> HEADLINES = List.of("noteF1", "notePrecision", "noteRecall", "offsetF1",
@@ -29,7 +35,7 @@ final class BenchScorecard {
     private BenchScorecard() {}
 
     static Card create(String manifest, String catalogue, boolean holdout, boolean audioRefine,
-                       Map<String, String> goldInputs, List<Case> cases) {
+                       Map<String, String> goldInputs, List<Case> cases, TargetGame target) {
         var corpus = cases.stream().filter(c -> c.profile != null).toList();
         var profiles = new TreeMap<String, Group>();
         var variants = new TreeMap<String, Group>();
@@ -42,7 +48,8 @@ final class BenchScorecard {
             if (!matches.isEmpty()) variants.put(variant.name(), mean(matches));
         }
         return new Card(VERSION, manifest, catalogue, holdout, audioRefine, goldInputs, cases, mean(corpus), profiles,
-                variants, mean(cases.stream().filter(c -> c.profile == null).toList()));
+                variants, mean(cases.stream().filter(c -> c.profile == null).toList()),
+                target == TargetGame.S3K ? null : target.id());
     }
 
     private static Group mean(List<Case> cases) {
@@ -61,6 +68,7 @@ final class BenchScorecard {
 
     static String markdown(Card card) {
         var doc = new StringBuilder("# Reconstruction benchmark\n\n");
+        if (card.target != null) doc.append("Reconstruction target is ").append(card.target).append(".\n\n");
         doc.append("Catalogue mode is ").append(card.holdout ? "song holdout" : "in-catalogue")
                 .append(". Audio refinement is ").append(card.audioRefine ? "on" : "off").append(".\n\n");
         doc.append("| Group | Cases | Metric | Mean | Measured cases |\n|---|---:|---|---:|---:|\n");
@@ -94,10 +102,15 @@ final class BenchScorecard {
     record Comparison(boolean passed, boolean failedCases, List<Delta> deltas) {}
 
     static Comparison compare(Card old, Card current, double tolerance) {
-        return compare(old, current, tolerance, false);
+        return compare(old, current, tolerance, false, false);
     }
 
-    static Comparison compare(Card old, Card current, double tolerance, boolean alternateMidi) {
+    static Comparison compare(Card old, Card current, double tolerance, boolean alternateMidi, boolean crossTarget) {
+        var beforeTarget = old.targetGame();
+        var afterTarget = current.targetGame();
+        if (beforeTarget != afterTarget && !crossTarget)
+            throw new IllegalArgumentException("Cannot compare targets " + beforeTarget.id() + " and " + afterTarget.id()
+                    + ". Use --cross-target for diagnostics.");
         if (!supported(old) || !supported(current) || old.holdout != current.holdout
                 || (!alternateMidi && !old.manifestSha256.equals(current.manifestSha256))
                 || !old.goldInputs.equals(current.goldInputs)

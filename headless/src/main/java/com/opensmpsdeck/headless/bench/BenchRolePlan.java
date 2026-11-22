@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless.bench;
 
 import com.opensmpsdeck.headless.ReconstructionAttackGrid;
+import com.opensmpsdeck.project.TargetClock;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -50,7 +51,7 @@ final class BenchRolePlan {
     private BenchRolePlan() {}
 
     static void write(Path work, List<BenchMetrics.Event> truth, Mode mode, BenchCli.Reconstruction run,
-                      PrintStream out) throws IOException {
+                      PrintStream out, TargetClock clock) throws IOException {
         var melody = BenchMetrics.melody(truth);
         Path path = work.resolve("roleplan.json");
         if (mode == Mode.ORACLE_SECTION) {
@@ -63,12 +64,12 @@ final class BenchRolePlan {
         // that handoff can lose attacks. Leave such passages to the heuristic if
         // the whole plan provides no gain on the allocated note timeline.
         List<Rule> best = List.of();
-        double bestFit = fit(work, melody, run, out);
+        double bestFit = fit(work, melody, run, out, clock);
         var leadOnly = rules.stream().filter(rule -> rule.role.equals("melody")).toList();
         for (var candidate : List.of(rules, leadOnly)) {
             if (candidate.isEmpty() || candidate.equals(best)) continue;
             BenchFiles.write(path, new Plan(1, candidate));
-            double fit = fit(work, melody, run, out);
+            double fit = fit(work, melody, run, out, clock);
             if (fit > bestFit) {
                 bestFit = fit;
                 best = candidate;
@@ -77,13 +78,13 @@ final class BenchRolePlan {
         BenchFiles.write(path, new Plan(1, best));
     }
 
-    private static double fit(Path work, List<BenchMetrics.Event> melody, BenchCli.Reconstruction run, PrintStream out)
-            throws IOException {
+    private static double fit(Path work, List<BenchMetrics.Event> melody, BenchCli.Reconstruction run,
+                              PrintStream out, TargetClock clock) throws IOException {
         run.run(new String[]{"reconstruct", "roles", work.toString()}, out);
         run.run(new String[]{"reconstruct", "allocate", work.toString()}, out);
         var allocation = BenchFiles.read(work.resolve("allocation.json"), Allocation.class);
         var notes = allocation.notes.stream().filter(note -> note.lane != null && !note.role.equals("drums"))
-                .map(note -> new BenchMetrics.Event(note.lane, note.startTick / 60.0, note.endTick / 60.0,
+                .map(note -> new BenchMetrics.Event(note.lane, clock.secondsAtTick(note.startTick), clock.secondsAtTick(note.endTick),
                         note.note.pitch, null, null)).toList();
         var estimate = BenchMetrics.melody(notes);
         return new BenchMetrics.F1(melody.size(), estimate.size(), BenchMetrics.notes(melody, estimate, false).size()).f1();

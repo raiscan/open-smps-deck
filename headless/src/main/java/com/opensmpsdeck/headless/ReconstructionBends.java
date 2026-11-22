@@ -54,6 +54,18 @@ final class ReconstructionBends {
         }
     }
 
+    private record Tracking(double minimumSupport, double minimumFundamental,
+                            double attackJump, double trackingJump, double excursion, double jumpDamping) {
+        private Tracking(double minimumSupport, double minimumFundamental) {
+            this(minimumSupport, minimumFundamental, 85, 190, MAX_EXCURSION, 150);
+        }
+    }
+
+    private static final Tracking BEND = new Tracking(.62, .14);
+    private static final Tracking APPROACH = new Tracking(.47, .14);
+    private static final Tracking PARALLEL_APPROACH = new Tracking(.085, .055);
+    private static final Tracking VIBRATO = new Tracking(.28, .14, 100, 100, 155, 45);
+
     private record Peak(double hz, double amplitude) {}
     record Sample(double time, double cents, double support) {}
 
@@ -92,26 +104,38 @@ final class ReconstructionBends {
         }
 
         List<Sample> trace(Note note) {
+            return trace(note, false);
+        }
+
+        List<Sample> vibratoTrace(Note note) {
+            return trace(note, true);
+        }
+
+        private List<Sample> trace(Note note, boolean vibrato) {
             double span = note.end() - note.start();
-            if (note.run() != null || note.pitch() < 48 || note.pitch() > 94 || span < .075 || span > 2.5)
+            if (note.run() != null || note.pitch() < (vibrato ? 36 : 48) || note.pitch() > 94 || span < .075 || span > 2.5)
                 return List.of();
-            if (note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED)
+            if (!vibrato && note.motion() != null && note.motion().vibrato() >= ReconstructionLeadAudio.MODULATED)
                 return List.of();
 
             double carrier = ReconstructionLeadAudio.hz(note.pitch());
             int rate = audio.sampleRate();
-            int length = (int) Math.round(rate * Math.clamp(7 / carrier, .016, .034));
+            int length = (int) Math.round(rate * Math.clamp(7 / carrier, .016, vibrato ? .050 : .034));
             double[] window = new double[length];
             for (int i = 0; i < length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
             int first = (int) Math.ceil(note.start() * rate);
             int end = Math.min(audio.samples().length, (int) Math.floor(note.end() * rate));
             int hop = (int) Math.round(HOP * rate);
             var track = new ArrayList<Sample>();
+            var tracking = vibrato ? VIBRATO : BEND;
+            int windows = 0;
             for (int at = first; at + length <= end; at += hop) {
+                windows++;
                 double time = (at + length / 2.0) / rate;
                 double prior = track.isEmpty() ? 0 : track.getLast().cents();
-                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty(), .62, .14);
+                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty(), tracking);
                 if (sample == null) {
+                    if (vibrato) continue;
                     if (track.isEmpty() && time - note.start() < .023) continue;
                     // A broken ridge cannot support a bend through a new attack or silence.
                     if ((end - at) / (double) rate > .032) return List.of();
@@ -119,6 +143,7 @@ final class ReconstructionBends {
                 }
                 track.add(sample);
             }
+            if (vibrato && track.size() < .68 * windows) return List.of();
             return track;
         }
 
@@ -142,7 +167,7 @@ final class ReconstructionBends {
             for (double t = last; t >= first; t -= HOP) {
                 int at = (int) Math.round(t * rate) - length / 2;
                 if (at < 0 || at + length > audio.samples().length) return null;
-                Sample sample = sample(at, window, carrier, t, prior, reverse.isEmpty(), .47, .14);
+                Sample sample = sample(at, window, carrier, t, prior, reverse.isEmpty(), APPROACH);
                 if (sample == null || Math.abs(sample.cents() - prior) > 125) break;
                 if (reverse.size() < 4 && Math.abs(sample.cents()) > 60) return null;
                 if (sample.cents() > 65) break;
@@ -180,7 +205,7 @@ final class ReconstructionBends {
                     double time = point.time() + lag * HOP;
                     int at = (int) Math.round(time * rate) - length / 2;
                     var sample = at < 0 || at + length > audio.samples().length ? null
-                            : sample(at, window, carrier, time, point.cents(), true, .085, .055);
+                            : sample(at, window, carrier, time, point.cents(), true, PARALLEL_APPROACH);
                     double tolerance = Math.abs(point.cents()) < 42 ? 48 : 70;
                     if (sample == null || Math.abs(sample.cents() - point.cents()) > tolerance) {
                         error += tolerance;
@@ -248,7 +273,7 @@ final class ReconstructionBends {
         }
 
         private Sample sample(int at, double[] window, double carrier, double time, double prior, boolean attack,
-                              double minimumSupport, double minimumFundamental) {
+                              Tracking tracking) {
             double energy = 0;
             for (int i = 0; i < window.length; i++) {
                 double value = audio.samples()[at + i];
@@ -280,8 +305,9 @@ final class ReconstructionBends {
             for (Peak peak : peaks) {
                 double cents = CENTS_PER_LOG * Math.log(peak.hz() / carrier);
                 double jump = Math.abs(cents - prior);
-                if (jump > (attack ? 85 : 190) || Math.abs(cents) > MAX_EXCURSION
-                        || peak.amplitude() < minimumFundamental * rms) continue;
+                if (jump > (attack ? tracking.attackJump() : tracking.trackingJump())
+                        || Math.abs(cents) > tracking.excursion()
+                        || peak.amplitude() < tracking.minimumFundamental() * rms) continue;
                 double salience = peak.amplitude();
                 double numerator = cents * peak.amplitude();
                 double harmonicEnergy = peak.amplitude() * peak.amplitude();
@@ -295,8 +321,9 @@ final class ReconstructionBends {
                 }
                 double support = Math.sqrt(harmonicEnergy) / rms;
                 // A strong fundamental alone can support a nearly sinusoidal tone.
-                if (support < minimumSupport) continue;
-                double merit = salience / (1 + jump / 150);
+                if (support < tracking.minimumSupport()) continue;
+                double merit = salience / (1 + jump / tracking.jumpDamping());
+                if (tracking == VIBRATO) merit /= 1 + Math.abs(cents) / 115;
                 if (merit > bestSalience) {
                     bestSalience = merit;
                     best = new Sample(time, numerator / salience, Math.min(1, support));

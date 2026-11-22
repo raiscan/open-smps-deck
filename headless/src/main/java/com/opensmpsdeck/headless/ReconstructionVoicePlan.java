@@ -146,10 +146,19 @@ public final class ReconstructionVoicePlan {
     private final Map<String, Group> groups = new LinkedHashMap<>();
     private final Map<String, Group> owners = new HashMap<>();
     private InstrumentCatalogue catalogue;
+    private final Map<String, List<String>> splitSuccessors;
+    private final Map<String, String> mergeSuccessors;
 
     private ReconstructionVoicePlan(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles) throws IOException {
+        this(work, score, roles, ReconstructionEdits.Journal.read(work).stages().getOrDefault("transcribe", List.of()));
+    }
+
+    private ReconstructionVoicePlan(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles,
+                                    List<ReconstructionEdits.Outcome> scoreEdits) throws IOException {
         this.work = work;
         this.score = score;
+        splitSuccessors = ReconstructionEdits.splitSuccessors(scoreEdits);
+        mergeSuccessors = ReconstructionEdits.mergeSuccessors(scoreEdits);
         timeline = ReconstructionTimeMap.of(score);
         for (var part : score.source().parts()) parts.put(part.id(), part);
         var original = new HashMap<String, ReconstructionStages.Note>();
@@ -221,6 +230,11 @@ public final class ReconstructionVoicePlan {
     static Result preview(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles,
                           ReconstructionEdits edits) throws IOException {
         return new ReconstructionVoicePlan(work, score, roles).apply(combined(work, edits));
+    }
+
+    static Result preview(Path work, ReconstructionStages.Score score, ReconstructionRoles.Result roles,
+                          ReconstructionEdits edits, List<ReconstructionEdits.Outcome> scoreEdits) throws IOException {
+        return new ReconstructionVoicePlan(work, score, roles, scoreEdits).apply(combined(work, edits));
     }
 
     static void reviewOutcomes(ReconstructionEdits edits, Result result, List<ReconstructionEdits.Outcome> outcomes) {
@@ -487,10 +501,11 @@ public final class ReconstructionVoicePlan {
 
     private List<String> select(Edit edit, Group source) {
         if (edit.noteIds != null) {
-            var missing = edit.noteIds.stream().filter(id -> !notes.containsKey(id)
+            var target = ReconstructionEdits.classificationTargets(edit.noteIds, splitSuccessors, mergeSuccessors);
+            var missing = target.stream().filter(id -> !notes.containsKey(id)
                     || source != null && owners.get(id) != source).toList();
             if (!missing.isEmpty()) throw new Orphan("notes missing from selection: " + missing);
-            return edit.noteIds;
+            return target;
         }
         var candidates = source == null ? notes.values() : source.notes.stream().map(notes::get).toList();
         var selected = new LinkedHashSet<String>();

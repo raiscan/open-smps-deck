@@ -25,7 +25,20 @@ final class ReconstructionVoicing {
                   @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,
                   @Nullable Map<String, SourceSound> sourceInstruments,
                   @Nullable ReconstructionLanePolicies.Configuration lanePolicies,
-                  @Nullable String leadProminenceWarning) {
+                  @Nullable String leadProminenceWarning,
+                  @Nullable ReconstructionArrangement.Configuration arrangement) {
+        Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
+               Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments,
+               ReconstructionLanePolicies.Configuration lanePolicies, String leadProminenceWarning) {
+            this(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, lanePolicies,
+                    leadProminenceWarning, null);
+        }
+
+        Result withArrangement(ReconstructionArrangement.Configuration settings) {
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments,
+                    lanePolicies, leadProminenceWarning, settings);
+        }
+
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
                Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments,
                ReconstructionLanePolicies.Configuration lanePolicies) {
@@ -33,7 +46,7 @@ final class ReconstructionVoicing {
         }
 
         Result withLevels(Map<String, Lane> lanes, Map<String, SourceSound> instruments, String warning) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, warning);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, warning, arrangement);
         }
         Result(int version, Map<String, Lane> lanes, FitWindows fitWindows, String sustainWarning,
                Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments, Map<String, SourceSound> sourceInstruments) {
@@ -44,15 +57,15 @@ final class ReconstructionVoicing {
         }
 
         Result withAssignments(Map<String, ReconstructionVoicePlan.Assignment> assignments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments, lanePolicies, leadProminenceWarning);
+            return new Result(version, lanes, fitWindows, sustainWarning, assignments.isEmpty() ? null : assignments, sourceInstruments, lanePolicies, leadProminenceWarning, arrangement);
         }
 
         Result withSourceInstruments(Map<String, SourceSound> instruments) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, leadProminenceWarning);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, instruments, lanePolicies, leadProminenceWarning, arrangement);
         }
 
         Result withLanePolicies(ReconstructionLanePolicies.Configuration policies) {
-            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies, leadProminenceWarning);
+            return new Result(version, lanes, fitWindows, sustainWarning, voiceAssignments, sourceInstruments, policies, leadProminenceWarning, arrangement);
         }
 
         SourceSound sourceSound(String lane, int part) {

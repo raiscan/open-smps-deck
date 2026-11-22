@@ -69,6 +69,23 @@ class ReconstructionCliTest {
                 ReconstructionCli.audioHash(output.resolve("render.wav")));
         assertEquals(500_000, ReferenceAudio.durationMicros(output.resolve("render.wav")));
         assertTargetRoundTrip(midi, wav, index);
+        // The classic search only sees variants for the selected driver.
+        // Check that a native catalogue hold survives assembly without looping.
+        String held = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Held contour",
+                new byte[]{0, 2, 3, (byte) 0x80});
+        classicVariants(builder, held, "Held contour", InstrumentCatalogue.Recipe.plain());
+        Path classicIndex = directory.resolve("classic-index.json");
+        builder.build().save(classicIndex);
+        for (var target : classicTargets()) {
+            var classic = classicRun(midi, wav, classicIndex, directory.resolve("spill-" + target.id()), target,
+                    "--seconds", ".5");
+            var heldEnvelope = classic.envelopes().stream().filter(e -> e.name().equals("Held contour"))
+                    .findFirst().orElseThrow();
+            assertEquals(List.of(0, 2, 3, 0x80), heldEnvelope.bytes());
+            var tones = classic.sequences().stream().filter(seq -> seq.type().equals("PSG"))
+                    .flatMap(seq -> seq.notes().stream()).map(n -> n.pitch()).toList();
+            assertTrue(tones.containsAll(List.of(69, 70)), tones.toString());
+        }
         assertTrue(Files.isRegularFile(output.resolve("arrangement.smps.zip")));
         String reportText = Files.readString(output.resolve("report.json"));
         var report = JsonParser.parseString(reportText).getAsJsonObject();
@@ -285,6 +302,45 @@ class ReconstructionCliTest {
         }
     }
 
+    static List<TargetGame> classicTargets() {
+        return List.of(TargetGame.S1, TargetGame.S2);
+    }
+
+    static void classicVariants(InstrumentCatalogue.Builder builder, String asset, String name,
+                                InstrumentCatalogue.Recipe recipe) {
+        for (var target : classicTargets()) builder.variant(asset, name, recipe, target, null);
+    }
+
+    static com.opensmpsdeck.project.StudioProject classicRun(Path midi, Path wav, Path index, Path work,
+                                                             TargetGame target, String... options) throws Exception {
+        var args = new java.util.ArrayList<>(List.of("reconstruct", "run", midi.toString(), wav.toString(),
+                index.toString(), work.toString(), "--target", target.id()));
+        args.addAll(List.of(options));
+        var project = classicRun(args, work, target);
+        var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
+        assertEquals(target.id() + "-layering", voicing.lanePolicies().preset());
+        return project;
+    }
+
+    static com.opensmpsdeck.project.StudioProject classicRun(List<String> args, Path work, TargetGame target) throws Exception {
+        var diagnostics = new ByteArrayOutputStream();
+        var command = new java.util.ArrayList<>(args);
+        // These fixtures exercise PSG and transcription with synthetic assets.
+        command.addAll(List.of("--drum-kit", "custom"));
+        try (var out = new PrintStream(diagnostics)) {
+            assertEquals(0, Main.run(command.toArray(String[]::new), out, out), diagnostics.toString());
+        }
+        var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
+        assertEquals(target, project.target());
+        TargetPlayback.prepare(project);
+        for (var envelope : project.envelopes()) {
+            assertEquals(0x80, envelope.bytes().getLast());
+            assertTrue(envelope.bytes().subList(0, envelope.bytes().size() - 1).stream().allMatch(b -> b < 0x80));
+        }
+        assertTrue(artifact(work, "report.json").has("psgEnvelopes"));
+        return project;
+    }
+
     private void assertTargetRoundTrip(Path midi, Path wav, Path index) throws Exception {
         Path staged = directory.resolve("target-s3k");
         Path classic = directory.resolve("target-s1");
@@ -433,6 +489,8 @@ class ReconstructionCliTest {
         bytes[1] ^= 1;
         String other = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Edited", bytes);
         String editVariant = builder.variant(other, "Edited", InstrumentCatalogue.Recipe.plain(), null);
+        classicVariants(builder, asset, patch.name(), InstrumentCatalogue.Recipe.plain());
+        classicVariants(builder, other, "Edited", InstrumentCatalogue.Recipe.plain());
         var catalogue = builder.build();
         Path index = directory.resolve("index.json");
         catalogue.save(index);
@@ -450,6 +508,8 @@ class ReconstructionCliTest {
         var err = new PrintStream(errors);
         assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
                 index.toString(), work.toString()}, System.out, err), errors.toString());
+        for (var target : classicTargets())
+            classicRun(midi, wav, index, directory.resolve("change-voice-" + target.id()), target);
         Path file = work.resolve("voicing.json");
         String original = Files.readString(file);
         assertEquals(0, Main.run(new String[]{"reconstruct", "voice", work.toString()}, System.out, err), errors.toString());
@@ -487,6 +547,15 @@ class ReconstructionCliTest {
             assertEquals("FM5", report.getAsJsonArray("effectCopyLanes").get(0).getAsString());
             assertEquals(1, report.get("echoNotes").getAsInt());
         }
+        Path solo = work.resolve("part.wav");
+        var part = ReconstructionCli.renderPart(work, 0, solo);
+        var soloLanes = part.getAsJsonArray("lanes").asList().stream()
+                .map(com.google.gson.JsonElement::getAsString).toList();
+        var builtLanes = ProjectFiles.load(work.resolve("arrangement.smps.json")).project().clips().stream()
+                .map(com.opensmpsdeck.project.Clip::lane).distinct().toList();
+        assertTrue(soloLanes.containsAll(List.of("FM1", "FM5")));
+        assertEquals(builtLanes, soloLanes);
+        assertEquals(-1, Files.mismatch(solo, work.resolve("render.wav")));
     }
 
     @Test void scopedVoicingRestoresInsideAHeldNoteAndSurvivesRefit() throws Exception {
@@ -499,6 +568,8 @@ class ReconstructionCliTest {
         bytes[1] ^= 1;
         String replacement = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Replacement", bytes);
         String candidate = builder.variant(replacement, "Replacement", InstrumentCatalogue.Recipe.plain(), null);
+        classicVariants(builder, original, "Original", InstrumentCatalogue.Recipe.plain());
+        classicVariants(builder, replacement, "Replacement", InstrumentCatalogue.Recipe.plain());
         var catalogue = builder.build();
         var index = directory.resolve("scoped-catalogue.json");
         catalogue.save(index);
@@ -515,6 +586,8 @@ class ReconstructionCliTest {
         var err = new PrintStream(errors);
         assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
                 index.toString(), work.toString()}, System.out, err), errors.toString());
+        for (var target : classicTargets())
+            classicRun(midi, wav, index, directory.resolve("scoped-voice-" + target.id()), target);
         var file = work.resolve("voicing.json");
         String saved = Files.readString(file);
         var artifact = JsonParser.parseString(saved).getAsJsonObject();

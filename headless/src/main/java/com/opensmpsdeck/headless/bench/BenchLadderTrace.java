@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.bench;
 
 import com.opensmpsdeck.headless.BenchClock;
 import com.opensmpsdeck.headless.LeadGap;
+import com.opensmpsdeck.project.TargetClock;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -98,10 +99,10 @@ final class BenchLadderTrace {
     static Detail read(Path work, List<BenchMetrics.Event> truth, List<BenchMetrics.Event> nativeEvents,
                        List<BenchMetrics.Event> nativeEventsWithLayers, BenchLadder.Input input,
                        Integer leadPart, DoubleUnaryOperator projectToTruth,
-                       DoubleUnaryOperator inputToTruth) throws IOException {
+                       DoubleUnaryOperator inputToTruth, TargetClock clock) throws IOException {
         var trace = new BenchLadderTrace(work, projectToTruth, inputToTruth);
         var lead = truth.stream().filter(note -> note.lane().equals(input.leadLane())).toList();
-        var assembled = trace.assembled(nativeEvents);
+        var assembled = trace.assembled(nativeEvents, clock);
         return new Detail(trace.waterfall(truth, assembled, false, null, input.rung() == BenchLadder.Rung.EXACT),
                 trace.waterfall(lead, assembled, true, leadPart, false),
                 input.torture() ? trace.sections(truth, lead, nativeEvents, nativeEventsWithLayers) : List.of(),
@@ -109,12 +110,12 @@ final class BenchLadderTrace {
                 trace.structure.phrases() == null ? 0 : trace.structure.phrases().size());
     }
 
-    private java.util.Set<String> assembled(List<BenchMetrics.Event> events) {
+    private java.util.Set<String> assembled(List<BenchMetrics.Event> events, TargetClock clock) {
         var candidates = placed.values().stream().filter(entry -> entry.lane() != null && entry.startTick() != null
                 && !entry.outcome().equals("dropped")).sorted(
                         java.util.Comparator.comparing(entry -> entry.note().id())).toList();
-        var expected = candidates.stream().map(entry -> new BenchMetrics.Event(entry.lane(), entry.startTick() / 60.0,
-                entry.endTick() / 60.0, entry.note().pitch(), null, null)).toList();
+        var expected = candidates.stream().map(entry -> new BenchMetrics.Event(entry.lane(), clock.secondsAtTick(entry.startTick()),
+                clock.secondsAtTick(entry.endTick()), entry.note().pitch(), null, null)).toList();
         return BenchMetrics.laneNotes(expected, events, 1.0 / 60).stream()
                 .map(pair -> candidates.get(pair.truth()).note().id()).collect(Collectors.toSet());
     }

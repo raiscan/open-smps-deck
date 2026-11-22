@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
@@ -224,7 +225,10 @@ final class VoicePatchShortlist {
         for (int i = 0; i < target.length; i++)
             weights[i] = 1 / (target[i] + .03f * peak);
         double exposure = foreground ? Math.sqrt(peak * Math.min(ATTACK_TICKS, note.endTick() - note.startTick())) : 1;
-        return new Probe(note.note().pitch(), target, weights, exposure);
+        // Shared instruments probe PSG spill on a surrogate FM channel. Use the
+        // same upper limit as VoiceWindows without changing the actual PSG note.
+        int pitch = Math.min(note.note().pitch(), TargetProfile.of(this.target).fm().high());
+        return new Probe(pitch, target, weights, exposure);
     }
 
     private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {

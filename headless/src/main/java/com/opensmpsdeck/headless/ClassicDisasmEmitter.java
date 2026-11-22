@@ -15,7 +15,7 @@ import static com.opensmpsdeck.headless.S3kDisasmEmitter.hex;
 final class ClassicDisasmEmitter {
     private static final Map<Integer, String> FLAGS = Map.ofEntries(
             Map.entry(0xE0, "smpsPan"), Map.entry(0xE1, "smpsDetune"), Map.entry(0xE6, "smpsAlterVol"),
-            Map.entry(0xE7, "dc.b smpsNoAttack"), Map.entry(0xE8, "smpsNoteFill"),
+            Map.entry(0xE3, "smpsReturn"), Map.entry(0xE7, "dc.b smpsNoAttack"), Map.entry(0xE8, "smpsNoteFill"),
             Map.entry(0xE9, "smpsChangeTransposition"), Map.entry(0xEC, "smpsPSGAlterVol"),
             Map.entry(0xEF, "smpsFMvoice"), Map.entry(0xF0, "smpsModSet"), Map.entry(0xF2, "smpsStop"),
             Map.entry(0xF3, "smpsPSGform"), Map.entry(0xF4, "smpsModOff"), Map.entry(0xF5, "smpsPSGvoice"));
@@ -66,6 +66,9 @@ final class ClassicDisasmEmitter {
         for (int channel = 0; channel < fm + psg; channel++) {
             labels.add(pointer(channel < fm ? 6 + 4 * channel : 6 + 4 * fm + 6 * (channel - fm)));
         }
+        for (int at : units.keySet()) {
+            if (branch(at)) labels.add(branchTarget(at, units.get(at).count()));
+        }
         writeInstructions();
         var dac = ClassicDisasmDac.emit(kit, s1);
         emitEnvelopes();
@@ -95,6 +98,14 @@ final class ClassicDisasmEmitter {
                 line("dc.b " + dac.get(command).constant() + "," + literals(offset + 1, 1));
             } else if (command < 0xE0) {
                 line("dc.b " + literals(offset, unit.count()));
+            } else if (branch(offset)) {
+                String target = label(branchTarget(offset, unit.count()));
+                line(switch (command) {
+                    case 0xF6 -> "smpsJump " + target;
+                    case 0xF7 -> "smpsLoop " + literals(offset + 1, 2) + "," + target;
+                    case 0xF8 -> "smpsCall " + target;
+                    default -> throw new AssertionError(command);
+                });
             } else if (command == 0xE0) {
                 line("smpsPan " + literals(offset + 1, 1) + ",0");
             } else {
@@ -212,6 +223,12 @@ final class ClassicDisasmEmitter {
             kit.readme.append("\nApply `envelope-setup.asm` to `").append(table)
                     .append("`. Check other music and SFX that use any replaced slot.\n");
         }
+    }
+
+    private boolean branch(int offset) { return at(offset) >= 0xF6 && at(offset) <= 0xF8; }
+
+    private int branchTarget(int offset, int count) {
+        return ClassicPackageBank.branchTarget(driver, bank, layout.base(), offset + count - 2);
     }
 
     private int at(int offset) { return bank[offset] & 255; }

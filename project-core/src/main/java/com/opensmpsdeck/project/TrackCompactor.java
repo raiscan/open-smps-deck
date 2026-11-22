@@ -15,7 +15,8 @@ final class TrackCompactor {
     private static final int LOOP_BYTES = 5;
     private static final int CALL_BYTES = 3;
 
-    // The Z80 has two dedicated loop counters and a four-byte return stack.
+    // S3K has two dedicated loop counters and a four-byte return stack.
+    // S1/S2 share their counter bytes with the return stack.
     // Use only counter 0 and keep subroutines and loop bodies free of control flow.
     // The flags change only PC/counter/stack. All original timed events and flags,
     // including those affecting note fill, modulation and pan, execute in order.
@@ -38,6 +39,7 @@ final class TrackCompactor {
 
     private final Bank out;
     private final boolean compact;
+    private final TargetGame target;
     private final Bank bodies = new Bank();
     private final List<Call> calls = new ArrayList<>();
     private final List<Event> events = new ArrayList<>();
@@ -47,8 +49,13 @@ final class TrackCompactor {
     private boolean hold, relative;
 
     TrackCompactor(Bank out, boolean compact) {
+        this(out, compact, TargetGame.S3K);
+    }
+
+    TrackCompactor(Bank out, boolean compact, TargetGame target) {
         this.out = out;
         this.compact = compact;
+        this.target = target;
     }
 
     void put(int value) {
@@ -134,7 +141,7 @@ final class TrackCompactor {
         flush(false);
         out.put(SmpsCoordFlags.STOP);
         long base = out.size();
-        for (Call call : calls) out.word(call.operand, base + call.offset);
+        for (Call call : calls) pointer(call.operand, base + call.offset);
         out.append(bodies);
     }
 
@@ -231,7 +238,7 @@ final class TrackCompactor {
             if (bestLength == 0) continue;
             var subroutine = new Subroutine(start, bestLength, bodies.size());
             write(bodies, events, start, bestLength);
-            bodies.put(SmpsCoordFlags.RETURN);
+            bodies.put(target == TargetGame.S3K ? SmpsCoordFlags.RETURN : 0xE3);
             markCall(start, subroutine, subroutines, used);
             markCall(bestOther, subroutine, subroutines, used);
             // The representative is now reserved; compare later occurrences only
@@ -275,7 +282,21 @@ final class TrackCompactor {
         out.put(SmpsCoordFlags.LOOP);
         out.put(0);
         out.put(count);
-        out.word(target);
+        long operand = out.size();
+        out.put(0);
+        out.put(0);
+        pointer(operand, target);
+    }
+
+    private void pointer(long operand, long destination) {
+        if (target == TargetGame.S1) {
+            // The signed big-endian displacement is based at the second operand byte.
+            long displacement = destination - (operand + 1);
+            out.set(operand, (int) (displacement >> 8));
+            out.set(operand + 1, (int) displacement);
+        } else {
+            out.word(operand, destination);
+        }
     }
 
     private static void write(Bank out, List<Event> events, int start, int length) {

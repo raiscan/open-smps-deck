@@ -197,6 +197,48 @@ when a mapped or unmatched stem needs a separate transcriber.
    `reconstruct_run` with `from: "transcribe"`). Review the rebuilt
    phrase and audition the FM1 excerpt again.
 
+### Arrange for cleanliness
+
+When the source is denser than the hardware can reproduce, simplify by
+part and section before resorting to note-ID edits. Save the controls
+under `voicing.json.arrangement`. In MCP, read and write the full
+`voicing` artifact with `artifact_read` and `artifact_write`.
+
+- Use `partChips: [{"part":3,"chip":"FM","lanes":["FM3","FM4","FM5"]}]`
+  to keep backing on one chip. Use `"PSG"` for intentional PSG parts.
+- Apply `polyphony: [{"part":3,"maxVoices":3,"span":[8,24]}]` to thin
+  chords while retaining their extremes. Omit `span` for the full part.
+- Apply `bassHarmonics: [{"part":3,"bassPart":1}]` when simultaneous
+  octave, twelfth or double-octave notes are weaker than the bass.
+  Compare the dropped IDs with the stem and adjust the overlap, pitch
+  or level tolerances if the rule removes a real line.
+- Use `hats: "all"` to reserve DAC tails for other drums, or
+  `hats: "overflow"` to keep hats that would otherwise collide.
+  On an isolated drum stem, `drumDynamics: {"part":0,"levels":true,
+  "dropBelowDb":-15}` measures hit levels and drops hits far below the
+  median of their class.
+- Run `reconstruct run --from allocate "$work"` for these allocation
+  edits. Read drop reasons and competing IDs in `reconstruct trace`
+  and the assembly report.
+- Compare `reconstruct part-render "$work" --part 3 PART.wav` with
+  the mapped stem (MCP `reconstruct_part_render`). The solo includes
+  every placed lane and layer of that part. Set
+  `sectionFit: [{"part":3,"maxJumpDb":3}]` and rebuild from assemble
+  to fit the part's section levels against active stem audio.
+- For a lead deliberately placed at +24, set `vocalLead.registerShift`
+  in the transcriber config or `arrangement.vocalRegisterShift` for an
+  existing transposed lead. Review octave proposals in that register.
+  Set `monophonicStems.guitar: {"adapter":"rmvpe","span":[8,24],
+  "registerShift":12}` in the config to transcribe a guitar solo span
+  via F0. Author the solo's lane and role separately.
+- Shortlist patches with `catalog search INDEX.json --role lead
+  --min-centroid-hz 500 --max-centroid-hz 2600 --max-decay-db 4`.
+  Read the held-note measurements, then audition a few matching patches
+  against the part in context.
+
+[Headless arrangement controls](../../headless/README.md#arrange-for-cleanliness)
+describes the complete fields, defaults and MCP calls.
+
 ## 4. Propose or apply a scoped edit
 
 For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`
@@ -220,11 +262,20 @@ lists field names, selector rules and rebuild stages.
 | Goal | Operations |
 | --- | --- |
 | Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `retrigger`, `mergeNotes` |
-| Route a line or register | `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
+| Route a line or register | `transpose` (signed `semitones` and `noteIds`), `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
 | Shape articulation and level | `bend`, `glide`, `noteVoicing` for instrument or vibrato overrides, `setVelocity` |
 | Layer selected attacks | `layer` with `echo`, `chorus`, `double` or `off` |
 | Fit stacked tones | `arpeggio`, `chordInstrument` |
 | Change a voice in a reviewable batch | `voiceEdit` |
+
+For staged vibrato on an allocated S3K FM note, propose a `noteVoicing`
+edit with `vibratoEnvelope`. Each segment has `startOffset` in project
+driver ticks from the attack, `rateHz`, and `depthCents`. An opening with
+no segment is plain. A segment with zero depth turns vibrato off.
+`reconstruct vibrato-review WORK_DIR --propose` (MCP
+`reconstruct_vibrato_review` with `propose: true`) drafts stem-backed
+candidates. Review the proposals, rebuild from assemble, and check the
+stages in `trace` before auditioning.
 
 For a note-scoped echo, choose `laneType: "FM"` or `"PSG"` and set
 `delayFrames` and `levelDb` or `attenuation`. To match Studio's default
@@ -430,3 +481,9 @@ Use `package_inspect` to see the patch form and base song and
 even when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)
+
+When reclassifying notes, keep detail intents in the shared `edits.json`.
+Use stable note IDs. After rebuilding, inspect `orphanedEdits` from
+`reconstruct describe WORK_DIR --json` or `reconstruct_describe` for
+targets that lost playable gates. Restore a compatible assignment, or remove
+the intent and add one with the corrected target.
