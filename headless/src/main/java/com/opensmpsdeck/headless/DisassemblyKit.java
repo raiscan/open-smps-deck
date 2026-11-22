@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.StudioProject;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +42,7 @@ final class DisassemblyKit {
     final Map<String, byte[]> files = new LinkedHashMap<>();
     final Map<String, PackageManifest.Asset> assets = new LinkedHashMap<>();
     final String name;
+    List<String> matchedStockAssets = List.of();
 
     private DisassemblyKit(PortablePackageReader.Package artifact, List<? extends StockAssets> roms,
                            boolean closed, List<Integer> replacements) throws IOException {
@@ -69,31 +71,34 @@ final class DisassemblyKit {
                               List<Integer> replacements, ReconstructionStages.Progress progress) throws IOException {
         progress.report(0, 1, "Writing disassembly kit");
         if (Files.isDirectory(input)) input = input.resolve("arrangement.smps.json");
-        var roms = new ArrayList<StockAssets>();
-        var romWarnings = new TreeSet<String>();
-        PortablePackageReader.Package artifact = null;
+        DisassemblyKit kit;
         if (input.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".smps.zip")) {
-            artifact = PortablePackageReader.read(input);
+            var artifact = PortablePackageReader.read(input);
             if (artifact.manifest().bank().form().equals("patch"))
                 throw new IllegalArgumentException("Disassembly export requires an embedded portable bank");
+            var romWarnings = new TreeSet<String>();
+            var roms = PortablePackages.openRoms(romPaths, PackageDriver.supported(artifact.manifest().driver()), romWarnings);
+            new ExportStockCheck(roms).verifyManifest(artifact.manifest());
+            kit = build(artifact, roms, closed, replacements);
+            kit.warnings.addAll(romWarnings);
+        } else {
+            kit = prepare(ProjectFiles.loadSource(input), "s3k", romPaths, closed, replacements);
         }
-        var driver = PackageDriver.supported(artifact == null ? "s3k" : artifact.manifest().driver());
-        for (Path path : romPaths) {
-            var image = driver.openRom(path);
-            roms.add(image.assets());
-            if (!image.known()) romWarnings.add("UNKNOWN_ROM_IMAGE");
-        }
-        if (artifact == null) {
-            var project = StockAssets.resolveProject(ProjectFiles.load(input).project(), roms);
-            var payload = PortablePackageWriter.build(project,
-                    new PortableOptions("s3k", false, null, null, null, List.of(), List.of()));
-            artifact = new PortablePackageReader.Package(payload.manifest(), payload.entries());
-        }
-        var kit = build(artifact, roms, closed, replacements);
-        kit.warnings.addAll(romWarnings);
         kit.publish(output.toAbsolutePath().normalize());
         progress.report(1, 1, "Export complete");
         return List.copyOf(kit.warnings);
+    }
+
+    static DisassemblyKit prepare(StudioProject project, String driver, List<Path> romPaths,
+                                  boolean closed, List<Integer> replacements) throws IOException {
+        var romWarnings = new TreeSet<String>();
+        var roms = PortablePackages.openRoms(romPaths, PackageDriver.supported(driver), romWarnings);
+        var payload = PortablePackageWriter.build(project,
+                new PortableOptions(driver, false, null, null, null, List.of(), List.of()), roms);
+        var kit = build(new PortablePackageReader.Package(payload.manifest(), payload.entries()), roms, closed, replacements);
+        kit.warnings.addAll(romWarnings);
+        kit.matchedStockAssets = payload.matchedStockAssets();
+        return kit;
     }
 
     static DisassemblyKit build(PortablePackageReader.Package artifact, List<? extends StockAssets> roms,
@@ -124,20 +129,21 @@ final class DisassemblyKit {
     }
 
     void publish(Path output) throws IOException {
-        readme.append("## Warnings\n\n");
+        var finalReadme = new StringBuilder(readme).append("## Warnings\n\n");
         for (String code : warnings) {
-            readme.append("- `").append(code).append("` ").append(warningMessage(code)).append('\n');
+            finalReadme.append("- `").append(code).append("` ").append(warningMessage(code)).append('\n');
         }
-        if (warnings.isEmpty()) readme.append("None.\n");
-        text("README.md", readme);
+        if (warnings.isEmpty()) finalReadme.append("None.\n");
+        var complete = new LinkedHashMap<>(files);
+        complete.put("README.md", finalReadme.toString().getBytes(StandardCharsets.UTF_8));
         if (output.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip")) {
             var entries = new LinkedHashMap<String, byte[]>();
-            files.forEach((path, bytes) -> entries.put(name + "-kit/" + path, bytes));
+            complete.forEach((path, bytes) -> entries.put(name + "-kit/" + path, bytes));
             PortableArchive.write(output, entries, null);
         } else {
             Files.createDirectory(output);
             try {
-                for (var file : files.entrySet()) {
+                for (var file : complete.entrySet()) {
                     var path = output.resolve(file.getKey());
                     Files.createDirectories(path.getParent());
                     Files.write(path, file.getValue(), CREATE_NEW, WRITE);

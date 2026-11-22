@@ -8,6 +8,7 @@ import com.opensmpsdeck.headless.ExternalSeparators;
 import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.bench.BenchCli;
+import com.opensmpsdeck.project.ProjectFiles;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -425,8 +426,9 @@ final class McpTools {
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"), settings);
         var warnings = new java.util.TreeSet<String>();
-        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input,
-                romPaths, warnings::add);
+        var source = work ? input.resolve("arrangement.smps.json") : input;
+        var project = portable || format == ProjectExport.Format.PACKAGE ? ProjectFiles.loadSource(source)
+                : PortablePackages.openExportProject(source, romPaths, warnings::add);
         JsonObject result;
         if (portable) {
             result = ProjectExport.exportPortable(project, output, options, progress);

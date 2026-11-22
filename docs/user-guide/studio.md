@@ -432,6 +432,27 @@ local voices, or **SMPS package** to keep native bank addresses, envelope
 and DAC bindings, resources and editable source. OpenGGF can use the native
 contents via an adapter. OpenGGF currently has no direct ZIP loader.
 
+Choose **Portable SMPS package** for a package that references eligible stock
+assets from the player's ROM. Choose **OpenGGF mod** for a music replacement
+JAR and enter the decimal music IDs to replace. Both use the project driver,
+include redacted source by default and accept an optional SPDX license. For a
+native S3K retail bank, **Store changes as a retail song patch** omits source.
+An edited bank needs a matching ROM to build the delta. OpenGGF's current
+package reader supports the embedded form.
+
+Choose **Disassembly kit** for an SMPS2ASM ZIP targeting the project's driver.
+**DPCM closed** quantises the exported WAV samples for DPCM playback. Optional
+replacement DAC notes use hexadecimal. A ROM materialises stock files for
+personal use.
+
+Use **Choose ROM…** to verify stock references against a local cartridge image.
+Studio remembers the path per game in preferences. **Clear** removes the
+selection. The confirmation lists matched stock assets and provenance warnings
+before writing. A mismatch identifies the slot that failed. Keep embedded
+retail data and ROM-materialised kits for personal use. When you open redacted
+package source from Studio, the export dialog resolves its stock assets with
+the same picker.
+
 To hear the song on the Sonic 3 & Knuckles title screen, register a verified
 locked-on ROM under **ROM settings…** and choose **Export… → Test in game…**.
 [Test in game setup and options](14-test-in-game.md)

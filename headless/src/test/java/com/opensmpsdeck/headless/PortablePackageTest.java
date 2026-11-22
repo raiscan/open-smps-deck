@@ -170,6 +170,9 @@ class PortablePackageTest {
         assertFalse(skip.get("playbackValidated").getAsBoolean());
         assertEquals(1, artifact.manifest().bank().fills().size());
         assertEquals(List.of(), PortablePackageReader.warnings(artifact).stream().toList());
+        var verified = PortablePackageWriter.build(project, PortableOptions.DEFAULT, List.of(first, second));
+        assertTrue(verified.matchedStockAssets().containsAll(List.of("fm/0 (" + voice.id() + ")", "psg/0 (psg)", "dac/0 (dac)")));
+        assertArrayEquals(artifact.entries().get("manifest.json"), verified.entries().get("manifest.json"));
         var assembled = PortablePackageReader.assemble(artifact, List.of(first, second));
         assertArrayEquals(ProjectCompiler.compile(project), assembled.song());
         assertArrayEquals(dac, assembled.samples().getFirst().pcm());
@@ -207,6 +210,70 @@ class PortablePackageTest {
         assertFailure("Patch exceeds", () -> assembleMutated(artifact, json -> asset(json, "fm/0")
                 .getAsJsonArray("transforms").get(0).getAsJsonObject().getAsJsonArray("bytes").get(0)
                 .getAsJsonObject().addProperty("offset", 25), first, second));
+    }
+
+    @Test void exportChecksBothRomAndTransformedProjectHashesBeforeCreatingOutput() throws Exception {
+        var fixture = ExportRomFixture.create(directory);
+        var project = fixture.writeProject(directory.resolve("valid.smps.json"), false);
+        var broken = fixture.writeProject(directory.resolve("broken.smps.json"), true);
+        Path valid = directory.resolve("valid.smps.zip");
+        var result = expectSuccess("compile-package", project.toString(), valid.toString(), "--portable", "--driver", "s1",
+                "--rom", fixture.rom().toString());
+        assertTrue(result.err().contains("UNKNOWN_ROM_IMAGE"), result.err());
+        Path withoutRom = directory.resolve("without-rom.smps.zip");
+        expectSuccess("compile-package", project.toString(), withoutRom.toString(), "--portable", "--driver", "s1");
+        assertEquals(-1, Files.mismatch(withoutRom, valid));
+        var prepared = ProjectExport.preparePackage(fixture.project(), new ProjectExport.Options(
+                ProjectExport.Format.PORTABLE, null, null, null, null, false, false,
+                new ProjectExport.PortableSettings("s1", true, "MIT", null, null, List.of(), List.of(),
+                        null, false, false, List.of(fixture.rom()))));
+        assertTrue(prepared.matchedStockAssets().containsAll(List.of("psg/0 (edited)", "psg/1 (plain)")));
+        assertTrue(prepared.warnings().contains("UNKNOWN_ROM_IMAGE"));
+        var artifact = PortablePackageReader.read(valid);
+        Path redacted = Files.write(directory.resolve("redacted.smps.json"), artifact.entries().get("source.smps.json"));
+        expectSuccess("export", redacted.toString(), directory.resolve("repacked.smps.zip").toString(), "--format", "portable",
+                "--rom", fixture.rom().toString());
+
+        Path bad = directory.resolve("broken.smps.zip");
+        result = run("compile-package", broken.toString(), bad.toString(), "--portable", "--driver", "s1",
+                "--rom", fixture.rom().toString());
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("Mismatch psg/0 (edited)") && result.err().contains("project payload"), result.err());
+        assertTrue(result.err().contains("Matched psg/1 (plain)"), result.err());
+        assertFalse(Files.exists(bad));
+        expectSuccess("compile-package", broken.toString(), bad.toString(), "--portable", "--driver", "s1");
+
+        Path wav = directory.resolve("broken.wav");
+        result = run("export", broken.toString(), wav.toString(), "--format", "wav", "--rom", fixture.rom().toString());
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("Mismatch psg/0 (edited)"), result.err());
+        assertFalse(Files.exists(wav));
+
+        byte[] changed = Files.readAllBytes(fixture.rom());
+        changed[0x300] ^= 1;
+        changed[0x310] ^= 1;
+        Path wrongRom = Files.write(directory.resolve("changed.gen"), changed);
+        Path mod = directory.resolve("wrong.jar");
+        result = run("export", project.toString(), mod.toString(), "--format", "mod", "--replace", "129",
+                "--rom", wrongRom.toString());
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("Mismatch psg/0 (edited)") && result.err().contains("Mismatch psg/1 (plain)"), result.err());
+        assertFalse(Files.exists(mod));
+    }
+
+    @Test void disassemblyVerifiesRecordedResultHashesEvenForUnboundAssets() throws Exception {
+        var fixture = ExportRomFixture.create(directory);
+        var payload = PortablePackageWriter.build(fixture.project(), PortableOptions.defaults(fixture.project().target()));
+        var artifact = new PortablePackageReader.Package(payload.manifest(), payload.entries());
+        var changed = openMutated(artifact, json -> asset(json, "psg/0").addProperty("resultSha256", "f".repeat(64)));
+        Path packagePath = directory.resolve("changed.smps.zip");
+        PortableArchive.write(packagePath, changed.entries(), null);
+        Path output = directory.resolve("kit.zip");
+        var result = run("export", packagePath.toString(), output.toString(), "--format", "disasm",
+                "--rom", fixture.rom().toString());
+        assertEquals(2, result.exit());
+        assertTrue(result.err().contains("Mismatch psg/0 (edited)") && result.err().contains("transformed payload"), result.err());
+        assertFalse(Files.exists(output));
     }
 
     @Test void strictReaderChecksFieldsPathsHashesHolesEnumsAndLimits() throws Exception {

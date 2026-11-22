@@ -7,6 +7,11 @@ Project and work-directory inputs target skdisasm. Portable packages target
 s1disasm, s2disasm or skdisasm according to their driver. For S1 and S2, see
 [Export a classic kit](#export-a-classic-kit).
 
+In Studio, choose **Export… → Disassembly kit** to export a ZIP for the
+project's driver. The optional ROM picker uses the same stock verifier as
+`--rom`. The dialog exposes **DPCM closed** and optional hexadecimal DAC
+replacement notes and shows kit warnings before writing.
+
 ## skdisasm files and rights
 
 - `Sound/Music/OSD_<id>.asm` contains the SMPS2ASM header, tracks and local

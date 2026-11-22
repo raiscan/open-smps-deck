@@ -104,7 +104,7 @@ interface StockAssets {
         return resolved;
     }
 
-    private static byte[] resolveProjectAsset(String id, AssetOrigin origin, List<? extends StockAssets> sources) {
+    static byte[] resolveProjectAsset(String id, AssetOrigin origin, List<? extends StockAssets> sources) {
         StockRef ref = origin.ref();
         return resolve(id, ref, origin.transforms(), null, sources,
                 ref.game().equals("s2") && ref.kind().equals("FM_VOICE"));
