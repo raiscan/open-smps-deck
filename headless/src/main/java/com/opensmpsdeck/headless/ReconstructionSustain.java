@@ -129,7 +129,7 @@ final class ReconstructionSustain {
         var part = score.source().parts().stream().filter(p -> p.id() == note.part()).findFirst().orElseThrow();
         int volume = Math.max(ReconstructionEcho.fmVolumeFloor(asset.bytes(), score.inputs().profile()),
                 ReconstructionEcho.scaleVolume(S3kReconstruction.volume(part, note.midi()), lane.gainFor(note.part())));
-        byte[] bytes = ReconstructionVoicing.patchBytes(asset, lane.articulation());
+        byte[] bytes = asset.bytes();
         var patch = new ArrayList<Integer>(bytes.length);
         for (byte value : bytes) patch.add(Byte.toUnsignedInt(value));
         var profile = score.profile();

@@ -31,7 +31,7 @@ class ReconstructionLevelsTest {
         bytes[24] |= (byte) 0x80;
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         var catalogue = builder.build();
 
         Path stem = directory.resolve("lead.wav");
@@ -76,7 +76,7 @@ class ReconstructionLevelsTest {
         var builder = new InstrumentCatalogue.Builder();
         var patch = DemoProject.create().voices().getFirst();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), StockTable.bytes(patch.bytes()));
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         var catalogue = builder.build();
         Path drums = directory.resolve("drums.wav");
         Path tone = directory.resolve("tone.wav");

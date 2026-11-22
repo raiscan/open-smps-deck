@@ -266,7 +266,7 @@ final class ReconstructionLanePolicies {
         private final Map<Probe, Double> cache = new HashMap<>();
 
         int volume(Voice fm, Envelope dryPsg, int dryPitch, int dryVolume, int pitch,
-                   Envelope envelope, int duration, double db) throws IOException {
+                   Envelope envelope, int duration, double db, boolean echo) throws IOException {
             int ticks = Math.min(duration, 36);
             double target = power(new Probe(fm, dryPsg, dryPitch, ticks, dryVolume)) * Math.pow(10, db / 10);
             if (target <= 1e-12) return 0;
@@ -275,23 +275,23 @@ final class ReconstructionLanePolicies {
             int step = (int) Math.round(5 * Math.log10(maximum / target));
             // Keep a sustained layer audible throughout its gate. An echo
             // may decay to the PSG's mute step sooner at quiet levels.
-            int envelopePeak = envelope == ECHO ? 0
+            int envelopePeak = envelope == null || echo ? 0
                     : envelope.bytes().stream().filter(v -> v < 0x80).mapToInt(Integer::intValue).max().orElse(0);
-            return 127 - 8 * Math.clamp(step, 0, 14 - envelopePeak);
+            return 127 - 8 * Math.clamp(step, 0, Math.max(0, 14 - envelopePeak));
         }
 
         private double power(Probe probe) throws IOException {
             var saved = cache.get(probe);
             if (saved != null) return saved;
             boolean fm = probe.fm() != null;
-            String asset = fm ? probe.fm().id() : probe.psg().id();
+            String asset = fm ? probe.fm().id() : probe.psg() == null ? null : probe.psg().id();
             var sequence = new Sequence("probe", "Probe", fm ? "FM" : "PSG", probe.ticks(),
                     fm ? asset : null, probe.volume(), List.of(new NoteEvent("probe-note", 0, probe.ticks(), probe.pitch())),
                     List.of(), "RESET", fm ? null : asset, null);
             var project = new StudioProject(4, "Level probe", "S3K", 30, 0,
                     fm ? List.of(probe.fm()) : List.of(), List.of(sequence),
                     List.of(new Clip("probe-clip", "probe", fm ? "FM1" : "PSG1", 0, probe.ticks())),
-                    fm ? List.of() : List.of(ReconstructionPsgEnvelopes.forProbe(probe.psg(), profile.game(),
+                    probe.psg() == null ? List.of() : List.of(ReconstructionPsgEnvelopes.forProbe(probe.psg(), profile.game(),
                             probe.ticks(), classicEnvelopes.contains(asset))),
                     List.of(), profile.game(),
                     profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());

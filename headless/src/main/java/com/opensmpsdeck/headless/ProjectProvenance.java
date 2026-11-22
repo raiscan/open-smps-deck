@@ -54,7 +54,7 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
             if (StockTable.matchProjectAsset(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
         } else {
             switch (origin.type()) {
-                case "stock" -> warnings.add("ROM_DERIVED_DATA");
+                case "stock", "custom" -> warnings.add("ROM_DERIVED_DATA");
                 case "source-audio" -> warnings.add("SOURCE_AUDIO");
                 case "third-party" -> warnings.add("THIRD_PARTY");
                 default -> {}

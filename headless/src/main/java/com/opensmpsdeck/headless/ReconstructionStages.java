@@ -742,7 +742,7 @@ public final class ReconstructionStages {
                     ReconstructionChecks.allocation(allocation, score);
                     var voicing = ReconstructionArtifacts.decode(file, ReconstructionVoicing.Result.class, value);
                     if (voicing.arrangement() != null) voicing.arrangement().validate(score);
-                    ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.open(Path.of(score.inputs.catalogue), score.inputs.targetGame()),
+                    ReconstructionVoicing.validate(voicing, allocation, InstrumentCatalogue.openReconstruction(Path.of(score.inputs.catalogue), score.inputs.targetGame()),
                             ReconstructionTimeMap.of(score));
                     if (voicing.lanePolicies() != null && !voicing.lanePolicies().rules().isEmpty())
                         ReconstructionLanePolicies.resolve(work, score, readStructure(work.resolve("structure.json"), score),
@@ -767,7 +767,7 @@ public final class ReconstructionStages {
 
     private static void previewNoteVoicing(ReconstructionEdits edits, Score score, ReconstructionAllocation.Result allocation,
                                            List<ReconstructionEdits.Outcome> outcomes) throws IOException {
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs.catalogue), score.inputs.targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs.catalogue), score.inputs.targetGame());
         ReconstructionNoteVoicing.resolve(edits.intents(), allocation, catalogue, score, Map.of(), Map.of(), outcomes);
     }
 

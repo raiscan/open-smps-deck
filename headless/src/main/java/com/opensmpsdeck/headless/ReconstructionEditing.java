@@ -68,7 +68,7 @@ public final class ReconstructionEditing {
     public static ReconstructionEditing open(Path work) throws IOException {
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var cataloguePath = Path.of(score.inputs().catalogue());
-        var catalogue = Files.isRegularFile(cataloguePath) ? InstrumentCatalogue.open(cataloguePath, score.inputs().targetGame()) : null;
+        var catalogue = Files.isRegularFile(cataloguePath) ? InstrumentCatalogue.openReconstruction(cataloguePath, score.inputs().targetGame()) : null;
         return new ReconstructionEditing(score,
                 ReconstructionTrace.optional(work, "voicing.json", ReconstructionVoicing.Result.class), catalogue);
     }
@@ -165,7 +165,7 @@ public final class ReconstructionEditing {
         var timeline = ReconstructionTimeMap.of(score);
         var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var scopes = ReconstructionVoicing.validate(voicing, allocation, catalogue, timeline);
         var selected = allocation.notes().stream().filter(entry -> entry.lane() != null && noteIds.contains(entry.note().id())).toList();
         require(!selected.isEmpty(), "Audition", "selection has no allocated notes");

@@ -264,7 +264,7 @@ public final class CataloguePlayback {
             var origin = catalogue.origin(asset, target.target());
             for (int i = 0; i < voices.size(); i++) {
                 var existing = voices.get(i);
-                if (!existing.bytes().equals(bytes)) continue;
+                if (!existing.bytes().equals(bytes) || existing.origin() != null && existing.origin().clonedFrom() != null) continue;
                 if (existing.origin() == null && origin != null) voices.set(i, existing.withOrigin(origin));
                 return existing.id();
             }
@@ -280,7 +280,8 @@ public final class CataloguePlayback {
             var origin = catalogue.origin(asset, target.target());
             for (int i = 0; i < envelopes.size(); i++) {
                 var existing = envelopes.get(i);
-                if (!existing.type().equals(type) || !existing.bytes().equals(bytes)) continue;
+                if (!existing.type().equals(type) || !existing.bytes().equals(bytes)
+                        || existing.origin() != null && existing.origin().clonedFrom() != null) continue;
                 if (existing.origin() == null && origin != null) envelopes.set(i, existing.withOrigin(origin));
                 return existing.id();
             }

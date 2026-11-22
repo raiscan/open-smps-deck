@@ -1277,9 +1277,10 @@ it carries a backing role.
 For long notes with a mapped stem, the fitter measures pitch-band energy
 near the attack and in the hold. It screens the FM attack shortlist on
 representative long gates using the pinned chip. For shared FM guitar
-profiles (General MIDI guitar programs with a mapped stem), it also
-compares the first 50 ms of exposed attacks for changes in relative level
-and spectral brightness. It fits the surviving choices jointly with the
+profiles, the hold screen compares each stock patch with the stem.
+Exposed attacks with a mapped stem also compare time to near-peak level
+in 5 ms bins and energy above 2 and 5 kHz. Guitar profiles use a narrower
+acceptance margin. It fits the surviving stock choices jointly with the
 other instruments. The PSG spill fit includes a long-hold probe alongside
 its short FM contour probes. If an attack would
 steal most of a stem-supported hold from another source part, allocation
@@ -1386,8 +1387,11 @@ The shared tonal instrument gains and PSG spill settings stay intact.
 Retained voicings keep their saved drum gains. Move a saved voicing aside to
 fit a fresh kit balance.
 `articulation.gate` is the fraction of the allocated duration held before
-key-off. FM `minimumReleaseRate` floors the four operator RR nibbles (0
-preserves the patch). `effects.detune` is a signed frequency offset.
+key-off. Fresh automatic fits use exact stock FM patches and compatible stock
+PSG envelope programs. Gain is applied through channel volume commands.
+Saved automatic `fast-release` settings replay with the stock patch. Use a
+scoped release-rate edit to intentionally create an FM clone.
+`effects.detune` is a signed frequency offset.
 Optional `effects.vibrato` holds the four native F0 parameters `delay`,
 `rate`, `delta` and `steps`. In [S3K's driver](../../openggf-audio/src/main/java/com/openggf/audio/smps/SmpsSequencer.java),
 `delay` counts ticks until the rate counter starts. `rate` counts ticks per
@@ -1505,8 +1509,11 @@ notes. Combining IDs and a time range selects their intersection.
 
 Each entry must set at least one of `variantId`, `gain`, `gate`,
 `minimumReleaseRate`, `vibrato`, or `modulationOff: true`. Gain replaces the
-lane gain before applying per-part gains. FM selects a voice and can floor its
-operator release rates. Tonal PSG can select a PSG volume envelope.
+lane gain before applying per-part gains. FM selects a stock voice. An explicit
+release-rate edit that changes its operator bytes creates a custom clone for
+that scope with `origin.clonedFrom` set to the stock asset ID. A deliberate
+`chordInstrument` operator edit also creates a clone. Tonal PSG can select a
+compatible stock PSG volume envelope.
 Vibrato takes the same F0 arguments as `effects.vibrato`. Overlapping entries
 compose when they set different fields. For example, a patch override can
 cover the whole phrase while a note-level vibrato override affects two

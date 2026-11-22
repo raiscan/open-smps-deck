@@ -33,7 +33,7 @@ class ReconstructionLanePoliciesTest {
         assertEquals(Map.of("PSG3", 1, "PSG2", 1), coverage.lanes());
         assertTrue(result.voicedGates().stream().anyMatch(g -> g.id().equals("counter") && g.lane().equals("FM3")));
         assertEquals(2, result.project().sequences().stream()
-                .filter(seq -> ReconstructionLanePolicies.PAD.id().equals(seq.psgEnvelopeId())).count());
+                .filter(seq -> stockId(ReconstructionLanePolicies.PAD).equals(seq.psgEnvelopeId())).count());
         ProjectCompiler.compile(result.project());
     }
 
@@ -69,7 +69,7 @@ class ReconstructionLanePoliciesTest {
         assertEquals(27, clip.startTick() + echo.tick());
         assertEquals(6, echo.duration());
         assertTrue(seq.commands().stream().anyMatch(c -> c.tick() == echo.tick()
-                && c.command() == NativeCommand.PSG_ENVELOPE && ReconstructionLanePolicies.ECHO.id().equals(c.assetId())));
+                && c.command() == NativeCommand.PSG_ENVELOPE && stockId(ReconstructionLanePolicies.ECHO).equals(c.assetId())));
         ProjectCompiler.compile(result.project());
     }
 
@@ -127,7 +127,7 @@ class ReconstructionLanePoliciesTest {
         assertEquals(2, psg.applied());
         assertEquals(2, psg.eligible());
         assertTrue(result.project().sequences().stream()
-                .filter(seq -> ReconstructionLanePolicies.DOUBLE.id().equals(seq.psgEnvelopeId()))
+                .filter(seq -> stockId(ReconstructionLanePolicies.DOUBLE).equals(seq.psgEnvelopeId()))
                 .flatMap(seq -> seq.notes().stream()).anyMatch(note -> note.tick() == 0 && note.pitch() == 77));
         var fm = result.policyCoverage().getLast();
         assertEquals(3, fm.applied());
@@ -392,6 +392,10 @@ class ReconstructionLanePoliciesTest {
                 ReconstructionAllocation.Outcome.kept, null, null);
     }
 
+    private static String stockId(com.opensmpsdeck.project.Envelope shape) {
+        return InstrumentCatalogue.assetId(InstrumentCatalogue.Kind.PSG_VOLUME, StockTable.bytes(shape.bytes()));
+    }
+
     private static S3kReconstruction.Result arrange(List<ReconstructionAllocation.Entry> entries,
                                                      List<ReconstructionLanePolicies.Scoped> policies) throws Exception {
         return arrange(entries, policies, Map.of());
@@ -422,6 +426,11 @@ class ReconstructionLanePoliciesTest {
         var psg = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Plain", new byte[]{0, (byte) 0x83});
         var fmVariant = builder.variant(fm, "Fixture", InstrumentCatalogue.Recipe.plain(), null);
         var psgVariant = builder.variant(psg, "Plain", InstrumentCatalogue.Recipe.plain(), null);
+        for (var shape : List.of(ReconstructionLanePolicies.PAD, ReconstructionLanePolicies.ECHO, ReconstructionLanePolicies.DOUBLE)) {
+            var stock = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, shape.name(), StockTable.bytes(shape.bytes()));
+            builder.variant(stock, shape.name(), InstrumentCatalogue.Recipe.plain(),
+                    new InstrumentCatalogue.Occurrence("fixture", "s3k", "test", "fixture", 1, 1, null, null, false));
+        }
         var catalogue = builder.build();
         var parts = List.of(new MidiScore.Part(0, "Tone", 81, false), new MidiScore.Part(1, "Drums", 0, true));
         var choices = new LinkedHashMap<String, Map<ReconstructionVoices.Key, ReconstructionVoices.Choice>>();

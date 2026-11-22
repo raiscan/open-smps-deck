@@ -29,12 +29,12 @@ class ReconstructionCliTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         for (var target : List.of(TargetGame.S1, TargetGame.S2))
-            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, null);
+            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, ReconstructionCatalogueFixture.stock(target));
         String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Tone contour",
                 new byte[]{0, 2, (byte) 0x83});
-        builder.variant(envelope, "Tone contour", InstrumentCatalogue.Recipe.plain(), null);
+        builder.variant(envelope, "Tone contour", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         InstrumentCatalogue catalogue = builder.build();
         Path index = directory.resolve("index.json");
         catalogue.save(index);
@@ -60,9 +60,8 @@ class ReconstructionCliTest {
         assertEquals(5, project.clips().size());
         assertEquals(List.of(68, 69, 70, 71, 72), project.sequences().stream()
                 .flatMap(s -> s.notes().stream()).map(n -> n.pitch()).sorted().toList());
-        // Synthetic fixture fingerprints recorded on master before introducing target selection.
-        assertEquals("f04feb6f4d7c720d17c2bf3797a4298e80801b551ff71ea01fcd7567860259ff",
-                ReconstructionCli.audioHash(output.resolve("arrangement.smps.json")));
+        // Stock provenance changes the editable source. Native bytes and playback stay identical.
+        assertTrue(project.voices().stream().allMatch(v -> v.origin().isStock()));
         assertEquals("2e1b0ff357ffe977c65daf359395e89bdc1fca5168ddc02be9e09dcb0592ca54",
                 InstrumentCatalogue.digest(ProjectCompiler.compile(project)));
         assertEquals("3ea2786afbed30e9ea3be0f1d115f1e0b30409eaa74efc469dc5a2d2e91cce44",
@@ -240,7 +239,7 @@ class ReconstructionCliTest {
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
         for (var target : List.of(TargetGame.S1, TargetGame.S2))
-            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, null);
+            builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), target, ReconstructionCatalogueFixture.stock(target));
         Path index = directory.resolve("click-index.json");
         builder.build().save(index);
 
@@ -308,7 +307,7 @@ class ReconstructionCliTest {
 
     static void classicVariants(InstrumentCatalogue.Builder builder, String asset, String name,
                                 InstrumentCatalogue.Recipe recipe) {
-        for (var target : classicTargets()) builder.variant(asset, name, recipe, target, null);
+        for (var target : classicTargets()) builder.variant(asset, name, recipe, target, ReconstructionCatalogueFixture.stock(target));
     }
 
     static com.opensmpsdeck.project.StudioProject classicRun(Path midi, Path wav, Path index, Path work,
@@ -485,10 +484,10 @@ class ReconstructionCliTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         bytes[1] ^= 1;
         String other = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Edited", bytes);
-        String editVariant = builder.variant(other, "Edited", InstrumentCatalogue.Recipe.plain(), null);
+        String editVariant = builder.variant(other, "Edited", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         classicVariants(builder, asset, patch.name(), InstrumentCatalogue.Recipe.plain());
         classicVariants(builder, other, "Edited", InstrumentCatalogue.Recipe.plain());
         var catalogue = builder.build();
@@ -564,10 +563,10 @@ class ReconstructionCliTest {
         var bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String original = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Original", bytes);
-        String originalVariant = builder.variant(original, "Original", InstrumentCatalogue.Recipe.plain(), null);
+        String originalVariant = builder.variant(original, "Original", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         bytes[1] ^= 1;
         String replacement = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Replacement", bytes);
-        String candidate = builder.variant(replacement, "Replacement", InstrumentCatalogue.Recipe.plain(), null);
+        String candidate = builder.variant(replacement, "Replacement", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         classicVariants(builder, original, "Original", InstrumentCatalogue.Recipe.plain());
         classicVariants(builder, replacement, "Replacement", InstrumentCatalogue.Recipe.plain());
         var catalogue = builder.build();
@@ -622,6 +621,8 @@ class ReconstructionCliTest {
         String nativeBytes = java.util.HexFormat.of().formatHex(data);
         assertTrue(nativeBytes.matches("(?s).*ef01e4..e70aef00e4..e7.*"), nativeBytes);
         assertEquals(2, project.voices().size());
+        var clone = project.voices().stream().filter(v -> v.origin().clonedFrom() != null).findFirst().orElseThrow();
+        assertEquals(replacement, clone.origin().clonedFrom());
         assertTrue(nativeBytes.contains("f001020304"), nativeBytes);
         var commands = project.sequences().getFirst().commands();
         assertTrue(commands.stream().anyMatch(command -> command.tick() == 54

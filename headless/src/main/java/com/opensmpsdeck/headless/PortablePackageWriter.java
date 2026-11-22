@@ -362,7 +362,7 @@ final class PortablePackageWriter {
         if (origin != null) {
             if (origin.ref() != null) origin = AssetOrigin.stock(null);
             switch (origin.type()) {
-                case "stock" -> romBytes = true;
+                case "stock", "custom" -> romBytes = true;
                 case "source-audio" -> warnings.add("SOURCE_AUDIO");
                 case "third-party" -> warnings.add("THIRD_PARTY");
                 default -> {}

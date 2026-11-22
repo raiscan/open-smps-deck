@@ -144,7 +144,7 @@ class ExternalTranscribersTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         Path index = directory.resolve("index.json");
         catalogue.build().save(index);
 
@@ -185,7 +185,7 @@ class ExternalTranscribersTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         byte[] kick = new byte[256];
         java.util.Arrays.fill(kick, (byte) 0x80);
         kick[0] = (byte) 0xff;
@@ -356,7 +356,7 @@ class ExternalTranscribersTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = catalogue.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        catalogue.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         catalogue.build().save(directory.resolve("index.json"));
 
         Path config = directory.resolve("separators.json");

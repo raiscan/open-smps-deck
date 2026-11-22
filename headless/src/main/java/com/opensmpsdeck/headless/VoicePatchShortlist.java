@@ -28,7 +28,7 @@ final class VoicePatchShortlist {
     private record Key(String asset, int pitch, TargetGame target) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
-    private record AttackProbe(int pitch, VoiceAttackShape.Profile shape) {}
+    private record AttackProbe(int pitch, VoiceAttackShape.Profile shape, VoiceSpectralBalance.Profile spectrum) {}
     private record Template(float[] spectrum, LowRegisterSpectrum.Profile lowProfile, VoiceAttackShape.Profile attack) {}
     private static final Map<Key, Template> TEMPLATES = new ConcurrentHashMap<>();
 
@@ -38,6 +38,7 @@ final class VoicePatchShortlist {
     private final VoiceSpectra spectra = new VoiceSpectra();
     private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
     private final VoiceAttackShape attackShape = new VoiceAttackShape();
+    private final VoiceSpectralBalance spectralBalance = new VoiceSpectralBalance();
 
     VoicePatchShortlist(InstrumentCatalogue catalogue, TargetGame target) {
         this.catalogue = catalogue;
@@ -143,7 +144,7 @@ final class VoicePatchShortlist {
      */
     List<RankedPatch> fittingAttacks(List<RankedPatch> candidates,
                                     List<ReconstructionAllocation.Entry> part,
-                                    Path stem, VoiceWindows windows) throws IOException {
+                                    Path stem, VoiceWindows windows, boolean guitar) throws IOException {
         if (candidates.size() < 2 || stem == null) return candidates;
         double duration = VoiceAttackShape.SAMPLES / (double) VoiceSpectra.RATE;
         double audioEnd = ReferenceAudio.durationMicros(stem) / 1e6;
@@ -173,10 +174,12 @@ final class VoicePatchShortlist {
             int pitch = note.pitch();
             var range = TargetProfile.of(target).fm();
             if (pitch < range.low() || pitch > range.high() || pitches.getOrDefault(pitch, 0) >= 2) continue;
-            var audio = VoiceSpectra.resample(ReferenceAudio.read(stem, note.start(), duration), VoiceAttackShape.SAMPLES);
-            var shape = attackShape.measure(audio);
+            var audio = ReferenceAudio.read(stem, note.start(), duration);
+            var shape = attackShape.measure(VoiceSpectra.resample(audio, VoiceAttackShape.SAMPLES));
             if (shape.peak() < .003) continue;
-            probes.add(new AttackProbe(pitch, shape));
+            var spectral = audio.sampleRate() >= 16000
+                    ? spectralBalance.measure(audio.samples(), 0, audio.sampleRate(), fundamental(pitch)) : null;
+            probes.add(new AttackProbe(pitch, shape, spectral));
             pitches.merge(pitch, 1, Integer::sum);
         }
         if (probes.size() < 3) return candidates;
@@ -186,15 +189,41 @@ final class VoicePatchShortlist {
         for (int i = 0; i < candidates.size(); i++) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("attack fitting cancelled");
             var variant = catalogue.match(candidates.get(i).id(), target).variant();
-            for (var probe : probes)
-                losses[i] += probe.shape().distance(template(variant, probe.pitch()).attack()) / probes.size();
+            var profiles = new java.util.HashMap<Integer, VoiceSpectralBalance.Profile>();
+            for (var probe : probes) {
+                double loss = probe.shape().distance(template(variant, probe.pitch()).attack());
+                if (probe.spectrum() != null) {
+                    var stock = profiles.get(probe.pitch());
+                    if (stock == null) {
+                        stock = spectralProbe(variant, probe.pitch());
+                        profiles.put(probe.pitch(), stock);
+                    }
+                    loss += .012 * probe.spectrum().distance(stock) + .025 * probe.spectrum().excess(stock);
+                }
+                losses[i] += loss / probes.size();
+            }
             best = Math.min(best, losses[i]);
         }
         // Leave the contextual fit a choice when attacks differ only slightly.
         var result = new ArrayList<RankedPatch>();
         for (int i = 0; i < candidates.size(); i++)
-            if (losses[i] <= best + .08) result.add(candidates.get(i));
+            if (losses[i] <= best + (guitar ? .10 : .20)) result.add(candidates.get(i));
         return List.copyOf(result);
+    }
+
+    private VoiceSpectralBalance.Profile spectralProbe(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
+        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, 3, true, target);
+        var mono = new float[3 * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION];
+        int[] offset = {0};
+        TargetPlayback.prepare(project).render(3, pcm -> {
+            for (int i = 0; i < pcm.length; i += 2)
+                mono[offset[0]++] = (pcm[i] + pcm[i + 1]) / 65536f;
+        });
+        return spectralBalance.measure(mono, 0, S3kRenderer.SAMPLE_RATE, fundamental(pitch));
+    }
+
+    private static double fundamental(int pitch) {
+        return 440 * Math.pow(2, (pitch - 69) / 12.0);
     }
 
     List<RankedPatch> lowCandidates(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,

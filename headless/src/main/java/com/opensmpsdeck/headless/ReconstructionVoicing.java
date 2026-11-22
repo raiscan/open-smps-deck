@@ -248,6 +248,11 @@ final class ReconstructionVoicing {
     }
     record Articulation(String preset, double gate, int minimumReleaseRate) {
         int duration(int ticks) { return Math.max(1, (int) Math.round(ticks * gate)); }
+
+        Integer editedRelease() {
+            // Older automatic fits serialized this preset alongside authored settings.
+            return "fast-release".equals(preset) ? null : minimumReleaseRate;
+        }
     }
     record Vibrato(int delay, int rate, int delta, int steps) {
         List<Integer> bytes() { return List.of(delay, rate, delta & 255, steps); }
@@ -279,16 +284,21 @@ final class ReconstructionVoicing {
         };
     }
 
-    static byte[] patchBytes(InstrumentCatalogue.Asset asset, Articulation articulation) {
+    static byte[] editedRelease(InstrumentCatalogue.Asset asset, Integer minimumReleaseRate) {
+        if (minimumReleaseRate == null || minimumReleaseRate == 0) return asset.bytes();
         byte[] bytes = asset.bytes();
         // S3K stores D1L/RR for its four operators in bytes 17–20.
         for (int i = 17; i < 21; i++)
-            bytes[i] = (byte) ((bytes[i] & 0xf0) | Math.max(bytes[i] & 15, articulation.minimumReleaseRate()));
+            bytes[i] = (byte) ((bytes[i] & 0xf0) | Math.max(bytes[i] & 15, minimumReleaseRate));
         return bytes;
     }
 
     static String patchId(InstrumentCatalogue.Asset asset, byte[] bytes) {
-        return java.util.Arrays.equals(bytes, asset.bytes()) ? asset.id() : "fm-voice-" + InstrumentCatalogue.digest(bytes);
+        return java.util.Arrays.equals(bytes, asset.bytes()) ? asset.id() : cloneId(asset, bytes);
+    }
+
+    static String cloneId(InstrumentCatalogue.Asset asset, byte[] bytes) {
+        return "fm-clone-" + InstrumentCatalogue.digest(asset.bytes()).substring(0, 12) + "-" + InstrumentCatalogue.digest(bytes);
     }
 
     static Map<String, List<ReconstructionAllocation.Entry>> byLane(ReconstructionAllocation.Result allocation) {

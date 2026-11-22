@@ -206,7 +206,7 @@ class ReconstructionStagesTest {
         byte[] bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         var asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        var variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        var variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         var existing = new ReconstructionVoices.Choice(asset, variant, patch.name(), null, "matched", List.of(), List.of());
         var choices = Map.of("FM1", Map.of(new ReconstructionVoices.Key(0, null), existing));
         var result = S3kReconstruction.arrangeAllocated("Repeats", 30, 360,

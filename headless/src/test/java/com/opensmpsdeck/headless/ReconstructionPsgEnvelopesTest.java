@@ -133,8 +133,13 @@ class ReconstructionPsgEnvelopesTest {
         var builder = new InstrumentCatalogue.Builder();
         var patch = DemoProject.create().voices().getFirst();
         String fm = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), StockTable.bytes(patch.bytes()));
-        String variant = builder.variant(fm, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(fm, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         ReconstructionCliTest.classicVariants(builder, fm, patch.name(), InstrumentCatalogue.Recipe.plain());
+        String contour = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Noise contour",
+                new byte[]{0, 4, 9, (byte) 0x80});
+        for (var target : ReconstructionCliTest.classicTargets())
+            builder.variant(contour, "Noise contour", InstrumentCatalogue.Recipe.plain(), target,
+                    ReconstructionCatalogueFixture.stock(target));
         var catalogue = builder.build();
         var index = directory.resolve("catalogue.json");
         catalogue.save(index);

@@ -41,7 +41,7 @@ class ReconstructionEchoTest {
         byte[] raw = new byte[voice.bytes().size()];
         for (int i = 0; i < raw.length; i++) raw[i] = voice.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), raw);
-        String variant = builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         var index = builder.build();
         var score = new MidiScore(List.of(new MidiScore.Part(0, "Lead", 81, false)),
                 List.of(new MidiScore.Note(0, 69, 92, 200_000, 300_000)), List.of());
@@ -81,7 +81,7 @@ class ReconstructionEchoTest {
         byte[] raw = new byte[voice.bytes().size()];
         for (int i = 0; i < raw.length; i++) raw[i] = voice.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), raw);
-        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), null);
+        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         Path index = directory.resolve("index.json");
         builder.build().save(index);
         Path output = directory.resolve("result");

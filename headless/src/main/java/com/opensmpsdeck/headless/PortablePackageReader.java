@@ -99,7 +99,7 @@ final class PortablePackageReader {
             nonblank(asset.id(), asset.key() + " id");
             nonblank(asset.name(), asset.key() + " name");
             var origin = new AssetOrigin(asset.origin().type(), asset.ref(), asset.transforms(),
-                    asset.origin().license(), asset.origin().attribution());
+                    asset.origin().license(), asset.origin().attribution(), asset.origin().clonedFrom());
             origin.validateKind(kind.name());
             if (asset.origin().license() != null) Metadata.validateLicense(asset.origin().license());
             Integer globalSlot = globalIndex.get(asset.key());
@@ -373,6 +373,7 @@ final class PortablePackageReader {
         for (var asset : manifest.assets()) {
             switch (asset.origin().type()) {
                 case "stock" -> stock |= asset.ref() == null;
+                case "custom" -> stock = true;
                 case "source-audio" -> warnings.add("SOURCE_AUDIO");
                 case "third-party" -> warnings.add("THIRD_PARTY");
                 default -> {

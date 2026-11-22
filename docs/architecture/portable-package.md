@@ -165,6 +165,9 @@ Each `assets[]` entry:
   - `third-party`: additionally requires `origin.license` (SPDX) and
     `origin.attribution` (string). Emits `THIRD_PARTY`.
   - `stock`: comes from a retail ROM.
+  - `custom`: an edited stock FM voice or envelope. Requires
+    `origin.clonedFrom`, the original stock asset ID. The edited bytes use
+    embedded storage and count as ROM-derived data.
 - **The payload is exactly one of the following:**
   - Embedded: `path` + `sha256`, or for an FM voice inside the bank's local
     voice table, `bankOffset`. It is the final bytes, after any transform.
@@ -420,7 +423,7 @@ compressed driver are identical across the two tested revisions.
 ### 6.1 Fields
 
 - Asset-level `origin` on voices, envelopes and samples:
-  `{"type": ..., "ref": {...}?, "transforms": [...]?, "license"?, "attribution"?}`.
+  `{"type": ..., "ref": {...}?, "transforms": [...]?, "license"?, "attribution"?, "clonedFrom"?}`.
   It has the same shapes as §3.
 - Project-level `derivedFrom`: `null` or
   `{"type": "retail-song", "game", "songId", "bankSha256"}`.
@@ -428,6 +431,9 @@ compressed driver are identical across the two tested revisions.
   asset. `copy-arrangement` propagates it. Catalogue *Add to project*,
   `catalog apply` and reconstruction stamp each asset's `origin`, including
   the gain transform for DAC and `source-audio` for sliced stem samples.
+- Studio saves changes to a stock instrument as a new editable asset and keeps
+  all existing source and command references pointing at the stock asset.
+  Assign the custom clone to the intended source or timed instrument command.
 - Files with no origin data MUST round-trip byte-identically and keep their
   version.
 

@@ -59,6 +59,39 @@ class PortablePackageTest {
         assertEquals(-1, Files.mismatch(expected, rendered));
     }
 
+    @Test void stockInstrumentEditsExportAsEmbeddedClonesAndPreserveExistingUses() throws Exception {
+        var original = DemoProject.create();
+        var voice = original.voices().getFirst().withOrigin(AssetOrigin.stock(null));
+        var envelope = new Envelope("stock-envelope", "Fixture", Envelope.PSG_VOLUME, List.of(0, 0x81),
+                AssetOrigin.stock(null));
+        var voices = new java.util.ArrayList<>(original.voices());
+        voices.set(0, voice);
+        var stock = com.opensmpsdeck.project.ProjectEdits.addEnvelope(
+                original.withAssets(voices, List.of(), original.samples()), envelope);
+        var bytes = new java.util.ArrayList<>(voice.bytes());
+        bytes.set(0, bytes.getFirst() ^ 8);
+        var edited = com.opensmpsdeck.project.ProjectEdits.updateVoice(stock,
+                new Voice(voice.id(), voice.name(), bytes), "voice-clone");
+        edited = com.opensmpsdeck.project.ProjectEdits.updateEnvelope(edited,
+                new Envelope(envelope.id(), envelope.name(), envelope.type(), List.of(1, 0x81)), "envelope-clone");
+        assertEquals(stock.sequences(), edited.sequences());
+        assertEquals(voice, edited.voices().getFirst());
+        assertEquals(envelope, edited.envelopes().getFirst());
+        assertEquals(AssetOrigin.cloneOf(voice.id()), edited.voices().getLast().origin());
+        assertEquals(AssetOrigin.cloneOf(envelope.id()), edited.envelopes().getLast().origin());
+
+        var source = directory.resolve("clone.smps.json");
+        var output = directory.resolve("clone.smps.zip");
+        ProjectFiles.save(source, edited, null);
+        assertEquals(edited, ProjectFiles.load(source).project());
+        expectSuccess("compile-package", source.toString(), output.toString(), "--portable");
+        var manifest = PortablePackageReader.read(output).manifest();
+        var clones = manifest.assets().stream().filter(asset -> "custom".equals(asset.origin().type())).toList();
+        assertEquals(List.of(voice.id(), envelope.id()), clones.stream().map(asset -> asset.origin().clonedFrom()).toList());
+        assertTrue(clones.stream().allMatch(asset -> asset.ref() == null));
+        assertTrue(manifest.provenance().containsRomDerivedData());
+    }
+
     @Test void portableWarningsReferenceStockAssetsAndReportSourceAudio() throws Exception {
         var original = ProjectFiles.load(Path.of("../examples/dac-percussion.smps.json")).project();
         assertEquals(List.of(), ProjectExport.portableWarnings(original));

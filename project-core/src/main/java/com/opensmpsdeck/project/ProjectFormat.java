@@ -455,10 +455,10 @@ public final class ProjectFormat {
 
     private static AssetOrigin origin(JsonElement value) {
         if (value == null) return null;
-        var o = reviewObject(value, "origin", Set.of("ref", "transforms", "license", "attribution"), "type");
+        var o = reviewObject(value, "origin", Set.of("ref", "transforms", "license", "attribution", "clonedFrom"), "type");
         return new AssetOrigin(string(o, "type"), o.has("ref") ? stockRef(o.get("ref")) : null,
                 o.has("transforms") ? list(o, "transforms", ProjectFormat::transform) : null,
-                optionalString(o, "license"), optionalString(o, "attribution"));
+                optionalString(o, "license"), optionalString(o, "attribution"), optionalString(o, "clonedFrom"));
     }
 
     public static StockRef stockRef(JsonElement value) {

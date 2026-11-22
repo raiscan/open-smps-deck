@@ -1081,11 +1081,11 @@ class ReconstructionEditsTest {
         var bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         if (psg) {
             String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Chord envelope",
                     new byte[]{0, (byte) 0x80});
-            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), null);
+            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         }
         var catalogue = builder.build();
         catalogue.save(index);

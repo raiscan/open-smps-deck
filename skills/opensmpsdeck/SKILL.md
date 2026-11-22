@@ -213,7 +213,11 @@ that reaches roles but drops in allocation has a separate fate and reason.
 
 When the source is denser than the hardware can reproduce, simplify by
 part and section before resorting to note-ID edits. Save the controls
-under `voicing.json.arrangement`. In MCP, read and write the full
+under `voicing.json.arrangement`. Automatic voicing selects exact stock FM
+patches and compatible PSG envelopes. For an intentional FM release change,
+use a scoped `minimumReleaseRate` edit. The arrangement exports the changed
+instrument as a custom clone with its stock asset ID in `origin.clonedFrom`.
+In MCP, read and write the full
 `voicing` artifact with `artifact_read` and `artifact_write`.
 
 - Use `partChips: [{"part":3,"chip":"FM","lanes":["FM3","FM4","FM5"]}]`
