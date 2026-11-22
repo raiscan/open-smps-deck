@@ -750,7 +750,8 @@ public final class ReconstructionTrace {
         }
         var stemDrops = new HashMap<String, S3kReconstruction.Reduction>();
         for (var reduction : score.reductions()) {
-            if ("stem-midi-doubling".equals(reduction.reason()) || "stem-hold-fragment".equals(reduction.reason()))
+            if ("stem-midi-doubling".equals(reduction.reason()) || "stem-hold-fragment".equals(reduction.reason())
+                    || ReconstructionStemParts.HARMONIC_GHOST.equals(reduction.reason()))
                 stemDrops.put(reduction.id(), reduction);
         }
         for (var entry : replacedParts.entrySet()) {

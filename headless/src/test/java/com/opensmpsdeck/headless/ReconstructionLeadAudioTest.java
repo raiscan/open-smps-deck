@@ -9,6 +9,30 @@ import java.util.Locale;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionLeadAudioTest {
+    @Test void upperRecoveryRejectsACoherentPartialButKeepsAnIndependentOctaveAttack() {
+        var sustain = List.of(new ExternalTranscribers.RawNote(.10, .65, 57, 90),
+                new ExternalTranscribers.RawNote(.10, .65, 52, 90));
+        for (boolean harmonic : List.of(true, false)) {
+            int rate = 12_000;
+            var samples = new float[rate];
+            for (int i = 0; i < samples.length; i++) {
+                double time = i / (double) rate;
+                if (time < .10 || time >= .65) continue;
+                double envelope = Math.min((time - .10) / .030, 1) * Math.exp(-5 * (time - .10));
+                double upper = harmonic ? envelope : Math.max(0, Math.min(1, (time - .33) / .025));
+                samples[i] = (float) (envelope * (.10 * Math.sin(Math.TAU * 220 * time)
+                        + .02 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(52) * time))
+                        + .17 * upper * Math.sin(Math.TAU * 440 * time + .3));
+            }
+            var spectrum = new ReconstructionStemParts.Spectrum(new ReferenceAudio(samples, rate));
+            var reductions = new ArrayList<S3kReconstruction.Reduction>();
+            var recovered = ReconstructionStemParts.upperVoicing(1, sustain, spectrum, 1, reductions);
+            assertEquals(!harmonic, recovered.stream().anyMatch(note -> note.pitch() == 69));
+            assertEquals(harmonic, reductions.stream().anyMatch(reduction -> reduction.note().pitch() == 69
+                    && "stem-upper-harmonic".equals(reduction.reason())));
+        }
+    }
+
     @Test void separatesFrequencyModulationFromStaticPolyphony() {
         var vibrato = new ArrayList<Double>();
         var staticChord = new ArrayList<Double>();

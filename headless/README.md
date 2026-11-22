@@ -706,6 +706,11 @@ call `reconstruct_run` with `from` set to `roles`.
 
 ### Inspect time-aligned evidence
 
+For stem-derived scores, `stem-upper-harmonic` in the note trace identifies
+a generated upper candidate excluded by harmonic phase and envelope
+evidence. The score retains its ID in `reductions`. Replay from
+`transcribe` to apply the check to a saved transcription.
+
 ```sh
 java -jar "$deck_jar" reconstruct view "$work" --start 45.3 --end 48.8 \
   --stem 0 --render --harmonics "$note_id" "$work/evidence.png"

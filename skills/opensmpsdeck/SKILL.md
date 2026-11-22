@@ -182,6 +182,10 @@ Use [role plans](../../headless/README.md#inspect-the-score-and-plan-musical-rol
 for recurring lead and backing rules and [external transcription](../../headless/README.md#external-transcription)
 when a mapped or unmatched stem needs a separate transcriber.
 
+In note trace, `stem-upper-harmonic` means a generated upper note followed
+a decoded lower note's partial in frequency, phase and envelope. A note
+that reaches roles but drops in allocation has a separate fate and reason.
+
 ### Clean up a vocal-derived lead
 
 1. Run `reconstruct vocal-review "$work" --json` or call

@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.TargetProfile;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -63,10 +64,10 @@ class ReconstructionChordReductionTest {
         var spectrum = new ReconstructionStemParts.Spectrum(new ReferenceAudio(samples, rate));
         var seed = List.of(new ExternalTranscribers.RawNote(0, 1, 60, 96),
                 new ExternalTranscribers.RawNote(0, 1, 64, 96));
-        var notes = ReconstructionStemParts.upperVoicing(0, seed, spectrum, 1);
+        var notes = ReconstructionStemParts.upperVoicing(0, seed, spectrum, 1, new ArrayList<>());
         assertEquals(List.of(79), notes.stream().map(Note::pitch).toList());
         assertTrue(notes.getFirst().end() - notes.getFirst().start() > .8);
-        assertTrue(ReconstructionStemParts.upperVoicing(0, seed.subList(0, 1), spectrum, 1).isEmpty());
+        assertTrue(ReconstructionStemParts.upperVoicing(0, seed.subList(0, 1), spectrum, 1, new ArrayList<>()).isEmpty());
     }
 
     @Test void rejectsPulsingEnvelopesForAutomaticStemVoicing() {
