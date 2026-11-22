@@ -66,7 +66,12 @@ final class S3kReconstruction {
     }
     record CopyWindow(String lane, int startTick, int endTick) {}
 
-    record VoicedGate(String id, String lane, int pitch, int startTick, int endTick, String evidence) {
+    record VoicedGate(String id, String lane, int pitch, int startTick, int endTick, String evidence,
+                      List<ReconstructionEditing.VibratoSegment> vibratoEnvelope) {
+        VoicedGate(String id, String lane, int pitch, int startTick, int endTick, String evidence) {
+            this(id, lane, pitch, startTick, endTick, evidence, null);
+        }
+
         VoicedGate(String id, String lane, int pitch, int startTick, int endTick) {
             this(id, lane, pitch, startTick, endTick, null);
         }
@@ -88,6 +93,7 @@ final class S3kReconstruction {
         boolean chord;
         ReconstructionVoicing.Vibrato vibrato;
         ReconstructionBendEncoding.Fit bend;
+        ReconstructionBendEncoding.Fit vibratoEnvelope;
         boolean pitchedNoise;
         java.util.NavigableMap<Integer, Tone> releaseTones = java.util.Collections.emptyNavigableMap();
         java.util.NavigableMap<Integer, Tone> scopedTones = java.util.Collections.emptyNavigableMap();
@@ -511,6 +517,9 @@ final class S3kReconstruction {
                 var asset = catalogue.asset(choice.assetId());
                 int psgOffset = !isFm && sourceSound != null && assignment == null ? sourceSound.psgVolumeOffset() : 0;
                 var spans = scopes.get(origin);
+                var envelope = isFm && spans != null ? spans.stream()
+                        .filter(span -> span.start() == start && span.settings().vibratoEnvelope() != null)
+                        .findFirst().map(span -> span.settings().vibratoEnvelope()).orElse(null) : null;
                 var chord = allocation.chords().get(noteId);
                 if (chord != null) {
                     var selected = spans == null ? null : ReconstructionOverrides.changes(spans, end).floorEntry(start);
@@ -569,6 +578,11 @@ final class S3kReconstruction {
                                 .duration(end - start);
                         placed.end = start + duration;
                     }
+                    if (envelope != null) {
+                        // Keep the normal gate when it already contains every requested stage.
+                        duration = Math.max(duration, envelope.getLast().startOffset() + 1);
+                        placed.end = start + duration;
+                    }
                     placed.scopedTones = new java.util.TreeMap<>();
                     placed.releaseTones = new java.util.TreeMap<>();
                     var changes = ReconstructionOverrides.changes(spans, placed.end);
@@ -607,7 +621,10 @@ final class S3kReconstruction {
                     }
                 }
                 var curve = entry.note().bend();
-                if (bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
+                if (envelope != null) {
+                    placed.vibratoEnvelope = ReconstructionBendEncoding.envelope(note.pitch(), placed.detune, duration, envelope);
+                }
+                if (envelope == null && bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
                     var changes = new java.util.TreeMap<Integer, ReconstructionVoicing.Vibrato>();
                     var current = placed.attackTone().vibrato();
                     for (var change : placed.scopedTones.tailMap(start, false).entrySet()) {
@@ -626,7 +643,7 @@ final class S3kReconstruction {
                 var layer = layers.get(origin);
                 if (layer != null && layer.settings().overridesAll()) placed.copy = null;
                 // Record after scoped gate overrides so the trace reports the voiced length.
-                gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, placed.end));
+                gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, placed.end, null, envelope));
                 if (isFm) fm.get(ReconstructionAllocation.FM.indexOf(lane)).add(placed);
                 else psg.get(ReconstructionAllocation.PSG.indexOf(lane)).add(placed);
             }
@@ -1538,19 +1555,20 @@ final class S3kReconstruction {
                 emitTone(commands, offset, selectAsset, activeAsset, volume, attack);
                 activeAsset = attack.asset();
                 volume = attack.volume();
-                if (placement.bend != null) {
-                    if (placement.bend.mode() == ReconstructionBendEncoding.Mode.E7
+                var pitchProgram = placement.vibratoEnvelope == null ? placement.bend : placement.vibratoEnvelope;
+                if (pitchProgram != null) {
+                    if (pitchProgram.mode() == ReconstructionBendEncoding.Mode.E7
                             && attack.vibrato() == null && (vibrato != null || bendModulation)) {
                         commands.add(new CommandEvent("bend-reset-" + offset, offset, NativeCommand.MODULATION_OFF, List.of()));
                     }
-                    vibrato = placement.bend.endingVibrato();
-                    bendModulation = placement.bend.modulatingAtEnd();
-                    for (var command : placement.bend.commands()) {
+                    vibrato = pitchProgram.endingVibrato();
+                    bendModulation = pitchProgram.modulatingAtEnd();
+                    for (var command : pitchProgram.commands()) {
                         commands.add(new CommandEvent(command.id() + "-" + offset, offset + command.tick(),
                                 command.command(), command.arguments()));
                         if (command.command() == NativeCommand.DETUNE) detune = (byte) (int) command.arguments().getFirst();
                     }
-                    for (var step : placement.bend.notes()) {
+                    for (var step : pitchProgram.notes()) {
                         events.add(new NoteEvent(step.id() + "-" + offset, offset + step.tick(), step.duration(), step.pitch()));
                     }
                 } else {
@@ -1585,7 +1603,7 @@ final class S3kReconstruction {
                     emitTone(commands, boundary - from, selectAsset, activeAsset, volume, next);
                     activeAsset = next.asset();
                     volume = next.volume();
-                    if (placement.bend == null && !java.util.Objects.equals(current.vibrato(), next.vibrato())) {
+                    if (pitchProgram == null && !java.util.Objects.equals(current.vibrato(), next.vibrato())) {
                         if (next.vibrato() != null) {
                             // A fresh setup needs an attack to load live S3K counters.
                             events.add(new NoteEvent("note-" + (noteStart - from), noteStart - from,
@@ -1598,7 +1616,7 @@ final class S3kReconstruction {
                     }
                     current = next;
                 }
-                if (placement.bend == null)
+                if (pitchProgram == null)
                     events.add(new NoteEvent("note-" + (noteStart - from), noteStart - from,
                             placement.end - noteStart, note.note().pitch()));
                 for (var change : releaseTones(notes, i).entrySet()) {

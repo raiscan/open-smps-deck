@@ -414,9 +414,13 @@ composer stays available across a refresh. The
   drag up or down. Drag farther right for a longer slide. Hold **Shift**
   to snap to semitones. Drag a handle on the selected curve to revise it.
   The driver plays authored bends on FM.
-- In **Vibrato**, drag right to increase rate and up to increase depth
-  on an FM note. The readout shows the achievable Hz and cents. Drag down
-  to zero depth to turn modulation off for that note.
+- In **Vibrato**, start a drag where you want a stage to begin within an
+  S3K FM note. Drag right for a faster oscillation and up for more depth.
+  Start inside the note to leave the opening plain, then add another stage
+  farther right to deepen it. Drag from a gold marker to edit that stage.
+  **Alt-click** a marker to remove it. Drag down to zero depth to stop the
+  vibrato from that point. The Note tab lists the stages in ticks, Hz, and
+  cents.
 - Select a scored note to set its velocity or delete it with **Delete**.
   Set a role or pin a lane from the **Note** tab. Delete on a note generated
   during role assignment records a drop. The trace shows the fate and reason,

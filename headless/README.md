@@ -1403,6 +1403,22 @@ or Studio **Selection → Layer**. Choose echo, chorus, double or off, then
 rebuild from `assemble`. The selected notes' layer intents override the
 preset. Inspect `report.json.noteLayers` for applied and skipped copies.
 
+### Staged vibrato
+
+On an allocated S3K FM note, a `noteVoicing` edit can set
+`vibratoEnvelope` to an ordered array such as
+`[{"startOffset":18,"rateHz":5,"depthCents":20},{"startOffset":32,"rateHz":5,"depthCents":48}]`.
+The opening is flat. These offsets are driver ticks from the note attack.
+A zero-depth stage stops vibrato. Submit the edit with `reconstruct edit`
+or MCP `reconstruct_edit` and rebuild from `assemble`. Use `trace` or
+`describe` to check the assembled stages.
+
+Run `reconstruct vibrato-review WORK_DIR [--part ID] [--propose]` or
+`reconstruct_vibrato_review` over MCP to detect delayed or changing vibrato
+in mapped stems. Omit `--propose` (MCP `propose`) for read-only detection.
+Review or accept the proposals in Studio or with `reconstruct proposals`.
+See the [envelope contract](../docs/architecture/reconstruction-stages.md#per-note-vibrato-envelopes).
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then

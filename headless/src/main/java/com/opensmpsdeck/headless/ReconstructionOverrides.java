@@ -19,8 +19,18 @@ final class ReconstructionOverrides {
                     @Nullable Integer startTick, @Nullable Integer endTick, @Nullable List<String> noteIds,
                     @Nullable String variantId, @Nullable Double gain, @Nullable Double gate,
                     @Nullable Integer minimumReleaseRate, @Nullable ReconstructionVoicing.Vibrato vibrato,
-                    @Nullable Boolean modulationOff) {
-        boolean changesModulation() { return vibrato != null || Boolean.TRUE.equals(modulationOff); }
+                    @Nullable Boolean modulationOff,
+                    @Nullable List<ReconstructionEditing.VibratoSegment> vibratoEnvelope) {
+        Settings(Double startSeconds, Double endSeconds, Integer startTick, Integer endTick, List<String> noteIds,
+                 String variantId, Double gain, Double gate, Integer minimumReleaseRate,
+                 ReconstructionVoicing.Vibrato vibrato, Boolean modulationOff) {
+            this(startSeconds, endSeconds, startTick, endTick, noteIds, variantId, gain, gate, minimumReleaseRate,
+                    vibrato, modulationOff, null);
+        }
+
+        boolean changesModulation() {
+            return vibratoEnvelope != null || vibrato != null || Boolean.TRUE.equals(modulationOff);
+        }
 
         boolean conflicts(Settings other) {
             return variantId != null && other.variantId != null || gain != null && other.gain != null
@@ -34,7 +44,8 @@ final class ReconstructionOverrides {
                     gate == null ? other.gate : gate,
                     minimumReleaseRate == null ? other.minimumReleaseRate : minimumReleaseRate,
                     changesModulation() ? vibrato : other.vibrato,
-                    changesModulation() ? modulationOff : other.modulationOff);
+                    changesModulation() ? modulationOff : other.modulationOff,
+                    changesModulation() ? vibratoEnvelope : other.vibratoEnvelope);
         }
     }
 
@@ -94,6 +105,7 @@ final class ReconstructionOverrides {
                     at + ".minimumReleaseRate", "expected an FM release rate in 0–15");
             require(scope.vibrato == null || !Boolean.TRUE.equals(scope.modulationOff),
                     at, "choose vibrato or modulationOff");
+            require(scope.vibratoEnvelope == null, at, "use a noteVoicing edit for vibratoEnvelope");
             ReconstructionVoicing.vibrato(scope.vibrato, at + ".vibrato");
             require(scope.variantId != null || scope.gain != null || scope.gate != null
                     || scope.minimumReleaseRate != null || scope.changesModulation(), at, "expected a voicing change");
