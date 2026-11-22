@@ -35,6 +35,10 @@ bindings. OpenGGF currently has no direct ZIP loader.
 See the [Studio guide](studio.md#listen-and-export) and
 [CLI and MCP export commands](../../headless/README.md#export-project-output).
 
+Sonic 1 and Sonic 2 portable exports compress repeated phrases with the
+target driver's loops and calls to help fit the 32 KiB song bank. To hear
+the linear encoding for comparison, use `render-project PROJECT OUTPUT.wav --linear`.
+
 ## Test in game
 
 Export a patched Sonic 3 & Knuckles ROM or a BPS patch to hear your song on

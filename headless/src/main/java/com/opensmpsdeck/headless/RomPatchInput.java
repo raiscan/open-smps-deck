@@ -67,14 +67,7 @@ record RomPatchInput(RomGame game, Song song) {
             project = StockAssets.resolveProject(project, stock(game, clean));
         var driver = game == RomGame.S1 ? ClassicPackageDriver.S1 : ClassicPackageDriver.S2;
         var tempo = driver.projectTempo(project);
-        ProjectCompiler.BankLayout layout;
-        try {
-            layout = driver.compile(project, tempo.targetByte());
-        } catch (IllegalArgumentException failure) {
-            if (!failure.getMessage().contains("32 KiB")) throw failure;
-            throw new IllegalArgumentException("Compiled song exceeds the 32,768-byte (32 KB) per-song limit. "
-                    + "Shorten the song or reduce layering.", failure);
-        }
+        var layout = driver.compile(project, tempo.targetByte());
         var compiled = new CompiledProject(layout.bytes(), project.envelopes(), project.samples());
         var result = patchClassic(game, clean, compiled, project.voices().size(), layout.relocations(), options);
         if (!tempo.exact())

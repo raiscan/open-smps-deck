@@ -12,7 +12,8 @@ and asset wire format.
 | Editable versions 1–4 and 6 | Supported | Supported | Supported |
 | v5 native banks, global voices and native control flow | Rejected | Rejected | Existing S3K native profile |
 | Compiled lanes | DAC, FM1–FM5, PSG1–PSG3 | Same | Same |
-| Clip gaps, partial repeats, reset/carry state and nested groups | Linearized | Linearized | Linearized |
+| Clip gaps, partial repeats, reset/carry state and nested groups | Flattened into timed events | Same | Same |
+| Repeated material in editable arrangements | Compacted into finite loops and calls | Same | Same |
 | Local FM table | Up to 128 voices, order 4/3/2/1 | Up to 128 voices, order 4/2/3/1 | Up to 128 voices, order 4/3/2/1 |
 | FM carrier selection | Algorithm | Algorithm | TL high bit |
 | Note pitch | MIDI 12–106 FM, 48–116 PSG | Same | MIDI 12–106 FM, 45–117 PSG |
@@ -182,12 +183,45 @@ Tonal layers use the remaining two PSG lanes while PSG3 is reserved.
 | PSG_NOISE | `F3 byte`, restricted to nonzero noise on PSG3. Resetting a noise track to tone or resetting its state on a subsequent clip or repeat is rejected. A tone must rest before switching to noise |
 | MODULATION_ENVELOPE, FM_VOLUME_ENVELOPE, SSG_EG | Rejected with the target and command in the error |
 
-The S1/S2 reader validates the finite stream subset, including explicit
-note/rest durations, duration-only continuations and an `F2` stop on
-every track. Retail loops, calls, and hardware/SFX-only commands have no
-editable portable representation in those dialects. Headless preview tests
-exercise NTSC activation and native writes. PAL, gameplay speed transitions,
-SFX arbitration and retail ROM patch execution are outside these preview tests.
+## Loops and calls
+
+S1 and S2 compact repeated timed events by default, using the same repeat
+search as S3K. The search compares event bytes, transposition and attenuation,
+keeps hold boundaries inline, and excludes source-relative state changes.
+Use `render-project PROJECT OUTPUT.wav --linear` to compare playback with
+the uncompressed stream. The compiler checks the final size against the
+32,768-byte bank limit.
+
+The classic portable profile uses `F7 index count pointer` for backward
+loops to event starts and `F8 pointer` for calls to standalone routines
+after the track's `F2` stop. A routine ends with `E3`. The `F9` return
+opcode is specific to S3K among these targets. Classic banks may also use
+`F6 pointer` to jump forward to an event in the same track. The reader
+validates finite flow, explicit note/rest durations and duration-only
+continuations. It reserves counter 0 for non-nested loops and uses one
+call level, with no branches inside a loop or subroutine.
+
+| Target | Control-flow pointer | Retail storage per track |
+|---|---|---|
+| S1 | Signed big-endian word relative to the second operand byte | 12 shared bytes. Up to 12 counters without calls, three return addresses without loops, or two return addresses with counter 0 reserved |
+| S2 | Little-endian absolute Z80 address from the bank base | 10 shared bytes. Up to 10 counters without calls, five return addresses without loops, or four return addresses with counter 0 reserved |
+
+Each counter occupies one byte. Counters grow up from the start of the
+shared region. Return addresses grow down from its end, using four bytes
+each on S1 and two on S2.
+
+The S1 limits come from `SMPS_Track.LoopCounters` in
+`s1.sounddriver.ram.asm` and `cfRepeatAtPos`, `cfJumpToGosub` and
+`cfJumpReturn` in `s1.sounddriver.asm`. See `zTrack.LoopCounters` and
+`zTrack.GoSubStack` in `s2.sounddriver.asm` for S2.
+Schema 4 includes S2 branch pointer operands in `bank.relocations`.
+Test in game installs S2 at Z80 address `$8000` in bank `$20` and
+relocates those words alongside the header. S1 branch words move with their
+tracks.
+
+Headless preview tests compare NTSC PCM and native chip writes with the
+linear encoding. ROM-gated tests patch a retail image and render the
+installed bank through the pinned driver.
 
 The pinned [Sonic1SmpsData](../../openggf-audio/src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsData.java),
 [Sonic2SmpsData](../../openggf-audio/src/main/java/com/openggf/game/sonic2/audio/smps/Sonic2SmpsData.java) and

@@ -63,9 +63,10 @@ The pinned `Sonic1SmpsData` decodes the same relative header. Retail
 `F6`, `F7`, and `F8` use a signed word displacement based at the second
 operand byte (`cfJumpTo` reads two bytes, adds the word, then subtracts one).
 The pinned S1 sequencer selects relative pointers as well. Moving a complete
-bank preserves these relationships. The accepted compiler profile has finite
-streams and emits none of those control-flow commands. The engine caps the
-bank at 32,768 bytes and accepts its local 25-byte FM voices in S1 operator
+bank preserves these relationships. The compiler uses finite loops and
+standalone calls from the [classic portable profile](driver-support.md#loops-and-calls).
+The engine walks their timed events and routines to locate DAC and envelope
+operands. It caps the bank at 32,768 bytes and accepts local 25-byte FM voices in S1 operator
 order. The arrangement profile supports DAC, FM1–FM5, and PSG1–PSG3.
 
 The stock table at `0x719A8` contains nine longword pointers. With custom

@@ -11,13 +11,13 @@ final class ClassicDisasmTestAssembler {
             Map.entry("smpsPan", 0xE0), Map.entry("smpsDetune", 0xE1), Map.entry("smpsAlterVol", 0xE6),
             Map.entry("smpsNoteFill", 0xE8), Map.entry("smpsChangeTransposition", 0xE9),
             Map.entry("smpsPSGAlterVol", 0xEC), Map.entry("smpsFMvoice", 0xEF), Map.entry("smpsModSet", 0xF0),
-            Map.entry("smpsStop", 0xF2), Map.entry("smpsPSGform", 0xF3), Map.entry("smpsModOff", 0xF4),
+            Map.entry("smpsReturn", 0xE3), Map.entry("smpsStop", 0xF2), Map.entry("smpsPSGform", 0xF3), Map.entry("smpsModOff", 0xF4),
             Map.entry("smpsPSGvoice", 0xF5));
     private static final Map<String, Integer> ARITY = Map.ofEntries(
             Map.entry("smpsPan", 2), Map.entry("smpsDetune", 1), Map.entry("smpsAlterVol", 1),
             Map.entry("smpsNoteFill", 1), Map.entry("smpsChangeTransposition", 1),
             Map.entry("smpsPSGAlterVol", 1), Map.entry("smpsFMvoice", 1), Map.entry("smpsModSet", 4),
-            Map.entry("smpsStop", 0), Map.entry("smpsPSGform", 1), Map.entry("smpsModOff", 0),
+            Map.entry("smpsReturn", 0), Map.entry("smpsStop", 0), Map.entry("smpsPSGform", 1), Map.entry("smpsModOff", 0),
             Map.entry("smpsPSGvoice", 1));
 
     private ClassicDisasmTestAssembler() {}
@@ -74,6 +74,18 @@ final class ClassicDisasmTestAssembler {
                             bytes.write(pointer >> 8);
                         }
                         writeArgs(bytes, args, 1, symbols);
+                    }
+                    case "smpsJump", "smpsLoop", "smpsCall" -> {
+                        boolean loop = macro.equals("smpsLoop");
+                        bytes.write(loop ? 0xF7 : macro.equals("smpsJump") ? 0xF6 : 0xF8);
+                        if (loop) {
+                            bytes.write(value(args[0], symbols, false));
+                            bytes.write(value(args[1], symbols, false));
+                        }
+                        int target = value(args[args.length - 1], symbols, pass == 0);
+                        int pointer = s1 ? target - bytes.size() - 1 : placement + target;
+                        bytes.write(s1 ? pointer >> 8 : pointer);
+                        bytes.write(s1 ? pointer : pointer >> 8);
                     }
                     case "dc.b", "smpsHeaderChan", "smpsHeaderTempo" -> writeArgs(bytes, args, 0, symbols);
                     default -> {
