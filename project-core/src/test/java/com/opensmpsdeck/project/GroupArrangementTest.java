@@ -27,6 +27,24 @@ class GroupArrangementTest {
         assertArrayEquals(ProjectCompiler.compile(original), ProjectCompiler.compile(ungrouped));
     }
 
+    @Test void editsAndFileRoundTripPreserveSonic1Target(@org.junit.jupiter.api.io.TempDir Path directory) throws Exception {
+        var source = DemoProject.create().withSettings("S1", 12, 0).withTarget(TargetGame.S1).withNativeTempo(37);
+        var moved = ProjectEdits.moveClip(source, "clip-a1", "FM2", 0);
+        assertEquals(source.clock(), moved.clock());
+        assertEquals(source.nativeTempo(), moved.nativeTempo());
+        var grouped = GroupEdits.create(moved, null, "section", "Section", Set.of("clip-a1", "clip-b1"));
+        assertEquals(source.clock(), grouped.clock());
+        assertEquals(source.nativeTempo(), grouped.nativeTempo());
+        var file = directory.resolve("sonic1.smps.json");
+        ProjectFiles.save(file, grouped, null);
+        var loaded = ProjectFiles.load(file).project();
+        assertEquals(source.clock(), loaded.clock());
+        assertEquals(source.nativeTempo(), loaded.nativeTempo());
+        var ungrouped = GroupEdits.ungroup(loaded, null, "section-placement");
+        assertEquals(source.clock(), ungrouped.clock());
+        assertEquals(source.nativeTempo(), ungrouped.nativeTempo());
+    }
+
     @Test void reportsLongCyclesIncludingUnusedDefinitions() {
         var definitions = new ArrayList<GroupSequence>();
         for (int i=0;i<6;i++) definitions.add(group("g"+i,"g"+((i+1)%6)));
@@ -114,6 +132,6 @@ class GroupArrangementTest {
     private static StudioProject project(List<GroupSequence> groups,List<GroupPlacement> placements,List<Clip> clips) {
         var demo=DemoProject.create();
         return new StudioProject(6,demo.name(),demo.mode(),demo.ticksPerBeat(),demo.tempo(),demo.voices(),
-                demo.sequences(),clips,List.of(),List.of(),null,List.of(),List.of(),1,groups,placements);
+                demo.sequences(),clips,List.of(),List.of(),null,List.of(),List.of(),1,groups,placements, TargetGame.S3K, null);
     }
 }

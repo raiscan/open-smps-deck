@@ -1,11 +1,10 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.GroupArrangement;
 import com.opensmpsdeck.project.NativeCommand;
-import com.opensmpsdeck.project.ProjectCompiler;
-import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
@@ -201,10 +200,8 @@ public final class ReconstructionAudition {
             outputs.add(file);
         }
 
-        var banks = matches.stream().map(match -> {
-            var probe = overlay(project, clips, auditionLane, start, end, match.asset(), gain);
-            return probe.nativeTempo() == null ? ProjectCompiler.compileWithAssets(probe) : ReconstructionCli.compileTarget(probe);
-        }).toList();
+        var banks = matches.stream().map(match -> TargetPlayback.prepare(
+                overlay(project, clips, auditionLane, start, end, match.asset(), gain))).toList();
         float[] referencePcm = null;
         if (reference != null) {
             if (ReconstructionStages.usesSteadyReference(work.resolve("report.json"), reference))
@@ -224,12 +221,7 @@ public final class ReconstructionAudition {
                 if (t >= 0) for (int sample = 0; sample < samples.length; sample++)
                     pcm[t * FRAME_SAMPLES + sample] = samples[sample] / 32768f;
             };
-            if (project.nativeTempo() == null)
-                S3kRenderer.render(banks.get(i), endFrame, mask, collect);
-            else {
-                var driver = (ClassicPackageDriver) PackageDriver.supported(project.target().id());
-                driver.render(banks.get(i), endFrame, mask, collect, ChipWriteObserver.NONE);
-            }
+            banks.get(i).render(endFrame, mask, collect);
             PhraseAudio.write(outputs.get(i), length, pcm, referencePcm);
             results.add(new Candidate(match.variant().id(), match.variant().name(), outputs.get(i).toString(), envelope(pcm)));
         }
@@ -259,7 +251,7 @@ public final class ReconstructionAudition {
         byte[] bytes = asset.bytes();
         var patch = new ArrayList<Integer>(bytes.length);
         for (byte value : bytes) patch.add(Byte.toUnsignedInt(value));
-        int volumeFloor = ReconstructionEcho.fmVolumeFloor(bytes);
+        int volumeFloor = ReconstructionEcho.fmVolumeFloor(bytes, com.opensmpsdeck.project.TargetProfile.of(project.target()));
         var outputVoices = new HashMap<List<Integer>, String>();
         for (var voice : voices) outputVoices.putIfAbsent(voice.bytes(), voice.id());
         for (var clip : clips) {
@@ -289,8 +281,10 @@ public final class ReconstructionAudition {
                 offset += length;
             }
         }
+        if (project.target() == TargetGame.S1)
+            sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, voices));
         return new StudioProject(project.arrangementVersion(), project.name(), project.mode(), project.ticksPerBeat(),
-                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples()).withTarget(project.target()).withNativeTempo(project.nativeTempo());
+                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples(), project.target(), project.nativeTempo());
     }
 
     private static String uniqueSource(HashMap<String, Sequence> sources, int index) {

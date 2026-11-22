@@ -45,7 +45,7 @@ final class ReconstructionVoiceStage {
                 || !cymbalGains.containsKey(n.note().pitch())).toList();
         if (!noise.isEmpty() && fitPsg3.isEmpty()) byLane.remove("PSG3");
         else if (fitPsg3.size() != noise.size()) byLane.put("PSG3", fitPsg3);
-        var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
+        var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of(), score.profile());
         var options = score.inputs().options(score.durationUs());
         var mix = Path.of(score.inputs().wav());
         var tonalInstruments = shared ? Map.<ReconstructionVoices.Key, ReconstructionVoices.Choice>of()
@@ -67,7 +67,7 @@ final class ReconstructionVoiceStage {
         });
         var savedWindows = previous == null ? null : previous.fitWindows();
         var windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
-        var screening = new VoicePatchShortlist(catalogue);
+        var screening = new VoicePatchShortlist(catalogue, options.target());
         var leadPatches = new HashMap<String, List<RankedPatch>>();
         var unsupported = new ArrayList<String>();
         for (var focus : foreground.entrySet()) {
@@ -455,7 +455,8 @@ final class ReconstructionVoiceStage {
                 .filter(e -> e.role() != Role.drums).map(e -> e.note().part()).collect(java.util.stream.Collectors.toSet());
         var notes = score.notes().stream().filter(note -> psg.contains(note.part())).map(ReconstructionStages.Note::midi).toList();
         return ReconstructionVoices.select(catalogue, mix, stems, score.source(), notes,
-                score.durationUs(), Kind.PSG_VOLUME, ReconstructionStemParts.addedParts(score.inputs()));
+                score.durationUs(), Kind.PSG_VOLUME, ReconstructionStemParts.addedParts(score.inputs()),
+                score.inputs().targetGame());
     }
 
     private static List<Instrument> fixedInstruments(String lane, List<ReconstructionAllocation.Entry> notes,

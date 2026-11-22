@@ -8,6 +8,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.opensmpsdeck.project.CommandEvent;
+import com.opensmpsdeck.project.NativeCommand;
+import com.opensmpsdeck.project.Sequence;
+import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.Voice;
+
 import static com.opensmpsdeck.headless.S3kRenderer.PRESENTATIONS_PER_SECOND;
 
 final class ReconstructionEcho {
@@ -26,12 +32,57 @@ final class ReconstructionEcho {
 
     private ReconstructionEcho() {}
 
-    static int fmVolumeFloor(byte[] patch) {
+    // Algorithm masks in the editable patch's 4/3/2/1 operator order.
+    private static final int[] CARRIERS = {8, 8, 8, 8, 10, 14, 14, 15};
+
+    static int fmVolumeFloor(byte[] patch, TargetProfile profile) {
+        return fmVolumeFloor(i -> patch[i] & 255, profile);
+    }
+
+    static int fmVolumeFloor(java.util.function.IntUnaryOperator patch,
+                             TargetProfile profile) {
         int floor = 0;
-        // S3K adds attenuation only to carriers, and wraps the result at 128.
-        for (int i = 21; i < 25; i++)
-            if ((patch[i] & 128) != 0) floor = Math.max(floor, patch[i] & 127);
+        int carriers = CARRIERS[patch.applyAsInt(0) & 7];
+        for (int i = 0; i < 4; i++) {
+            int tl = patch.applyAsInt(21 + i);
+            boolean carrier = switch (profile.carrierSelection()) {
+                case TL_HIGH_BIT -> (tl & 128) != 0;
+                case ALGORITHM -> (carriers & (1 << i)) != 0;
+            };
+            if (carrier) floor = Math.max(floor, tl & 127);
+        }
         return floor;
+    }
+
+    /**
+     * A volume change can run before the following voice upload, so include
+     * the previous voice as well as the voice chosen for the next gate.
+     */
+    static Sequence s1SafeVolume(Sequence sequence, java.util.Collection<Voice> voices) {
+        if (!sequence.type().equals("FM")) return sequence;
+        int floor = voices.stream().flatMap(voice -> voice.bytes().subList(21, 25).stream())
+                .mapToInt(tl -> tl - 128).max().orElse(0);
+        if (floor <= 0) return sequence;
+        int volume = sequence.volume() & 127;
+        int initial = Math.max(floor, volume);
+        var commands = new ArrayList<CommandEvent>();
+        for (var command : sequence.commands().stream()
+                .sorted(java.util.Comparator.comparingInt(CommandEvent::tick)).toList()) {
+            if (command.command() == NativeCommand.VOLUME) {
+                volume = command.arguments().getFirst() & 127;
+            } else if (command.command() == NativeCommand.FM_VOLUME) {
+                // Preserve the unfitted level for subsequent relative changes.
+                volume = Math.clamp(volume - (byte) (int) command.arguments().getFirst(), 0, 127);
+            } else {
+                commands.add(command);
+                continue;
+            }
+            commands.add(new CommandEvent(command.id(), command.tick(), NativeCommand.VOLUME,
+                    List.of(Math.max(floor, volume))));
+        }
+        return new Sequence(sequence.id(), sequence.name(), sequence.type(), sequence.lengthTicks(), sequence.voiceId(),
+                initial, sequence.notes(), commands, sequence.repeatState(),
+                sequence.psgEnvelopeId(), sequence.modulationEnvelopeId(), sequence.triggers());
     }
 
     static int scaleVolume(int volume, double gain) {

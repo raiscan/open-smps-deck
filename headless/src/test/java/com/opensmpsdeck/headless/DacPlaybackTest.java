@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
@@ -108,7 +110,7 @@ class DacPlaybackTest {
         var sequence = new Sequence("drums", "Drums", "DAC", length, null, 127, List.of(), List.of(),
                 "RESET", null, null, triggers);
         return new StudioProject(4, "DAC playback fixture", "S3K", 24, 0, List.of(), List.of(sequence),
-                List.of(new Clip("clip", "drums", "DAC", 0, length)), List.of(), samples);
+                List.of(new Clip("clip", "drums", "DAC", 0, length)), List.of(), samples, TargetGame.S3K, null);
     }
 
     private static byte[] bank(int... track) {

@@ -100,34 +100,33 @@ public final class S3kRenderer {
     static void renderPackageMusic(String game, AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
                                    SmpsPhysicalPolicy policy, int presentations, PcmSink sink, ChipWriteObserver observer)
             throws IOException {
-        renderPackageMusic(game, data, dac, config, policy, presentations, ChannelMask.NONE, sink, observer);
+        try (var session = openPackageMusic(game, data, dac, config, policy, ChannelMask.NONE, observer)) {
+            renderFrames(session, presentations, sink);
+        }
     }
 
-    static void renderPackageMusic(String game, AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
-                                   SmpsPhysicalPolicy policy, int presentations, ChannelMask mask, PcmSink sink,
-                                   ChipWriteObserver observer) throws IOException {
+    static SmpsDriverSession openPackageMusic(String game, AbstractSmpsData data, DacData dac,
+                                             SmpsSequencerConfig config, SmpsPhysicalPolicy policy,
+                                             ChannelMask mask, ChipWriteObserver observer) {
         var prepared = prepare(data, dac, config, () -> {
             throw new IllegalStateException("music restoration requires a previous project");
         }, true);
-        renderPrepared(prepared, policy, presentations, mask, sink, observer, game);
+        return openPlayback(prepared, policy, game, mask, observer);
+    }
+
+    static void renderFrames(SmpsDriverSession session, int presentations, PcmSink sink) throws IOException {
+        var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
+        for (int frame = 0; frame < presentations; frame++) {
+            advance(session, pcm);
+            sink.accept(pcm);
+        }
     }
 
     private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
                                        int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer)
             throws IOException {
-        renderPrepared(prepared, policy, presentations, mask, sink, observer, "s3k");
-    }
-
-    private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
-                                       int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer,
-                                       String game) throws IOException {
-        try (var session = newSession(observer, policy, game)) {
-            start(session, prepared, mask);
-            var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
-            for (int frame = 0; frame < presentations; frame++) {
-                advance(session, pcm);
-                sink.accept(pcm);
-            }
+        try (var session = openPlayback(prepared, policy, "s3k", mask, observer)) {
+            renderFrames(session, presentations, sink);
         }
     }
 
@@ -135,7 +134,12 @@ public final class S3kRenderer {
         var prepared = prepare(project, 0, false, () -> {
             throw new IllegalStateException("music restoration requires a previous project");
         });
-        var session = newSession(observer, Sonic3kSmpsPhysicalPolicy.INSTANCE);
+        return openPlayback(prepared, Sonic3kSmpsPhysicalPolicy.INSTANCE, "s3k", mask, observer);
+    }
+
+    private static SmpsDriverSession openPlayback(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
+                                                  String game, ChannelMask mask, ChipWriteObserver observer) {
+        var session = newSession(observer, policy, game);
         try {
             start(session, prepared, mask);
             return session;

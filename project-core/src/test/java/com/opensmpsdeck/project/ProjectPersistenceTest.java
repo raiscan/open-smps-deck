@@ -22,7 +22,7 @@ class ProjectPersistenceTest {
     @TempDir Path directory;
 
     private static StudioProject project(String name) {
-        return new StudioProject(1, name, "S3K", 24, 120, List.of(), List.of(), List.of());
+        return new StudioProject(1, name, "S3K", 24, 120, List.of(), List.of(), List.of(), TargetGame.S3K, null);
     }
 
     private Path create(String name) throws IOException {

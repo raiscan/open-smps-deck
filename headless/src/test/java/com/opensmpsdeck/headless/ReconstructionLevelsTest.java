@@ -49,8 +49,8 @@ class ReconstructionLevelsTest {
         var ideal = new Result(VERSION, lanes, null).withSourceInstruments(
                 Map.of("part-0", new SourceSound(lane(Role.melody, variant, 1), null, 0)));
         var probe = new ReconstructionLevels.Probe(score, catalogue, allocation, ideal);
-        WaveFile.render(probe.compile(List.of(lead), ideal), stem, frames);
-        WaveFile.render(probe.compile(probe.notes(), ideal), mix, frames);
+        probe.compile(List.of(lead), ideal).writeWave(stem, frames);
+        probe.compile(probe.notes(), ideal).writeWave(mix, frames);
 
         var quiet = ideal.withSourceInstruments(
                 Map.of("part-0", new SourceSound(lane(Role.melody, variant, .004), null, 0)));

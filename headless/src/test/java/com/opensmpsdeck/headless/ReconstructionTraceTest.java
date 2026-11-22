@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.DemoProject;
@@ -36,7 +38,7 @@ class ReconstructionTraceTest {
             var early = new Sequence("early", "Early", "PSG", 5, null, 127,
                     List.of(new NoteEvent("changed", 0, 5, work.equals(before) ? 60 : 67)));
             var project = new StudioProject(4, "Phase carry", "S3K", 15, 0, List.of(), List.of(early, late),
-                    List.of(new Clip("a", "early", "PSG1", 0, 5), new Clip("b", "late", "PSG1", 42, 10)));
+                    List.of(new Clip("a", "early", "PSG1", 0, 5), new Clip("b", "late", "PSG1", 42, 10)), TargetGame.S3K, null);
             ReconstructionArtifacts.write(work.resolve("score.json"), score);
             ProjectFiles.save(work.resolve("arrangement.smps.json"), project, null);
             WaveFile.render(ProjectCompiler.compileWithAssets(project), work.resolve("render.wav"), 60);
@@ -212,10 +214,10 @@ class ReconstructionTraceTest {
         var late = new Sequence("late", "FM", "FM", 5, voice.id(), 64,
                 List.of(new NoteEvent("later", 0, 5, 64)));
         var oneClip = new StudioProject(4, "Before", "S3K", 15, 0,
-                List.of(voice), List.of(initial), List.of(new Clip("a", "all", "FM1", 0, 47)));
+                List.of(voice), List.of(initial), List.of(new Clip("a", "all", "FM1", 0, 47)), TargetGame.S3K, null);
         var split = new StudioProject(4, "After", "S3K", 15, 0, List.of(voice),
                 List.of(early, late), List.of(new Clip("a", "early", "FM1", 0, 5),
-                        new Clip("b", "late", "FM1", 42, 5)));
+                        new Clip("b", "late", "FM1", 42, 5)), TargetGame.S3K, null);
         ProjectFiles.save(work.resolve("arrangement.smps.json"), oneClip, null);
         ProjectFiles.save(candidate.resolve("arrangement.smps.json"), split, null);
         var timeline = ReconstructionTrace.diff(work, candidate, "0,.5").getAsJsonObject("compiledTimeline");

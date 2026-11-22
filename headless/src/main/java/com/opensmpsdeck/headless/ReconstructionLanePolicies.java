@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 import com.google.gson.JsonDeserializationContext;
 import com.google.gson.JsonDeserializer;
 import com.google.gson.JsonElement;
@@ -11,7 +13,6 @@ import com.google.gson.reflect.TypeToken;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NoteEvent;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
@@ -243,6 +244,12 @@ final class ReconstructionLanePolicies {
 
     /** Match short solo renders using the same K-weighted power as the drum balance. */
     static final class Levels {
+        private final TargetProfile profile;
+
+        Levels(TargetProfile profile) {
+            this.profile = profile;
+        }
+
         private record Probe(Voice fm, Envelope psg, int pitch, int ticks, int volume) {}
         private final Map<Probe, Double> cache = new HashMap<>();
 
@@ -272,9 +279,10 @@ final class ReconstructionLanePolicies {
             var project = new StudioProject(4, "Level probe", "S3K", 30, 0,
                     fm ? List.of(probe.fm()) : List.of(), List.of(sequence),
                     List.of(new Clip("probe-clip", "probe", fm ? "FM1" : "PSG1", 0, probe.ticks())),
-                    fm ? List.of() : List.of(probe.psg()), List.of());
+                    fm ? List.of() : List.of(probe.psg()), List.of(), profile.game(),
+                    profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
             var loudness = new KWeightedLevel();
-            S3kRenderer.render(ProjectCompiler.compileWithAssets(project), probe.ticks(), pcm -> {
+            TargetPlayback.prepare(project).render((int) project.clock().frameAtTick(probe.ticks()), pcm -> {
                 for (int i = 0; i < pcm.length; i += 2) loudness.add(pcm[i] / 32768.0, pcm[i + 1] / 32768.0);
             });
             double power = loudness.probePower();

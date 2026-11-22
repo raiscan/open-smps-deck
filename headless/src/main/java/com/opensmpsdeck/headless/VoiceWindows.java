@@ -1,7 +1,6 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.ProjectCompiler;
-import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.StudioProject;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -222,13 +221,13 @@ final class VoiceWindows {
                         && "PSG3".equals(note.lane()))) return new float[frames * SAMPLES_PER_TICK];
         var project = S3kReconstruction.arrangeAllocated("Voicing probe", 30, frames, score, allocation,
                 null, catalogue, choices, Map.of(), voicing, true).project();
-        return renderMono(ProjectCompiler.compileWithAssets(project), frames);
+        return renderMono(project, frames);
     }
 
-    static float[] renderMono(CompiledProject project, int frames) throws IOException {
+    static float[] renderMono(StudioProject project, int frames) throws IOException {
         var mono = new float[frames * SAMPLES_PER_TICK];
         int[] at = {0};
-        S3kRenderer.render(project, frames, pcm -> {
+        TargetPlayback.prepare(project).render(frames, pcm -> {
             if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("voicing fit cancelled");
             for (int i = 0; i < pcm.length; i += DECIMATE * 2) {
                 int sum = 0;

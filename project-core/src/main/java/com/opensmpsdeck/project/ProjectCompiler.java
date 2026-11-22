@@ -51,7 +51,7 @@ public final class ProjectCompiler {
         if (project.formatVersion() == 6) {
             project = new StudioProject(project.arrangementVersion(), project.name(), project.mode(),
                     project.ticksPerBeat(), project.tempo(), project.voices(), project.sequences(), clips,
-                    project.envelopes(), project.samples());
+                    project.envelopes(), project.samples(), project.target(), project.nativeTempo());
         }
         Map<String,Sequence> sources=new HashMap<>(); Map<String,List<NoteEvent>> notes=new HashMap<>();
         for (Sequence s : project.sequences()) { sources.put(s.id(),s); notes.put(s.id(),s.notes().stream().sorted(Comparator.comparingInt(NoteEvent::tick)).toList()); }

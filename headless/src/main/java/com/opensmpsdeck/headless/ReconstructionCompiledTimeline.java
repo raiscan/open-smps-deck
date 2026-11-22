@@ -1,12 +1,12 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.openggf.audio.smps.CoordFlagContext;
 import com.openggf.audio.smps.SmpsNoteListener;
 import com.openggf.audio.smps.SmpsSequencer.Track;
 import com.openggf.audio.smps.SmpsSequencer.TrackType;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kCoordFlagHandler;
 import com.opensmpsdeck.project.CompiledProject;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
 import java.io.IOException;
@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
-/** Walk compiled S3K events, including the clip setup emitted by the compiler. */
+/** Walk the declared driver’s compiled timeline, including clip setup and native attacks. */
 final class ReconstructionCompiledTimeline extends Sonic3kCoordFlagHandler implements SmpsNoteListener {
     record Difference(boolean available, int changedEvents, Integer firstTick, List<String> lanes) {}
     private record Position(int tick, String lane) {}
@@ -30,6 +30,7 @@ final class ReconstructionCompiledTimeline extends Sonic3kCoordFlagHandler imple
 
     private static final int ATTACK = -1;
     private static final int RELEASE = -2;
+    private static final int TRACK_STATE = -3;
 
     private final Map<Position, List<Event>> events = new HashMap<>();
     private final Map<Integer, List<Integer>> psgEnvelopes;
@@ -39,6 +40,7 @@ final class ReconstructionCompiledTimeline extends Sonic3kCoordFlagHandler imple
     private final ReconstructionTimeMap time;
     private final ReconstructionTrace.Span span;
     private int tick;
+    private final Map<Track, List<Object>> classicState = new IdentityHashMap<>();
 
     private ReconstructionCompiledTimeline(CompiledProject project,
                                            ReconstructionTimeMap time, ReconstructionTrace.Span span) {
@@ -91,18 +93,32 @@ final class ReconstructionCompiledTimeline extends Sonic3kCoordFlagHandler imple
         var project = ProjectFiles.load(file).project();
         if (project.nativeProgram() != null) return null;
         var time = ReconstructionTimeMap.of(ReconstructionStages.readScore(work.resolve("score.json")));
-        var compiled = ProjectCompiler.compileWithAssets(project);
-        var recorder = new ReconstructionCompiledTimeline(compiled, time, span);
-        var sequencer = S3kRenderer.timelineSequencer(compiled, () -> {}, recorder);
+        var playback = TargetPlayback.prepare(project);
+        var recorder = new ReconstructionCompiledTimeline(playback.compiled(), time, span);
+        var sequencer = playback.timeline(() -> {}, recorder);
+        boolean classic = playback.target() != TargetGame.S3K;
         sequencer.setNoteListener(recorder);
         // Include the stop immediately after the final gate.
-        int limit = Math.max(time.frames(), project.clips().stream()
-                .mapToInt(clip -> clip.startTick() + clip.lengthTicks()).max().orElse(0));
+        int endTick = project.clips().stream().mapToInt(clip -> clip.startTick() + clip.lengthTicks()).max().orElse(0);
+        int limit = Math.max(time.frames(), (int) project.clock().frameAtTick(endTick));
         for (; recorder.tick <= limit && !sequencer.isComplete(); recorder.tick++) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Compiled timeline interrupted");
             sequencer.serviceOuterFrame();
+            if (classic) sequencer.getTracks().forEach(recorder::captureClassicState);
         }
         return recorder.events;
+    }
+
+    // Classic handlers are owned by the pinned configuration. Record their resolved
+    // setup changes after each service instead of decoding flags with the S3K table.
+    private void captureClassicState(Track track) {
+        if (track.type == TrackType.DAC) return;
+        var state = List.<Object>of(track.active, track.keyOffset, track.detune, track.pan, track.volumeOffset,
+                track.voiceData == null ? "" : InstrumentCatalogue.digest(track.voiceData),
+                track.envData == null ? "" : InstrumentCatalogue.digest(track.envData),
+                track.psgNoiseParam, track.modEnabled, track.modDelayInit,
+                track.modRate, track.modDelta, track.modStepsFull, track.baseFnum, track.baseBlock);
+        if (!state.equals(classicState.put(track, state))) add(track, TRACK_STATE, state);
     }
 
     private void add(Track track, int opcode, Object value) {

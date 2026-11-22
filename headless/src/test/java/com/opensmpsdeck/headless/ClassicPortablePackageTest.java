@@ -7,6 +7,7 @@ import com.openggf.game.sonic2.audio.smps.Sonic2SmpsData;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.Clip;
+import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
@@ -66,7 +67,7 @@ class ClassicPortablePackageTest {
         var sequence = new Sequence("s", "Held note", "FM", duration, voice.id(), 100,
                 List.of(new NoteEvent("held", 0, duration, 60)));
         var project = new StudioProject(2, "Oversize", "S3K", 24, 0, List.of(voice), List.of(sequence),
-                List.of(new Clip("clip", sequence.id(), "FM1", 0, duration)));
+                List.of(new Clip("clip", sequence.id(), "FM1", 0, duration)), TargetGame.S3K, null);
         for (var game : TargetGame.values()) {
             var failure = assertThrows(ProjectCompiler.BankLimitException.class,
                     () -> ReconstructionCli.compileTarget(project.withTarget(game)), game.id());
@@ -88,7 +89,7 @@ class ClassicPortablePackageTest {
         var base = DemoProject.create().withTarget(TargetGame.S2);
         var project = new StudioProject(3, base.name(), base.mode(), base.ticksPerBeat(), base.tempo(),
                 base.voices(), base.sequences(), base.clips(),
-                List.of(new Envelope("psg-closed-cymbal", "Cymbal", Envelope.PSG_VOLUME, List.of(0, 0x83))))
+                List.of(new Envelope("psg-closed-cymbal", "Cymbal", Envelope.PSG_VOLUME, List.of(0, 0x83))), TargetGame.S3K, null)
                 .withTarget(base.target());
         var error = assertThrows(IllegalArgumentException.class, () -> ReconstructionCli.compileTarget(project));
         assertTrue(error.getMessage().contains("s2: PSG envelope 'psg-closed-cymbal' uses S3K control byte 83"),
@@ -140,8 +141,7 @@ class ClassicPortablePackageTest {
             var game = com.opensmpsdeck.project.TargetGame.parse(driver.id());
             var clock = com.opensmpsdeck.project.TargetProfile.of(game).clock();
             var project = new StudioProject(4, "Native clock fixture", "S3K", 30, 0, List.of(),
-                    List.of(sequence), List.of(new Clip("psg-c", "psg", "PSG1", 0, ticks)))
-                    .withTarget(game).withNativeTempo(clock.tempo());
+                    List.of(sequence), List.of(new Clip("psg-c", "psg", "PSG1", 0, ticks)), game, clock.tempo());
             project = com.opensmpsdeck.project.ProjectFormat.read(com.opensmpsdeck.project.ProjectFormat.write(project));
             var strict = new PortableOptions(driver.id(), false, null, null, null, List.of(), List.of(), null, true);
             var payload = PortablePackageWriter.build(project, strict);
@@ -196,7 +196,7 @@ class ClassicPortablePackageTest {
                         new CommandEvent("v2", 320, NativeCommand.FM_VOICE, List.of(), "voice2")), "RESET");
         var psg = new Sequence("psg", "PSG", "PSG", 768, null, 127, notes);
         return new StudioProject(4, "Tempo and voice fixture", "S3K", 24, tempo, voices, List.of(fm, psg),
-                List.of(new Clip("fm-c", "fm", "FM1", 0, 768), new Clip("psg-c", "psg", "PSG1", 0, 768)));
+                List.of(new Clip("fm-c", "fm", "FM1", 0, 768), new Clip("psg-c", "psg", "PSG1", 0, 768)), TargetGame.S3K, null);
     }
 
     private static Observation render(StudioProject project, PackageDriver driver) throws Exception {
@@ -369,11 +369,67 @@ class ClassicPortablePackageTest {
         var bank = NativeProgram.of(0, 0, 0, 30,
                 bytes("00 00 01 00 01 80 0a 00 00 00 f2"), List.of(), List.of());
         var nativeProject = new StudioProject(5, "Native fixture", "S3K", 24, 128,
-                List.of(), List.of(), List.of(), List.of(), List.of(), bank);
+                List.of(), List.of(), List.of(), List.of(), List.of(), bank, TargetGame.S3K, null);
         assertFailure("s1: native v5 banks are S3K-only", () ->
                 PortablePackageWriter.build(nativeProject, options(ClassicPackageDriver.S1)));
         assertFailure("s2: native v5 banks are S3K-only", () ->
                 PortablePackageWriter.build(nativeProject, options(ClassicPackageDriver.S2)));
+    }
+
+    @Test
+    void sourcePlaybackUsesDeclaredDriver() throws Exception {
+        for (var game : TargetGame.values()) {
+            var source = project(NativeCommand.DETUNE, 72).withTarget(game);
+            var expected = new Observation();
+            var actual = new Observation();
+            if (game == TargetGame.S3K) {
+                S3kRenderer.render(ProjectCompiler.compileWithAssets(source), 32, expected::capture, expected);
+            } else {
+                var driver = ClassicPackageDriver.valueOf(game.name());
+                int nativeTempo = game == TargetGame.S1 ? 7 : 193;
+                source = source.withSettings(source.name(), source.ticksPerBeat(), 0).withNativeTempo(nativeTempo);
+                var bank = driver.compile(source, nativeTempo);
+                var compiled = new CompiledProject(bank.bytes(), source.envelopes(), source.samples());
+                driver.preflight(compiled);
+                driver.render(compiled, 32, expected::capture, expected);
+            }
+            var playback = TargetPlayback.prepare(source);
+            assertEquals(game, playback.target());
+            if (source.nativeTempo() != null)
+                assertEquals(source.nativeTempo().intValue(), Byte.toUnsignedInt(playback.compiled().song()[5]));
+            playback.render(32, S3kRenderer.ChannelMask.NONE, actual::capture, actual);
+            assertEquals(expected.writes, actual.writes);
+            assertEquals(32, actual.audio.size());
+            for (int i = 0; i < 32; i++) assertArrayEquals(expected.audio.get(i), actual.audio.get(i));
+        }
+    }
+
+    @Test
+    void sonic1VolumeFitPreservesACompilableLevelWhenAPreviousVoiceHasHighTl() {
+        var source = project(NativeCommand.VOLUME, 72).withTarget(TargetGame.S1);
+        var previousBytes = new ArrayList<>(source.voices().getFirst().bytes());
+        previousBytes.set(24, 250);
+        var previousVoice = new Voice("previous", "High TL", previousBytes);
+        var first = new Sequence("first", "First", "FM", 6, previousVoice.id(), 127,
+                List.of(new NoteEvent("first-note", 0, 6, 60)));
+        var next = source.sequences().getFirst();
+        var quiet = new Sequence(next.id(), next.name(), next.type(), next.lengthTicks(), next.voiceId(), 30,
+                next.notes(), List.of(new CommandEvent("quiet", 2, NativeCommand.VOLUME, List.of(1)),
+                        new CommandEvent("recover", 3, NativeCommand.FM_VOLUME, List.of(128))), "RESET");
+        var clips = List.of(new Clip("first-clip", first.id(), "FM1", 0, 6),
+                new Clip("next-clip", quiet.id(), "FM1", 6, 6));
+        var voices = List.of(previousVoice, source.voices().getFirst());
+        var unsafe = new StudioProject(4, "Volume fit", "S3K", 24, 0,
+                voices, List.of(first, quiet), clips, TargetGame.S1, null);
+        assertFailure("overflows an S1 total-level update", () -> TargetPlayback.prepare(unsafe));
+
+        var fitted = ReconstructionEcho.s1SafeVolume(quiet, voices);
+        assertEquals(122, fitted.volume());
+        assertEquals(List.of(122), fitted.commands().getFirst().arguments());
+        assertEquals(List.of(127), fitted.commands().getLast().arguments());
+        var safe = new StudioProject(4, "Volume fit", "S3K", 24, 0,
+                voices, List.of(first, fitted), clips, TargetGame.S1, null);
+        assertDoesNotThrow(() -> TargetPlayback.prepare(safe));
     }
 
     private static PortableOptions options(ClassicPackageDriver driver) {
@@ -392,7 +448,7 @@ class ClassicPortablePackageTest {
                 List.of(new Clip("fm-c", "fm", "FM1", 0, 6), new Clip("psg-c", "psg", "PSG1", 0, 4),
                         new Clip("dac-c", "dac", "DAC", 0, 6)),
                 List.of(new Envelope("env", "Envelope", Envelope.PSG_VOLUME, StockAssets.unsigned(PSG))),
-                List.of(DacSample.of("sample", "PCM", 6, PCM)));
+                List.of(DacSample.of("sample", "PCM", 6, PCM)), TargetGame.S3K, null);
     }
 
     private static PortablePackageReader.Package archive(PortablePackageWriter.Payload payload) {

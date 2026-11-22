@@ -1,6 +1,5 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.CompiledProject;
 import com.openggf.audio.synth.ChipWriteObserver;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -37,7 +36,7 @@ final class VgmFile {
 
     private VgmFile() {}
 
-    static void write(CompiledProject compiled, String title, int frames, NativeExportLength.Loop loop,
+    static void write(TargetPlayback playback, String title, int frames, NativeExportLength.Loop loop,
                       Path path, ReconstructionStages.Progress progress) throws IOException {
         int total = sample((long) frames * NTSC_MASTER_CLOCKS_PER_FRAME);
         int loopSample = loop == null ? -1 : sample((long) loop.start() * NTSC_MASTER_CLOCKS_PER_FRAME);
@@ -48,7 +47,7 @@ final class VgmFile {
             var recorder = new Recorder(stream, total, loopSample);
             progress.report(0, frames + 1, "Recording chip writes");
             try {
-                S3kRenderer.render(compiled, frames, pcm -> {
+                playback.render(frames, S3kRenderer.ChannelMask.NONE, pcm -> {
                     if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("VGM export cancelled");
                     recorder.presentation();
                     if (recorder.frames < frames && recorder.frames % 30 == 0)

@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
+
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.openggf.audio.synth.FastYm2612Chip;
 import com.openggf.audio.synth.fast.FastYm2612Dsp;
@@ -94,6 +97,20 @@ class ReconstructionBendsTest {
         assertTrue(roundTrip(fit, bend) < 90);
     }
 
+    @Test void modulationTraceUsesTheClassicDriversNativeTiming() throws IOException {
+        var fit = new ReconstructionBendEncoding.Fit(ReconstructionBendEncoding.Mode.F0,
+                List.of(new NoteEvent("note", 0, FRAMES, PITCH)),
+                List.of(new CommandEvent("vibrato", 0, NativeCommand.MODULATION, List.of(1, 2, 7, 8))), 0);
+        var sonic1 = ReconstructionBendEncoding.frequencies(fit, VOICE, FRAMES, TargetProfile.of(TargetGame.S1));
+        var sonic2 = ReconstructionBendEncoding.frequencies(fit, VOICE, FRAMES, TargetProfile.of(TargetGame.S2));
+        var sonic3 = ReconstructionBendEncoding.frequencies(fit, VOICE, FRAMES, TargetProfile.of(TargetGame.S3K));
+        assertTrue(Arrays.stream(sonic1).distinct().count() > 1);
+        assertTrue(Arrays.stream(sonic2).distinct().count() > 1);
+        assertFalse(Arrays.equals(sonic1, sonic2));
+        assertFalse(Arrays.equals(sonic1, sonic3));
+        assertFalse(Arrays.equals(sonic2, sonic3));
+    }
+
     private static double roundTrip(ReconstructionBendEncoding.Fit fit, ReconstructionBends.Bend bend)
             throws IOException {
         var audio = render(fit.notes(), fit.commands());
@@ -159,7 +176,7 @@ class ReconstructionBendsTest {
     private static ReferenceAudio render(List<NoteEvent> notes, List<CommandEvent> commands) throws IOException {
         var sequence = new Sequence("clip", "Chip fixture", "FM", FRAMES, VOICE.id(), 118, notes, commands, "RESET");
         var project = new StudioProject(4, "Bend fixture", "S3K", 30, 0, List.of(VOICE), List.of(sequence),
-                List.of(new Clip("clip", sequence.id(), "FM1", 0, FRAMES)));
+                List.of(new Clip("clip", sequence.id(), "FM1", 0, FRAMES)), TargetGame.S3K, null);
         var mono = new float[FRAMES * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION];
         var position = new int[1];
         var attacks = new int[1];

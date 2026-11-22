@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonParser;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.CompiledProject;
@@ -74,7 +76,7 @@ class NativeBankPlaybackTest {
         put(bank, 0x55, 0xF2, 0x91, 2, 0xF2, 0xEF, 0, 0xBC, 2, 0xF2);
         var source = new StudioProject(5, "Inactive FM header", "S3K", 24, 0,
                 List.of(VOICE), List.of(), List.of(), List.of(), List.of(),
-                NativeProgram.of(BASE, HEADER, 0, PREVIEW, bank, List.of(), List.of()));
+                NativeProgram.of(BASE, HEADER, 0, PREVIEW, bank, List.of(), List.of()), TargetGame.S3K, null);
         var compiled = ProjectCompiler.compileWithAssets(source);
         var observation = observe(compiled);
         assertTrue(observation.hasAudio(), "PSG root must survive the extra FM declaration");
@@ -211,7 +213,7 @@ class NativeBankPlaybackTest {
         put(bank, 0x30, dac);
         put(bank, 0x40, fm1);
         return new StudioProject(5, "Restore fixture", "S3K", 24, 0, List.of(VOICE), List.of(), List.of(),
-                List.of(), List.of(), NativeProgram.of(BASE, HEADER, 0, PREVIEW, bank, List.of(), List.of()));
+                List.of(), List.of(), NativeProgram.of(BASE, HEADER, 0, PREVIEW, bank, List.of(), List.of()), TargetGame.S3K, null);
     }
 
     @Test void preservesAnUnsupportedNativeBankWithoutPublishingAudio() throws Exception {
@@ -223,7 +225,7 @@ class NativeBankPlaybackTest {
         put(bytes, 0x40, 0xF2);
         var source = new StudioProject(5, original.name(), "S3K", 24, 0, original.voices(),
                 List.of(), List.of(), original.envelopes(), original.samples(),
-                original.nativeProgram().withBank(bytes));
+                original.nativeProgram().withBank(bytes), TargetGame.S3K, null);
         Path packagePath = directory.resolve("archived.zip");
         ProjectPackage.write(source, packagePath);
         try (var zip = new ZipFile(packagePath.toFile())) {
@@ -241,7 +243,7 @@ class NativeBankPlaybackTest {
         var program = NativeProgram.of(BASE, HEADER, 0, PREVIEW, original.nativeProgram().bank(),
                 List.of(new NativeProgram.EnvelopeSlot("negative", 11)), List.of());
         var project = new StudioProject(5, original.name(), "S3K", 24, 0, original.voices(),
-                List.of(), List.of(), List.of(raw), List.of(), program);
+                List.of(), List.of(), List.of(raw), List.of(), program, TargetGame.S3K, null);
         Path archive = directory.resolve("raw-envelope.zip");
         ProjectPackage.write(project, archive);
         try (var zip = new ZipFile(archive.toFile())) {
@@ -292,7 +294,7 @@ class NativeBankPlaybackTest {
                 List.of(new NativeProgram.EnvelopeSlot("volume", 17), new NativeProgram.EnvelopeSlot("volume", 23)),
                 List.of(new NativeProgram.DacSlot(0x86, "sample", 1), new NativeProgram.DacSlot(0x89, "sample", 3)));
         return new StudioProject(5, "Original bank", "S3K", 24, 0, List.of(VOICE), List.of(), List.of(),
-                List.of(psg), List.of(sample, spare), nativeProgram);
+                List.of(psg), List.of(sample, spare), nativeProgram, TargetGame.S3K, null);
     }
 
     private static void put(byte[] bank, int offset, int... values) {

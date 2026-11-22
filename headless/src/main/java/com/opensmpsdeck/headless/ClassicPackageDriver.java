@@ -1,6 +1,10 @@
 package com.opensmpsdeck.headless;
 
+import com.openggf.audio.MusicRestoreSink;
+import com.openggf.audio.session.SmpsDriverSession;
 import com.openggf.audio.session.SmpsPhysicalPolicy;
+import com.openggf.audio.smps.DacData;
+import com.openggf.audio.smps.SmpsSequencer;
 import com.openggf.audio.smps.AbstractSmpsData;
 import com.openggf.audio.smps.FmVoiceOperatorOrder;
 import com.openggf.audio.smps.SmpsSequencerConfig;
@@ -207,9 +211,25 @@ enum ClassicPackageDriver implements PackageDriver {
 
     void render(CompiledProject project, int frames, S3kRenderer.ChannelMask mask,
                 S3kRenderer.PcmSink sink, ChipWriteObserver observer) throws IOException {
+        S3kRenderer.validatePresentations(frames);
+        try (var session = openPlayback(project, mask, observer)) {
+            S3kRenderer.renderFrames(session, frames, sink);
+        }
+    }
+
+    SmpsDriverSession openPlayback(CompiledProject project, S3kRenderer.ChannelMask mask, ChipWriteObserver observer) {
+        return S3kRenderer.openPackageMusic(id, playbackData(project), dac(project), config, policy, mask, observer);
+    }
+
+    SmpsSequencer timeline(CompiledProject project, MusicRestoreSink restore) {
         var data = playbackData(project);
-        var dac = S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), profile.dacBaseCycles());
-        S3kRenderer.renderPackageMusic(id, data, dac, config, policy, frames, mask, sink, observer);
+        var sequencer = new SmpsSequencer(data, dac(project), restore, config);
+        sequencer.setFallbackVoiceData(data);
+        return sequencer;
+    }
+
+    private DacData dac(CompiledProject project) {
+        return S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), profile.dacBaseCycles());
     }
 
     void require(boolean condition, String message) {

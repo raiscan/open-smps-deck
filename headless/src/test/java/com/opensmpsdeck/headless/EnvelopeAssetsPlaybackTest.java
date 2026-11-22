@@ -83,7 +83,7 @@ class EnvelopeAssetsPlaybackTest {
                     List.of(new NoteEvent("plain-note", 0, 4, 60)), List.of(), "RESET", null, null);
             var project = new StudioProject(3, source.name(), "S3K", 24, 0, List.of(),
                     List.of(source.sequences().getFirst(), plain),
-                    List.of(source.clips().getFirst(), new Clip("plain-clip", "plain", "PSG1", 8, 4)), source.envelopes());
+                    List.of(source.clips().getFirst(), new Clip("plain-clip", "plain", "PSG1", 8, 4)), source.envelopes(), TargetGame.S3K, null);
             int[] phrase = {0x99, 2, 0xFA, 0xF4, 0, 0xE7, 2};
             byte[] expected = psgBank(concat(psgReset(1, 1), phrase,
                     state.equals("RESET") ? psgReset(1, 1) : new int[0], phrase,
@@ -118,7 +118,7 @@ class EnvelopeAssetsPlaybackTest {
         var voice = new Voice("voice", "Native flags", Arrays.stream(voiceBytes).boxed().toList());
         var sequence = new Sequence("sequence", "Voice", "FM", 6, "voice", 100, source.sequences().getFirst().notes(),
                 List.of(), "RESET", null, null);
-        var project = new StudioProject(3, source.name(), "S3K", 24, 0, List.of(voice), List.of(sequence), source.clips(), List.of());
+        var project = new StudioProject(3, source.name(), "S3K", 24, 0, List.of(voice), List.of(sequence), source.clips(), List.of(), TargetGame.S3K, null);
         Capture actual = equivalent(project, fmBank(voiceBytes, concat(fmReset(100, 0), new int[]{0xB1, 6, 0xF2})),
                 Map.of(), Map.of(), 12);
         assertEquals(1, lastFm(actual, 0, 0x30));
@@ -228,7 +228,7 @@ class EnvelopeAssetsPlaybackTest {
                 127, notes, commands, repeat, psgEnvelope, modulationEnvelope);
         List<Voice> voices = type.equals("FM") ? List.of(new Voice("voice", "Original native patch", Arrays.stream(VOICE).boxed().toList())) : List.of();
         return new StudioProject(3, "Asset fixture", "S3K", 24, 0, voices, List.of(sequence),
-                List.of(new Clip("clip", "sequence", type + "1", 0, clipLength)), envelopes);
+                List.of(new Clip("clip", "sequence", type + "1", 0, clipLength)), envelopes, TargetGame.S3K, null);
     }
 
     static Envelope envelope(String id, String type, int... values) {

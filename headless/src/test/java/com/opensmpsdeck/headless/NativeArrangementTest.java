@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.DacSample;
@@ -10,6 +12,7 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectEdits;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import org.junit.jupiter.api.Test;
@@ -43,6 +46,20 @@ class NativeArrangementTest {
         assertEquals(0, dac.triggers().getFirst().tick());
         assertArrayEquals(bank, original.nativeProgram().bank());
         assertTrue(original.clips().isEmpty());
+    }
+
+    @Test void convertingAnS3kNativeBankPreservesTheEditableTarget() throws Exception {
+        var bank = nativeFixture().withTarget(TargetGame.S1);
+        var error = assertThrows(IllegalArgumentException.class, () -> TargetPlayback.prepare(bank));
+        assertTrue(error.getMessage().contains("s1: native S3K banks require an editable copy"));
+        var projected = NativeArrangement.project(bank);
+        var editable = NativeArrangement.editableCopy(bank);
+        for (var copy : List.of(projected, editable)) {
+            assertEquals(bank.target(), copy.target());
+            // Native banks carry the tempo in their own header, with no classic arrangement override.
+            assertEquals(bank.nativeTempo(), copy.nativeTempo());
+        }
+        assertThrows(IllegalArgumentException.class, () -> ProjectFormat.validate(bank.withNativeTempo(37)));
     }
 
     @Test void cliCopyRetainsVoiceAndDacRatesAndSupportsArrangementEdits(@TempDir Path directory) throws Exception {
@@ -87,7 +104,7 @@ class NativeArrangementTest {
         put(bank, 16, 0xF2, 0x81, 2, 0x99, 2, 0xF2);
         var program = NativeProgram.of(0x8000, 0, 0, 120, bank, List.of(), List.of());
         var source = new StudioProject(5, "Low PSG", "S3K", 24, 0,
-                List.of(), List.of(), List.of(), List.of(), List.of(), program);
+                List.of(), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
         var psg = NativeArrangement.editableCopy(source).sequences().getFirst();
         assertEquals(List.of(45, 60), psg.notes().stream().map(NoteEvent::pitch).toList());
         assertEquals(List.of(new CommandEvent("transpose-0", 0, NativeCommand.TRANSPOSE, List.of(0x37)),
@@ -104,7 +121,7 @@ class NativeArrangementTest {
         var voice = new Voice("voice", "FM organ", List.of(7, 1, 2, 3, 4, 31, 31, 31, 31,
                 0, 0, 0, 0, 0, 0, 0, 0, 15, 15, 15, 15, 32, 40, 48, 56));
         var source = new StudioProject(5, "Held effects", "S3K", 24, 0,
-                List.of(voice), List.of(), List.of(), List.of(), List.of(), program);
+                List.of(voice), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
 
         var copy = NativeArrangement.editableCopy(source);
         var commands = copy.sequences().getFirst().commands();
@@ -133,7 +150,7 @@ class NativeArrangementTest {
         var program = NativeProgram.of(0x8000, 0, 0, 24, bank, List.of(
                 new NativeProgram.EnvelopeSlot(noise.id(), 7), new NativeProgram.EnvelopeSlot(bend.id(), 4)), List.of());
         var source = new StudioProject(5, "PSG effects", "S3K", 24, 0,
-                List.of(), List.of(), List.of(), List.of(noise, bend), List.of(), program);
+                List.of(), List.of(), List.of(), List.of(noise, bend), List.of(), program, TargetGame.S3K, null);
 
         var copy = NativeArrangement.editableCopy(source);
         assertEquals(List.of(noise, bend), copy.envelopes());
@@ -157,7 +174,7 @@ class NativeArrangementTest {
         var program = NativeProgram.of(0x8000, 0, 0, 24, bank,
                 List.of(new NativeProgram.EnvelopeSlot(envelope.id(), 9)), List.of());
         var source = new StudioProject(5, "FM envelope", "S3K", 24, 0,
-                List.of(voice), List.of(), List.of(), List.of(envelope), List.of(), program);
+                List.of(voice), List.of(), List.of(), List.of(envelope), List.of(), program, TargetGame.S3K, null);
 
         var copy = NativeArrangement.editableCopy(source);
         var commands = copy.sequences().getFirst().commands();
@@ -202,7 +219,7 @@ class NativeArrangementTest {
                         new NativeProgram.DacSlot(0x90, "beat", 16)));
         return new StudioProject(5, "Native fixture", "S3K", 24, 0,
                 List.of(new Voice("voice", "Voice", Collections.nCopies(25, 0))),
-                List.of(), List.of(), List.of(), List.of(sample), program);
+                List.of(), List.of(), List.of(), List.of(sample), program, TargetGame.S3K, null);
     }
 
     private static void put(byte[] data, int start, int... bytes) {

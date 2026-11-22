@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.Clip;
@@ -92,7 +94,7 @@ class CatalogueCliTest {
                 new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(0xE7)),
                 new CommandEvent("hold", 6, NativeCommand.HOLD, List.of())), "RESET", envelope.id(), null);
         var project = new StudioProject(4, "Pitch-linked sizzle", "S3K", 24, 0, List.of(), List.of(source),
-                List.of(new Clip("noise-clip", source.id(), "PSG3", 0, 12)), List.of(envelope), List.of());
+                List.of(new Clip("noise-clip", source.id(), "PSG3", 0, 12)), List.of(envelope), List.of(), TargetGame.S3K, null);
         ProjectFiles.save(rips.resolve("noise.smps.json"), project, null);
         Path index = directory.resolve("noise-library.json");
         json("scan", index.toString(), "--rips", rips.toString());
@@ -107,7 +109,7 @@ class CatalogueCliTest {
         assertEquals("PSG3", match.variant().occurrences().stream()
                 .filter(InstrumentCatalogue.Occurrence::played).findFirst().orElseThrow().lane());
         Path target = directory.resolve("target.smps.json");
-        ProjectFiles.save(target, new StudioProject(4, "Target", "S3K", 24, 0, List.of(), List.of(), List.of()), null);
+        ProjectFiles.save(target, new StudioProject(4, "Target", "S3K", 24, 0, List.of(), List.of(), List.of(), TargetGame.S3K, null), null);
         Path deployed = directory.resolve("deployed.smps.json");
         json("apply", index.toString(), match.variant().id(), target.toString(), deployed.toString());
         var applied = ProjectFiles.load(deployed).project();

@@ -1,10 +1,10 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
@@ -107,7 +107,7 @@ final class ReconstructionSustain {
         Double worst = null;
         String warning = null;
         for (var note : longest) {
-            var rms = probe(note.ticks, note.pitch, note.volume, note.voice.bytes());
+            var rms = probe(note.ticks, note.pitch, note.volume, note.voice.bytes(), project.target(), project.nativeTempo());
             double dip = midDip(rms);
             if (worst != null && dip <= worst) continue;
             worst = dip;
@@ -127,24 +127,27 @@ final class ReconstructionSustain {
                                       ReconstructionVoicing.Lane lane, InstrumentCatalogue.Asset asset) throws IOException {
         var note = entry.note();
         var part = score.source().parts().stream().filter(p -> p.id() == note.part()).findFirst().orElseThrow();
-        int volume = Math.max(ReconstructionEcho.fmVolumeFloor(asset.bytes()),
+        int volume = Math.max(ReconstructionEcho.fmVolumeFloor(asset.bytes(), score.inputs().profile()),
                 ReconstructionEcho.scaleVolume(S3kReconstruction.volume(part, note.midi()), lane.gainFor(note.part())));
         byte[] bytes = ReconstructionVoicing.patchBytes(asset, lane.articulation());
         var patch = new ArrayList<Integer>(bytes.length);
         for (byte value : bytes) patch.add(Byte.toUnsignedInt(value));
-        return probe(heldTicks(entry, lane), note.pitch(), volume, patch);
+        var profile = score.profile();
+        return probe(heldTicks(entry, lane), note.pitch(), volume, patch, profile.game(),
+                profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
     }
 
-    private static List<Double> probe(int duration, int pitch, int volume, List<Integer> patch) throws IOException {
+    private static List<Double> probe(int duration, int pitch, int volume, List<Integer> patch, TargetGame target, Integer nativeTempo) throws IOException {
         int ticks = Math.min(3 * PRESENTATIONS_PER_SECOND, duration);
         var voice = new Voice("probe", "Sustain", patch);
         var sequence = new Sequence("probe", "Sustain", "FM", ticks, voice.id(), volume,
                 List.of(new NoteEvent("probe", 0, ticks, pitch)));
         var project = new StudioProject(4, "Sustain probe", "S3K", 15, 0, List.of(voice),
-                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, ticks)));
-        var pcm = new float[ticks * ReconstructionAudition.FRAME_SAMPLES];
+                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, ticks)), target, nativeTempo);
+        int frames = (int) project.clock().frameAtTick(ticks);
+        var pcm = new float[frames * ReconstructionAudition.FRAME_SAMPLES];
         int[] offset = {0};
-        S3kRenderer.render(ProjectCompiler.compileWithAssets(project), ticks, samples -> {
+        TargetPlayback.prepare(project).render(frames, samples -> {
             for (short sample : samples) pcm[offset[0]++] = sample / 32768f;
         });
         return ReconstructionAudition.envelope(pcm);

@@ -1,5 +1,7 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.project.AudioReference;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.ReviewNote;
@@ -48,7 +50,7 @@ public class StudioDesignCapture {
             var renamed = new StudioProject(source.formatVersion(),
                     source.name() + " — Long project titles still leave room for playback and export controls",
                     source.mode(), source.ticksPerBeat(), source.tempo(), source.voices(), source.sequences(),
-                    source.clips(), source.envelopes(), source.samples(), source.nativeProgram());
+                    source.clips(), source.envelopes(), source.samples(), source.nativeProgram(), TargetGame.S3K, null);
             if (scene.endsWith("commands")) renamed = withCommands(renamed, scene.startsWith("dense"));
             if (scene.endsWith("-assets")) renamed = withAssets(renamed);
             if (scene.equals("reference-review")) {

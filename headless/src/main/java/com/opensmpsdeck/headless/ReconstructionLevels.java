@@ -1,7 +1,5 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.CompiledProject;
-import com.opensmpsdeck.project.ProjectCompiler;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -267,12 +265,12 @@ final class ReconstructionLevels {
         return new Level(loudness, 0);
     }
 
-    static Level renderLevel(CompiledProject compiled, int samples) throws IOException {
+    static Level renderLevel(TargetPlayback compiled, int samples) throws IOException {
         var loudness = new KWeightedLevel();
         int[] peak = {0};
         int[] remaining = {samples * 2};
         int presentations = Math.ceilDiv(samples, S3kRenderer.STEREO_FRAMES_PER_PRESENTATION);
-        S3kRenderer.render(compiled, presentations, pcm -> {
+        compiled.render(presentations, pcm -> {
             checkCancelled();
             int length = Math.min(pcm.length, remaining[0]);
             for (int i = 0; i < length; i += 2) {
@@ -318,16 +316,16 @@ final class ReconstructionLevels {
             return renderLevel(compile(notes, voicing), frames * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION);
         }
 
-        CompiledProject compile(List<ReconstructionAllocation.Entry> notes, Result voicing) throws IOException {
+        TargetPlayback compile(List<ReconstructionAllocation.Entry> notes, Result voicing) throws IOException {
             var ordered = notes.stream().sorted(Comparator.comparingInt(ReconstructionAllocation.Entry::startTick)).toList();
             var playback = ReconstructionRetriggers.articulate(ordered, score.retriggers(), timeline, voicing::articulation);
             var group = new ReconstructionAllocation.Result(allocation.version(), playback.notes(), allocation.timeBase(),
                     null, null, null, null, allocation.chordVoicings());
-            var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
+            var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of(), score.profile());
             var arrangement = S3kReconstruction.arrangeAllocated("Level probe", score.inputs().ticksPerBeat(),
                     timeline.ticks(), source, group, null, catalogue, matches, Map.of(), voicing.lanes(),
                     true, false, Map.of(), playback.origins(), Map.of(), null, Map.of(), voicing.sourceInstruments());
-            return ProjectCompiler.compileWithAssets(arrangement.project());
+            return TargetPlayback.prepare(arrangement.project());
         }
     }
 

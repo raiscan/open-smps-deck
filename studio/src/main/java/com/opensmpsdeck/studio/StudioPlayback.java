@@ -3,7 +3,7 @@ package com.opensmpsdeck.studio;
 import com.opensmpsdeck.headless.ProjectRenderTiming;
 import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.project.AudioReference;
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.project.StudioProject;
 
 import javax.sound.sampled.AudioFormat;
@@ -196,7 +196,7 @@ final class StudioPlayback implements AutoCloseable {
     }
 
     /** Keep each rendered presentation for sample-aligned looping and monitor switches. */
-    private static final class RenderBuffer {
+    static final class RenderBuffer {
         private final short[][] frames;
         private int next;
         private Exception error;
@@ -206,8 +206,7 @@ final class StudioPlayback implements AutoCloseable {
 
         void render(StudioProject source, S3kRenderer.ChannelMask mask) {
             try {
-                var binary = ProjectCompiler.compileWithAssets(source);
-                S3kRenderer.render(binary, size(), mask, this::append);
+                TargetPlayback.prepare(source).render(size(), mask, this::append);
             } catch (Exception failure) {
                 synchronized (this) {
                     error = failure;

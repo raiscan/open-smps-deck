@@ -1,7 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.StudioProject;
 
 import java.io.IOException;
@@ -47,7 +47,7 @@ public final class CatalogueMatcher {
     private CatalogueMatcher() {}
 
     public static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
-        return match(index, audio, options, false, Set.of());
+        return match(index, audio, options, false, Set.of(), TargetGame.S3K);
     }
 
     static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options) throws IOException {
@@ -56,11 +56,16 @@ public final class CatalogueMatcher {
 
     static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options,
                               Set<String> variants) throws IOException {
-        return match(index, audio, options, true, variants);
+        return matchAssets(index, audio, options, variants, TargetGame.S3K);
+    }
+
+    static Report matchAssets(InstrumentCatalogue index, ReferenceAudio audio, Options options,
+                              Set<String> variants, TargetGame target) throws IOException {
+        return match(index, audio, options, true, variants, target);
     }
 
     private static Report match(InstrumentCatalogue index, ReferenceAudio audio, Options options,
-                                boolean rawAssets, Set<String> variants) throws IOException {
+                                boolean rawAssets, Set<String> variants, TargetGame target) throws IOException {
         float[] samples = audio.samples();
         var reference = AudioFingerprint.extract(samples, audio.sampleRate());
         double seconds = samples.length / (double) audio.sampleRate();
@@ -89,7 +94,7 @@ public final class CatalogueMatcher {
                     continue;
                 }
                 try {
-                    var probe = CataloguePlayback.matchProbe(index, variant.id(), options.midi(), gate, rawAssets);
+                    var probe = CataloguePlayback.matchProbe(index, variant.id(), options.midi(), gate, rawAssets, target);
                     var fingerprint = describeProbe(probe, referenceFrames);
                     ranked.add(new Ranked(hit.asset().id(), variant.id(), hit.asset().kind(), variant.name(),
                             variant.roles(), reference.distance(fingerprint), fingerprint.summary()));
@@ -123,10 +128,10 @@ public final class CatalogueMatcher {
     }
 
     static double assetDistance(InstrumentCatalogue index, AudioFingerprint reference, String variant,
-                                int midi, int gateTicks, int frames) throws IOException {
+                                int midi, int gateTicks, int frames, TargetGame target) throws IOException {
         checkInterrupted();
         return reference.distance(describeProbe(
-                CataloguePlayback.matchProbe(index, variant, midi, gateTicks, true), frames)).total();
+                CataloguePlayback.matchProbe(index, variant, midi, gateTicks, true, target), frames)).total();
     }
 
     private static AudioFingerprint describeProbe(StudioProject probe, int referenceFrames) throws IOException {
@@ -134,7 +139,7 @@ public final class CatalogueMatcher {
         int samplesPerFrame = S3kRenderer.STEREO_FRAMES_PER_PRESENTATION;
         float[] audio = new float[frames * samplesPerFrame];
         int[] position = {0};
-        S3kRenderer.render(ProjectCompiler.compileWithAssets(probe), frames, pcm -> {
+        TargetPlayback.prepare(probe).render(frames, pcm -> {
             checkInterrupted();
             for (int i = 0; i < samplesPerFrame; i++)
                 audio[position[0]++] = (pcm[2 * i] + pcm[2 * i + 1]) / 65536.0f;

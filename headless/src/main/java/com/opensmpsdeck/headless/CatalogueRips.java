@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectFiles;
@@ -115,7 +117,7 @@ final class CatalogueRips {
         }
         var program = NativeProgram.of(base, 0, voices, PREVIEW_FRAMES, bank, List.of(), List.of());
         var project = new StudioProject(5, path.getFileName().toString(), "S3K", 24, program.tempo(),
-                List.of(), List.of(), List.of(), List.of(), List.of(), program);
+                List.of(), List.of(), List.of(), List.of(), List.of(), program, TargetGame.S3K, null);
         return new Source(project, InstrumentCatalogue.digest(bank));
     }
 

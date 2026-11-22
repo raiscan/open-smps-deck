@@ -3,8 +3,6 @@ package com.opensmpsdeck.headless;
 import com.openggf.audio.session.SmpsDriverSession;
 import com.openggf.audio.synth.ChipWriteObserver;
 import com.openggf.audio.synth.PsgChip;
-import com.opensmpsdeck.project.CompiledProject;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 
 import java.io.IOException;
@@ -29,8 +27,8 @@ final class ReconstructionPsgTail {
         var oldProject = ProjectFiles.load(oldFile).project();
         var newProject = ProjectFiles.load(newFile).project();
         if (oldProject.nativeProgram() != null || newProject.nativeProgram() != null) return null;
-        var oldCompiled = ProjectCompiler.compileWithAssets(oldProject);
-        var newCompiled = ProjectCompiler.compileWithAssets(newProject);
+        var oldCompiled = TargetPlayback.prepare(oldProject);
+        var newCompiled = TargetPlayback.prepare(newProject);
         var changes = new ArrayList<LaneDifference>();
         for (String lane : ReconstructionAllocation.PSG) {
             if (oldProject.clips().stream().noneMatch(clip -> clip.lane().equals(lane))
@@ -41,7 +39,7 @@ final class ReconstructionPsgTail {
         return List.copyOf(changes);
     }
 
-    private static LaneDifference compare(CompiledProject before, CompiledProject after, String lane,
+    private static LaneDifference compare(TargetPlayback before, TargetPlayback after, String lane,
                                           long start, long length) throws IOException {
         int tone = ReconstructionAllocation.PSG.indexOf(lane);
         var mask = ReconstructionView.soloMask(List.of(lane));
@@ -52,8 +50,8 @@ final class ReconstructionPsgTail {
         long changed = 0, first = -1;
         String cause = null;
         boolean differentWrites = false;
-        try (var oldPlayback = S3kRenderer.openPlayback(before, mask, oldWrites);
-             var newPlayback = S3kRenderer.openPlayback(after, mask, newWrites)) {
+        try (var oldPlayback = before.open(mask, oldWrites);
+             var newPlayback = after.open(mask, newWrites)) {
             for (long base = 0; base < length; base += STEREO_FRAMES_PER_PRESENTATION) {
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("PSG tail comparison interrupted");
                 oldWrites.writes.clear();

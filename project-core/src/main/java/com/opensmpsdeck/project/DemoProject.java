@@ -21,7 +21,7 @@ public final class DemoProject {
                 new Clip("clip-a2",a.id(),"FM1",bar*4,bar*2),new Clip("clip-b2",b.id(),"FM1",bar*6,bar*2),
                 new Clip("clip-bass",low.id(),"FM3",0,bar*8),
                 new Clip("clip-answer1",answer.id(),"PSG1",bar,bar), new Clip("clip-answer2",answer.id(),"PSG1",bar*3,bar),
-                new Clip("clip-answer3",answer.id(),"PSG1",bar*5,bar*3)));
+                new Clip("clip-answer3",answer.id(),"PSG1",bar*5,bar*3)), TargetGame.S3K, null);
         ProjectFormat.validate(project); return project;
     }
     private static List<NoteEvent> notes(String prefix,int[][] data) {

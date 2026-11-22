@@ -1,6 +1,5 @@
 package com.opensmpsdeck.headless;
 
-import com.opensmpsdeck.project.ProjectCompiler;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -105,7 +104,7 @@ final class LowRegisterFit {
         var allocation = new ReconstructionAllocation.Result(ReconstructionStages.VERSION, packed);
         var project = S3kReconstruction.arrangeAllocated("Low register probe", 30, frames, source, allocation,
                 null, catalogue, Map.of(id, choices), Map.of(), Map.of(id, settings), false).project();
-        var mono = VoiceWindows.renderMono(ProjectCompiler.compileWithAssets(project), frames);
+        var mono = VoiceWindows.renderMono(project, frames);
         double fit = 0, check = 0, centroidError = 0;
         for (int i = 0; i < probes.size(); i++) {
             var probe = probes.get(i);

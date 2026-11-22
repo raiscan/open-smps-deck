@@ -2,9 +2,8 @@
 
 Portable schema 4 targets Sonic 1 (`s1`), Sonic 2 (`s2`) or
 Sonic 3 & Knuckles (`s3k`, the default). Sonic CD's FM loader has no music
-or DAC implementation and `driver: scd` is rejected. Projects retain their
-`S3K` mode and editing clock. Reconstruction can save a target before
-analysis. Portable and mod export default to that target and accept an
+or DAC implementation and `driver: scd` is rejected. Projects retain their `S3K` mode. Reconstruction can save a target before
+analysis and uses its native duration clock for new classic builds. Portable and mod export default to that target and accept an
 explicit driver override. See the [package contract](portable-package.md) for the bank
 and asset wire format.
 
@@ -34,11 +33,29 @@ order. The pinned loaders and sequencer normalize the order for chip writes,
 including the [Sonic1SmpsData load-time swap](../../openggf-audio/src/main/java/com/openggf/game/sonic1/audio/smps/Sonic1SmpsData.java)
 and [Sonic3kSmpsData's raw `30,38,34,3C` traversal](../../openggf-audio/src/main/java/com/openggf/game/sonic3k/audio/smps/Sonic3kSmpsData.java).
 
+## Project playback
+
+`TargetPlayback.prepare(project)` compiles and selects the backend from the
+project's saved target. S3K uses the existing arrangement compiler, native
+bank reader and pinned S3K session. S1 and S2 use the classic arrangement
+compiler and portable-bank preflight, then load the bank into the pinned
+Sonic 1 or Sonic 2 session. The session uses the target's DAC rate base
+and supports channel masks and chip-write observers.
+
+Reconstruction uses this path for patch and articulation probes, level and
+drum balance, lead effects, bend traces, timeline and PSG-tail comparisons,
+and final, vocal phrase and audition WAVs. Studio uses it for playback and reconstruction
+monitoring. The standalone catalogue audition still creates S3K projects.
+The S3K PSG cymbal calibration also uses S3K projects because the cymbal
+envelopes and noise setup are specific to that driver. Raw S3K banks and
+native S3K-to-editable conversion retain their existing native reader.
+
 ## Tempo conversion
 
-Studio previews the editable source on the S3K clock. Portable and mod exports
-convert its tempo byte `t` to a target header byte `b` by matching the long-run
-number of duration ticks per NTSC frame.
+Classic playback and same-target export use the saved `nativeTempo` when
+present. Otherwise, classic playback and export convert the editable source
+tempo byte `t` to a target header byte `b` by matching the long-run number of
+duration ticks per NTSC frame.
 
 | Driver | Load and duration rule in the pinned sequencer | Rate | Export byte |
 |---|---|---|---|

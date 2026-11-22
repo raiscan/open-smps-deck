@@ -2,7 +2,6 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.StudioProject;
 
@@ -456,14 +455,14 @@ public final class ReconstructionView {
     static EvidenceSpectrum.Audio render(StudioProject project, Span span, List<String> solo,
                                                 EvidenceBends bends, boolean captureAudio) throws IOException {
         if (project.nativeProgram() != null || project.tempo() != 0)
-            throw new IllegalArgumentException("Render view requires an editable arrangement at 60 project ticks per second");
+            throw new IllegalArgumentException("Render view requires a reconstruction arrangement");
         int first = Math.max(0, (int) Math.floor((span.seconds(span.start, TimeBase.project) - EvidenceSpectrum.CONTEXT) * 60));
         int limit = ProjectRenderTiming.presentationCount(project);
         int end = Math.min(limit, (int) Math.ceil((span.seconds(span.end, TimeBase.project) + EvidenceSpectrum.CONTEXT) * 60));
         if (end <= first) return !captureAudio ? null : new EvidenceSpectrum.Audio(new float[0], SAMPLE_RATE, 0, limit / 60.0);
         var mono = captureAudio ? new float[(end - first) * STEREO_FRAMES_PER_PRESENTATION] : null;
         int[] tick = {0};
-        S3kRenderer.render(ProjectCompiler.compileWithAssets(project), end, soloMask(solo), samples -> {
+        TargetPlayback.prepare(project).render(end, soloMask(solo), samples -> {
             int current = tick[0]++;
             if (bends != null) bends.frame(current);
             int frame = current - first;

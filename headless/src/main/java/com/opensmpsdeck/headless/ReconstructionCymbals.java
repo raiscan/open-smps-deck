@@ -1,11 +1,12 @@
 package com.opensmpsdeck.headless;
 
+
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 
@@ -169,6 +170,7 @@ final class ReconstructionCymbals {
 
     static Map<Integer, Double> gains(ReconstructionStages.Score score, List<ReconstructionAllocation.Entry> entries)
             throws IOException {
+        if (score.inputs().targetGame() != TargetGame.S3K) return Map.of();
         if (entries.stream().noneMatch(entry -> automatic(entry.reason()))) return Map.of();
         var levels = measure(score, true);
         var byPitch = new HashMap<Integer, List<Double>>();
@@ -224,12 +226,12 @@ final class ReconstructionCymbals {
                 clips.add(new Clip(id, id, "PSG3", level * spacing, ticks));
             }
             var project = new StudioProject(4, "PSG calibration", "S3K", 30, 0, List.of(),
-                    sequences, clips, List.of(envelope));
+                    sequences, clips, List.of(envelope), TargetGame.S3K, null);
             int frames = spacing * 16;
             float[] audio = new float[frames * 800];
             int[] frame = {0};
             try {
-                S3kRenderer.render(ProjectCompiler.compileWithAssets(project), frames, pcm -> {
+                TargetPlayback.prepare(project).render(frames, pcm -> {
                     int offset = frame[0]++ * 800;
                     for (int i = 0; i < 800; i++) audio[offset + i] = (pcm[2 * i] + pcm[2 * i + 1]) / 65536f;
                 });

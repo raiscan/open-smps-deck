@@ -7,6 +7,7 @@ import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.RetailSongOrigin;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.Voice;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -105,7 +106,7 @@ class DisassemblyKitTest {
         var sample = DacSample.of("sample", "Stock DAC", 6, Arrays.copyOfRange(pcm, 1, 4)).withOrigin(origin);
         var retail = new RetailSongOrigin("retail-song", "s3k", 1, "a".repeat(64));
         var fixture = new StudioProject(4, project.name(), project.mode(), project.ticksPerBeat(), project.tempo(),
-                List.of(stockVoice, project.voices().get(1)), project.sequences(), project.clips(), List.of(), List.of(sample))
+                List.of(stockVoice, project.voices().get(1)), project.sequences(), project.clips(), List.of(), List.of(sample), project.target(), project.nativeTempo())
                 .withDerivedFrom(retail);
 
         var artifact = artifact(fixture);
@@ -219,7 +220,8 @@ class DisassemblyKitTest {
     private static StudioProject nativeProject(byte[] bytes, List<DacSample> samples, List<NativeProgram.DacSlot> dac) {
         var bank = NativeProgram.of(bytes[0] == (byte) 0xA7 ? 0x8000 : 0, bytes[0] == (byte) 0xA7 ? 2 : 0,
                 0, 60, bytes, List.of(), dac);
-        return new StudioProject(5, "Test bank", "S3K", 24, bank.tempo(), List.of(), List.of(), List.of(), List.of(), samples, bank);
+        return new StudioProject(5, "Test bank", "S3K", 24, bank.tempo(), List.of(), List.of(), List.of(), List.of(), samples, bank,
+                TargetGame.S3K, null);
     }
 
     private static byte[] assemble(DisassemblyKit kit) {

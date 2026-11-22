@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
@@ -45,7 +46,12 @@ final class S3kReconstruction {
                      @ReconstructionStages.Nullable String reason) {
         Reduction(MidiScore.Note note, Change change) { this(note, change, null, null); }
     }
-    record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {}
+    record Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions,
+                 TargetProfile profile) {
+        Score(List<MidiScore.Part> parts, List<MidiScore.Note> notes, List<Reduction> reductions) {
+            this(parts, notes, reductions, TargetProfile.S3K);
+        }
+    }
     record Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                   List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends,
                   List<VoicedGate> voicedGates, int assignmentClipCost, Integer arpeggioExtraNoteBytes,
@@ -169,7 +175,7 @@ final class S3kReconstruction {
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> choices,
                           Map<ReconstructionVoices.Key, ReconstructionVoices.Choice> spillChoices,
                           Map<Integer, ReconstructionEcho.Estimate> echoes) {
-        return arrange(name, ticksPerBeat, frames, score, catalogue, choices, spillChoices, echoes, TargetProfile.S3K);
+        return arrange(name, ticksPerBeat, frames, score, catalogue, choices, spillChoices, echoes, score.profile());
     }
 
     static Result arrange(String name, int ticksPerBeat, int frames, Score score, InstrumentCatalogue catalogue,
@@ -238,12 +244,12 @@ final class S3kReconstruction {
         for (int i = 0; i < fm.size(); i++) writeToneLane("FM", "FM" + (i + 1), fm.get(i), parts, sequences, clips, repeats);
         for (int i = 0; i < psg.size(); i++) writeToneLane("PSG", "PSG" + (i + 1), psg.get(i), parts, sequences, clips, repeats);
         writeDacLane(dac, sequences, clips, repeats);
+        if (profile.game() == TargetGame.S1)
+            sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, voices.values()));
         StudioProject project = new StudioProject(4, name, "S3K", ticksPerBeat, 0,
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
-                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList())
-                .withTarget(profile.game())
-                .withNativeTempo(profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList(), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
         return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
                 dac.size(), echoNotes, List.copyOf(reductions), List.of(), List.of());
     }
@@ -373,7 +379,7 @@ final class S3kReconstruction {
             throws java.io.IOException {
         return arrangeAllocated(name, ticksPerBeat, frames, score, allocation, structure, catalogue, matches,
                 echoes, voicing, copies, bends, scopes, origins, scopedDrumGains, layout, assignments, sourceInstruments,
-                policies, levels, layers, fmOnly, policyDecisions, TargetProfile.S3K);
+                policies, levels, layers, fmOnly, policyDecisions, score.profile());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
@@ -477,7 +483,7 @@ final class S3kReconstruction {
                     var toneLane = isFm ? fm.get(ReconstructionAllocation.FM.indexOf(lane))
                             : psg.get(ReconstructionAllocation.PSG.indexOf(lane));
                     int extra = placeChord(chord, entry, part, voice, asset, settings, catalogue, toneLane,
-                            voices, envelopes, gates, assignment != null, psgOffset);
+                            voices, envelopes, gates, assignment != null, psgOffset, profile);
                     if (chord.arpeggio())
                         arpeggioExtraNoteBytes = extra + (arpeggioExtraNoteBytes == null ? 0 : arpeggioExtraNoteBytes);
                     continue;
@@ -493,7 +499,7 @@ final class S3kReconstruction {
                 }
                 int duration = voicedDuration(entry, articulation);
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
-                int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes()) : 0;
+                int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes(), profile) : 0;
                 if (voice != null) volume = voicedVolume(volume, floor, voice.gainFor(part.id()), psgOffset);
                 boolean pitchedNoise = entry.laneType() == ReconstructionLaneType.NOISE;
                 var playedNote = pitchedNoise ? new MidiScore.Note(note.partId(), ReconstructionCymbals.PITCH,
@@ -553,7 +559,7 @@ final class S3kReconstruction {
                         }
                         int scopedVolume = volume;
                         if (scoped.gain() != null || !selected.id().equals(asset.id())) {
-                            int selectedFloor = isFm ? ReconstructionEcho.fmVolumeFloor(selected.bytes()) : 0;
+                            int selectedFloor = isFm ? ReconstructionEcho.fmVolumeFloor(selected.bytes(), profile) : 0;
                             double gain = scoped.gain() == null ? voice.gain() : scoped.gain();
                             int raw = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
                             scopedVolume = voicedVolume(raw, selectedFloor, voice.gainFor(part.id(), gain),
@@ -573,7 +579,7 @@ final class S3kReconstruction {
                         current = next;
                     }
                     placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration, placed.detune,
-                            voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes, profile.clock());
+                            voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes, profile);
                     if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
                             curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
@@ -615,6 +621,8 @@ final class S3kReconstruction {
         for (int i = 0; i < psg.size(); i++)
             assignmentClipCost += writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
         writeDacLane(dac, sequences, clips, repeats);
+        if (profile.game() == TargetGame.S1)
+            sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, voices.values()));
         if (!scopes.isEmpty() || !allocation.chords().isEmpty() || !policies.isEmpty() || !layers.isEmpty()) {
             var used = new HashSet<String>();
             for (var sequence : sequences) {
@@ -630,8 +638,7 @@ final class S3kReconstruction {
             }
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
-                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values())).withTarget(profile.game())
-                .withNativeTempo(profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
+                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
                 List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes,
                 coverage, layerResults, List.copyOf(lanePolicyCopies), decisions == null ? List.of() : List.copyOf(decisions));
@@ -648,7 +655,7 @@ final class S3kReconstruction {
                                   MidiScore.Part part, ReconstructionVoicing.Lane voice, InstrumentCatalogue.Asset asset,
                                   ReconstructionOverrides.Settings settings, InstrumentCatalogue catalogue,
                                   List<Placement> lane, Map<String, Voice> voices, Map<String, Envelope> envelopes,
-                                  List<VoicedGate> gates, boolean assigned, int psgOffset) {
+                                  List<VoicedGate> gates, boolean assigned, int psgOffset, TargetProfile profile) {
         int start = anchor.startTick(), end = anchor.endTick();
         boolean fm = anchor.lane().startsWith("FM");
         var articulation = voice == null ? ReconstructionVoicing.WRITTEN : voice.articulation();
@@ -671,7 +678,7 @@ final class S3kReconstruction {
                 byte[] patch = assigned ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, articulation);
                 id = ReconstructionVoicing.patchId(asset, patch);
                 voices.putIfAbsent(id, new Voice(id, asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
-                if (voice != null) level = Math.max(level, ReconstructionEcho.fmVolumeFloor(patch));
+                if (voice != null) level = Math.max(level, ReconstructionEcho.fmVolumeFloor(patch, profile));
             } else {
                 envelopes.putIfAbsent(id, catalogueEnvelope(catalogue, asset, id, asset.name()));
             }
@@ -707,8 +714,7 @@ final class S3kReconstruction {
             // remain stock material described as a patch of that voice.
             voices.putIfAbsent(patch.id(), patch.withOrigin(
                     patchedOrigin(catalogue, asset, StockTable.bytes(patch.bytes()))));
-            int floor = patch.bytes().subList(21, 25).stream().filter(tl -> (tl & 128) != 0)
-                    .mapToInt(tl -> tl & 127).max().orElse(0);
+            int floor = ReconstructionEcho.fmVolumeFloor(patch.bytes()::get, profile);
             var placement = chordPlacement(note, tuning.note(), start, release, patch.id(), Math.max(level, floor), tuning.detune());
             placement.noteId = anchor.note().id();
             lane.add(placement);
@@ -841,10 +847,10 @@ final class S3kReconstruction {
                 var psgVoice = envelopes.get(tone.asset());
                 var layerNote = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
                 var layer = targetFm
-                        ? fmLayer(dry, tone, fmVoice, layerNote, settings, start, end, voices, catalogue, instruments)
+                        ? fmLayer(dry, tone, fmVoice, layerNote, settings, start, end, voices, catalogue, instruments, profile)
                         : psgLayer(dry, tone, fmVoice, psgVoice, layerNote, settings, start, end, envelopes, levels, profile.psg());
                 if (layer != null) {
-                    curve = copyBend(dry, layer, fmVoice, targetFm, settings.detune());
+                    curve = copyBend(dry, layer, fmVoice, targetFm, settings.detune(), profile);
                     layer.noteId = dry.noteId;
                     slot.lane().add(slot.index(), layer);
                 } else reason = targetFm ? "No usable FM instrument" : "Source has no measurable PSG level match";
@@ -867,38 +873,38 @@ final class S3kReconstruction {
     }
 
     private static ReconstructionLayers.Curve copyBend(Placement dry, Placement layer, Voice source,
-                                                       boolean targetFm, int detune) throws java.io.IOException {
+                                                       boolean targetFm, int detune, TargetProfile profile) throws java.io.IOException {
         if (dry.bend == null) return null;
         var copy = ReconstructionLayerPitch.copy(dry.bend, source, targetFm, layer.end - layer.event.start(),
-                dry.event.note().pitch(), layer.event.note().pitch(), detune);
+                dry.event.note().pitch(), layer.event.note().pitch(), detune, profile);
         layer.bend = copy.fit();
         return copy.curve();
     }
 
     private static Placement fmLayer(Placement dry, Tone tone, Voice voice, MidiScore.Note note,
                                      ReconstructionLayers.Settings settings, int start, int end, Map<String, Voice> voices,
-                                     InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments) {
+                                     InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments, TargetProfile profile) {
         int baseVolume = tone.volume();
         var vibrato = settings.mode() == ReconstructionLayers.Mode.chorus ? null : tone.vibrato();
         int detune = dry.detune;
         if (voice == null) {
             var fitted = instruments == null ? null : instruments.get(ReconstructionVoicePlan.SourceInstrument.id(note.partId()));
-            var profile = fitted == null ? null : fitted.fm();
-            var asset = profile == null || profile.variantId() == null ? catalogue.assets().stream()
+            var fittedFm = fitted == null ? null : fitted.fm();
+            var asset = fittedFm == null || fittedFm.variantId() == null ? catalogue.assets().stream()
                     .filter(candidate -> candidate.kind() == InstrumentCatalogue.Kind.FM_VOICE).findFirst().orElse(null)
-                    : catalogue.match(profile.variantId()).asset();
+                    : catalogue.match(fittedFm.variantId()).asset();
             if (asset == null) return null;
-            var patch = profile == null ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, profile.articulation());
+            var patch = fittedFm == null ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, fittedFm.articulation());
             String id = ReconstructionVoicing.patchId(asset, patch);
             voice = voices.computeIfAbsent(id, key -> new Voice(key, asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
             baseVolume = voicedVolume(Math.min(127, tone.volume() + 24), 0,
-                    profile == null ? 1 : profile.gainFor(note.partId()), 0);
-            detune = profile == null ? 0 : profile.effects().detune();
+                    fittedFm == null ? 1 : fittedFm.gainFor(note.partId()), 0);
+            detune = fittedFm == null ? 0 : fittedFm.effects().detune();
             vibrato = null;
         }
         var patch = new byte[voice.bytes().size()];
         for (int i = 0; i < patch.length; i++) patch[i] = voice.bytes().get(i).byteValue();
-        int floor = ReconstructionEcho.fmVolumeFloor(patch);
+        int floor = ReconstructionEcho.fmVolumeFloor(patch, profile);
         int volume = fmLayerVolume(baseVolume, floor, settings.attenuation());
         var layer = new Placement(new Event(note, start, end, dry.event.priority(), voice.id(), volume));
         layer.detune = Math.clamp(detune + settings.detune(), -128, 127);
@@ -1061,7 +1067,7 @@ final class S3kReconstruction {
                     placed = new Placement(new Event(pitched, start, end, dry.event.priority(), envelope.id(), volume));
                 }
                 if (dry.bend != null) {
-                    var curve = copyBend(dry, placed, voices.get(tone.asset()), fmDouble, fmDouble ? rule.fmDetune() : 0);
+                    var curve = copyBend(dry, placed, voices.get(tone.asset()), fmDouble, fmDouble ? rule.fmDetune() : 0, profile);
                     bendLayers.add(new ReconstructionLanePolicies.BendLayer(id, start, end, slot.id(), curve, null));
                 }
                 placed.noteId = dry.noteId;
@@ -1083,7 +1089,7 @@ final class S3kReconstruction {
                 count++;
             }
             int promoted = promoteCounters(scoped, sources, freed, moved, fm, psg, voices, gates, catalogue,
-                    instruments, parts, layers, decisions);
+                    instruments, parts, layers, decisions, profile);
             coverage.add(new ReconstructionLanePolicies.Coverage(scoped.index(), kind, mode, eligible, count,
                     busy, incompatible, movedFromFm, promoted, byLane, bendLayers.isEmpty() ? null : List.copyOf(bendLayers)));
         }
@@ -1147,7 +1153,7 @@ final class S3kReconstruction {
                                        Map<String, Voice> voices, List<VoicedGate> gates, InstrumentCatalogue catalogue,
                                        Map<String, ReconstructionVoicing.SourceSound> instruments,
                                        Map<Integer, MidiScore.Part> parts, Map<String, ReconstructionLayers.Request> layers,
-                                       List<ReconstructionLanePolicies.Decision> decisions) {
+                                       List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile) {
         if (freed.isEmpty() || instruments == null) return 0;
         int promoted = 0;
         for (var source : sources) {
@@ -1175,7 +1181,7 @@ final class S3kReconstruction {
                 var id = ReconstructionVoicing.patchId(asset, patch);
                 var part = parts.get(note.partId());
                 voices.putIfAbsent(id, new Voice(id, part.name() + " / " + asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
-                int level = voicedVolume(volume(part, note), ReconstructionEcho.fmVolumeFloor(patch),
+                int level = voicedVolume(volume(part, note), ReconstructionEcho.fmVolumeFloor(patch, profile),
                         sound.fm().gainFor(note.partId()), 0);
                 var placed = new Placement(new Event(note, start, dry.end, dry.event.priority(), id, level));
                 placed.noteId = dry.noteId;

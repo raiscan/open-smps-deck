@@ -5,7 +5,8 @@ import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.TargetClock;
@@ -51,12 +52,13 @@ final class ReconstructionBendEncoding {
     static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
                    ReconstructionVoicing.Vibrato vibrato, java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes)
             throws IOException {
-        return fit(note, startTick, duration, detune, voice, vibrato, changes, TargetClock.FRAME_CLOCK);
+        return fit(note, startTick, duration, detune, voice, vibrato, changes, TargetProfile.S3K);
     }
 
     static Fit fit(ReconstructionStages.Note note, int startTick, int duration, int detune, Voice voice,
                    ReconstructionVoicing.Vibrato vibrato, java.util.Map<Integer, ReconstructionVoicing.Vibrato> changes,
-                   TargetClock clock) throws IOException {
+                   TargetProfile profile) throws IOException {
+        var clock = profile.clock();
         var bend = note.bend();
         if (bend == null || duration < 4
                 || Math.abs(bend.points().getFirst().time() - clock.secondsAtTick(startTick)) > .025) return null;
@@ -68,7 +70,10 @@ final class ReconstructionBendEncoding {
             desired[i] = bend.cents(midpoint);
         }
         int pitch = note.pitch();
-        double base = linear(packed(new Pitch(pitch, detune)));
+        double base = linear(profile.game() == TargetGame.S3K ? packed(new Pitch(pitch, detune))
+                : frequencies(new Fit(Mode.E7, List.of(new NoteEvent("base", 0, duration, pitch)),
+                        List.of(new CommandEvent("detune", 0, NativeCommand.DETUNE, List.of(detune & 255))), 0),
+                        voice, duration, profile)[0]);
         double baseline = 0, excursion = 0;
         for (double cents : desired) {
             baseline += cents * cents;
@@ -78,9 +83,9 @@ final class ReconstructionBendEncoding {
         double flatError = Math.sqrt(baseline / duration);
 
         int limit = Math.max(14, (int) Math.ceil(excursion / 80) + 2);
-        Fit steps = measure(steps(pitch, detune, base, desired, limit), voice, base, desired);
+        Fit steps = measure(steps(pitch, detune, base, desired, limit), voice, base, desired, profile);
         boolean modulated = vibrato != null || !changes.isEmpty();
-        Fit ramp = !modulated ? measure(ramp(pitch, detune, base, desired), voice, base, desired) : null;
+        Fit ramp = !modulated ? measure(ramp(pitch, detune, base, desired), voice, base, desired, profile) : null;
         // Prefer the more compact ramp when the scores differ by less than 10 cents.
         Fit best = ramp != null && (steps == null || ramp.rmseCents() <= steps.rmseCents() + 10) ? ramp : steps;
         if (best == null || best.rmseCents() > Math.min(90, flatError * .66)) return null;
@@ -209,9 +214,9 @@ final class ReconstructionBendEncoding {
         return new Fit(Mode.F0, notes, commands, 0);
     }
 
-    private static Fit measure(Fit fit, Voice voice, double base, double[] desired) throws IOException {
+    private static Fit measure(Fit fit, Voice voice, double base, double[] desired, TargetProfile profile) throws IOException {
         if (fit == null) return null;
-        int[] packed = frequencies(fit, voice, desired.length);
+        int[] packed = frequencies(fit, voice, desired.length, profile);
         double squaredError = 0;
         for (int tick = 0; tick < desired.length; tick++) {
             double cents = CENTS_PER_LOG * Math.log(linear(packed[tick]) / base);
@@ -222,20 +227,29 @@ final class ReconstructionBendEncoding {
     }
 
     static int[] frequencies(Fit fit, Voice voice, int duration) throws IOException {
+        return frequencies(fit, voice, duration, TargetProfile.S3K);
+    }
+
+    static int[] frequencies(Fit fit, Voice voice, int duration, TargetProfile profile) throws IOException {
+        var clock = profile.game() == profile.clock().game() ? profile.clock() : TargetProfile.of(profile.game()).clock();
         var sequence = new Sequence("probe", "Bend probe", "FM",
                 fit.notes().getLast().tick() + fit.notes().getLast().duration(), voice.id(), 100,
                 fit.notes(), fit.commands(), "RESET");
         var probe = new StudioProject(4, "Bend probe", "S3K", 30, 0, List.of(voice),
-                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, duration)));
+                List.of(sequence), List.of(new Clip("probe", sequence.id(), "FM1", 0, duration)), profile.game(),
+                profile.game() == TargetGame.S3K ? null : clock.tempo());
         var trace = new FrequencyTrace();
-        var compiled = ProjectCompiler.compileWithAssets(probe);
+        int lastFrame = (int) clock.frameAtTick(duration - 1);
         int[] packed = new int[duration];
-        S3kRenderer.render(compiled, duration, pcm -> packed[trace.tick++] = trace.packed, trace);
+        int[] tick = {0};
+        TargetPlayback.prepare(probe).render(lastFrame + 1, S3kRenderer.ChannelMask.NONE, pcm -> {
+            if (trace.frame++ == clock.frameAtTick(tick[0])) packed[tick[0]++] = trace.packed;
+        }, trace);
         return packed;
     }
 
     private static final class FrequencyTrace implements ChipWriteObserver {
-        int high, packed, tick;
+        int high, packed, frame;
 
         @Override public void onYm2612Write(int port, int register, int value) {
             if (port != 0) return;

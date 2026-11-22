@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 
 import java.io.IOException;
@@ -119,12 +121,12 @@ final class ReconstructionVoices {
 
     static Map<Key, Choice> select(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems, MidiScore sourceScore,
                                    List<MidiScore.Note> notes, long limitUs, Kind toneKind) throws IOException {
-        return select(catalogue, mix, stems, sourceScore, notes, limitUs, toneKind, Set.of());
+        return select(catalogue, mix, stems, sourceScore, notes, limitUs, toneKind, Set.of(), TargetGame.S3K);
     }
 
     static Map<Key, Choice> select(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems, MidiScore sourceScore,
                                    List<MidiScore.Note> notes, long limitUs, Kind toneKind,
-                                   Set<Integer> addedParts) throws IOException {
+                                   Set<Integer> addedParts, TargetGame target) throws IOException {
         Set<String> sustainedPsg = addedParts.isEmpty() ? Set.of() : catalogue.variants().stream()
                 .filter(variant -> {
                     var asset = catalogue.asset(variant.assetId());
@@ -156,24 +158,24 @@ final class ReconstructionVoices {
                     byPitch.computeIfAbsent(note.pitch(), ignored -> new ArrayList<>()).add(note);
                 for (var entry : byPitch.entrySet())
                     result.put(new Key(part.id(), entry.getKey()),
-                            choose(catalogue, audio, audioEndUs, source, timeline, entry.getValue(), Kind.DAC_SAMPLE, Set.of()));
+                            choose(catalogue, audio, audioEndUs, source, timeline, entry.getValue(), Kind.DAC_SAMPLE, Set.of(), target));
             } else {
                 boolean added = addedParts.contains(part.id());
                 if (added && stem != null) timeline = new Timeline(partNotes);
                 result.put(new Key(part.id(), null), choose(catalogue, audio, audioEndUs, source, timeline, partNotes,
-                        toneKind, added ? sustainedPsg : Set.of()));
+                        toneKind, added ? sustainedPsg : Set.of(), target));
             }
         }
         return Collections.unmodifiableMap(result);
     }
 
     private static Choice choose(InstrumentCatalogue catalogue, Path audio, long audioEndUs, String source, Timeline timeline,
-                                 List<MidiScore.Note> notes, Kind kind, Set<String> variants) throws IOException {
+                                 List<MidiScore.Note> notes, Kind kind, Set<String> variants, TargetGame target) throws IOException {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var windows = windows(notes, timeline, audioEndUs, kind);
         long spacing = drums ? 180_000 : INDEPENDENT_US;
         return rank(catalogue, audio, source, timeline, kind,
-                pickWindows(windows, drums ? 3 : 4, spacing, drums), variants);
+                pickWindows(windows, drums ? 3 : 4, spacing, drums), variants, target);
     }
 
     private static List<Window> windows(List<MidiScore.Note> notes, Timeline timeline, long audioEndUs, Kind kind) {
@@ -219,13 +221,13 @@ final class ReconstructionVoices {
     }
 
     private static Choice rank(InstrumentCatalogue catalogue, Path audio, String source, Timeline timeline,
-                               Kind kind, List<Window> windows, Set<String> variants) throws IOException {
+                               Kind kind, List<Window> windows, Set<String> variants, TargetGame target) throws IOException {
         boolean drums = kind == Kind.DAC_SAMPLE;
         var probes = new ArrayList<Probe>();
         var evidence = new LinkedHashMap<String, Evidence>();
         Set<String> kicks = drums ? corroboratedKicks(catalogue, audio, windows) : Set.of();
         for (Window window : windows) {
-            Probe probe = probe(catalogue, audio, source, kind, window, timeline, drums ? kicks : variants);
+            Probe probe = probe(catalogue, audio, source, kind, window, timeline, drums ? kicks : variants, target);
             probes.add(probe);
             double weight = 1.0 / (1.0 + probe.overlappingNotes() * 0.25);
             for (int rank = 0; rank < probe.matches().size(); rank++) {
@@ -255,7 +257,7 @@ final class ReconstructionVoices {
 
     static SectionPlan refineSections(InstrumentCatalogue catalogue, Path mix, Map<Integer, Path> stems,
                                       MidiScore source, List<MidiScore.Note> notes, long limitUs,
-                                      Map<Key, Choice> defaults) throws IOException {
+                                      Map<Key, Choice> defaults, TargetGame target) throws IOException {
         var choices = new LinkedHashMap<>(defaults);
         var trials = new ArrayList<SectionTrial>();
         var sections = new LinkedHashMap<Key, List<MidiScore.Note>>();
@@ -288,11 +290,11 @@ final class ReconstructionVoices {
             var selected = pickWindows(available, 4, INDEPENDENT_US, false);
             if (selected.size() < 4) continue;
             Choice candidate = rank(catalogue, audio, stems.containsKey(key.partId()) ? "stem" : "mix",
-                    timeline, Kind.FM_VOICE, List.of(selected.get(0), selected.get(2)), Set.of());
+                    timeline, Kind.FM_VOICE, List.of(selected.get(0), selected.get(2)), Set.of(), target);
             if (candidate.assetId() == null || candidate.assetId().equals(fallback.assetId())) continue;
             var validation = new ArrayList<Check>();
             for (Window window : List.of(selected.get(1), selected.get(3))) {
-                Check check = check(catalogue, audio, fallback, candidate, window);
+                Check check = check(catalogue, audio, fallback, candidate, window, target);
                 if (check != null) validation.add(check);
             }
             boolean accepted = validation.size() == 2 && validation.stream().allMatch(check ->
@@ -304,7 +306,7 @@ final class ReconstructionVoices {
     }
 
     private static Check check(InstrumentCatalogue catalogue, Path input, Choice fallback, Choice candidate,
-                               Window window) throws IOException {
+                               Window window, TargetGame target) throws IOException {
         var note = window.note();
         var audio = ReferenceAudio.read(input, note.startUs() / (double) MICROS_PER_SECOND,
                 window.durationUs() / (double) MICROS_PER_SECOND);
@@ -317,8 +319,8 @@ final class ReconstructionVoices {
         }
         int frames = (int) Math.ceil(audio.samples().length * (double) S3kRenderer.PRESENTATIONS_PER_SECOND / audio.sampleRate());
         int gate = gateTicks(note);
-        double original = CatalogueMatcher.assetDistance(catalogue, reference, fallback.variantId(), note.pitch(), gate, frames);
-        double replacement = CatalogueMatcher.assetDistance(catalogue, reference, candidate.variantId(), note.pitch(), gate, frames);
+        double original = CatalogueMatcher.assetDistance(catalogue, reference, fallback.variantId(), note.pitch(), gate, frames, target);
+        double replacement = CatalogueMatcher.assetDistance(catalogue, reference, candidate.variantId(), note.pitch(), gate, frames, target);
         return new Check(note.startUs(), window.durationUs(), note.pitch(), gate, window.overlappingNotes(),
                 original, replacement);
     }
@@ -388,7 +390,7 @@ final class ReconstructionVoices {
     }
 
     private static Probe probe(InstrumentCatalogue catalogue, Path path, String source, Kind kind, Window window,
-                               Timeline timeline, Set<String> variants) throws IOException {
+                               Timeline timeline, Set<String> variants, TargetGame target) throws IOException {
         var note = window.note();
         long start = note.startUs();
         int midi = kind == Kind.DAC_SAMPLE ? Math.clamp(note.pitch(), 12, 117) : note.pitch();
@@ -403,9 +405,9 @@ final class ReconstructionVoices {
         try {
             var options = new CatalogueMatcher.Options(kind, null, null, midi, gateTicks,
                     kind == Kind.DAC_SAMPLE ? SHORTLIST_SIZE : InstrumentCatalogue.PAGE_LIMIT);
-            var report = CatalogueMatcher.matchAssets(catalogue, audio, options, variants);
+            var report = CatalogueMatcher.matchAssets(catalogue, audio, options, variants, target);
             if (kind == Kind.DAC_SAMPLE && !variants.isEmpty() && report.matches().isEmpty())
-                report = CatalogueMatcher.matchAssets(catalogue, audio, options);
+                report = CatalogueMatcher.matchAssets(catalogue, audio, options, Set.of(), target);
             var seenAssets = new HashSet<String>();
             var hits = report.matches().stream()
                     .filter(row -> kind == Kind.DAC_SAMPLE || seenAssets.add(row.assetId()))

@@ -14,7 +14,7 @@ class EnvelopeAssetsTest {
         return new Sequence("s","Source",type,4,type.equals("FM")?"v":null,100,List.of(new NoteEvent("n",0,4,60)),List.of(),state,psg,mod);
     }
     private static StudioProject project(Sequence source,List<Envelope> envelopes,int length) {
-        return new StudioProject(3,"Assets","S3K",24,128,List.of(VOICE),List.of(source),List.of(new Clip("c","s",source.type()+"1",0,length)),envelopes);
+        return new StudioProject(3,"Assets","S3K",24,128,List.of(VOICE),List.of(source),List.of(new Clip("c","s",source.type()+"1",0,length)),envelopes, TargetGame.S3K, null);
     }
 
     @Test void validatesTheBoundedSafeNativeEnvelopeProfile() {
@@ -45,7 +45,7 @@ class EnvelopeAssetsTest {
                 json.replace("\"type\": \"PSG_VOLUME\"","\"type\": \"OTHER\""),json.replace("\"formatVersion\": 3","\"formatVersion\": 2"),json.replace("\"formatVersion\": 3","\"formatVersion\": 1"),
                 json.replace("\"psgEnvelopeId\": \"e\"","\"psgEnvelopeId\": \"missing\""),json.replace("\"modulationEnvelopeId\": null","\"modulationEnvelopeId\": \"e\"")))
             assertThrows(IllegalArgumentException.class,()->ProjectFormat.read(invalid),invalid);
-        assertThrows(IllegalArgumentException.class,()->ProjectFormat.write(new StudioProject(2,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes())));
+        assertThrows(IllegalArgumentException.class,()->ProjectFormat.write(new StudioProject(2,p.name(),p.mode(),p.ticksPerBeat(),p.tempo(),p.voices(),p.sequences(),p.clips(),p.envelopes(), TargetGame.S3K, null)));
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(project(source("FM","RESET","e",null),List.of(env),4)));
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(project(source("PSG","RESET",null,"e"),List.of(env),4)));
         assertThrows(IllegalArgumentException.class,()->ProjectFormat.validate(project(source("PSG","RESET","e",null),List.of(env,env),4)));

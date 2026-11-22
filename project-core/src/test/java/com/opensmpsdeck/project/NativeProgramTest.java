@@ -11,7 +11,7 @@ class NativeProgramTest {
     private final byte[] bank = {42, 0, 0, 1, 0, 1, (byte) 192, 0, 0, 0, 0};
     private final NativeProgram program = NativeProgram.of(0x8000,1,0,180,bank,List.of(),List.of());
     private final StudioProject project = new StudioProject(5,"Exact bank","S3K",24,192,List.of(),
-            List.of(),List.of(),List.of(),List.of(),program);
+            List.of(),List.of(),List.of(),List.of(),program, TargetGame.S3K, null);
 
     @Test void exactBankAndHeaderOffsetSurviveRoundTrip() {
         String json = ProjectFormat.write(project);
@@ -40,7 +40,7 @@ class NativeProgramTest {
         assertEquals(Map.of(37,raw.bytes()),ProjectCompiler.compileWithAssets(nativeProject).modulationEnvelopes());
 
         StudioProject authored = new StudioProject(4,"Authored","S3K",24,192,List.of(),
-                List.of(),List.of(),List.of(raw),List.of());
+                List.of(),List.of(),List.of(raw),List.of(), TargetGame.S3K, null);
         assertThrows(IllegalArgumentException.class,() -> ProjectFormat.write(authored));
         var outOfRange = new Envelope("mod","Bad modulation",Envelope.MODULATION,List.of(256));
         assertThrows(IllegalArgumentException.class,() -> ProjectEdits.updateEnvelope(nativeProject,outOfRange));

@@ -1,11 +1,11 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.synth.ChipWriteObserver;
-import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -36,10 +36,10 @@ final class ReconstructionSpill {
             int pitch = Math.clamp(note.note().pitch(), profile.psg().low(), profile.fm().high());
             int gate = Math.min(48, S3kReconstruction.voicedDuration(note, fm.articulation()));
             int raw = S3kReconstruction.volume(part, note.note().midi());
-            int fmLevel = Math.max(ReconstructionEcho.fmVolumeFloor(bytes), ReconstructionEcho.scaleVolume(raw, fm.gain()));
+            int fmLevel = Math.max(ReconstructionEcho.fmVolumeFloor(bytes, profile), ReconstructionEcho.scaleVolume(raw, fm.gain()));
             int psgLevel = psgLevel(fm, part, note);
             if (probes.stream().anyMatch(p -> p.pitch() == pitch && p.gate() == gate && p.fmLevel() == fmLevel)) continue;
-            var target = contour(catalogue, fm.variantId(), pitch, gate, fmLevel, bytes).amplitude();
+            var target = contour(catalogue, fm.variantId(), pitch, gate, fmLevel, bytes, profile).amplitude();
             probes.add(new Probe(pitch, gate, fmLevel, psgLevel, target));
         }
         var seen = new HashSet<String>();
@@ -50,8 +50,11 @@ final class ReconstructionSpill {
             if (asset.kind() != InstrumentCatalogue.Kind.PSG_VOLUME || !seen.add(variant.assetId())) continue;
             byte[] envelope = asset.bytes();
             if (!ReconstructionStemParts.startsAudibly(envelope)) continue;
+            // Classic targets can only fit contours that end in a single hold.
+            if (profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
+                    && !classicEnvelope(envelope)) continue;
             var contours = new java.util.ArrayList<Contour>();
-            for (var probe : probes) contours.add(contour(catalogue, variant.id(), probe.pitch(), probe.gate(), 127, null));
+            for (var probe : probes) contours.add(contour(catalogue, variant.id(), probe.pitch(), probe.gate(), 127, null, profile));
             int attack = contours.stream().mapToInt(Contour::attackAttenuation).max().orElseThrow();
             if (attack == 15) continue;
             // Leave room for the attack steps even at the quietest note's quantized level.
@@ -83,6 +86,12 @@ final class ReconstructionSpill {
         return best;
     }
 
+    private static boolean classicEnvelope(byte[] bytes) {
+        if (bytes.length < 2 || bytes[bytes.length - 1] != (byte) 0x80) return false;
+        for (int i = 0; i < bytes.length - 1; i++) if (bytes[i] < 0) return false;
+        return true;
+    }
+
     private static int psgLevel(ReconstructionVoicing.Lane fm, MidiScore.Part part,
                                 ReconstructionAllocation.Entry note) {
         int raw = S3kReconstruction.volume(part, note.note().midi());
@@ -90,8 +99,8 @@ final class ReconstructionSpill {
     }
 
     private static Contour contour(InstrumentCatalogue catalogue, String variant, int pitch, int gate,
-                                    int volume, byte[] fmPatch) throws IOException {
-        var raw = CataloguePlayback.matchProbe(catalogue, variant, pitch, gate, true);
+                                    int volume, byte[] fmPatch, TargetProfile profile) throws IOException {
+        var raw = CataloguePlayback.matchProbe(catalogue, variant, pitch, gate, true, profile.game());
         var setup = raw.sequences().getFirst();
         var envelopes = raw.envelopes();
         if (fmPatch == null) {
@@ -110,7 +119,8 @@ final class ReconstructionSpill {
             voices = List.of(new Voice(original.id(), original.name(), bytes));
         }
         var project = new StudioProject(4, raw.name(), "S3K", raw.ticksPerBeat(), raw.tempo(),
-                voices, List.of(sequence), raw.clips(), envelopes, raw.samples());
+                voices, List.of(sequence), raw.clips(), envelopes, raw.samples(), profile.game(),
+                profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
         double[] result = new double[gate + RELEASE_TICKS];
         int[] tick = {0};
         int[] attenuation = {15, 0};
@@ -128,9 +138,8 @@ final class ReconstructionSpill {
                 attenuation[1] = Math.max(attenuation[1], attenuation[0]);
             result[tick[0]++] = Math.sqrt(power / pcm.length) / 32768;
         };
-        var compiled = ProjectCompiler.compileWithAssets(project);
-        if (observer == null) S3kRenderer.render(compiled, result.length, sink);
-        else S3kRenderer.render(compiled, result.length, sink, observer);
+        TargetPlayback.prepare(project).render(result.length, S3kRenderer.ChannelMask.NONE, sink,
+                observer == null ? ChipWriteObserver.NONE : observer);
         return new Contour(result, attenuation[1]);
     }
 }

@@ -59,9 +59,9 @@ class GroupPlaybackTest {
             clips.add(new Clip("hit-"+i,"drums","DAC",origins[i]+4,Math.min(16,budgets[i]-4)));
         }
         var flat = new StudioProject(4,"Flat","S3K",8,48,List.of(voice),List.of(reset,carry,drums),
-                clips,List.of(),List.of(sample));
+                clips,List.of(),List.of(sample), TargetGame.S3K, null);
         var nested = new StudioProject(6,"Grouped","S3K",8,48,flat.voices(),flat.sequences(),songClips,
-                List.of(),flat.samples(),null,List.of(),List.of(),4,groups,List.of(placement));
+                List.of(),flat.samples(),null,List.of(),List.of(),4,groups,List.of(placement), TargetGame.S3K, null);
         assertEquals(ProjectRenderTiming.presentationCount(flat),ProjectRenderTiming.presentationCount(nested));
         assertEquals(ProjectCompiler.dacEndTick(flat),ProjectCompiler.dacEndTick(nested));
         var expected = ProjectCompiler.compileWithAssets(flat);

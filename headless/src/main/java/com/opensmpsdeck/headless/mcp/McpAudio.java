@@ -7,7 +7,7 @@ import com.opensmpsdeck.headless.ReconstructionView;
 import com.opensmpsdeck.headless.ReconstructionStages;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.headless.WaveFile;
-import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.project.ProjectFiles;
 
 import java.io.IOException;
@@ -29,8 +29,8 @@ final class McpAudio {
         var solo = lanes(args, "solo");
         var mute = args.has("solo") && solo.isEmpty() ? List.of(LANES) : lanes(args, "mute");
         var mask = ReconstructionView.laneMask(solo, mute);
-        var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(project).project());
-        WaveFile.renderRange(compiled, output, range, mask);
+        var playback = TargetPlayback.prepare(ProjectFiles.load(project).project());
+        WaveFile.renderRange(playback, output, range, mask);
         return object(Map.of("output", output.toString(), "startFrame", range.start(), "endFrame", range.end(),
                 "presentations", range.count(), "sampleRate", SAMPLE_RATE));
     }

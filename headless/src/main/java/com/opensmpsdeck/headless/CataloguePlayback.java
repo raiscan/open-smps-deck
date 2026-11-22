@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
+
 import com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Match;
 import com.opensmpsdeck.headless.InstrumentCatalogue.Recipe;
@@ -34,7 +36,7 @@ public final class CataloguePlayback {
     /** Plays a fixed phrase or one-shot, with the entry's available playback context. */
     public static StudioProject audition(InstrumentCatalogue catalogue, String id) {
         Match match = catalogue.match(id);
-        return renderProbe(catalogue, match, recipe(match), false);
+        return renderProbe(catalogue, match, recipe(match), false, TargetGame.S3K);
     }
 
     /**
@@ -46,12 +48,17 @@ public final class CataloguePlayback {
     }
 
     static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks, boolean rawAsset) {
+        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, TargetGame.S3K);
+    }
+
+    static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
+                                    boolean rawAsset, TargetGame target) {
         Match match = catalogue.match(id);
         Recipe source = recipe(match);
         if (rawAsset) source = new Recipe(source.rate(), null, 127, source.durationTicks(),
                 null, null, List.of(), List.of());
         if (match.asset().kind() == Kind.DAC_SAMPLE || match.asset().kind() == Kind.PSG_NOISE)
-            return renderProbe(catalogue, match, source, rawAsset);
+            return renderProbe(catalogue, match, source, rawAsset, target);
         if (gateTicks < 1 || gateTicks > 180)
             throw new IllegalArgumentException("Matching note length must be 1–180 ticks (was " + gateTicks + ").");
         String chip = probeChip(match, rawAsset);
@@ -73,11 +80,11 @@ public final class CataloguePlayback {
         var note = new NoteEvent("match-note", 0, gateTicks, midi);
         var controlled = new Recipe(source.rate(), source.pan(), source.volume(), gateTicks,
                 source.volumeEnvelope(), source.modulationEnvelope(), List.of(note), setup);
-        return renderProbe(catalogue, match, controlled, rawAsset);
+        return renderProbe(catalogue, match, controlled, rawAsset, target);
     }
 
-    private static StudioProject renderProbe(InstrumentCatalogue catalogue, Match match, Recipe recipe, boolean rawAsset) {
-        var base = new StudioProject(4, name(match), "S3K", 15, 0, List.of(), List.of(), List.of());
+    private static StudioProject renderProbe(InstrumentCatalogue catalogue, Match match, Recipe recipe, boolean rawAsset, TargetGame target) {
+        var base = new StudioProject(4, name(match), "S3K", 15, 0, List.of(), List.of(), List.of(), target, null);
         var install = new Install(catalogue, base);
         var asset = match.asset();
         Sequence probe;
@@ -111,6 +118,7 @@ public final class CataloguePlayback {
         install.sequences.add(probe);
         install.clips.add(new Clip("probe-clip", probe.id(), lane, 0, probe.lengthTicks()));
         StudioProject result = install.finish();
+        if (target != TargetGame.S3K) return result;
         byte[] linear = ProjectCompiler.compile(result, ProjectCompiler.Encoding.LINEAR);
         int frames = ProjectRenderTiming.presentationCount(result);
         if (asset.kind() == Kind.DAC_SAMPLE && recipe.pan() != null && recipe.pan() != 0xC0)
@@ -128,7 +136,7 @@ public final class CataloguePlayback {
                 probe.samples().getFirst().id(), probe.samples().getFirst().rate());
         var program = NativeProgram.of(0, 0, 0, frames, bank, List.of(), List.of(binding));
         return new StudioProject(5, probe.name(), "S3K", probe.ticksPerBeat(), probe.tempo(),
-                List.of(), List.of(), List.of(), List.of(), probe.samples(), program);
+                List.of(), List.of(), List.of(), List.of(), probe.samples(), program, probe.target(), probe.nativeTempo());
     }
 
     /**
@@ -324,7 +332,7 @@ public final class CataloguePlayback {
 
         StudioProject finish() {
             var result = new StudioProject(version, target.name(), target.mode(), target.ticksPerBeat(),
-                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom()).withTarget(target.target()).withNativeTempo(target.nativeTempo());
+                    target.tempo(), voices, sequences, clips, envelopes, samples, target.target(), target.nativeTempo()).withDerivedFrom(target.derivedFrom());
             ProjectFormat.validate(result);
             return result.equals(target) ? target : result;
         }
