@@ -1326,17 +1326,64 @@ class StudioWindowTest {
         }
     }
 
+    @Test void unloopedLateShortEditCanBeHeardAfterItsGateHasPassed() throws Exception {
+        var work = assembledLiveFixture(4800, 4970, 6);
+        var project = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
+        var edits = new com.google.gson.JsonArray();
+        var entries = com.google.gson.JsonParser.parseString("""
+                {"id":"late","op":"transpose","reason":"fixture","noteIds":["n-0-5000000-69"],"semitones":2}
+                """);
+        edits.add(entries);
+        var preview = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
+                com.opensmpsdeck.headless.ReconstructionReview.revision(work));
+        var prepared = preview.prepare(edits, 0, 6, 5.01);
+        var gate = prepared.changedGates(null).getFirst();
+        assertTrue(gate.start() > 2.5);
+        var expected = new ArrayList<byte[]>();
+        prepared.playback().render(360, pcm -> expected.add(pcmBytes(pcm)));
+        var block = expected.get((int) Math.round(gate.start() * 60) + 2);
+
+        var sink = new CapturedAudio();
+        try (var player = new StudioPlayback(sink::open)) {
+            var cursor = new java.util.concurrent.atomic.AtomicReference<>(0.0);
+            var transport = new ReviewTransport();
+            var stream = player.new LiveStream(() -> fail("Could not render the late edit"));
+            player.playEditable(project, transport, () -> null, message -> {}, cursor::set,
+                    new ReviewTransport.Range(0, 6), stream, null);
+            await(stream::ready);
+            assertTrue(stream.seek(gate.start()));
+            await(() -> cursor.get() >= gate.start());
+            stream.beginEdit();
+            // The renderer is deliberately late. The old note has already passed.
+            await(() -> cursor.get() >= gate.end());
+            int firstNewBlock = sink.blocks.size();
+            stream.replace(prepared, System.nanoTime(), gate.start() + .01, false);
+            await(() -> sink.blocks.stream().skip(firstNewBlock).anyMatch(bytes -> Arrays.equals(bytes, block)));
+            assertEquals(1, sink.opens.get());
+        }
+    }
+
     private static String liveStatus(javafx.scene.Scene scene) {
         return ((Label) scene.lookup("#reconstruction-live-status")).getText();
     }
 
     private Path assembledLiveFixture() throws Exception {
+        return assembledLiveFixture(0, 1300, 2);
+    }
+
+    private Path assembledLiveFixture(int start, int end, int seconds) throws Exception {
         var inputs = reconstructionFixture();
+        if (seconds > 2) {
+            int rate = 12_000;
+            int[] pcm = new int[seconds * rate];
+            for (int i = 0; i < pcm.length; i++) pcm[i] = (int) (22000 * Math.sin(i * 440 * Math.TAU / rate));
+            ReferenceWaveTest.wav(inputs.resolve("mix.wav"), 16, 1, rate, pcm);
+        }
         var midi = inputs.resolve("tone.mid");
         var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
         var track = sequence.createTrack();
-        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), 0));
-        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), 1300));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), start));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), end));
         javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
         var catalogue = inputs.resolve("index.json");
         var voice = DemoProject.create().voices().getFirst();
@@ -1349,7 +1396,7 @@ class StudioWindowTest {
         var work = folder.resolve("live-assembly");
         com.opensmpsdeck.headless.ReconstructionStages.runForReview("run", new String[]{
                 midi.toString(), inputs.resolve("mix.wav").toString(), catalogue.toString(), work.toString(),
-                "--seconds", "2"}, (done, total, message) -> {});
+                "--seconds", Integer.toString(seconds)}, (done, total, message) -> {});
         return work;
     }
 

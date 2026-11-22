@@ -1,85 +1,90 @@
 # Live reconstruction playback
 
-Phase 1 adds a short S3K audition to Studio's reconstruction Notes workspace.
-The design and exploratory benchmarks in [PR #122](https://github.com/raiscan/open-smps-deck/pull/122)
-measured whole-song held-note diagnostics at 125–147 s, journal validation
-at 6–13 s, and replay to project second 60 at about 2 s. These operations
-run on the canonical build path or fall outside the Phase 1 window.
+Studio auditions pitch, gate and supported bend edits throughout an attached
+S3K reconstruction. **Song**, **Section** and **Selection** support live edits
+on Chip and on the Chip side of A/B. Voice and Lane use built scoped playback.
+An edit ahead of the playhead is heard on arrival. A loop lets a passed note
+be heard on its next pass. If an unlooped note at or just ahead of the gesture
+has already passed when the preview is ready, playback briefly re-cues the
+edited gate on the same line, including at the end of the song.
 
-## Phase 1 window
-
-Studio can audition pitch, gate and supported bends while playing Chip
-(or the Chip side of A/B) in the first 2.5 project seconds. Both the
-built and edited gate must fit the active loop, or the intersection of
-the current play range and the first 2.5 seconds. Song, Section and
-Selection use this path. Voice and Lane keep their scoped playback.
-A note ahead of the playhead is heard when the transport reaches it.
-A note already passed in a loop is heard on the next pass. In normal
-playback the monitor resumes the built arrangement at the end of the
-live window and displays that transition.
+Phase 1 limited audition to the first 2.5 project seconds. The exploratory
+benchmarks measured about two seconds to replay the first minute from the
+origin. [Phase 1 design and measurements](https://github.com/raiscan/open-smps-deck/pull/122)
 
 ## Assembly and journal
 
-On open, Studio loads the built source score, structure, allocation,
-fitted voicing and assembly layout. Preparation checks the assembly
-fingerprints and verifies that the reassembled bank agrees with the built
-bank, comparing PCM in the first 2.5 seconds if the bytes or bindings
-differ. The loaded score already incorporates the built edit prefix.
+On open, Studio loads the built score, structure, allocation, fitted voicing
+and assembly layout. It checks the assembly fingerprints and verifies that the
+rebuilt bank has the same assets and executed events as the attached bank.
+The loaded score already incorporates the built edit prefix.
 
-Each audition evaluates the ordered suffix of stable-note-ID intents
-against this score using the existing `setNote`, `transpose`, `bend`
-and `glide` kernels. It projects the changed notes onto their saved
-lanes, retains the fitted patches and gains, then uses the same S3K
-assembly and bank compiler as a rebuild. A conflicting gate, changed
-journal prefix, unsupported edit, or bank limit leaves the built audio
-available and displays **Rebuild needed**. A canonical **Apply & rebuild**
-runs from the first affected stage and can re-evaluate allocation and
-other upstream decisions. Only that build publishes an updated project,
-reports, diagnostics and exportable WAV.
+Each audition applies the ordered suffix of stable-note-ID intents with the
+existing `setNote`, `transpose`, `bend` and `glide` kernels. It projects changed
+notes onto their saved lanes, retains fitted patches and gains, and uses the
+canonical S3K assembly and bank compiler. A conflicting gate, a changed
+journal prefix, an unsupported edit or a bank limit leaves the built audio
+available and displays **Rebuild needed**. **Apply & rebuild** can
+reevaluate allocation and other upstream decisions. It updates the built
+project, reports, diagnostics and exportable WAV.
 
-Studio saves a checked audition as an atomic `edits.json` replacement
-under the existing journal locks and revision check. Undo and redo
-write the corresponding journal revision while a live audition is
-active. Proposals stay in the journal with their existing statuses.
-An external accepted edit or rebuild reloads the snapshot through the
-existing watcher. A clean reload can require **Apply & rebuild** before
-the next audition.
+Studio saves a checked audition as an atomic `edits.json` replacement under
+the existing journal locks and revision check. Undo and redo save the
+corresponding journal revision while an audition is active. Proposals keep
+their existing statuses. An external accepted edit or rebuild reloads the
+snapshot through the existing watcher and can require **Apply & rebuild**
+before the next audition.
 
-## Native playback and timing
+## Checkpoints and handoff
 
-The replacement is a fresh pinned OpenGGF session rendered continuously
-from the song origin. The audio worker changes source at the next
-unqueued block with two presentations of lookahead, or the remaining
-blocks at a loop boundary. It keeps the audio line, playhead and monitor.
-The replacement PCM cache ends at the live window boundary. A newer edit
-supersedes a pending render, and a retired transport cannot publish to a
-new one. The handoff uses the native PCM directly, so there is no crossfade
-to account for when checking parity.
+The pinned OpenGGF session supplies both snapshots. The logical snapshot
+covers the driver, per-track sequence and coordination flag state, and
+timing accumulators. The physical snapshot covers both chip cores, including
+FM operator state and LFO, PSG noise, DAC playback, and resampler history.
+Studio captures them together at 60-presentation intervals. The initial
+state comes from the normal session activation.
 
-Set `-Dopensmpsdeck.liveTiming=true` to log the elapsed milliseconds from
-a committed edit or undo/redo event to the first output write containing
-a sample different from the previous chip revision at the same project
-frame. This includes scheduling against the open line and the time until
-the changed material is encountered. It measures delivery to the line.
-The device can buffer more audio after the write.
+Each revision retains checkpoints strictly before the earliest changed gate.
+The compiler may change CALL and LOOP packing or move a voice table when
+it recompiles the song. Before reusing a checkpoint, Studio compares each
+track's executed event bytes and verifies the asset bindings. It relocates
+the next program counter, active return address and loop counter in the
+new bank. A failed proof discards that checkpoint and the suffix. Studio
+rebuilds the missing states from the latest verified checkpoint.
 
-## Verification and next phases
+The render worker prepares an exact handoff position. The audio worker
+restores it on the open line and switches at the next unqueued block. It
+caps queued audio at two presentations on the editable transport. Newer
+edits supersede pending work, and each reader belongs to its own worker.
+The first pass builds the checkpoint grid in the background. The built
+revision and latest edited revision can each retain a grid, with up to
+60 checkpoints per minute. Studio retains a transient handoff snapshot
+during a swap. Editable playback renders PCM in presentation-sized blocks.
 
-The synthetic parity test compares the preview and undo PCM with the
-continuous canonical retained-voicing render. The Studio scene test
-exercises journal save, undo, redo and rebuild fallback on one audio line.
+A warm seek restores the closest preceding checkpoint and renders at most
+one second of catch-up before playing at the requested sample. Scrubbing
+within the active range keeps the line open. A cold seek or a change far
+behind the playhead can require a longer catch-up while Studio rebuilds
+the invalidated interval.
 
-Phase 2 extends auditioning to later playheads using exact checkpoints
-or another bounded catch-up path. A checkpoint must preserve track
-pointers, loops, modulation, DAC and chip state together. Cross-bank
-reuse needs a proven unchanged executed prefix and a mapping for each
-live program counter and return address. The later gates also cover
-30/60/120-second seeks and edits, underruns, and parity of held FM, PSG,
-DAC and effect tails.
+Set `-Dopensmpsdeck.liveTiming=true` to log milliseconds from the gesture
+to the first changed sample written and to observation that the output
+line's device frame cursor has passed that sample. The comparison uses
+the two revisions at the same project frame. The device cursor measures the audio line boundary. Acoustic output
+delay is outside that measurement.
 
-Later work includes incremental roles and allocation, live external
-journal updates, patch and proposal A/B, explicit refitting, and
-additional drivers.
+## Verification and next phase
+
+Synthetic tests compare restored PCM with continuous playback from
+several seeks and checkpoints. They cover compact and linear packing,
+address relocation, invalidation on a late pitch change, and canonical
+pitch, gate, bend and undo renders. The Studio tests cover journal and
+audio-line continuity, including a deliberately late handoff after a
+short unlooped note has passed.
+
+Phase 3 can extend the live path to incremental roles and allocation,
+external journal updates, patch and proposal A/B, explicit refitting,
+and additional drivers.
 
 [Stage and edit contracts](reconstruction-stages.md) ·
 [Studio review and transport](../user-guide/studio.md#inspect-and-edit-a-reconstruction)

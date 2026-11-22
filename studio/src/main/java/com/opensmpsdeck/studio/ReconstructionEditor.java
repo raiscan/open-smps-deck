@@ -18,7 +18,6 @@ import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.headless.ReconstructionReview.EditResult;
 import com.opensmpsdeck.headless.ReconstructionReview.Revision;
 import com.opensmpsdeck.headless.ReconstructionLivePreview;
-import com.opensmpsdeck.headless.TargetPlayback;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.project.ProjectWatcher;
 import com.opensmpsdeck.project.ProjectDocument;
@@ -1554,7 +1553,7 @@ final class ReconstructionEditor implements AutoCloseable {
         if (liveTransport != null && liveTransport.chipPlaying()) {
             var playback = view.rolesView() || view.reviewing() ? null : liveTransport.liveEdit();
             if (playback == null) {
-                liveTransport.rebuildNeeded("Use Detail and a Chip range in the first 2.5 project seconds");
+                liveTransport.rebuildNeeded("Use Detail with an active Chip play range");
             } else {
                 queuedLiveEdit = new LiveRequest(generation, eventNanos, draft.entries(), playback);
                 liveTransport.livePreparing();
@@ -1583,12 +1582,12 @@ final class ReconstructionEditor implements AutoCloseable {
         var entries = forApply(expected.entries(), request.entries());
         worker.execute(() -> {
             Revision written = null;
-            TargetPlayback playback = null;
+            ReconstructionLivePreview.Prepared playback = null;
             String problem = null;
             try {
                 var window = request.playback().window();
                 var prepared = reconstruction.prepare(entries, window.start(), window.end(), request.playback().playhead());
-                playback = prepared.playback();
+                playback = prepared;
                 written = prepared.save(expected);
             } catch (Exception failure) {
                 problem = describe(failure);
