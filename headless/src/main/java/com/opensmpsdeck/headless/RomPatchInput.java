@@ -4,6 +4,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomTarget;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
+import com.opensmpsdeck.headless.rompatch.S2RomTarget;
+import com.opensmpsdeck.headless.rompatch.S2Song;
+import com.openggf.data.Rom;
+import com.openggf.data.RomByteReader;
 import com.opensmpsdeck.headless.rompatch.RomPatch;
 import com.opensmpsdeck.headless.rompatch.S3kRomTarget;
 import com.opensmpsdeck.project.CompiledProject;
@@ -24,12 +30,22 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.zip.ZipFile;
 
-record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
-    static RomPatchInput compile(StudioProject project) {
-        var game = TestInGame.game(project);
+record RomPatchInput(RomGame game, Song song) {
+    @FunctionalInterface
+    interface Song {
+        RomTarget.PatchedRom<JsonObject> patch(VerifiedRom clean, TestInGame.Options options) throws IOException;
+    }
+
+    static RomPatchInput compile(StudioProject project, RomGame driver) {
+        var game = driver == null ? TestInGame.game(project) : driver;
         TestInGame.requireAvailable(game);
+        if (game == RomGame.S2) {
+            if (project.nativeProgram() != null)
+                throw new IllegalArgumentException("s2: native v5 banks are S3K-only. Export an editable arrangement.");
+            return new RomPatchInput(game, (clean, options) -> compileS2(project, clean, options));
+        }
         try {
-            return new RomPatchInput(game, new S3kRomTarget.Song(ProjectCompiler.compileWithAssets(project), List.of()));
+            return s3k(new S3kRomTarget.Song(ProjectCompiler.compileWithAssets(project), List.of()));
         } catch (IllegalArgumentException failure) {
             var limit = ProjectCompiler.BankLimitException.from(failure);
             if (limit == null) throw failure;
@@ -40,20 +56,57 @@ record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
         }
     }
 
-    static RomPatchInput load(Path path) throws IOException {
+    private static RomTarget.PatchedRom<JsonObject> compileS2(StudioProject project, VerifiedRom clean,
+                                                               TestInGame.Options options) throws IOException {
+        if (project.voices().stream().anyMatch(voice -> voice.bytes() == null)
+                || project.envelopes().stream().anyMatch(envelope -> envelope.bytes() == null)
+                || project.samples().stream().anyMatch(sample -> sample.pcmBase64() == null))
+            project = StockAssets.resolveProject(project, stock(clean));
+        var driver = ClassicPackageDriver.S2;
+        var tempo = driver.convertTempo(project.tempo());
+        ProjectCompiler.BankLayout layout;
+        try {
+            layout = driver.compile(project, tempo.targetByte());
+        } catch (IllegalArgumentException failure) {
+            if (!failure.getMessage().contains("32 KiB")) throw failure;
+            throw new IllegalArgumentException("Compiled song exceeds the 32,768-byte (32 KB) per-song limit. "
+                    + "Shorten the song or reduce layering.", failure);
+        }
+        var compiled = new CompiledProject(layout.bytes(), project.envelopes(), project.samples());
+        var result = S2RomTarget.TARGET.patch(clean,
+                S2Song.from(compiled, project.voices().size(), layout.relocations()), options.s2());
+        if (!tempo.exact())
+            result.report().getAsJsonArray("warnings").add(tempo.warning("Normal tempo", project.tempo(), driver));
+        return result;
+    }
+
+    private static List<StockAssets> stock(VerifiedRom clean) {
+        byte[] bytes = clean.bytes();
+        var rom = Rom.fromReader(RomByteReader.fromBytes(bytes), clean.revision().displayName());
+        return List.of(new ClassicStockAssets(false, rom, bytes));
+    }
+
+    private static RomPatchInput s3k(S3kRomTarget.Song song) {
+        return new RomPatchInput(RomGame.S3K, (clean, options) -> S3kRomTarget.TARGET.patch(clean, song, options.s3k()));
+    }
+
+    static RomPatchInput load(Path path, RomGame driver) throws IOException {
         if (!path.getFileName().toString().endsWith(".smps.zip")) {
             if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Expected a regular project file: " + path);
             try (var input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
                 var source = StandardCharsets.UTF_8.newDecoder()
                         .decode(ByteBuffer.wrap(ProjectFiles.readSource(input))).toString();
-                return compile(readProject(source));
+                return compile(readProject(source), driver);
             }
         }
         try (var zip = new ZipFile(path.toFile())) {
             var manifest = JsonParser.parseString(new String(entry(zip, "manifest.json", 1024 * 1024),
                     StandardCharsets.UTF_8)).getAsJsonObject();
             var game = checkDriver(manifest);
+            if (driver != null && game != driver)
+                throw new IllegalArgumentException("Package driver " + game.id() + " does not match requested " + driver.id());
+            if (game == RomGame.S2) return loadS2(PortablePackageReader.read(path));
             if (!manifest.has("track") || !manifest.has("source")) {
                 throw new IllegalArgumentException("Test in game requires a legacy SMPS package with track and source entries. "
                         + "Export from the original project instead.");
@@ -74,11 +127,28 @@ record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
             var compiled = new CompiledProject(track, project.envelopes(), project.samples(),
                     nativeProgram == null ? null : nativeProgram.withBank(track),
                     nativeProgram == null ? List.of() : project.voices());
-            return new RomPatchInput(game, new S3kRomTarget.Song(compiled, relocations));
+            return s3k(new S3kRomTarget.Song(compiled, relocations));
         } catch (JsonParseException | IllegalStateException | NullPointerException | ClassCastException
                  | ArithmeticException malformed) {
-            throw new IOException("Invalid S3K package manifest or source", malformed);
+            throw new IOException("Invalid SMPS package manifest or source", malformed);
         }
+    }
+
+    private static RomPatchInput loadS2(PortablePackageReader.Package pkg) {
+        var manifest = pkg.manifest();
+        if (!"s2".equals(manifest.driver())) throw new IllegalArgumentException("Expected an S2 portable package");
+        return new RomPatchInput(RomGame.S2, (clean, options) -> {
+            var compiled = PortablePackageReader.assemble(pkg,
+                    manifest.requires().stockAssets() ? stock(clean) : List.of());
+            var result = S2RomTarget.TARGET.patch(clean,
+                    S2Song.from(compiled, manifest.bank().localVoiceCount(), manifest.bank().relocations()), options.s2());
+            var warnings = result.report().getAsJsonArray("warnings");
+            manifest.provenance().warnings().forEach(warnings::add);
+            if (manifest.driverOptions() != null && manifest.driverOptions().has("speedUpTempo")
+                    && !manifest.driverOptions().get("speedUpTempo").isJsonNull())
+                warnings.add("Sonic 2 uses the retail speed-shoes tempo for the selected slot.");
+            return result;
+        });
     }
 
     private static StudioProject readProject(String source) throws IOException {
@@ -92,7 +162,7 @@ record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
 
     private static RomGame checkDriver(JsonObject source) {
         RomGame game = RomGame.S3K;
-        // Portable packages declare driver. Legacy packages and project JSON use mode.
+        // Prefer a portable package's driver over the editable project's mode.
         for (String field : List.of("driver", "mode")) {
             if (source.has(field)) {
                 var value = source.get(field);
@@ -100,6 +170,7 @@ record RomPatchInput(RomGame game, S3kRomTarget.Song song) {
                     throw new IllegalArgumentException("Expected a string " + field + " for Test in game.");
                 game = TestInGame.game(value.getAsString());
                 TestInGame.requireAvailable(game);
+                return game;
             }
         }
         return game;

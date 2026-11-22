@@ -203,7 +203,7 @@ absolute `rom` path to `rom_patch`. Supply an absolute `project` path and
 at least one absolute `out` (personal-use ROM) or `bps` (shareable patch)
 path. The optional fields are `slot`, `titleMusic`, `noDemo`, `loop`, and
 `force`. Read the returned `report` and `warnings` before handing off a patch.
-[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-sonic-3--knuckles)
+[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-sonic-2-or-sonic-3--knuckles)
 
 See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
 equivalents, the [stage guide](../architecture/reconstruction-stages.md)

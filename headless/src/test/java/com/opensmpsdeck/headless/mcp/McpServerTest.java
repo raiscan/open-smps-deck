@@ -38,11 +38,15 @@ class McpServerTest {
 
         Path archive = directory.resolve("other.smps.zip");
         try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(archive))) {
-            zip.putNextEntry(new java.util.zip.ZipEntry("manifest.json"));
+            var entry = new java.util.zip.ZipEntry("manifest.json");
+            entry.setTime(0);
+            zip.putNextEntry(entry);
             zip.write("{\"schemaVersion\":4,\"driver\":\"s2\"}".getBytes(UTF_8));
         }
         assertToolError("rom_patch", Map.of("project", archive.toString(),
-                "out", directory.resolve("song.gen").toString()), "Test in game for s2 is not available yet");
+                "out", directory.resolve("song.gen").toString()), "manifest");
+        assertToolError("rom_patch", Map.of("project", source.toString(), "driver", "s2",
+                "out", directory.resolve("song.gen").toString(), "slot", 37), "Sonic 2 music ID");
     }
 
     @Test void stdioUsesOneUtf8JsonMessagePerLineAndRecoversFromInvalidFrames() throws Exception {

@@ -2,7 +2,7 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.GsonBuilder;
 import com.opensmpsdeck.headless.rom.RomLibrary;
-import com.opensmpsdeck.headless.rompatch.RomPatch;
+import com.opensmpsdeck.headless.rom.RomGame;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -12,20 +12,22 @@ import java.util.HashSet;
 import java.util.Locale;
 
 final class RomPatchCommand {
-    static final String USAGE = "rom-patch PROJECT [--rom PATH] [--out SONG.s3k.gen] [--bps SONG.s3k.bps]"
+    static final String USAGE = "rom-patch PROJECT [--driver s3k|s2] [--rom PATH] [--out SONG.gen] [--bps SONG.bps]"
             + " [--slot ID] [--title-music] [--no-demo] [--loop] [--force]";
 
     private RomPatchCommand() {}
 
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length < 2 || args[1].startsWith("--")) throw new IllegalArgumentException("Expected " + USAGE);
-        int slot = RomPatch.DEFAULT_SLOT;
+        Integer slot = null;
+        RomGame driver = null;
         Path rom = null, image = null, bps = null;
         var flags = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
             String flag = args[i];
             if (!flags.add(flag)) throw new IllegalArgumentException("Duplicate option " + flag);
             switch (flag) {
+                case "--driver" -> driver = RomGame.parse(value(args, ++i, flag).toLowerCase(Locale.ROOT));
                 case "--slot" -> slot = slot(value(args, ++i, flag));
                 case "--rom" -> rom = Path.of(value(args, ++i, flag));
                 case "--out" -> image = Path.of(value(args, ++i, flag));
@@ -36,9 +38,9 @@ final class RomPatchCommand {
         }
 
         var outputs = new TestInGame.Outputs(image, bps, flags.contains("--force"));
-        var options = new RomPatch.Options(slot, flags.contains("--title-music"),
+        var options = new TestInGame.Options(slot, flags.contains("--title-music"),
                 flags.contains("--no-demo"), flags.contains("--loop"));
-        var result = TestInGame.export(RomLibrary.userLibrary(), Path.of(args[1]), rom, outputs, options);
+        var result = TestInGame.export(RomLibrary.userLibrary(), Path.of(args[1]), rom, outputs, driver, options);
         result.getAsJsonArray("warnings").forEach(warning -> err.println(warning.getAsString()));
         out.println(new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(result));
     }
