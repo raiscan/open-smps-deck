@@ -397,11 +397,15 @@ final class ReconstructionChecks {
                     && ReconstructionAllocation.expectedLanes(entry.role(), false).contains(entry.relocatedFrom())
                     && (ReconstructionAllocation.INNER_FM.contains(lane) || !score.inputs().fmOnly()
                         && ReconstructionAllocation.PSG.contains(lane) && entry.note().pitch() >= score.profile().psg().low() && entry.note().pitch() <= score.profile().psg().high());
+            boolean recoveryAlternate = lane != null && score.inputs().audioOnly() != null
+                    && entry.relocatedFrom() != null && ReconstructionAllocation.FM.contains(lane)
+                    && (ReconstructionAllocation.RECOVERED_GATE.equals(entry.reason())
+                        || ReconstructionAllocation.RECOVERY_RELOCATION.equals(entry.reason()));
             require(lane != null && (entry.pinnedLane() != null ? pinned : switch (entry.role()) {
-                case melody -> lane.equals("FM1") || holdAlternate;
-                case bass -> lane.equals("FM2") || holdAlternate;
+                case melody -> lane.equals("FM1") || holdAlternate || recoveryAlternate;
+                case bass -> lane.equals("FM2") || holdAlternate || recoveryAlternate;
                 case drums -> lane.equals("DAC") || lane.equals("PSG3") && !score.inputs().fmOnly();
-                case harmony, counter -> ReconstructionAllocation.INNER_FM.contains(lane)
+                case harmony, counter -> ReconstructionAllocation.INNER_FM.contains(lane) || recoveryAlternate
                         || ReconstructionAllocation.PSG.contains(lane) && !score.inputs().fmOnly() && entry.note().pitch() >= score.inputs().profile().psg().low();
                 case drop -> false;
             }), where, "invalid lane for " + entry.role());

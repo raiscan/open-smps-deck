@@ -22,7 +22,8 @@ final class ReconstructionChordReduction {
     }
 
     record Voice(Note note, Role role) {}
-    record Loss(String noteId, int part, int pitch, double sourceStart, Tone tone, String reason) {}
+    record Loss(String noteId, int part, int pitch, double sourceStart, Tone tone, String reason,
+                Role role, List<String> competingNoteIds) {}
     record SectionCounts(String label, double sourceStart, double sourceEnd, Map<Tone, Integer> counts) {}
     record Audit(Map<Tone, Integer> song, Map<String, SectionCounts> sections, List<Loss> losses) {}
 
@@ -109,6 +110,8 @@ final class ReconstructionChordReduction {
         var voices = new ArrayList<Voice>();
         var lost = new ArrayList<Voice>();
         var reasons = new HashMap<String, String>();
+        var competitors = new HashMap<String, List<String>>();
+        boolean audioOnly = score.inputs() != null && score.inputs().audioOnly() != null;
         var unmatched = new HashSet<String>();
         for (var reduction : assemblyLosses)
             if (reduction.change() == S3kReconstruction.Change.NO_MATCH) unmatched.add(reduction.id());
@@ -119,6 +122,10 @@ final class ReconstructionChordReduction {
             if (entry.lane() == null || unmatched.contains(entry.note().id())) {
                 lost.add(voice);
                 reasons.put(entry.note().id(), entry.lane() == null ? entry.reason() : "no-playable-catalogue-match");
+                if (audioOnly && entry.blockingNoteIds() != null)
+                    competitors.put(entry.note().id(), entry.blockingNoteIds());
+                else if (audioOnly && entry.competitorNoteId() != null)
+                    competitors.put(entry.note().id(), List.of(entry.competitorNoteId()));
             }
         }
         int index = 0;
@@ -156,7 +163,8 @@ final class ReconstructionChordReduction {
             for (var section : bySection.values()) {
                 if (start >= section.sourceStart && start < section.sourceEnd) section.counts.merge(tone, 1, Integer::sum);
             }
-            losses.add(new Loss(note.id(), note.part(), note.pitch(), start, tone, reasons.get(note.id())));
+            losses.add(new Loss(note.id(), note.part(), note.pitch(), start, tone, reasons.get(note.id()),
+                    audioOnly ? voice.role() : null, competitors.get(note.id())));
         }
         return new Audit(counts, bySection, List.copyOf(losses));
     }

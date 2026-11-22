@@ -24,6 +24,10 @@ final class ReconstructionAllocation {
     static final List<String> INNER_FM = FM.subList(2, FM.size());
     static final String HOLD_RELOCATION = "relocated-for-stem-hold";
     static final String HOLD_OVERFLOW = "routed-around-stem-hold";
+    static final String RECOVERED_GATE = "recovered-gate";
+    static final String RECOVERY_RELOCATION = "relocated-for-recovered-gate";
+    private static final int MIN_OVERFLOW_TICKS = 3;
+    private static final double RELEASE_YIELD_LEVEL_RATIO = 4;
     private static final String VOICE_ASSIGNMENT = "voice:assignment";
     private static final int RELEASE_TICKS = 2;
     private static final int SUSTAINED_SPILL_TICKS = 6;
@@ -274,6 +278,19 @@ final class ReconstructionAllocation {
                                        boolean chordReduction, TargetProfile profile,
                                        ReconstructionArrangement.Allocation arrangement,
                                        Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels, voiceTypes,
+                chords, outcomes, salience, chordReduction, profile, arrangement, stemHolds, false);
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                                       Map<String, ReconstructionLaneType> voiceTypes,
+                                       Map<String, ReconstructionChords.Group> chords,
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience,
+                                       boolean chordReduction, TargetProfile profile,
+                                       ReconstructionArrangement.Allocation arrangement,
+                                       Map<String, ReconstructionHeldNotes.Hold> stemHolds, boolean recoverGates) {
         var usableChords = usableChords(chords, arrangement, outcomes);
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
@@ -401,6 +418,7 @@ final class ReconstructionAllocation {
                 allocator.place(attack);
             }
         }
+        if (recoverGates) allocator.recoverGates(attacks);
         var continuity = ReconstructionLeadContinuity.Stats.of(roles.notes());
         var placed = new ArrayList<Entry>();
         var runs = new ArrayList<RunPlacement>();
@@ -597,6 +615,177 @@ final class ReconstructionAllocation {
                     : PSG.contains(lane) && !attack.noise ? "psg-spill" : null;
             keep(attack, lane, reason);
         }
+    }
+
+    private void recoverGates(List<Attack> attacks) {
+        var schedule = new HashMap<String, NavigableMap<Integer, Entry>>();
+        for (String lane : FM) schedule.put(lane, new TreeMap<>());
+        for (String lane : PSG) schedule.put(lane, new TreeMap<>());
+        for (var entry : entries.values()) {
+            if (schedule.containsKey(entry.lane())) schedule.get(entry.lane()).put(entry.startTick(), entry);
+        }
+        var byId = new HashMap<String, Attack>();
+        attacks.forEach(attack -> byId.put(attack.note().id(), attack));
+        var candidates = attacks.stream().filter(attack -> canMove(attack, entries.get(attack.note().id())))
+                .filter(attack -> {
+                    var entry = entries.get(attack.note().id());
+                    return entry.outcome() == Outcome.dropped && capacityDrop(entry.reason())
+                            || entry.outcome() == Outcome.shortened && entry.startTick() == attack.start
+                            && ("quantized-release-overlap".equals(entry.reason()) || "higher-priority-attack".equals(entry.reason()));
+                })
+                .sorted(Comparator.comparing((Attack a) -> backing(a.role()))
+                        .thenComparing(a -> !stemHolds.containsKey(a.note().id()))
+                        .thenComparing(a -> entries.get(a.note().id()).outcome() != Outcome.shortened)
+                        .thenComparingInt(a -> a.note().pitch() < profile.psg().low() ? 0 : 1)
+                        .thenComparing(Comparator.comparingInt((Attack a) -> a.end - a.start).reversed())
+                        .thenComparing(Comparator.comparingInt((Attack a) -> priority(a)).reversed())
+                        .thenComparing(Comparator.comparingInt((Attack a) -> tonePriority(a.note())).reversed())
+                        .thenComparing(Comparator.comparingDouble((Attack a) -> salience(a.note())).reversed())
+                        .thenComparingInt(Attack::start)
+                        .thenComparing(a -> a.note().id())).toList();
+        for (var attack : candidates) {
+            var entry = entries.get(attack.note().id());
+            if (entry.lane() == null) {
+                var cover = coveredBy(attack, schedule);
+                if (cover != null) {
+                    drop(attack, "covered-source-unison", List.of(cover.note().id()));
+                    continue;
+                }
+                if (attack.end - attack.start < MIN_OVERFLOW_TICKS) {
+                    entries.put(attack.note().id(), new Entry(entry.note(), entry.role(), null, null, null,
+                            Outcome.dropped, "too-short-for-overflow", null, entry.competitorNoteId(),
+                            entry.blockingNoteIds(), null));
+                    continue;
+                }
+            }
+
+            var lanes = recoveryLanes(attack, entry.lane(), attack.start, attack.end);
+            String lane = lanes.stream().filter(l -> conflicts(schedule.get(l), attack.start, attack.end, entry).isEmpty())
+                    .findFirst().orElse(null);
+            if (lane == null && (entry.lane() != null || !backing(attack.role())
+                    || stemHolds.containsKey(attack.note().id()))) {
+                for (String alternative : lanes) {
+                    if (relocateBlockers(schedule, byId, attack, entry, alternative)) {
+                        lane = alternative;
+                        break;
+                    }
+                }
+            }
+            if (lane == null && "quantized-release-overlap".equals(entry.reason())
+                    && yieldReleaseOverlap(schedule, byId, attack, entry)) lane = entry.lane();
+            if (lane != null)
+                replaceGate(schedule, entry, lane, attack.start, attack.end, RECOVERED_GATE, entry.competitorNoteId());
+        }
+    }
+
+    private boolean relocateBlockers(Map<String, NavigableMap<Integer, Entry>> schedule, Map<String, Attack> byId,
+                                     Attack attack, Entry entry, String lane) {
+        var blockers = conflicts(schedule.get(lane), attack.start, attack.end, entry);
+        var moves = new java.util.LinkedHashMap<Entry, String>();
+        // Reserve destinations while planning. Commit only when every blocker fits.
+        for (var blocker : blockers) {
+            var other = byId.get(blocker.note().id());
+            if (!canMove(other, blocker) || blocker.outcome() != Outcome.kept
+                    || !backing(blocker.role()) || RECOVERED_GATE.equals(blocker.reason())) break;
+            String destination = recoveryLanes(other, blocker.lane(), blocker.startTick(), blocker.endTick()).stream()
+                    .filter(l -> !l.equals(lane))
+                    .filter(l -> conflicts(schedule.get(l), blocker.startTick(), blocker.endTick(), blocker).isEmpty())
+                    .findFirst().orElse(null);
+            if (destination == null) break;
+            schedule.get(destination).put(blocker.startTick(), blocker);
+            moves.put(blocker, destination);
+        }
+        moves.forEach((blocker, destination) -> schedule.get(destination).remove(blocker.startTick()));
+        if (moves.size() != blockers.size()) return false;
+        moves.forEach((blocker, destination) -> replaceGate(schedule, blocker, destination, blocker.startTick(),
+                blocker.endTick(), RECOVERY_RELOCATION, entry.note().id()));
+        return true;
+    }
+
+    private boolean yieldReleaseOverlap(Map<String, NavigableMap<Integer, Entry>> schedule, Map<String, Attack> byId,
+                                        Attack attack, Entry earlier) {
+        var lane = schedule.get(earlier.lane());
+        var blockers = conflicts(lane, attack.start, attack.end, earlier);
+        if (blockers.size() != 1) return false;
+        var next = blockers.getFirst();
+        double nextLevel = salience(next.note());
+        if (next.startTick() < earlier.endTick() || attack.end - next.startTick() > RELEASE_TICKS
+                || next.endTick() - attack.end < MIN_OVERFLOW_TICKS
+                || !canMove(byId.get(next.note().id()), next) || !backing(next.role())
+                || next.outcome() != Outcome.kept || next.note().bend() != null || next.note().motion() != null
+                || RECOVERED_GATE.equals(next.reason()) || RECOVERY_RELOCATION.equals(next.reason())
+                || nextLevel <= 0 || salience(attack.note()) < RELEASE_YIELD_LEVEL_RATIO * nextLevel) return false;
+
+        var delayed = new Entry(next.note(), next.role(), next.lane(), attack.end, next.endTick(),
+                Outcome.shortened, "yielded-to-stronger-release", null, earlier.note().id(), null, next.relocatedFrom());
+        lane.remove(next.startTick());
+        lane.put(delayed.startTick(), delayed);
+        entries.put(next.note().id(), delayed);
+        return true;
+    }
+
+    private boolean canMove(Attack attack, Entry entry) {
+        return attack != null && attack.pin == null && attack.note().run() == null && attack.role() != Role.drums
+                && attack.role() != Role.drop && !chordAnchors.contains(attack.note().id())
+                && !continuations.containsKey(entry.note().id()) && entry.mergedInto() == null
+                && attack.decision.preLegatoEnd() == null
+                && !"edit".equals(entry.note().source());
+    }
+
+    private static boolean capacityDrop(String reason) {
+        return "fm-lanes-busy".equals(reason) || "fm-and-psg-lanes-busy".equals(reason)
+                || "bass-lane-busy".equals(reason) || "melody-lane-busy".equals(reason)
+                || "higher-priority-chord-tone".equals(reason);
+    }
+
+    private Entry coveredBy(Attack attack, Map<String, NavigableMap<Integer, Entry>> schedule) {
+        if (!backing(attack.role()) || attack.note().bend() != null || attack.note().motion() != null) return null;
+        return java.util.stream.Stream.concat(FM.stream(), PSG.stream())
+                .map(lane -> schedule.get(lane).floorEntry(attack.start))
+                .filter(java.util.Objects::nonNull).map(Map.Entry::getValue)
+                .filter(entry -> entry.role() != Role.drums && entry.note().part() == attack.note().part()
+                        && entry.note().pitch() == attack.note().pitch()
+                        && entry.note().bend() == null && entry.note().motion() == null
+                        && !chordAnchors.contains(entry.note().id()) && entry.note().run() == null
+                        && attack.start - entry.startTick() <= RELEASE_TICKS && entry.endTick() >= attack.end)
+                .findFirst().orElse(null);
+    }
+
+    private List<String> recoveryLanes(Attack attack, String current, int start, int end) {
+        var lanes = new java.util.LinkedHashSet<String>();
+        if (current != null) lanes.add(current);
+        int pitch = attack.note().pitch();
+        if (pitch >= profile.fm().low() && pitch <= profile.fm().high()) {
+            lanes.addAll(expectedLanes(attack.role(), false));
+            lanes.addAll(INNER_FM);
+            lanes.addAll(FM);
+        }
+        if (!fmOnly && !attack.fmRequired && pitch >= profile.psg().low() && pitch <= profile.psg().high()) {
+            lanes.addAll(reservePsg3 || overlapsCymbal(start, end) ? PSG.subList(0, 2) : PSG);
+        }
+        return List.copyOf(lanes);
+    }
+
+    private static List<Entry> conflicts(NavigableMap<Integer, Entry> schedule, int start, int end, Entry ignore) {
+        var conflicts = new ArrayList<Entry>();
+        var earlier = schedule.lowerEntry(start);
+        if (earlier != null && earlier.getValue() != ignore && earlier.getValue().endTick() > start)
+            conflicts.add(earlier.getValue());
+        for (var entry : schedule.subMap(start, true, end, false).values())
+            if (entry != ignore) conflicts.add(entry);
+        return conflicts;
+    }
+
+    private void replaceGate(Map<String, NavigableMap<Integer, Entry>> schedule, Entry original,
+                             String lane, int start, int end, String reason, String competitor) {
+        String previous = original.relocatedFrom();
+        if (previous == null) previous = original.lane() == null
+                ? expectedLanes(original.role(), false).getFirst() : original.lane();
+        if (original.lane() != null) schedule.get(original.lane()).remove(original.startTick());
+        var updated = new Entry(original.note(), original.role(), lane, start, end, Outcome.kept, reason, null,
+                competitor, null, lane.equals(previous) ? null : previous);
+        entries.put(original.note().id(), updated);
+        schedule.get(lane).put(start, updated);
     }
 
     private boolean protectedHold(Entry prior, Attack attack) {
