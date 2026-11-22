@@ -52,13 +52,21 @@ final class S2Dac {
         }
         var result = new ArrayList<Stock>();
         for (int note = DAC_FIRST_NOTE; note <= DAC_LAST_NOTE; note++) {
-            int entry = DAC_PLAYLIST + 2 * (note - DAC_FIRST_NOTE);
-            int index = u8(driver, entry) - DAC_FIRST_NOTE, rate = u8(driver, entry + 1);
+            int index = u8(driver, playlistOffset(note)) - DAC_FIRST_NOTE;
+            int rate = stockRate(driver, note);
             if (index < 0 || index >= samples.length)
                 throw new IllegalArgumentException("Invalid Sonic 2 stock DAC note 0x%02X".formatted(note));
             result.add(new Stock(note, NAMES.get(index), rate, samples[index], Shape.of(samples[index], rate)));
         }
         return result;
+    }
+
+    static int stockRate(byte[] driver, int note) {
+        return u8(driver, playlistOffset(note) + 1);
+    }
+
+    private static int playlistOffset(int note) {
+        return DAC_PLAYLIST + 2 * (note - DAC_FIRST_NOTE);
     }
 
     private static Binding nearest(int note, DacSample sample, List<Stock> stock) {

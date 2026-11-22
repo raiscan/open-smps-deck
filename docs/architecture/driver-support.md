@@ -56,6 +56,7 @@ Reconstruction uses the target profile's DAC base cycles for sample probes,
 rate-byte quantization and stem slicing. The S3K default searches catalogue
 sounds and nearby rates. S1 and S2 default to fixed native DAC entries
 decoded by the pinned loaders from the verified cartridge in the ROM library.
+S2 rates come from the decompressed driver playlist also used by Test in game.
 
 The classic kits include kick and snare. S1 uses four fixed timpani aliases.
 The raw timpani command inherits an earlier rate write, so the matcher uses

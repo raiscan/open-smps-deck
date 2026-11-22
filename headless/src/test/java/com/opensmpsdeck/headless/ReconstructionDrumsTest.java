@@ -1,5 +1,8 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.headless.rom.VerifiedRom;
 import com.opensmpsdeck.project.TargetGame;
 
 import com.google.gson.JsonParser;
@@ -11,6 +14,7 @@ import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
@@ -26,6 +30,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -438,6 +443,37 @@ class ReconstructionDrumsTest {
                 assertEquals(project.samples().get(slot).origin().ref().note().intValue(),
                         binding.get("mappedNote").getAsInt());
             }
+        }
+    }
+
+    @Test void everySonic2StockRateMatchesTheDecompressedDriver() throws Exception {
+        String configured = System.getenv("OPENSMPSDECK_S2_ROM");
+        assumeTrue(configured != null && !configured.isBlank());
+        Path rom = Path.of(configured);
+        var samples = List.copyOf(ReconstructionStockDrums.load(VerifiedRom.read(RomGame.S2, rom)).values());
+        assertEquals(17, samples.size());
+        var triggers = new ArrayList<SampleTrigger>();
+        for (int i = 0; i < samples.size(); i++)
+            triggers.add(new SampleTrigger("hit-" + i, i * 60, samples.get(i).id()));
+        int length = 60 * samples.size();
+        var seq = new Sequence("drums", "Drums", "DAC", length, null, 127, List.of(), List.of(),
+                "RESET", null, null, triggers);
+        var project = new StudioProject(4, "Stock rate coverage", "S3K", 30, 0, List.of(),
+                List.of(seq), List.of(new Clip("clip", "drums", "DAC", 0, length)),
+                List.of(), samples, TargetGame.S2, 255);
+        Path portable = directory.resolve("stock.smps.zip");
+        PortablePackageWriter.write(project, portable, PortableOptions.defaults(TargetGame.S2));
+        var result = TestInGame.export(new RomLibrary(directory.resolve("roms.json")), portable, rom,
+                new TestInGame.Outputs(null, directory.resolve("stock.bps"), false), RomGame.S2,
+                new TestInGame.Options(null, false, false, false));
+        var mappings = result.getAsJsonObject("report").getAsJsonArray("dacNoteMap");
+        assertEquals(samples.size(), mappings.size());
+        for (var item : mappings) {
+            var binding = item.getAsJsonObject();
+            int slot = binding.get("note").getAsInt() - DacSample.FIRST_NOTE;
+            assertEquals(samples.get(slot).origin().ref().note().intValue(), binding.get("mappedNote").getAsInt());
+            assertTrue(binding.get("exact").getAsBoolean(), binding.toString());
+            assertEquals(0.0, binding.get("distance").getAsDouble());
         }
     }
 
