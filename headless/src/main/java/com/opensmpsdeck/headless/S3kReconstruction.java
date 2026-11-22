@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.Clip;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.DacSample;
@@ -186,11 +187,11 @@ final class S3kReconstruction {
             if (part.drums()) {
                 String sampleId = asset.id() + "-" + choice.sampleRate();
                 samples.computeIfAbsent(sampleId, id -> DacSample.of(id, choice.name(),
-                        choice.sampleRate(), asset.bytes()));
+                        choice.sampleRate(), asset.bytes()).withOrigin(catalogue.origin(asset)));
                 drumHits.add(new Event(note, start, start + 1, drumPriority(note.pitch()), sampleId, 0));
             } else {
                 voices.computeIfAbsent(asset.id(), id -> {
-                    return new Voice(id, part.name() + " / " + choice.name(), unsigned(asset.bytes()));
+                    return new Voice(id, part.name() + " / " + choice.name(), unsigned(asset.bytes()), catalogue.origin(asset));
                 });
                 tones.add(new Event(note, start, end, tonePriority(part, note.pitch()), asset.id(), volume(part, note)));
             }
@@ -205,8 +206,7 @@ final class S3kReconstruction {
                 continue;
             }
             String id = choice.assetId();
-            envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME,
-                    psgAttenuation(catalogue.asset(key).bytes())));
+            envelopes.computeIfAbsent(id, key -> catalogueEnvelope(catalogue, catalogue.asset(key), key, choice.name()));
             spill.add(new Event(event.note(), event.start(), event.end(), event.priority(), id,
                     Math.max(1, event.volume() - 24)));
         }
@@ -426,9 +426,12 @@ final class S3kReconstruction {
                         voice == null ? 1 : voice.drumGain(note.pitch()));
                 String gainedId = gain == 1 ? id : id + "-gain-" + Double.toHexString(gain);
                 samples.computeIfAbsent(gainedId, key -> {
-                    if (gain == 1 && slice != null) return slice;
-                    byte[] pcm = slice == null ? catalogue.asset(choice.assetId()).bytes() : slice.pcm();
-                    return DacSample.of(key, choice.name(), choice.sampleRate(), DacSample.applyGain(pcm, gain));
+                    if (gain == 1 && slice != null) return slice.withOrigin(AssetOrigin.sourceAudio());
+                    var asset = slice == null ? catalogue.asset(choice.assetId()) : null;
+                    var sampleOrigin = slice == null ? catalogue.origin(asset) : AssetOrigin.sourceAudio();
+                    byte[] pcm = slice == null ? asset.bytes() : slice.pcm();
+                    return DacSample.of(key, choice.name(), choice.sampleRate(), DacSample.applyGain(pcm, gain))
+                            .withOrigin(sampleOrigin == null ? null : sampleOrigin.withGain(gain));
                 });
                 dac.add(new Event(note, start, end, drumPriority(note.pitch()), gainedId, 0));
                 gates.add(new VoicedGate(entry.note().id(), lane, note.pitch(), start, end));
@@ -453,9 +456,9 @@ final class S3kReconstruction {
                 if (isFm) {
                     byte[] patch = assignment == null ? ReconstructionVoicing.patchBytes(asset, articulation) : asset.bytes();
                     id = ReconstructionVoicing.patchId(asset, patch);
-                    voices.computeIfAbsent(id, key -> new Voice(key, part.name() + " / " + choice.name(), unsigned(patch)));
+                    voices.computeIfAbsent(id, key -> new Voice(key, part.name() + " / " + choice.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
                 } else {
-                    envelopes.computeIfAbsent(id, key -> new Envelope(key, choice.name(), Envelope.PSG_VOLUME, psgAttenuation(asset.bytes())));
+                    envelopes.computeIfAbsent(id, key -> catalogueEnvelope(catalogue, asset, key, choice.name()));
                 }
                 int duration = voicedDuration(entry, articulation);
                 int volume = Math.max(1, volume(part, note) - (isFm ? 0 : 24));
@@ -513,10 +516,9 @@ final class S3kReconstruction {
                                     : new ReconstructionVoicing.Articulation("scoped", articulation.gate(), scoped.minimumReleaseRate());
                             var patch = assignment == null ? ReconstructionVoicing.patchBytes(selected, activeArt) : selected.bytes();
                             selectedId = ReconstructionVoicing.patchId(selected, patch);
-                            voices.putIfAbsent(selectedId, new Voice(selectedId, selected.name(), unsigned(patch)));
+                            voices.putIfAbsent(selectedId, new Voice(selectedId, selected.name(), unsigned(patch), patchedOrigin(catalogue, selected, patch)));
                         } else {
-                            envelopes.putIfAbsent(selectedId, new Envelope(selectedId, selected.name(),
-                                    Envelope.PSG_VOLUME, psgAttenuation(selected.bytes())));
+                            envelopes.putIfAbsent(selectedId, catalogueEnvelope(catalogue, selected, selectedId, selected.name()));
                         }
                         int scopedVolume = volume;
                         if (scoped.gain() != null || !selected.id().equals(asset.id())) {
@@ -636,10 +638,10 @@ final class S3kReconstruction {
             if (fm) {
                 byte[] patch = assigned ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, articulation);
                 id = ReconstructionVoicing.patchId(asset, patch);
-                voices.putIfAbsent(id, new Voice(id, asset.name(), unsigned(patch)));
+                voices.putIfAbsent(id, new Voice(id, asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
                 if (voice != null) level = Math.max(level, ReconstructionEcho.fmVolumeFloor(patch));
             } else {
-                envelopes.putIfAbsent(id, new Envelope(id, asset.name(), Envelope.PSG_VOLUME, psgAttenuation(asset.bytes())));
+                envelopes.putIfAbsent(id, catalogueEnvelope(catalogue, asset, id, asset.name()));
             }
             boolean pitchedNoise = anchor.laneType() == ReconstructionLaneType.NOISE;
             int bytes = 0;
@@ -849,7 +851,7 @@ final class S3kReconstruction {
             if (asset == null) return null;
             var patch = profile == null ? asset.bytes() : ReconstructionVoicing.patchBytes(asset, profile.articulation());
             String id = ReconstructionVoicing.patchId(asset, patch);
-            voice = voices.computeIfAbsent(id, key -> new Voice(key, asset.name(), unsigned(patch)));
+            voice = voices.computeIfAbsent(id, key -> new Voice(key, asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
             baseVolume = voicedVolume(Math.min(127, tone.volume() + 24), 0,
                     profile == null ? 1 : profile.gainFor(note.partId()), 0);
             detune = profile == null ? 0 : profile.effects().detune();
@@ -1133,7 +1135,7 @@ final class S3kReconstruction {
                 var patch = ReconstructionVoicing.patchBytes(asset, sound.fm().articulation());
                 var id = ReconstructionVoicing.patchId(asset, patch);
                 var part = parts.get(note.partId());
-                voices.putIfAbsent(id, new Voice(id, part.name() + " / " + asset.name(), unsigned(patch)));
+                voices.putIfAbsent(id, new Voice(id, part.name() + " / " + asset.name(), unsigned(patch), patchedOrigin(catalogue, asset, patch)));
                 int level = voicedVolume(volume(part, note), ReconstructionEcho.fmVolumeFloor(patch),
                         sound.fm().gainFor(note.partId()), 0);
                 var placed = new Placement(new Event(note, start, dry.end, dry.event.priority(), id, level));
@@ -1526,6 +1528,18 @@ final class S3kReconstruction {
                     List.of(), List.of(), "RESET", null, null, triggers);
             links.add(source, "DAC", from, chunk.span(), sequences, clips);
         }
+    }
+
+    private static Envelope catalogueEnvelope(InstrumentCatalogue catalogue, InstrumentCatalogue.Asset asset,
+                                               String id, String name) {
+        var bytes = psgAttenuation(asset.bytes());
+        return new Envelope(id, name, Envelope.PSG_VOLUME, bytes, patchedOrigin(catalogue, asset, StockTable.bytes(bytes)));
+    }
+
+    private static AssetOrigin patchedOrigin(InstrumentCatalogue catalogue, InstrumentCatalogue.Asset asset, byte[] patch) {
+        var origin = catalogue.origin(asset);
+        if (origin == null || origin.ref() == null) return origin;
+        return origin.withPatch(asset.bytes(), patch);
     }
 
     static List<Integer> psgAttenuation(byte[] bytes) {

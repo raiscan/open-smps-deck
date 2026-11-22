@@ -9,6 +9,26 @@ class ProjectFormatTest {
     static StudioProject fixture() {
         return ProjectCompilerTest.project(List.of(ProjectCompilerTest.sequence("s","FM",24,List.of(new NoteEvent("n",0,12,60)))),List.of(new Clip("c","s","FM1",0,48)));
     }
+    @Test void provenanceIsOptionalAndStrictWithoutChangingTheVersion() {
+        var before = fixture();
+        var voice = before.voices().getFirst();
+        var ref = new StockRef("s3k", "global-fm", null, 3, null, null, "a".repeat(64));
+        var declared = new StudioProject(1, before.name(), before.mode(), before.ticksPerBeat(),
+                before.tempo(), List.of(voice.withOrigin(AssetOrigin.stock(ref))), before.sequences(), before.clips())
+                .withDerivedFrom(new RetailSongOrigin("retail-song", "s3k", 13, "b".repeat(64)));
+        String json = ProjectFormat.write(declared);
+        assertEquals(declared, ProjectFormat.read(json));
+        assertEquals(json, ProjectFormat.write(ProjectFormat.read(json)));
+        assertEquals(1, ProjectFormat.read(json).formatVersion());
+        assertEquals(ProjectFormat.write(before), ProjectFormat.write(ProjectFormat.read(ProjectFormat.write(before))));
+        for (String invalid : List.of(json.replace("\"slot\": 3", "\"slot\": 3, \"note\": 129"),
+                json.replace("\"slot\": 3", "\"slot\": 3, \"slot\": 4"),
+                json.replace("\"slot\": 3", "\"bogus\": 3"),
+                json.replace("\"type\": \"stock\"", "\"type\": \"original\""),
+                json.replace("\"songId\": 13", "\"songId\": \"13\""))) {
+            assertThrows(IllegalArgumentException.class, () -> ProjectFormat.read(invalid));
+        }
+    }
     @Test void deterministicRoundTripAndDefensiveLists() {
         var source=new ArrayList<NoteEvent>(); source.add(new NoteEvent("n",0,1,60));
         var s=ProjectCompilerTest.sequence("s","FM",24,source); source.clear();

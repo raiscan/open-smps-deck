@@ -245,7 +245,7 @@ final class DacSampleEditorPane extends BorderPane {
     private void duplicate() {
         DacSample source = findSample(project, selectedSampleId());
         if (source == null) return;
-        var copy = new DacSample(newId(), source.name() + " copy", source.rate(), source.pcmBase64());
+        var copy = new DacSample(newId(), source.name() + " copy", source.rate(), source.pcmBase64(), source.origin());
         submit(p -> ProjectEdits.addSample(p, copy));
         selectSample(copy.id());
     }
@@ -263,7 +263,7 @@ final class DacSampleEditorPane extends BorderPane {
             return;
         }
         DacSample audio = replacementAudio == null ? expected : replacementAudio;
-        var sample = new DacSample(expected.id(), name.getText(), parsed, audio.pcmBase64());
+        var sample = new DacSample(expected.id(), name.getText(), parsed, audio.pcmBase64(), audio.origin());
         submit(p -> ProjectEdits.updateSample(guardSample(p, expected), sample));
         if (sample.equals(findSample(project, sample.id()))) load(sample);
     }

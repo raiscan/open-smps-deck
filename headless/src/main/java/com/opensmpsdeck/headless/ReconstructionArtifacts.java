@@ -121,6 +121,10 @@ final class ReconstructionArtifacts {
                 String name = field.getName();
                 keys.add(name);
                 JsonElement member = object.get(name);
+                // Voicing stores a slice as an intermediate value. Its origin is
+                // assigned when the slice enters the project, keeping old voicing files readable.
+                if (clazz == com.opensmpsdeck.project.DacSample.class && name.equals("origin") && member == null)
+                    continue;
                 if (field.isAnnotationPresent(ReconstructionStages.Nullable.class)
                         && (member == null || member.isJsonNull())) continue;
                 shape(at + "." + name, field.getGenericType(), member);

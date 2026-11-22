@@ -204,6 +204,8 @@ final class McpReconstruction {
             if (Files.isRegularFile(path)) files.put(file, path.toString());
         }
         var result = object(Map.of("workDir", work.toString(), "files", files, "refitChanges", changed));
+        if (!single || command.equals("assemble"))
+            result.add("warnings", McpJson.JSON.toJsonTree(ReconstructionStages.packageWarnings(work)));
         var issues = ReconstructionSections.anchorIssues(work);
         if (!issues.isEmpty()) result.add("sectionIssues", McpJson.JSON.toJsonTree(issues));
         var voicesFile = work.resolve(ReconstructionVoicePlan.FILE);

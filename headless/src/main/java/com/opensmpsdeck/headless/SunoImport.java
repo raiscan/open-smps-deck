@@ -323,7 +323,7 @@ public final class SunoImport {
         return Path.of(args.get(3)).resolve("arrangement.smps.json");
     }
 
-    static void cli(String[] args, PrintStream out) throws IOException {
+    static void cli(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("reconstruct import expects FOLDER WORK_DIR");
         Path catalogue = null;
         boolean run = false, audioOnly = false;
@@ -385,8 +385,11 @@ public final class SunoImport {
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
-        if (run && report.issues.stream().noneMatch(issue -> issue.code.equals(AUDIO_ONLY)))
-            out.println(run(report, catalogue, (a, b, message) -> out.println(message)));
+        if (run && report.issues.stream().noneMatch(issue -> issue.code.equals(AUDIO_ONLY))) {
+            var source = run(report, catalogue, (a, b, message) -> out.println(message));
+            ProjectProvenance.printWarnings(ReconstructionStages.packageWarnings(source.getParent()), err);
+            out.println(source);
+        }
     }
 
     private static Path prepareWork(Path source, Path requested) throws IOException {

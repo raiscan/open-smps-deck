@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.ProjectExport;
+import com.opensmpsdeck.headless.ProjectProvenance;
 import com.opensmpsdeck.headless.ProjectExport.Format;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
@@ -150,15 +151,32 @@ final class ExportDialog {
         var destination = chooser.showSaveDialog(owner);
         if (destination == null) return;
         Path output = destination.toPath();
-        var job = new Task<Void>() {
-            @Override protected Void call() throws Exception {
+        var job = new Task<Boolean>() {
+            @Override protected Boolean call() throws Exception {
                 var opened = source.call();
+                if (options.format() == Format.PACKAGE) {
+                    var warnings = ProjectProvenance.detect(opened.project()).warnings();
+                    if (!warnings.isEmpty()) {
+                        var confirmation = new java.util.concurrent.FutureTask<>(() -> {
+                            if (isCancelled()) return false;
+                            var text = warnings.stream().map(ProjectProvenance::warningMessage)
+                                    .collect(java.util.stream.Collectors.joining("\n\n"));
+                            var alert = new Alert(Alert.AlertType.CONFIRMATION, text, ButtonType.OK, ButtonType.CANCEL);
+                            alert.initOwner(owner);
+                            alert.setTitle("Package provenance");
+                            alert.setHeaderText("Export this package?");
+                            return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
+                        });
+                        javafx.application.Platform.runLater(confirmation);
+                        if (!confirmation.get()) return false;
+                    }
+                }
                 ProjectExport.write(opened.project(), opened.work(), output, options, (done, total, message) -> {
                     if (isCancelled()) throw new java.util.concurrent.CancellationException();
                     updateProgress(done, total);
                     updateMessage(message);
                 });
-                return null;
+                return true;
             }
         };
 
@@ -176,7 +194,7 @@ final class ExportDialog {
         progress.setOnCloseRequest(event -> { if (!job.isDone()) job.cancel(); });
         job.setOnSucceeded(event -> {
             progress.close();
-            status.accept("Exported " + output.getFileName());
+            status.accept(job.getValue() ? "Exported " + output.getFileName() : "Export cancelled");
         });
         job.setOnFailed(event -> {
             progress.close();

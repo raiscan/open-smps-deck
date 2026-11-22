@@ -5,7 +5,9 @@ import com.openggf.data.Rom;
 import com.openggf.data.RomByteReader;
 import com.openggf.game.sonic3k.audio.Sonic3kMusic;
 import com.openggf.game.sonic3k.audio.smps.Sonic3kSmpsLoader;
+import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.CompiledProject;
+import com.opensmpsdeck.project.RetailSongOrigin;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NativeProgram;
@@ -56,24 +58,38 @@ public final class S3kRomImporter {
         byte[] cartridge = readCartridge(path);
         try (var rom = Rom.fromReader(RomByteReader.fromBytes(cartridge), path.getFileName().toString())) {
             var loader = new Sonic3kSmpsLoader(rom);
-            int address = loader.findMusicOffset(id);
-            if (address < 0) throw new IOException("Cartridge music table has no entry for " + song.name());
-            int headerOffset = address % BANK_SIZE;
-            byte[] bank = rom.readBytes(address - headerOffset, BANK_SIZE);
-            return assemble(song.name(), bank, headerOffset, loader.getGlobalVoiceData(),
-                    loader.getPsgEnvelopes(), loader.getModEnvelopes(), loader.getPlaybackModEnvelopes(),
-                    loader.loadDacData());
+            return readSong(rom, loader, song);
         }
+    }
+
+    static List<Song> songs() { return SONGS; }
+
+    static StudioProject readSong(Rom rom, Sonic3kSmpsLoader loader, Song song) throws IOException {
+        int address = loader.findMusicOffset(song.id());
+        if (address < 0) throw new IOException("Cartridge music table has no entry for " + song.name());
+        int headerOffset = address % BANK_SIZE;
+        byte[] bank = rom.readBytes(address - headerOffset, BANK_SIZE);
+        return assemble(song.name(), bank, headerOffset, loader.getGlobalVoiceData(),
+                loader.getPsgEnvelopes(), loader.getModEnvelopes(), loader.getPlaybackModEnvelopes(),
+                loader.loadDacData(), true).withDerivedFrom(
+                        new RetailSongOrigin("retail-song", "s3k", song.id(), StockTable.hash(bank)));
     }
 
     static StudioProject assemble(String name, byte[] bank, int headerOffset, byte[] globalTable,
                                   Map<Integer, byte[]> psg, Map<Integer, byte[]> rawModulation,
                                   Map<Integer, byte[]> playbackModulation, DacData dac) {
+        return assemble(name, bank, headerOffset, globalTable, psg, rawModulation, playbackModulation, dac, false);
+    }
+
+    private static StudioProject assemble(String name, byte[] bank, int headerOffset, byte[] globalTable,
+                                          Map<Integer, byte[]> psg, Map<Integer, byte[]> rawModulation,
+                                          Map<Integer, byte[]> playbackModulation, DacData dac, boolean retail) {
         var envelopes = new ArrayList<Envelope>();
         var envelopeSlots = new ArrayList<NativeProgram.EnvelopeSlot>();
         new TreeMap<>(psg).forEach((slot, bytes) -> {
             String assetId = "psg-%02x".formatted(slot);
-            envelopes.add(new Envelope(assetId, "PSG %02X".formatted(slot), Envelope.PSG_VOLUME, unsigned(bytes)));
+            envelopes.add(new Envelope(assetId, "PSG %02X".formatted(slot), Envelope.PSG_VOLUME, unsigned(bytes),
+                    retail ? StockTable.origin("psg", slot, bytes) : null));
             envelopeSlots.add(new NativeProgram.EnvelopeSlot(assetId, slot));
         });
         new TreeMap<>(rawModulation).forEach((slot, raw) -> {
@@ -81,10 +97,12 @@ public final class S3kRomImporter {
             String assetId = "mod-%02x".formatted(slot);
             String title = "Modulation %02X".formatted(slot);
             if (!Arrays.equals(raw, playback)) {
-                envelopes.add(new Envelope(assetId + "-rom", title + " (ROM)", Envelope.MODULATION, unsigned(raw)));
+                envelopes.add(new Envelope(assetId + "-rom", title + " (ROM)", Envelope.MODULATION, unsigned(raw),
+                        retail ? AssetOrigin.stock(null) : null));
             }
             if (playback != null) {
-                envelopes.add(new Envelope(assetId, title, Envelope.MODULATION, unsigned(playback)));
+                envelopes.add(new Envelope(assetId, title, Envelope.MODULATION, unsigned(playback),
+                        retail ? StockTable.origin("mod", slot, playback) : null));
                 envelopeSlots.add(new NativeProgram.EnvelopeSlot(assetId, slot));
             }
         });
@@ -94,8 +112,9 @@ public final class S3kRomImporter {
         var voices = new ArrayList<Voice>();
         for (int offset = 0; offset < globalTable.length; offset += VOICE_BYTES) {
             int index = offset / VOICE_BYTES;
+            byte[] bytes = Arrays.copyOfRange(globalTable, offset, offset + VOICE_BYTES);
             voices.add(new Voice("global-%02x".formatted(index), "Global FM %02X".formatted(index),
-                    unsigned(Arrays.copyOfRange(globalTable, offset, offset + VOICE_BYTES))));
+                    unsigned(bytes), retail ? StockTable.origin("global-fm", index, bytes) : null));
         }
 
         if (dac.baseCycles() != DacSample.BASE_CYCLES)
@@ -109,7 +128,8 @@ public final class S3kRomImporter {
             if (sample == null) throw new IllegalArgumentException("Missing DAC sample for note %02X".formatted(note));
             byte[] pcm = new byte[sample.length()];
             for (int index = 0; index < pcm.length; index++) pcm[index] = sample.byteAt(index);
-            var candidate = DacSample.of("dac-%02x".formatted(note), "DAC %02X".formatted(note), entry.rate(), pcm);
+            var candidate = DacSample.of("dac-%02x".formatted(note), "DAC %02X".formatted(note), entry.rate(), pcm)
+                    .withOrigin(retail ? StockTable.origin("dac", note, pcm) : null);
             var canonical = uniquePcm.computeIfAbsent(candidate.pcmBase64(), ignored -> candidate);
             dacSlots.add(new NativeProgram.DacSlot(note, canonical.id(), entry.rate()));
         }
@@ -125,7 +145,7 @@ public final class S3kRomImporter {
         return project;
     }
 
-    private static byte[] readCartridge(Path path) throws IOException {
+    static byte[] readCartridge(Path path) throws IOException {
         if (!Files.isRegularFile(path)) throw new IOException("Select a regular S3&K cartridge image");
         byte[] bytes;
         try (var input = Files.newInputStream(path)) {

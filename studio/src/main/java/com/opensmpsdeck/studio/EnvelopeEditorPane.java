@@ -86,14 +86,17 @@ final class EnvelopeEditorPane extends BorderPane {
     }
     private void duplicate(){
         Envelope current=find(selectedId);if(current==null)return;
-        Envelope copy=new Envelope("envelope-"+UUID.randomUUID(),current.name()+" copy",current.type(),current.bytes());
+        Envelope copy=new Envelope("envelope-"+UUID.randomUUID(),current.name()+" copy",current.type(),current.bytes(),current.origin());
         submit(p->ProjectEdits.addEnvelope(p,copy));selectEnvelope(copy.id());
     }
     private void apply(){
         if(baseline==null)return;
         Envelope expected=baseline;
         try {
-            Envelope replacement=new Envelope(expected.id(),name.getText(),expected.type(),CommandEditorPane.parseHexArguments(bytes.getText()));
+            var values = CommandEditorPane.parseHexArguments(bytes.getText());
+            var origin = expected.origin();
+            Envelope replacement = new Envelope(expected.id(), name.getText(), expected.type(), values,
+                    origin == null ? null : origin.withPatch(expected.bytes(), values));
             submit(p->ProjectEdits.updateEnvelope(guardEnvelope(p,expected),replacement));
             if(replacement.equals(find(expected.id())))selectEnvelope(expected.id());
         }catch(IllegalArgumentException failure){error.accept(failure.getMessage());}

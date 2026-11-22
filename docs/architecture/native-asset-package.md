@@ -125,3 +125,20 @@ PCM. Schema 3 preserves structurally valid envelope bytes outside this profile.
 
 The [S3K support matrix](s3k-support.md) tracks the remaining playback and
 dependency gaps, including cross-song voices and game runtime context.
+
+## Provenance
+
+Legacy package schemas 1–3 add `provenance` only when a package embeds
+ROM-derived assets or retail song data. This object contains
+`containsRomDerivedData`, `containsRetailSongData`, `derivedFromRetailSong`
+(a game, song ID and bank SHA-256, or null) and sorted `warnings` codes.
+Export remains available. The CLI warns on stderr, MCP package exports
+return `warnings`, and Studio asks for confirmation before export.
+
+Detection uses declared origins and exact payload hashes for undeclared
+assets. The public stock table also covers the whole addressed bank written
+by the ROM importer. Catalogue assets prefer a global FM locator over a local
+one, then the lowest song ID and slot. PSG and playback modulation use
+their lowest index and DAC uses its lowest note. The table ships hashes and
+loader coordinates only. Regenerate it locally with
+`stock-table build ROM OUT.json` using a verified locked-on S3&K image.

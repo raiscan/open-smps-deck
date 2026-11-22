@@ -98,7 +98,9 @@ class ReconstructionDrumsTest {
         var catalogue = reconstruct(midi, stem, index, "catalogue", true);
         assertTrue(catalogue.id().startsWith(sample));
         assertTrue(catalogue.rate() < nativeRate, "the higher reference pitch should choose faster DAC playback");
-        assertTrue(reconstruct(midi, stem, index, "sliced", true).id().startsWith("stem-"));
+        var slice = reconstruct(midi, stem, index, "sliced", true);
+        assertTrue(slice.id().startsWith("stem-"));
+        assertEquals("source-audio", slice.origin().type());
         assertFalse(reconstruct(midi, stem, index, "auto", false).id().startsWith("stem-"));
     }
 

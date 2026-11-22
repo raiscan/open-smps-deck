@@ -56,7 +56,10 @@ def verify(root, source, scratch):
         # Renderer resource records and the bounded envelope grammar use only
         # the JDK. Keep this independent bridge free of Gson/project persistence.
         project = root / "project-core/src/main/java/com/opensmpsdeck/project"
-        adapters += [project / f"{name}.java" for name in ("CompiledProject", "Envelope", "EnvelopeProgram", "DacSample", "NativeProgram", "Voice")]
+        adapters += [project / f"{name}.java" for name in (
+            "AssetOrigin", "CompiledProject", "DacSample", "Envelope", "EnvelopeProgram",
+            "NativeProgram", "StockRef", "Voice",
+        )]
         reference = run_probe(originals + [stub, services, fallback] + adapters, workspace / "reference-classes", probe)
         actual = run_probe(vendored + adapters, workspace / "vendored-classes", probe)
         if actual != reference:

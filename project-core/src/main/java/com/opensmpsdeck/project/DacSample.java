@@ -7,7 +7,15 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Original unsigned eight-bit mono PCM together with the native S3K rate byte. */
-public record DacSample(String id, String name, int rate, String pcmBase64) {
+public record DacSample(String id, String name, int rate, String pcmBase64, AssetOrigin origin) {
+    public DacSample(String id, String name, int rate, String pcmBase64) {
+        this(id, name, rate, pcmBase64, null);
+    }
+
+    public DacSample withOrigin(AssetOrigin origin) {
+        return new DacSample(id, name, rate, pcmBase64, origin);
+    }
+
     public static final int BASE_CYCLES = 297;
     public static final int FIRST_NOTE = 0x81;
     public static final int MAX_SAMPLES = 95;

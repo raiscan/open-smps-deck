@@ -1087,3 +1087,14 @@ with a nonzero exit status.
 Agents can also author the [version 6 JSON fields](../project-core/README.md#version-6-group-sequences)
 directly. See [Signal garden](../examples/signal-garden.smps.json) for a nested
 arrangement with linked instances and partial repeats.
+
+## Package provenance
+
+Package exports warn when they embed assets derived from the ROM or
+copyrighted retail song data. Keep these packages for personal use and do
+not redistribute them. A shareable portable mode is planned. The warnings
+go to stderr for CLI package writers and appear in the `warnings` array for
+MCP package exports and reconstruction runs. Export still succeeds.
+
+`stock-table build ROM OUT.json` rebuilds the public stock hash and locator
+table from a verified locked-on S3&K image. Choose a new output path.
