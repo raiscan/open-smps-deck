@@ -3,6 +3,7 @@ package com.opensmpsdeck.studio;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.ReconstructionLaneType;
 
 import java.util.List;
 import java.util.UUID;
@@ -56,6 +57,16 @@ final class ReconstructionDraft {
         edit.addProperty("op", op);
         edit.addProperty("author", "human");
         edit.addProperty("reason", reason);
+        return edit;
+    }
+
+    static JsonObject transpose(List<String> noteIds, int semitones, ReconstructionLaneType laneType) {
+        var edit = human("transpose", "Transpose notes in Studio");
+        var ids = new JsonArray();
+        noteIds.forEach(ids::add);
+        edit.add("noteIds", ids);
+        edit.addProperty("semitones", semitones);
+        edit.addProperty("laneType", laneType.name());
         return edit;
     }
 

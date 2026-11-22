@@ -1,7 +1,9 @@
 package com.opensmpsdeck.studio;
 
+import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.Sequence;
+import com.opensmpsdeck.project.TargetProfile;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -53,6 +55,50 @@ final class PianoRollView extends ViewportCanvas {
         });
         canvas.setOnMouseReleased(e -> { var change=ghost; dragging=null; ghost=null; if(change!=null) edit.accept(change); draw(); });
     }
+    void transpose(int semitones, TargetProfile profile, Consumer<String> status) {
+        if (readOnly || sequence == null || selected == null) return;
+        var note = sequence.notes().stream().filter(candidate -> candidate.id().equals(selected)).findFirst().orElse(null);
+        if (note == null) return;
+        boolean psg = sequence.type().equals("PSG");
+        if (psg && usesNoise(sequence, note)) {
+            status.accept("Transpose skipped · PSG noise note");
+            return;
+        }
+        var range = psg ? profile.psg() : profile.fm();
+        int pitch = note.pitch() + semitones;
+        if (!range.contains(pitch)) {
+            status.accept("Transpose refused · " + sequence.type() + " MIDI pitch must stay in "
+                    + range.low() + "–" + range.high());
+            return;
+        }
+        edit.accept(new NoteEvent(note.id(), note.tick(), note.duration(), pitch));
+        var current = sequence.notes().stream()
+                .anyMatch(candidate -> candidate.id().equals(note.id()) && candidate.pitch() == pitch);
+        if (!current) return;
+        double viewport = scroll.getViewportBounds().getHeight();
+        double scrollable = contentHeight - viewport;
+        if (scrollable > 0) {
+            double y = HEADER + (topPitch - pitch) * NOTE_ROW;
+            double top = scroll.getVvalue() * scrollable;
+            if (y < top || y + NOTE_ROW > top + viewport)
+                scroll.setVvalue(Math.clamp((y - viewport / 2) / scrollable, 0, 1));
+        }
+        status.accept("Transposed to " + noteName(pitch));
+    }
+
+    static boolean usesNoise(Sequence source, NoteEvent note) {
+        var changes = source.commands().stream().filter(event -> event.command() == NativeCommand.PSG_NOISE)
+                .sorted(java.util.Comparator.comparingInt(event -> event.tick())).toList();
+        boolean noise = source.repeatState().equals("CARRY") && !changes.isEmpty()
+                && changes.getLast().arguments().getFirst() != 0;
+        for (var change : changes) {
+            if (change.tick() >= note.tick() + note.duration()) break;
+            if (change.tick() > note.tick() && noise) return true;
+            noise = change.arguments().getFirst() != 0;
+        }
+        return noise;
+    }
+
     void setSequence(Sequence source,String noteId,int beat) {
         if(sequence!=source){dragging=null;ghost=null;}
         double previousOffset=offset;

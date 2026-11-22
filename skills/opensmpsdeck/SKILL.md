@@ -220,7 +220,7 @@ lists field names, selector rules and rebuild stages.
 | Goal | Operations |
 | --- | --- |
 | Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `retrigger`, `mergeNotes` |
-| Route a line or register | `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
+| Route a line or register | `transpose` (signed `semitones` and `noteIds`), `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
 | Shape articulation and level | `bend`, `glide`, `noteVoicing` for instrument or vibrato overrides, `setVelocity` |
 | Layer selected attacks | `layer` with `echo`, `chorus`, `double` or `off` |
 | Fit stacked tones | `arpeggio`, `chordInstrument` |

@@ -336,6 +336,12 @@ for stem in stems:
         assert not (work / "edits.json").exists() and Path(files["render.wav"]).read_bytes() == before_layers
         scored = trace[0]["score"]
         source = scored["note"]
+        transpose = {"id": "register-preview", "reason": "Raise one attack", "op": "transpose",
+                     "noteIds": [target], "semitones": 12}
+        preview = rpc.call("reconstruct_edit", workDir=work, action="add", dryRun=True, verbose=True, edit=transpose)
+        assert preview["from"] == "transcribe"
+        assert preview["outcomes"][0]["resultNotes"][0]["pitch"] == source["pitch"] + 12
+        assert not (work / "edits.json").exists()
         cut_at = (source["start"] + source["end"]) / 2
         split = {"id": "split-preview", "reason": "Synthetic cut", "op": "splitNote", "noteId": target, "at": cut_at}
         preview = rpc.call("reconstruct_edit", workDir=work, action="add", edit=split, dryRun=True, verbose=True)

@@ -27,6 +27,8 @@ import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
@@ -161,6 +163,7 @@ final class ReconstructionPane implements AutoCloseable {
                             Supplier<ProjectDocument> openProject) {
         model = snapshot.inspection();
         view = new ReconstructionCanvas(model, status::setText);
+        status.setId("reconstruction-status");
         editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh, position -> {
             if (playing || playWhenLoaded) stopPlayback();
             updatePosition(position, true);
@@ -298,11 +301,27 @@ final class ReconstructionPane implements AutoCloseable {
         var roles = new FlowPane(12, 6, new Label("Notes"));
         roles.setAlignment(Pos.CENTER_LEFT);
         for (var role : Role.values()) {
-            var filter = new CheckBox(ReconstructionCanvas.roleName(role));
-            filter.setStyle("-fx-text-fill: #%06x".formatted(role.rgb()));
+            String name = ReconstructionCanvas.roleName(role);
+            var filter = new CheckBox();
+            filter.setAccessibleText("Show " + name + " notes");
+            filter.setTooltip(new Tooltip("Show " + name + " notes"));
             filter.setSelected(true);
             filter.selectedProperty().addListener((ignored, previous, visible) -> view.roleVisible(role, visible));
-            roles.getChildren().add(filter);
+            var select = new Button(name);
+            select.setId("reconstruction-role-" + role.name().toLowerCase(java.util.Locale.ROOT));
+            select.setStyle("-fx-text-fill: #%06x".formatted(role.rgb()));
+            select.setTooltip(new Tooltip("Select all " + name + " notes. Shift-click or Ctrl-click to add."));
+            select.setOnAction(event -> view.selectRole(role, false));
+            select.addEventFilter(MouseEvent.MOUSE_PRESSED, event -> {
+                if (event.getButton() == MouseButton.PRIMARY
+                        && (event.isShiftDown() || event.isControlDown() || event.isMetaDown())) {
+                    view.selectRole(role, true);
+                    event.consume();
+                }
+            });
+            var controls = new HBox(2, filter, select);
+            controls.setAlignment(Pos.CENTER_LEFT);
+            roles.getChildren().add(controls);
         }
         laneFilters = new MenuButton("Lanes");
         refreshLaneFilters();
