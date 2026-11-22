@@ -8,6 +8,7 @@ import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.headless.WaveFile;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -94,9 +95,9 @@ class BenchCliTest {
         Path after = directory.resolve("after.json");
         var sample = card(.90, .4).cases();
         BenchFiles.write(before, BenchScorecard.create(BenchFiles.hash(beforeManifest), "catalogue",
-                false, false, Map.of(), sample));
+                false, false, Map.of(), sample, TargetGame.S3K));
         BenchFiles.write(after, BenchScorecard.create(BenchFiles.hash(afterManifest), "catalogue",
-                false, false, Map.of(), sample));
+                false, false, Map.of(), sample, TargetGame.S3K));
         var command = new String[]{"bench", "compare", before.toString(), after.toString(), "--alternate-midi",
                 beforeManifest.toString(), afterManifest.toString()};
         var captured = new ByteArrayOutputStream();
@@ -105,7 +106,7 @@ class BenchCliTest {
             Files.writeString(afterManifest, Files.readString(afterManifest).replace("mix.wav", "other.wav"));
             assertEquals(2, Main.run(command, output, output));
             BenchFiles.write(after, BenchScorecard.create(BenchFiles.hash(afterManifest), "catalogue",
-                    false, false, Map.of(), sample));
+                    false, false, Map.of(), sample, TargetGame.S3K));
             assertEquals(2, Main.run(command, output, output));
         }
     }
@@ -227,7 +228,7 @@ class BenchCliTest {
         Path first = directory.resolve("first");
         Path second = directory.resolve("second");
         assertEquals(0, cli("run", manifest.toString(), index.toString(), first.toString(), "--quick", "--jobs", "1"));
-        assertEquals(0, cli("run", manifest.toString(), index.toString(), second.toString(), "--quick", "--jobs", "2"));
+        assertEquals(0, cli("run", manifest.toString(), index.toString(), second.toString(), "--quick", "--jobs", "2", "--target", "s3k"));
         var card = BenchFiles.read(first.resolve("scorecard.json"), BenchScorecard.Card.class);
         // The default layering adds a PSG octave and an FM echo to this one unaccompanied note.
         assertEquals(1.0, card.overall().mean().get("noteF1"));
@@ -243,11 +244,32 @@ class BenchCliTest {
         assertEquals(-1, Files.mismatch(first.resolve("scorecard.json"), second.resolve("scorecard.json")));
     }
 
+    @Test void comparesTargetKeysOnlyWithExplicitOptIn() throws Exception {
+        Path legacy = directory.resolve("legacy.json");
+        Path classic = directory.resolve("classic.json");
+        BenchFiles.write(legacy, card(.9, .4));
+        var json = BenchFiles.read(legacy, com.google.gson.JsonObject.class);
+        assertFalse(json.has("target"));
+        json.addProperty("target", "s2");
+        BenchFiles.write(classic, json);
+        var roundTrip = directory.resolve("round-trip.json");
+        BenchFiles.write(roundTrip, BenchFiles.read(classic, BenchScorecard.Card.class));
+        assertEquals("s2", BenchFiles.read(roundTrip, com.google.gson.JsonObject.class).get("target").getAsString());
+
+        var captured = new ByteArrayOutputStream();
+        try (var output = new PrintStream(captured)) {
+            assertEquals(2, Main.run(new String[]{"bench", "compare", legacy.toString(), classic.toString(),
+                    "--tolerance", "0"}, output, output));
+            assertTrue(captured.toString().contains("--cross-target"), captured.toString());
+        }
+        assertEquals(0, cli("compare", legacy.toString(), classic.toString(), "--cross-target", "--tolerance", "0"));
+    }
+
     @Test void compareUsesTheSameDrumClassDefinitionOnBothSides() {
         var legacy = scorecard(Map.of("drumClassAccuracy", .7));
         var old = new BenchScorecard.Card(1, legacy.manifestSha256(), legacy.catalogueSha256(),
                 legacy.holdout(), legacy.audioRefine(), legacy.goldInputs(), legacy.cases(), legacy.overall(),
-                legacy.profiles(), legacy.variants(), legacy.gold());
+                legacy.profiles(), legacy.variants(), legacy.gold(), null);
         var fixed = scorecard(Map.of("drumClassAccuracy", .5, "drumClassAccuracyLegacy", .7));
         var regressed = scorecard(Map.of("drumClassAccuracy", .4, "drumClassAccuracyLegacy", .7));
 
@@ -264,7 +286,7 @@ class BenchCliTest {
     private static BenchScorecard.Card scorecard(Map<String, Double> metrics) {
         var sample = new BenchScorecard.Case("fixture", BenchMidi.Profile.clean, BenchAudio.Variant.dry,
                 metrics, null, null, null, null, null, null, null);
-        return BenchScorecard.create("manifest", "catalogue", false, false, Map.of(), List.of(sample));
+        return BenchScorecard.create("manifest", "catalogue", false, false, Map.of(), List.of(sample), TargetGame.S3K);
     }
 
     private static byte[] voice(int id) {
