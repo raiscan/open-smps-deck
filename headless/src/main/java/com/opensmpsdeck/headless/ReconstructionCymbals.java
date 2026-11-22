@@ -22,6 +22,7 @@ import java.util.Map;
 /** Native-style noise substitutes and source-clock measurements for GM cymbals. */
 final class ReconstructionCymbals {
     static final String COLLISION = "psg-cymbal-dac-collision";
+    static final String HAT_ROUTE = "arrangement:psg-hat";
     static final String QUIET = "psg-cymbal-quiet-stem";
     static final int PITCH = 117;
     static final int TONE_PERIOD = 16; // S3K PSG period at pitch 117.
@@ -53,7 +54,7 @@ final class ReconstructionCymbals {
     }
 
     static boolean automatic(String reason) {
-        return COLLISION.equals(reason) || QUIET.equals(reason);
+        return COLLISION.equals(reason) || QUIET.equals(reason) || HAT_ROUTE.equals(reason);
     }
 
     static boolean voiced(ReconstructionAllocation.Entry entry) {

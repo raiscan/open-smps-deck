@@ -57,6 +57,7 @@ final class CatalogueCli {
         out.println("  catalog scan OUTPUT.json [--game s1|s2|s3k] [--rom ROM ...] [--rips DIRECTORY]");
         out.println("  catalog search INDEX.json [--query TEXT] [--kind KIND] [--target s1|s2|s3k]");
         out.println("          [--role ROLE] [--source SOURCE] [--variant ID] [--offset N] [--limit N]");
+        out.println("          [--min-centroid-hz HZ] [--max-centroid-hz HZ] [--max-decay-db DB]");
         out.println("  catalog show INDEX.json ID [--brief]");
         out.println("  catalog dac-classes INDEX.json");
         out.println("  catalog match INDEX.json REFERENCE.wav [--target s1|s2|s3k] [--kind KIND] [--midi N] [--gate-ticks N]");
@@ -88,7 +89,7 @@ final class CatalogueCli {
 
     private static void search(String[] args, PrintStream out) throws IOException {
         var options = options(args, 3, Set.of("--query", "--kind", "--driver", "--target", "--role", "--source",
-                "--variant", "--offset", "--limit"));
+                "--variant", "--offset", "--limit", "--min-centroid-hz", "--max-centroid-hz", "--max-decay-db"));
         Kind kind = options.containsKey("--kind") ? parseKind(options.get("--kind")) : null;
         String driver = options.containsKey("--target") ? target(options).id() : options.get("--driver");
         if (options.containsKey("--target") && options.containsKey("--driver"))
@@ -96,13 +97,45 @@ final class CatalogueCli {
         var query = new InstrumentCatalogue.Query(options.get("--query"), kind, driver,
                 options.get("--role"), options.get("--source"), options.get("--variant"),
                 integer(options, "--offset", 0), integer(options, "--limit", 25));
-        var page = InstrumentCatalogue.open(Path.of(args[2])).search(query);
+        var catalogue = InstrumentCatalogue.open(Path.of(args[2]));
+        var measured = new java.util.HashMap<String, CatalogueSustain.Measurement>();
+        var filter = new CatalogueSustain.Filter(decimalOption(options, "--min-centroid-hz"),
+                decimalOption(options, "--max-centroid-hz"), decimalOption(options, "--max-decay-db"));
+        InstrumentCatalogue.Page page;
+        if (filter.minCentroidHz() == null && filter.maxCentroidHz() == null && filter.maxDecayDb() == null) {
+            page = catalogue.search(query);
+        } else {
+            if (kind != null && kind != Kind.FM_VOICE)
+                throw new IllegalArgumentException("Centroid and held decay filters apply to FM voices");
+            var eligible = new ArrayList<InstrumentCatalogue.Match>();
+            var probes = new java.util.HashMap<List<String>, CatalogueSustain.Measurement>();
+            for (var match : catalogue.matching(query)) {
+                if (match.asset().kind() != Kind.FM_VOICE) continue;
+                var key = List.of(match.asset().id(), match.variant().driver());
+                if (!probes.containsKey(key)) probes.put(key, CatalogueSustain.probe(catalogue, match));
+                var result = probes.get(key);
+                if (filter.accepts(result)) {
+                    eligible.add(match);
+                    measured.put(match.variant().id(), result);
+                }
+            }
+            page = InstrumentCatalogue.page(query, eligible);
+        }
         var summaries = page.items().stream().map(match -> {
             var variant = match.variant();
+            var roles = new ArrayList<>(variant.roles());
+            if (query.role() != null || measured.containsKey(variant.id())) {
+                for (String role : InstrumentCatalogue.observedFmRoles(match))
+                    if (!roles.contains(role)) roles.add(role);
+            }
             return new Summary(match.asset().id(), variant.id(), match.asset().kind(), variant.name(), variant.driver(),
-                    variant.recipe().rate(), variant.recipe().pan(), variant.roles(), variant.occurrences().size());
+                    variant.recipe().rate(), variant.recipe().pan(), roles, variant.occurrences().size(), measured.get(variant.id()));
         }).toList();
         print(out, new Results(VERSION, page.total(), page.offset(), summaries));
+    }
+
+    private static Double decimalOption(Map<String, String> options, String name) {
+        return options.containsKey(name) ? Double.parseDouble(options.get(name)) : null;
     }
 
     private static void show(String[] args, PrintStream out) throws IOException {
@@ -250,7 +283,7 @@ final class CatalogueCli {
                         int variants, List<InstrumentCatalogue.Issue> issues) {}
     private record Results(int formatVersion, int total, int offset, List<Summary> items) {}
     private record Summary(String assetId, String variantId, Kind kind, String name, String driver, Integer rate,
-                           Integer pan, List<String> roles, int occurrenceCount) {}
+                           Integer pan, List<String> roles, int occurrenceCount, CatalogueSustain.Measurement heldNote) {}
     private record Details(int formatVersion, String auditionProfile, InstrumentCatalogue.Asset asset,
                            List<InstrumentCatalogue.Variant> variants) {}
     private record Output(int formatVersion, String auditionProfile, String variantId, Integer frames) {}

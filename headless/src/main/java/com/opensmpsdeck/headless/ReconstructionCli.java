@@ -99,6 +99,12 @@ final class ReconstructionCli {
                                          int omitPolicy, int bankPass) throws IOException;
     }
 
+    @FunctionalInterface
+    private interface PartArrangement {
+        S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends,
+                                         int omitPolicy, int bankPass, S3kReconstruction.Performance performance) throws IOException;
+    }
+
     private ReconstructionCli() {}
 
     static void usage(PrintStream out) {
@@ -139,6 +145,7 @@ final class ReconstructionCli {
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
         out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose] [--show-decided] [--json]");
         out.println("       reconstruct vocal-render WORK_DIR --phrase ID OUT.wav");
+        out.println("       reconstruct part-render WORK_DIR --part ID OUT.wav");
         out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [--color-by voice] [options] OUT.png");
         out.println("           [--time source|project] [--notes FILE] [--harmonics-at PITCH[@TIME] ...] [--ridges] [--ridge-count N] [--shared-db|--db] [--pitch-preset drums] [--force]");
         out.println("       reconstruct audition WORK_DIR (--lane FM1 --start S --end S [--time source|project] | --note ID) (--variant ID ... | --shortlist)");
@@ -179,6 +186,12 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("vocal-review")) {
             ReconstructionVocalReview.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("part-render")) {
+            if (args.length != 6 || !args[3].equals("--part"))
+                throw new IllegalArgumentException("part-render expects WORK_DIR --part ID OUT.wav");
+            out.println(renderPart(Path.of(args[2]), Integer.parseInt(args[4]), Path.of(args[5])));
             return;
         }
         if (args.length >= 2 && args[1].equals("vocal-render")) {
@@ -381,7 +394,7 @@ final class ReconstructionCli {
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var catalogue = InstrumentCatalogue.open(index, options.target());
-        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, policyDecisions);
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, policyDecisions, null);
         var matched = assembly.matched();
         var instruments = voicing.sourceInstruments();
         var effects = new Effects(Map.of(), Map.of(), Map.of());
@@ -407,6 +420,8 @@ final class ReconstructionCli {
             Path reportFile = staging.resolve("report.json");
             var report = ReconstructionArtifacts.readTree(reportFile).getAsJsonObject();
             var json = new com.google.gson.Gson();
+            if (!assembly.sectionGains().isEmpty()) report.add("sectionGains", json.toJsonTree(assembly.sectionGains()));
+            if (!assembly.hitGains().isEmpty()) report.add("drumHitGains", json.toJsonTree(assembly.hitGains()));
             if (policyDecisions) report.add("policyDecisions", json.toJsonTree(rendered.policyDecisions()));
             for (var layer : rendered.layers()) layer.report(outcomes);
             var edits = new ArrayList<>(ReconstructionEdits.Journal.read(work).through(ReconstructionStages.Stage.ASSEMBLE).all());
@@ -463,13 +478,18 @@ final class ReconstructionCli {
     }
 
     private record Assembly(Matched matched, ReconstructionAllocation.Result ordered, ReconstructionClipLinks.Layout layout,
-                            ReconstructionRetriggers.Playback playback, Arrangement arrangement) {}
+                            ReconstructionRetriggers.Playback playback, Arrangement arrangement, PartArrangement partArrangement,
+                            List<ReconstructionSectionLevels.Gain> sectionGains, Map<String, Double> hitGains,
+                            int bankFitCandidates) {}
 
     private static Assembly prepareAssembly(Path work, ReconstructionStages.Score score,
                                             ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
                                             ReconstructionVoicing.Result voicing, InstrumentCatalogue catalogue,
-                                            ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions)
+                                            ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions,
+                                            List<ReconstructionSectionLevels.Gain> savedGains)
             throws IOException {
+        var settings = voicing.arrangement();
+        if (settings != null) settings.validate(score);
         var options = score.inputs().options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
@@ -479,7 +499,22 @@ final class ReconstructionCli {
         var voiceAssignments = voicing.voiceAssignments() == null
                 ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
         var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
-        var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
+        var drumGains = new java.util.HashMap<String, Double>();
+        var dynamics = settings == null ? null : settings.drumDynamics();
+        if (dynamics != null && dynamics.fitLevels()) {
+            var hits = allocation.notes().stream().filter(row -> row.role() == ReconstructionRoles.Role.drums)
+                    .map(row -> timeline.sourceNote(row.note())).toList();
+            var lanes = voicing.lanes();
+            var automatic = dynamics.measure(score, hits);
+            for (var row : allocation.notes()) {
+                var db = automatic.get(row.note().id());
+                if (db == null || row.lane() == null) continue;
+                var lane = lanes.get(row.lane());
+                double base = lane == null ? 1 : lane.drumGain(row.note().pitch());
+                drumGains.put(row.note().id(), Math.min(4, base * ReconstructionDrumDynamics.gain(db)));
+            }
+        }
+        drumGains.putAll(ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline));
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
         var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
@@ -492,15 +527,78 @@ final class ReconstructionCli {
         var layout = ReconstructionClipLinks.Layout.read(work);
         var bankFit = score.inputs().audioOnly() == null ? List.<ReconstructionAllocation.Entry>of()
                 : bankFitCandidates(articulated, playback.origins(), authored, layers.keySet());
-        Arrangement arrange = (echoes, copies, bends, omitPolicy, bankPass) -> S3kReconstruction.arrangeAllocated(
+        PartArrangement build = (echoes, copies, bends, omitPolicy, bankPass, performance) -> S3kReconstruction.arrangeAllocated(
                 options.name(), options.ticksPerBeat(), timeline.ticks(),
                 new S3kReconstruction.Score(score.source().parts(), List.of(), score.reductions()),
                 compactForBank(articulated, bankFit, bankPass),
                 structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
                 authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
                 omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
-                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0, score.profile());
-        return new Assembly(matched, ordered, layout, playback, arrange);
+                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0, score.profile(), performance);
+        var fitRules = settings == null ? List.<ReconstructionArrangement.SectionFit>of() : settings.sectionFit();
+        var sectionGains = savedGains == null
+                ? ReconstructionSectionLevels.fit(work, score, structure, fitRules, part ->
+                    TargetPlayback.prepare(build.arrange(Map.of(), true, true, -1, 0,
+                            new S3kReconstruction.Performance(part, Map.of())).project()))
+                : savedGains;
+        var levels = ReconstructionSectionLevels.noteGains(sectionGains, articulated.notes());
+        return new Assembly(matched, ordered, layout, playback,
+                (echoes, copies, bends, omitPolicy, bankPass) -> build.arrange(echoes, copies, bends, omitPolicy, bankPass,
+                        new S3kReconstruction.Performance(null, levels)),
+                (echoes, copies, bends, omitPolicy, bankPass, performance) -> build.arrange(echoes, copies, bends,
+                        omitPolicy, bankPass, new S3kReconstruction.Performance(performance.soloPart(), levels)),
+                sectionGains, dynamics != null && dynamics.fitLevels() ? new java.util.TreeMap<>(drumGains) : Map.of(),
+                bankFit.size());
+    }
+
+    static com.google.gson.JsonObject renderPart(Path work, int part, Path output) throws IOException {
+        if (!output.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".wav"))
+            throw new IllegalArgumentException("part-render output needs a .wav extension");
+        if (Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(output.toString());
+        var attached = ReconstructionReview.requireAttached(work, false);
+        if (attached == null) throw new IllegalArgumentException("Assemble the work directory before rendering a part");
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        if (score.source().parts().stream().noneMatch(candidate -> candidate.id() == part))
+            throw new IllegalArgumentException("Unknown part " + part);
+        var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+        var voice = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
+        var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
+        var json = new com.google.gson.Gson();
+        if (!json.toJsonTree(assemblyInputs(score, allocation, voice)).equals(report.get("assemblyInputs")))
+            throw new IllegalArgumentException("Part render needs current assembly inputs. Rebuild the arrangement first.");
+        var savedGains = report.has("sectionGains") ? List.of(json.fromJson(report.get("sectionGains"),
+                ReconstructionSectionLevels.Gain[].class)) : List.<ReconstructionSectionLevels.Gain>of();
+        var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
+        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var assembly = prepareAssembly(work, score, structure, allocation, voice, catalogue,
+                ReconstructionEdits.read(work).accepted(), new ArrayList<>(), false, savedGains);
+        boolean copies = !report.has("echoBankLimit") || !report.get("echoBankLimit").getAsBoolean();
+        boolean bends = !report.has("bendSizeLimit") || !report.get("bendSizeLimit").getAsBoolean();
+        long omitted = report.getAsJsonArray("reductions").asList().stream().map(com.google.gson.JsonElement::getAsJsonObject)
+                .filter(row -> row.has("reason") && "audio-only-bank-fit".equals(row.get("reason").getAsString())).count();
+        int bankPass = 0;
+        while (bankPass < 4 && bankFitCount(assembly.bankFitCandidates(), bankPass) < omitted) bankPass++;
+        if (bankFitCount(assembly.bankFitCandidates(), bankPass) != omitted)
+            throw new IllegalArgumentException("The bank fit differs from the current assembly inputs. Rebuild the arrangement first.");
+        var full = assembly.arrangement().arrange(Map.of(), copies, bends, -1, bankPass).project();
+        var rebuilt = compileTarget(full);
+        var saved = compileTarget(attached.project());
+        if (!java.util.Arrays.equals(rebuilt.song(), saved.song())
+                || !rebuilt.envelopes().equals(saved.envelopes()) || !rebuilt.samples().equals(saved.samples())) {
+            throw new IllegalArgumentException("The saved arrangement differs from current assembly settings. Rebuild it first.");
+        }
+        var solo = assembly.partArrangement().arrange(Map.of(), copies, bends, -1, bankPass,
+                new S3kReconstruction.Performance(part, Map.of())).project();
+        int frames = ReconstructionTimeMap.of(score).frames();
+        TargetPlayback.prepare(solo).writeWave(output, frames);
+        var response = new com.google.gson.JsonObject();
+        response.addProperty("part", part);
+        response.addProperty("output", output.toAbsolutePath().toString());
+        response.addProperty("frames", frames);
+        String stem = score.inputs().stems().get(part);
+        if (stem != null) response.addProperty("stem", stem);
+        response.add("lanes", json.toJsonTree(solo.clips().stream().map(com.opensmpsdeck.project.Clip::lane).distinct().toList()));
+        return response;
     }
 
     static void previewLayers(Path work, ReconstructionStages.Score score, ReconstructionStructure.Result structure,
@@ -511,7 +609,7 @@ final class ReconstructionCli {
         if (assignments != null)
             voicing = keepVoicing(score, allocation, voicing, ignored -> {}).withAssignments(assignments);
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
-        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true);
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true, List.of());
         var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
         for (var layer : arrangement.layers()) layer.report(outcomes);
     }
@@ -534,13 +632,17 @@ final class ReconstructionCli {
     private static ReconstructionAllocation.Result compactForBank(ReconstructionAllocation.Result allocation,
                                                                      List<ReconstructionAllocation.Entry> candidates, int pass) {
         if (pass == 0) return allocation;
-        int count = (int) Math.ceil(candidates.size() * Math.min(1, pass * .25));
+        int count = bankFitCount(candidates.size(), pass);
         var removed = new java.util.HashSet<>(candidates.subList(0, count));
         return new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream().map(entry ->
                 removed.contains(entry) ? new ReconstructionAllocation.Entry(entry.note(), entry.role(),
                         null, null, null, ReconstructionAllocation.Outcome.dropped, "audio-only-bank-fit", null)
                         : entry).toList(), allocation.timeBase(), allocation.leadContinuity(), allocation.melodyGapFill(),
                 allocation.fm1InterNoteGaps(), allocation.fastRuns(), allocation.chordVoicings());
+    }
+
+    private static int bankFitCount(int candidates, int pass) {
+        return (int) Math.ceil(candidates * Math.min(1, pass * .25));
     }
 
     static boolean bankOverflow(IllegalArgumentException failure) {
@@ -555,7 +657,8 @@ final class ReconstructionCli {
         inputs.put("allocation", ReconstructionArtifacts.fingerprint(allocation));
         inputs.put("voicing", ReconstructionArtifacts.fingerprint(
                 new ReconstructionVoicing.Result(voicing.version(), voicing.lanes(), voicing.fitWindows(), null,
-                        voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies())));
+                        voicing.voiceAssignments(), voicing.sourceInstruments(), voicing.lanePolicies())
+                        .withArrangement(voicing.arrangement())));
         return inputs;
     }
 
