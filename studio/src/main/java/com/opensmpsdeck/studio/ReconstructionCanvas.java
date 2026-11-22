@@ -61,6 +61,8 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private static final Color GRID = Color.web("#a5badd").deriveColor(0, 1, 1, .16);
     private static final String[] PITCHES = {"C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"};
 
+    java.util.function.BooleanSupplier copyForAgent = () -> false;
+
     private record Hit(Overlay note, double left, double top, double width, double height) {
         boolean contains(double x, double y) {
             return x >= left && x <= left + width && y >= top && y <= top + height;
@@ -234,6 +236,19 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         hover.setShowDelay(javafx.util.Duration.millis(250));
         hover.setShowDuration(javafx.util.Duration.seconds(20));
         Tooltip.install(canvas, hover);
+        canvas.setOnKeyPressed(event -> {
+            if (AgentClipboard.shortcut(event) && copyForAgent.getAsBoolean()) event.consume();
+        });
+        canvas.setOnContextMenuRequested(event -> {
+            if (reviewing) return;
+            var item = hit(event.getX(), event.getY());
+            if (!event.isKeyboardTrigger() && item != null && !selection.contains(item.note()))
+                select(item.note(), item.note().lane());
+            if (!selectedNotes().isEmpty()) {
+                AgentClipboard.menu(canvas, event, copyForAgent);
+                event.consume();
+            }
+        });
         canvas.setOnMousePressed(this::press);
         canvas.setOnMouseDragged(this::drag);
         canvas.setOnDragDetected(event -> {
@@ -1033,6 +1048,30 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         laneSelection = lane;
         publishSelection(note);
         draw();
+    }
+
+    List<Overlay> lassoNotes(javafx.geometry.Rectangle2D box) {
+        var notes = new java.util.LinkedHashMap<String, Overlay>();
+        for (var hit : hits) if (box.intersects(hit.left(), hit.top(), hit.width(), hit.height()))
+            notes.putIfAbsent(hit.note().eventId(), hit.note());
+        return List.copyOf(notes.values());
+    }
+
+    com.opensmpsdeck.headless.NoteHandoff.ViewRange lassoRange(javafx.geometry.Rectangle2D box, List<Overlay> notes) {
+        Integer low = null, high = null;
+        if (box.getMinY() < pitchBottom() && box.getMaxY() > sectionBottom()) {
+            low = Math.clamp((int) Math.floor(pitchTop - (Math.min(pitchBottom(), box.getMaxY()) - sectionBottom()) / rowHeight()), 0, 127);
+            high = Math.clamp((int) Math.ceil(pitchTop - (Math.max(sectionBottom(), box.getMinY()) - sectionBottom()) / rowHeight()), 0, 127);
+        }
+        for (var note : notes) {
+            low = low == null ? note.pitch() : Math.min(low, note.pitch());
+            high = high == null ? note.pitch() : Math.max(high, note.pitch());
+        }
+        return new com.opensmpsdeck.headless.NoteHandoff.ViewRange(seconds(box.getMinX()), seconds(box.getMaxX()), low, high,
+                Map.of("audio", source == null ? "none" : source.label(), "ruler", projectRuler ? "project" : "source",
+                        "pixelsPerSecond", pixelsPerSecond, "visibleRoles", List.copyOf(roles),
+                        "visibleLanes", visibleLanes.stream().sorted().toList(), "showDrums", showDrums, "ridges", ridges,
+                        "dbRange", dbRange, "pitchTop", pitchTop, "pitchSpan", pitchSpan));
     }
 
     List<Overlay> selectedNotes() {

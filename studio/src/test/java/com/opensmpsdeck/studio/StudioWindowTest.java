@@ -1441,6 +1441,75 @@ class StudioWindowTest {
         });
     }
 
+    @Test void pianoRollCopyForAgentIncludesTheProjectAndSelectedNotes() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var note = piano.sequence.notes().getFirst();
+            var second = piano.sequence.notes().get(1);
+            for (var picked : List.of(note, second)) {
+                double x = PianoRollView.KEYBOARD + picked.tick() * piano.scale - piano.offset + 3;
+                double y = PianoRollView.HEADER + (piano.topPitch - picked.pitch()) * PianoRollView.NOTE_ROW + 5;
+                modifierClick(piano.canvas, x, y, picked.equals(second), false, false);
+            }
+            key(piano.canvas, KeyCode.C, true);
+            var clipboard = Clipboard.getSystemClipboard();
+            var text = clipboard.getString();
+            assertNotNull(text);
+            assertTrue(text.startsWith("opensmpsdeck-notes v1\n"), text);
+            assertTrue(text.contains(file.toString()), text);
+            for (var picked : List.of(note, second)) assertTrue(text.contains(picked.id()), text);
+
+            var cleared = new ClipboardContent();
+            cleared.putString("before context menu");
+            clipboard.setContent(cleared);
+            Event.fireEvent(piano.canvas, new ContextMenuEvent(ContextMenuEvent.CONTEXT_MENU_REQUESTED,
+                    10, 10, 100, 100, true, new PickResult(piano.canvas, 10, 10)));
+            var menu = Window.getWindows().stream().filter(ContextMenu.class::isInstance)
+                    .map(ContextMenu.class::cast).filter(ContextMenu::isShowing).findFirst().orElseThrow();
+            try {
+                var action = menu.getItems().stream().filter(item -> item.getText().equals("Copy for agent")).findFirst().orElseThrow();
+                action.fire();
+                assertEquals(text, clipboard.getString());
+            } finally {
+                menu.hide();
+            }
+            return null;
+        });
+    }
+
+    @Test void screenshotLassoCopiesPngAndTextForOnlyTheNotesItIntersects() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var first = piano.sequence.notes().getFirst();
+            double x = PianoRollView.KEYBOARD + first.tick() * piano.scale - piano.offset + 2;
+            double y = PianoRollView.HEADER + (piano.topPitch - first.pitch()) * PianoRollView.NOTE_ROW + 2;
+            var box = new javafx.geometry.Rectangle2D(x, y, 10, 7);
+            assertEquals(List.of(first), piano.lassoNotes(box));
+            var toggle = (ToggleButton) window.scene().lookup("#screenshot-lasso");
+            Event.fireEvent(piano.canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.L, true, true, false, false));
+            assertTrue(toggle.isSelected());
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_PRESSED, x, y, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_DRAGGED, x + 10, y + 7, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_RELEASED, x + 10, y + 7, false, false, false, false);
+            var clipboard = Clipboard.getSystemClipboard();
+            assertTrue(window.scene().lookup("#save-lasso-png").isVisible());
+            assertTrue(clipboard.hasImage(), clipboard.getContentTypes()::toString);
+            assertTrue(clipboard.hasString());
+            assertTrue(clipboard.hasContent(DataFormat.lookupMimeType("image/png")), clipboard.getContentTypes()::toString);
+            var text = clipboard.getString();
+            assertTrue(text.contains("lasso: "), text);
+            assertTrue(text.contains(first.id()), text);
+            assertEquals(1, text.lines().filter(line -> line.startsWith("note: ")).count());
+            return null;
+        });
+    }
+
     @Test void pianoRollTransposesWithUndoOnlyWhenTheCanvasHasFocus() throws Exception {
         fx(() -> {
             ((ListView<?>) window.scene().lookup("#sequence-browser")).getSelectionModel().select(0);
@@ -1508,6 +1577,10 @@ class StudioWindowTest {
                 var melody = (Button) scene.lookup("#reconstruction-role-melody");
                 melody.fire();
                 assertEquals(plot, scene.getFocusOwner());
+                key(plot, KeyCode.C, true);
+                var copied = javafx.scene.input.Clipboard.getSystemClipboard().getString();
+                assertTrue(copied.startsWith("opensmpsdeck-notes v1\n"), copied);
+                assertTrue(copied.contains("test-note"), copied);
                 key(plot, KeyCode.EQUALS, false);
                 var title = (Label) scene.lookup("#reconstruction-note-title");
                 assertTrue(title.getText().startsWith("A♯4"), title::getText);
@@ -1524,6 +1597,10 @@ class StudioWindowTest {
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-role-selection")).getText());
                 reconstructionWorkspace(scene, "detail");
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-selection-count")).getText());
+                key(plot, KeyCode.C, true);
+                var detailCopy = Clipboard.getSystemClipboard().getString();
+                assertTrue(detailCopy.contains("reconstruction/detail"), detailCopy);
+                assertEquals(2, detailCopy.lines().filter(line -> line.startsWith("note: ")).count());
                 key(plot, KeyCode.SUBTRACT, false);
                 var status = (Label) scene.lookup("#reconstruction-status");
                 assertTrue(status.getText().contains("skipped drums or noise (1)"), status::getText);

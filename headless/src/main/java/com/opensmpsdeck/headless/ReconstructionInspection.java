@@ -60,6 +60,7 @@ public final class ReconstructionInspection {
     public enum Grid { BEAT, BAR }
 
     private final ReconstructionTimeMap clock;
+    private final ReconstructionNoteContext noteContext;
     private final Map<String, ReconstructionTrace.Row> trace;
     private final StudioProject project;
     private final TargetGame target;
@@ -71,9 +72,10 @@ public final class ReconstructionInspection {
     private final List<ReconstructionStructure.Bar> bars;
     private final ReconstructionBeatMap beats;
 
-    private ReconstructionInspection(Path work, ReconstructionStages.Score score, StudioProject project) throws IOException {
+    private ReconstructionInspection(Path work, ReconstructionStages.Score score, StudioProject project, String noteRevision) throws IOException {
         this.clock = ReconstructionTimeMap.of(score);
         this.trace = ReconstructionTrace.read(work, score);
+        this.noteContext = new ReconstructionNoteContext(work, score, noteRevision, trace);
         this.project = project;
         this.target = score.profile().game();
         this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
@@ -102,10 +104,36 @@ public final class ReconstructionInspection {
     }
 
     public static ReconstructionInspection open(Path work) throws IOException {
+        var revision = ReconstructionNoteContext.builtRevision(work);
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
         var arrangement = work.resolve("arrangement.smps.json");
         var project = Files.isRegularFile(arrangement) ? ProjectFiles.load(arrangement).project() : null;
-        return new ReconstructionInspection(work, score, project);
+        var inspection = new ReconstructionInspection(work, score, project, revision);
+        if (!revision.equals(ReconstructionNoteContext.builtRevision(work))) throw new ReconstructionReview.Changed();
+        return inspection;
+    }
+
+    public String copyNotes(List<Overlay> notes, boolean roles, boolean draft, ReconstructionReview.Revision revision,
+                            Map<String, String> draftVoices, Map<String, Integer> draftVelocities,
+                            com.google.gson.JsonArray entries, Map<String, List<ReconstructionReview.EditResult>> outcomes,
+                            List<ReconstructionProposals.Result> proposals) {
+        return noteBlock(notes, roles, draft, revision, draftVoices, draftVelocities, entries, outcomes, proposals, null).text();
+    }
+
+    public NoteHandoff.Capture captureNotes(List<Overlay> notes, boolean roles, boolean draft, ReconstructionReview.Revision revision,
+                            Map<String, String> draftVoices, Map<String, Integer> draftVelocities,
+                            com.google.gson.JsonArray entries, Map<String, List<ReconstructionReview.EditResult>> outcomes,
+                            List<ReconstructionProposals.Result> proposals, NoteHandoff.ViewRange range) {
+        return noteBlock(notes, roles, draft, revision, draftVoices, draftVelocities, entries, outcomes, proposals, range)
+                .capture(noteContext.area(range));
+    }
+
+    private NoteHandoff.Block noteBlock(List<Overlay> notes, boolean roles, boolean draft, ReconstructionReview.Revision revision,
+                            Map<String, String> draftVoices, Map<String, Integer> draftVelocities,
+                            com.google.gson.JsonArray entries, Map<String, List<ReconstructionReview.EditResult>> outcomes,
+                            List<ReconstructionProposals.Result> proposals, NoteHandoff.ViewRange range) {
+        return noteContext.block(notes, roles, draft, revision, draftVoices, draftVelocities,
+                ReconstructionNoteContext.touching(entries, outcomes, proposals), range);
     }
 
     public double duration() { return clock.sourceDuration(); }

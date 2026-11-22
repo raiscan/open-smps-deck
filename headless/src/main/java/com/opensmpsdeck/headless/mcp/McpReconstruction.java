@@ -362,13 +362,22 @@ final class McpReconstruction {
     }
 
     static JsonObject describe(JsonObject args) throws IOException {
+        if (args.has("fromPng")) {
+            if (args.keySet().stream().anyMatch(key -> !key.equals("fromPng") && !key.equals("json")))
+                throw new IllegalArgumentException("Use only fromPng and optional json to decode a lasso");
+            boolean json = args.has("json") && args.get("json").getAsBoolean();
+            String description = com.opensmpsdeck.headless.NoteScreenshot.describe(McpPaths.input(string(args, "fromPng")), json);
+            return json ? McpJson.parse(new java.io.StringReader(description)).getAsJsonObject() : object(Map.of("text", description));
+        }
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE, "edit-results.json",
                 "edits.json", "voice-edits.json")) McpPaths.managed(work, file);
+        if (args.has("notes")) for (String file : ReconstructionDescribe.NOTE_FILES) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
                 optional(args, "parts"), optional(args, "bars"),
-                args.has("roles") && args.get("roles").getAsBoolean());
+                args.has("roles") && args.get("roles").getAsBoolean(),
+                optional(args, "notes"), optional(args, "context"), optional(args, "revision"));
         if (args.has("output")) {
             Path output = McpPaths.output(work, string(args, "output"));
             Files.writeString(output, description, java.nio.file.StandardOpenOption.CREATE_NEW);

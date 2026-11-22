@@ -739,6 +739,41 @@ final class ReconstructionEditor implements AutoCloseable {
         audition.stop();
     }
 
+    boolean copyForAgent() {
+        var notes = view.selectedNotes();
+        if (notes.isEmpty() || view.reviewing()) return false;
+        var local = noteDraft();
+        return AgentClipboard.copy(snapshot.inspection().copyNotes(notes, view.rolesView(), draft.pending(),
+                snapshot.revision(), draftMembership, local.velocities(), local.entries(), snapshot.outcomes(), snapshot.proposals()), status);
+    }
+
+    com.opensmpsdeck.headless.NoteHandoff.Capture lasso(javafx.geometry.Rectangle2D box) {
+        var notes = view.lassoNotes(box);
+        var local = noteDraft();
+        return snapshot.inspection().captureNotes(notes, view.rolesView(), draft.pending(), snapshot.revision(),
+                draftMembership, local.velocities(), local.entries(), snapshot.outcomes(), snapshot.proposals(),
+                view.lassoRange(box, notes));
+    }
+
+    private record NoteDraft(JsonArray entries, Map<String, Integer> velocities) {}
+
+    private NoteDraft noteDraft() {
+        var entries = draft.entries();
+        var velocities = new java.util.HashMap<String, Integer>();
+        if (draft.pending()) {
+            for (var entry : entries) {
+                if (!draft.changed(entry) || !entry.isJsonObject()) continue;
+                var edit = entry.getAsJsonObject();
+                if (edit.has("velocity") && ReconstructionReview.validationIssue(entry) == null) {
+                    for (String target : targetIds(entry)) velocities.put(target, edit.get("velocity").getAsInt());
+                    if ("insertNote".equals(edit.get("op").getAsString()))
+                        velocities.put("edit-" + edit.get("id").getAsString(), edit.get("velocity").getAsInt());
+                }
+            }
+        }
+        return new NoteDraft(forApply(snapshot.revision().entries(), entries), velocities);
+    }
+
     private int pendingVelocity(Overlay note, int fallback) {
         int value = fallback;
         for (var entry : draft.entries()) {

@@ -48,5 +48,6 @@ abstract class ViewportCanvas extends Region {
         draw();
     }
     @Override protected void layoutChildren() { updateViewport(); }
+    void overlay(javafx.scene.Node node) { getChildren().add(node); }
     abstract void draw();
 }

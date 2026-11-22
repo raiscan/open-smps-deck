@@ -49,6 +49,21 @@ Choose **Open reconstruction…** and select the generated
 `import-work/reconstruction` directory to inspect the aligned stems,
 audition the result and make or review edits.
 
+### Copy notes into chat
+
+Select notes in Analysis **Roles** or **Notes**, or in the arrangement
+piano roll. Press Ctrl+C (Cmd+C on macOS) or right-click and choose
+**Copy for agent**. The clipboard text gives the project, note IDs,
+timing, playback evidence and a command an agent can use to inspect the
+following bar. In the piano roll, Ctrl/Cmd-click or Shift-click adds or
+removes a note from the selection. [Clipboard format](agents.md#investigate-notes-pasted-from-studio)
+
+Turn on **Screenshot lasso** or press Ctrl/Cmd+Shift+L with the plot focused
+to drag an image region. Release to copy the crop and a plain-text handoff
+for the visible notes inside it. The image includes a short reference in
+its footer. **Save lasso PNG…** saves the most recent capture for attachment.
+[Decode a lasso attachment](agents.md#decode-a-screenshot-lasso)
+
 ## Import a Suno folder
 
 Choose **Import Suno folder…**, select the download, then select a separate
