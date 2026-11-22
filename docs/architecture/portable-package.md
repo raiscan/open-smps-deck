@@ -504,9 +504,10 @@ sfx: []
   mod manager and log show the corresponding warning.
 - Mod v1 manifests and streamed tracks are unchanged.
 
-The OpenGGF `smpsPackage` reader in
-[OpenGGF PR #452](https://github.com/OpenGGF/OpenGGF/pull/452) still
-rejects patch form. The follow-up reader must implement these steps.
+OpenGGF reads `smpsPackage` tracks since
+[OpenGGF PR #452](https://github.com/OpenGGF/OpenGGF/pull/452). Its patch
+form reader, from [OpenGGF PR #461](https://github.com/OpenGGF/OpenGGF/pull/461),
+follows these steps.
 
 1. Accept `patch` for S3K and enforce the manifest constraints in §5.4.
    Read the exploded `track.delta` with its own entry limit, verify
