@@ -125,6 +125,24 @@ final class ReconstructionLeadContinuity {
 
     Map<String, Double> accents() { return accents; }
 
+    Set<String> polyphonicLead(ReconstructionAudioOnly.Provenance source) {
+        var line = new HashSet<String>();
+        for (var entry : source.stems().entrySet()) {
+            var stem = stems.get(entry.getKey());
+            if (stem == null || !Set.of("lead", "synth", "keyboard", "piano", "guitar")
+                    .contains(entry.getValue().role())) continue;
+            line.addAll(ReconstructionPolyphonicLead.line(stem.notes(), note -> {
+                if (!stem.track().clearAttack(note)) return 0;
+                // Weak decoder candidates need an unshared fundamental throughout the gate.
+                // Their onset alone can be the octave partial of an approaching scoop.
+                if (note.confidence() < .9 && stem.track().independentLevel(note,
+                        stem.overlapping(note.start(), note.end()), false) < .30) return 0;
+                return stem.track().upperAttackLevel(note, stem.overlapping(note.start() - .040, note.start() + .045));
+            }));
+        }
+        return line;
+    }
+
     /**
      * Resonant leaps can make the lead path skip two attacks of a single articulated phrase.
      * Restore them when a monophonic group on the explicit lead stem supplies both pitch and

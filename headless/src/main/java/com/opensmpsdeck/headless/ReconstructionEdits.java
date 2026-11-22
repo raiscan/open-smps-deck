@@ -1062,7 +1062,17 @@ final class ReconstructionEdits {
                 score.usesBeatGrid() ? score.beatMap() : null, continuity, score.inputs().leadPart(), fixedGates, separate,
                 note -> !written.contains(note.id()) && ReconstructionStructure.suppressed(suppressed, note, note.start(), .035),
                 ReconstructionStemParts.addedParts(score.inputs()));
-        return applyRoles(score, structure, roles, scoreOutcomes, outcomes, resolutions);
+        var edited = applyRoles(score, structure, roles, scoreOutcomes, outcomes, resolutions);
+        var source = score.inputs().audioOnly();
+        if (source == null || source.stems() == null || continuity == null || plan != null) return edited;
+        var authored = new LinkedHashSet<>(written);
+        if (edited.lanePins() != null) authored.addAll(edited.lanePins().keySet());
+        for (var outcome : outcomes) {
+            if (outcome.status == Status.applied || outcome.status == Status.satisfied)
+                authored.addAll(outcome.noteIds);
+        }
+        return ReconstructionPolyphonicLead.prioritize(edited, continuity.polyphonicLead(source), authored,
+                score.inputs().leadPart());
     }
 
     ReconstructionRoles.Result applyRoles(Score score, ReconstructionStructure.Result structure,

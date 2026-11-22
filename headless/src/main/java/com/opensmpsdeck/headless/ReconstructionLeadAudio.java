@@ -206,6 +206,29 @@ final class ReconstructionLeadAudio {
             return after >= Math.max(.006, Math.max(2 * before, .19 * at(rms, note.start() + .025)));
         }
 
+        /** A fresh upper ridge can share a frequency with an already sounding chord partial. */
+        double upperAttackLevel(Note note, List<Note> overlapping) {
+            double onset = note.start();
+            var band = peaks[index(note.pitch(), 1)];
+            double before = at(band, Math.max(0, onset - .030));
+            double after = Math.min(at(band, onset + .020), at(band, onset + .040));
+            double localRms = at(rms, onset + .025);
+            for (var lower : overlapping) {
+                if (lower.pitch() < LOW || lower.pitch() >= note.pitch() || lower.end() < onset + .025) continue;
+                double ratio = hz(note.pitch()) / hz(lower.pitch());
+                long harmonic = Math.round(ratio);
+                if (harmonic < 2 || harmonic > HARMONICS || Math.abs(CENTS * Math.log(ratio / harmonic)) > 35)
+                    continue;
+                var fundamental = peaks[index(lower.pitch(), 1)];
+                double lowerAfter = at(fundamental, onset + .030);
+                if (lowerAfter < .12 * localRms) continue;
+                double lowerBefore = at(fundamental, Math.max(0, onset - .030));
+                // Accept a new, separate ridge over a stationary, already sounding lower note.
+                if (lowerBefore < .12 * localRms || after * lowerBefore < 2 * before * lowerAfter) return 0;
+            }
+            return Math.min(1, after / Math.max(.003, localRms));
+        }
+
         /**
          * Mean relative level of the fundamental and strongest independent overtone.
          * A prominent harmonic alone can belong to the chord's lower voice.

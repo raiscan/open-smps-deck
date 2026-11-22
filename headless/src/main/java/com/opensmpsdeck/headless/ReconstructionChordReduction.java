@@ -14,7 +14,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 
 final class ReconstructionChordReduction {
     enum Tone {
-        doubling(0), rootInBass(0), fifth(1), extension(2), third(3), seventh(3), topVoice(4);
+        doubling(0), rootInBass(0), fifth(1), extension(2), third(3), seventh(3), topVoice(4), root(4);
 
         final int priority;
 
@@ -30,6 +30,10 @@ final class ReconstructionChordReduction {
     private ReconstructionChordReduction() {}
 
     static Map<String, Tone> classify(List<Voice> notes) {
+        return classify(notes, note -> false);
+    }
+
+    static Map<String, Tone> classify(List<Voice> notes, java.util.function.Predicate<Note> competingWithLead) {
         var ordered = notes.stream().sorted(Comparator.comparing(Voice::note, ReconstructionStages.NOTE_ORDER)).toList();
         var result = new HashMap<String, Tone>();
         var tops = new HashSet<String>();
@@ -47,12 +51,12 @@ final class ReconstructionChordReduction {
             while (next < ordered.size() && ordered.get(next).note.start() <= onset + .020)
                 active.add(ordered.get(next++));
             active.removeIf(other -> other.note.end() <= onset);
-            result.put(voice.note.id(), classify(voice, active, tops.contains(voice.note.id())));
+            result.put(voice.note.id(), classify(voice, active, tops.contains(voice.note.id()), competingWithLead.test(voice.note)));
         }
         return result;
     }
 
-    private static Tone classify(Voice voice, List<Voice> active, boolean top) {
+    private static Tone classify(Voice voice, List<Voice> active, boolean top, boolean upperLine) {
         int pitch = voice.note.pitch();
         int pitchClass = pitch % 12;
         int bass = -1, lowest = 128;
@@ -63,6 +67,8 @@ final class ReconstructionChordReduction {
             lowest = Math.min(lowest, sounding);
             classes |= 1 << (sounding % 12);
             if (other.note.id().equals(voice.note.id())) continue;
+            if (upperLine && sounding < pitch && sounding % 12 == pitchClass && other.note.part() == voice.note.part()
+                    && Math.abs(other.note.start() - voice.note.start()) <= .020) return Tone.doubling;
             if (other.role == Role.bass && (bass < 0 || sounding < bass)) bass = sounding;
             if ((other.role == Role.bass || other.role == Role.melody)
                     && sounding % 12 == pitchClass && Math.abs(sounding - pitch) <= 12) {
@@ -74,6 +80,7 @@ final class ReconstructionChordReduction {
         if (bass >= 0 && bass % 12 == pitchClass && root == pitchClass) return Tone.rootInBass;
         if (bassOctave) return Tone.doubling;
         if (top) return Tone.topVoice;
+        if (upperLine && root == pitchClass) return Tone.root;
         return switch (Math.floorMod(pitchClass - root, 12)) {
             case 3, 4 -> Tone.third;
             case 7 -> Tone.fifth;
@@ -171,7 +178,7 @@ final class ReconstructionChordReduction {
 
     private static Map<Tone, Integer> counts() {
         var result = new EnumMap<Tone, Integer>(Tone.class);
-        for (var tone : Tone.values()) result.put(tone, 0);
+        for (var tone : Tone.values()) if (tone != Tone.root) result.put(tone, 0);
         return result;
     }
 }

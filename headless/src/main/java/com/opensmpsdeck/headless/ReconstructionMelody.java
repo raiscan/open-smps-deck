@@ -167,6 +167,10 @@ final class ReconstructionMelody {
         return selected.size() == contour.size() ? contour : trackPath(notes, false, evidence, accents, selected);
     }
 
+    static List<Note> trackUpperLine(List<Note> notes, Map<String, Double> salience) {
+        return trackPath(notes, false, Map.of(), salience, null);
+    }
+
     private static boolean canReplace(Note note, List<Note> contour, int first) {
         boolean replacesBacking = false;
         for (int i = first; i < contour.size() && contour.get(i).start() < note.end(); i++) {
