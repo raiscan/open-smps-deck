@@ -10,7 +10,7 @@ from unittest.mock import patch
 import numpy as np
 
 import run
-from syllables import Settings, segment
+from syllables import Settings, segment, supported_attack
 
 
 class AdapterTest(unittest.TestCase):
@@ -51,10 +51,19 @@ class AdapterTest(unittest.TestCase):
             with patch.object(run, "infer", return_value=(pitch, {})), patch.dict("sys.modules", soundfile=audio_reader):
                 run.transcribe(args)
             metadata = json.loads(output.with_suffix(".json.meta.json").read_text())
-            self.assertEqual([15, 145], metadata["vocalBoundaries10ms"]["syllable"])
+            self.assertEqual([20, 150], metadata["vocalBoundaries10ms"]["syllable"])
             self.assertEqual([20, 150], metadata["vocalBoundaries10ms"]["voicing"])
+            self.assertEqual("3", metadata["version"])
             self.assertEqual(50, metadata["syllableSettings"]["min_pitch"])
             self.assertEqual([[.20, .58, 57], [1.50, 1.75, 57]], json.loads(output.read_text()))
+
+    def test_flux_at_the_end_of_a_vowel_does_not_make_an_attack(self):
+        voiced = np.zeros(70, dtype=bool)
+        voiced[12:30] = True
+        voiced[50:65] = True
+        rms = np.full(70, -50.0)
+        rms[26:30] = -20
+        self.assertIsNone(supported_attack(voiced, rms, 26, Settings()))
 
     def test_segments_pitch_changes_and_writes_fractional_f0_sidecar(self):
         with tempfile.TemporaryDirectory() as folder:

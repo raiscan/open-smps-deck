@@ -62,10 +62,32 @@ def syllable_onsets(samples, rate, voiced, settings):
     flux[0] = 0
     peaks, _ = find_peaks(flux, height=np.percentile(flux, settings.flux_percentile),
                           distance=settings.onset_spacing_frames)
-    return [int(p) for p in peaks
-            if voiced[p:p + settings.onset_voiced_frames].any()
-            and rms[p:p + settings.rms_after_frames].max()
-            - rms[max(0, p - settings.rms_before_frames):p].min() >= settings.rms_rise_db]
+    onsets = [supported_attack(voiced, rms, int(p), settings) for p in peaks]
+    return sorted({onset for onset in onsets if onset is not None})
+
+
+def supported_attack(voiced, rms, onset, settings):
+    carried = voiced[max(0, onset - 6):onset].sum() >= 4
+    if carried:
+        # A flux peak followed by a break in an already voiced vowel is usually its release.
+        tail = voiced[onset:onset + 16]
+        if len(tail) == 16 and any(not tail[i:i + 8].any() for i in range(9)):
+            return None
+    after = rms[onset:onset + settings.rms_after_frames].max()
+    before = rms[max(0, onset - settings.rms_before_frames):onset].min()
+    if after - before < settings.rms_rise_db:
+        return None
+    lookahead = voiced[onset:onset + settings.onset_voiced_frames]
+    if lookahead.sum() >= max(1, settings.onset_voiced_frames - 2):
+        return onset
+    # The centered analysis window can place the peak before the vowel.
+    # Snap such peaks to the nearby sustained voicing start.
+    for start in np.flatnonzero(lookahead):
+        landing = onset + int(start)
+        count = voiced[landing:landing + settings.onset_voiced_frames].sum()
+        if count >= max(1, settings.onset_voiced_frames - 1):
+            return landing
+    return None
 
 
 def segment(pitches, onsets, settings):

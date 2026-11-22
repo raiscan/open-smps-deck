@@ -129,6 +129,8 @@ final class ReconstructionEditor implements AutoCloseable {
     private final Tab bulkTab = new Tab("Selection");
     private final Tab proposalTab = new Tab("Proposals");
     private final VBox proposalList = new VBox(8);
+    private final CheckBox showDecidedProposals = new CheckBox("Show decided");
+    private final java.util.Set<String> selectedProposals = new java.util.HashSet<>();
     private final Button stopPreview = new Button("Stop preview");
     private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, proposalTab, diffTab);
     private final ReconstructionBulk bulk;
@@ -328,7 +330,8 @@ final class ReconstructionEditor implements AutoCloseable {
         proposalList.setId("reconstruction-proposals");
         proposalList.getStyleClass().add("inspector");
         stopPreview.setOnAction(event -> stopAudition());
-        var proposalPanel = new VBox(8, stopPreview, scroll(proposalList));
+        showDecidedProposals.setOnAction(event -> updateProposals());
+        var proposalPanel = new VBox(8, new FlowPane(5, 4, stopPreview, showDecidedProposals), scroll(proposalList));
         VBox.setVgrow(proposalPanel.getChildren().getLast(), Priority.ALWAYS);
         proposalTab.setContent(proposalPanel);
         comparison.setWrapText(true);
@@ -742,7 +745,7 @@ final class ReconstructionEditor implements AutoCloseable {
 
     static JsonArray accepted(JsonArray journal) {
         var entries = new JsonArray();
-        journal.asList().stream().filter(entry -> !ReconstructionProposals.isProposed(entry)).forEach(entries::add);
+        journal.asList().stream().filter(entry -> !ReconstructionProposals.isInactive(entry)).forEach(entries::add);
         return entries;
     }
 
@@ -753,7 +756,7 @@ final class ReconstructionEditor implements AutoCloseable {
         for (var entry : journal) {
             var replacement = byId.remove(text(entry, "id", ""));
             if (replacement != null) combined.add(replacement);
-            else if (ReconstructionProposals.isProposed(entry)) combined.add(entry);
+            else if (ReconstructionProposals.isInactive(entry)) combined.add(entry);
         }
         byId.values().forEach(combined::add);
         return combined;
@@ -773,6 +776,20 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         view.proposals(marks);
         proposalList.getChildren().clear();
+        var visible = groups.values().stream().flatMap(List::stream).toList();
+        selectedProposals.retainAll(visible.stream().map(ReconstructionProposals.Result::id).collect(Collectors.toSet()));
+        var acceptSelected = new Button("Accept selected");
+        var rejectSelected = new Button("Reject selected");
+        Runnable selectionChanged = () -> {
+            acceptSelected.setDisable(selectedProposals.isEmpty());
+            rejectSelected.setDisable(selectedProposals.isEmpty());
+        };
+        acceptSelected.setOnAction(event -> acceptProposals(visible.stream()
+                .filter(proposal -> selectedProposals.contains(proposal.id())).toList()));
+        rejectSelected.setOnAction(event -> rejectProposals(visible.stream()
+                .filter(proposal -> selectedProposals.contains(proposal.id())).toList()));
+        selectionChanged.run();
+        if (!visible.isEmpty()) proposalList.getChildren().add(new FlowPane(5, 4, acceptSelected, rejectSelected));
         if (groups.isEmpty()) proposalList.getChildren().add(new Label("No proposals to review"));
         groups.forEach((group, proposals) -> {
             var heading = new Label(group == null ? "Ungrouped" : group);
@@ -789,8 +806,14 @@ final class ReconstructionEditor implements AutoCloseable {
             }
             for (var proposal : proposals) {
                 var edit = proposal.edit();
-                var title = new Label(text(edit, "op", "") + " · " + proposal.id());
+                var title = new CheckBox(text(edit, "op", "") + " · " + proposal.id());
                 title.setWrapText(true);
+                title.setSelected(selectedProposals.contains(proposal.id()));
+                title.setOnAction(event -> {
+                    if (title.isSelected()) selectedProposals.add(proposal.id());
+                    else selectedProposals.remove(proposal.id());
+                    selectionChanged.run();
+                });
                 var detail = new StringBuilder(text(edit, "reason", ""));
                 for (var result : proposal.outcomes()) {
                     String outcome = switch (result.status()) {
@@ -820,8 +843,64 @@ final class ReconstructionEditor implements AutoCloseable {
                 accept.setOnAction(event -> acceptProposals(List.of(proposal)));
                 var reject = new Button("Reject");
                 reject.setOnAction(event -> rejectProposals(List.of(proposal)));
-                proposalList.getChildren().addAll(title, reason, new FlowPane(5, 4, preview, accept, reject), new Separator());
+                var revise = new Button("Revise");
+                revise.setOnAction(event -> reviseProposal(proposal));
+                proposalList.getChildren().addAll(title, reason, new FlowPane(5, 4, preview, revise, accept, reject), new Separator());
             }
+        });
+        if (showDecidedProposals.isSelected()) {
+            var entries = snapshot.revision().entries();
+            for (var entry : entries) {
+                if (!entry.isJsonObject()) continue;
+                var edit = entry.getAsJsonObject();
+                String decision = text(edit, "status", "");
+                if (!decision.equals("accepted") && !decision.equals("rejected")) continue;
+                var row = new Label(decision + " · " + text(edit, "id", "") + "\n" + text(edit, "reason", ""));
+                row.setWrapText(true);
+                proposalList.getChildren().add(row);
+            }
+        }
+    }
+
+    private void reviseProposal(ReconstructionProposals.Result proposal) {
+        if (busy || external != null || externalError) return;
+        var dialog = new Dialog<String>();
+        dialog.initOwner(owner);
+        dialog.setTitle("Revise proposal");
+        var area = new TextArea(new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(proposal.edit()));
+        area.setPrefColumnCount(58);
+        area.setPrefRowCount(17);
+        dialog.getDialogPane().setContent(area);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        dialog.setResultConverter(button -> button == ButtonType.OK ? area.getText() : null);
+        var replacement = dialog.showAndWait();
+        if (replacement.isEmpty()) return;
+        JsonObject intent;
+        try {
+            intent = com.google.gson.JsonParser.parseString(replacement.get()).getAsJsonObject();
+        } catch (com.google.gson.JsonParseException | IllegalStateException failure) {
+            status.accept("Revision needs a JSON intent object");
+            return;
+        }
+        var expected = snapshot.revision();
+        setBusy();
+        cancel.setDisable(true);
+        worker.execute(() -> {
+            String message;
+            try {
+                ReconstructionEditCommand.revise(work, proposal.id(), intent, expected);
+                message = "Proposal revised";
+            } catch (IOException | IllegalArgumentException failure) {
+                message = "Revision failed · " + failure.getMessage();
+            }
+            String detail = message;
+            Platform.runLater(() -> {
+                if (closed) return;
+                busy = false;
+                updateControls();
+                status.accept(detail);
+                readExternal();
+            });
         });
     }
 

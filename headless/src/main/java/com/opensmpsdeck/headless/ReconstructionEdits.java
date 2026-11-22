@@ -80,11 +80,15 @@ final class ReconstructionEdits {
 
         boolean proposed() { return ReconstructionProposals.isProposed(json); }
 
-        Intent accept() {
+        boolean inactive() { return ReconstructionProposals.isInactive(json); }
+
+        Intent decide(String status) {
             var accepted = json.deepCopy();
-            accepted.addProperty("status", "accepted");
+            accepted.addProperty("status", status);
             return parse(accepted, FILE);
         }
+
+        Intent accept() { return decide("accepted"); }
 
         boolean matchesSpan(Note note, double sourceStart) {
             return part == note.part() && span.contains(sourceStart)
@@ -184,8 +188,8 @@ final class ReconstructionEdits {
     boolean isEmpty() { return intents.isEmpty(); }
 
     ReconstructionEdits accepted() {
-        return intents.stream().noneMatch(Intent::proposed) ? this
-                : new ReconstructionEdits(intents.stream().filter(edit -> !edit.proposed()).toList());
+        return intents.stream().noneMatch(Intent::inactive) ? this
+                : new ReconstructionEdits(intents.stream().filter(edit -> !edit.inactive()).toList());
     }
 
     String scoreRecipe() {
@@ -229,7 +233,7 @@ final class ReconstructionEdits {
         require(id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,95}"), at + ".id", "expected 1–96 letters, digits, dots, underscores or hyphens");
         string(json, "reason", at);
         Kind kind = choice(Kind.class, json, "op", at);
-        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence"));
+        var allowed = new LinkedHashSet<>(Set.of("id", "reason", "op", "timeBase", "author", "status", "group", "evidence", "proposalRevised"));
         allowed.addAll(switch (kind) {
             case insertNote -> List.of("part", "start", "end", "pitch", "velocity", "lane", "role");
             case deleteNote -> List.of("noteId", "selector");
@@ -255,12 +259,15 @@ final class ReconstructionEdits {
         });
         fields(json, at, allowed);
         if (json.has("status"))
-            require(Set.of("proposed", "accepted").contains(string(json, "status", at)),
-                    at + ".status", "expected proposed or accepted");
+            require(Set.of("proposed", "accepted", "rejected").contains(string(json, "status", at)),
+                    at + ".status", "expected proposed, accepted or rejected");
         if (ReconstructionProposals.isProposed(json))
             require(json.has("author") && string(json, "author", at).equals("agent"),
                     at + ".author", "proposed edits require an agent author");
         if (json.has("group")) string(json, "group", at);
+        if (json.has("proposalRevised"))
+            require(json.get("proposalRevised").equals(new com.google.gson.JsonPrimitive(true)),
+                    at + ".proposalRevised", "expected true");
         if (json.has("evidence")) {
             require(json.get("evidence").isJsonObject(), at + ".evidence", "expected an evidence object");
             var evidence = json.getAsJsonObject("evidence");

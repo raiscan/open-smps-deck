@@ -31,7 +31,15 @@ public final class ReconstructionProposals {
     private ReconstructionProposals() {}
 
     public static boolean isProposed(JsonElement entry) {
-        return entry.isJsonObject() && new com.google.gson.JsonPrimitive("proposed")
+        return hasStatus(entry, "proposed");
+    }
+
+    public static boolean isInactive(JsonElement entry) {
+        return isProposed(entry) || hasStatus(entry, "rejected");
+    }
+
+    private static boolean hasStatus(JsonElement entry, String status) {
+        return entry.isJsonObject() && new com.google.gson.JsonPrimitive(status)
                 .equals(entry.getAsJsonObject().get("status"));
     }
 
@@ -43,11 +51,21 @@ public final class ReconstructionProposals {
     }
 
     static List<ReconstructionEdits.Intent> select(ReconstructionEdits journal, String id, String group) {
-        require(id == null || group == null, "proposals", "choose an ID or group");
-        return journal.intents().stream().filter(ReconstructionEdits.Intent::proposed)
-                .filter(edit -> id == null || edit.id().equals(id))
-                .filter(edit -> group == null || edit.json().has("group") && edit.json().get("group").getAsString().equals(group))
-                .toList();
+        return selectBatch(journal, id == null ? List.of() : List.of(id), group, null);
+    }
+
+    static List<ReconstructionEdits.Intent> selectBatch(ReconstructionEdits journal, List<String> ids,
+                                                         String group, String op) {
+        require(ids.isEmpty() || group == null && op == null, "proposals", "choose IDs or selectors");
+        var wanted = new java.util.LinkedHashSet<>(ids);
+        var result = journal.intents().stream().filter(ReconstructionEdits.Intent::proposed)
+                .filter(edit -> wanted.isEmpty() || wanted.contains(edit.id()))
+                .filter(edit -> group == null || edit.json().has("group")
+                        && edit.json().get("group").getAsString().equals(group))
+                .filter(edit -> op == null || edit.kind().name().equals(op)).toList();
+        result.forEach(edit -> wanted.remove(edit.id()));
+        require(wanted.isEmpty(), "proposals", "no pending proposal for " + wanted);
+        return result;
     }
 
     static Stage from(ReconstructionEdits shadow, List<ReconstructionEdits.Intent> selected,
@@ -63,7 +81,7 @@ public final class ReconstructionProposals {
     static ReconstructionEdits shadow(ReconstructionEdits journal, List<ReconstructionEdits.Intent> selected) {
         var ids = selected.stream().map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
         return new ReconstructionEdits(journal.intents().stream()
-                .filter(edit -> !edit.proposed() || ids.contains(edit.id()))
+                .filter(edit -> !edit.inactive() || ids.contains(edit.id()))
                 .map(edit -> edit.proposed() ? edit.accept() : edit).toList());
     }
 
@@ -148,18 +166,66 @@ public final class ReconstructionProposals {
         return new Marker(note.id(), note.part(), note.pitch(), note.start(), note.end(), bend);
     }
 
-    static JsonObject listing(Path work, ReconstructionEdits journal, String id, String group) throws IOException {
-        var ids = select(journal, id, group).stream().map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
+    static JsonObject listing(Path work, ReconstructionEdits journal, List<String> ids, String group,
+                              String op, boolean showDecided) throws IOException {
+        var selected = selectBatch(journal, showDecided ? List.of() : ids, group, op).stream()
+                .map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
         var object = new JsonObject();
-        object.add("proposals", JSON.toJsonTree(results(work, journal).stream().filter(row -> ids.contains(row.id())).toList()));
+        object.add("proposals", JSON.toJsonTree(results(work, journal).stream()
+                .filter(row -> selected.contains(row.id()) && (ids.isEmpty() || ids.contains(row.id()))).toList()));
+        if (showDecided) object.add("decided", JSON.toJsonTree(journal.intents().stream()
+                .filter(edit -> !edit.proposed() && edit.json().has("status"))
+                .filter(edit -> ids.isEmpty() || ids.contains(edit.id()))
+                .filter(edit -> group == null || edit.json().has("group")
+                        && edit.json().get("group").getAsString().equals(group))
+                .filter(edit -> op == null || edit.kind().name().equals(op))
+                .map(ReconstructionEdits.Intent::json).toList()));
         return object;
     }
 
+    public static List<String> idsFile(Path file) throws IOException {
+        String text = Files.readString(file).strip();
+        require(!text.isEmpty(), "file", "expected at least one proposal ID");
+        if (text.startsWith("[")) return com.google.gson.JsonParser.parseString(text)
+                .getAsJsonArray().asList().stream().map(JsonElement::getAsString).toList();
+        return List.of(text.split("\\s+"));
+    }
+
     static void cli(String[] args, java.io.PrintStream out) throws IOException {
-        require(args.length >= 2, "proposals", "expected list|accept|reject WORK_DIR [ID | --group GROUP]");
-        var selected = selection(List.of(args).subList(2, args.length));
-        out.println(JSON.toJson(ReconstructionEditCommand.proposals(Path.of(args[1]), args[0],
-                selected.id(), selected.group())));
+        require(args.length >= 2, "proposals", "expected list|accept|reject|revise WORK_DIR [IDs | --file FILE | --group GROUP | --op OP]");
+        var work = Path.of(args[1]);
+        if (args[0].equals("revise")) {
+            require(args.length == 5 && args[3].equals("--file"), "revise", "expected ID --file INTENT.json");
+            out.println(JSON.toJson(ReconstructionEditCommand.revise(work, args[2],
+                    ReconstructionArtifacts.readTree(Path.of(args[4])).getAsJsonObject(), null)));
+            return;
+        }
+        var ids = new ArrayList<String>();
+        String group = null, op = null;
+        boolean showDecided = false, verbose = false;
+        for (int i = 2; i < args.length; i++) {
+            var option = args[i];
+            switch (option) {
+                case "--show-decided" -> showDecided = true;
+                case "--verbose" -> verbose = true;
+                case "--id", "--file", "--group", "--op" -> {
+                    require(i + 1 < args.length, option, "expected a value");
+                    String value = args[++i];
+                    switch (option) {
+                        case "--id" -> ids.add(value);
+                        case "--file" -> ids.addAll(idsFile(Path.of(value)));
+                        case "--group" -> group = value;
+                        case "--op" -> op = value;
+                    }
+                }
+                default -> {
+                    require(!option.startsWith("--"), "proposals", "unknown option " + option);
+                    ids.add(option);
+                }
+            }
+        }
+        out.println(JSON.toJson(ReconstructionEditCommand.proposalBatch(work, args[0], ids, group, op,
+                showDecided, verbose)));
     }
 
     record Selection(String id, String group) {}

@@ -84,7 +84,10 @@ Bounds use project seconds rounded to 60 Hz. Playback warms up from zero
 and discards audio before the start. Omit the start to begin at zero.
 Omit the end to use `--frames` if supplied, or the project's presentation
 count for a bounded render. `--solo FM1,PSG1` mutes all other lanes and
-`--mute DAC,PSG3` mutes the listed lanes even when soloed.
+`--mute DAC,PSG3` mutes the listed lanes even when soloed. Masked WAVs
+from this command and MCP `render_clip` subtract the YM2612's modeled idle
+level of 288 PCM counts per channel (−41.1 dBFS). Full, unmasked renders
+retain the raw chip output.
 
 Pass `--force` to `render-project` or `render-compare` to replace an existing
 regular file with a completed export staged in the same directory.
@@ -736,17 +739,36 @@ for selectors, role swaps, velocity spans, extension guards and other edits.
 java -jar "$jar" reconstruct edit propose "$work" --file batch.json
 java -jar "$jar" reconstruct proposals list "$work" --group phrase-1
 java -jar "$jar" reconstruct run "$work" --with-proposals --id answer
-java -jar "$jar" reconstruct proposals accept "$work" answer
-java -jar "$jar" reconstruct proposals reject "$work" --group phrase-1
+java -jar "$jar" reconstruct proposals revise "$work" answer --file revised.json
+java -jar "$jar" reconstruct proposals accept "$work" answer answer-2
+java -jar "$jar" reconstruct proposals reject "$work" --group phrase-1 --op insertNote
+java -jar "$jar" reconstruct proposals list "$work" --show-decided
 ```
 
-`edit propose WORK_DIR JSON` also takes a single intent. Add the same
-`"group":"phrase-1"` to intents you want reviewed together. Optional
+`edit propose WORK_DIR JSON` also takes a single intent. Set
+`"group":"phrase-1"` to review intents together. Optional
 `"evidence":{"text":"Separate attack in the stem","path":"evidence.png"}`
-links a view or render inside the work directory. Propose sets the author to
-`agent` by default. The response and `proposal-results.json` report dry-run
-outcomes and affected notes. Regular stage runs refresh these outcomes
-without applying the proposals.
+links a view or render inside the work directory. Studio's **Proposals**
+panel supports selecting several rows, revising a pending intent, and
+showing decisions. Revisions replace the intent while preserving its ID and
+default group.
+
+Accept and reject take IDs, `--file` (a JSON array of strings or a
+whitespace-separated list), or the `--group` and `--op` selectors. MCP
+`reconstruct_edit` exposes `id`, `ids`, `file`, `group`, `op` and
+`showDecided`. Use `action: "revise"` with `id` and the replacement
+`edit` object. Accept validates the selected set in journal order once
+and records it as a batch if it resolves. Rebuild from the returned `from`
+stage. Reject records the decision without rebuilding. Use `--verbose`
+(MCP `verbose: true`) to include the full acceptance preview.
+
+`reconstruct edit WORK_DIR add --file BATCH` and `--dry-run` return one
+result per intent. `applied` and `satisfied` describe the journal's
+resolution on preview or rebuild. A `rejected` intent carries the
+validation reason. The `journalSaved` field reports whether a direct batch
+was recorded for future rebuilding, including well-formed intents that
+could not resolve against the current score. A batch with malformed intents
+is left unsaved. Use `--verbose` for note-level outcomes and markers.
 
 Preview all proposals by omitting the filter, or use `--group GROUP`. The
 accepted arrangement must have a `render.wav`. The command creates a new
@@ -1055,9 +1077,24 @@ using the usual FM modulation controls. Edit the source instrument and its
 effects in `voicing.json` to override these choices.
 
 Review the saved vocal contour and suggested edits by phrase with
-`reconstruct vocal-review WORK_DIR [--phrase ID]` or MCP
-`reconstruct_vocal_review`. `--propose` (MCP `propose: true`) saves the
-suggestions to the existing proposal journal for CLI or Studio review.
+`reconstruct vocal-review WORK_DIR [--phrase ID] --json` or MCP
+`reconstruct_vocal_review`. The response includes source-time syllables,
+per-note RMVPE and stem harmonic summaries, repeat votes, and kept FM1
+gates in both clocks. `--propose` (MCP `propose: true`) saves suggestions
+for CLI or Studio review. Vocal decisions follow stable note identities and
+the intent and material evidence, so a rejected suggestion stays out of
+pending counts across rebuilds. Use `--show-decided` (MCP
+`showDecided: true`) to include decision history.
+
+`reconstruct vocal-render WORK_DIR --phrase ID OUT.wav` (MCP
+`reconstruct_vocal_render` with `workDir`, `phrase` and `output`) plays
+the built FM1 lane from the beginning and writes just the chosen phrase.
+The JSON compares source-time syllables with detected render attacks within
+50 ms, measures stem-voiced seconds below the render's activity threshold,
+and reports the fraction of audible, placed FM1 gate time within 0.7
+semitones of the register-shifted stem contour. Envelope measurements can
+miss legato reattacks. Pitch agreement uses saved gate pitches and RMVPE,
+with independent octave evidence available in vocal review.
 See [Clean up a vocal-derived lead](../skills/opensmpsdeck/SKILL.md#clean-up-a-vocal-derived-lead).
 
 A `drums` stem feeds DAC and PSG3 routing. When the stem is absent, detection
