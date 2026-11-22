@@ -1245,6 +1245,143 @@ class StudioWindowTest {
         return work;
     }
 
+    @Test void reconstructionLiveTransposeUndoRedoAndFallbackKeepTheAudioLine() throws Exception {
+        var work = assembledLiveFixture();
+        var original = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
+        var prepared = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
+                com.opensmpsdeck.headless.ReconstructionReview.revision(work));
+        var sink = new CapturedAudio();
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, sink::open));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            var view = fx(() -> {
+                reconstructionWorkspace(scene, "detail");
+                var canvas = pane.canvas();
+                @SuppressWarnings("unchecked")
+                var hearing = (ComboBox<ReconstructionTransport.Hearing>) scene.lookup("#reconstruction-hearing");
+                hearing.setValue(ReconstructionTransport.Hearing.CHIP);
+                var note = pane.inspection().overlays().stream().filter(n -> n.sounds() && n.lane().equals("FM1"))
+                        .findFirst().orElseThrow();
+                canvas.select(note, note.lane());
+                canvas.onRange.accept(new ReviewTransport.Range(0, 2));
+                canvas.canvas.requestFocus();
+                return canvas;
+            });
+            await(() -> !scene.lookup("#reconstruction-play").isDisabled());
+            fx(() -> { ((Button) scene.lookup("#reconstruction-play")).fire(); return null; });
+            await(() -> sink.blocks.size() > 20);
+            var playedBefore = sink.blocks.get(20);
+            fx(() -> { key(view.canvas, KeyCode.ADD, false); return null; });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            var journal = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
+            assertEquals("transpose", journal.entries().get(0).getAsJsonObject().get("op").getAsString());
+            var changed = prepared.prepare(journal.entries(), 0, 2, 0.5).playback();
+            var expected = new ArrayList<byte[]>();
+            changed.render(120, samples -> expected.add(pcmBytes(samples)));
+            assertFalse(Arrays.equals(expected.get(20), playedBefore));
+            await(() -> sink.blocks.stream().anyMatch(block -> Arrays.equals(block, expected.get(20))));
+            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
+            await(() -> liveStatus(scene).isEmpty());
+            assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
+            int beforeUndo = sink.blocks.size();
+            await(() -> sink.blocks.stream().skip(beforeUndo).anyMatch(block -> Arrays.equals(block, playedBefore)));
+            int beforeRedo = sink.blocks.size();
+            fx(() -> { key(view.canvas, KeyCode.Y, true); return null; });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(20))));
+            fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; });
+            await(() -> liveStatus(scene).startsWith("Rebuild needed"));
+            fx(() -> {
+                assertEquals("Stop", ((Button) scene.lookup("#reconstruction-play")).getText());
+                assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
+                return null;
+            });
+            assertEquals(1, sink.opens.get());
+            assertEquals(original, com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project());
+
+            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            var external = journal.entries();
+            var entry = external.get(0).getAsJsonObject().deepCopy();
+            entry.addProperty("id", "agent-edit");
+            entry.addProperty("author", "agent");
+            external.add(entry);
+            var incoming = new JsonObject();
+            incoming.addProperty("version", 1);
+            incoming.add("edits", external);
+            var replacement = Files.writeString(work.resolve("incoming-edits.json"), incoming.toString());
+            Files.move(replacement, work.resolve("edits.json"), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            await(() -> liveStatus(scene).contains("Saved changes from disk"));
+            fx(() -> {
+                assertEquals("Play", ((Button) scene.lookup("#reconstruction-play")).getText());
+                assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
+                return null;
+            });
+            assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+        } finally {
+            fx(() -> { pane.stage().close(); pane.close(); return null; });
+        }
+    }
+
+    private static String liveStatus(javafx.scene.Scene scene) {
+        return ((Label) scene.lookup("#reconstruction-live-status")).getText();
+    }
+
+    private Path assembledLiveFixture() throws Exception {
+        var inputs = reconstructionFixture();
+        var midi = inputs.resolve("tone.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), 0));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), 1300));
+        javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
+        var catalogue = inputs.resolve("index.json");
+        var voice = DemoProject.create().voices().getFirst();
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] bytes = new byte[voice.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = voice.bytes().get(i).byteValue();
+        var asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), bytes);
+        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), null);
+        builder.build().save(catalogue);
+        var work = folder.resolve("live-assembly");
+        com.opensmpsdeck.headless.ReconstructionStages.runForReview("run", new String[]{
+                midi.toString(), inputs.resolve("mix.wav").toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2"}, (done, total, message) -> {});
+        return work;
+    }
+
+    private static byte[] pcmBytes(short[] samples) {
+        var out = java.nio.ByteBuffer.allocate(samples.length * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (short sample : samples) out.putShort(sample);
+        return out.array();
+    }
+
+    private static final class CapturedAudio {
+        final java.util.concurrent.atomic.AtomicInteger opens = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.CopyOnWriteArrayList<byte[]> blocks = new java.util.concurrent.CopyOnWriteArrayList<>();
+        long frames;
+
+        javax.sound.sampled.SourceDataLine open(javax.sound.sampled.AudioFormat format) {
+            opens.incrementAndGet();
+            return (javax.sound.sampled.SourceDataLine) java.lang.reflect.Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{javax.sound.sampled.SourceDataLine.class},
+                    (line, method, args) -> switch (method.getName()) {
+                        case "write" -> {
+                            int count = (Integer) args[2];
+                            frames += count / 4;
+                            blocks.add(Arrays.copyOf((byte[]) args[0], count));
+                            java.util.concurrent.locks.LockSupport.parkNanos(4_000_000);
+                            yield count;
+                        }
+                        case "getLongFramePosition" -> frames;
+                        default -> null;
+                    });
+        }
+    }
+
     @Test void reconstructionGesturesDraftNotesAndWatchBothJournals() throws Exception {
         Path work = reconstructionFixture();
         com.opensmpsdeck.headless.ReconstructionSections.run(work, "set", com.google.gson.JsonParser.parseString("""

@@ -94,7 +94,7 @@ final class ReconstructionCli {
     }
 
     @FunctionalInterface
-    private interface Arrangement {
+    interface Arrangement {
         S3kReconstruction.Result arrange(Map<Integer, ReconstructionEcho.Estimate> echoes, boolean copies, boolean bends,
                                          int omitPolicy, int bankPass) throws IOException;
     }
@@ -484,7 +484,7 @@ final class ReconstructionCli {
         }
     }
 
-    private record Assembly(Matched matched, ReconstructionAllocation.Result ordered, ReconstructionClipLinks.Layout layout,
+    record Assembly(Matched matched, ReconstructionAllocation.Result ordered, ReconstructionClipLinks.Layout layout,
                             ReconstructionRetriggers.Playback playback, Arrangement arrangement, PartArrangement partArrangement,
                             List<ReconstructionSectionLevels.Gain> sectionGains, Map<String, Double> hitGains,
                             int bankFitCandidates) {}
@@ -495,20 +495,35 @@ final class ReconstructionCli {
                                             ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes, boolean policyDecisions,
                                             List<ReconstructionSectionLevels.Gain> savedGains)
             throws IOException {
+        return prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes,
+                policyDecisions, savedGains, null);
+    }
+
+    record SavedAssembly(Map<String, List<ReconstructionOverrides.Span>> scopes,
+                         Map<String, Double> drumGains, ReconstructionClipLinks.Layout layout) {}
+
+    static Assembly prepareAssembly(Path work, ReconstructionStages.Score score,
+                                    ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
+                                    ReconstructionVoicing.Result voicing, InstrumentCatalogue catalogue,
+                                    ReconstructionEdits intents, List<ReconstructionEdits.Outcome> outcomes,
+                                    boolean policyDecisions, List<ReconstructionSectionLevels.Gain> savedGains,
+                                    SavedAssembly saved) throws IOException {
         var settings = voicing.arrangement();
-        if (settings != null) settings.validate(score);
+        if (saved == null && settings != null) settings.validate(score);
         var options = score.inputs().options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(Comparator.comparingInt(entry -> entry.startTick() == null
                         ? timeline.startTick(entry.note()) : entry.startTick())).toList());
-        var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline);
+        var scopes = saved == null ? ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline) : saved.scopes();
         var voiceAssignments = voicing.voiceAssignments() == null
                 ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
         var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, score, voiceAssignments, scopes, outcomes);
         var drumGains = new java.util.HashMap<String, Double>();
         var dynamics = settings == null ? null : settings.drumDynamics();
-        if (dynamics != null && dynamics.fitLevels()) {
+        if (saved != null) {
+            drumGains.putAll(saved.drumGains());
+        } else if (dynamics != null && dynamics.fitLevels()) {
             var hits = allocation.notes().stream().filter(row -> row.role() == ReconstructionRoles.Role.drums)
                     .map(row -> timeline.sourceNote(row.note())).toList();
             var lanes = voicing.lanes();
@@ -521,7 +536,8 @@ final class ReconstructionCli {
                 drumGains.put(row.note().id(), Math.min(4, base * ReconstructionDrumDynamics.gain(db)));
             }
         }
-        drumGains.putAll(ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline));
+        if (saved == null || dynamics == null || !dynamics.fitLevels())
+            drumGains.putAll(ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline));
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
         var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
@@ -531,8 +547,9 @@ final class ReconstructionCli {
         var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
                 null, null, null, null, allocation.chordVoicings());
-        var layout = ReconstructionClipLinks.Layout.read(work);
-        var bankFit = score.inputs().audioOnly() == null ? List.<ReconstructionAllocation.Entry>of()
+        var layout = saved == null ? ReconstructionClipLinks.Layout.read(work) : saved.layout();
+        var bankFit = saved != null || score.inputs().audioOnly() == null
+                ? List.<ReconstructionAllocation.Entry>of()
                 : bankFitCandidates(articulated, playback.origins(), authored, layers.keySet());
         PartArrangement build = (echoes, copies, bends, omitPolicy, bankPass, performance) -> S3kReconstruction.arrangeAllocated(
                 options.name(), options.ticksPerBeat(), timeline.ticks(),

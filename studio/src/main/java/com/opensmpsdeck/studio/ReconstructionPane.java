@@ -54,6 +54,7 @@ final class ReconstructionPane implements AutoCloseable {
     private final Path work;
     private final Runnable openArrangement;
     private final Supplier<ProjectDocument> openProject;
+    private final StudioPlayback.LineFactory audioLines;
     private final Slider zoom = new Slider(0, ReconstructionCanvas.MAX_TIME_ZOOM, 0);
     private ReconstructionInspection model;
     private ReconstructionCanvas view;
@@ -67,6 +68,12 @@ final class ReconstructionPane implements AutoCloseable {
     }
 
     ReconstructionPane(Window owner, Path work, Runnable openArrangement, Supplier<ProjectDocument> openProject) {
+        this(owner, work, openArrangement, openProject, javax.sound.sampled.AudioSystem::getSourceDataLine);
+    }
+
+    ReconstructionPane(Window owner, Path work, Runnable openArrangement, Supplier<ProjectDocument> openProject,
+                       StudioPlayback.LineFactory audioLines) {
+        this.audioLines = audioLines;
         this.work = work;
         this.openArrangement = openArrangement;
         this.openProject = openProject;
@@ -133,7 +140,8 @@ final class ReconstructionPane implements AutoCloseable {
         view = new ReconstructionCanvas(model, status::setText);
         editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh,
                 position -> listen.cuePreview(position), openProject);
-        listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition);
+        listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition, audioLines);
+        editor.liveTransport(listen);
         view.onNote = editor::show;
         editor.onSelectionChanged = listen::selectionChanged;
         editor.onVoicesChanged = listen::refreshTargets;
