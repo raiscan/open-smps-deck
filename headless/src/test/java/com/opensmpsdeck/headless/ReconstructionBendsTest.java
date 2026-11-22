@@ -76,6 +76,112 @@ class ReconstructionBendsTest {
         assertEquals(0, falsePositives);
     }
 
+    @Test void detectsAnAttackThatStartsThreeSemitonesBelowTheLanding() {
+        var audio = fixture(frame -> -300 * (1 - Math.clamp(frame / 6, 0, 1)));
+        var candidates = ReconstructionBendRecovery.detect(audio, List.of(note()), true);
+        assertEquals(1, candidates.size());
+        var recovery = candidates.getFirst();
+        assertTrue(recovery.automatic());
+        var bend = recovery.approach().bend(recovery.start(), recovery.landing().end());
+        assertEquals(ReconstructionBends.Kind.SCOOP_IN, bend.kind());
+        assertTrue(bend.points().getFirst().cents() < -230);
+        assertEquals(0, bend.points().getLast().cents());
+    }
+
+    @Test void mergesContinuousRidgeFragmentsIntoAPlayableLanding() throws IOException {
+        var fragments = List.of(fragment("first", 0, .034, PITCH - 4),
+                fragment("second", .034, .066, PITCH - 3),
+                fragment("third", .066, .100, PITCH - 2),
+                fragment("last", .100, FRAMES / 60.0, PITCH));
+        var audio = fixture(frame -> -480 * (1 - Math.clamp(frame / 7.2, 0, 1)));
+        var candidates = ReconstructionBendRecovery.detect(audio, fragments, true);
+        assertEquals(1, candidates.size());
+        var recovery = candidates.getFirst();
+        assertTrue(recovery.automatic());
+        assertEquals(fragments, recovery.members());
+        assertEquals(ReconstructionEdits.Kind.mergeNotes, recovery.intent().kind());
+        var curve = recovery.approach().bend(recovery.start(), recovery.landing().end());
+        assertTrue(curve.points().getFirst().cents() < -400);
+        var fit = ReconstructionBendEncoding.fit(note().withBend(curve), 0, FRAMES, 0, VOICE);
+        assertNotNull(fit);
+        assertTrue(roundTrip(fit, curve) < 55);
+    }
+
+    @Test void recoversWrittenOctavesWithMatchingMotionAndLeavesASteadyChordVoiceAlone() {
+        var notes = List.of(fragment("low", 0, .50, PITCH - 24),
+                fragment("middle", 0, .50, PITCH - 12),
+                fragment("steady", 0, .50, PITCH - 7),
+                fragment("high", .12, .50, PITCH));
+        int rate = 24_000;
+        float[] samples = new float[rate / 2];
+        double phase = 0;
+        for (int i = 0; i < samples.length; i++) {
+            double t = i / (double) rate;
+            double pitch = PITCH - 24 - 3 * (1 - Math.clamp(t / .094, 0, 1));
+            phase += Math.TAU * 440 * Math.pow(2, (pitch - 69) / 12) / rate;
+            samples[i] = (float) (.24 * Math.sin(phase) + .12 * Math.sin(phase * 2)
+                    + .075 * Math.sin(phase * 4) + .075 * Math.sin(Math.TAU * ReconstructionLeadAudio.hz(PITCH - 7) * t));
+        }
+        var candidates = ReconstructionBendRecovery.detect(new ReferenceAudio(samples, rate), notes, true);
+        assertEquals(List.of("high", "low", "middle"),
+                candidates.stream().filter(ReconstructionBendRecovery.Candidate::automatic)
+                        .map(candidate -> candidate.landing().id()).sorted().toList());
+    }
+
+    @Test void offersContinuousRidgeWithANewPickForReview() {
+        var fragments = List.of(fragment("first", 0, .034, PITCH - 4),
+                fragment("second", .034, .066, PITCH - 3),
+                fragment("third", .066, .100, PITCH - 2),
+                fragment("last", .100, FRAMES / 60.0, PITCH));
+        var audio = fixture(frame -> -480 * (1 - Math.clamp(frame / 7.2, 0, 1)));
+        for (int i = 0; i < audio.samples().length; i++) {
+            if (Math.abs(i / (double) audio.sampleRate() - .066) < .007) audio.samples()[i] *= .40f;
+        }
+        var candidates = ReconstructionBendRecovery.detect(audio, fragments, true);
+        assertEquals(1, candidates.size());
+        assertFalse(candidates.getFirst().automatic());
+        assertEquals(fragments, candidates.getFirst().members());
+    }
+
+    @Test void retainsTheScoopWhenAnUpperVoiceUsesPsgAndGetsAnOctaveLayer() throws IOException {
+        var curve = new ReconstructionBends.Bend(ReconstructionBends.Kind.SCOOP_IN, 0, 1, List.of(
+                new ReconstructionBends.Point(0, -240), new ReconstructionBends.Point(.09, 0),
+                new ReconstructionBends.Point(.50, 0)));
+        var dry = ReconstructionLayerPitch.fitPsg(note().withBend(curve), 0, 30, 0, TargetProfile.S3K);
+        assertNotNull(dry);
+        var octave = ReconstructionLayerPitch.copy(dry, null, false, 30, PITCH, PITCH + 12, 0);
+        assertTrue(octave.curve().withinTolerance());
+        for (var fit : List.of(dry, octave.fit())) {
+            assertTrue(fit.notes().size() >= 4);
+            assertEquals(fit.notes().size() - 1,
+                    fit.commands().stream().filter(command -> command.command() == NativeCommand.HOLD).count());
+            var last = fit.notes().getLast();
+            assertEquals(30, last.tick() + last.duration());
+        }
+    }
+
+    @Test void keepsDiscreteAscendingPitchesEvenWhenTheirGatesTouch() {
+        var notes = List.of(fragment("first", 0, .040, PITCH - 3),
+                fragment("second", .040, .080, PITCH - 2),
+                fragment("third", .080, .120, PITCH - 1),
+                fragment("last", .120, FRAMES / 60.0, PITCH));
+        var audio = fixture(frame -> -300 + 100 * Math.min(3, (int) (frame / 2.4)));
+        assertTrue(ReconstructionBendRecovery.detect(audio, notes, true).isEmpty());
+    }
+
+    @Test void offersTheSameCurveForReviewOnAnUnselectedPart() {
+        var audio = fixture(frame -> -300 * (1 - Math.clamp(frame / 6, 0, 1)));
+        var candidates = ReconstructionBendRecovery.detect(audio, List.of(note()), false);
+        assertEquals(1, candidates.size());
+        assertFalse(candidates.getFirst().automatic());
+        assertTrue(candidates.getFirst().intent().proposed());
+        assertEquals(ReconstructionEdits.Kind.bend, candidates.getFirst().intent().kind());
+    }
+
+    private static ReconstructionStages.Note fragment(String id, double start, double end, int pitch) {
+        return new ReconstructionStages.Note(id, 0, start, end, pitch, 96, "midi", 1);
+    }
+
     @Test void keepsVibratoAroundATiedSlideDeeperThanFourteenSemitones() throws IOException {
         var bend = new ReconstructionBends.Bend(ReconstructionBends.Kind.DOWN, 6 / 60.0, 1, List.of(
                 new ReconstructionBends.Point(0, 0), new ReconstructionBends.Point(6 / 60.0, 0),

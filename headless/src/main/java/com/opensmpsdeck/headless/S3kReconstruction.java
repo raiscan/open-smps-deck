@@ -621,10 +621,13 @@ final class S3kReconstruction {
                     }
                 }
                 var curve = entry.note().bend();
+                // Staged vibrato is FM-only. Its pitch commands take precedence over bends on the same gate.
                 if (envelope != null) {
                     placed.vibratoEnvelope = ReconstructionBendEncoding.envelope(note.pitch(), placed.detune, duration, envelope);
-                }
-                if (envelope == null && bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
+                } else if (bends && !isFm && !pitchedNoise && profile.game() == TargetGame.S3K
+                        && ReconstructionBendRecovery.psgCompatible(curve)) {
+                    placed.bend = ReconstructionLayerPitch.fitPsg(entry.note(), start, duration, placed.detune, profile);
+                } else if (bends && curve != null && (lane.equals("FM1") || isFm && curve.editReason() != null)) {
                     var changes = new java.util.TreeMap<Integer, ReconstructionVoicing.Vibrato>();
                     var current = placed.attackTone().vibrato();
                     for (var change : placed.scopedTones.tailMap(start, false).entrySet()) {
@@ -634,10 +637,10 @@ final class S3kReconstruction {
                     }
                     placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration, placed.detune,
                             voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes, profile);
-                    if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
-                            lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
-                            curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
                 }
+                if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
+                        lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
+                        curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
                 if (!policies.isEmpty() || layers.containsKey(origin))
                     candidates.add(new PolicySource(entry, origin, placed, gates.size(), assignment != null));
                 var layer = layers.get(origin);

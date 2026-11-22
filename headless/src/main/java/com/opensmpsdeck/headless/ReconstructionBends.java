@@ -54,11 +54,41 @@ final class ReconstructionBends {
         }
     }
 
+    private record Tracking(double minimumSupport, double minimumFundamental,
+                            double attackJump, double trackingJump, double excursion, double jumpDamping) {
+        private Tracking(double minimumSupport, double minimumFundamental) {
+            this(minimumSupport, minimumFundamental, 85, 190, MAX_EXCURSION, 150);
+        }
+    }
+
+    private static final Tracking BEND = new Tracking(.62, .14);
+    private static final Tracking APPROACH = new Tracking(.47, .14);
+    private static final Tracking PARALLEL_APPROACH = new Tracking(.085, .055);
+    private static final Tracking VIBRATO = new Tracking(.28, .14, 100, 100, 155, 45);
+
     private record Peak(double hz, double amplitude) {}
     record Sample(double time, double cents, double support) {}
 
     static Bend detect(ReferenceAudio audio, Note note) {
         return new Tracker(audio).detect(note);
+    }
+
+    record Approach(double start, double landing, List<Sample> samples, boolean strong) {
+        Bend bend(double start, double end) {
+            var points = new ArrayList<Point>();
+            points.add(new Point(start, (int) Math.round(samples.getFirst().cents())));
+            double previous = samples.getFirst().cents();
+            for (var sample : samples) {
+                if (sample.time() <= start || sample.time() >= end) continue;
+                previous = Math.max(previous, Math.min(0, sample.cents()));
+                points.add(new Point(sample.time(), (int) Math.round(previous)));
+            }
+            points.add(new Point(end, 0));
+            var reduced = new ArrayList<Point>();
+            reduced.add(points.getFirst());
+            simplify(points, 0, points.size() - 1, reduced);
+            return new Bend(Kind.SCOOP_IN, 0, strong ? .95 : .82, reduced);
+        }
     }
 
     static final class Tracker {
@@ -97,12 +127,13 @@ final class ReconstructionBends {
             int end = Math.min(audio.samples().length, (int) Math.floor(note.end() * rate));
             int hop = (int) Math.round(HOP * rate);
             var track = new ArrayList<Sample>();
+            var tracking = vibrato ? VIBRATO : BEND;
             int windows = 0;
             for (int at = first; at + length <= end; at += hop) {
                 windows++;
                 double time = (at + length / 2.0) / rate;
                 double prior = track.isEmpty() ? 0 : track.getLast().cents();
-                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty(), vibrato);
+                Sample sample = sample(at, window, carrier, time, prior, track.isEmpty(), tracking);
                 if (sample == null) {
                     if (vibrato) continue;
                     if (track.isEmpty() && time - note.start() < .023) continue;
@@ -116,8 +147,133 @@ final class ReconstructionBends {
             return track;
         }
 
+        /**
+         * Track backward from the written landing. With the ridge seeded on the
+         * settled pitch, the onset does not have to resemble the MIDI note.
+         */
+        Approach approach(Note note) {
+            if (note.run() != null || note.pitch() < 48 || note.pitch() > 94 || note.end() - note.start() < .068)
+                return null;
+            double carrier = ReconstructionLeadAudio.hz(note.pitch());
+            int rate = audio.sampleRate();
+            int length = (int) Math.round(rate * Math.clamp(5 / carrier, .013, .022));
+            double[] window = new double[length];
+            for (int i = 0; i < length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
+            var reverse = new ArrayList<Sample>();
+            double last = Math.min(note.start() + .210, note.end() - .018);
+            double first = Math.max(length / (2.0 * rate), note.start() - .55);
+            double prior = 0;
+            int stable = 0;
+            for (double t = last; t >= first; t -= HOP) {
+                int at = (int) Math.round(t * rate) - length / 2;
+                if (at < 0 || at + length > audio.samples().length) return null;
+                Sample sample = sample(at, window, carrier, t, prior, reverse.isEmpty(), APPROACH);
+                if (sample == null || Math.abs(sample.cents() - prior) > 125) break;
+                if (reverse.size() < 4 && Math.abs(sample.cents()) > 60) return null;
+                if (sample.cents() > 65) break;
+                reverse.add(sample);
+                stable = Math.abs(sample.cents() - prior) < 11 ? stable + 1 : 0;
+                prior = sample.cents();
+                // Stop at the previous held note, even when there was no gap.
+                if (sample.cents() < -70 && stable >= 4
+                        && Math.abs(sample.cents() - reverse.get(reverse.size() - 5).cents()) < 26) {
+                    reverse.subList(reverse.size() - 4, reverse.size()).clear();
+                    break;
+                }
+            }
+            return approach(note, reverse.reversed());
+        }
+
+        /** Look for the same motion in another written voice, even at a weak harmonic. */
+        Approach parallelApproach(Note note, Approach guide) {
+            double carrier = ReconstructionLeadAudio.hz(note.pitch());
+            int rate = audio.sampleRate();
+            int length = (int) Math.round(rate * Math.clamp(12 / carrier, .022, .036));
+            double[] window = new double[length];
+            for (int i = 0; i < length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
+            List<Sample> best = List.of();
+            double bestError = Double.POSITIVE_INFINITY;
+            // Allow a small strum offset. Compare the rise itself and two
+            // settled frames to distinguish a parallel voice from a crossing.
+            var expected = new ArrayList<>(guide.samples());
+            for (int i = 1; i <= 2; i++) expected.add(new Sample(guide.landing() + i * HOP, 0, 1));
+            for (int lag = -2; lag <= 3; lag++) {
+                var measured = new ArrayList<Sample>();
+                double error = 0;
+                int gap = 0;
+                for (var point : expected) {
+                    double time = point.time() + lag * HOP;
+                    int at = (int) Math.round(time * rate) - length / 2;
+                    var sample = at < 0 || at + length > audio.samples().length ? null
+                            : sample(at, window, carrier, time, point.cents(), true, PARALLEL_APPROACH);
+                    double tolerance = Math.abs(point.cents()) < 42 ? 48 : 70;
+                    if (sample == null || Math.abs(sample.cents() - point.cents()) > tolerance) {
+                        error += tolerance;
+                        if (++gap > 2) break;
+                        continue;
+                    }
+                    gap = 0;
+                    error += Math.abs(sample.cents() - point.cents());
+                    measured.add(sample);
+                }
+                if (measured.size() < expected.size() * .80 || gap != 0
+                        || measured.getFirst().time() > guide.start() + (lag + 1.5) * HOP
+                        || measured.getFirst().cents() > -70 || error >= bestError) continue;
+                best = List.copyOf(measured);
+                bestError = error;
+            }
+            if (best.isEmpty()) return null;
+            var moving = new ArrayList<>(best.subList(0, best.size() - 2));
+            var landing = moving.removeLast();
+            moving.add(new Sample(landing.time(), 0, landing.support()));
+            return new Approach(moving.getFirst().time(), landing.time(), List.copyOf(moving), true);
+        }
+
+        private static Approach approach(Note note, List<Sample> track) {
+            if (track.size() < 7) return null;
+            int first = 0;
+            for (int i = 1; i < Math.min(3, track.size()); i++) {
+                if (track.get(i).cents() < track.get(first).cents() - 18) first = i;
+            }
+            int landing = first + 1;
+            int settled = 0;
+            for (int i = landing; i < track.size(); i++) {
+                settled = Math.abs(track.get(i).cents()) <= 42 ? settled + 1 : 0;
+                if (settled == 4) {
+                    landing = i - 3;
+                    break;
+                }
+            }
+            if (settled < 4 || landing - first < 3) return null;
+            double time = track.get(landing).time();
+            double start = track.get(first).time();
+            double depth = -track.get(first).cents();
+            if (depth < 65 || time - start < .017 || time - start > .55
+                    || time < note.start() - .055 || time > note.start() + .17) return null;
+
+            double back = 0, support = track.get(first).support(), largestStep = 0;
+            int flat = 0, longestFlat = 0;
+            for (int i = first + 1; i <= landing; i++) {
+                // Evaluate the measured crossing too. A jump into the target
+                // followed by a hold cannot stand in for a continuous ramp.
+                double change = midpoint(track, i) - midpoint(track, i - 1);
+                back += Math.max(0, -change);
+                largestStep = Math.max(largestStep, change);
+                flat = Math.abs(change) < 7 ? flat + 1 : 0;
+                longestFlat = Math.max(longestFlat, flat);
+                support += track.get(i).support();
+            }
+            if (back > Math.max(22, depth * .19) || longestFlat > 3 || largestStep > depth * .68) return null;
+            boolean strong = depth >= 85 && time - start >= .027 && back <= Math.max(12, depth * .09)
+                    && longestFlat < 3 && largestStep <= depth * .47 && support / (landing - first + 1) >= .86;
+            var samples = new ArrayList<>(track.subList(first, landing));
+            var last = track.get(landing);
+            samples.add(new Sample(last.time(), 0, last.support()));
+            return new Approach(start, time, List.copyOf(samples), strong);
+        }
+
         private Sample sample(int at, double[] window, double carrier, double time, double prior, boolean attack,
-                              boolean vibrato) {
+                              Tracking tracking) {
             double energy = 0;
             for (int i = 0; i < window.length; i++) {
                 double value = audio.samples()[at + i];
@@ -149,8 +305,9 @@ final class ReconstructionBends {
             for (Peak peak : peaks) {
                 double cents = CENTS_PER_LOG * Math.log(peak.hz() / carrier);
                 double jump = Math.abs(cents - prior);
-                if (jump > (vibrato ? 100 : attack ? 85 : 190) || Math.abs(cents) > (vibrato ? 155 : MAX_EXCURSION)
-                        || peak.amplitude() < .14 * rms) continue;
+                if (jump > (attack ? tracking.attackJump() : tracking.trackingJump())
+                        || Math.abs(cents) > tracking.excursion()
+                        || peak.amplitude() < tracking.minimumFundamental() * rms) continue;
                 double salience = peak.amplitude();
                 double numerator = cents * peak.amplitude();
                 double harmonicEnergy = peak.amplitude() * peak.amplitude();
@@ -164,9 +321,9 @@ final class ReconstructionBends {
                 }
                 double support = Math.sqrt(harmonicEnergy) / rms;
                 // A strong fundamental alone can support a nearly sinusoidal tone.
-                if (support < (vibrato ? .28 : .62)) continue;
-                double merit = salience / (1 + jump / (vibrato ? 45 : 150));
-                if (vibrato) merit /= 1 + Math.abs(cents) / 115;
+                if (support < tracking.minimumSupport()) continue;
+                double merit = salience / (1 + jump / tracking.jumpDamping());
+                if (tracking == VIBRATO) merit /= 1 + Math.abs(cents) / 115;
                 if (merit > bestSalience) {
                     bestSalience = merit;
                     best = new Sample(time, numerator / salience, Math.min(1, support));

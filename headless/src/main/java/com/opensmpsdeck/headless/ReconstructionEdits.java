@@ -246,7 +246,7 @@ final class ReconstructionEdits {
             case splitNote -> List.of("noteId", "selector", "at", "pitch");
             case retrigger -> List.of("noteId", "selector", "attacks", "rate", "count", "gate", "role", "lane");
             case mergeNotes -> List.of("noteIds", "selectors", "span", "part", "pitch",
-                    "allowDifferentPitches", "glide");
+                    "allowDifferentPitches", "glide", "points");
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
@@ -258,7 +258,7 @@ final class ReconstructionEdits {
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",
                     "pitchMax", "voice", "lane", "laneType");
             case unmerge -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "voice");
-            case bend -> List.of("noteId", "selector", "points");
+            case bend -> List.of("noteId", "selector", "points", "start");
             case glide -> List.of("fromNoteId", "toNoteId", "shape", "seconds");
             case arpeggio -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "rate", "order");
             case chordInstrument -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax");
@@ -435,7 +435,8 @@ final class ReconstructionEdits {
             }
         }
         var points = new ArrayList<ReconstructionBends.Point>();
-        if (kind == Kind.bend) {
+        if (kind == Kind.bend || kind == Kind.mergeNotes && json.has("points")) {
+            require(kind != Kind.mergeNotes || mergeGlide, at + ".points", "requires glide: true");
             var values = array(json, "points", at);
             require(values.size() >= 2 && values.size() <= 512, at + ".points", "expected 2–512 [seconds, semitones] pairs");
             double prior = -1;
@@ -695,9 +696,17 @@ final class ReconstructionEdits {
                         validateNote(note, score, part(score, note.part()), at);
                         notes.put(id, note);
                     }
-                    case bend -> notes.put(id, before.withBend(bend(edit, before, at, edit.points.stream()
-                            .map(point -> new ReconstructionBends.Point(edit.toSource(point.time(), timeline), point.cents()))
-                            .toList(), timeline)));
+                    case bend -> {
+                        var gate = before;
+                        if (edit.start != null) {
+                            double start = edit.toSource(edit.start, timeline);
+                            require(start < before.end(), at + ".start", "must precede release");
+                            gate = new Note(id, before.part(), start, before.end(), before.pitch(), before.velocity(),
+                                    before.source(), before.confidence(), before.motion(), before.run());
+                            validateNote(gate, score, part(score, gate.part()), at);
+                        }
+                        notes.put(id, gate.withBend(bend(edit, gate, at, curveInSource(edit, timeline), timeline)));
+                    }
                     case glide -> {
                         Note target = notes.get(requested.getLast());
                         if (target == null) {
@@ -713,6 +722,7 @@ final class ReconstructionEdits {
                 if (timingOrPitch) changed.add(id);
                 var outcome = new Outcome(edit.id, edit.kind, Status.applied, List.of(id), null, null,
                         edit.kind == Kind.deleteNote || edit.kind == Kind.glide
+                                || edit.kind == Kind.bend && edit.start != null
                                 || edit.kind == Kind.setNote && timingOrPitch ? before : null);
                 outcomes.add(outcome);
                 if (edit.kind == Kind.deleteNote) retired.put(id, outcome);
@@ -932,10 +942,12 @@ final class ReconstructionEdits {
             String conflict = mergeConflict(edit, members, origins, timeline, scoped);
             if (conflict != null) return conflict(edit, ids, conflict);
             double end = members.stream().mapToDouble(Note::end).max().orElseThrow();
-            var merged = new Note(first.id(), first.part(), first.start(), end, first.pitch(), first.velocity(),
+            int pitch = edit.points.isEmpty() ? first.pitch() : members.getLast().pitch();
+            var merged = new Note(first.id(), first.part(), first.start(), end, pitch, first.velocity(),
                     first.source(), first.confidence());
             validateNote(merged, score, part(score, merged.part()), at);
-            if (edit.mergeGlide) merged = mergeGlide(edit, merged, members, at, timeline);
+            if (!edit.points.isEmpty()) merged = merged.withBend(bend(edit, merged, at, curveInSource(edit, timeline), timeline));
+            else if (edit.mergeGlide) merged = mergeGlide(edit, merged, members, at, timeline);
             removed.forEach(note -> notes.remove(note.id()));
             notes.put(first.id(), merged);
             return new Outcome(edit.id, edit.kind, Status.applied, List.of(first.id()), null,
@@ -983,7 +995,7 @@ final class ReconstructionEdits {
         return null;
     }
 
-    private static boolean targets(Intent edit, Note note, ReconstructionTimeMap timeline) {
+    static boolean targets(Intent edit, Note note, ReconstructionTimeMap timeline) {
         if (note == null) return false;
         double start = edit.inBase(note.start(), timeline);
         return edit.noteIds.contains(note.id()) || edit.attack != null && edit.attack.matches(note, start)
@@ -1062,7 +1074,8 @@ final class ReconstructionEdits {
     private ReconstructionRoles.Result applyRoles(Score score, ReconstructionStructure.Result structure,
                                                   ReconstructionRoles.Result roles, List<Outcome> scoreOutcomes,
                                                   List<Outcome> outcomes, List<Resolution> resolutions) {
-        if (isEmpty()) return roles;
+        if (isEmpty() && scoreOutcomes.stream().noneMatch(outcome -> ReconstructionBendRecovery.generated(outcome.id())))
+            return roles;
         var timeline = ReconstructionTimeMap.of(score);
         var written = new LinkedHashMap<String, Note>();
         for (var note : structure.notes()) written.put(note.id(), note);
@@ -1076,6 +1089,14 @@ final class ReconstructionEdits {
             }
         }
         var pins = new LinkedHashMap<String, Pin>();
+        for (var outcome : scoreOutcomes) {
+            if (outcome.status() != Status.applied || !ReconstructionBendRecovery.generated(outcome.id())) continue;
+            if (ReconstructionBendRecovery.parallel(outcome.id())) continue;
+            var choice = decisions.get(outcome.noteIds().getFirst());
+            if (choice != null && choice.role() != Role.drop && choice.note().bend() != null
+                    && outcome.tag().equals(choice.note().bend().editReason()))
+                pins.put(choice.note().id(), new Pin(null, outcome.id(), Integer.MAX_VALUE, ReconstructionLaneType.FM));
+        }
         var restored = new LinkedHashSet<String>();
         var deleted = new LinkedHashSet<String>();
         var scoreResults = new LinkedHashMap<String, Outcome>();
@@ -1417,6 +1438,11 @@ final class ReconstructionEdits {
         return gate.withBend(bend(edit, gate, at, points, timeline));
     }
 
+    private static List<ReconstructionBends.Point> curveInSource(Intent edit, ReconstructionTimeMap timeline) {
+        return edit.points.stream().map(point -> new ReconstructionBends.Point(
+                edit.toSource(point.time(), timeline), point.cents())).toList();
+    }
+
     private static ReconstructionBends.Bend bend(Intent edit, Note note, String at,
                                                  List<ReconstructionBends.Point> curve, ReconstructionTimeMap time) {
         require(note.run() == null && !"external".equals(note.source()), at + ".noteId", "bend expects an effective single attack");
@@ -1441,8 +1467,11 @@ final class ReconstructionEdits {
         int first = points.getFirst().cents();
         int last = points.getLast().cents();
         double delay = points.stream().filter(p -> p.cents() != first).findFirst().map(p -> p.time() - note.start()).orElse(0.0);
-        return new ReconstructionBends.Bend(last >= first ? ReconstructionBends.Kind.UP : ReconstructionBends.Kind.DOWN,
-                delay, 1, points, edit.tag(), edit.kind == Kind.glide || edit.kind == Kind.mergeNotes && edit.mergeGlide ? true : null);
+        boolean recovery = ReconstructionBendRecovery.generated(edit.id);
+        var kind = last < first ? ReconstructionBends.Kind.DOWN
+                : recovery ? ReconstructionBends.Kind.SCOOP_IN : ReconstructionBends.Kind.UP;
+        return new ReconstructionBends.Bend(kind, recovery ? 0 : delay, 1, points, edit.tag(),
+                recovery || edit.kind == Kind.glide || edit.kind == Kind.mergeNotes && edit.mergeGlide ? true : null);
     }
 
     private static MidiScore.Part part(Score score, int id) {
@@ -1487,7 +1516,8 @@ final class ReconstructionEdits {
                 if (drums) yield "PSG tone cannot voice MIDI drums; use NOISE or DAC";
                 if (fmOnly) yield "PSG tone is disabled in FM-only mode";
                 if (note.pitch() < profile.psg().low() || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch " + profile.psg().low() + " or higher";
-                if (note.bend() != null && note.bend().editReason() != null) yield "authored bends require FM";
+                if (note.bend() != null && note.bend().editReason() != null
+                        && !ReconstructionBendRecovery.psgCompatible(note.bend())) yield "authored bends require FM";
                 yield null;
             }
             case NOISE -> {

@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.IntPredicate;
+import java.util.function.IntToDoubleFunction;
 
 import static com.opensmpsdeck.headless.ReconstructionBendEncoding.Fit;
 
@@ -30,6 +32,21 @@ final class ReconstructionLayerPitch {
 
     private ReconstructionLayerPitch() {}
 
+    static Fit fitPsg(ReconstructionStages.Note note, int start, int duration, int detune, TargetProfile profile) {
+        var clock = profile.clock();
+        var bend = note.bend();
+        if (duration < 4 || Math.abs(bend.points().getFirst().time() - clock.secondsAtTick(start)) > .025)
+            return null;
+        double base = PSG_HZ_PER_PERIOD / ReconstructionLeadAudio.hz(note.pitch()) + detune;
+        if (base <= 0) return null;
+        var copy = steps(duration, false, tick -> {
+            int at = start + tick;
+            double midpoint = (clock.frameAtTick(at) + clock.frameAtTick(at + 1)) / 120.0;
+            return PSG_HZ_PER_PERIOD / (FM_HZ_PER_UNIT * base) * Math.pow(2, bend.cents(midpoint) / 1200);
+        }, tick -> tick == 0);
+        return copy.fit().notes().size() > 1 && copy.curve().withinTolerance() ? copy.fit() : null;
+    }
+
     static Copy copy(Fit dry, Voice voice, boolean targetFm, int duration, int sourcePitch, int targetPitch,
                      int detuneOffset) throws IOException {
         return copy(dry, voice, targetFm, duration, sourcePitch, targetPitch, detuneOffset, TargetProfile.S3K);
@@ -38,7 +55,7 @@ final class ReconstructionLayerPitch {
     static Copy copy(Fit dry, Voice voice, boolean targetFm, int duration, int sourcePitch, int targetPitch,
                      int detuneOffset, TargetProfile profile) throws IOException {
         int transpose = targetPitch - sourcePitch;
-        if (targetFm && detuneOffset == 0
+        if (voice != null && targetFm && detuneOffset == 0
                 && dry.notes().stream().allMatch(n -> n.pitch() + transpose >= 12 && n.pitch() + transpose <= 106)) {
             // Shift the original driver program by whole octaves. The F-numbers,
             // detune values and live F0/FA counters are identical at each block.
@@ -66,7 +83,6 @@ final class ReconstructionLayerPitch {
 
         // Probe the rendered bend, rather than refitting the source annotation.
         // Each sample is local to the attack, so the copy can outlive the dry gate in project time.
-        int[] frequency = ReconstructionBendEncoding.frequencies(dry, voice, duration, profile);
         int fnum = LeadEffectMatcher.fmFnum(sourcePitch);
         double ratio = Math.pow(2, transpose / 12.0) * (fnum + detuneOffset) / fnum;
         var held = new HashSet<Integer>();
@@ -76,6 +92,29 @@ final class ReconstructionLayerPitch {
         for (var note : dry.notes())
             if (!held.contains(note.tick())) attacks.add(note.tick());
 
+        if (voice == null) return copyPsg(dry, targetFm, duration, ratio, attacks::contains);
+        int[] frequency = ReconstructionBendEncoding.frequencies(dry, voice, duration, profile);
+        return steps(duration, targetFm, tick -> ReconstructionBendEncoding.linear(frequency[tick]) * ratio,
+                attacks::contains);
+    }
+
+    private static Copy copyPsg(Fit dry, boolean targetFm, int duration, double ratio, IntPredicate attacks) {
+        var detuneChanges = new java.util.HashMap<Integer, Integer>();
+        for (var command : dry.commands()) if (command.command() == NativeCommand.DETUNE)
+            detuneChanges.put(command.tick(), (int) (byte) (int) command.arguments().getFirst());
+        var frequency = new double[duration];
+        for (int i = 0, detune = 0; i < dry.notes().size(); i++) {
+            var note = dry.notes().get(i);
+            detune = detuneChanges.getOrDefault(note.tick(), detune);
+            double value = PSG_HZ_PER_PERIOD / (FM_HZ_PER_UNIT * psgPeriod(new Pitch(note.pitch(), detune))) * ratio;
+            int end = i + 1 == dry.notes().size() ? duration : Math.min(duration, note.tick() + note.duration());
+            if (note.tick() >= end) break;
+            java.util.Arrays.fill(frequency, note.tick(), end, value);
+        }
+        return steps(duration, targetFm, tick -> frequency[tick], attacks);
+    }
+
+    private static Copy steps(int duration, boolean targetFm, IntToDoubleFunction frequency, IntPredicate attacks) {
         var notes = new ArrayList<NoteEvent>();
         var commands = new ArrayList<CommandEvent>();
         // The samples already include vibrato. Clear any live modulation left
@@ -85,15 +124,15 @@ final class ReconstructionLayerPitch {
         int start = 0;
         double squaredError = 0;
         for (int tick = 0; tick < duration; tick++) {
-            double target = ReconstructionBendEncoding.linear(frequency[tick]) * ratio;
+            double target = frequency.applyAsDouble(tick);
             Pitch next = targetFm ? fm(target, current) : psg(PSG_HZ_PER_PERIOD / (FM_HZ_PER_UNIT * target), current);
-            if (!next.equals(current) || attacks.contains(tick)) {
+            if (!next.equals(current) || attacks.test(tick)) {
                 if (current != null)
                     notes.add(new NoteEvent("layer-pitch-" + start, start, tick - start, current.note()));
                 if (tick == 0 || current.detune() != next.detune())
                     commands.add(new CommandEvent("layer-detune-" + tick, tick, NativeCommand.DETUNE,
                             List.of(next.detune() & 255)));
-                if (!attacks.contains(tick))
+                if (!attacks.test(tick))
                     commands.add(new CommandEvent("layer-hold-" + tick, tick, NativeCommand.HOLD, List.of()));
                 start = tick;
                 current = next;
