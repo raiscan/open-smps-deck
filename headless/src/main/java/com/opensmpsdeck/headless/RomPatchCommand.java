@@ -1,66 +1,80 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
+import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.headless.rompatch.RomPatch;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Locale;
 
-/** CLI and MCP entry point for publishing a patched copy. */
-public final class RomPatchCommand {
+final class RomPatchCommand {
+    static final String USAGE = "rom-patch PROJECT [--rom PATH] [--out SONG.s3k.gen] [--bps SONG.s3k.bps]"
+            + " [--slot ID] [--title-music] [--no-demo] [--loop] [--force]";
+
     private RomPatchCommand() {}
 
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
-        err.println(RomPatch.WARNING);
-        if (args.length < 4)
-            throw new IllegalArgumentException("Expected rom-patch PROJECT ROM OUTPUT [--slot ID] [--title-music] [--no-demo] [--loop] [--force]");
+        if (args.length < 2 || args[1].startsWith("--")) throw new IllegalArgumentException("Expected " + USAGE);
         int slot = RomPatch.DEFAULT_SLOT;
+        Path rom = null, image = null, bps = null;
         var flags = new HashSet<String>();
-        for (int i = 4; i < args.length; i++) {
+        for (int i = 2; i < args.length; i++) {
             String flag = args[i];
             if (!flags.add(flag)) throw new IllegalArgumentException("Duplicate option " + flag);
             switch (flag) {
-                case "--slot" -> {
-                    if (++i >= args.length) throw new IllegalArgumentException("Missing --slot value");
-                    String value = args[i];
-                    slot = value.regionMatches(true, 0, "0x", 0, 2)
-                            ? Integer.parseInt(value.substring(2), 16) : Integer.parseInt(value);
-                }
+                case "--slot" -> slot = slot(value(args, ++i, flag));
+                case "--rom" -> rom = Path.of(value(args, ++i, flag));
+                case "--out" -> image = Path.of(value(args, ++i, flag));
+                case "--bps" -> bps = Path.of(value(args, ++i, flag));
                 case "--title-music", "--no-demo", "--loop", "--force" -> {}
                 default -> throw new IllegalArgumentException("Unknown option " + flag);
             }
         }
-        var result = export(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]),
-                new RomPatch.Options(slot, flags.contains("--title-music"), flags.contains("--no-demo"),
-                        flags.contains("--loop")), flags.contains("--force"));
+
+        var outputs = new TestInGame.Outputs(image, bps, flags.contains("--force"));
+        var options = new RomPatch.Options(slot, flags.contains("--title-music"),
+                flags.contains("--no-demo"), flags.contains("--loop"));
+        var result = TestInGame.export(RomLibrary.userLibrary(), Path.of(args[1]), rom, outputs, options);
+        result.getAsJsonArray("warnings").forEach(warning -> err.println(warning.getAsString()));
         out.println(new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(result));
     }
 
-    public static JsonObject export(Path source, Path rom, Path output, RomPatch.Options options, boolean force)
-            throws IOException {
-        Path destination = output.toAbsolutePath().normalize();
-        for (Path input : new Path[]{source, rom}) {
-            if (destination.equals(input.toAbsolutePath().normalize())
-                    || (Files.exists(destination) && Files.isSameFile(input, destination)))
-                throw new IllegalArgumentException("ROM patch output must be a separate file from both inputs");
-        }
-        try (var target = new ExportTarget(destination, force)) {
-            if (!Files.isRegularFile(rom)) throw new IOException("Select a regular locked-on S3&K cartridge image");
-            byte[] cartridge;
-            try (var stream = Files.newInputStream(rom)) {
-                cartridge = stream.readNBytes(RomPatch.INPUT_ROM_BYTES + 1);
+    /** Route the two cartridge formats without extending the audio/native format parser. */
+    static boolean exportAlias(String[] args, PrintStream out, PrintStream err) throws IOException {
+        for (int i = 3; i + 1 < args.length; i++) {
+            if (!args[i].equals("--format")) continue;
+            String format = args[i + 1].toLowerCase(Locale.ROOT);
+            if (!format.equals("rom") && !format.equals("bps")) return false;
+            var patch = new ArrayList<String>();
+            patch.add("rom-patch");
+            patch.add(args[1]);
+            patch.add(format.equals("rom") ? "--out" : "--bps");
+            patch.add(args[2]);
+            for (int j = 3; j < args.length; j++) {
+                if (j != i && j != i + 1) patch.add(args[j]);
             }
-            var project = RomPatchInput.load(source);
-            var result = RomPatch.patch(cartridge, project.compiled(), options, project.relocations());
-            Files.write(target.path(), result.bytes(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-            target.publish();
-            result.report().addProperty("output", destination.toString());
-            return result.report();
+            run(patch.toArray(String[]::new), out, err);
+            return true;
+        }
+        return false;
+    }
+
+    private static String value(String[] args, int index, String flag) {
+        if (index >= args.length || args[index].startsWith("--"))
+            throw new IllegalArgumentException("Missing " + flag + " value");
+        return args[index];
+    }
+
+    private static int slot(String value) {
+        try {
+            return value.regionMatches(true, 0, "0x", 0, 2)
+                    ? Integer.parseInt(value.substring(2), 16) : Integer.parseInt(value);
+        } catch (NumberFormatException malformed) {
+            throw new IllegalArgumentException("Invalid music slot '" + value + "'. Use a decimal or 0x-prefixed ID.");
         }
     }
 }

@@ -291,6 +291,25 @@ directory when preserving both versions. Studio **Apply** offers a warning
 with options to preserve the edited arrangement before rebuilding.
 [Export reference](../../headless/README.md#export-project-output)
 
+### Test in game
+
+Use `rom set s3k PATH` or MCP `rom_set` with `game: "s3k"` and an
+absolute `path` to register a verified clean locked-on Sonic 3 & Knuckles
+ROM. Check `rom list` or `rom_list` for its status.
+
+```sh
+java -jar "$jar" rom-patch song.smps.json --out song.s3k.gen --bps song.s3k.bps --no-demo
+```
+
+Use at least one output. Pass `--rom PATH` to override the saved ROM for
+one export. With MCP `rom_patch`, use absolute `project`, `out` and/or
+`bps` paths, with optional `rom`, `slot`, `titleMusic`, `noDemo`, `loop`,
+and `force`. Read the `report` and `warnings`, including any DPCM and
+envelope approximations. A patched ROM is for personal use only. Hand off
+the BPS when sharing, subject to rights on any stock-derived material.
+It requires the same clean ROM to apply. Studio offers **Export… → Test in
+game…** once the ROM verifies. [Test in game guide](../../docs/user-guide/14-test-in-game.md)
+
 ## Lessons from agent trials
 
 - Judge a change by attack, pitch, rhythm, timbre and balance evidence.

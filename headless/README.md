@@ -208,9 +208,9 @@ MCP provides `rom_list` and `rom_set` with `game` and an absolute `path`.
 | `s3k` | Sonic 3 & Knuckles (locked-on) | 4,194,304 | `63522553` |
 
 Convert headered or interleaved SMD dumps to raw, deinterleaved `.bin` or
-`.gen` before setting a path. The title-music patch engines and their export
-commands are supplied separately. An engine's CLI can pass its `--rom PATH`
-override to the library for the current export without changing the saved path.
+`.gen` before setting a path. S3K export is available. S1 and S2 export are coming
+soon. An explicit `--rom PATH` overrides the library for the current export
+without changing the saved path.
 
 An engine binds its game ID with `RomTarget<S, O, R>` in
 `com.opensmpsdeck.headless.rom`. Its engine function takes
@@ -232,36 +232,42 @@ on your own emulator or hardware. Real-hardware testing is performed by users.
 
 ## Test an arrangement in Sonic 3 & Knuckles
 
-The patched ROM is derived from the player's retail ROM and contains
-copyrighted data. **Personal use only. Do not redistribute.**
+Export from S3K project JSON or a legacy SMPS package with embedded source
+and compiled track. The song's driver determines the game. The ROM must be
+a clean locked-on image from the library or an explicit override.
 
 ```sh
-java -jar "$deck_jar" rom-patch arrangement.smps.json locked-on.gen title-test.gen --no-demo
-java -jar "$deck_jar" rom-patch arrangement.smps.zip locked-on.gen title-test.gen --slot 0x24 --title-music --force
+java -jar "$deck_jar" rom-patch song.smps.json --out song.s3k.gen --bps song.s3k.bps --no-demo
+java -jar "$deck_jar" rom-patch song.smps.zip --rom locked-on.gen --bps song.s3k.bps --slot 0x24 --title-music
+java -jar "$deck_jar" export song.smps.json song.s3k.gen --format rom --no-demo
 ```
 
-Use your clean 4 MiB locked-on Sonic 3 & Knuckles image with SHA-1
-`cfbf98c36c776677290a872547ac47c53d2761d6`. The exporter takes S3K project JSON
-or a legacy SMPS package with embedded source and compiled track. It writes
-a separate 4 MiB image and prints a JSON report.
-
+- Supply at least one of `--out` (patched ROM) and `--bps` (verified BPS).
+  The CLI aliases `export PROJECT OUTPUT --format rom|bps` select the output
+  type for `OUTPUT` and accept the same ROM and music options.
 - `--slot ID` selects a music request from `0x01` to `0x33`. The title uses
   `0x25` by default. Add `--title-music` to request a different slot from the
   title. Game events that use the selected slot also play the replacement.
 - `--no-demo` disables the idle title demo. Start still enters the game.
+  Studio enables this by default.
 - `--loop` replaces each channel's final stop with a jump to its start when
-  every channel reaches its stop on the same tick.
-- `--force` stages a replacement alongside an existing output before
-  publishing it. Both inputs must be separate from the output.
+  every channel reaches its stop on the same tick and loop control is supported.
+- `--force` allows replacing existing output files. Keep outputs separate from
+  the source project and clean ROM.
 
-MCP exposes `rom_patch` with absolute `project`, `rom`, and `output` paths,
-plus the optional `slot` (integer), `titleMusic`, `noDemo`, `loop`, and
-`force` fields. The result includes cartridge hashes, patched ROM ranges,
-DAC error metrics, PSG envelope mappings, and personal-use warnings.
+MCP exposes `rom_patch` with absolute `project` and optional absolute
+`rom`, `out`, and `bps` paths. Provide at least one of `out` and `bps`.
+Other optional fields are `slot` (integer), `titleMusic`, `noDemo`,
+`loop`, and `force` (booleans). CLI and MCP return output paths,
+`report` (including cartridge hashes, patched ranges, DPCM error metrics and
+envelope mappings), `warnings`, and `bpsStats` when a BPS is written.
 
-The compiled song must fit in free fragments of one 32 KB music bank.
-Drums are encoded as the game driver's 4-bit DPCM at their original rate on
-unused note IDs. See the [ROM patch layout and limits](../docs/architecture/s3k-rom-patch.md).
+A patched ROM is for personal use only. Do not redistribute it. A BPS is
+the shareable form and requires the matching clean ROM. Material derived
+from stock assets remains subject to its original rights. The compiled song
+must fit in free fragments of one 32 KB music bank. See the
+[Test in game user guide](../docs/user-guide/14-test-in-game.md) and the
+[ROM patch layout and limits](../docs/architecture/s3k-rom-patch.md).
 
 ## External stem separation
 

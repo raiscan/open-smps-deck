@@ -27,6 +27,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class McpServerTest {
     @TempDir Path directory;
 
+    @Test void romPatchAcceptsOptionalRomAndValidatesOutputAndDriver() throws Exception {
+        Path source = directory.resolve("song.smps.json");
+        ProjectFiles.save(source, DemoProject.create(), null);
+        assertToolError("rom_patch", Map.of("project", source.toString()), "--out or --bps");
+        assertToolError("rom_patch", Map.of("project", source.toString(), "output", "old.gen"), "unknown argument");
+        assertToolError("rom_patch", Map.of("project", source.toString(), "bps", "relative.bps"), "absolute path");
+        assertToolError("rom_patch", Map.of("project", source.toString(), "bps", directory.resolve("song.bps").toString(),
+                "slot", 52), "Music ID must be in");
+
+        Path archive = directory.resolve("other.smps.zip");
+        try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("manifest.json"));
+            zip.write("{\"schemaVersion\":4,\"driver\":\"s2\"}".getBytes(UTF_8));
+        }
+        assertToolError("rom_patch", Map.of("project", archive.toString(),
+                "out", directory.resolve("song.gen").toString()), "Test in game for s2 is not available yet");
+    }
+
     @Test void stdioUsesOneUtf8JsonMessagePerLineAndRecoversFromInvalidFrames() throws Exception {
         var responses = exchange("""
                 Content-Length: 12

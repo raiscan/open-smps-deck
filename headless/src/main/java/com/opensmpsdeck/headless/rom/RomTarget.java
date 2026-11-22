@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless.rom;
 
+import java.io.IOException;
 import java.util.Objects;
 
 /**
@@ -14,7 +15,7 @@ public record RomTarget<S, O, R>(RomGame game, Engine<S, O, R> engine) {
 
     @FunctionalInterface
     public interface Engine<S, O, R> {
-        PatchedRom<R> patch(VerifiedRom clean, S compiledSong, O options);
+        PatchedRom<R> patch(VerifiedRom clean, S compiledSong, O options) throws IOException;
     }
 
     public record PatchedRom<R>(byte[] bytes, R report) {
@@ -27,7 +28,7 @@ public record RomTarget<S, O, R>(RomGame game, Engine<S, O, R> engine) {
         }
     }
 
-    public PatchedRom<R> patch(VerifiedRom clean, S compiledSong, O options) {
+    public PatchedRom<R> patch(VerifiedRom clean, S compiledSong, O options) throws IOException {
         if (clean.revision().game() != game) {
             throw new IllegalArgumentException("Expected " + game.id() + " ROM, found " + clean.revision().displayName());
         }

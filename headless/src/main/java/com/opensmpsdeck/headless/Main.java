@@ -163,7 +163,9 @@ public final class Main {
                             + "; use validate-project, compile-project or render-project to work with it");
                 }
                 case "demo", "render", "render-project" -> render(args, out, err);
-                case "export" -> ProjectExport.cli(args, out, err);
+                case "export" -> {
+                    if (!RomPatchCommand.exportAlias(args, out, err)) ProjectExport.cli(args, out, err);
+                }
                 case "render-compare" -> RenderComparison.cli(args, out);
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
@@ -362,7 +364,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs ROM");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar rom-patch PROJECT ROM OUTPUT [--slot ID] [--title-music] [--no-demo] [--loop] [--force]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar " + RomPatchCommand.USAGE);
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement PROJECT.json OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
@@ -387,6 +389,7 @@ public final class Main {
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
         out.println("       export PROJECT.json|WORK_DIR OUTPUT --format wav|mp3|vgm|smps|package|portable|mod");
         out.println("              Portable/mod: [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
+        out.println("       export PROJECT OUTPUT --format rom|bps [ROM patch options]");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
         out.println("Binary input: finite standalone S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
