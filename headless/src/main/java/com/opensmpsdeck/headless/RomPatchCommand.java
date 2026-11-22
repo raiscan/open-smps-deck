@@ -12,7 +12,7 @@ import java.util.HashSet;
 import java.util.Locale;
 
 final class RomPatchCommand {
-    static final String USAGE = "rom-patch PROJECT [--driver s3k|s2] [--rom PATH] [--out SONG.gen] [--bps SONG.bps]"
+    static final String USAGE = "rom-patch PROJECT [--driver s3k|s1|s2] [--rom PATH] [--out SONG.gen] [--bps SONG.bps]"
             + " [--slot ID] [--title-music] [--no-demo] [--loop] [--force]";
 
     private RomPatchCommand() {}

@@ -129,6 +129,38 @@ class StudioWindowTest {
         closeDialog("test-in-game-dialog", ButtonType.CANCEL);
     }
 
+    @Test void sonic1IsSelectableAndUsesItsVerifiedRom() throws Exception {
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        String clean = System.getenv("OPENSMPSDECK_S1_ROM");
+        boolean verified = clean != null && !clean.isBlank();
+        if (verified) library.set(RomGame.S1, Path.of(clean));
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null);
+        fx(() -> {
+            @SuppressWarnings("unchecked")
+            var target = (ChoiceBox<RomGame>) dialogPane("export-dialog").lookup("#test-in-game-driver");
+            assertTrue(target.getItems().contains(RomGame.S1));
+            target.setValue(RomGame.S1);
+            return null;
+        });
+        if (!verified) {
+            await(() -> ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("clean S1"));
+            assertTrue(fx(() -> dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled()));
+            closeDialog("export-dialog", ButtonType.CANCEL);
+            return;
+        }
+        await(() -> !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-test-in-game")).fire());
+        await(() -> dialogPane("test-in-game-dialog") != null);
+        fx(() -> {
+            var pane = dialogPane("test-in-game-dialog");
+            assertEquals("Export to Sonic 1", pane.getHeaderText());
+            assertNull(pane.lookup("#rom-loop"));
+            return null;
+        });
+        closeDialog("test-in-game-dialog", ButtonType.CANCEL);
+    }
+
     private void showExport(RomLibrary library) {
         Platform.runLater(() -> ExportDialog.show(stage, window.document().project(), file, null, library,
                 task -> Thread.ofVirtual().start(task), ignored -> {}));

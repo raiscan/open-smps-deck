@@ -3,8 +3,8 @@
 `S1RomPatch` consumes the player's clean Sonic 1 World REV01 image (512 KiB,
 SHA-1 `69E102855D4389C3FD1A8F3DC7D193F8EEE5FE5B`) and a resolved S1 portable
 bank. It builds a new image and JSON report in memory. `S1RomTarget` plugs into
-the verified ROM export contract. Test in game keeps S1 project export disabled
-pending integration with the portable arrangement compiler in PR #81.
+the verified ROM export contract. Test in game compiles editable arrangements
+with the S1 portable compiler and also accepts resolved S1 portable packages.
 
 The engine checks the entire input SHA-1, the expected cartridge instructions,
 header fields and table pointers, and the expected decompressed DAC driver

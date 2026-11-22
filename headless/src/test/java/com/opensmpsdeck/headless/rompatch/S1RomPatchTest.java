@@ -1,6 +1,5 @@
 package com.opensmpsdeck.headless.rompatch;
 
-import com.opensmpsdeck.headless.TestInGame;
 import com.opensmpsdeck.headless.rom.BpsPatch;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.VerifiedRom;
@@ -116,11 +115,6 @@ class S1RomPatchTest {
         assertTrue(size.getMessage().contains("32769"));
         assertTrue(size.getMessage().contains("32768"));
         assertTrue(size.getMessage().contains("Shorten the song or reduce layering"));
-    }
-
-    @Test void keepsS1ProjectExportUnavailableUntilCompilerIntegration() {
-        assertFalse(TestInGame.available(RomGame.S1));
-        assertTrue(TestInGame.available(RomGame.S3K));
     }
 
     @Test void patchesVerifiedRetailCartridge() throws Exception {

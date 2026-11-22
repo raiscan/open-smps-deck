@@ -230,17 +230,19 @@ requires the matching clean ROM to apply. Material derived from stock assets
 used by the song remains subject to the original rights. Test the resulting ROM
 on your own emulator or hardware. Real-hardware testing is performed by users.
 
-## Test an arrangement in Sonic 2 or Sonic 3 & Knuckles
+## Test an arrangement in game
 
-Editable project JSON defaults to S3K. Pass `--driver s2` to compile it for
-Sonic 2, or give an S2 portable package, which declares its driver.
-S3K also accepts legacy packages with embedded source and track. Select a
-clean World REV01 S2 or locked-on S3K ROM in the library or pass `--rom`.
+Editable project JSON defaults to S3K. Pass `--driver s1` or `--driver s2`
+to compile for Sonic 1 or Sonic 2, or supply a portable package that declares
+one of those drivers. S3K also accepts legacy packages with embedded source
+and track. Select a clean World REV01 S1 or S2 ROM or a locked-on S3K ROM in
+the library, or pass `--rom`.
 
 ```sh
 java -jar "$deck_jar" rom-patch song.smps.json --out song.s3k.gen --bps song.s3k.bps --no-demo
 java -jar "$deck_jar" rom-patch song.smps.zip --rom locked-on.gen --bps song.s3k.bps --slot 0x24 --title-music
 java -jar "$deck_jar" export song.smps.json song.s3k.gen --format rom --no-demo
+java -jar "$deck_jar" rom-patch song.smps.json --driver s1 --out song.s1.gen --no-demo
 java -jar "$deck_jar" rom-patch song.smps.json --driver s2 --out song.s2.gen --no-demo
 java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
 ```
@@ -249,20 +251,22 @@ java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
   The CLI aliases `export PROJECT OUTPUT --format rom|bps` select the output
   type for `OUTPUT` and accept the same ROM and music options.
 - `--slot ID` selects a music request from `0x01` to `0x33` for S3K
-  (title default `0x25`) or `0x81` to `0x9F` for S2 (title default `0x99`). Add `--title-music` to request a different slot from the
-  title. Game events that use the selected slot also play the replacement.
+  (title default `0x25`), `0x81` to `0x93` for S1 (title default `0x8A`),
+  or `0x81` to `0x9F` for S2 (title default `0x99`). Add `--title-music`
+  to request a different slot from the title. Game events that use the
+  selected slot also play the replacement.
 - `--no-demo` disables the idle title demo. Start still enters the game.
   Studio enables this by default.
-- `--loop` replaces each channel's final stop with a jump to its start when
-  the active channels reach their stops on the same tick and loop control is
-  supported. S2 loop generation requires tracks without existing branches
-  and is unavailable for the Extra Life slot.
+- On S2 and S3K, `--loop` replaces each channel's final stop with a jump to
+  its start when the active channels reach their stops on the same tick and
+  loop control is supported. S2 loop generation requires tracks without
+  existing branches and is unavailable for the Extra Life slot.
 - `--force` allows replacing existing output files. Keep outputs separate from
   the source project and clean ROM.
 
 MCP exposes `rom_patch` with absolute `project` and optional absolute
 `rom`, `out`, and `bps` paths. Provide at least one of `out` and `bps`.
-Other optional fields are `driver` (`s3k` or `s2`), `slot` (integer),
+Other optional fields are `driver` (`s1`, `s2` or `s3k`), `slot` (integer),
 `titleMusic`, `noDemo`, `loop`, and `force` (booleans). CLI and MCP return
 output paths, `report` (cartridge hashes, patched ranges, DAC and envelope
 mappings), `warnings`, and `bpsStats` when a BPS is written.
@@ -272,7 +276,8 @@ the shareable form and requires the matching clean ROM. Material derived
 from stock assets remains subject to its original rights. The compiled song
 must fit in one 32 KB music bank. S2 uses an expansion bank and stock DAC
 samples. See the [Test in game user guide](../docs/user-guide/14-test-in-game.md)
-and the layouts for [S2](../docs/architecture/s2-rom-patch.md) and
+and the layouts for [S1](../docs/architecture/s1-rom-patch.md),
+[S2](../docs/architecture/s2-rom-patch.md) and
 [S3K](../docs/architecture/s3k-rom-patch.md).
 
 ## External stem separation
