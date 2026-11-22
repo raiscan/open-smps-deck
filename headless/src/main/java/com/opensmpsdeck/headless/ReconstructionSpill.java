@@ -50,9 +50,6 @@ final class ReconstructionSpill {
             if (asset.kind() != InstrumentCatalogue.Kind.PSG_VOLUME || !seen.add(variant.assetId())) continue;
             byte[] envelope = asset.bytes();
             if (!ReconstructionStemParts.startsAudibly(envelope)) continue;
-            // Classic targets can only fit contours that end in a single hold.
-            if (profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
-                    && !classicEnvelope(envelope)) continue;
             var contours = new java.util.ArrayList<Contour>();
             for (var probe : probes) contours.add(contour(catalogue, variant.id(), probe.pitch(), probe.gate(), 127, null, profile));
             int attack = contours.stream().mapToInt(Contour::attackAttenuation).max().orElseThrow();
@@ -86,12 +83,6 @@ final class ReconstructionSpill {
         return best;
     }
 
-    private static boolean classicEnvelope(byte[] bytes) {
-        if (bytes.length < 2 || bytes[bytes.length - 1] != (byte) 0x80) return false;
-        for (int i = 0; i < bytes.length - 1; i++) if (bytes[i] < 0) return false;
-        return true;
-    }
-
     private static int psgLevel(ReconstructionVoicing.Lane fm, MidiScore.Part part,
                                 ReconstructionAllocation.Entry note) {
         int raw = S3kReconstruction.volume(part, note.note().midi());
@@ -105,8 +96,13 @@ final class ReconstructionSpill {
         var envelopes = raw.envelopes();
         if (fmPatch == null) {
             var envelope = envelopes.getFirst();
-            envelopes = List.of(new com.opensmpsdeck.project.Envelope(envelope.id(), envelope.name(), envelope.type(),
-                    S3kReconstruction.psgAttenuation(catalogue.match(variant).asset().bytes())));
+            var match = catalogue.match(variant);
+            var bytes = S3kReconstruction.psgAttenuation(match.asset().bytes());
+            envelope = new com.opensmpsdeck.project.Envelope(envelope.id(), envelope.name(), envelope.type(),
+                    bytes, profile.game() == TargetGame.S3K || envelope.origin() == null
+                            ? null : envelope.origin().withPatch(envelope.bytes(), bytes));
+            envelopes = List.of(ReconstructionPsgEnvelopes.forProbe(envelope, profile.game(), gate,
+                    match.variant().target() != TargetGame.S3K));
         }
         var sequence = new Sequence(setup.id(), setup.name(), setup.type(), setup.lengthTicks(), setup.voiceId(),
                 volume, setup.notes(), setup.commands(), setup.repeatState(), setup.psgEnvelopeId(),

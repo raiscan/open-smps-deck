@@ -54,7 +54,7 @@ final class McpReconstruction {
             field("policyDecisions", "boolean", "Include per-note lane policy decisions and blockers in the assembly report").optional(),
             choice("drumKit", "DAC kit selection. S1 and S2 default to stock", "stock", "custom").optional(),
             choice("drumSource", "Custom kit source", "catalogue", "sliced", "auto").optional(),
-            choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
+            choice("lanePolicyPreset", "Layering defaults to the target game. Choose off to disable or select a preset to replace saved policies", "s1-layering", "s2-layering", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
             field("refitLevels", "boolean", "Recompute levels for the lanes being refitted").optional(),

@@ -220,8 +220,8 @@ public final class SunoImport {
                                  Path separatorConfig, TargetGame target, String drumKit,
                                  ReconstructionStages.Progress progress) throws IOException {
         ReconstructionDrums.KitMode.forTarget(drumKit, target);
-        if (lanePolicyPreset != null && !Set.of("off", ReconstructionLanePolicies.S3K_LAYERING).contains(lanePolicyPreset))
-            throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
+        if (lanePolicyPreset != null && !("off".equals(lanePolicyPreset) || ReconstructionLanePolicies.PRESETS.contains(lanePolicyPreset)))
+            throw new IllegalArgumentException("--lane-policy-preset expects s1-layering, s2-layering, s3k-layering or off");
         Path source = folder.toRealPath();
         if (!Files.isDirectory(source)) throw new IOException("Expected a Suno folder: " + source);
         Path work = prepareWork(source, workDir);

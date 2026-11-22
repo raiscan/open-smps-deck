@@ -35,6 +35,12 @@ final class ReconstructionLanePolicies {
     enum Mode { chorus, echo }
 
     static final String S3K_LAYERING = "s3k-layering";
+    static final Set<String> PRESETS = Set.of(S3K_LAYERING, "s1-layering", "s2-layering");
+
+    static String defaultPreset(TargetGame game) {
+        return game.id() + "-layering";
+    }
+
     private static final String FIELD = "voicing.json.lanePolicies";
 
     @JsonAdapter(ConfigurationJson.class)
@@ -44,7 +50,7 @@ final class ReconstructionLanePolicies {
         }
 
         private static Configuration preset(String name, Integer echoAttenuation) {
-            require(S3K_LAYERING.equals(name), FIELD + ".preset", "expected " + S3K_LAYERING);
+            require(PRESETS.contains(name), FIELD + ".preset", "expected s1-layering, s2-layering or s3k-layering");
             require(echoAttenuation == null || echoAttenuation >= 0 && echoAttenuation <= 127,
                     FIELD + ".echoAttenuation", "expected 0–127 TL steps");
             int attenuation = echoAttenuation == null ? ReconstructionLayers.DEFAULT_ECHO_ATTENUATION : echoAttenuation;
@@ -245,9 +251,15 @@ final class ReconstructionLanePolicies {
     /** Match short solo renders using the same K-weighted power as the drum balance. */
     static final class Levels {
         private final TargetProfile profile;
+        private final Set<String> classicEnvelopes;
 
         Levels(TargetProfile profile) {
+            this(profile, Set.of());
+        }
+
+        Levels(TargetProfile profile, Set<String> classicEnvelopes) {
             this.profile = profile;
+            this.classicEnvelopes = classicEnvelopes;
         }
 
         private record Probe(Voice fm, Envelope psg, int pitch, int ticks, int volume) {}
@@ -279,7 +291,9 @@ final class ReconstructionLanePolicies {
             var project = new StudioProject(4, "Level probe", "S3K", 30, 0,
                     fm ? List.of(probe.fm()) : List.of(), List.of(sequence),
                     List.of(new Clip("probe-clip", "probe", fm ? "FM1" : "PSG1", 0, probe.ticks())),
-                    fm ? List.of() : List.of(probe.psg()), List.of(), profile.game(),
+                    fm ? List.of() : List.of(ReconstructionPsgEnvelopes.forProbe(probe.psg(), profile.game(),
+                            probe.ticks(), classicEnvelopes.contains(asset))),
+                    List.of(), profile.game(),
                     profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
             var loudness = new KWeightedLevel();
             TargetPlayback.prepare(project).render((int) project.clock().frameAtTick(probe.ticks()), pcm -> {

@@ -1255,8 +1255,14 @@ rejection history.
 
 ## Reconstruction layering
 
-New staged runs, including import and MCP, use the `s3k-layering` preset.
-It adds octave-up PSG doubling and a 14-frame FM echo on spare channels.
+New staged runs, including import and MCP, choose `s1-layering`,
+`s2-layering`, or `s3k-layering` from the target game.
+These presets add octave-up PSG doubling and a 14-tick FM echo on spare channels.
+S1 and S2 use hold-terminated volume envelopes and reserve PSG3 for the
+whole noise track when it is needed. On S2, set `OPENSMPSDECK_S2_ROM` to a
+local ROM to consider close stock envelope matches. Check `psgEnvelopes`
+in `report.json` for stock and custom counts, custom bytes, and approximations.
+[PSG driver rules](../docs/architecture/driver-support.md#psg-reconstruction-on-s1-and-s2)
 FM-only runs use the FM echo. The echo defaults to 11
 carrier TL steps below the dry note (8.25 dB nominal), or 3 dB quieter than
 the original 7-TL echo.
@@ -1264,7 +1270,7 @@ Set `lanePolicies.echoAttenuation` in `voicing.json` to override that level,
 then assemble using the saved policy. Existing work directories and their
 reruns keep the saved voicing policy. Use `--lane-policy-preset off` when
 starting a run or import, or pass it to `reconstruct assemble WORK_DIR` to
-clear an existing policy. Passing `s3k-layering` restores the preset.
+clear an existing policy. Pass the target's preset name to restore layering.
 For MCP `reconstruct_stage`, pass `stage: "assemble"` and
 `options.lanePolicyPreset` to set or clear the preset. See the
 [lane policy guide](../docs/architecture/reconstruction-stages.md#optional-lane-policies)

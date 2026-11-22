@@ -57,10 +57,11 @@ final class S3kReconstruction {
                   List<VoicedGate> voicedGates, int assignmentClipCost, Integer arpeggioExtraNoteBytes,
                   List<ReconstructionLanePolicies.Coverage> policyCoverage,
                   List<ReconstructionLayers.Result> layers, List<CopyWindow> lanePolicyCopies,
-                  List<ReconstructionLanePolicies.Decision> policyDecisions) {
+                  List<ReconstructionLanePolicies.Decision> policyDecisions,
+                  ReconstructionPsgEnvelopes.Report psgEnvelopes) {
         Result(StudioProject project, int fmNotes, int psgNotes, int dacHits, int echoNotes,
                List<Reduction> reductions, List<ReconstructionBendEncoding.Applied> bends, List<VoicedGate> voicedGates) {
-            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of(), List.of(), List.of(), List.of());
+            this(project, fmNotes, psgNotes, dacHits, echoNotes, reductions, bends, voicedGates, 0, null, List.of(), List.of(), List.of(), List.of(), null);
         }
     }
     record CopyWindow(String lane, int startTick, int endTick) {}
@@ -254,8 +255,11 @@ final class S3kReconstruction {
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
                 samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList(), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
-        return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
-                dac.size(), echoNotes, List.copyOf(reductions), List.of(), List.of());
+        var adapted = ReconstructionPsgEnvelopes.forAssembly(project,
+                ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, profile.game()));
+        return new Result(adapted.project(), fmNotes, psg.stream().mapToInt(List::size).sum(),
+                dac.size(), echoNotes, List.copyOf(reductions), List.of(), List.of(), 0, null,
+                List.of(), List.of(), List.of(), List.of(), adapted.report());
     }
 
     static Result arrangeAllocated(String name, int ticksPerBeat, int frames, Score score,
@@ -436,7 +440,7 @@ final class S3kReconstruction {
                         : !assignment.instrument().equals("fixed");
                 boolean closedHat = assignment == null ? ReconstructionCymbals.closedHat(note.pitch())
                         : assignment.instrument().equals("closed-hat");
-                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat);
+                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, profile);
                 placed.assignedInstrument = assignment != null;
                 psg.get(2).add(placed);
                 gates.add(new VoicedGate(entry.note().id(), lane, placed.event.note().pitch(), start, end));
@@ -508,7 +512,7 @@ final class S3kReconstruction {
                 int floor = isFm && voice != null ? ReconstructionEcho.fmVolumeFloor(asset.bytes(), profile) : 0;
                 if (voice != null) volume = voicedVolume(volume, floor, voice.gainFor(part.id()), psgOffset);
                 boolean pitchedNoise = entry.laneType() == ReconstructionLaneType.NOISE;
-                var playedNote = pitchedNoise ? new MidiScore.Note(note.partId(), ReconstructionCymbals.PITCH,
+                var playedNote = pitchedNoise ? new MidiScore.Note(note.partId(), ReconstructionCymbals.pitch(profile),
                         note.velocity(), note.startUs(), note.endUs()) : note;
                 var placed = new Placement(new Event(playedNote, start, start + duration,
                         tonePriority(part, note.pitch()), id, volume));
@@ -530,7 +534,7 @@ final class S3kReconstruction {
                                 vibrato.delay(), vibrato.rate(), delta, vibrato.steps());
                     }
                 }
-                if (pitchedNoise) placed.detune = ReconstructionPitchedNoise.detune(note.pitch());
+                if (pitchedNoise) placed.detune = ReconstructionPitchedNoise.detune(note.pitch(), profile);
                 if (spans != null) {
                     var attack = spans.stream().filter(span -> span.start() <= start && span.end() > start
                             && span.settings().gate() != null).findFirst().orElse(null);
@@ -600,19 +604,23 @@ final class S3kReconstruction {
                 else psg.get(ReconstructionAllocation.PSG.indexOf(lane)).add(placed);
             }
         }
-        placeDacNoiseFallbacks(noiseFallbacks, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames);
+        boolean classicNoise = profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
+                && (!noiseFallbacks.isEmpty() || psg.get(2).stream().anyMatch(p -> noiseKind(p) != PsgMode.TONE));
+        if (classicNoise) reserveNoiseLane(psg.get(2), candidates, gates, reductions);
+        placeDacNoiseFallbacks(noiseFallbacks, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames, profile);
+        var tonePsg = classicNoise ? psg.subList(0, 2) : psg;
         int fmNotes = fm.stream().mapToInt(List::size).sum();
         int psgNotes = psg.stream().mapToInt(List::size).sum();
         if (fmNotes + psgNotes + dac.size() == 0)
             throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
         int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
-        var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, psg, candidates, voices, envelopes,
+        var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, tonePsg, candidates, voices, envelopes,
                 levels, catalogue, sourceInstruments, policyDecisions, profile);
         int echoNotes = addEchoes(fm, echoes, frames, 2, profile.clock());
         if (copies) echoNotes += addVoicingCopies(fm, frames);
         var lanePolicyCopies = new ArrayList<CopyWindow>();
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
-        var coverage = applyLanePolicies(policies, levels, frames, fm, psg, candidates, voices, envelopes, gates,
+        var coverage = applyLanePolicies(policies, levels, frames, fm, tonePsg, candidates, voices, envelopes, gates,
                 catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile);
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
@@ -625,7 +633,8 @@ final class S3kReconstruction {
         for (int i = 0; i < fm.size(); i++)
             assignmentClipCost += writeToneLane("FM", ReconstructionAllocation.FM.get(i), fm.get(i), parts, sequences, clips, repeats);
         for (int i = 0; i < psg.size(); i++)
-            assignmentClipCost += writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats);
+            assignmentClipCost += writeToneLane("PSG", ReconstructionAllocation.PSG.get(i), psg.get(i), parts, sequences, clips, repeats,
+                    classicNoise && i == 2, profile);
         writeDacLane(dac, sequences, clips, repeats);
         if (profile.game() == TargetGame.S1)
             sequences.replaceAll(sequence -> ReconstructionEcho.s1SafeVolume(sequence, voices.values()));
@@ -645,9 +654,12 @@ final class S3kReconstruction {
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
                 sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values()), profile.game(), profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
-        return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
+        var adapted = ReconstructionPsgEnvelopes.forAssembly(project,
+                ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, profile.game()));
+        return new Result(adapted.project(), fmNotes, psgNotes, dac.size(), echoNotes,
                 List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes,
-                coverage, layerResults, List.copyOf(lanePolicyCopies), decisions == null ? List.of() : List.copyOf(decisions));
+                coverage, layerResults, List.copyOf(lanePolicyCopies), decisions == null ? List.of() : List.copyOf(decisions),
+                adapted.report());
     }
 
     private static ReconstructionVoices.Choice assignedChoice(InstrumentCatalogue catalogue,
@@ -692,8 +704,8 @@ final class S3kReconstruction {
             int bytes = 0;
             for (var step : ReconstructionChords.steps(chord, start, end)) {
                 var member = step.member();
-                int pitch = pitchedNoise ? ReconstructionCymbals.PITCH : member.pitch();
-                int detune = pitchedNoise ? ReconstructionPitchedNoise.detune(member.pitch()) : 0;
+                int pitch = pitchedNoise ? ReconstructionCymbals.pitch(profile) : member.pitch();
+                int detune = pitchedNoise ? ReconstructionPitchedNoise.detune(member.pitch(), profile) : 0;
                 var placement = chordPlacement(note, pitch, step.start(), step.end(), id, level, detune);
                 placement.noteId = member.id();
                 placement.pitchedNoise = pitchedNoise;
@@ -1234,12 +1246,29 @@ final class S3kReconstruction {
         return low;
     }
 
+    private static void reserveNoiseLane(List<Placement> lane, List<PolicySource> candidates,
+                                         List<VoicedGate> gates, List<Reduction> reductions) {
+        var removed = new HashSet<Placement>();
+        var attacks = new HashSet<Integer>();
+        for (var placement : lane) {
+            if (noiseKind(placement) != PsgMode.TONE) continue;
+            removed.add(placement);
+            attacks.add(placement.event.start());
+            reductions.add(new Reduction(placement.event.note(), Change.PSG_BUSY,
+                    placement.noteId, "classic-psg3-reserved-for-noise"));
+        }
+        lane.removeAll(removed);
+        candidates.removeIf(source -> removed.contains(source.placed()));
+        gates.removeIf(gate -> gate.lane().equals("PSG3") && attacks.contains(gate.startTick()));
+    }
+
     private static Placement psgDrum(ReconstructionAllocation.Entry entry, MidiScore.Part part, int end,
                                      ReconstructionVoicing.Lane voice, Map<String, Envelope> envelopes,
-                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat) {
+                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat,
+                                     TargetProfile profile) {
         var note = entry.note().midi();
         closedHat &= decaying;
-        int pitch = decaying ? ReconstructionCymbals.PITCH : 81;
+        int pitch = decaying ? ReconstructionCymbals.pitch(profile) : 81;
         var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
         int level = closedHat ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
         int volume = decaying ? level << 3 : volume(part, note);
@@ -1249,8 +1278,9 @@ final class S3kReconstruction {
         if (voice != null) volume = psgDrumVolume(volume, voice.drumGain(note.pitch()));
         var placed = new Placement(new Event(pitched, entry.startTick(), end, 0, asset, volume));
         placed.noteId = entry.note().id();
+        if (decaying) placed.detune = ReconstructionCymbals.detune(
+                closedHat ? hatClock.hatAttackPeriod() : ReconstructionCymbals.TONE_PERIOD, profile);
         if (closedHat) {
-            placed.detune = ReconstructionCymbals.detune(hatClock.hatAttackPeriod());
             placed.hatClock = hatClock;
         }
         return placed;
@@ -1259,7 +1289,7 @@ final class S3kReconstruction {
     private static void placeDacNoiseFallbacks(List<ReconstructionAllocation.Entry> fallbacks,
             List<Placement> lane, Map<Integer, MidiScore.Part> parts, ReconstructionVoicing.Lane voice,
             Map<String, Envelope> envelopes, ReconstructionVoicing.PsgPercussion hatClock,
-            List<VoicedGate> gates, List<Reduction> reductions, int frames) {
+            List<VoicedGate> gates, List<Reduction> reductions, int frames, TargetProfile profile) {
         if (fallbacks.isEmpty()) return;
         var occupied = new java.util.BitSet(frames);
         for (var placed : lane) occupied.set(placed.event.start(), placed.end);
@@ -1279,7 +1309,7 @@ final class S3kReconstruction {
             int busy = occupied.nextSetBit(start);
             int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(note.pitch()));
             var placed = psgDrum(entry, parts.get(note.partId()), end, voice, envelopes, hatClock,
-                    true, ReconstructionCymbals.closedHat(note.pitch()));
+                    true, ReconstructionCymbals.closedHat(note.pitch()), profile);
             lane.add(placed);
             gates.add(new VoicedGate(entry.note().id(), "PSG3", placed.event.note().pitch(), start, end, DAC_NOISE_FALLBACK));
             occupied.set(start, end);
@@ -1397,12 +1427,23 @@ final class S3kReconstruction {
     private static int writeToneLane(String chip, String lane, List<Placement> notes,
                                       Map<Integer, MidiScore.Part> parts, List<Sequence> sequences, List<Clip> clips,
                                       ReconstructionClipLinks links) {
+        return writeToneLane(chip, lane, notes, parts, sequences, clips, links, false, TargetProfile.S3K);
+    }
+
+    private static int writeToneLane(String chip, String lane, List<Placement> notes,
+                                     Map<Integer, MidiScore.Part> parts, List<Sequence> sequences, List<Clip> clips,
+                                     ReconstructionClipLinks links, boolean classicNoise, TargetProfile profile) {
+        if (notes.isEmpty()) return 0;
         boolean fm = chip.equals("FM");
         NativeCommand selectAsset = fm ? NativeCommand.FM_VOICE : NativeCommand.PSG_ENVELOPE;
         var chunks = links.chunks(lane, notes.size(), i -> notes.get(i).event.start(), i -> clipEnd(notes, i),
                 i -> noiseKind(notes.get(i)), CLIP_TICKS);
         int defaultCount = chunks.size();
-        if (notes.stream().anyMatch(note -> note.assignedInstrument)) {
+        if (classicNoise) {
+            // Once F3 runs the classic drivers keep PSG3 in noise mode.
+            // One source avoids the implicit tone reset at each clip boundary.
+            chunks = List.of(new ReconstructionClipLinks.Chunk(0, notes.size(), notes.getFirst().event.start(), null));
+        } else if (notes.stream().anyMatch(note -> note.assignedInstrument)) {
             var modes = new ArrayList<ClipMode>();
             int run = 0;
             Placement prior = null;
@@ -1430,15 +1471,20 @@ final class S3kReconstruction {
             int detune = 0;
             ReconstructionVoicing.Vibrato vibrato = null;
             boolean bendModulation = false;
-            if (noise != PsgMode.TONE) {
-                int mode = noise == PsgMode.PITCHED_NOISE
-                        ? ReconstructionPitchedNoise.COMMAND : ReconstructionVoicing.PSG_PERCUSSION.noiseByte();
-                commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(mode)));
-            }
+            int activeNoise = noiseCommand(noise);
+            if (noise != PsgMode.TONE)
+                commands.add(new CommandEvent("noise", 0, NativeCommand.PSG_NOISE, List.of(activeNoise)));
             for (int i = start; i < end; i++) {
                 Placement placement = notes.get(i);
                 Event note = placement.event;
                 int offset = note.start() - from;
+                if (classicNoise) {
+                    int mode = noiseCommand(noiseKind(placement));
+                    if (mode != activeNoise) {
+                        commands.add(new CommandEvent("noise-" + offset, offset, NativeCommand.PSG_NOISE, List.of(mode)));
+                        activeNoise = mode;
+                    }
+                }
                 Tone attack = placement.attackTone();
                 emitTone(commands, offset, selectAsset, activeAsset, volume, attack);
                 activeAsset = attack.asset();
@@ -1472,7 +1518,7 @@ final class S3kReconstruction {
                 int noteStart = note.start();
                 if (placement.hatClock != null) {
                     int boundary = noteStart + placement.hatClock.hatSwitchTick();
-                    int decayDetune = ReconstructionCymbals.detune(placement.hatClock.hatDecayPeriod());
+                    int decayDetune = ReconstructionCymbals.detune(placement.hatClock.hatDecayPeriod(), profile);
                     if (boundary < placement.end && decayDetune != detune) {
                         events.add(new NoteEvent("note-" + offset, offset, boundary - noteStart, note.note().pitch()));
                         int tail = boundary - from;
@@ -1525,12 +1571,17 @@ final class S3kReconstruction {
                     initial.volume(), events, commands, "RESET", fm || noise == PsgMode.FIXED_NOISE ? null : initial.asset(), null);
             links.add(source, lane, from, chunk.span(), sequences, clips);
         }
-        return chunks.size() - defaultCount;
+        return classicNoise ? 0 : chunks.size() - defaultCount;
     }
 
     private record ClipMode(PsgMode mode, int instrumentRun) {}
 
     private enum PsgMode { TONE, FIXED_NOISE, CYMBAL_NOISE, PITCHED_NOISE }
+
+    private static int noiseCommand(PsgMode mode) {
+        return mode == PsgMode.PITCHED_NOISE ? ReconstructionPitchedNoise.COMMAND
+                : ReconstructionVoicing.PSG_PERCUSSION.noiseByte();
+    }
 
     private static PsgMode noiseKind(Placement placement) {
         if (placement.pitchedNoise) return PsgMode.PITCHED_NOISE;
@@ -1552,7 +1603,8 @@ final class S3kReconstruction {
     private static void emitTone(List<CommandEvent> commands, int tick, NativeCommand selectAsset,
                                  String activeAsset, int volume, Tone next) {
         if (!activeAsset.equals(next.asset()))
-            commands.add(new CommandEvent("asset-" + tick, tick, selectAsset, List.of(), next.asset()));
+            commands.add(new CommandEvent("asset-" + tick, tick, selectAsset, List.of(),
+                    NOISE.equals(next.asset()) ? null : next.asset()));
         if (volume != next.volume())
             commands.add(new CommandEvent("volume-" + tick, tick, NativeCommand.VOLUME, List.of(next.volume())));
     }

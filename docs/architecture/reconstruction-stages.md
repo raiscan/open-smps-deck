@@ -1445,9 +1445,9 @@ voices and a 32 KiB total bank.
 
 #### Optional lane policies
 
-New reconstructions save `"lanePolicies": {"preset": "s3k-layering"}` in
-`voicing.json`. The preset adds an octave-up PSG double and a 14-frame FM
-echo on spare channels. FM-only runs retain the FM echo. Existing work and
+New reconstructions save the target's layering preset in `voicing.json`.
+The `s1-layering`, `s2-layering` and `s3k-layering` presets add an octave-up
+PSG double and a 14-tick FM echo on spare channels. FM-only runs retain the FM echo. Existing work and
 replays reuse their saved policy. Set `--lane-policy-preset off` on a fresh
 run, or rebuild an existing work directory with a replacement preset:
 
@@ -1457,7 +1457,7 @@ java -jar "$jar" reconstruct assemble WORK_DIR --lane-policy-preset s3k-layering
 
 In MCP, call `reconstruct_stage` with `stage: "assemble"` and
 `options: {"lanePolicyPreset": "s3k-layering"}`. In Studio's reconstruction
-editor, choose **Lane policies → S3K layering**. These actions replace any
+editor, choose the target’s preset under **Lane policies**. These actions replace any
 previous lane policy configuration. Use `off` or choose **Off** to clear it.
 
 The preset FM echo adds 11 carrier total-level (TL) steps relative to the

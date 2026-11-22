@@ -85,7 +85,8 @@ final class ReconstructionCli {
                           ReconstructionDrums.Source drumSource,
                           List<S3kReconstruction.VoicedGate> voicedGates,
                           Map<String, String> assemblyInputs, ReconstructionSustain.Probe sustainProbe,
-                          List<String> voicingWarnings, Integer voiceAssignmentExtraClips, Integer arpeggioExtraNoteBytes) {}
+                          List<String> voicingWarnings, Integer voiceAssignmentExtraClips, Integer arpeggioExtraNoteBytes,
+                          ReconstructionPsgEnvelopes.Report psgEnvelopes) {}
 
     @FunctionalInterface
     private interface Matching<T> {
@@ -112,7 +113,7 @@ final class ReconstructionCli {
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
         out.println("           [--target s1|s2|s3k] [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
-        out.println("           [--lane-policy-preset s3k-layering|off] [--separator-config FILE] (also on import)");
+        out.println("           [--lane-policy-preset s1-layering|s2-layering|s3k-layering|off] [--separator-config FILE] (also on import)");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
         out.println("           [--transcribe-unmapped ROLE=WAV ...] [--transcriber-for ROLE=NAME ...] [--transcriber-device DEVICE] [--transcriber-config FILE]");
         out.println("           [--replace-notes PART=FILE ...] [--add-notes PART=FILE ...]");
@@ -479,7 +480,8 @@ final class ReconstructionCli {
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
         var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
-        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels(score.profile());
+        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels(score.profile(),
+                ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, options.target()));
         var instruments = voicing.sourceInstruments();
         var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),
@@ -759,7 +761,7 @@ final class ReconstructionCli {
                     assemblyInputs == null ? null : result.voicedGates(), assemblyInputs, legacySustain,
                     legacySustain == null || legacySustain.warning() == null ? List.of() : List.of(legacySustain.warning()),
                     result.assignmentClipCost() == 0 ? null : result.assignmentClipCost(),
-                    result.arpeggioExtraNoteBytes());
+                    result.arpeggioExtraNoteBytes(), result.psgEnvelopes());
             var json = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
             var reportJson = json.toJsonTree(report).getAsJsonObject();
             if (options.target() != TargetGame.S3K)
@@ -787,6 +789,11 @@ final class ReconstructionCli {
             Files.writeString(target.resolve(OUTPUTS.get(3)), json.toJson(reportJson) + "\n",
                     java.nio.file.StandardOpenOption.CREATE_NEW);
             complete = true;
+            if (options.target() == TargetGame.S2) {
+                var psg = result.psgEnvelopes();
+                out.printf("S2 PSG envelopes: %d custom (%d bytes), %d stock%n",
+                        psg.customCount(), psg.customBytes(), psg.stockCount());
+            }
             out.printf("Reconstructed %d FM notes, %d PSG notes, and %d DAC hits over %d presentations into %s%n",
                     result.fmNotes(), result.psgNotes(), result.dacHits(), frames, destination);
             return result;

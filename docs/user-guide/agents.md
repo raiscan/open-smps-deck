@@ -128,8 +128,8 @@ tool_timeout_sec = 600
    preserve compatible settings. Record musical intent in `edits.json`.
    Keep the score and allocation as generated evidence. For selected
    notes, use the `layer` edit or Studio **Selection → Layer** to add or
-   suppress a copy. Use **Lane policies → S3K layering** for an
-   arrangement-wide preset and `lanePolicies.echoAttenuation` in
+   suppress a copy. Choose the target's preset under **Lane policies** for
+   arrangement-wide layering and `lanePolicies.echoAttenuation` in
    `voicing.json` to set its echo level.
    [Layering options](../../headless/README.md#reconstruction-layering)
 4. **Compare.** Use `reconstruct_trace_diff` on the baseline and candidate
