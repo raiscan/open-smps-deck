@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
 import java.util.List;
 import java.util.Map;
 
@@ -102,7 +103,7 @@ class ReconstructionChordReductionTest {
         var parts = java.util.stream.IntStream.range(0, 4)
                 .mapToObj(id -> new MidiScore.Part(id, "Fixture " + id, 4, false)).toList();
         return ReconstructionAllocation.allocateWithAffinity(new ReconstructionRoles.Result(1, 0, notes, null),
-                parts, 60, true, !salience.isEmpty(), Map.of(), Map.of(), Map.of(), Map.of(), null, salience, true);
+                parts, 60, true, !salience.isEmpty(), Map.of(), Map.of(), Map.of(), Map.of(), null, salience, true, TargetProfile.S3K);
     }
 
     private static ReconstructionRoles.Decision voice(String id, int part, int pitch, double start, double end, Role role) {

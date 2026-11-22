@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless.mcp;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -38,6 +39,7 @@ final class McpReconstruction {
             field("stems", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of MIDI part IDs or audio-only stem labels to absolute aligned WAV paths").optional());
     static final JsonObject OPTIONS = schema(
+            choice("target", "Target game (default s3k, or the saved target when resuming)", "s1", "s2", "s3k").optional(),
             field("seconds", "number", "Duration from time zero, in (0, 600] seconds").optional(),
             field("name", "string", "Project title").optional(),
             field("ticksPerBeat", "integer", "Studio ruler ticks per beat").optional(),
@@ -108,7 +110,8 @@ final class McpReconstruction {
         return SunoImport.inspect(folder, work, catalogue, assign, exclude,
                 optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, transcriberFor,
                 optional(args, "drumDetector"), optional(args, "transcriberDevice"), null,
-                optional(args, "lanePolicyPreset"), null, progress).json();
+                optional(args, "lanePolicyPreset"), null,
+                args.has("target") ? TargetGame.parse(string(args, "target")) : TargetGame.S3K, progress).json();
     }
 
 
@@ -162,7 +165,7 @@ final class McpReconstruction {
         }
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
-            options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
+            options(cli, options, "target", "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
                     "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset", "policyDecisions");

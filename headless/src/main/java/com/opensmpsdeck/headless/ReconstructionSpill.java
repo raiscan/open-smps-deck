@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -23,7 +24,7 @@ final class ReconstructionSpill {
     private ReconstructionSpill() {}
 
     static Match match(InstrumentCatalogue catalogue, ReconstructionVoicing.Lane fm,
-                       MidiScore.Part part, List<ReconstructionAllocation.Entry> notes) throws IOException {
+                       MidiScore.Part part, List<ReconstructionAllocation.Entry> notes, TargetProfile profile) throws IOException {
         if (notes.isEmpty()) return new Match(null, 0);
         int quietest = notes.stream().mapToInt(note -> psgLevel(fm, part, note)).min().orElseThrow();
         var sorted = notes.stream().sorted(Comparator.comparingInt(n -> n.endTick() - n.startTick())).toList();
@@ -32,7 +33,7 @@ final class ReconstructionSpill {
         var bytes = ReconstructionVoicing.patchBytes(patch, fm.articulation());
         for (int i : new int[]{0, sorted.size() / 2, sorted.size() - 1}) {
             var note = sorted.get(i);
-            int pitch = Math.clamp(note.note().pitch(), 45, 106);
+            int pitch = Math.clamp(note.note().pitch(), profile.psg().low(), profile.fm().high());
             int gate = Math.min(48, S3kReconstruction.voicedDuration(note, fm.articulation()));
             int raw = S3kReconstruction.volume(part, note.note().midi());
             int fmLevel = Math.max(ReconstructionEcho.fmVolumeFloor(bytes), ReconstructionEcho.scaleVolume(raw, fm.gain()));

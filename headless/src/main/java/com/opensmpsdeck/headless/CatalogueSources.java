@@ -18,6 +18,7 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFormat;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetProfile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -352,7 +353,7 @@ public final class CatalogueSources {
                 if (tick >= duration) break;
                 int next = index + 1 < span.pitches().size()
                         ? Math.min(duration, span.pitches().get(index + 1).frame() - span.onset()) : duration;
-                int pitch = Math.clamp(item.pitch(), 45, 117);
+                int pitch = TargetProfile.S3K.psg().clamp(item.pitch());
                 int nextTranspose = item.pitch() - pitch;
                 if (nextTranspose != transpose) {
                     commands.add(new CommandEvent("transpose-" + index, tick, NativeCommand.TRANSPOSE,

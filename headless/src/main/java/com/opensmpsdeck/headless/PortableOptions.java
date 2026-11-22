@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -30,7 +31,11 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         if (speedUpTempo != null && (driver.equals("s3k") || speedUpTempo < 0 || speedUpTempo > 255))
             throw new IllegalArgumentException("speedUpTempo requires driver s1 or s2 and an S3K tempo byte in 0..255");
     }
-    static final PortableOptions DEFAULT = new PortableOptions("s3k", true, null, null, null, List.of(), List.of());
+    static final PortableOptions DEFAULT = defaults(TargetGame.S3K);
+
+    static PortableOptions defaults(TargetGame target) {
+        return new PortableOptions(target.id(), true, null, null, null, List.of(), List.of());
+    }
 
     com.google.gson.JsonObject driverOptions(Integer nativeSpeedUpTempo) {
         var options = new com.google.gson.JsonObject();
@@ -45,7 +50,7 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
         private final List<String> authors = new ArrayList<>();
         private final List<Integer> replacements = new ArrayList<>();
         private final List<Path> roms = new ArrayList<>();
-        private String driver = "s3k";
+        private String driver;
         private String license, id, version;
         private Integer speedUpTempo;
 
@@ -78,8 +83,10 @@ record PortableOptions(String driver, boolean includeSource, String license, Str
             return at;
         }
 
-        PortableOptions options() {
-            return new PortableOptions(driver, !seen.contains("--no-source"), license, id, version, authors, replacements,
+        PortableOptions options() { return options(TargetGame.S3K); }
+
+        PortableOptions options(TargetGame fallback) {
+            return new PortableOptions(driver == null ? fallback.id() : driver, !seen.contains("--no-source"), license, id, version, authors, replacements,
                     speedUpTempo, seen.contains("--strict-tempo"), seen.contains("--retail-patch"), roms);
         }
     }

@@ -4,6 +4,7 @@ import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.FileAlreadyExistsException;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -67,8 +68,8 @@ public final class ProjectExport {
                                 String version, List<String> authors, List<Integer> replacements) {
             this(driver, includeSource, license, id, version, authors, replacements, null);
         }
-        PortableOptions options() {
-            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo,
+        PortableOptions options(TargetGame fallback) {
+            return new PortableOptions(driver == null ? fallback.id() : driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo,
                     retailPatch, roms);
         }
     }
@@ -99,7 +100,7 @@ public final class ProjectExport {
             return warnings;
         }
         if (options.format == Format.PORTABLE || options.format == Format.MOD) {
-            var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
+            var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
             return writePortable(project, output, options.format, settings, progress).exportWarnings();
         }
         var compiled = ProjectCompiler.compileWithAssets(project);
@@ -194,12 +195,12 @@ public final class ProjectExport {
     }
 
     public static List<String> portableWarnings(StudioProject project, PortableSettings settings) throws IOException {
-        return PortablePackageWriter.build(project, settings == null ? PortableOptions.DEFAULT : settings.options()).exportWarnings();
+        return PortablePackageWriter.build(project, settings == null ? PortableOptions.defaults(project.target()) : settings.options(project.target())).exportWarnings();
     }
 
     public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
                                                             ReconstructionStages.Progress progress) throws IOException {
-        var settings = options.portable == null ? PortableOptions.DEFAULT : options.portable.options();
+        var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
         var payload = writePortable(project, output, options.format, settings, progress);
         var result = new com.google.gson.JsonObject();
         var json = new com.google.gson.Gson();
@@ -372,7 +373,7 @@ public final class ProjectExport {
         var options = new Options(format, start, end, fade, loops, stems, zip);
         Path output = Path.of(args[2]);
         if (portable) {
-            var payload = writePortable(project, output, options.format(), flags.options(), (done, total, message) -> {});
+            var payload = writePortable(project, output, options.format(), flags.options(project.target()), (done, total, message) -> {});
             PortablePackages.printWriteWarnings(payload, err);
         } else {
             var warnings = write(project, work, output, options, (done, total, message) -> {});

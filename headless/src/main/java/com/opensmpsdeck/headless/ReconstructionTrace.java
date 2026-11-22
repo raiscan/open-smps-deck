@@ -285,7 +285,7 @@ public final class ReconstructionTrace {
         var result = JSON.toJsonTree(Map.of("notes", notes)).getAsJsonObject();
         var drums = DrumEvidence.review(notes, rowsById, span.start() == null ? 0 : span.start(),
                 span.end() == null ? timeline.sourceDuration() : span.end(), timeline,
-                lane, List.of(), score.inputs() != null && score.inputs().fmOnly());
+                lane, List.of(), score.inputs() != null && score.inputs().fmOnly(), score.profile());
         if (drums != null) result.add("drums", JSON.toJsonTree(drums));
         return result;
     }

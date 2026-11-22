@@ -1,5 +1,7 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -32,7 +34,7 @@ final class DrumEvidence {
     }
 
     static Review review(Collection<Row> selected, Map<String, Row> all, double start, double end,
-                         ReconstructionTimeMap timeline, String lane, List<Integer> parts, boolean fmOnly) {
+                         ReconstructionTimeMap timeline, String lane, List<Integer> parts, boolean fmOnly, TargetProfile profile) {
         if (lane != null && !lane.equals("DAC") && !lane.equals("PSG3")) return null;
         var lost = selected.stream().filter(row -> {
             String blocked = blockedLane(row, all);
@@ -84,13 +86,13 @@ final class DrumEvidence {
                 if (reason.equals("protect-dac-tail"))
                     placement = ticks((int) placement.startTick(),
                             Math.min(timeline.frames(), (int) placement.startTick() + ReconstructionAllocation.DAC_PROTECTED_TICKS), timeline);
-                opponents.add(competitor(opponent, placement, placements, fmOnly, timeline));
+                opponents.add(competitor(opponent, placement, placements, fmOnly, timeline, profile));
             }
             if ((simultaneous || blocked.equals("PSG3")) && !fmOnly) {
                 for (var opponent : psg3) {
                     var occupied = opponent.allocation().placement();
                     if (overlaps(occupied, gate) && ids.add(opponent.id()))
-                        opponents.add(competitor(opponent, occupied, placements, fmOnly, timeline));
+                        opponents.add(competitor(opponent, occupied, placements, fmOnly, timeline, profile));
                 }
             }
             dropped.add(new DroppedHit(row.id(), row.pitch(), blocked, reason, requested, List.copyOf(opponents)));
@@ -99,7 +101,7 @@ final class DrumEvidence {
     }
 
     private static Competitor competitor(Row row, Timing interval, Map<String, List<Row>> placements,
-                                         boolean fmOnly, ReconstructionTimeMap timeline) {
+                                         boolean fmOnly, ReconstructionTimeMap timeline, TargetProfile profile) {
         var allocation = row.allocation();
         var alternatives = new ArrayList<PinLane>();
         if (allocation.role() != ReconstructionRoles.Role.drums && row.roles() != null) {
@@ -109,8 +111,8 @@ final class DrumEvidence {
             var gate = ticks((int) Math.min(interval.startTick(), source.timing().startTick()),
                     (int) Math.min(timeline.frames(), Math.max(interval.endTick(), source.timing().endTick())), timeline);
             for (var lane : Stream.concat(ReconstructionAllocation.FM.stream(), ReconstructionAllocation.PSG.stream()).toList()) {
-                if (lane.equals(allocation.lane()) || !ReconstructionEdits.pinCompatible(note, false, lane, fmOnly)
-                        || lane.startsWith("PSG") && ReconstructionEdits.laneTypeIssue(note, false, ReconstructionLaneType.PSG, fmOnly) != null)
+                if (lane.equals(allocation.lane()) || !ReconstructionEdits.pinCompatible(note, false, lane, fmOnly, profile)
+                        || lane.startsWith("PSG") && ReconstructionEdits.laneTypeIssue(note, false, ReconstructionLaneType.PSG, fmOnly, profile) != null)
                     continue;
                 if (placements.getOrDefault(lane, List.of()).stream().map(other -> other.allocation().placement())
                         .noneMatch(occupied -> overlaps(occupied, gate))) {

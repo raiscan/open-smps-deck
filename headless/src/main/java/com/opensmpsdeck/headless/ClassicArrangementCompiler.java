@@ -26,7 +26,7 @@ final class ClassicArrangementCompiler {
     private final ClassicPackageDriver driver;
     private final StudioProject project;
     private final int tempo;
-    private final byte[] bank = new byte[ProjectCompiler.MAX_BANK_BYTES];
+    private final byte[] bank;
     private final TreeSet<Integer> relocations = new TreeSet<>();
     private final Map<String, Sequence> sequences = new HashMap<>();
     private final Map<String, Integer> voices = new HashMap<>();
@@ -37,6 +37,7 @@ final class ClassicArrangementCompiler {
 
     ClassicArrangementCompiler(ClassicPackageDriver driver, StudioProject project, int tempo) {
         this.driver = driver;
+        this.bank = new byte[driver.profile.bankLimitBytes()];
         this.project = project;
         this.tempo = tempo;
     }
@@ -197,8 +198,8 @@ final class ClassicArrangementCompiler {
         }
 
         int pitch(int midi, String noteId) {
-            int low = psg ? 48 : 12;
-            int high = psg ? 116 : 106;
+            var range = psg ? driver.profile.psg() : driver.profile.fm();
+            int low = range.low(), high = range.high();
             driver.require(midi >= low && midi <= high && midi + transpose >= low && midi + transpose <= high,
                     lane + " note '" + noteId + "' pitch " + midi + " with transpose " + transpose
                             + " is outside " + low + ".." + high);
@@ -290,7 +291,8 @@ final class ClassicArrangementCompiler {
     }
 
     private void emit(int... bytes) {
-        driver.require(size + bytes.length <= bank.length, "compiled arrangement exceeds one 32 KiB bank");
+        if (size + bytes.length > bank.length)
+            throw new ProjectCompiler.BankLimitException(size + bytes.length, driver.profile.game());
         for (int value : bytes) bank[size++] = (byte) value;
     }
 }

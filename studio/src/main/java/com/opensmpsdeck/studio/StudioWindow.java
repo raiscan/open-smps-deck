@@ -905,7 +905,7 @@ public final class StudioWindow implements AutoCloseable {
         var result=new StudioProject(6,project.name(),project.mode(),project.ticksPerBeat(),project.tempo(),
                 updated.voices(),updated.sequences(),clips,updated.envelopes(),updated.samples(),null,
                 project.references(),project.notes(),updated.formatVersion(),project.groupSequences(),project.groupPlacements(),
-                project.detachedFromReconstruction(), project.derivedFrom());
+                project.detachedFromReconstruction(), project.derivedFrom(), project.target());
         ProjectCompiler.compile(result);
         return result;
     }

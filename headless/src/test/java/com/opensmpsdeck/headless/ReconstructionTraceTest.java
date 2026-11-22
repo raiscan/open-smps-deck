@@ -86,7 +86,7 @@ class ReconstructionTraceTest {
         var later = drumRow("late", Role.harmony, "FM1", 26, 30, null, null, clock);
         var boundary = drumRow("boundary", Role.harmony, "PSG1", 28, 32, null, null, clock);
         var all = Map.of("tone", tone, "hat", hat, "late", later, "boundary", boundary);
-        var review = DrumEvidence.review(List.of(hat), all, 0, 1, clock, "PSG3", List.of(), false);
+        var review = DrumEvidence.review(List.of(hat), all, 0, 1, clock, "PSG3", List.of(), false, com.opensmpsdeck.project.TargetProfile.S3K);
         var hit = review.droppedHits().getFirst();
         assertEquals("hat", hit.noteId());
         assertEquals("PSG3", hit.lane());

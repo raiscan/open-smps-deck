@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,7 +49,14 @@ final class DacAcoustics {
     private final Map<Key, Profile> profiles = new HashMap<>();
     private final Map<String, AssetProfile> assets = new LinkedHashMap<>();
 
+    private final TargetProfile target;
+
     DacAcoustics(InstrumentCatalogue catalogue) {
+        this(catalogue, TargetProfile.S3K);
+    }
+
+    DacAcoustics(InstrumentCatalogue catalogue, TargetProfile target) {
+        this.target = target;
         var variants = new LinkedHashMap<String, List<InstrumentCatalogue.Variant>>();
         for (var variant : catalogue.variants()) {
             if (catalogue.asset(variant.assetId()).kind() == InstrumentCatalogue.Kind.DAC_SAMPLE)
@@ -70,7 +78,7 @@ final class DacAcoustics {
             for (var variant : sounds) {
                 int rate = variant.recipe().rate();
                 rates.computeIfAbsent(rate, key -> new RateProfile(key, variant.id(), profile(id, key,
-                        ReconstructionDrums.resample(pcm, DacSample.sampleRateHz(key), ANALYSIS_RATE))));
+                        ReconstructionDrums.resample(pcm, target.dacSampleRateHz(key), ANALYSIS_RATE))));
             }
             var nativeRates = List.copyOf(rates.values());
             // A different pan or native rate must not let a speech or tonal
@@ -92,11 +100,15 @@ final class DacAcoustics {
     AssetProfile asset(String id) { return assets.get(id); }
 
     Profile profile(String id, int rate, float[] audio) {
-        return profiles.computeIfAbsent(new Key(id, rate), key -> analyze(audio, DacSample.sampleRateHz(rate)));
+        return profiles.computeIfAbsent(new Key(id, rate), key -> analyze(audio, target.dacSampleRateHz(rate)));
     }
 
     static Profile profile(DacSample slice) {
-        double playbackHz = slice.sampleRateHz();
+        return profile(slice, TargetProfile.S3K);
+    }
+
+    static Profile profile(DacSample slice, TargetProfile target) {
+        double playbackHz = target.dacSampleRateHz(slice.rate());
         float[] audio = ReconstructionDrums.resample(pcm(slice.pcm()), playbackHz, ANALYSIS_RATE);
         return analyze(audio, playbackHz);
     }

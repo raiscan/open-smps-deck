@@ -6,6 +6,8 @@ import com.opensmpsdeck.project.LoadedProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -37,7 +39,14 @@ final class ReconstructionCli {
             "render.wav", "report.json");
 
     record Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly, boolean wholePartVoices, boolean audioRefine,
-                           Map<Integer, Path> stems) {}
+                           Map<Integer, Path> stems, TargetGame target) {
+        Options(Long durationUs, String name, int ticksPerBeat, boolean keepOctaves, boolean fmOnly,
+                boolean wholePartVoices, boolean audioRefine, Map<Integer, Path> stems) {
+            this(durationUs, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, TargetGame.S3K);
+        }
+
+        TargetProfile profile() { return TargetProfile.of(target); }
+    }
     private record FileEvidence(String file, String sha256) {}
     private record PartEvidence(int id, String name, int program, boolean drums, int notesInRange) {}
     private record MatchEvidence(Kind kind, String lane, ReconstructionVoices.Key key, ReconstructionVoices.Choice choice) {}
@@ -88,14 +97,14 @@ final class ReconstructionCli {
     static void usage(PrintStream out) {
         out.println("       reconstruct separate MIX OUT_DIR --separator NAME [--device auto|cpu|rocm|cuda]");
         out.println("           [--separator-config FILE]");
-        out.println("       reconstruct import FOLDER WORK_DIR [--assign FILE=PART ...] [--exclude FILE ...]");
+        out.println("       reconstruct import FOLDER WORK_DIR [--target s1|s2|s3k] [--assign FILE=PART ...] [--exclude FILE ...]");
         out.println("           [--catalogue INDEX.json] [--transcribe-unmapped NAME] [--run]");
-        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
+        out.println("       reconstruct import FOLDER WORK_DIR --audio-only [--target s1|s2|s3k] [--transcriber NAME] [--transcriber-for ROLE=NAME ...]");
         out.println("           [--transcriber-config FILE] [--stem-role FILE=ROLE] [--run]");
         out.println("       reconstruct run|transcribe --audio-only WAV INDEX.json WORK_DIR --stem LABEL=WAV [options]");
         out.println("         [--stem-role LABEL=ROLE ...] [--drum-detector NAME] [--transcriber NAME]");
         out.println("       reconstruct run|transcribe MIDI WAV INDEX.json WORK_DIR [options]");
-        out.println("           [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
+        out.println("           [--target s1|s2|s3k] [--candidates NOTES.json] [--harmony-max-hz RATE] [--lead-part PART] [--no-fast-runs]");
         out.println("           [--no-stem-template-notes]");
         out.println("           [--lane-policy-preset s3k-layering|off] [--separator-config FILE] (also on import)");
         out.println("           [--transcriber NAME --transcribe-part PART=ROLE ... --stem PART=WAV ...]");
@@ -117,7 +126,7 @@ final class ReconstructionCli {
         out.println("       reconstruct trace WORK_DIR [--by-onset] [--start S] [--end S] [--time source|project] [--part N] [--lane LANE]");
         out.println("           [--pitch P | --pitch-min P --pitch-max P] [--status STATUS] [--json]");
         out.println("       reconstruct trace-diff OLD_WORK_DIR NEW_WORK_DIR [--span START,END] [--json]");
-        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
+        out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--target s1|s2|s3k] [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
         out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose]");
@@ -127,7 +136,7 @@ final class ReconstructionCli {
         out.println("           [--gain MULTIPLIER] [--solo|--in-mix] [--reference WAV] [--rms-json FILE] OUT.wav");
         out.println("       reconstruct run --from STAGE WORK_DIR [--harmony-max-hz RATE] [--keep-voicing] [--overwrite-detached]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar reconstruct MIDI WAV INDEX.json OUTPUT_DIR");
-        out.println("           [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
+        out.println("           [--target s1|s2|s3k] [--seconds N] [--name NAME] [--ticks-per-beat N] [--keep-octaves] [--fm-only] [--whole-part-voices] [--audio-refine] [--stem PART=WAV]...");
     }
 
     static void run(String[] args, PrintStream out) throws IOException {
@@ -249,7 +258,7 @@ final class ReconstructionCli {
         Files.createDirectory(target);
         render(midi, reference, index, target, target, options, transcription, matched, effects, null, null, null, null, null, List.of(),
                 (echoes, copies, bends, omitPolicy, bankPass) -> S3kReconstruction.arrange(options.name(), options.ticksPerBeat(), frames, prepared,
-                        catalogue, sectionPlan.choices(), spill, echoes), out, null, null);
+                        catalogue, sectionPlan.choices(), spill, echoes, options.profile()), out, null, null);
     }
 
     static ReconstructionVoicing.Result fitVoicing(ReconstructionStages.Score score,
@@ -320,7 +329,7 @@ final class ReconstructionCli {
                 String id = ReconstructionVoicePlan.SourceInstrument.id(part.id());
                 var sound = instruments.get(id);
                 if (sound == null || sound.psgVariantId() != null || !spilled.containsKey(part.id())) continue;
-                var match = ReconstructionSpill.match(catalogue, sound.fm(), part, spilled.get(part.id()));
+                var match = ReconstructionSpill.match(catalogue, sound.fm(), part, spilled.get(part.id()), score.inputs().profile());
                 instruments.put(id, new ReconstructionVoicing.SourceSound(sound.fm(), match.variantId(), match.volumeOffset()));
             }
             result = result.withSourceInstruments(instruments);
@@ -456,7 +465,7 @@ final class ReconstructionCli {
                 structure, catalogue, matched.byLane(), echoes, voicing.lanes(), copies, bends,
                 authored.scopes(), playback.origins(), drumGains, layout, authored.instruments(), instruments,
                 omitPolicy < 0 ? policies : policies.stream().filter(policy -> policy.index() != omitPolicy).toList(),
-                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0);
+                policyLevels, layers, score.inputs().fmOnly(), policyDecisions && omitPolicy < 0, score.inputs().profile());
         return new Assembly(matched, ordered, layout, playback, arrange);
     }
 
@@ -504,8 +513,7 @@ final class ReconstructionCli {
     }
 
     static boolean bankOverflow(IllegalArgumentException failure) {
-        String message = failure.getMessage();
-        return message != null && (message.contains("32 KiB S3K bank") || message.contains("S3K local bank limit is 128"));
+        return failure instanceof ProjectCompiler.BankLimitException || failure instanceof S3kReconstruction.VoiceLimitException;
     }
 
     static Map<String, String> assemblyInputs(ReconstructionStages.Score score,
@@ -634,9 +642,8 @@ final class ReconstructionCli {
                     project = project.withReview(references, project.notes());
                 }
                 try {
-                    compiled = ProjectCompiler.compileWithAssets(result.project());
-                } catch (IllegalArgumentException failure) {
-                    if (!failure.getMessage().contains("32 KiB S3K bank")) throw failure;
+                    compiled = compileTarget(result.project());
+                } catch (ProjectCompiler.BankLimitException failure) {
                     if (!result.bends().isEmpty()) bendSizeLimit = true;
                     else if (result.echoNotes() > 0) echoBankLimit = true;
                     else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
@@ -661,11 +668,16 @@ final class ReconstructionCli {
             }
             if (bankPass > 0) {
                 long removed = result.reductions().stream().filter(r -> "audio-only-bank-fit".equals(r.reason())).count();
-                out.println("S3K bank fit omitted " + removed + " lower-priority backing attacks");
+                out.println(options.target().name() + " bank fit omitted " + removed + " lower-priority backing attacks");
             }
             if (timeline.warped()) ReferenceStretch.write(reference, aligned, frames, timeline.sourceDuration(), timeline::source);
-            ProjectPackage.write(result.project(), packagePath);
-            WaveFile.render(compiled, audio, frames);
+            if (options.target() == TargetGame.S3K) {
+                ProjectPackage.write(result.project(), packagePath);
+                WaveFile.render(compiled, audio, frames);
+            } else {
+                PortablePackageWriter.write(result.project(), packagePath, PortableOptions.defaults(options.target()));
+                PackageDriver.supported(options.target().id()).render(compiled, audio, frames);
+            }
             var inputEvidence = new LinkedHashMap<String, FileEvidence>();
             if (midi != null) inputEvidence.put("midi", evidence(midi));
             inputEvidence.put("wav", evidence(reference));
@@ -697,7 +709,8 @@ final class ReconstructionCli {
             if (transcription.retriggers() != null)
                 for (var burst : transcription.retriggers()) runEvidence.add(burst.figure());
             var assembled = result.project();
-            var legacySustain = assemblyInputs == null ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
+            var legacySustain = assemblyInputs == null && options.target() == TargetGame.S3K
+                    ? matchQuietly(() -> ReconstructionSustain.inspect(assembled)) : null;
             var report = new Report(REPORT_VERSION, CatalogueMatcher.ASSET_PROFILE, durationUs, frames, compiled.song().length,
                     noteCounts.values().stream().mapToInt(Integer::intValue).sum(), result.fmNotes(), result.psgNotes(),
                     result.dacHits(), options.keepOctaves(), options.fmOnly(), inputEvidence, outputEvidence, partEvidence,
@@ -727,11 +740,10 @@ final class ReconstructionCli {
                             !echoBankLimit, !bendSizeLimit, coverage.index(), bankPass);
                     row.addProperty("psgEnvelopeBytesDelta", psgEnvelopeBytes(result.project()) - psgEnvelopeBytes(without.project()));
                     try {
-                        int withoutBytes = ProjectCompiler.compile(without.project()).length;
+                        int withoutBytes = compileTarget(without.project()).song().length;
                         row.addProperty("bankBytesDelta", compiled.song().length - withoutBytes);
-                    } catch (IllegalArgumentException failure) {
-                        if (!failure.getMessage().contains("32 KiB S3K bank")) throw failure;
-                        row.addProperty("bankBytesDeltaUnavailable", "bank without this policy exceeds the S3K limit");
+                    } catch (ProjectCompiler.BankLimitException failure) {
+                        row.addProperty("bankBytesDeltaUnavailable", "bank without this policy exceeds the " + options.target().name() + " limit");
                     }
                     policyReport.add(row);
                 }
@@ -790,6 +802,7 @@ final class ReconstructionCli {
         boolean fmOnly = false;
         boolean wholePartVoices = false;
         boolean audioRefine = false;
+        TargetGame target = TargetGame.S3K;
         var stems = new java.util.TreeMap<Integer, Path>();
         var seen = new java.util.HashSet<String>();
         for (int i = 5; i < args.length; i++) {
@@ -821,6 +834,7 @@ final class ReconstructionCli {
                     duration = Math.round(seconds * MICROS_PER_SECOND);
                 }
                 case "--name" -> name = value;
+                case "--target" -> target = TargetGame.parse(value);
                 case "--ticks-per-beat" -> {
                     ticksPerBeat = Integer.parseInt(value);
                     if (ticksPerBeat < 1) throw new IllegalArgumentException("--ticks-per-beat must be positive");
@@ -837,7 +851,23 @@ final class ReconstructionCli {
             }
         }
         if (name.isBlank()) throw new IllegalArgumentException("Project name must not be blank");
-        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems);
+        return new Options(duration, name, ticksPerBeat, keepOctaves, fmOnly, wholePartVoices, audioRefine, stems, target);
+    }
+
+    static com.opensmpsdeck.project.CompiledProject compileTarget(StudioProject project) {
+        if (project.target() == TargetGame.S3K) return ProjectCompiler.compileWithAssets(project);
+        var driver = (ClassicPackageDriver) PackageDriver.supported(project.target().id());
+        int tempo = driver.convertTempo(project.tempo()).targetByte();
+        var layout = driver.compile(project, tempo);
+        var compiled = new com.opensmpsdeck.project.CompiledProject(layout.bytes(), project.envelopes(), project.samples());
+        driver.preflight(compiled);
+        return compiled;
+    }
+
+    static TargetGame parseTargetAssertion(String[] args) {
+        if (args.length != 2 || !args[0].equals("--target"))
+            throw new IllegalArgumentException("Unsupported options when resuming reconstruction; expected --target s1|s2|s3k");
+        return TargetGame.parse(args[1]);
     }
 
     static String audioHash(Path path, java.nio.file.OpenOption... options) throws IOException {

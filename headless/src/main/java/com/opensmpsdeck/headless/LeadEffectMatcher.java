@@ -87,9 +87,8 @@ final class LeadEffectMatcher {
             com.opensmpsdeck.project.CompiledProject compiled;
             try {
                 compiled = ProjectCompiler.compileWithAssets(trial);
-            } catch (IllegalArgumentException e) {
-                if (e.getMessage().contains("32 KiB S3K bank")) continue;
-                throw e;
+            } catch (ProjectCompiler.BankLimitException overflow) {
+                continue;
             }
             var score = score(profile.name(), read(render(compiled, frames), probes), partition, fit, check);
             scores.add(score);

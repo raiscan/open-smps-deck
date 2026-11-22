@@ -353,6 +353,13 @@ public final class ProjectCompiler {
             this.compiledBytes = compiledBytes;
         }
 
+        /** Classic compilers report the first attempted write beyond the bank. */
+        public BankLimitException(long compiledBytes, TargetGame target) {
+            super(target.id() + ": compiled arrangement exceeds one 32 KiB bank (attempted "
+                    + compiledBytes + " bytes). Shorten the song or reduce layering, voices, or notes.");
+            this.compiledBytes = compiledBytes;
+        }
+
         public long compiledBytes() { return compiledBytes; }
         public int limitBytes() { return MAX_BANK_BYTES; }
 

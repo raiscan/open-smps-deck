@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -1082,7 +1083,7 @@ final class ReconstructionEdits {
                     validateRoleLane(score, decision.note(), role, edit.lane, at);
                     if (edit.laneType != null) {
                         String issue = laneTypeIssue(decision.note(), part(score, decision.note().part()).drums(),
-                                edit.laneType, score.inputs().fmOnly());
+                                edit.laneType, score.inputs().fmOnly(), score.inputs().profile());
                         require(issue == null, at + ".laneType", issue);
                     }
                     Role incoming = decision.role();
@@ -1270,24 +1271,28 @@ final class ReconstructionEdits {
         boolean drums = part(score, note.part()).drums();
         require(role == null || role == Role.drop || (role == Role.drums) == drums,
                 at + ".role", "drums role must match MIDI percussion part");
-        require(lane == null || pinCompatible(note, drums, lane, score.inputs().fmOnly()), at + ".lane",
+        require(lane == null || pinCompatible(note, drums, lane, score.inputs().fmOnly(), score.inputs().profile()), at + ".lane",
                 "lane " + lane + " cannot play this note with the current percussion, pitch or FM-only settings");
     }
 
-    static boolean pinCompatible(Note note, boolean drums, String lane, boolean fmOnly) {
+    static boolean pinCompatible(Note note, boolean drums, String lane, boolean fmOnly, TargetProfile profile) {
         if (drums) return lane.equals("DAC") || !fmOnly && lane.equals("PSG3");
         return ReconstructionAllocation.FM.contains(lane)
-                || !fmOnly && note.pitch() >= 45 && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
+                || !fmOnly && note.pitch() >= profile.psg().low() && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
     }
 
     static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly) {
+        return laneTypeIssue(note, drums, type, fmOnly, TargetProfile.S3K);
+    }
+
+    static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly, TargetProfile profile) {
         return switch (type) {
             case FM -> drums ? "FM percussion voicing is not supported for MIDI drum parts" : null;
             case DAC -> drums ? null : "DAC requires a MIDI drum part and sampled drum voicing";
             case PSG -> {
                 if (drums) yield "PSG tone cannot voice MIDI drums; use NOISE or DAC";
                 if (fmOnly) yield "PSG tone is disabled in FM-only mode";
-                if (note.pitch() < 45 || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch 45 or higher";
+                if (note.pitch() < profile.psg().low() || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch " + profile.psg().low() + " or higher";
                 if (note.bend() != null && note.bend().editReason() != null) yield "authored bends require FM";
                 yield null;
             }

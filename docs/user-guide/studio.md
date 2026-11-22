@@ -55,6 +55,10 @@ Choose **Import Suno folder…**, select the download, then select a separate
 work directory. Studio lists the detected files, the mapped MIDI parts and
 any gaps. A tick marks a passing check, a warning marks a fallback or
 unmapped file, and a cross marks an error that blocks reconstruction.
+Choose the **Target game** before starting. The default is Sonic 3 & Knuckles
+(S3K). Sonic 1 and Sonic 2 reconstruction are in progress, and assembly can
+stop if the selected driver cannot play an envelope or command used by the
+arrangement. The project keeps its target for portable export.
 
 Use a stem's **Override** dropdown to select a MIDI part, exclude the stem,
 or restore automatic mapping. Choose **Re-check** to apply your changes and

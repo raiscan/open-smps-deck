@@ -8,6 +8,7 @@ import com.opensmpsdeck.headless.TestInGame;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -27,10 +28,15 @@ final class ExportDialog {
 
     static void show(Window owner, StudioProject project, Path projectPath, Path work,
                      RomLibrary library, Executor worker, Consumer<String> status) {
+        show(owner, project, projectPath, work, TargetGame.S3K, library, worker, status);
+    }
+
+    static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
+                     RomLibrary library, Executor worker, Consumer<String> status) {
         boolean nativeBank = project != null && project.nativeProgram() != null;
         Callable<ProjectExport.Source> source = () -> project == null ? ProjectExport.open(work)
                 : new ProjectExport.Source(project, work);
-        RomGame game = project == null ? RomGame.S3K : TestInGame.game(project);
+        RomGame game = project == null ? RomGame.parse(fallbackTarget.id()) : TestInGame.game(project);
         String name = project == null ? work.getFileName().toString() : project.name();
         var dialog = new Dialog<ProjectExport.Options>();
         dialog.initOwner(owner);
@@ -63,7 +69,7 @@ final class ExportDialog {
         var drivers = new ChoiceBox<String>();
         drivers.setId("export-driver");
         drivers.getItems().setAll(nativeBank ? java.util.List.of("s3k") : java.util.List.of("s3k", "s1", "s2"));
-        drivers.setValue("s3k");
+        drivers.setValue(nativeBank ? TargetGame.S3K.id() : game.id());
         var driverLabel = new Label("Target driver");
         var portableSelected = formats.valueProperty().isEqualTo(Format.PORTABLE);
         drivers.visibleProperty().bind(portableSelected);

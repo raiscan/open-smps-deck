@@ -25,6 +25,8 @@ import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.GroupArrangement;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.TargetProfile;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,17 +36,17 @@ import java.util.Locale;
 import java.util.Set;
 
 enum ClassicPackageDriver implements PackageDriver {
-    S1("s1", 301, Sonic1SmpsSequencerConfig.CONFIG, Sonic1SmpsCompatibilityPolicy.INSTANCE),
-    S2("s2", 295, Sonic2SmpsSequencerConfig.CONFIG, Sonic2SmpsCompatibilityPolicy.INSTANCE);
+    S1(TargetGame.S1, Sonic1SmpsSequencerConfig.CONFIG, Sonic1SmpsCompatibilityPolicy.INSTANCE),
+    S2(TargetGame.S2, Sonic2SmpsSequencerConfig.CONFIG, Sonic2SmpsCompatibilityPolicy.INSTANCE);
 
     private final String id;
-    private final int dacCycles;
+    final TargetProfile profile;
     final SmpsSequencerConfig config;
     final SmpsPhysicalPolicy policy;
 
-    ClassicPackageDriver(String id, int dacCycles, SmpsSequencerConfig config, SmpsPhysicalPolicy policy) {
-        this.id = id;
-        this.dacCycles = dacCycles;
+    ClassicPackageDriver(TargetGame target, SmpsSequencerConfig config, SmpsPhysicalPolicy policy) {
+        this.id = target.id();
+        this.profile = TargetProfile.of(target);
         this.config = config;
         this.policy = policy;
     }
@@ -129,7 +131,7 @@ enum ClassicPackageDriver implements PackageDriver {
 
     long dacTailFrames(DacSample sample) {
         int loops = sample.rate() == 0 ? 256 : sample.rate();
-        long period = dacCycles + 26L * (loops - 1);
+        long period = profile.dacBaseCycles() + 26L * (loops - 1);
         long cyclesPerByte = ceil(5 * period, 28) + 37;
         // At most one arrangement tick per presentation, including with speed shoes.
         return ceil((sample.pcm().length + 1L) * cyclesPerByte, 21334) + 4;
@@ -171,7 +173,7 @@ enum ClassicPackageDriver implements PackageDriver {
 
     AbstractSmpsData playbackData(CompiledProject project) {
         var psg = S3kRenderer.nativeEnvelopes(project.psgEnvelopes());
-        int base = project.nativeProgram().bankBase();
+        int base = project.nativeProgram() == null ? 0 : project.nativeProgram().bankBase();
         if (this == S1) {
             var data = new Sonic1SmpsData(project.song());
             var slots = new byte[psg.keySet().stream().mapToInt(Integer::intValue).max().orElse(0)][];
@@ -194,7 +196,7 @@ enum ClassicPackageDriver implements PackageDriver {
 
     void render(CompiledProject project, int frames, S3kRenderer.PcmSink sink, ChipWriteObserver observer) throws IOException {
         var data = playbackData(project);
-        var dac = S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), dacCycles);
+        var dac = S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), profile.dacBaseCycles());
         S3kRenderer.renderPackageMusic(id, data, dac, config, policy, frames, sink, observer);
     }
 

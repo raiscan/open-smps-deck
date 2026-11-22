@@ -7,6 +7,7 @@ import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -77,7 +78,7 @@ class ReconstructionChordsTest {
                         new ReconstructionChords.Member("third", 64, 60),
                         new ReconstructionChords.Member("fifth", 67, 60)));
         var result = ReconstructionAllocation.allocateWithAffinity(roles, parts, 60, true, false, Map.of(),
-                Map.of(), Map.of(), Map.of("root", group, "third", group, "fifth", group), null, Map.of(), false);
+                Map.of(), Map.of(), Map.of("root", group, "third", group, "fifth", group), null, Map.of(), false, TargetProfile.S3K);
         assertEquals(3, result.notes().stream().filter(note -> note.lane() != null).count());
         assertNotNull(result.notes().get(3).lane());
         assertNotNull(result.notes().get(4).lane());

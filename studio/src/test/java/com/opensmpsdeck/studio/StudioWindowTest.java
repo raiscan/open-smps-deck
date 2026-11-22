@@ -6,6 +6,7 @@ import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.project.*;
+import com.opensmpsdeck.project.TargetGame;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.event.Event;
@@ -201,6 +202,16 @@ class StudioWindowTest {
             });
             await(() -> !scene.lookup("#suno-import-start").isDisabled());
             assertTrue(Files.readString(work.resolve("import.json")).contains("excluded"));
+            fx(() -> {
+                var picker = (ComboBox<?>) scene.lookup("#suno-import-target");
+                assertEquals(TargetGame.S3K, picker.getValue());
+                assertEquals(List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K), picker.getItems());
+                picker.getSelectionModel().select(0);
+                return null;
+            });
+            await(() -> !scene.lookup("#suno-import-start").isDisabled());
+            var report = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("import.json"))).getAsJsonObject();
+            assertEquals("s1", report.getAsJsonObject("runRequest").getAsJsonObject("options").get("target").getAsString());
         } finally {
             fx(() -> { ((SunoImportPane) preview.getScene().getRoot()).close(); preview.close(); return null; });
         }

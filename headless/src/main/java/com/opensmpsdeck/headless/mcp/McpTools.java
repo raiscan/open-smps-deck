@@ -75,6 +75,7 @@ final class McpTools {
             tool("reconstruct_import", "Check a Suno download, separated folder or aligned audio-only folder and write import.json with file status, mapping evidence and available run arguments.",
                     McpReconstruction::importFolder, path("folder", "Absolute path to the input folder"), WORK,
                     CATALOGUE.optional(),
+                    choice("target", "Target game (default s3k)", "s1", "s2", "s3k").optional(),
                     field("assign", object(Map.of("type", "object", "additionalProperties", Map.of("type", "integer"))),
                             "Map of folder-relative stem files to MIDI part IDs").optional(),
                     field("exclude", object(Map.of("type", "array", "items", Map.of("type", "string"))),
@@ -120,7 +121,7 @@ final class McpTools {
                     field("output", "string", "New file or stem directory inside the project or work directory"),
                     choice("format", "Export format", "wav", "mp3", "vgm", "smps", "package", "portable", "mod"),
                     ROMS,
-                    choice("driver", "Portable target driver (default s3k)", "s1", "s2", "s3k").optional(),
+                    choice("driver", "Portable target driver (defaults to the project target)", "s1", "s2", "s3k").optional(),
                     field("speedUpTempo", "integer", "S3K-clock speed-shoes tempo byte (0..255) for S1/S2 exports").optional(),
                     field("strictTempo", "boolean", "Reject inexact tempo conversions for portable or mod export").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
@@ -391,7 +392,7 @@ final class McpTools {
         var replace = args.has("replace") ? args.getAsJsonArray("replace").asList().stream()
                 .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
         var romPaths = roms(args);
-        var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
+        var settings = new ProjectExport.PortableSettings(optionalString(args, "driver"),
                 !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
                 optionalString(args, "packageVersion"), authors, replace,
                 args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null,

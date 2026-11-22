@@ -9,6 +9,7 @@ import com.opensmpsdeck.headless.ReconstructionView;
 import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.headless.ReconstructionReview;
 import com.opensmpsdeck.project.ProjectDocument;
+import com.opensmpsdeck.project.TargetGame;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -123,7 +124,8 @@ final class ReconstructionPane implements AutoCloseable {
         output.setOnAction(event -> {
             var open = openProject.get();
             var snapshot = open != null && arrangement.equals(open.path()) ? open.project() : null;
-            ExportDialog.show(stage, snapshot, arrangement, work, RomLibrary.userLibrary(), loader, status::setText);
+            var fallback = model.project() == null ? TargetGame.S3K : model.project().target();
+            ExportDialog.show(stage, snapshot, arrangement, work, fallback, RomLibrary.userLibrary(), loader, status::setText);
         });
         title.getChildren().add(output);
         if (openArrangement != null) {

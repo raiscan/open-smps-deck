@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
@@ -355,13 +356,14 @@ final class ReconstructionManifest {
         return new ReconstructionStages.Inputs(midi, wav, catalogue, options.name(), options.ticksPerBeat(),
                 options.keepOctaves(), options.fmOnly(), options.wholePartVoices(), options.audioRefine(), stems,
                 candidates, options.harmonyMaxHz(), options.grid(), options.audioRepeats(), external,
-                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff(), options.audioOnly());
+                options.leadPart(), options.fastRunsOff(), options.drumSource(), options.stemTemplateNotesOff(), options.audioOnly(), options.target());
     }
 
     static void run(String[] args, PrintStream out, PrintStream err) throws IOException {
         if (args.length < 2) throw new IllegalArgumentException("rerun expects WORKDIR NEWWORKDIR [--search DIR ...]");
         var search = new ArrayList<Path>();
         boolean keepVoicing = false, overwriteDetached = false;
+        TargetGame target = null;
         for (int i = 2; i < args.length; i++) {
             if (args[i].equals("--keep-voicing")) {
                 keepVoicing = true;
@@ -371,11 +373,16 @@ final class ReconstructionManifest {
                 overwriteDetached = true;
                 continue;
             }
+            if (args[i].equals("--target")) {
+                if (target != null || ++i == args.length) throw new IllegalArgumentException("Expected one --target s1|s2|s3k");
+                target = TargetGame.parse(args[i]);
+                continue;
+            }
             if (!args[i].equals("--search") || ++i == args.length)
-                throw new IllegalArgumentException("rerun expects --search DIR, --keep-voicing or --overwrite-detached");
+                throw new IllegalArgumentException("rerun expects --search DIR, --target s1|s2|s3k, --keep-voicing or --overwrite-detached");
             search.add(Path.of(args[i]).toAbsolutePath().normalize());
         }
         ReconstructionStages.rerun(Path.of(args[0]).toAbsolutePath().normalize(),
-                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, overwriteDetached, out, err);
+                Path.of(args[1]).toAbsolutePath().normalize(), search, keepVoicing, overwriteDetached, target, out, err);
     }
 }

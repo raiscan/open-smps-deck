@@ -53,7 +53,7 @@ public final class TestInGame {
     }
 
     public static RomGame game(StudioProject project) {
-        return game(project.mode());
+        return RomGame.parse(project.target().id());
     }
 
     static RomGame game(String driver) {

@@ -57,7 +57,15 @@ class ReconstructionCliTest {
         assertEquals(5, project.clips().size());
         assertEquals(List.of(68, 69, 70, 71, 72), project.sequences().stream()
                 .flatMap(s -> s.notes().stream()).map(n -> n.pitch()).sorted().toList());
+        // Synthetic fixture fingerprints recorded on master before introducing target selection.
+        assertEquals("f04feb6f4d7c720d17c2bf3797a4298e80801b551ff71ea01fcd7567860259ff",
+                ReconstructionCli.audioHash(output.resolve("arrangement.smps.json")));
+        assertEquals("2e1b0ff357ffe977c65daf359395e89bdc1fca5168ddc02be9e09dcb0592ca54",
+                InstrumentCatalogue.digest(ProjectCompiler.compile(project)));
+        assertEquals("3ea2786afbed30e9ea3be0f1d115f1e0b30409eaa74efc469dc5a2d2e91cce44",
+                ReconstructionCli.audioHash(output.resolve("render.wav")));
         assertEquals(500_000, ReferenceAudio.durationMicros(output.resolve("render.wav")));
+        assertTargetRoundTrip(midi, wav, index);
         assertTrue(Files.isRegularFile(output.resolve("arrangement.smps.zip")));
         String reportText = Files.readString(output.resolve("report.json"));
         var report = JsonParser.parseString(reportText).getAsJsonObject();
@@ -203,6 +211,58 @@ class ReconstructionCliTest {
         assertEquals(0, Main.run(new String[]{"reconstruct", "run", work.toString(), "--from", "allocate"},
                 System.out, new PrintStream(errors)), errors.toString());
         assertEquals(goodReport, Files.readString(work.resolve("report.json")));
+    }
+
+    private void assertTargetRoundTrip(Path midi, Path wav, Path index) throws Exception {
+        Path staged = directory.resolve("target-s3k");
+        Path classic = directory.resolve("target-s1");
+        Path replay = directory.resolve("target-replay");
+        Path imported = directory.resolve("target-import");
+        var errors = new ByteArrayOutputStream();
+        var err = new PrintStream(errors);
+        Path download = Files.createDirectory(directory.resolve("download"));
+        Files.copy(midi, download.resolve("song.mid"));
+        Files.copy(wav, download.resolve("mix.wav"));
+        assertEquals(0, Main.run(new String[]{"reconstruct", "import", download.toString(), imported.toString(),
+                "--catalogue", index.toString(), "--target", "s2"}, System.out, err), errors.toString());
+        assertEquals("s2", artifact(imported, "import.json").getAsJsonObject("runRequest")
+                .getAsJsonObject("options").get("target").getAsString());
+
+        for (var target : List.of("s3k", "s1")) {
+            Path work = target.equals("s3k") ? staged : classic;
+            assertEquals(0, Main.run(new String[]{"reconstruct", "run", midi.toString(), wav.toString(),
+                    index.toString(), work.toString(), "--seconds", ".5", "--fm-only", "--lane-policy-preset", "off",
+                    "--target", target}, System.out, err), errors.toString());
+        }
+        assertFalse(artifact(staged, "score.json").getAsJsonObject("inputs").has("target"));
+        assertFalse(artifact(staged, "manifest.json").getAsJsonObject("options").has("target"));
+        assertEquals("181141a52786c09aa266918b07bdd1306a956e812e6e6a0010b5c678e3433fe2",
+                ReconstructionCli.audioHash(staged.resolve("arrangement.smps.json")));
+        assertEquals("c113fbbd7ac4e9dac388a500a43784f0d0eb3e81fd13b84f47603565d2f1352f",
+                ReconstructionCli.audioHash(staged.resolve("render.wav")));
+        assertEquals(0, Main.run(new String[]{"reconstruct", "structure", classic.toString(), "--target", "s1"},
+                System.out, err), errors.toString());
+        assertEquals(2, Main.run(new String[]{"reconstruct", "structure", classic.toString(), "--target", "s2"},
+                System.out, err));
+        assertTrue(errors.toString().contains("Saved reconstruction target is s1"));
+        assertEquals(0, Main.run(new String[]{"reconstruct", "rerun", classic.toString(), replay.toString()},
+                System.out, err), errors.toString());
+
+        for (var work : List.of(classic, replay)) {
+            assertEquals("s1", artifact(work, "score.json").getAsJsonObject("inputs").get("target").getAsString());
+            assertEquals("s1", artifact(work, "manifest.json").getAsJsonObject("options").get("target").getAsString());
+            assertEquals("s1", artifact(work, "arrangement.smps.json").get("target").getAsString());
+            try (var zip = new java.util.zip.ZipFile(work.resolve("arrangement.smps.zip").toFile());
+                 var input = zip.getInputStream(zip.getEntry("manifest.json"))) {
+                assertEquals("s1", JsonParser.parseString(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+                        .getAsJsonObject().get("driver").getAsString());
+            }
+        }
+        assertEquals(-1, Files.mismatch(classic.resolve("render.wav"), replay.resolve("render.wav")));
+    }
+
+    private static com.google.gson.JsonObject artifact(Path dir, String name) throws java.io.IOException {
+        return JsonParser.parseString(Files.readString(dir.resolve(name))).getAsJsonObject();
     }
 
     private void assertUnplannedArtifacts(Path work) throws Exception {

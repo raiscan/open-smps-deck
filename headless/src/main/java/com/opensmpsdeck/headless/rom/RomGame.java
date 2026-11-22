@@ -1,22 +1,24 @@
 package com.opensmpsdeck.headless.rom;
 
+import com.opensmpsdeck.project.TargetGame;
+
 /** Game IDs match the portable package driver IDs. */
 public enum RomGame {
-    S1("s1"), S2("s2"), S3K("s3k");
+    S1(TargetGame.S1), S2(TargetGame.S2), S3K(TargetGame.S3K);
 
-    private final String id;
+    private final TargetGame target;
 
-    RomGame(String id) {
-        this.id = id;
+    RomGame(TargetGame target) {
+        this.target = target;
     }
 
     public String id() {
-        return id;
+        return target.id();
     }
 
     public static RomGame parse(String id) {
         for (RomGame game : values()) {
-            if (game.id.equals(id)) return game;
+            if (game.id().equals(id)) return game;
         }
         throw new IllegalArgumentException("Unknown ROM game '" + id + "'. Choose s1, s2 or s3k.");
     }
