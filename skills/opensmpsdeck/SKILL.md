@@ -226,6 +226,15 @@ lists field names, selector rules and rebuild stages.
 | Fit stacked tones | `arpeggio`, `chordInstrument` |
 | Change a voice in a reviewable batch | `voiceEdit` |
 
+For staged vibrato on an allocated S3K FM note, propose a `noteVoicing`
+edit with `vibratoEnvelope`. Each segment has `startOffset` in project
+driver ticks from the attack, `rateHz`, and `depthCents`. An opening with
+no segment is plain. A segment with zero depth turns vibrato off.
+`reconstruct vibrato-review WORK_DIR --propose` (MCP
+`reconstruct_vibrato_review` with `propose: true`) drafts stem-backed
+candidates. Review the proposals, rebuild from assemble, and check the
+stages in `trace` before auditioning.
+
 For a note-scoped echo, choose `laneType: "FM"` or `"PSG"` and set
 `delayFrames` and `levelDb` or `attenuation`. To match Studio's default
 echo, use 14 frames and 11 TL below dry. Studio shows this as a −3 dB

@@ -137,6 +137,7 @@ final class ReconstructionCli {
         out.println("       reconstruct rerun WORK_DIR NEW_WORK_DIR [--target s1|s2|s3k] [--search DIR ...] [--keep-voicing] [--overwrite-detached]");
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
+        out.println("       reconstruct vibrato-review WORK_DIR [--part ID] [--propose]");
         out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose] [--show-decided] [--json]");
         out.println("       reconstruct vocal-render WORK_DIR --phrase ID OUT.wav");
         out.println("       reconstruct view WORK_DIR (--start S --end S | --section NAME) [--sections] [--color-by voice] [options] OUT.png");
@@ -175,6 +176,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("view")) {
             ReconstructionView.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("vibrato-review")) {
+            ReconstructionVibratoEnvelope.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("vocal-review")) {
@@ -475,7 +480,7 @@ final class ReconstructionCli {
         var scopes = ReconstructionVoicing.validate(voicing, ordered, catalogue, timeline);
         var voiceAssignments = voicing.voiceAssignments() == null
                 ? Map.<String, ReconstructionVoicePlan.Assignment>of() : voicing.voiceAssignments();
-        var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, voiceAssignments, scopes, outcomes);
+        var authored = ReconstructionNoteVoicing.resolve(intents.intents(), ordered, catalogue, score, voiceAssignments, scopes, outcomes);
         var drumGains = ReconstructionVoicing.scopedDrumGains(voicing.lanes().get("DAC"), allocation, timeline);
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());

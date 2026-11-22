@@ -59,7 +59,22 @@ class ReconstructionVibratoTest {
         assertTrue(ReconstructionVibrato.detect(score, incompatible, Map.of(), END_US).isEmpty());
     }
 
-    private enum Shape { VIBRATO, FAST_VIBRATO, DETUNED, SLIDE, BEATING, TREMOLO }
+    @Test void detectsQuietOpeningAndDepthChangeFromStemRidge() throws Exception {
+        var note = new ReconstructionStages.Note("held", 0, .1, 1.25, 55, 96, "midi", 1);
+        var tracker = new ReconstructionBends.Tracker(ReconstructionLeadAudio.readMono(
+                fixture("staged", Shape.STAGED, Shape.DETUNED), 3));
+        var stages = ReconstructionVibratoEnvelope.detect(note.start(), tracker.vibratoTrace(note));
+        assertEquals(2, stages.size(), stages.toString());
+        assertEquals(.41, stages.getFirst().time(), .045);
+        assertEquals(.76, stages.getLast().time(), .08);
+        assertEquals(6.15, stages.getLast().hz(), .7);
+        assertTrue(stages.getLast().depth() > 1.75 * stages.getFirst().depth());
+
+        var plain = new ReconstructionStages.Note("plain", 0, 1.55, 2.80, 78, 96, "midi", 1);
+        assertTrue(ReconstructionVibratoEnvelope.detect(plain.start(), tracker.vibratoTrace(plain)).isEmpty());
+    }
+
+    private enum Shape { VIBRATO, FAST_VIBRATO, STAGED, DETUNED, SLIDE, BEATING, TREMOLO }
 
     private Path fixture(String name, Shape first, Shape second) throws Exception {
         var samples = new double[(int) (END_US * SAMPLE_RATE / 1_000_000)];
@@ -89,6 +104,8 @@ class ReconstructionVibratoTest {
             double movement = Math.sin(2 * Math.PI * rate * time + note.pitch());
             double cents = switch (shape) {
                 case VIBRATO, FAST_VIBRATO -> 24 * movement + 16;
+                case STAGED -> time < .31 ? 0
+                        : (time < .66 ? 18 : 56) * Math.sin(Math.TAU * rate * (time - .31));
                 case DETUNED -> 33;
                 case SLIDE -> -55 + 110 * (i / (double) length);
                 case BEATING, TREMOLO -> 0;

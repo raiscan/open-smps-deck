@@ -55,19 +55,22 @@ final class ReconstructionTools {
         return edit;
     }
 
-    static JsonObject vibrato(String id, ReconstructionEditing.Vibrato gesture) {
-        var edit = ReconstructionDraft.human("noteVoicing", "Set note vibrato in Studio");
+    static JsonObject vibrato(String id, List<ReconstructionEditing.VibratoSegment> segments) {
+        var edit = ReconstructionDraft.human("noteVoicing", "Set note vibrato envelope in Studio");
         var ids = new JsonArray();
         ids.add(id);
         edit.add("noteIds", ids);
-        if (gesture.delta() == 0) edit.addProperty("modulationOff", true);
+        if (segments.isEmpty()) edit.addProperty("modulationOff", true);
         else {
-            var f0 = new JsonObject();
-            f0.addProperty("delay", 1);
-            f0.addProperty("rate", gesture.rate());
-            f0.addProperty("delta", gesture.delta());
-            f0.addProperty("steps", gesture.steps());
-            edit.add("vibrato", f0);
+            var envelope = new JsonArray();
+            for (var segment : segments) {
+                var stage = new JsonObject();
+                stage.addProperty("startOffset", segment.startOffset());
+                stage.addProperty("rateHz", segment.rateHz());
+                stage.addProperty("depthCents", segment.depthCents());
+                envelope.add(stage);
+            }
+            edit.add("vibratoEnvelope", envelope);
         }
         return edit;
     }

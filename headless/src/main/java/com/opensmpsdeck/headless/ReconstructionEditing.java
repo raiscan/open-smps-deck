@@ -26,6 +26,14 @@ public final class ReconstructionEditing {
 
     public record Vibrato(double hz, double cents, double minCents, double maxCents, int rate, int delta, int steps) {}
 
+    /** Start measured in project driver ticks from the allocated note onset. */
+    public record VibratoSegment(int startOffset, double rateHz, double depthCents) {}
+
+    public static List<VibratoSegment> vibratoEnvelope(com.google.gson.JsonObject edit) {
+        var segments = ReconstructionNoteVoicing.envelope(edit, "noteVoicing");
+        return segments == null ? List.of() : segments;
+    }
+
     public record Audition(StudioProject project, double start, double end) {}
 
     private final ReconstructionStages.Score score;

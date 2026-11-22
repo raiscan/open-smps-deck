@@ -714,7 +714,7 @@ public final class ReconstructionStages {
     private static void previewNoteVoicing(ReconstructionEdits edits, Score score, ReconstructionAllocation.Result allocation,
                                            List<ReconstructionEdits.Outcome> outcomes) throws IOException {
         var catalogue = InstrumentCatalogue.open(Path.of(score.inputs.catalogue), score.inputs.targetGame());
-        ReconstructionNoteVoicing.resolve(edits.intents(), allocation, catalogue, Map.of(), Map.of(), outcomes);
+        ReconstructionNoteVoicing.resolve(edits.intents(), allocation, catalogue, score, Map.of(), Map.of(), outcomes);
     }
 
     private static void checkInputFiles(Inputs inputs) {

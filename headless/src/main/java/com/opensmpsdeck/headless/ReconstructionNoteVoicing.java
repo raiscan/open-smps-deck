@@ -1,12 +1,15 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonObject;
+import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.headless.ReconstructionEditing.VibratoSegment;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.ReconstructionArtifacts.require;
 import static com.opensmpsdeck.headless.ReconstructionEdits.integer;
@@ -26,9 +29,11 @@ final class ReconstructionNoteVoicing {
         require(!off || json.get("modulationOff").isJsonPrimitive()
                 && json.getAsJsonPrimitive("modulationOff").isBoolean()
                 && json.get("modulationOff").getAsBoolean(), at, "expected modulationOff:true");
-        require(!off || !json.has("vibrato"), at, "choose vibrato or modulationOff");
-        require(type != null || off || json.has("vibrato"), at, "expected a voicing change");
+        int modulationFields = (off ? 1 : 0) + (json.has("vibrato") ? 1 : 0) + (json.has("vibratoEnvelope") ? 1 : 0);
+        require(modulationFields <= 1, at, "choose vibrato, vibratoEnvelope or modulationOff");
+        require(type != null || modulationFields == 1, at, "expected a voicing change");
         vibrato(json, at);
+        envelope(json, at);
     }
 
     private static ReconstructionVoicing.Vibrato vibrato(JsonObject json, String at) {
@@ -44,12 +49,45 @@ final class ReconstructionNoteVoicing {
         return new ReconstructionVoicing.Vibrato(delay, rate, delta, steps);
     }
 
+    static List<VibratoSegment> envelope(JsonObject json, String at) {
+        if (!json.has("vibratoEnvelope")) return null;
+        at += ".vibratoEnvelope";
+        require(json.get("vibratoEnvelope").isJsonArray(), at, "expected an array of segments");
+        var values = json.getAsJsonArray("vibratoEnvelope");
+        require(!values.isEmpty(), at, "expected at least one segment");
+        var segments = new ArrayList<VibratoSegment>();
+        int previous = -1;
+        for (int i = 0; i < values.size(); i++) {
+            String field = at + "[" + i + "]";
+            require(values.get(i).isJsonObject(), field, "expected a segment object");
+            var value = values.get(i).getAsJsonObject();
+            var offset = integer(value, "startOffset", field, 0, Integer.MAX_VALUE);
+            double depth = ReconstructionEdits.number(value.get("depthCents"), field + ".depthCents");
+            double rate = value.has("rateHz") ? ReconstructionEdits.number(value.get("rateHz"), field + ".rateHz") : 0;
+            require(offset != null && offset > previous, field, "startOffset must strictly increase");
+            require(depth >= 0 && depth <= 200, field, "expected depthCents in 0–200");
+            require(rate >= 0 && rate <= 15 && (depth == 0 || rate >= .12), field,
+                    "expected rateHz in 0.12–15 for a moving segment");
+            require(value.size() == (value.has("rateHz") ? 3 : 2), field, "unexpected segment field");
+            segments.add(new VibratoSegment(offset, rate, depth));
+            previous = offset;
+        }
+        return List.copyOf(segments);
+    }
+
+    static Set<String> retriggerAnchors(ReconstructionStages.Score score) {
+        return score.retriggers() == null ? Set.of() : score.retriggers().stream()
+                .map(ReconstructionRetriggers.Burst::anchor).collect(java.util.stream.Collectors.toSet());
+    }
+
     static Resolved resolve(List<ReconstructionEdits.Intent> edits, ReconstructionAllocation.Result allocation,
-                            InstrumentCatalogue catalogue, Map<String, ReconstructionVoicePlan.Assignment> assignments,
+                            InstrumentCatalogue catalogue, ReconstructionStages.Score score,
+                            Map<String, ReconstructionVoicePlan.Assignment> assignments,
                             Map<String, List<ReconstructionOverrides.Span>> scopes,
                             List<ReconstructionEdits.Outcome> outcomes) {
         if (edits.stream().noneMatch(edit -> edit.kind() == ReconstructionEdits.Kind.noteVoicing))
             return new Resolved(assignments, scopes);
+        var retriggers = retriggerAnchors(score);
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
         for (var entry : allocation.notes()) if (entry.lane() != null) entries.put(entry.note().id(), entry);
         var instruments = new LinkedHashMap<>(assignments);
@@ -60,11 +98,13 @@ final class ReconstructionNoteVoicing {
             var type = edit.laneType();
             var instrument = type == null ? null : new ReconstructionVoicePlan.Assignment(type, json.get("instrument").getAsString());
             var bend = vibrato(json, edit.id());
+            var envelope = envelope(json, edit.id());
             boolean off = json.has("modulationOff");
             var hits = new ArrayList<String>();
             var misses = new ArrayList<String>();
             String issue = null;
             try {
+                require(envelope == null || score.profile().game() == TargetGame.S3K, edit.id(), "vibratoEnvelope requires the S3K target");
                 if (instrument != null) instrument.validate(catalogue, edit.id());
                 for (String id : edit.noteIds()) {
                     var entry = entries.get(id);
@@ -74,16 +114,24 @@ final class ReconstructionNoteVoicing {
                     }
                     require(instrument == null || type.accepts(entry),
                             edit.id(), "instrument cannot play on " + entry.lane() + " for " + id);
-                    require(!(off || bend != null) || entry.lane().startsWith("FM"),
+                    require(!(off || bend != null || envelope != null) || entry.lane().startsWith("FM"),
                             edit.id(), "vibrato requires FM for " + id);
+                    if (envelope != null) {
+                        require(entry.note().run() == null && !allocation.chords().containsKey(id) && !retriggers.contains(id),
+                                edit.id(), "vibratoEnvelope requires a single attack for " + id);
+                        require(envelope.getLast().startOffset() < entry.endTick() - entry.startTick(),
+                                edit.id(), "segment starts outside the allocated note " + id);
+                        require(entry.note().bend() == null || entry.note().bend().editReason() == null,
+                                edit.id(), "vibratoEnvelope and an authored bend cannot share note " + id);
+                    }
                     hits.add(id);
                 }
                 for (String id : hits) {
                     if (instrument != null) instruments.put(id, instrument);
-                    if (off || bend != null) {
+                    if (off || bend != null || envelope != null) {
                         var entry = entries.get(id);
                         var settings = new ReconstructionOverrides.Settings(null, null, null, null, List.of(id),
-                                null, null, null, null, bend, off);
+                                null, null, null, null, bend, off, envelope);
                         modulation.put(id, new ReconstructionOverrides.Span(entry.startTick(), entry.endTick(), settings, -1));
                     }
                 }

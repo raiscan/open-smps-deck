@@ -482,7 +482,7 @@ removes only the selected proposals. See the
 | `arpeggio` | `noteIds` or `span` with `part` and optional pitch bounds. `rate` is 1–127 driver ticks per step (default 2). `order` is `up`, `down`, or `up-down` (default `up`). | `allocate` |
 | `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
 | `voiceEdit` | A `voiceEdit` object with the fields of a [voice journal entry](#identify-and-assign-voices), including its own `op` and `voiceId`. The outer intent supplies `id` and `author`. The voices stage replays these after `voice-edits.json`. | `voices` |
-| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
+| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, `vibratoEnvelope` for staged S3K vibrato, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
 | `layer` | `noteIds`, point `selector` or `selectors`, or `span` with `part` and optional `pitchMin`, `pitchMax` and `fromRole` filters. Set `mode` to `echo`, `chorus`, `double` or `off`. Copies require `laneType` (`FM` or `PSG`). | `assemble` |
 
 At assembly, `noteVoicing` resolves each ID on its current chip, reports
@@ -1533,40 +1533,44 @@ compare the compiled arrangement with the indexed rule omitted while
 keeping the other rules enabled. The report gives bank bytes and PSG envelope asset bytes. An omitted or empty array leaves
 assembly behavior unchanged.
 
-### Studio vibrato gesture
+### Per-note vibrato envelopes
 
-Studio writes a `noteVoicing` intent by allocated FM note ID and resolves its
-scope against the current allocation on each build. The underlying settings
-also work directly under `lanes.<lane>.overrides` in `voicing.json`. For example,
-this scope sets about 48 cents of depth at 5 Hz for MIDI 65:
+An S3K `noteVoicing` edit can replace the allocated FM note's vibrato with a
+series of stages. These are project driver ticks relative to its allocated
+attack, even when the source and project timelines differ.
 
 ```json
-{"noteIds":["LEAD_ID"],"vibrato":{"delay":1,"rate":1,"delta":8,"steps":6}}
+{"id":"lead-vibrato","reason":"Match the held lead's widening vibrato","op":"noteVoicing","noteIds":["LEAD_ID"],"vibratoEnvelope":[{"startOffset":0,"depthCents":0},{"startOffset":18,"rateHz":5,"depthCents":20},{"startOffset":32,"rateHz":5,"depthCents":48}]}
 ```
 
-Depth here is half the peak-to-peak pitch swing. To map a drag in cents and
-Hz to F0 on an FM note:
+Offsets are strictly increasing integers within the allocated note. Depth
+is half the peak-to-peak excursion, from 0 to 200 cents. Use 0.12–15 Hz for
+moving segments. A zero-depth segment can omit `rateHz`. The opening stays
+flat when the first offset is greater than zero. `vibratoEnvelope`,
+`vibrato` (raw F0 fields), and `modulationOff` are mutually exclusive.
+The envelope applies to one held attack at a time and supersedes inferred
+bends and scoped vibrato on that attack. Authored bends, chord figures, PSG,
+and S1/S2 targets are rejected. The normal articulation gate is extended
+only if needed to reach an authored boundary within the allocation.
 
-1. Pick the even `steps` in 2–254 that minimizes the error from the requested
-   rate. Actual Hz is `30 / steps`, so the centered range is about 0.118–15 Hz.
-   Set `delay: 1` to start immediately. Pick a `rate` divisor of `steps / 2`
-   (including 1) to keep the two halves symmetric.
-2. Let `F` be the note's S3K F-number plus lane detune. The cents-to-frequency
-   conversion is local to the current octave block. The F-number table
-   from C through B is 644, 683, 723, 766, 813, 860, 911, 965, 1023, 1084,
-   1148, 1216. For desired depth `D`, compute
-   `A = F × tanh(D × ln(2) / 1200)`.
-3. With `k = steps / (2 × rate)`, choose integer `delta` nearest `A / k`
-   in 1–127, keeping `F ± k × delta` inside 1–2047. Try the divisors if
-   a finer depth step or more headroom is needed. With
-   `a = k × delta`, the achieved depth is
-   `600 × log2((F + a) / (F - a))`. The minimum nonzero and maximum
-   depth therefore depend on pitch and rate. At MIDI 65 and 5 Hz with
-   `rate:1`, the depth ranges from about 6 to 824 cents in discrete steps.
-   Very slow settings need a long gate to complete a cycle.
-4. Save `modulationOff: true` in place of `vibrato` for an explicit zero
-   depth. Studio resolves the lane automatically. When editing
-   `voicing.json` directly, move the override if allocation changes.
+The compiler prepares the first moving stage with F0 on the original attack
+when its onset fits the driver's delay range. Reissuing F0 under E7 does
+not reload the live modulation delta. Later stages therefore stop custom
+modulation and use native detune and pitch updates under E7, including
+for onset offsets outside the F0 delay range. These continuations retain
+one FM key-on. The first stage's Hz and depth are quantized to native F0
+values. Later stages are sampled at 60 Hz and consume bytes in the music
+bank.
+
+`reconstruct vibrato-review WORK_DIR [--part ID] [--propose]` examines the
+mapped stems of allocated FM notes. It estimates rate and depth from
+consecutive alternating pitch excursions. It looks for a quiet opening
+before sustained oscillation and for sustained changes in cycle depth or
+period. The command prints candidates and the number of examined notes.
+With `--propose`, it saves candidates for review in the `staged-vibrato`
+group. Accept a proposal and rebuild assembly to hear it. Trace and describe
+show the stages on the rebuilt gate. The default reconstruction does not
+run this review or change its output.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,

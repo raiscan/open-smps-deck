@@ -308,21 +308,26 @@ final class McpReconstruction {
         return !verbose && !rerun && result.has("results") && (dryRun || edit != null && edit.isJsonArray()) ? ReconstructionEditCommand.compact(result) : result;
     }
 
+    static JsonObject vibratoReview(JsonObject args) throws IOException {
+        return com.opensmpsdeck.headless.ReconstructionVibratoEnvelope.review(reviewWork(args),
+                args.has("part") ? args.get("part").getAsInt() : null, args.has("propose") && args.get("propose").getAsBoolean());
+    }
+
     static JsonObject vocalReview(JsonObject args) throws IOException {
-        Path work = vocalWork(args);
+        Path work = reviewWork(args);
         return com.opensmpsdeck.headless.ReconstructionVocalReview.review(work, optional(args, "phrase"),
                 args.has("propose") && args.get("propose").getAsBoolean(),
                 args.has("showDecided") && args.get("showDecided").getAsBoolean());
     }
 
     static JsonObject vocalRender(JsonObject args) throws IOException {
-        Path work = vocalWork(args);
+        Path work = reviewWork(args);
         McpPaths.managed(work, "arrangement.smps.json");
         return com.opensmpsdeck.headless.VocalPhraseRender.render(work, string(args, "phrase"),
                 McpPaths.output(work, string(args, "output")));
     }
 
-    private static Path vocalWork(JsonObject args) throws IOException {
+    private static Path reviewWork(JsonObject args) throws IOException {
         Path work = McpPaths.directory(string(args, "workDir"));
         for (String file : List.of("score.json", "structure.json", "allocation.json", ReconstructionSections.FILE,
                 ReconstructionEditCommand.FILE, ReconstructionEditCommand.LOCK))
