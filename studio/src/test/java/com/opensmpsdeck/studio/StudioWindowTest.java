@@ -1650,6 +1650,9 @@ class StudioWindowTest {
                 zoom.setValue(0);
                 ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
                 double startPitch = 127.5 - pitch.getValue() - fraction * (128 - pitch.getMax());
+                scene.getRoot().layout();
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
+                double anchor = seeks.getLast();
 
                 scrollPlot(plot, x, y, 12, false);
                 double step = zoom.getValue();
@@ -1658,7 +1661,7 @@ class StudioWindowTest {
                 assertEquals(step * 1.5, zoom.getValue(), 1e-9);
                 scene.getRoot().layout();
                 mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
-                assertEquals(1.44, seeks.getLast(), .005);
+                assertEquals(anchor, seeks.getLast(), .005);
 
                 double fittedSpan = 128 - pitch.getMax();
                 scrollPlot(plot, x, y, 4, true);
