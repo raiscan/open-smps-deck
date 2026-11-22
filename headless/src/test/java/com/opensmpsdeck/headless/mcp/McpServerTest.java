@@ -144,6 +144,70 @@ class McpServerTest {
                 .getAsJsonArray("notes").isEmpty());
     }
 
+    @Test void describeCopiedIdsReturnsTheNextBarAndItsAllocationReason() throws Exception {
+        Path work = Files.createDirectory(directory.resolve("work"));
+        Path score = work.resolve("score.json");
+        Files.writeString(score, """
+                {"version":1,"durationUs":4000000,"frames":240,"ticksPerSecond":60,
+                 "inputs":{"midi":"fixture.mid","wav":"mix.wav","catalogue":"index.json","name":"Fixture",
+                           "ticksPerBeat":4,"keepOctaves":false,"fmOnly":false,"wholePartVoices":false,
+                           "audioRefine":false,"stems":{},"harmonyMaxHz":7.5},
+                 "bars":[{"id":"b1","start":0,"end":2,"complete":true},
+                         {"id":"b2","start":2,"end":4,"complete":true}],
+                 "source":{"parts":[{"id":0,"name":"Synthetic synth","program":80,"drums":false}],
+                           "notes":[],"warnings":[]},"sourceCounts":{},"reductions":[],"pitchChanges":[],
+                 "notes":[{"id":"pick","part":0,"start":1.5,"end":1.8,"pitch":69,"velocity":90,
+                           "source":"midi","confidence":1},
+                          {"id":"next","part":0,"start":2.1,"end":2.4,"pitch":71,"velocity":88,
+                           "source":"midi","confidence":1}]}
+                """);
+        var notes = JsonParser.parseString(Files.readString(score)).getAsJsonObject().getAsJsonArray("notes");
+        Files.writeString(work.resolve("allocation.json"), """
+                {"version":1,"notes":[
+                  {"note":%s,"role":"melody","outcome":"dropped","reason":"lane-contention",
+                   "competitorNoteId":"pick"}]}
+                """.formatted(notes.get(1)));
+        var inspection = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
+        var picked = inspection.overlays().stream().filter(overlay -> overlay.id().equals("pick")).toList();
+        var revision = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
+        var clipboard = inspection.copyNotes(picked, false, false, revision, Map.of(), Map.of(),
+                revision.entries(), Map.of(), List.of()).lines().toList();
+        var header = JsonParser.parseString(clipboard.get(1).substring("project: ".length())).getAsJsonObject();
+        var note = JsonParser.parseString(clipboard.get(3).substring("note: ".length())).getAsJsonObject();
+        var args = Map.of("workDir", header.get("path").getAsString(), "notes", note.get("id").getAsString(),
+                "context", "1bar", "revision", header.get("revision").getAsString(), "json", true);
+        var result = call("reconstruct_describe", args);
+        assertFalse(result.get("stale").getAsBoolean());
+        Files.writeString(work.resolve("edits.json"), "{\"version\":1,\"edits\":[]}");
+        assertTrue(call("reconstruct_describe", args).get("stale").getAsBoolean());
+        var selected = result.getAsJsonArray("selected").get(0).getAsJsonObject().getAsJsonObject("note");
+        assertEquals("pick", selected.get("id").getAsString());
+        assertEquals(90, selected.get("velocity").getAsInt());
+        var next = result.getAsJsonArray("neighbors").get(0).getAsJsonObject().getAsJsonObject("note");
+        assertEquals("next", next.get("id").getAsString());
+        assertEquals(2, next.get("bar").getAsInt());
+        assertEquals("dropped", next.get("playback").getAsString());
+        assertEquals("lane-contention", next.get("reason").getAsString());
+        assertEquals("pick", next.getAsJsonArray("competitors").get(0).getAsString());
+    }
+
+    @Test void reconstructDescribeReadsLassoAttachmentWithoutAWorkDirectory() throws Exception {
+        var project = DemoProject.create();
+        var sequence = project.sequences().getFirst();
+        var capture = com.opensmpsdeck.headless.ArrangementNoteContext.capture(directory.resolve("song.smps.json"),
+                project, false, sequence.id(), List.of(), sequence.notes().subList(0, 1),
+                new com.opensmpsdeck.headless.NoteHandoff.ViewRange(0, 12, 60, 72, Map.of()));
+        var image = new java.awt.image.BufferedImage(320, 100, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var png = com.opensmpsdeck.headless.NoteScreenshot.capture(image, capture).png();
+        var file = Files.write(directory.resolve("attachment.png"), png);
+        var result = call("reconstruct_describe", Map.of("fromPng", file.toString(), "json", true));
+        assertEquals("metadata", result.get("method").getAsString());
+        assertEquals(capture.payload(), result.get("payload").getAsString());
+        assertEquals(1, result.getAsJsonArray("notes").size());
+        assertToolError("reconstruct_describe", Map.of("fromPng", file.toString(), "workDir", directory.toString()),
+                "Use only fromPng");
+    }
+
     @Test void invalidArgumentsAndManagedSymlinksAreToolErrors() throws Exception {
         Path score = directory.resolve("outside.json");
         Files.writeString(score, "{}");

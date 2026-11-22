@@ -135,6 +135,9 @@ final class ReconstructionPane implements AutoCloseable {
                 position -> listen.cuePreview(position), openProject);
         listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition);
         view.onNote = editor::show;
+        view.copyForAgent = editor::copyForAgent;
+        var lasso = new ScreenshotLasso(view, editor::lasso, status::setText).controls();
+        lasso.managedProperty().bind(lasso.visibleProperty());
         editor.onSelectionChanged = listen::selectionChanged;
         editor.onVoicesChanged = listen::refreshTargets;
         stage.setOnCloseRequest(event -> { if (!editor.allowClose()) event.consume(); });
@@ -174,7 +177,7 @@ final class ReconstructionPane implements AutoCloseable {
             buttons.put(item, button);
             switcher.getChildren().add(button);
         }
-        switcher.getChildren().addAll(spacer(), viewToggle);
+        switcher.getChildren().addAll(spacer(), lasso, viewToggle);
         for (var node : List.of(tools, side, workspace, export, editor.rolesInspector(),
                 editor.notesInspector(), editor.reviewInspector(), viewToggle))
             node.managedProperty().bind(node.visibleProperty());
@@ -191,6 +194,7 @@ final class ReconstructionPane implements AutoCloseable {
             view.rolesView(showRoles);
             view.reviewing(showReview);
             tools.setVisible(showNotes);
+            lasso.setVisible(showRoles || showNotes);
             workspace.setVisible(page != Workspace.Export);
             editor.rolesInspector().setVisible(showRoles);
             editor.notesInspector().setVisible(showNotes);

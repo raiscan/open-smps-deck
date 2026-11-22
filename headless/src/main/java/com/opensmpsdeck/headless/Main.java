@@ -115,6 +115,7 @@ public final class Main {
                                 + " compiled bytes (" + input + ")");
                     }
                 }
+                case "describe-notes" -> ArrangementNoteContext.run(java.util.Arrays.copyOfRange(args, 1, args.length), out);
                 case "inspect-project" -> {
                     requireArguments(args, 2);
                     var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(Path.of(args[1])).project());
@@ -383,6 +384,7 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group create PROJECT.json GROUP_ID NAME PLACEMENT_ID... [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group place PROJECT.json GROUP_ID PLACEMENT_ID START LENGTH [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group ungroup PROJECT.json PLACEMENT_ID [--in GROUP_ID]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar describe-notes PROJECT.json --sequence ID --notes IDS [--clip JSON] [--context 1bar] [--revision HASH]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin [--linear]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");

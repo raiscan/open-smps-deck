@@ -221,10 +221,15 @@ public final class StudioWindow implements AutoCloseable {
         commands.voiceEditor=id->{showAssets();assetKinds.getSelectionModel().select(0);if(id!=null)voices.selectVoice(id);};
         commands.envelopeEditor=id->{showEnvelopes();if(id!=null)envelopes.selectEnvelope(id);};
         piano.selection=id->{selectedNote=id;refreshNoteInspector();};
+        piano.copyForAgent = this::copyNotesForAgent;
         piano.edit=n->change(p->ProjectEdits.updateNote(p,selectedSequence,n));
         piano.addition=n->{if(change(p->ProjectEdits.addNote(p,selectedSequence,n))){selectedNote=n.id();refreshView();}};
         detail.getStyleClass().add("section");linked.getStyleClass().add("muted");
-        HBox pianoHeader=new HBox(12,detail,spacer(),linked);pianoHeader.getStyleClass().add("panelbar");
+        var lasso = new ScreenshotLasso(piano, this::lassoNotesForAgent, status::setText).controls();
+        lasso.visibleProperty().bind(sourceModes.getSelectionModel().selectedItemProperty().isEqualTo(noteMode)
+                .and(piano.scroll.visibleProperty()));
+        lasso.managedProperty().bind(lasso.visibleProperty());
+        HBox pianoHeader=new HBox(12,detail,spacer(),linked,lasso);pianoHeader.getStyleClass().add("panelbar");
         noteInspector.getStyleClass().add("note-inspector");
         noteBody=new VBox(piano.scroll,noteInspector);VBox.setVgrow(piano.scroll,Priority.ALWAYS);
         Tab fmAssets=new Tab("FM voices",voices),envAssets=new Tab("Envelopes",envelopes),dacAssets=new Tab("DAC samples",samples);
@@ -662,6 +667,27 @@ public final class StudioWindow implements AutoCloseable {
         stop();
         refreshView();
     }
+    private boolean copyNotesForAgent() {
+        var notes = piano.selectedNotes();
+        if (notes.isEmpty()) return false;
+        return AgentClipboard.copy(com.opensmpsdeck.headless.ArrangementNoteContext.copy(document.path(),
+                document.project(), document.dirty(), selectedSequence, clipPath(), notes), status::setText);
+    }
+
+    private com.opensmpsdeck.headless.NoteHandoff.Capture lassoNotesForAgent(javafx.geometry.Rectangle2D box) {
+        if (piano.sequence == null) return null;
+        return com.opensmpsdeck.headless.ArrangementNoteContext.capture(document.path(), document.project(),
+                document.dirty(), selectedSequence, clipPath(), piano.lassoNotes(box), piano.lassoRange(box));
+    }
+
+    private List<String> clipPath() {
+        if (clip() == null) return List.of();
+        var path = new ArrayList<String>();
+        groupPath.forEach(frame -> path.add(frame.placementId()));
+        path.add(selectedClip);
+        return path;
+    }
+
     private void key(KeyEvent e){
         if(e.isShortcutDown()&&e.getCode()==KeyCode.S){save();e.consume();return;}
         if(e.getCode()==KeyCode.ESCAPE && !groupPath.isEmpty() && document.project().nativeProgram()==null) {
