@@ -23,19 +23,50 @@ Add an entry to `transcribers.json`:
 }
 ```
 
-Set `defaults.vocals` to `muscriptor-medium,basic-pitch,rmvpe` when all
-three entries are installed, or pass
-`--transcriber-for vocals=muscriptor-medium,basic-pitch,rmvpe` on an
-audio-only run. Set `defaults.vocals` to `rmvpe` to use it alone.
+When the command is named `rmvpe`, audio-only reconstruction uses it by
+default for vocals. Set `vocalLead.choice` to `muscriptor-medium`,
+`basic-pitch` or `fusion` to choose an alternative. Use `defaults.vocals`
+to list the adapters to compare for fusion. Set `vocalLead.registerShift`
+to the number of semitones to add to the selected vocal line (default 12).
 
-The adapter writes `[[startSeconds, endSeconds, midiPitch], ...]`. It
-smooths the pitch contour over five frames and splits on a sustained pitch
-change or an unvoiced gap. The `<output>.meta.json` sidecar records the
-checkpoint hash, effective device and `f0Cents10ms`, a base64-encoded array
-of little-endian unsigned 16-bit MIDI cents with zero for unvoiced frames.
-The reconstruction uses the fractional contour to look for supported bends
-on held notes. When selecting among candidates it measures agreement against
-periodicity in the vocal stem.
+The default adapter mode uses strong spectral-flux onsets, voicing starts
+and sustained pitch changes as boundaries. Each note takes the rounded
+median of the raw voiced frames in its segment. Short gaps can extend
+the previous release while preserving both attacks. Add `"--mode",
+"contour"` to the command to use the earlier pitch-only segmentation.
+
+To override segmentation, add `"--syllable-settings", "{...}"` to the
+configured command, with the JSON object encoded as one argument. All frame
+values use the 10 ms grid. The default object is:
+
+```json
+{
+  "window_samples": 2048,
+  "flux_scale": 100,
+  "flux_percentile": 93,
+  "onset_spacing_frames": 14,
+  "onset_voiced_frames": 6,
+  "rms_before_frames": 8,
+  "rms_after_frames": 5,
+  "rms_rise_db": 6,
+  "median_frames": 11,
+  "pitch_change_semitones": 1,
+  "pitch_change_frames": 8,
+  "pitch_reference_update": 0.15,
+  "bridge_frames": 6,
+  "min_voiced_frames": 10,
+  "min_note_frames": 9,
+  "min_pitch": 40
+}
+```
+
+The adapter writes `[[startSeconds, endSeconds, midiPitch], ...]`.
+The `<output>.meta.json` sidecar records the checkpoint hash, effective
+device, effective segmentation settings, detected boundary frames by
+type and `f0Cents10ms`, a base64 array of little-endian unsigned 16-bit
+MIDI cents with zero for unvoiced frames. Reconstruction saves the note
+output under `snapshots/` and the sidecar evidence in the manifest so
+replay and review can use it with the adapter and checkpoint offline.
 
 Run the mock tests without a checkpoint or GPU with
 `python3 -m unittest discover -s tools/transcribers/rmvpe -v` from the repo root.

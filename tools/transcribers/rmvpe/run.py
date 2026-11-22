@@ -62,7 +62,8 @@ def infer(args):
     with torch.inference_mode():
         hz = chunked_pitch(mono, lambda chunk: model.infer_from_audio(chunk, thred=VOICING_THRESHOLD),
                            lambda chunk, length: np.pad(chunk, (0, length - len(chunk))))
-    pitches = [69 + 12 * math.log2(frequency / 440) if frequency > 0 else 0 for frequency in hz]
+    hz = np.asarray(hz)
+    pitches = np.where(hz > 0, 69 + 12 * np.log2(np.maximum(hz, 1e-6) / 440), 0)
     with args.weights.open("rb") as weights:
         digest = hashlib.file_digest(weights, "sha256").hexdigest()
     return pitches, {"tool": "rmvpe", "version": "1", "torchVersion": str(torch.__version__),
@@ -122,7 +123,21 @@ def transcribe(args):
         raise ValueError("RMVPE expects the vocals role")
     pitches, metadata = infer(args)
     pitches = [pitch if math.isfinite(pitch) and 1 <= pitch <= 127 else 0 for pitch in pitches]
-    notes = segment(pitches)
+    if args.mode == "syllable":
+        from dataclasses import asdict
+        import numpy as np
+        import soundfile as sf
+        from syllables import Settings, segment as segment_syllables, syllable_onsets
+
+        settings = Settings(**json.loads(args.syllable_settings))
+        audio, rate = sf.read(args.input, always_2d=True)
+        contour = np.asarray(pitches)
+        onsets = syllable_onsets(audio.mean(axis=1), rate, contour > 0, settings)
+        notes, boundaries = segment_syllables(contour, onsets, settings)
+        metadata.update(version="2", vocalMode="syllable", vocalBoundaries10ms=boundaries,
+                        syllableSettings=asdict(settings))
+    else:
+        notes = segment(pitches)
     contour = struct.pack(f"<{len(pitches)}H", *(round(pitch * 100) for pitch in pitches))
     metadata["f0Cents10ms"] = base64.b64encode(contour).decode("ascii")
     args.output.write_text(json.dumps(notes), encoding="utf-8")
@@ -137,4 +152,6 @@ if __name__ == "__main__":
     parser.add_argument("--weights", type=Path, required=True, help="Local RMVPE PyTorch checkpoint")
     parser.add_argument("--role", default="vocals")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--mode", choices=("syllable", "contour"), default="syllable")
+    parser.add_argument("--syllable-settings", default="{}", help="JSON object overriding syllable segmentation defaults")
     transcribe(parser.parse_args())

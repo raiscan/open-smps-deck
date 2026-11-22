@@ -31,12 +31,12 @@ lets import recognize the audio-only source automatically. Override a role
 with `--stem-role stems/NAME.wav=ROLE` and repeat it on subsequent checks.
 
 The [local extraction guide](../../headless/README.md#external-stem-separation)
-covers model setup and config paths. The bake-off recommends SW, MuScriptor
-Medium for tonal instruments, Basic Pitch for vocals and ADTOF for drums.
-For vocal candidate selection, configure
-`vocals: "muscriptor-medium,basic-pitch,rmvpe"` in the transcriber defaults
-and let each role select its adapter. Inspect the candidate coverage, F0
-agreement and winner in `manifest.json`. A configured `bs-roformer`
+covers model setup and config paths. Use MuScriptor Medium for tonal backing, ADTOF for drums, and configure
+[RMVPE](../../tools/transcribers/rmvpe/) under the name `rmvpe` for
+syllable-aware vocal leads. The vocal gate and selected register are saved
+in `manifest.json`. Use `vocalLead.choice` in the transcriber configuration
+to choose Basic Pitch, MuScriptor or fusion, and `vocalLead.registerShift`
+to change the default +12 semitones. A configured `bs-roformer`
 separator supplies and snapshots aligned drums when the input has no mapped
 drum stem. Otherwise the CLI warns and fits drums against the mix.
 
@@ -159,6 +159,31 @@ additional filters, voice assignments, section journals and detector details.
 Use [role plans](../../headless/README.md#inspect-the-score-and-plan-musical-roles)
 for recurring lead and backing rules and [external transcription](../../headless/README.md#external-transcription)
 when a mapped or unmatched stem needs a separate transcriber.
+
+### Clean up a vocal-derived lead
+
+1. Run `reconstruct vocal-review "$work"` or call
+   `reconstruct_vocal_review` with `workDir`. Find the phrase you want
+   and pass `--phrase ID` (MCP `phrase`). Each note includes source and
+   project times, the nearby syllable onset, other boundary evidence, and
+   its RMVPE median and slope in the selected register. Vibrato is the
+   RMS variation around the linear pitch trend. Pitch confidence is the
+   fraction of voiced frames within 0.7 semitones of the note. Voicing
+   fraction counts the whole gate.
+2. Listen with MCP `render_clip` on the built project, using that phrase's
+   project seconds and `solo: ["FM1"]`. Audition the returned vocal
+   `stem` path over the corresponding **source** seconds. Compare the
+   attacks, releases and pitch before choosing edits.
+3. Add `--propose` or MCP `propose: true` to save the suggested intents
+   under the `vocal-lead-review` group. The same intents are returned in
+   `edits` so you can revise them before sending them to
+   `reconstruct edit propose`. Accept or reject individual proposals
+   with `reconstruct proposals`, `reconstruct_edit`, or Studio
+   **Proposals**. Audition overlapping suggestions individually.
+4. Run `reconstruct run --from transcribe "$work"` (MCP
+   `reconstruct_run` with `from: "transcribe"`). Re-check the phrase
+   with the review view and another solo render. The rebuild uses the
+   saved contour and boundaries.
 
 ## 4. Propose or apply a scoped edit
 

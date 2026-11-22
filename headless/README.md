@@ -328,15 +328,15 @@ checked `runRequest` to `reconstruct_run`.
 
 The [extraction bake-off](../experiments/extraction-bakeoff/RESULTS.md)
 supports starting with BS-RoFormer SW, MuScriptor Medium for bass, guitar,
-piano and other tonal material, Basic Pitch for vocals, and ADTOF for drums.
-Add [RMVPE](../tools/transcribers/rmvpe/) as a vocal candidate when its
-checkpoint is available.
+piano and other tonal material, and ADTOF for drums. Configure
+[RMVPE](../tools/transcribers/rmvpe/) for syllable-aware vocal leads.
+Basic Pitch remains a vocal alternative.
 In the four-track [Suno head-to-head](../experiments/extraction-bakeoff/README.md#original-midi-render-head-to-head),
 the local Medium + ADTOF route scored 0.775 onset F1 against 0.429 for the
 per-stem Suno MIDI after delay correction. The commands above explicitly
 select SW and Medium. The integrated
-audio-only build sends all tonal stems, including vocals, to the selected
-transcriber and uses the built-in spectral detector on drums. For separate
+audio-only build uses the configured RMVPE command for vocals when available
+and the built-in spectral detector on drums by default. For separate
 vocal and drum estimates, use the
 [bake-off environments and CLI](../experiments/extraction-bakeoff/README.md#run-basic-pitch-and-adtof-on-separated-stems).
 Those estimates are independent of the audio-only import.
@@ -991,20 +991,28 @@ Install the adapters and replace the paths. Each command may choose its own devi
 }
 ```
 
-For vocals, pass up to three distinct comma-separated adapter names.
-The example evaluates MuScriptor, Basic Pitch, their fused notes, and the
-monophonic line from RMVPE. Use the same list with `--transcriber-for vocals=...`
-or MCP `transcriberFor.vocals`. The comparison balances coverage of audible
-vocal frames and F0 agreement within one semitone. With RMVPE in the set,
-all candidates use periodicity measured directly on the stem as the pitch
-reference. With MuScriptor and Basic Pitch alone, the Basic Pitch contour
-can fill gaps in the reference. The manifest records the winner, reference,
-and each score. A single name uses that adapter alone. RMVPE's fractional
-contour can also supply bends for held notes with smooth, sustained motion.
+With an adapter named `rmvpe` configured, audio-only runs select its
+syllable-aware transcription for vocals by default. Use the
+`vocalLead` object in `transcribers.json` to choose another method or
+change the vocal register:
 
-Audio-only vocal cleanup follows a monophonic line using pitch salience,
-continuity and a range learned from the stem. It joins supported syllables,
-bridges short voiced gaps and can fill sustained pitches. When other tonal stems are present, vocals need at least two seconds of
+```json
+"vocalLead": {"choice": "auto", "registerShift": 12}
+```
+
+`choice` accepts `auto`, a configured adapter name, or `fusion`. Fusion
+uses at least two note adapters listed in `defaults.vocals`. For an
+individual run, pass `--transcriber-for vocals=NAME` or MCP
+`transcriberFor.vocals`. A comma-separated list runs up to three candidates,
+including RMVPE if listed. The comparison measures audible frame coverage
+and one-semitone F0 agreement. With an RMVPE contour available, stem
+periodicity supplies the comparison reference. The manifest and report
+record the selected method, register shift, gate and candidate metrics.
+
+The syllable mode preserves separate attacks on repeated pitches and
+snapshots its pitch contour and detected boundaries. Alternative note
+transcribers use the existing monophonic cleanup and pitch salience.
+When other tonal stems are present, vocals need at least two seconds of
 audible periodic pitch (or 15% of a short excerpt, whichever is smaller)
 and an RMS level of at least 3.5% of the strongest other tonal stem.
 Residual vocals are skipped and normal lead selection resumes.
@@ -1013,6 +1021,12 @@ The vocal-derived FM1 part uses a bright sustained patch selected from the catal
 held-note probe. When the stem supports a vibrato estimate, it is encoded
 using the usual FM modulation controls. Edit the source instrument and its
 effects in `voicing.json` to override these choices.
+
+Review the saved vocal contour and suggested edits by phrase with
+`reconstruct vocal-review WORK_DIR [--phrase ID]` or MCP
+`reconstruct_vocal_review`. `--propose` (MCP `propose: true`) saves the
+suggestions to the existing proposal journal for CLI or Studio review.
+See [Clean up a vocal-derived lead](../skills/opensmpsdeck/SKILL.md#clean-up-a-vocal-derived-lead).
 
 A `drums` stem feeds DAC and PSG3 routing. When the stem is absent, detection
 uses drums from local separation, or the mix if the separator is unavailable.

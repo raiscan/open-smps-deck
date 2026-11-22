@@ -197,6 +197,24 @@ class ExternalTranscribersTest {
 
         Path config = directory.resolve("transcribers.json");
         fixtureConfig(config);
+        var f0 = java.nio.ByteBuffer.allocate(200).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int frame = 0; frame < 100; frame++)
+            f0.putShort((short) (frame >= 20 && frame < 78 ? 7800 : 0));
+        String encoded = java.util.Base64.getEncoder().encodeToString(f0.array());
+        Path adapter = directory.resolve("rmvpe-fixture.sh");
+        Files.writeString(adapter, """
+                set -eu
+                cat > "$2" <<'JSON'
+                [[0.2,0.4,78],[0.4,0.78,78]]
+                JSON
+                cat > "$2.meta.json" <<'JSON'
+                {"vocalMode":"syllable","f0Cents10ms":"%s","vocalBoundaries10ms":{"syllable":[20,40,60],"voicing":[20],"pitchChange":[]}}
+                JSON
+                """.formatted(encoded));
+        var configJson = com.google.gson.JsonParser.parseString(Files.readString(config)).getAsJsonObject();
+        configJson.add("rmvpe", new Gson().toJsonTree(List.of("sh", adapter.toString(), "{input}", "{output}")));
+        configJson.add("defaults", new Gson().toJsonTree(Map.of("vocals", "fixture")));
+        Files.writeString(config, configJson.toString());
         Path drum = directory.resolve("drum.wav");
         Path vocal = directory.resolve("vocals.wav");
         WaveFile.write(vocal, 60, sink -> {
@@ -229,7 +247,7 @@ class ExternalTranscribersTest {
         var args = List.of("reconstruct", "run", "--audio-only", wav.toString(), index.toString(), work.toString(),
                 "--stem", "vocals=" + vocal, "--stem", "drums=" + drum, "--stem", "other=" + quiet,
                 "--tempo", "105", "--bar-offset", "0.125", "--transcriber-config", config.toString(),
-                "--transcriber-device", "cuda:0", "--fm-only");
+                "--transcriber-device", "cuda:0", "--fm-only", "--transcriber", "fixture");
         run(0, args);
 
         var score = ReconstructionStages.readScore(work.resolve("score.json"));
@@ -242,7 +260,14 @@ class ExternalTranscribersTest {
         assertEquals(List.of("other"), score.inputs().audioOnly().skippedStems());
         assertEquals(1, score.inputs().leadPart());
         assertEquals("vocals", score.inputs().externalNotes().get(1).provenance().role());
-        assertEquals(List.of(78), pitches(score, 1));
+        assertEquals(List.of(90, 90), pitches(score, 1));
+        var metadata = score.inputs().externalNotes().get(1).provenance().metadata();
+        assertEquals("rmvpe", metadata.get("vocalSelection"));
+        assertEquals("passed", metadata.get("vocalGate"));
+        var view = ReconstructionVocalReview.review(work, null, false);
+        assertEquals(1, view.getAsJsonObject("flagsByType").get("missingSyllableNote").getAsInt());
+        assertEquals("splitNote", view.getAsJsonArray("edits").get(0).getAsJsonObject().get("op").getAsString());
+        assertFalse(Files.exists(work.resolve("edits.json")));
         assertEquals(List.of(36), pitches(score, 0));
         assertEquals(105, score.tempo().selected().bpm());
         assertEquals(.125, score.tempo().selected().barOffset());
@@ -255,6 +280,16 @@ class ExternalTranscribersTest {
         run(0, List.of("reconstruct", "rerun", work.toString(), replay.toString()));
         assertEquals(-1, Files.mismatch(work.resolve("render.wav"), replay.resolve("render.wav")));
         assertEquals(-1, Files.mismatch(work.resolve("score.json"), replay.resolve("score.json")));
+        assertEquals(view.get("phrases"), ReconstructionVocalReview.review(replay, null, false).get("phrases"));
+        var published = ReconstructionVocalReview.review(replay, null, true);
+        assertEquals(1, published.get("proposalsSaved").getAsInt());
+        assertEquals(0, ReconstructionVocalReview.review(replay, null, true).get("proposalsSaved").getAsInt());
+        var proposal = ReconstructionEdits.read(replay).intents().getFirst();
+        assertTrue(proposal.proposed());
+        ReconstructionEditCommand.proposals(replay, "accept", proposal.id(), null);
+        run(0, List.of("reconstruct", "run", "--from", "transcribe", replay.toString()));
+        assertEquals(List.of(90, 90, 90), pitches(ReconstructionStages.readScore(replay.resolve("score.json")), 1));
+        assertEquals(0, ReconstructionVocalReview.review(replay, null, false).getAsJsonArray("edits").size());
         var missing = new ArrayList<>(args);
         missing.set(5, directory.resolve("missing-config").toString());
         assertTrue(run(2, missing).contains("needs a configured transcriber"));
@@ -331,6 +366,29 @@ class ExternalTranscribersTest {
         assertEquals("example", detector.metadata().get("model"));
         assertEquals(List.of(35, 38), pitches(score, 0));
         assertEquals(List.of(99, 85), detector.hits().stream().map(MidiScore.Note::velocity).toList());
+    }
+
+    @Test void configRoutesVocalAlternativesAndValidatesTheRegister() throws Exception {
+        var command = List.of("ignored", "{input}", "{output}");
+        var configFile = directory.resolve("choices.json");
+        for (String choice : List.of("auto", "fusion", "basic-pitch", "muscriptor-medium")) {
+            Files.writeString(configFile, new Gson().toJson(Map.of(
+                    "rmvpe", command, "basic-pitch", command, "muscriptor-medium", command,
+                    "defaults", Map.of("vocals", "muscriptor-medium,basic-pitch"),
+                    "vocalLead", Map.of("choice", choice, "registerShift", 0))));
+            var config = ExternalTranscribers.config(configFile, false);
+            assertEquals(0, config.vocalLead().registerShift());
+            String expected = switch (choice) {
+                case "auto" -> "rmvpe";
+                case "fusion" -> "muscriptor-medium,basic-pitch";
+                default -> choice;
+            };
+            assertEquals(expected, config.audioRole("vocals", "muscriptor-medium", Map.of(), true));
+            assertEquals("basic-pitch", config.audioRole("vocals", "muscriptor-medium",
+                    Map.of("vocals", "basic-pitch"), true));
+        }
+        Files.writeString(configFile, "{\"vocalLead\":{\"registerShift\":0.5}}");
+        assertThrows(IllegalArgumentException.class, () -> ExternalTranscribers.config(configFile, false));
     }
 
     @Test void missingExecutableAbortsAndNamesTheTranscriber() throws Exception {
