@@ -1,0 +1,1322 @@
+{
+  "version": 4,
+  "matcher": "s3k-ntsc-match-assets-v2",
+  "referenceUs": 8000000,
+  "presentations": 480,
+  "bankBytes": 484,
+  "sourceNotes": 80,
+  "fmNotes": 64,
+  "psgNotes": 16,
+  "dacHits": 32,
+  "keepOctaves": false,
+  "fmOnly": false,
+  "inputs": {
+    "wav": {
+      "file": "mix.wav",
+      "sha256": "d8a6220e713892e0211cf2c443b7bd6f4e3da87d581b06acbd97223f8c6ab2f2"
+    },
+    "catalogue": {
+      "file": "catalogue.json",
+      "sha256": "7e5a261da5aa7b10cdbe861977efb59bacd994eeefbcd8203e08d1c280f3c4de"
+    },
+    "stem-0": {
+      "file": "drums.wav",
+      "sha256": "4e9d48854c35128c318d7aff98e6f07fec3b36b323c01da2c736271bf1e0385e"
+    },
+    "stem-1": {
+      "file": "vocals.wav",
+      "sha256": "4274d2b136c49993c05fa0334ac71b1ceca9964d961e69d8a3661bbeb06b05fc"
+    },
+    "stem-2": {
+      "file": "bass.wav",
+      "sha256": "ce424603269049c5211cb1a0bed7dfee422177ac1463320dd514e1c459459707"
+    },
+    "stem-3": {
+      "file": "keys.wav",
+      "sha256": "56f3db4a95eca08eee58b978a4b22d810c6ba6d655e7740d5fb9fa62c954ab43"
+    }
+  },
+  "outputs": {
+    "project": {
+      "file": "arrangement.smps.json",
+      "sha256": "d63a42ba441fbe7f5f3b7ed5620fa963bb794991aca2ce6caee58c282032c4ea"
+    },
+    "package": {
+      "file": "arrangement.smps.zip",
+      "sha256": "6d8e5d3610e8332dc7b553559f218d0ace860d7d1618580372b22c967540a3f2"
+    },
+    "wav": {
+      "file": "render.wav",
+      "sha256": "7ecf9465db59920afd1a9cad5ffeefca8949875faf3fe2d4e16e5af309c9d22d"
+    }
+  },
+  "parts": [
+    {
+      "id": 0,
+      "name": "Drums",
+      "program": 0,
+      "drums": true,
+      "notesInRange": 32
+    },
+    {
+      "id": 1,
+      "name": "vocals",
+      "program": 80,
+      "drums": false,
+      "notesInRange": 16
+    },
+    {
+      "id": 2,
+      "name": "bass",
+      "program": 33,
+      "drums": false,
+      "notesInRange": 16
+    },
+    {
+      "id": 3,
+      "name": "keys",
+      "program": 4,
+      "drums": false,
+      "notesInRange": 16
+    }
+  ],
+  "matches": [
+    {
+      "kind": "DAC_SAMPLE",
+      "lane": "DAC",
+      "key": {
+        "partId": 0,
+        "drumPitch": 36
+      },
+      "choice": {
+        "assetId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8",
+        "name": "Stem drum 36",
+        "sampleRate": 2,
+        "status": "requested",
+        "probes": [],
+        "shortlist": [],
+        "rankingPolicy": "perceptual-drum",
+        "drums": {
+          "reference": "stem",
+          "timeBase": "source",
+          "hits": [
+            {
+              "onset": 0.0,
+              "start": 0.0,
+              "length": 0.16,
+              "overlaps": 0
+            },
+            {
+              "onset": 0.995,
+              "start": 1.0,
+              "length": 0.16,
+              "overlaps": 0
+            },
+            {
+              "onset": 1.995,
+              "start": 2.0,
+              "length": 0.16,
+              "overlaps": 0
+            },
+            {
+              "onset": 2.995,
+              "start": 3.0,
+              "length": 0.16,
+              "overlaps": 0
+            },
+            {
+              "onset": 3.995,
+              "start": 4.0,
+              "length": 0.16,
+              "overlaps": 0
+            }
+          ],
+          "target": {
+            "bands": [
+              0.05821703574551926,
+              0.09196446278543362,
+              0.18239263443735848,
+              0.3752053445811333,
+              0.20272936161663502,
+              0.05781478009073415,
+              0.018823669719831675,
+              0.007202430446140019,
+              0.0030475775525780607,
+              0.001369734235423181,
+              6.387925323567398E-4,
+              3.0485895890769503E-4,
+              1.4762353772205522E-4,
+              7.213769204649887E-5,
+              3.5438498244084115E-5,
+              1.7452169527226145E-5,
+              8.59332886528583E-6,
+              4.218697460214182E-6,
+              2.0569516331783273E-6,
+              9.90378223263123E-7,
+              4.664297911563122E-7,
+              2.1137404586995893E-7,
+              8.89007074781189E-8,
+              3.175163806264163E-8,
+              7.58804474558398E-9
+            ],
+            "sound": {
+              "centroidHz": 74.40401203766113,
+              "flatness": 0.0035108420106443206,
+              "brightness": 0.11220281785185626,
+              "noisiness": 0.025984596039029695,
+              "attackSeconds": 0.0,
+              "decaySeconds": 0.09,
+              "effectiveDurationSeconds": 0.145
+            },
+            "pitchHz": 76.92307692307692
+          },
+          "alternatives": [],
+          "selected": "sliced",
+          "reason": "requested",
+          "drumClass": "KICK",
+          "acousticProfileVersion": 2,
+          "exclusions": []
+        }
+      }
+    },
+    {
+      "kind": "DAC_SAMPLE",
+      "lane": "DAC",
+      "key": {
+        "partId": 0,
+        "drumPitch": 38
+      },
+      "choice": {
+        "assetId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28",
+        "name": "Stem drum 38",
+        "sampleRate": 2,
+        "status": "requested",
+        "probes": [],
+        "shortlist": [],
+        "rankingPolicy": "perceptual-drum",
+        "drums": {
+          "reference": "stem",
+          "timeBase": "source",
+          "hits": [
+            {
+              "onset": 6.495,
+              "start": 6.499916666666667,
+              "length": 0.16508333333333333,
+              "overlaps": 0
+            },
+            {
+              "onset": 2.495,
+              "start": 2.4999166666666666,
+              "length": 0.16508333333333333,
+              "overlaps": 0
+            },
+            {
+              "onset": 0.495,
+              "start": 0.4999166666666666,
+              "length": 0.16508333333333333,
+              "overlaps": 0
+            },
+            {
+              "onset": 1.495,
+              "start": 1.4999166666666668,
+              "length": 0.16508333333333333,
+              "overlaps": 0
+            },
+            {
+              "onset": 3.495,
+              "start": 3.5,
+              "length": 0.165,
+              "overlaps": 0
+            }
+          ],
+          "target": {
+            "bands": [
+              0.03193513570187313,
+              0.03232953934477244,
+              0.037332114959081286,
+              0.04561506328381761,
+              0.07204974631699769,
+              0.14463085094695607,
+              0.21873710204083774,
+              0.08271228068074507,
+              0.03466742275002344,
+              0.0251279331748841,
+              0.022229087446782113,
+              0.024008042577387905,
+              0.024922194097998326,
+              0.018452443246198706,
+              0.018851192524566403,
+              0.01877716504867768,
+              0.018507926377167142,
+              0.01947743497698985,
+              0.017918246320698706,
+              0.016818447380722513,
+              0.013527909065486005,
+              0.010906722386449061,
+              0.0043368366881167296,
+              6.238853242055344E-4,
+              9.866447970165666E-5
+            ],
+            "sound": {
+              "centroidHz": 459.4067536199883,
+              "flatness": 0.4875980100744361,
+              "brightness": 0.28279642330422844,
+              "noisiness": 0.6976966298831677,
+              "attackSeconds": 0.0,
+              "decaySeconds": 0.085,
+              "effectiveDurationSeconds": 0.13
+            },
+            "pitchHz": 94.95798319327731
+          },
+          "alternatives": [],
+          "selected": "sliced",
+          "reason": "requested",
+          "drumClass": "SNARE",
+          "acousticProfileVersion": 2,
+          "exclusions": []
+        }
+      }
+    },
+    {
+      "kind": "FM_VOICE",
+      "lane": "FM1",
+      "key": {
+        "partId": 1
+      },
+      "choice": {
+        "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+        "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+        "name": "Round bass",
+        "status": "bright sustained vocal lead synth",
+        "probes": [],
+        "shortlist": [
+          {
+            "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+            "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+            "name": "Round bass",
+            "windows": 0,
+            "score": 0.0,
+            "meanDistance": 1440.781025034658
+          }
+        ]
+      }
+    },
+    {
+      "kind": "FM_VOICE",
+      "lane": "FM2",
+      "key": {
+        "partId": 2
+      },
+      "choice": {
+        "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+        "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+        "name": "Round bass",
+        "status": "shortlist leader (no validated improvement)",
+        "probes": [],
+        "shortlist": [
+          {
+            "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+            "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+            "name": "Round bass",
+            "windows": 0,
+            "score": 0.7661039709435844,
+            "meanDistance": 1440.781025034658
+          },
+          {
+            "assetId": "fm-voice-70ec934edbada66a5458a9cfc80b67e6cb4f8ae0f0598bdc0c587641d4faf812",
+            "variantId": "variant-47432115ee1dabbf3efc0facc815dbda457123c417c8a81bc480d41248393ea7",
+            "name": "Glass keys",
+            "windows": 0,
+            "score": 0.4274861686969592,
+            "meanDistance": 1587.7377106377983
+          }
+        ]
+      }
+    },
+    {
+      "kind": "FM_VOICE",
+      "lane": "FM3",
+      "key": {
+        "partId": 3
+      },
+      "choice": {
+        "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+        "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+        "name": "Round bass",
+        "status": "shortlist leader (no validated improvement)",
+        "probes": [],
+        "shortlist": [
+          {
+            "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+            "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+            "name": "Round bass",
+            "windows": 0,
+            "score": 0.31194417712531597,
+            "meanDistance": 1440.781025034658
+          },
+          {
+            "assetId": "fm-voice-70ec934edbada66a5458a9cfc80b67e6cb4f8ae0f0598bdc0c587641d4faf812",
+            "variantId": "variant-47432115ee1dabbf3efc0facc815dbda457123c417c8a81bc480d41248393ea7",
+            "name": "Glass keys",
+            "windows": 0,
+            "score": 0.15874257712941583,
+            "meanDistance": 1729.5963504302956
+          }
+        ]
+      }
+    },
+    {
+      "kind": "FM_VOICE",
+      "lane": "FM4",
+      "key": {
+        "partId": 3
+      },
+      "choice": {
+        "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+        "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+        "name": "Round bass",
+        "status": "shortlist leader (no validated improvement)",
+        "probes": [],
+        "shortlist": [
+          {
+            "assetId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+            "variantId": "variant-8a19b3d03d12cf1b226616d5194b040a2f840d85c96cb61eae930434b619e905",
+            "name": "Round bass",
+            "windows": 0,
+            "score": 0.31194417712531597,
+            "meanDistance": 1440.781025034658
+          },
+          {
+            "assetId": "fm-voice-70ec934edbada66a5458a9cfc80b67e6cb4f8ae0f0598bdc0c587641d4faf812",
+            "variantId": "variant-47432115ee1dabbf3efc0facc815dbda457123c417c8a81bc480d41248393ea7",
+            "name": "Glass keys",
+            "windows": 0,
+            "score": 0.15874257712941583,
+            "meanDistance": 1729.5963504302956
+          }
+        ]
+      }
+    }
+  ],
+  "midiWarnings": [],
+  "wholePartVoices": false,
+  "sectionTrials": [],
+  "audioRefine": false,
+  "refinedNotes": 32,
+  "pitchChanges": [],
+  "echoEstimates": [],
+  "echoNotes": 0,
+  "echoBankLimit": false,
+  "vibratoEstimates": {},
+  "reverbEstimates": [],
+  "reductions": [],
+  "audio": [
+    {
+      "startSeconds": 0.0,
+      "endSeconds": 8.0,
+      "referenceRmsDbfs": -9.781310470055535,
+      "renderedRmsDbfs": -24.085753486050052,
+      "referenceOnsets": 8,
+      "renderedOnsets": 3,
+      "pairedOnsets": 2
+    }
+  ],
+  "stages": {
+    "repeatGroups": 0,
+    "consensusCorrections": 0,
+    "harmonyMerges": 0,
+    "harmonyDrops": 0,
+    "linkedClips": 0,
+    "phraseGroups": 3,
+    "sections": 1,
+    "leadContinuity": {
+      "split": 0,
+      "added": 0,
+      "extended": 0,
+      "lead-legato": 0
+    },
+    "melodyGapFill": {
+      "beforeSeconds": 0.0,
+      "afterSeconds": 0.0
+    },
+    "fm1InterNoteGaps": {
+      "before": {
+        "6": 15
+      },
+      "after": {
+        "6": 15
+      }
+    }
+  },
+  "effectCopyLanes": [],
+  "tempoCurve": {
+    "startBpm": 120.0,
+    "endBpm": 120.0,
+    "maxDeviation": 0.0,
+    "confidence": 1.0,
+    "warped": false,
+    "durationSeconds": 8.0
+  },
+  "externalTranscription": {
+    "1": {
+      "tool": "fixture",
+      "role": "vocals",
+      "device": "auto",
+      "inputSha256": "4274d2b136c49993c05fa0334ac71b1ceca9964d961e69d8a3661bbeb06b05fc",
+      "outputSha256": "da00f88ef034efd291a6b18d3ab635cb358083dbe899502f6f9339781912449a",
+      "configSha256": "1a4c94ac41caf9285c5c85f7b254d6181e7b60dd34cca8402111a470aa575408",
+      "metadata": {
+        "f0Cents10ms": "AAAAAAAALBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBoAAAAAAAAAAAAAAAAAAAAAAAAAAPQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQaAAAAAAAAAAAAAAAAAAAAAAAAAACEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHAAAAAAAAAAAAAAAAAAAAAAAAAAA6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BwAAAAAAAAAAAAAAAAAAAAAAAAAACAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcAAAAAAAAAAAAAAAAAAAAAAAAAAD0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GgAAAAAAAAAAAAAAAAAAAAAAAAAALBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBoAAAAAAAAAAAAAAAAAAAAAAAAAAAAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZABkAGQAZAAAAAAAAAAAAAAAAAAAAAAAAAAAsGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGgAAAAAAAAAAAAAAAAAAAAAAAAAA9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9BoAAAAAAAAAAAAAAAAAAAAAAAAAAIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQchByEHIQcAAAAAAAAAAAAAAAAAAAAAAAAAACwHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHbAdsB2wHQAAAAAAAAAAAAAAAAAAAAAAAAAA6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BzoHOgc6BwAAAAAAAAAAAAAAAAAAAAAAAAAACAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcIBwgHCAcAAAAAAAAAAAAAAAAAAAAAAAAAAD0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GvQa9Br0GgAAAAAAAAAAAAAAAAAAAAAAAAAALBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBosGiwaLBoAAAAAAAAAAAAAAAAAAA==",
+        "vocalBoundaries10ms": "{\"syllable\":[3,53,103,153,203,253,303,353,403,453,503,553,603,653,703,753],\"voicing\":[],\"pitchChange\":[]}",
+        "vocalChoice": "fixture",
+        "vocalComparison": "{\"fixture\":{\"voicedSeconds\":6.71,\"coveredSeconds\":6.4,\"coverage\":0.9538002980625931,\"pitchAgreement\":1.0,\"f0ComparableSeconds\":6.4}}",
+        "vocalGate": "pinned",
+        "vocalReference": "stem-periodicity",
+        "vocalRegisterShift": "12",
+        "vocalSelection": "fixture"
+      },
+      "noteCount": 16,
+      "replace": false,
+      "addedStem": true
+    },
+    "2": {
+      "tool": "fixture",
+      "role": "bass",
+      "device": "auto",
+      "inputSha256": "ce424603269049c5211cb1a0bed7dfee422177ac1463320dd514e1c459459707",
+      "outputSha256": "54e596250a6709ca94a8b8a75946af6b88e12e00e3cc6084d327e7f079567f9a",
+      "configSha256": "1a4c94ac41caf9285c5c85f7b254d6181e7b60dd34cca8402111a470aa575408",
+      "metadata": {},
+      "noteCount": 16,
+      "replace": false,
+      "addedStem": true
+    },
+    "3": {
+      "tool": "fixture",
+      "role": "keyboard",
+      "device": "auto",
+      "inputSha256": "56f3db4a95eca08eee58b978a4b22d810c6ba6d655e7740d5fb9fa62c954ab43",
+      "outputSha256": "9a8973349e8ab27d9d7724b8a3867048e7eafc513e79073db789353f77b1c430",
+      "configSha256": "1a4c94ac41caf9285c5c85f7b254d6181e7b60dd34cca8402111a470aa575408",
+      "metadata": {},
+      "noteCount": 16,
+      "replace": false,
+      "addedStem": true
+    }
+  },
+  "drumSource": "sliced",
+  "voicedGates": [
+    {
+      "id": "transcriber-2-0",
+      "lane": "FM2",
+      "pitch": 43,
+      "startTick": 0,
+      "endTick": 25
+    },
+    {
+      "id": "n-0-0-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 0,
+      "endTick": 1
+    },
+    {
+      "id": "transcriber-1-0",
+      "lane": "FM1",
+      "pitch": 79,
+      "startTick": 2,
+      "endTick": 26
+    },
+    {
+      "id": "n-0-245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 15,
+      "endTick": 16
+    },
+    {
+      "id": "transcriber-3-1",
+      "lane": "FM3",
+      "pitch": 59,
+      "startTick": 15,
+      "endTick": 48
+    },
+    {
+      "id": "transcriber-3-0",
+      "lane": "FM4",
+      "pitch": 55,
+      "startTick": 15,
+      "endTick": 48
+    },
+    {
+      "id": "transcriber-2-1",
+      "lane": "FM2",
+      "pitch": 43,
+      "startTick": 30,
+      "endTick": 55
+    },
+    {
+      "id": "n-0-495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 30,
+      "endTick": 31
+    },
+    {
+      "id": "transcriber-1-1",
+      "lane": "FM1",
+      "pitch": 81,
+      "startTick": 32,
+      "endTick": 56
+    },
+    {
+      "id": "n-0-745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 45,
+      "endTick": 46
+    },
+    {
+      "id": "transcriber-2-2",
+      "lane": "FM2",
+      "pitch": 45,
+      "startTick": 60,
+      "endTick": 85
+    },
+    {
+      "id": "n-0-995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 60,
+      "endTick": 61
+    },
+    {
+      "id": "transcriber-1-2",
+      "lane": "FM1",
+      "pitch": 84,
+      "startTick": 62,
+      "endTick": 86
+    },
+    {
+      "id": "n-0-1245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 75,
+      "endTick": 76
+    },
+    {
+      "id": "transcriber-3-3",
+      "lane": "FM3",
+      "pitch": 60,
+      "startTick": 75,
+      "endTick": 108
+    },
+    {
+      "id": "transcriber-3-2",
+      "lane": "FM4",
+      "pitch": 57,
+      "startTick": 75,
+      "endTick": 108
+    },
+    {
+      "id": "transcriber-2-3",
+      "lane": "FM2",
+      "pitch": 45,
+      "startTick": 90,
+      "endTick": 115
+    },
+    {
+      "id": "n-0-1495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 90,
+      "endTick": 91
+    },
+    {
+      "id": "transcriber-1-3",
+      "lane": "FM1",
+      "pitch": 86,
+      "startTick": 92,
+      "endTick": 116
+    },
+    {
+      "id": "n-0-1745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 105,
+      "endTick": 106
+    },
+    {
+      "id": "transcriber-2-4",
+      "lane": "FM2",
+      "pitch": 41,
+      "startTick": 120,
+      "endTick": 145
+    },
+    {
+      "id": "n-0-1995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 120,
+      "endTick": 121
+    },
+    {
+      "id": "transcriber-1-4",
+      "lane": "FM1",
+      "pitch": 84,
+      "startTick": 122,
+      "endTick": 146
+    },
+    {
+      "id": "n-0-2245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 135,
+      "endTick": 136
+    },
+    {
+      "id": "transcriber-3-5",
+      "lane": "FM4",
+      "pitch": 57,
+      "startTick": 135,
+      "endTick": 168
+    },
+    {
+      "id": "transcriber-3-4",
+      "lane": "FM3",
+      "pitch": 53,
+      "startTick": 135,
+      "endTick": 168
+    },
+    {
+      "id": "transcriber-2-5",
+      "lane": "FM2",
+      "pitch": 41,
+      "startTick": 150,
+      "endTick": 175
+    },
+    {
+      "id": "n-0-2495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 150,
+      "endTick": 151
+    },
+    {
+      "id": "transcriber-1-5",
+      "lane": "FM1",
+      "pitch": 81,
+      "startTick": 152,
+      "endTick": 176
+    },
+    {
+      "id": "n-0-2745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 165,
+      "endTick": 166
+    },
+    {
+      "id": "transcriber-2-6",
+      "lane": "FM2",
+      "pitch": 48,
+      "startTick": 180,
+      "endTick": 205
+    },
+    {
+      "id": "n-0-2995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 180,
+      "endTick": 181
+    },
+    {
+      "id": "transcriber-1-6",
+      "lane": "FM1",
+      "pitch": 79,
+      "startTick": 182,
+      "endTick": 206
+    },
+    {
+      "id": "n-0-3245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 195,
+      "endTick": 196
+    },
+    {
+      "id": "transcriber-3-7",
+      "lane": "FM4",
+      "pitch": 60,
+      "startTick": 195,
+      "endTick": 228
+    },
+    {
+      "id": "transcriber-3-6",
+      "lane": "FM3",
+      "pitch": 55,
+      "startTick": 195,
+      "endTick": 228
+    },
+    {
+      "id": "transcriber-2-7",
+      "lane": "FM2",
+      "pitch": 48,
+      "startTick": 210,
+      "endTick": 235
+    },
+    {
+      "id": "n-0-3495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 210,
+      "endTick": 211
+    },
+    {
+      "id": "transcriber-1-7",
+      "lane": "FM1",
+      "pitch": 76,
+      "startTick": 212,
+      "endTick": 236
+    },
+    {
+      "id": "n-0-3745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 225,
+      "endTick": 226
+    },
+    {
+      "id": "transcriber-2-8",
+      "lane": "FM2",
+      "pitch": 43,
+      "startTick": 240,
+      "endTick": 265
+    },
+    {
+      "id": "n-0-3995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 240,
+      "endTick": 241
+    },
+    {
+      "id": "transcriber-1-8",
+      "lane": "FM1",
+      "pitch": 79,
+      "startTick": 242,
+      "endTick": 266
+    },
+    {
+      "id": "n-0-4245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 255,
+      "endTick": 256
+    },
+    {
+      "id": "transcriber-3-9",
+      "lane": "FM4",
+      "pitch": 59,
+      "startTick": 255,
+      "endTick": 288
+    },
+    {
+      "id": "transcriber-3-8",
+      "lane": "FM3",
+      "pitch": 55,
+      "startTick": 255,
+      "endTick": 288
+    },
+    {
+      "id": "transcriber-2-9",
+      "lane": "FM2",
+      "pitch": 43,
+      "startTick": 270,
+      "endTick": 295
+    },
+    {
+      "id": "n-0-4495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 270,
+      "endTick": 271
+    },
+    {
+      "id": "transcriber-1-9",
+      "lane": "FM1",
+      "pitch": 81,
+      "startTick": 272,
+      "endTick": 296
+    },
+    {
+      "id": "n-0-4745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 285,
+      "endTick": 286
+    },
+    {
+      "id": "transcriber-2-10",
+      "lane": "FM2",
+      "pitch": 45,
+      "startTick": 300,
+      "endTick": 325
+    },
+    {
+      "id": "n-0-4995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 300,
+      "endTick": 301
+    },
+    {
+      "id": "transcriber-1-10",
+      "lane": "FM1",
+      "pitch": 84,
+      "startTick": 302,
+      "endTick": 326
+    },
+    {
+      "id": "n-0-5245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 315,
+      "endTick": 316
+    },
+    {
+      "id": "transcriber-3-11",
+      "lane": "FM4",
+      "pitch": 60,
+      "startTick": 315,
+      "endTick": 348
+    },
+    {
+      "id": "transcriber-3-10",
+      "lane": "FM3",
+      "pitch": 57,
+      "startTick": 315,
+      "endTick": 348
+    },
+    {
+      "id": "transcriber-2-11",
+      "lane": "FM2",
+      "pitch": 45,
+      "startTick": 330,
+      "endTick": 355
+    },
+    {
+      "id": "n-0-5495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 330,
+      "endTick": 331
+    },
+    {
+      "id": "transcriber-1-11",
+      "lane": "FM1",
+      "pitch": 88,
+      "startTick": 332,
+      "endTick": 356
+    },
+    {
+      "id": "n-0-5745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 345,
+      "endTick": 346
+    },
+    {
+      "id": "transcriber-2-12",
+      "lane": "FM2",
+      "pitch": 41,
+      "startTick": 360,
+      "endTick": 385
+    },
+    {
+      "id": "n-0-5995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 360,
+      "endTick": 361
+    },
+    {
+      "id": "transcriber-1-12",
+      "lane": "FM1",
+      "pitch": 86,
+      "startTick": 362,
+      "endTick": 386
+    },
+    {
+      "id": "n-0-6245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 375,
+      "endTick": 376
+    },
+    {
+      "id": "transcriber-3-13",
+      "lane": "FM3",
+      "pitch": 57,
+      "startTick": 375,
+      "endTick": 408
+    },
+    {
+      "id": "transcriber-3-12",
+      "lane": "FM4",
+      "pitch": 53,
+      "startTick": 375,
+      "endTick": 408
+    },
+    {
+      "id": "transcriber-2-13",
+      "lane": "FM2",
+      "pitch": 41,
+      "startTick": 390,
+      "endTick": 415
+    },
+    {
+      "id": "n-0-6495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 390,
+      "endTick": 391
+    },
+    {
+      "id": "transcriber-1-13",
+      "lane": "FM1",
+      "pitch": 84,
+      "startTick": 392,
+      "endTick": 416
+    },
+    {
+      "id": "n-0-6745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 405,
+      "endTick": 406
+    },
+    {
+      "id": "transcriber-2-14",
+      "lane": "FM2",
+      "pitch": 48,
+      "startTick": 420,
+      "endTick": 445
+    },
+    {
+      "id": "n-0-6995000-36",
+      "lane": "DAC",
+      "pitch": 36,
+      "startTick": 420,
+      "endTick": 421
+    },
+    {
+      "id": "transcriber-1-14",
+      "lane": "FM1",
+      "pitch": 81,
+      "startTick": 422,
+      "endTick": 446
+    },
+    {
+      "id": "n-0-7245000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 435,
+      "endTick": 436
+    },
+    {
+      "id": "transcriber-3-15",
+      "lane": "FM3",
+      "pitch": 60,
+      "startTick": 435,
+      "endTick": 468
+    },
+    {
+      "id": "transcriber-3-14",
+      "lane": "FM4",
+      "pitch": 55,
+      "startTick": 435,
+      "endTick": 468
+    },
+    {
+      "id": "transcriber-2-15",
+      "lane": "FM2",
+      "pitch": 48,
+      "startTick": 450,
+      "endTick": 475
+    },
+    {
+      "id": "n-0-7495000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 450,
+      "endTick": 451
+    },
+    {
+      "id": "transcriber-1-15",
+      "lane": "FM1",
+      "pitch": 79,
+      "startTick": 452,
+      "endTick": 476
+    },
+    {
+      "id": "n-0-7745000-38",
+      "lane": "DAC",
+      "pitch": 38,
+      "startTick": 465,
+      "endTick": 466
+    }
+  ],
+  "assemblyInputs": {
+    "allocation": "f3f423ea81ef5f74f6725e5dee1b400e542bcf98ec5d9e928e8640f04bf7e8a0",
+    "score": "613e02c3b6e28f7656ea33b024ba42cf02aa32c75e5b5490ca48c8b4651d0b7e",
+    "voicing": "64fb1a9c58eb42fd355ee94c134e274daba96f5b1d33fca1f18d575d66616394"
+  },
+  "voicingWarnings": [],
+  "lanePolicyCopies": [
+    {
+      "lane": "PSG1",
+      "startTick": 15,
+      "endTick": 48
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 15,
+      "endTick": 48
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 75,
+      "endTick": 108
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 75,
+      "endTick": 108
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 135,
+      "endTick": 168
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 135,
+      "endTick": 168
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 195,
+      "endTick": 228
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 195,
+      "endTick": 228
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 255,
+      "endTick": 288
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 255,
+      "endTick": 288
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 315,
+      "endTick": 348
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 315,
+      "endTick": 348
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 375,
+      "endTick": 408
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 375,
+      "endTick": 408
+    },
+    {
+      "lane": "PSG1",
+      "startTick": 435,
+      "endTick": 468
+    },
+    {
+      "lane": "PSG2",
+      "startTick": 435,
+      "endTick": 468
+    },
+    {
+      "lane": "FM5",
+      "startTick": 16,
+      "endTick": 40
+    },
+    {
+      "lane": "FM5",
+      "startTick": 46,
+      "endTick": 70
+    },
+    {
+      "lane": "FM5",
+      "startTick": 76,
+      "endTick": 100
+    },
+    {
+      "lane": "FM5",
+      "startTick": 106,
+      "endTick": 130
+    },
+    {
+      "lane": "FM5",
+      "startTick": 136,
+      "endTick": 160
+    },
+    {
+      "lane": "FM5",
+      "startTick": 166,
+      "endTick": 190
+    },
+    {
+      "lane": "FM5",
+      "startTick": 196,
+      "endTick": 220
+    },
+    {
+      "lane": "FM5",
+      "startTick": 226,
+      "endTick": 250
+    },
+    {
+      "lane": "FM5",
+      "startTick": 256,
+      "endTick": 280
+    },
+    {
+      "lane": "FM5",
+      "startTick": 286,
+      "endTick": 310
+    },
+    {
+      "lane": "FM5",
+      "startTick": 316,
+      "endTick": 340
+    },
+    {
+      "lane": "FM5",
+      "startTick": 346,
+      "endTick": 370
+    },
+    {
+      "lane": "FM5",
+      "startTick": 376,
+      "endTick": 400
+    },
+    {
+      "lane": "FM5",
+      "startTick": 406,
+      "endTick": 430
+    },
+    {
+      "lane": "FM5",
+      "startTick": 436,
+      "endTick": 460
+    },
+    {
+      "lane": "FM5",
+      "startTick": 466,
+      "endTick": 480
+    }
+  ],
+  "lanePolicies": [
+    {
+      "index": 0,
+      "policy": "psgDouble",
+      "eligible": 16,
+      "applied": 16,
+      "busy": 0,
+      "incompatible": 0,
+      "movedFromFm": 0,
+      "promotedCounters": 0,
+      "lanes": {
+        "PSG1": 8,
+        "PSG2": 8
+      },
+      "psgEnvelopeBytesDelta": 8,
+      "bankBytesDelta": 98
+    },
+    {
+      "index": 1,
+      "policy": "fmDouble",
+      "mode": "echo",
+      "eligible": 16,
+      "applied": 16,
+      "busy": 0,
+      "incompatible": 0,
+      "movedFromFm": 0,
+      "promotedCounters": 0,
+      "lanes": {
+        "FM5": 16
+      },
+      "psgEnvelopeBytesDelta": 0,
+      "bankBytesDelta": 83
+    }
+  ],
+  "chordAudit": {
+    "song": {
+      "doubling": 0,
+      "rootInBass": 0,
+      "fifth": 0,
+      "extension": 0,
+      "third": 0,
+      "seventh": 0,
+      "topVoice": 0
+    },
+    "sections": {
+      "section-1": {
+        "label": "A",
+        "sourceStart": 0.0,
+        "sourceEnd": 8.0,
+        "counts": {
+          "doubling": 0,
+          "rootInBass": 0,
+          "fifth": 0,
+          "extension": 0,
+          "third": 0,
+          "seventh": 0,
+          "topVoice": 0
+        }
+      }
+    },
+    "losses": []
+  },
+  "editResults": [
+    {
+      "id": "bass-attack",
+      "op": "setNote",
+      "status": "applied",
+      "noteIds": [
+        "transcriber-2-0"
+      ]
+    }
+  ],
+  "fmPatchSwitchBytes": 0,
+  "fmPatchBankBytes": 25,
+  "sustainProbe": {
+    "notesProbed": 0,
+    "notesOverHalfSecond": 0,
+    "totalNotes": 16
+  },
+  "heldNotes": {
+    "sourceHolds": 16,
+    "findings": []
+  },
+  "allocationAffinityChanges": []
+}

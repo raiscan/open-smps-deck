@@ -1,0 +1,962 @@
+{
+  "formatVersion": 4,
+  "name": "Copper Kites",
+  "mode": "S3K",
+  "ticksPerBeat": 30,
+  "tempo": 0,
+  "voices": [
+    {
+      "id": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "name": "bass / Round bass",
+      "bytes": [
+        4,
+        1,
+        1,
+        1,
+        1,
+        31,
+        31,
+        31,
+        31,
+        10,
+        8,
+        10,
+        8,
+        3,
+        3,
+        3,
+        3,
+        26,
+        26,
+        26,
+        26,
+        32,
+        12,
+        40,
+        12
+      ]
+    }
+  ],
+  "sequences": [
+    {
+      "id": "FM1-2",
+      "name": "vocals",
+      "type": "FM",
+      "lengthTicks": 474,
+      "voiceId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "volume": 125,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-30",
+          "tick": 30,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-90",
+          "tick": 90,
+          "duration": 24,
+          "pitch": 86
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-150",
+          "tick": 150,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-210",
+          "tick": 210,
+          "duration": 24,
+          "pitch": 76
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-270",
+          "tick": 270,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-330",
+          "tick": 330,
+          "duration": 24,
+          "pitch": 88
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 24,
+          "pitch": 86
+        },
+        {
+          "id": "note-390",
+          "tick": 390,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-450",
+          "tick": 450,
+          "duration": 24,
+          "pitch": 79
+        }
+      ],
+      "commands": [
+        {
+          "id": "vibrato-0",
+          "tick": 0,
+          "command": "MODULATION",
+          "arguments": [
+            10,
+            2,
+            2,
+            4
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "FM2-0",
+      "name": "bass",
+      "type": "FM",
+      "lengthTicks": 475,
+      "voiceId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "volume": 127,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 25,
+          "pitch": 43
+        },
+        {
+          "id": "note-30",
+          "tick": 30,
+          "duration": 25,
+          "pitch": 43
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 25,
+          "pitch": 45
+        },
+        {
+          "id": "note-90",
+          "tick": 90,
+          "duration": 25,
+          "pitch": 45
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 25,
+          "pitch": 41
+        },
+        {
+          "id": "note-150",
+          "tick": 150,
+          "duration": 25,
+          "pitch": 41
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 25,
+          "pitch": 48
+        },
+        {
+          "id": "note-210",
+          "tick": 210,
+          "duration": 25,
+          "pitch": 48
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 25,
+          "pitch": 43
+        },
+        {
+          "id": "note-270",
+          "tick": 270,
+          "duration": 25,
+          "pitch": 43
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 25,
+          "pitch": 45
+        },
+        {
+          "id": "note-330",
+          "tick": 330,
+          "duration": 25,
+          "pitch": 45
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 25,
+          "pitch": 41
+        },
+        {
+          "id": "note-390",
+          "tick": 390,
+          "duration": 25,
+          "pitch": 41
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 25,
+          "pitch": 48
+        },
+        {
+          "id": "note-450",
+          "tick": 450,
+          "duration": 25,
+          "pitch": 48
+        }
+      ],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "FM3-15",
+      "name": "keys",
+      "type": "FM",
+      "lengthTicks": 453,
+      "voiceId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "volume": 119,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 33,
+          "pitch": 59
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 33,
+          "pitch": 60
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 33,
+          "pitch": 53
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 33,
+          "pitch": 55
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 33,
+          "pitch": 55
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 33,
+          "pitch": 57
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 33,
+          "pitch": 57
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 33,
+          "pitch": 60
+        }
+      ],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "FM4-15",
+      "name": "keys",
+      "type": "FM",
+      "lengthTicks": 453,
+      "voiceId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "volume": 119,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 33,
+          "pitch": 55
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 33,
+          "pitch": 57
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 33,
+          "pitch": 57
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 33,
+          "pitch": 60
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 33,
+          "pitch": 59
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 33,
+          "pitch": 60
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 33,
+          "pitch": 53
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 33,
+          "pitch": 55
+        }
+      ],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "FM5-16",
+      "name": "vocals",
+      "type": "FM",
+      "lengthTicks": 464,
+      "voiceId": "fm-voice-d466ed2a36f9354e60ba9095a33364920d41d7e5aede506b39e4705528257e86",
+      "volume": 114,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-30",
+          "tick": 30,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-90",
+          "tick": 90,
+          "duration": 24,
+          "pitch": 86
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-150",
+          "tick": 150,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-210",
+          "tick": 210,
+          "duration": 24,
+          "pitch": 76
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 24,
+          "pitch": 79
+        },
+        {
+          "id": "note-270",
+          "tick": 270,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-330",
+          "tick": 330,
+          "duration": 24,
+          "pitch": 88
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 24,
+          "pitch": 86
+        },
+        {
+          "id": "note-390",
+          "tick": 390,
+          "duration": 24,
+          "pitch": 84
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 24,
+          "pitch": 81
+        },
+        {
+          "id": "note-450",
+          "tick": 450,
+          "duration": 14,
+          "pitch": 79
+        }
+      ],
+      "commands": [
+        {
+          "id": "detune-0",
+          "tick": 0,
+          "command": "DETUNE",
+          "arguments": [
+            2
+          ]
+        },
+        {
+          "id": "vibrato-0",
+          "tick": 0,
+          "command": "MODULATION",
+          "arguments": [
+            10,
+            2,
+            2,
+            4
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "PSG1-15",
+      "name": "keys",
+      "type": "PSG",
+      "lengthTicks": 453,
+      "voiceId": null,
+      "volume": 111,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 33,
+          "pitch": 71
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 33,
+          "pitch": 72
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 33,
+          "pitch": 69
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 33,
+          "pitch": 72
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 33,
+          "pitch": 71
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 33,
+          "pitch": 72
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 33,
+          "pitch": 69
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 33,
+          "pitch": 72
+        }
+      ],
+      "commands": [
+        {
+          "id": "volume-120",
+          "tick": 120,
+          "command": "VOLUME",
+          "arguments": [
+            119
+          ]
+        },
+        {
+          "id": "volume-180",
+          "tick": 180,
+          "command": "VOLUME",
+          "arguments": [
+            111
+          ]
+        },
+        {
+          "id": "volume-360",
+          "tick": 360,
+          "command": "VOLUME",
+          "arguments": [
+            119
+          ]
+        },
+        {
+          "id": "volume-420",
+          "tick": 420,
+          "command": "VOLUME",
+          "arguments": [
+            111
+          ]
+        }
+      ],
+      "repeatState": "RESET",
+      "psgEnvelopeId": "policy-psg-double",
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "PSG2-15",
+      "name": "keys",
+      "type": "PSG",
+      "lengthTicks": 453,
+      "voiceId": null,
+      "volume": 119,
+      "notes": [
+        {
+          "id": "note-0",
+          "tick": 0,
+          "duration": 33,
+          "pitch": 67
+        },
+        {
+          "id": "note-60",
+          "tick": 60,
+          "duration": 33,
+          "pitch": 69
+        },
+        {
+          "id": "note-120",
+          "tick": 120,
+          "duration": 33,
+          "pitch": 65
+        },
+        {
+          "id": "note-180",
+          "tick": 180,
+          "duration": 33,
+          "pitch": 67
+        },
+        {
+          "id": "note-240",
+          "tick": 240,
+          "duration": 33,
+          "pitch": 67
+        },
+        {
+          "id": "note-300",
+          "tick": 300,
+          "duration": 33,
+          "pitch": 69
+        },
+        {
+          "id": "note-360",
+          "tick": 360,
+          "duration": 33,
+          "pitch": 65
+        },
+        {
+          "id": "note-420",
+          "tick": 420,
+          "duration": 33,
+          "pitch": 67
+        }
+      ],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": "policy-psg-double",
+      "modulationEnvelopeId": null,
+      "triggers": []
+    },
+    {
+      "id": "DAC-0",
+      "name": "Drums",
+      "type": "DAC",
+      "lengthTicks": 466,
+      "voiceId": null,
+      "volume": 127,
+      "notes": [],
+      "commands": [],
+      "repeatState": "RESET",
+      "psgEnvelopeId": null,
+      "modulationEnvelopeId": null,
+      "triggers": [
+        {
+          "id": "hit-0",
+          "tick": 0,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-15",
+          "tick": 15,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-30",
+          "tick": 30,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-45",
+          "tick": 45,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-60",
+          "tick": 60,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-75",
+          "tick": 75,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-90",
+          "tick": 90,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-105",
+          "tick": 105,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-120",
+          "tick": 120,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-135",
+          "tick": 135,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-150",
+          "tick": 150,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-165",
+          "tick": 165,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-180",
+          "tick": 180,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-195",
+          "tick": 195,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-210",
+          "tick": 210,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-225",
+          "tick": 225,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-240",
+          "tick": 240,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-255",
+          "tick": 255,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-270",
+          "tick": 270,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-285",
+          "tick": 285,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-300",
+          "tick": 300,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-315",
+          "tick": 315,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-330",
+          "tick": 330,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-345",
+          "tick": 345,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-360",
+          "tick": 360,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-375",
+          "tick": 375,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-390",
+          "tick": 390,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-405",
+          "tick": 405,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-420",
+          "tick": 420,
+          "sampleId": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-435",
+          "tick": 435,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-450",
+          "tick": 450,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        },
+        {
+          "id": "hit-465",
+          "tick": 465,
+          "sampleId": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1"
+        }
+      ]
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip-FM1-2",
+      "sequenceId": "FM1-2",
+      "lane": "FM1",
+      "startTick": 2,
+      "lengthTicks": 474
+    },
+    {
+      "id": "clip-FM2-0",
+      "sequenceId": "FM2-0",
+      "lane": "FM2",
+      "startTick": 0,
+      "lengthTicks": 475
+    },
+    {
+      "id": "clip-FM3-15",
+      "sequenceId": "FM3-15",
+      "lane": "FM3",
+      "startTick": 15,
+      "lengthTicks": 453
+    },
+    {
+      "id": "clip-FM4-15",
+      "sequenceId": "FM4-15",
+      "lane": "FM4",
+      "startTick": 15,
+      "lengthTicks": 453
+    },
+    {
+      "id": "clip-FM5-16",
+      "sequenceId": "FM5-16",
+      "lane": "FM5",
+      "startTick": 16,
+      "lengthTicks": 464
+    },
+    {
+      "id": "clip-PSG1-15",
+      "sequenceId": "PSG1-15",
+      "lane": "PSG1",
+      "startTick": 15,
+      "lengthTicks": 453
+    },
+    {
+      "id": "clip-PSG2-15",
+      "sequenceId": "PSG2-15",
+      "lane": "PSG2",
+      "startTick": 15,
+      "lengthTicks": 453
+    },
+    {
+      "id": "clip-DAC-0",
+      "sequenceId": "DAC-0",
+      "lane": "DAC",
+      "startTick": 0,
+      "lengthTicks": 466
+    }
+  ],
+  "envelopes": [
+    {
+      "id": "policy-psg-double",
+      "name": "PSG double",
+      "type": "PSG_VOLUME",
+      "bytes": [
+        0,
+        0,
+        1,
+        1,
+        2,
+        2,
+        3,
+        129
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "id": "stem-c2967aafec9fcc89f7d38da8e3b6a64761b5894fff6f44cfc2e0dca157459ee8-gain-0x1.764f47fddeea6p-1",
+      "name": "Stem drum 36",
+      "rate": 2,
+      "pcmBase64": "gICAgIGBgYGCgoOEhIWGh4iJiouMjY6PkZKTlJaXmZqdnp+hoqWmp6mrra+wsrS1t7m6vL7AwcPExsjJy8zNz9DR09PT09LS0tHR0NDQ0M/Ozc3My8vKycjHxsXEw8LBwL69vLq5uLe1tLKxsK6tq6mnpqWjoZ+enJqZl5WUkpCPjIuJh4WEgoB/fHt5d3Z0cnFvbmxqaWdlY2JhX15cW1lYVlVUU1FQT05NS0tJSEdGRkRDQ0JBQEA/Pj09PTw8Ozs7Ozo6Ojo5OTk5OTk5Ojo6Ojs7Ozs8PT09Pj4/QEBBQkNDREZGR0hJSktMTU5PUFJTVFZWWFlbW11eYGFjZGVmaGlrbG5vcXJ0dXZ4eXt8f4CBg4SGh4mKi4yOj5GSlJWXl5manJ2en6Cio6Slpqeoqqqrra2ur7CxsrKztLW1tre3uLi5ubq6urq7u7u8vLy8vb29vb29vby8vLy7u7u6urq6ubi4uLe3trW1tLOysrGwsK+urayrqqmop6alpaOioaCfnp2bmpmYl5WUk5KRj46NjIqKiIeGhIOBgX9+fXx6eXh2dnRzcnFwbm5sbGppaGdmZWNjYmFgX15dXFtbWllZWFdWVlVUU1NTUlFRUFBQT09OTk5OTk5NTU1NTU1MTExMTU1NTU1OTk5OTk5PT1BQUFBRUlJTU1RVVVZWV1hZWVpbW1xdXl5gYWFiY2RlZmZoaWlrbGxubnBxcXN0dXZ2eHl6e3x9fn+AgYKEhIWHh4iKioyMjY+PkJGSk5SUlpeXmJmampudnZ6fn5+goaKio6SkpaWmpqenp6ioqamqqqqqqqqrq6urrKysrKysrKysrKysq6urq6qqqqqqqqmpqKinp6empqWlpaSjo6KioaCfn5+enZ2cm5qamZiXl5aVlJOSkpGQj4+NjIyLiomIh4eGhYSDgoGBf39+fXx7enl5eHd2dXR0c3JxcXBvbm5tbGxramlpaGhnZmZlZWRjY2NiYWFhYGBfX15eXl5eXV1cXFxcW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1xcXF1dXV5eXl5eX19gYGFhYWJiY2NjZGVmZmZnaGhpaWprbGxsbW5ub3BxcXJzdHR1dnZ3eHl5ent8fHx9fn9/gIGBgoOEhIWGh4eIiYqKi4yMjI2Oj4+QkZGSkpOTlJSVlZaXl5eYmJmZmpqampubnJydnZ2dnZ2enp6fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn56enp6dnZ2dnZycnJubmpqampmZmJiXl5eWlZWUlJSTkpKSkZGQj4+Pjo2MjIyLioqJiYiHh4aGhYSEg4KCgYGAf39/fn18fHx7enl5eXh3dnZ2dXR0dHNzcnFxcXBwb29ubm5tbWxsbGxra2pqaWlpaWlpaGhoZ2dnZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmdnZ2doaGhpaWlpaWlqamtra2xsbGxtbW5ubm5vcHBxcXFycnNzdHR0dXZ2dnd3eHl5eXp6e3x8fH19fn9/f4CAgYGBgoODhISEhYaGh4eHiImJioqKiouMjIyMjY2Ojo+Pj4+QkJGRkZKSkpKSk5OTlJSUlJSUlJWVlZWVlpaWlpaWlpaWlpeXl5eXl5aWlpaWlpaWlpaVlZWVlZWUlJSUlJSUk5OTkpKSkpKSkZGRkJCPj4+Pjo6OjY2MjIyMi4uKioqJiYiIh4eHh4aGhYSEhISDg4KBgYGBgIB/f39+fn19fHx8fHt7enp5eXl5eHh3d3Z2dnZ1dXR0dHR0c3NzcnJycXFxcXFxcHBwcG9vb29ubm5ubm5ubm5ubm5ubm5ubW1tbW1tbW1tbm5ubm5ubm5ubm5ubm5ubm9vb29vcHBwcHFxcXFxcXFycnJzc3N0dHR0dHV1dnZ2dnZ3d3d4eHl5eXl6enp7e3x8fHx9fX5+fn9/f3+AgIGBgYGCgoKDg4SEhISFhYWGhoeHh4eHiIiIiYmJioqKioqKi4uLjIyMjIyMjI2NjY2Njo6Ojo6Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pjo6Ojo6NjY2NjYyMjIyMjIyMi4uLioqKioqKiomJiYiIiIeHh4eHhoaGhYWFhISEhISDg4OCgoGBgYGBgYCAf39/f39/fn5+fX18fHx8fHx7e3t6enp5eXl5eXl5eHh4d3d3d3Z2dnZ2dnZ2dnV1dXV1dHR0dHR0dHR0dHR0dHR0dHRzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3R0dHR0dHR0dHR0dHR0dHR0dXV1dXV1dnZ2dnZ2dnZ2d3d3d3h4eHh5eXl5eXl5enp6ent7e3x8fHx8fHx9fX1+fn5/f39/f39/gICAgYGBgYGBgYKCgoODg4OEhISEhISEhYWFhYaGhoaHh4eHh4eHh4eIiIiIiImJiYmJiYqKioqKioqKioqKioqKioqKioqKi4uLi4uLi4uLi4uLi4uLi4uLi4uKioqKioqKioqKioqKioqKioqKiomJiYmJiYmIiIiIiIeHh4eHh4eHh4eGhoaGhoWFhYWEhISEhISEhISDg4ODgoKCgoGBgYGBgYGBgICAgH9/f39/f39/fn5+fn19fX19fHx8fHx8fHx8e3t7e3t6enp6enp5eXl5eXl5eXl5eXl5eXh4eHh4eHh4eHh3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3eHh4eHh4eHh4eHh5eXl5eXl5eXl5eXl5eXl6enp6enp7e3t7e3t8fHx8fHx8fHx8fH19fX19fn5+fn5/f39/f39/f39/gICAgICBgYGBgYGBgYGBgoKCgoKCg4ODg4OEhISEhISEhISEhISEhYWFhYWFhYWGhoaGhoaGhoaHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4aGhoaGhoaGhoaFhYWFhYWFhYSEhISEhISEhISEhISEg4ODg4ODg4KCgoKCgoGBgYGBgYGBgYGBgYCAgICAgIB/f39/f39/f39/f39/fn5+fn5+fn19fX19fX18fHx8fHx8fHx8fHx8fHx8fHx7e3t7e3t7e3t7e3t7e3p6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6e3t7e3t7e3t7e3t7e3t8fHx8fHx8fHx8fHx8fHx8fHx8fH19fX19fX19fX5+fn5+fn5+f39/f39/f39/f39/f39/f4CAgICAgICAgYGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKDg4ODg4ODg4ODhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhIWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISDg4ODg4ODg4ODg4KCgoKCgoKCgoKCgYGBgYGBgYGBgYGBgYGBgYGBgYGAgICAgICAgICAf39/f39/f39/f39/f39/f39/f39/fn5+fn5+fn5+fn5+fn19fX19fX19fX19fX19fX18fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fH19fX19fX19fX19fX19fX19fX5+fn5+fn5+fn5+fn5+f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKDg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODgoKCgoKCgoKCgoKCgoKCgoKCgoKCgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgICAgICAgICAgICAgICAgIB/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn9/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3+AgICAgICAgICAgICAgICAgICAgICBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgICAgICAgICAgICAgICAgICAgICAgICAgICAgH9/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/gICAgICAgICAgICAgICAgICAgA==",
+      "origin": {
+        "type": "source-audio"
+      }
+    },
+    {
+      "id": "stem-e7a0a3c6eebcec06dd84ff8defc9d0558525b79bc13566a53e8e85ad732c3b28-gain-0x1.764f47fddeea6p-1",
+      "name": "Stem drum 38",
+      "rate": 2,
+      "pcmBase64": "gH9/f358fHx6eX+HioeBfHyCiYuLjYyEf317e4eWkH6EoaaEZGZxZl5xkqWjnZ2nuLWKYHCnt45zkLiwf1NIYIu408CBS12gsnxcirWHP0+hwpRsf6a1tLOplIeHf2dcdJ2vl2dCO0E+PFmMn4FrhaWMV097lnpLO1Bvf3JSRV6ImY2Ah5qhimNWd5+afH6fon90l6d7TVuJl4aEnq2Ua155jHJQZaK3jWyFrKeMjp6UenV6bF97rsO1rLCliomqwah2YHmdoIFeXH2dlnFnkr2wfWl+h2xWYm9hVXCjv7eoopd8Z2dueJXAxpNlc5eRZ1hxj52blJWkqIdZVXyUin+LlJCSnZFuXW5/goycjmRSbZKhmoNgS1lxdXWKoJBjR1N0k6CQak1NW2NwhoxuTV6Vr5FmV15kb4ytt595W1l4oquFX2SCiXh6lJ+KbGNsfYqIfHFsZmh/obW4tKKEdH6DbmeLqIhUXpqvh2yJqqKTpLqrjYydmIF5fXZlaYqloYNlXnaXopeUpKB3UVhtZVBegYFmZo6mknV6l6aTbFZke3ZcUFlcU05SU1FbZFpIS2Jtam10cGx7joRtdJGXg3Z4dnSJo5dsWG6HgXZ7fm9qhJ+OZFl2kpKMlaCSc2Jugoh8bGqBoquZiJGlrauonIRxc4GJhHx6iaGrn42HgHNteIaGf3x+h52snHx4laONe4aUkpKdmYB2iqKmoJR+coSfopeXnJKFiJGIcV9bXFxcZXuUoJWEfoKGh4qEc2Zvh5OOhXxxaXWPmoZpWVhWVmeHmIp3e4V3Xl54ioN9iZWOgYSUnZqUj4uGhIF7c3F3fH+Hj5KRkYx8bG57g4ePlIdxboGVn6KjnZeboZaBgZeiimlqhI2AeoODd3eEh3lvbm50i6KeioWOj4qPlY2FlKqgfWhueX+JmZeBcHeOoJ+Ndm50dGhmf5SIbnCKkHVfa4ODbWR1jIt0Y2qCkpCHfndyb21qaGhsbmpfW22HjX50eHJjZn2IdmNwjJN7XllviIx9amFneIuXmJCBcGZsfY+amIh0bnl/dmxzh5eYlZeamZibmIVwc4yblY+Ym4RqbYaUjH+Aio+OiH92cG52hpGKeXJ7hIF2cHJ2dnmJn6WTgISQjYSLlYp0eJOdhGlpeYB8gZSfknx2gIeGhIWEgYB5a2Z5kpaKhIiBbmx/inlhYG9zaWl7iH1rbYSShm5jbnl1bHOEioF8f357f4WDenV0b3B8h4eBgYWFiZSbjHVwgI+NhIiVmYp7e4qXmZOLhH9/hY6Xm5mUkpKPjZKam5KMkpyXi4qUmo5/e4GIkZqYjIOEhoF+hI2PhHRtdoSJhISJi4V+d3FzhJSPeG15hHttcoKCb2NsgpKOfm1qdoF/cWVncXl7f4eJgHJpaW95g4iKh39xaWxxbmZuhI18anGEgWpfcYiMhIKDf32Bg3x3enlzdIKNioeMkod1dIaQgWprgo6Ce4iUh3R3i5OLhIN/dnJ5hY2Sk4x6bnePl4d1dXx6dXmChH95d3yKl5eKgYiRj4Z7cG11f3x3fYmHfH2JjYR9gYSAeXmAiYZ4cHeDhHt2fIOHhnxwbHN5eXZ8h4yEdnBxdnqBgnlucn2AeXmBgHNpb32FgHRudIGIhHp2eYGJioJ4cXFzdnyGjYyHh4+Pg3uCjId8f4+XjX97e3x9f3x5e4GEh42Ph32CkZJ+cX2RkoeIko9/doGPjoSCipKTkIuHipOThHZ4h4+KhIF8d3+Mjn92f4d+c3iGiHxzdHZ0d4KNjIFzbnR9hIF3cneBgXdtbnZ/hIF5dHmHi39vdIeSh3VwdHRxdHl4cXB2enl2dnl8fHl5f4B6dXh/goOHh3xucIGHfXZ8hIB5e313cHR/hIF+f4SKioWAf4KEg4CBhYaDhIiHgH+HjIZ8f4qNh4GAhYmIhIKHj5GKg4ePj4F2eYWHfXmBiYR8dnZ2eoSKiISEhYF/hYqDd3mIkYh7eX6BgoSHhYF7eXyDhICAhod/eX+GgHRxd3x9gYSEgH99enl8f396dnV3e3p2dHuEh4WFh4iJhXx2fIaEenZ8f3x5eXp/hoZ+fIWLhHl0dnuEiod+eXyGjoyEf4F/enyFioeEh4R8e4WPjIN9f4SJiomHg399f4KChIuRjH95gIqLiImJgXl8iYyEfH+GiISCgn94dnyHjIqGgHp2eHyBgX58gYeEfHqBg3pzeoeGeXR8hIF5c3N2e4CDg4F+fH2Bf3l3fYF8eX+Gg3p5gYqHgHl3eHp9f358e3t9goeHgXl2eYCHiISBhIaAfIGJiYWDgXx5enx8eXp8fX6BhYeHg3x3fISHhIGDhH96eXyAh4qKh4eKioSAgIGAgISJh4OBf3x6foSHhIOGh4SCg4J+enp8fn+Dg4B/gYSEhISBfn+Dgnx6fH58fH9/eXd8gH15eHZ0dn2DgX+BhISAgIKCgYOFgnx6f4OBfHl8goSAeXmAhH94d3p8fIGHh396f4mMhHp6hIuIgoCBg4WHhoF/gIODgoSFgn5/homEfXx9fHx/hoiEf3+BgXx6fICBf3+BhYaFhomKhH16fH5+f4GCf3+Eh4F9gYeGgH6BhIKBg4aHhYJ/enl6fX59fX5+fHt7f4GAfHl5fH+BfXl5f4J/eXZ2d3uAgX58f4SEgX56d3h7fXx5eXp+g4SBfX+Eh4SBgH9+f4GDgoCAgoSBfnx8enyBhIB8gIOBfoCCgoSGhH58hIqIhYSDf36BhoR+e31/fHt9gYKDhISAfH6BgoGAgIGBgX9/gYSEhIJ/foGEg359gIOBf4GEh4eEgX9+f3+BhIWDgX99enl+gYGBgH98fYGBfHp/g395e4CAfHx/f3p5f4OBfHt/g4SAfHp9gYB8ent8fH+BgH5/hIN9en6ChIKBf317e3+CgYCAgoF+fHx9f4SEgX6Bh4iEgYOGh4WBfnx/g4N/fH6ChIF+foCBgoWHhYOEhoaEhYeGgX+Eh4N8fIGEgXx6foKEhIF8e3x/f4CChISBf318fHx6e3+Bf3x+goJ/f398e3+DgHx+hIR+en2Cgn58f4GBf3p5fIGEgn17f4OCfnt8f4B+e3p8gIODg4KCgYGAf4GEhIF/gIOCgYOCf3x/gX98f4GBf4CDhISEhIKBf3+AgYGBg4WFgoCBhIeGhYSFhoWEgoGBgH+BhYeEgIGEhIF/gYSEg4KAfn+BgX9+f4KBf3x+gYOBf359fYCDgX9+f39/gIOEgn9+fHp8f4F/fH+CgXx8f398fYGCf3x9f39+f4B/f4GBf31+gYOCgIGCg4F/f35+f4GBf3x8fH19fn+Af4GDg398fX+AgYKDgX58fH1+gIGCf35/gIGBf4GDhISDgYGBgoSEg4SDgYGDhISCg4OBgICAf31/gYGAgIOFhIF+foCBg4SEg4KDgoKCgX9/gYODgX+AgH58fHx8fYCBgIGBgH18f4KCgX9+fHx9fnx8fn9/fHt9f39/f3+AgH9/gIGCgYB/fn18fX+AgICBg4F/fH1/f3+BgYB/gIGBgIGCg4OBf35/gIGBgoODgoGAf3+AgYKCg4OBf3+AgH+Bg4OBgYOEgn9+f4GAgIGBgH+AgYGBgYGBgYKCgYGBgYB/f4GBf4CCg4KDhIOBf35/gX9/gIKCgYCBg4KAgIGBf3x8f4GBf358fH1/gYGAfHt9f39+fX+Bf3x8fn58fX9/f3+AgH9+f4GBgYGBgYB/f35/f39/gIGBgYGAfn1+f39/gYOBf31/gYGBgH9/gIGBgoSEgn9+f4KCgH+Bg4KAf4GCg4ODhISCf3+AgoOBgH+BgX9+f4GBgoKCgYCBgoF/f4GBgYGDgoGBgoGBgICBgICAgICAgYB/f4CBgH9+gIGBf3+BgX99f4CAgIGCgX98fH6AgX9/gYKBf39/gYGBgYGAgIGBgH+BgYF+foCAf3+AgX9/gIB/f4GCgX9/f3+AgYGAfn+AgYB/f39/f4CAf3+BgYGBgYB/f3+BgYGBgYGAf3+AgYGAf4GCgoGBgYB/f4GCg4KCgoOCgX9/gIGAf3+BgYB/f4GCgH59f4GCgYB/f4GBgH9/gIGBf35/gYB+fX6AgYGBgH9/f35+f3+AgICAgH9+f39/gIGBgH9/gH9/f3+BgYF/fn+BgYGAgH9/gIGAfn1/gIGBgYF/f39/gIB/f4GCgoF/f3+BgYGBgYGCgX9+f4GCgYGBgYB+f4GCgYB/f39/gYKBgX+AgoOBgICBgoGBgIB/f4GBgH+AgYF/f3+BgH9/f4B/f3+BgYB+fX+AgICAgH9/gIGBgICAgYGBgH+AgH9/f4CAf39/gH9/f4GCgX9+f4GAgIGBgYGAf3+AgYB+fn9/f3+AgYCAgIB/f3+BgYGAf3+BgX9/gYGBgICBgYGBgICBgH9/f3+AgYGAf4GBgH9/gH9/f4GBgH9/gIGAf4CBgH+AgYGAgIGCgH+AgYGBgIGBgYCBgYCAgICAgIGBgICAgH+AgYF/f4GBgH9/f39/f39/f39/gH9/f39/gIGAgICBgYB/f3+AgH9+f4CBf35/gIB/gIGAf3+Af39/f4B/gIGBf3+AgYCAgYGAf4CBgYGBgYF/f3+AgYGBgICBgYGBgYGBgYB/f4CAf3+AgYGAf3+BgYB/gIGAgIGBgYCAgYGBgICBgYCAgICAf3+AgYGBgH+AgYB/f4CBgH9/gYGAf3+AgIB/f4CBgYB/f4CBgYB/f4CAf3+AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA=",
+      "origin": {
+        "type": "source-audio"
+      }
+    }
+  ]
+}

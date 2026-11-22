@@ -1,0 +1,53 @@
+{
+  "edits": [
+    {
+      "noteId": "transcriber-1-2",
+      "pitch": 85,
+      "op": "setNote",
+      "id": "vocal-1-1030000-contourDisagreement-fa767782be9f8208b631",
+      "reason": "Use the rounded RMVPE median for this gate",
+      "group": "vocal-lead-review",
+      "timeBase": "source",
+      "evidence": {
+        "text": "Use the rounded RMVPE median for this gate",
+        "path": "score.json"
+      },
+      "status": "proposed",
+      "author": "agent"
+    },
+    {
+      "noteId": "transcriber-1-10",
+      "pitch": 85,
+      "op": "setNote",
+      "id": "vocal-1-5030000-contourDisagreement-5fbfc69ce0a69f9133a2",
+      "reason": "Use the rounded RMVPE median for this gate",
+      "group": "vocal-lead-review",
+      "timeBase": "source",
+      "evidence": {
+        "text": "Use the rounded RMVPE median for this gate",
+        "path": "score.json"
+      },
+      "status": "proposed",
+      "author": "agent"
+    },
+    {
+      "id": "bass-attack",
+      "author": "human",
+      "reason": "Set a softer opening bass attack.",
+      "op": "setNote",
+      "noteId": "transcriber-2-0",
+      "velocity": 79
+    },
+    {
+      "id": "keys-space",
+      "reason": "Leave space for the lead entrance.",
+      "op": "setNote",
+      "noteId": "transcriber-3-0",
+      "velocity": 72,
+      "group": "Backing balance",
+      "status": "proposed",
+      "author": "agent"
+    }
+  ],
+  "version": 1
+}

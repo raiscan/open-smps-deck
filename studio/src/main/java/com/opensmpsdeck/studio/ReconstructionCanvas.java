@@ -86,6 +86,9 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     private ReconstructionInspection model;
     private ReconstructionTiles tiles;
+    private boolean spectrumReady;
+
+    boolean spectrumReady() { return spectrumReady; }
     private final Consumer<String> error;
     private List<Section> sections;
     private Mode mode = Mode.SELECT;
@@ -1132,6 +1135,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void drawSpectrum(GraphicsContext g, double width) {
+        spectrumReady = false;
         if (source == null) {
             g.setFill(SUBTLE);
             g.fillText("No source audio available", axis() + 16, sectionBottom() + 22);
@@ -1142,6 +1146,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         double tileSpan = Math.scalb(1.5, level);
         double end = seconds(width);
         var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
+        int drawn = 0;
         int low = (int) Math.floor(pitchTop - pitchSpan + .5);
         int high = (int) Math.ceil(pitchTop - .5);
         g.save();
@@ -1156,6 +1161,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 continue;
             }
             drawTile(g, key, tile.image());
+            drawn++;
             if (ridges) {
                 g.setFill(Color.web("#9cf4fb", .75));
                 for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
@@ -1163,6 +1169,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             }
         }
         g.restore();
+        spectrumReady = drawn > 0 && drawn == needed.size();
         tiles.request(needed);
     }
 

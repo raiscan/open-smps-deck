@@ -1,0 +1,1383 @@
+{
+  "version": 1,
+  "notes": [
+    {
+      "note": {
+        "id": "transcriber-2-0",
+        "part": 2,
+        "start": 0.0,
+        "end": 0.42,
+        "pitch": 43,
+        "velocity": 79,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 0,
+      "endTick": 25,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-0-36",
+        "part": 0,
+        "start": 0.0,
+        "end": 0.06,
+        "pitch": 36,
+        "velocity": 120,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 0,
+      "endTick": 1,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-0",
+        "part": 1,
+        "start": 0.03,
+        "end": 0.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 2,
+      "endTick": 26,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-245000-38",
+        "part": 0,
+        "start": 0.245,
+        "end": 0.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 15,
+      "endTick": 16,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-1",
+        "part": 3,
+        "start": 0.25,
+        "end": 0.8,
+        "pitch": 59,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM3",
+      "startTick": 15,
+      "endTick": 48,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-0",
+        "part": 3,
+        "start": 0.25,
+        "end": 0.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM4",
+      "startTick": 15,
+      "endTick": 48,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-1",
+        "part": 2,
+        "start": 0.5,
+        "end": 0.9199999999999999,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 30,
+      "endTick": 55,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-495000-38",
+        "part": 0,
+        "start": 0.495,
+        "end": 0.555,
+        "pitch": 38,
+        "velocity": 120,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 30,
+      "endTick": 31,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-1",
+        "part": 1,
+        "start": 0.53,
+        "end": 0.9299999999999999,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 32,
+      "endTick": 56,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-745000-38",
+        "part": 0,
+        "start": 0.745,
+        "end": 0.805,
+        "pitch": 38,
+        "velocity": 96,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 45,
+      "endTick": 46,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-2",
+        "part": 2,
+        "start": 1.0,
+        "end": 1.42,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 60,
+      "endTick": 85,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-995000-36",
+        "part": 0,
+        "start": 0.995,
+        "end": 1.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 60,
+      "endTick": 61,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-2",
+        "part": 1,
+        "start": 1.03,
+        "end": 1.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 62,
+      "endTick": 86,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-1245000-38",
+        "part": 0,
+        "start": 1.245,
+        "end": 1.305,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 75,
+      "endTick": 76,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-3",
+        "part": 3,
+        "start": 1.25,
+        "end": 1.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM3",
+      "startTick": 75,
+      "endTick": 108,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-2",
+        "part": 3,
+        "start": 1.25,
+        "end": 1.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM4",
+      "startTick": 75,
+      "endTick": 108,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-3",
+        "part": 2,
+        "start": 1.5,
+        "end": 1.92,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 90,
+      "endTick": 115,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-1495000-38",
+        "part": 0,
+        "start": 1.495,
+        "end": 1.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 90,
+      "endTick": 91,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-3",
+        "part": 1,
+        "start": 1.53,
+        "end": 1.93,
+        "pitch": 86,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 92,
+      "endTick": 116,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-1745000-38",
+        "part": 0,
+        "start": 1.745,
+        "end": 1.805,
+        "pitch": 38,
+        "velocity": 98,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 105,
+      "endTick": 106,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-4",
+        "part": 2,
+        "start": 2.0,
+        "end": 2.42,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 120,
+      "endTick": 145,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-1995000-36",
+        "part": 0,
+        "start": 1.995,
+        "end": 2.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 120,
+      "endTick": 121,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-4",
+        "part": 1,
+        "start": 2.03,
+        "end": 2.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 122,
+      "endTick": 146,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-2245000-38",
+        "part": 0,
+        "start": 2.245,
+        "end": 2.305,
+        "pitch": 38,
+        "velocity": 93,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 135,
+      "endTick": 136,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-5",
+        "part": 3,
+        "start": 2.25,
+        "end": 2.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM4",
+      "startTick": 135,
+      "endTick": 168,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-4",
+        "part": 3,
+        "start": 2.25,
+        "end": 2.8,
+        "pitch": 53,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM3",
+      "startTick": 135,
+      "endTick": 168,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-5",
+        "part": 2,
+        "start": 2.5,
+        "end": 2.92,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 150,
+      "endTick": 175,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-2495000-38",
+        "part": 0,
+        "start": 2.495,
+        "end": 2.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 150,
+      "endTick": 151,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-5",
+        "part": 1,
+        "start": 2.53,
+        "end": 2.93,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 152,
+      "endTick": 176,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-2745000-38",
+        "part": 0,
+        "start": 2.745,
+        "end": 2.805,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 165,
+      "endTick": 166,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-6",
+        "part": 2,
+        "start": 3.0,
+        "end": 3.42,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 180,
+      "endTick": 205,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-2995000-36",
+        "part": 0,
+        "start": 2.995,
+        "end": 3.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 180,
+      "endTick": 181,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-6",
+        "part": 1,
+        "start": 3.03,
+        "end": 3.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 182,
+      "endTick": 206,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-3245000-38",
+        "part": 0,
+        "start": 3.245,
+        "end": 3.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 195,
+      "endTick": 196,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-7",
+        "part": 3,
+        "start": 3.25,
+        "end": 3.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM4",
+      "startTick": 195,
+      "endTick": 228,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-6",
+        "part": 3,
+        "start": 3.25,
+        "end": 3.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM3",
+      "startTick": 195,
+      "endTick": 228,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-7",
+        "part": 2,
+        "start": 3.5,
+        "end": 3.92,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 210,
+      "endTick": 235,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-3495000-38",
+        "part": 0,
+        "start": 3.495,
+        "end": 3.555,
+        "pitch": 38,
+        "velocity": 115,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 210,
+      "endTick": 211,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-7",
+        "part": 1,
+        "start": 3.53,
+        "end": 3.93,
+        "pitch": 76,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 212,
+      "endTick": 236,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-3745000-38",
+        "part": 0,
+        "start": 3.745,
+        "end": 3.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 225,
+      "endTick": 226,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-8",
+        "part": 2,
+        "start": 4.0,
+        "end": 4.42,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 240,
+      "endTick": 265,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-3995000-36",
+        "part": 0,
+        "start": 3.995,
+        "end": 4.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 240,
+      "endTick": 241,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-8",
+        "part": 1,
+        "start": 4.03,
+        "end": 4.43,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 242,
+      "endTick": 266,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-4245000-38",
+        "part": 0,
+        "start": 4.245,
+        "end": 4.305,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 255,
+      "endTick": 256,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-9",
+        "part": 3,
+        "start": 4.25,
+        "end": 4.8,
+        "pitch": 59,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM4",
+      "startTick": 255,
+      "endTick": 288,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-8",
+        "part": 3,
+        "start": 4.25,
+        "end": 4.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM3",
+      "startTick": 255,
+      "endTick": 288,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-9",
+        "part": 2,
+        "start": 4.5,
+        "end": 4.92,
+        "pitch": 43,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 270,
+      "endTick": 295,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-4495000-38",
+        "part": 0,
+        "start": 4.495,
+        "end": 4.555,
+        "pitch": 38,
+        "velocity": 114,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 270,
+      "endTick": 271,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-9",
+        "part": 1,
+        "start": 4.53,
+        "end": 4.93,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 272,
+      "endTick": 296,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-4745000-38",
+        "part": 0,
+        "start": 4.745,
+        "end": 4.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 285,
+      "endTick": 286,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-10",
+        "part": 2,
+        "start": 5.0,
+        "end": 5.42,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 300,
+      "endTick": 325,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-4995000-36",
+        "part": 0,
+        "start": 4.995,
+        "end": 5.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 300,
+      "endTick": 301,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-10",
+        "part": 1,
+        "start": 5.03,
+        "end": 5.43,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 302,
+      "endTick": 326,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-5245000-38",
+        "part": 0,
+        "start": 5.245,
+        "end": 5.305,
+        "pitch": 38,
+        "velocity": 91,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 315,
+      "endTick": 316,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-11",
+        "part": 3,
+        "start": 5.25,
+        "end": 5.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM4",
+      "startTick": 315,
+      "endTick": 348,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-10",
+        "part": 3,
+        "start": 5.25,
+        "end": 5.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM3",
+      "startTick": 315,
+      "endTick": 348,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-11",
+        "part": 2,
+        "start": 5.5,
+        "end": 5.92,
+        "pitch": 45,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 330,
+      "endTick": 355,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-5495000-38",
+        "part": 0,
+        "start": 5.495,
+        "end": 5.555,
+        "pitch": 38,
+        "velocity": 116,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 330,
+      "endTick": 331,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-11",
+        "part": 1,
+        "start": 5.53,
+        "end": 5.93,
+        "pitch": 88,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 332,
+      "endTick": 356,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-5745000-38",
+        "part": 0,
+        "start": 5.745,
+        "end": 5.805,
+        "pitch": 38,
+        "velocity": 94,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 345,
+      "endTick": 346,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-12",
+        "part": 2,
+        "start": 6.0,
+        "end": 6.42,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 360,
+      "endTick": 385,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-5995000-36",
+        "part": 0,
+        "start": 5.995,
+        "end": 6.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 360,
+      "endTick": 361,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-12",
+        "part": 1,
+        "start": 6.03,
+        "end": 6.43,
+        "pitch": 86,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 362,
+      "endTick": 386,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-6245000-38",
+        "part": 0,
+        "start": 6.245,
+        "end": 6.305,
+        "pitch": 38,
+        "velocity": 92,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 375,
+      "endTick": 376,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-13",
+        "part": 3,
+        "start": 6.25,
+        "end": 6.8,
+        "pitch": 57,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM3",
+      "startTick": 375,
+      "endTick": 408,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-12",
+        "part": 3,
+        "start": 6.25,
+        "end": 6.8,
+        "pitch": 53,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM4",
+      "startTick": 375,
+      "endTick": 408,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-13",
+        "part": 2,
+        "start": 6.5,
+        "end": 6.92,
+        "pitch": 41,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 390,
+      "endTick": 415,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-6495000-38",
+        "part": 0,
+        "start": 6.495,
+        "end": 6.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 390,
+      "endTick": 391,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-13",
+        "part": 1,
+        "start": 6.53,
+        "end": 6.93,
+        "pitch": 84,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 392,
+      "endTick": 416,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-6745000-38",
+        "part": 0,
+        "start": 6.745,
+        "end": 6.805,
+        "pitch": 38,
+        "velocity": 94,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 405,
+      "endTick": 406,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-14",
+        "part": 2,
+        "start": 7.0,
+        "end": 7.42,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 420,
+      "endTick": 445,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-6995000-36",
+        "part": 0,
+        "start": 6.995,
+        "end": 7.055,
+        "pitch": 36,
+        "velocity": 103,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 420,
+      "endTick": 421,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-14",
+        "part": 1,
+        "start": 7.03,
+        "end": 7.43,
+        "pitch": 81,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 422,
+      "endTick": 446,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-7245000-38",
+        "part": 0,
+        "start": 7.245,
+        "end": 7.305,
+        "pitch": 38,
+        "velocity": 97,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 435,
+      "endTick": 436,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-15",
+        "part": 3,
+        "start": 7.25,
+        "end": 7.8,
+        "pitch": 60,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "counter",
+      "lane": "FM3",
+      "startTick": 435,
+      "endTick": 468,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-3-14",
+        "part": 3,
+        "start": 7.25,
+        "end": 7.8,
+        "pitch": 55,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "harmony",
+      "lane": "FM4",
+      "startTick": 435,
+      "endTick": 468,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-2-15",
+        "part": 2,
+        "start": 7.5,
+        "end": 7.92,
+        "pitch": 48,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "bass",
+      "lane": "FM2",
+      "startTick": 450,
+      "endTick": 475,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-7495000-38",
+        "part": 0,
+        "start": 7.495,
+        "end": 7.555,
+        "pitch": 38,
+        "velocity": 118,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 450,
+      "endTick": 451,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "transcriber-1-15",
+        "part": 1,
+        "start": 7.53,
+        "end": 7.93,
+        "pitch": 79,
+        "velocity": 96,
+        "source": "audio-transcribed",
+        "confidence": 1.0
+      },
+      "role": "melody",
+      "lane": "FM1",
+      "startTick": 452,
+      "endTick": 476,
+      "outcome": "kept"
+    },
+    {
+      "note": {
+        "id": "n-0-7745000-38",
+        "part": 0,
+        "start": 7.745,
+        "end": 7.805,
+        "pitch": 38,
+        "velocity": 95,
+        "source": "audio-drums",
+        "confidence": 1.0
+      },
+      "role": "drums",
+      "lane": "DAC",
+      "startTick": 465,
+      "endTick": 466,
+      "outcome": "kept"
+    }
+  ],
+  "timeBase": "source",
+  "leadContinuity": {
+    "split": 0,
+    "added": 0,
+    "extended": 0
+  },
+  "melodyGapFill": {
+    "beforeSeconds": 0.0,
+    "afterSeconds": 0.0
+  },
+  "fm1InterNoteGaps": {
+    "before": {
+      "6": 15
+    },
+    "after": {
+      "6": 15
+    }
+  }
+}

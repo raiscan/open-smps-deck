@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "journal": "962b3fba3a9f782e00cb83e06c50b4a9e1d70478da5a468abc569d70122cd579",
+  "proposals": [
+    {
+      "edit": {
+        "noteId": "transcriber-1-2",
+        "pitch": 85,
+        "op": "setNote",
+        "id": "vocal-1-1030000-contourDisagreement-fa767782be9f8208b631",
+        "reason": "Use the rounded RMVPE median for this gate",
+        "group": "vocal-lead-review",
+        "timeBase": "source",
+        "evidence": {
+          "text": "Use the rounded RMVPE median for this gate",
+          "path": "score.json"
+        },
+        "status": "proposed",
+        "author": "agent"
+      },
+      "outcomes": [
+        {
+          "status": "applied",
+          "noteIds": [
+            "transcriber-1-2"
+          ]
+        }
+      ],
+      "markers": [
+        {
+          "noteId": "transcriber-1-2",
+          "part": 1,
+          "pitch": 85,
+          "start": 1.03,
+          "end": 1.43,
+          "bend": []
+        }
+      ],
+      "roles": []
+    },
+    {
+      "edit": {
+        "noteId": "transcriber-1-10",
+        "pitch": 85,
+        "op": "setNote",
+        "id": "vocal-1-5030000-contourDisagreement-5fbfc69ce0a69f9133a2",
+        "reason": "Use the rounded RMVPE median for this gate",
+        "group": "vocal-lead-review",
+        "timeBase": "source",
+        "evidence": {
+          "text": "Use the rounded RMVPE median for this gate",
+          "path": "score.json"
+        },
+        "status": "proposed",
+        "author": "agent"
+      },
+      "outcomes": [
+        {
+          "status": "applied",
+          "noteIds": [
+            "transcriber-1-10"
+          ]
+        }
+      ],
+      "markers": [
+        {
+          "noteId": "transcriber-1-10",
+          "part": 1,
+          "pitch": 85,
+          "start": 5.03,
+          "end": 5.43,
+          "bend": []
+        }
+      ],
+      "roles": []
+    }
+  ]
+}
