@@ -291,7 +291,7 @@ public final class ReconstructionView {
             }
         }
         var picture = new EvidencePlot(options.width, span, low, high, rendered != null, lanes,
-                trajectories && options.db, drums != null, bands, noteColors);
+                trajectories && options.db, drums != null, bands, noteColors, !bends.isEmpty());
         if (!options.lanes.isEmpty()) picture.renderLabel = "Solo " + String.join(", ", options.lanes);
         var sounding = lanes.stream().filter(lane -> visible.stream()
                 .anyMatch(note -> note.layer == Layer.lane && lane.equals(note.lane))).toList();

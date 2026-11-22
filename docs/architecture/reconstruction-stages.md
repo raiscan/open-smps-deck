@@ -472,7 +472,7 @@ removes only the selected proposals. See the
 | `setNote` | `noteId` or a point selector and one or more of `pitch`, `start`, `end`, `velocity` (1–127), `noExtension` (boolean). Changing pitch or timing clears inferred motion, bends and retriggers tied to the old attack. | `transcribe` |
 | `transpose` | `noteIds` and a signed, nonzero integer `semitones`. Applies in journal order and keeps note IDs and timing. Skips drum parts and rejects moves outside the optional `laneType` range (`FM` by default, or `PSG` for tone lanes). PSG pitches above the FM limit are allocated to PSG. | `transcribe` |
 | `splitNote` | `noteId` or a point selector and `at` strictly inside the gate. Both halves need a project tick. Optional `pitch` retunes the second attack. The source attack is replaced by `edit-<id>-left` and `edit-<id>-right`. | `transcribe` |
-| `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each generated pitch change needs four project ticks between attacks. With `glide: true`, supply explicit `points` to use the last note’s pitch as the base for the measured curve. The resulting slide is routed to FM. | `transcribe` |
+| `mergeNotes` | At least two same-part tonal attacks selected by `noteIds`, point `selectors`, or `span`, `part` and `pitch`. The earliest attack keeps its ID, pitch and velocity and extends to the latest release. Set `allowDifferentPitches: true` to hold the first pitch, or `glide: true` to slide to each changed pitch. Each generated pitch change needs four project ticks between attacks. With `glide: true`, supply explicit `points` to use the last note’s pitch as the base for the measured curve. With explicit points, optional `start` sets the merged attack in the edit’s clock. The resulting slide is routed to FM. | `transcribe` |
 | `setVelocity` | `noteIds`, or `span` with `part` and optional `pitchMin` and `pitchMax`. Choose either absolute `velocity` (1–127) or a nonnegative `scale`. Scaled values round to the nearest integer and clamp to 1–127. | `transcribe` |
 | `setRole` | A selector and `role`. A span, ID list or point list can filter by `fromRole` after earlier edits. Optional `lane` also pins the note. | `roles` |
 | `swapRoles` | `span`, `part` and distinct tonal roles `from` and `to`. If any `from` notes match, move them to `to` and assign existing `to` notes within the same part and span to harmony. | `roles` |
@@ -1025,10 +1025,11 @@ grid marks upward and downward motion with ↗ and ↘.
 S3K transcription also tracks backward from a stable landing in the mapped
 stem. This finds upward scoops that begin below the attack window and can
 join short, ascending fragments that follow one continuous ridge. A
-stationary pitch between fragments or a pitch jump keeps separate attacks.
-If the full ridge fails around a touching lower gate, the detector can
-retry around the written landing attack. A supported residual rise becomes
-a single-note proposal and preserves both written gates.
+steady pickup can precede the rise. When the stem supports a continuous
+ridge and a single attack, the curve holds the pickup pitch from its onset
+until the glide begins. A merge proposal can join an adjacent written pickup
+and landing. A pitch jump, gap, or renewed attack keeps the pickup separate.
+The detector can still propose a supported residual rise on the landing gate.
 When a continuous ridge crosses a drop in energy at a fragment boundary,
 the join stays in review to allow for another pick on the sliding string.
 The merged gate keeps the first ID and

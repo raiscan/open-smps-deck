@@ -1361,7 +1361,9 @@ for payloads, split and merge, and MCP equivalents.
 
 On S3K, transcription follows the source pitch backward from a settled
 note. A continuous rise can become an onset scoop or a single bent gate
-across adjacent transcription fragments. A confirmed approach also guides
+across adjacent transcription fragments. A continuous pickup keeps its
+initial pitch until the rise starts. The evidence plot marks the bend start
+at the sounding pitch. A confirmed approach also guides
 the search for matching rises in other written chord voices, which can
 play on FM or PSG tone lanes. Use
 `reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect

@@ -246,7 +246,7 @@ final class ReconstructionEdits {
             case splitNote -> List.of("noteId", "selector", "at", "pitch");
             case retrigger -> List.of("noteId", "selector", "attacks", "rate", "count", "gate", "role", "lane");
             case mergeNotes -> List.of("noteIds", "selectors", "span", "part", "pitch",
-                    "allowDifferentPitches", "glide", "points");
+                    "allowDifferentPitches", "glide", "points", "start");
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
@@ -376,6 +376,7 @@ final class ReconstructionEdits {
                         "setNote requires start, end, pitch, velocity or noExtension");
             }
             case mergeNotes -> {
+                require(start == null || json.has("points"), at + ".start", "requires explicit glide points");
                 if (json.has("noteIds")) {
                     require(part == null && !json.has("span") && pitch == null, at + ".noteIds",
                             "use noteIds, selectors, or span with part and pitch");
@@ -943,7 +944,8 @@ final class ReconstructionEdits {
             if (conflict != null) return conflict(edit, ids, conflict);
             double end = members.stream().mapToDouble(Note::end).max().orElseThrow();
             int pitch = edit.points.isEmpty() ? first.pitch() : members.getLast().pitch();
-            var merged = new Note(first.id(), first.part(), first.start(), end, pitch, first.velocity(),
+            double start = edit.start == null ? first.start() : edit.toSource(edit.start, timeline);
+            var merged = new Note(first.id(), first.part(), start, end, pitch, first.velocity(),
                     first.source(), first.confidence());
             validateNote(merged, score, part(score, merged.part()), at);
             if (!edit.points.isEmpty()) merged = merged.withBend(bend(edit, merged, at, curveInSource(edit, timeline), timeline));

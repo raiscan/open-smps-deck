@@ -40,7 +40,7 @@ final class EvidencePlot {
     String renderLabel = "Full mix";
 
     EvidencePlot(int width, Span span, int minPitch, int maxPitch, boolean render, List<String> lanes, boolean levels, boolean drums,
-                 List<ReconstructionSections.Section> bands, java.util.Map<String, Color> noteColors) {
+                 List<ReconstructionSections.Section> bands, java.util.Map<String, Color> noteColors, boolean bendLegend) {
         this.span = span;
         this.lanes = lanes;
         this.bands = bands;
@@ -48,7 +48,7 @@ final class EvidencePlot {
         this.minPitch = minPitch;
         this.maxPitch = maxPitch;
         int pitchHeight = Math.max(186, (maxPitch - minPitch + 1) * 14);
-        int sourceTop = TOP + (bands.isEmpty() ? 0 : 63);
+        int sourceTop = TOP + (bendLegend ? 14 : 0) + (bands.isEmpty() ? 0 : 63);
         Integer renderTop = render ? sourceTop + pitchHeight + 39 + (levels ? LEVEL_HEIGHT : 0) : null;
         int laneTop = (render ? renderTop : sourceTop) + pitchHeight + 44 + (levels ? LEVEL_HEIGHT : 0);
         geometry = new Plot(LEFT, width - LEFT - RIGHT, sourceTop, renderTop, pitchHeight, laneTop);
@@ -69,7 +69,7 @@ final class EvidencePlot {
             g.fillRect(0, 0, image.getWidth(), image.getHeight());
             g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             text("Reconstruction evidence", LEFT, 29, INK, Font.BOLD, 22);
-            key();
+            key(!bends.isEmpty());
             drawSections();
             String analysis = emphasize ? "  ·  Harmonic sum" : "";
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
@@ -112,7 +112,7 @@ final class EvidencePlot {
         }
     }
 
-    private void key() {
+    private void key(boolean showBendStart) {
         int x = LEFT;
         String[] labels = {"Suno MIDI", "External", "Inserted", "Dropped / merged", noteColors.isEmpty() ? "Voiced lane" : "Voice colors"};
         Color[] colors = {SUNO, EXTERNAL, EDIT, WARNING, CHANNELS[0]};
@@ -126,6 +126,11 @@ final class EvidencePlot {
             g.setStroke(new BasicStroke(1));
             text(labels[i], x + 33, 54, INK, Font.PLAIN, 12);
             x += 45 + g.getFontMetrics().stringWidth(labels[i]);
+        }
+        if (showBendStart) {
+            g.setColor(EDIT.darker().darker());
+            g.drawLine(LEFT + 13, 62, LEFT + 13, 73);
+            text("Bend start at sounding pitch", LEFT + 33, 72, INK, Font.PLAIN, 12);
         }
     }
 
@@ -222,6 +227,10 @@ final class EvidencePlot {
             g.setColor(assembled ? laneColor(bend.lane()) : EDIT);
             g.setStroke(new BasicStroke(2));
             var previous = bend.points().getFirst();
+            if (previous.time() > span.start()) {
+                int x = x(previous.time()), y = y(previous.pitch(), top);
+                g.drawLine(x, y - 6, x, y + 6);
+            }
             for (var point : bend.points().subList(1, bend.points().size())) {
                 int x = x(previous.time()), y = y(previous.pitch(), top);
                 if (assembled) {

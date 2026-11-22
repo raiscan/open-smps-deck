@@ -337,8 +337,10 @@ the mapped stem with `reconstruct view` and check
 from `transcribe` to scan old work or apply an accepted proposal. Separate
 attacks can each have a scoop, and written chord voices can follow a
 matching rise on FM or PSG tone. Check the stem's ridge across each attack
-before merging fragments into one note. A `bend` can set `start`, and
-`mergeNotes` with `glide: true` can supply explicit points relative to its
+before merging fragments into one note. Use equal initial offsets to hold
+the pickup pitch before the glide. Set `start` on a `bend` or a `mergeNotes`
+with explicit glide points to move the attack to the pickup onset.
+`mergeNotes` with `glide: true` interprets those points relative to the
 last note’s pitch.
 
 Per-note layers and copy policies follow rendered bends, including the

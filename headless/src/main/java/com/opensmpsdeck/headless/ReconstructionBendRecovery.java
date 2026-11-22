@@ -24,6 +24,7 @@ final class ReconstructionBendRecovery {
     private static final double FRAGMENT_MAX = .145;
     private static final double TIME_SLOP = .018;
     private static final double CHORD_ATTACK_SLOP = .125;
+    private static final double PICKUP_MAX = .75;
 
     private ReconstructionBendRecovery() {}
 
@@ -57,6 +58,7 @@ final class ReconstructionBendRecovery {
             } else {
                 edit.addProperty("op", "mergeNotes");
                 edit.addProperty("glide", true);
+                if (start != members.getFirst().start()) edit.addProperty("start", start);
                 var ids = new JsonArray();
                 for (var member : members) ids.add(member.id());
                 edit.add("noteIds", ids);
@@ -70,10 +72,14 @@ final class ReconstructionBendRecovery {
             }
             edit.add("points", points);
             var evidence = new JsonObject();
+            double pickupCents = bend.points().getFirst().cents();
+            double riseStart = Math.max(start, approach.holdUntil());
+            String hold = riseStart > start
+                    ? String.format(Locale.ROOT, "holds the pickup for %.0f ms, then ", (riseStart - start) * 1000)
+                    : "";
             evidence.addProperty("text", String.format(Locale.ROOT,
-                    "Part %d rises %.1f semitones in %.0f ms, reaching MIDI pitch %d at source %.3f s",
-                    note.part(), -approach.samples().getFirst().cents() / 100.0,
-                    (approach.landing() - approach.start()) * 1000,
+                    "Part %d %srises %.1f semitones in %.0f ms, reaching MIDI pitch %d at source %.3f s",
+                    note.part(), hold, -pickupCents / 100.0, (approach.landing() - riseStart) * 1000,
                     note.pitch(), approach.landing()));
             evidence.addProperty("path", "score.json");
             edit.add("evidence", evidence);
@@ -95,14 +101,22 @@ final class ReconstructionBendRecovery {
             var landing = sorted.get(i);
             if ("external".equals(landing.source())) continue;
             var approach = tracker.approach(landing);
-            if (approach == null) {
-                // The previous gate can carry the pickup, while only the
-                // motion at the later attack needs a bend. Keep both gates.
-                if (landing.bend() == null && hasLowerPickup(sorted, endThrough, i)) {
-                    var attack = tracker.attackApproach(landing);
-                    if (attack != null && attack.landing() - landing.start() >= .021)
-                        candidates.add(new Candidate(List.of(landing), landing.start(), attack, false, false));
+            var pickups = lowerPickups(sorted, endThrough, i);
+            var attack = approach == null && landing.bend() == null ? tracker.attackApproach(landing) : null;
+            var rise = approach == null ? attack : approach;
+            if (rise != null && landing.bend() == null) {
+                var held = heldPickup(audio, tracker, sorted, landing, pickups, rise,
+                        eligibleForAutomatic && approach != null);
+                if (held != null) {
+                    candidates.add(held);
+                    continue;
                 }
+            }
+            if (approach == null) {
+                // A separate pickup can carry its own pitch while the later
+                // attack carries the supported remainder of the rise.
+                if (!pickups.isEmpty() && attack != null && attack.landing() - landing.start() >= .021)
+                    candidates.add(new Candidate(List.of(landing), landing.start(), attack, false, false));
                 continue;
             }
             var members = new ArrayList<Note>();
@@ -146,6 +160,14 @@ final class ReconstructionBendRecovery {
             if (!ordered) continue;
             boolean covered = members.size() >= 3 || members.size() == 1 && Math.abs(landing.start() - start) <= .027;
             boolean automatic = eligibleForAutomatic && covered && approach.strong() && !possibleReattack;
+            if (members.size() > 2) {
+                var held = tracker.heldPickup(landing, approach, members.getFirst());
+                if (held != null && held.start() < start + .012 && !reattacks(audio, held)
+                        && !overlapsVoice(sorted, landing, members.getFirst(), held)) {
+                    approach = held;
+                    start = Math.max(held.start(), start);
+                }
+            }
             candidates.add(new Candidate(List.copyOf(members), start, approach, automatic, false));
         }
         var companions = parallelVoices(tracker, sorted, candidates);
@@ -159,14 +181,60 @@ final class ReconstructionBendRecovery {
                         .thenComparingDouble(Candidate::start)).toList();
     }
 
-    private static boolean hasLowerPickup(List<Note> notes, double[] endThrough, int index) {
+    private static List<Note> lowerPickups(List<Note> notes, double[] endThrough, int index) {
         var landing = notes.get(index);
         double earliestEnd = landing.start() - .012;
+        var pickups = new ArrayList<Note>();
         for (int j = index - 1; j >= 0 && endThrough[j] >= earliestEnd; j--) {
             var note = notes.get(j);
             if (note.start() < landing.start() && note.end() >= earliestEnd && note.end() <= landing.start() + .012
                     && note.pitch() < landing.pitch() && landing.pitch() - note.pitch() <= 3
-                    && note.run() == null && !"external".equals(note.source())) return true;
+                    && note.run() == null && !"external".equals(note.source())) pickups.add(note);
+        }
+        return pickups;
+    }
+
+    private static Candidate heldPickup(ReferenceAudio audio, ReconstructionBends.Tracker tracker,
+                                        List<Note> notes, Note landing, List<Note> pickups,
+                                        ReconstructionBends.Approach rise, boolean eligibleForAutomatic) {
+        Candidate found = null;
+        for (var pickup : pickups) {
+            if (pickup.bend() != null || landing.start() - pickup.start() > PICKUP_MAX) continue;
+            var held = tracker.heldPickup(landing, rise, pickup);
+            if (held == null || reattacks(audio, held) || overlapsVoice(notes, landing, pickup, held)) continue;
+            if (found != null) return null;
+            // A spectrum window can see the pickup before its written gate.
+            // Keep that earlier estimate from competing for the previous gate's lane.
+            double start = Math.max(pickup.start(), held.start());
+            found = new Candidate(List.of(pickup, landing), start, held, false, false);
+        }
+        if (found != null || !pickups.isEmpty()) return found;
+
+        var held = tracker.heldPickup(landing, rise, null);
+        if (held == null || reattacks(audio, held) || overlapsVoice(notes, landing, null, held)) return null;
+        double offset = held.start() - landing.start();
+        if (offset > .027) return null;
+        double start = Math.abs(offset) <= .012 ? landing.start() : held.start();
+        boolean automatic = eligibleForAutomatic && held.strong() && Math.abs(offset) <= .027;
+        return new Candidate(List.of(landing), start, held, automatic, false);
+    }
+
+    private static boolean overlapsVoice(List<Note> notes, Note landing, Note pickup, ReconstructionBends.Approach held) {
+        int pitch = landing.pitch() + (int) Math.round(held.samples().getFirst().cents() / 100);
+        return notes.stream().anyMatch(other -> other != landing && other != pickup
+                && other.start() < held.landing() && other.end() > held.start() + .012
+                && (other.pitch() == pitch || other.pitch() == landing.pitch()));
+    }
+
+    private static boolean reattacks(ReferenceAudio audio, ReconstructionBends.Approach held) {
+        // The first analysis window can contain both the attack and the
+        // preceding silence. Leave room for that initial energy rise.
+        double from = Math.min(held.start() + .036, held.holdUntil());
+        for (double time = from; time < held.landing(); time += .006) {
+            double before = power(audio, time - .015);
+            double now = power(audio, time);
+            double after = power(audio, time + .012);
+            if (now < Math.min(before, after) * .20 || Math.min(now, after) > before * 5) return true;
         }
         return false;
     }
@@ -272,12 +340,17 @@ final class ReconstructionBendRecovery {
         }
         var eligible = candidates.stream().filter(candidate -> candidate.members().stream()
                 .noneMatch(note -> written.contains(note.id()))).toList();
-        var ids = new HashSet<String>();
-        for (var candidate : eligible) ids.add(candidate.id());
-        var updated = new ArrayList<>(journal.intents());
-        updated.removeIf(edit -> edit.proposed() && generated(edit.id()) && !ids.contains(edit.id()));
+        var fresh = new LinkedHashMap<String, Candidate>();
+        for (var candidate : eligible) fresh.putIfAbsent(candidate.id(), candidate);
+        var updated = new ArrayList<ReconstructionEdits.Intent>();
         var existing = new HashSet<String>();
-        updated.forEach(edit -> existing.add(edit.id()));
+        for (var edit : journal.intents()) {
+            var candidate = fresh.get(edit.id());
+            boolean refresh = edit.proposed() && generated(edit.id()) && !edit.json().has("proposalRevised");
+            if (refresh && candidate == null) continue;
+            updated.add(refresh ? candidate.intent() : edit);
+            existing.add(edit.id());
+        }
         for (var candidate : eligible) if (!candidate.decided(existing)) {
             updated.add(candidate.intent());
             existing.add(candidate.id());

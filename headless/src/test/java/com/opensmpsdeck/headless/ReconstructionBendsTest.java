@@ -178,6 +178,57 @@ class ReconstructionBendsTest {
         assertEquals(ReconstructionEdits.Kind.bend, candidates.getFirst().intent().kind());
     }
 
+    @Test void holdsTheWrittenPickupOnChipBeforeGlidingWithoutAnotherAttack() throws IOException {
+        var pickup = fragment("pickup", .06, .15, PITCH - 2);
+        var landing = fragment("landing", .15, .40, PITCH);
+        var audio = fixture(frame -> -200 * (1 - Math.clamp((frame / 60 - .14) / .042, 0, 1)));
+        Arrays.fill(audio.samples(), 0, (int) (.06 * audio.sampleRate()), 0);
+
+        var candidate = ReconstructionBendRecovery.detect(audio, List.of(pickup, landing), true).getFirst();
+        assertEquals(List.of(pickup, landing), candidate.members());
+        var bend = candidate.approach().bend(candidate.start(), landing.end());
+        assertEquals(-200, bend.cents(.12), 12);
+        assertEquals(bend.points().getFirst().cents(), bend.points().get(1).cents());
+        assertTrue(bend.points().get(1).time() > .12);
+        int start = (int) Math.round(candidate.start() * 60);
+        var fit = ReconstructionBendEncoding.fit(
+                fragment("merged", candidate.start(), landing.end(), PITCH).withBend(bend), start, 24 - start, 0, VOICE);
+        assertNotNull(fit);
+        var packed = ReconstructionBendEncoding.frequencies(fit, VOICE, 24 - start);
+        double pickupFrequency = Math.scalb(packed[0] & 0x7ff, packed[0] >> 11 & 7);
+        double landingFrequency = Math.scalb(packed[packed.length - 1] & 0x7ff, packed[packed.length - 1] >> 11 & 7);
+        assertEquals(-200, 1200 * Math.log(pickupFrequency / landingFrequency) / Math.log(2), 12);
+        for (int i = 1; i < 8 - start; i++) assertEquals(packed[0], packed[i]);
+        assertNotEquals(packed[0], packed[packed.length - 1]);
+        assertEquals(fit.notes().size() - 1,
+                fit.commands().stream().filter(command -> command.command() == NativeCommand.HOLD).count());
+    }
+
+    @Test void holdsAnUnsplitPickupOnAnAutomaticScoop() {
+        var gate = fragment("landing", .06, .50, PITCH);
+        var audio = fixture(frame -> -200 * (1 - Math.clamp((frame / 60 - .12) / .048, 0, 1)));
+        Arrays.fill(audio.samples(), 0, (int) (.06 * audio.sampleRate()), 0);
+
+        var candidate = ReconstructionBendRecovery.detect(audio, List.of(gate), true).getFirst();
+        assertTrue(candidate.automatic());
+        assertEquals(List.of(gate), candidate.members());
+        assertEquals(.06, candidate.start(), .012);
+        assertEquals(-200, candidate.approach().bend(candidate.start(), gate.end()).cents(.10), 12);
+    }
+
+    @Test void keepsHeldPickupAndNewAttackSeparateWhenThereIsAGap() {
+        var pickup = fragment("pickup", .06, .15, PITCH - 2);
+        var landing = fragment("landing", .15, .40, PITCH);
+        var audio = fixture(frame -> -200 * (1 - Math.clamp((frame / 60 - .158) / .042, 0, 1)));
+        int rate = audio.sampleRate();
+        Arrays.fill(audio.samples(), 0, (int) (.06 * rate), 0);
+        Arrays.fill(audio.samples(), (int) (.139 * rate), (int) (.155 * rate), 0);
+
+        var candidates = ReconstructionBendRecovery.detect(audio, List.of(pickup, landing), true);
+        assertTrue(candidates.stream().noneMatch(candidate -> candidate.members().contains(pickup)
+                || candidate.start() < landing.start() - .008));
+    }
+
     @Test void offersAnAttackScoopForReviewWhenTheLandingRidgeEndsEarly() {
         var pickup = fragment("pickup", .04, .20, PITCH - 2);
         var landing = fragment("landing", .20, .38, PITCH);
