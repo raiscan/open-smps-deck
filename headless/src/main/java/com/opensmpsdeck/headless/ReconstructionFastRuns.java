@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetClock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -90,6 +91,10 @@ final class ReconstructionFastRuns {
     record Frames(int pitch, int start, int end, int firstStep) {}
 
     static List<Frames> quantize(List<Step> figure, int start, int end) {
+        return quantize(figure, start, end, TargetClock.FRAME_CLOCK);
+    }
+
+    static List<Frames> quantize(List<Step> figure, int start, int end, TargetClock clock) {
         var steps = new ArrayList<>(figure);
         var indexes = new ArrayList<Integer>();
         for (int i = 0; i < figure.size(); i++) indexes.add(i);
@@ -111,7 +116,7 @@ final class ReconstructionFastRuns {
         var frames = new ArrayList<Frames>();
         for (int i = 0; i < steps.size(); i++) {
             int stop = i + 1 == steps.size() ? end
-                    : Math.clamp((int) Math.round(steps.get(i).end * 60), start + 1, end - (steps.size() - i - 1));
+                    : Math.clamp((int) clock.nearestTick(steps.get(i).end * 60), start + 1, end - (steps.size() - i - 1));
             frames.add(new Frames(steps.get(i).pitch, start, stop, indexes.get(i)));
             start = stop;
         }

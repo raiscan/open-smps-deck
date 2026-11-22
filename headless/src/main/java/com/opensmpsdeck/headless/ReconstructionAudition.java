@@ -5,6 +5,7 @@ import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.GroupArrangement;
 import com.opensmpsdeck.project.NativeCommand;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.openggf.audio.synth.ChipWriteObserver;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
@@ -75,7 +76,7 @@ public final class ReconstructionAudition {
         out.printf(Locale.ROOT, "%.6f–%.6f s source, %.6f–%.6f s project%n",
                 result.sourceStart(), result.sourceEnd(), result.projectStart(), result.projectEnd());
         out.printf(Locale.ROOT, "Ticks %d–%d, %d equal-width RMS bins (dBFS, before A/B matching)%n",
-                result.startTick(), result.endTick(), Math.min(BINS, result.endTick() - result.startTick()));
+                result.startTick(), result.endTick(), result.candidates().getFirst().rms().size());
         for (var candidate : result.candidates()) {
             out.println(candidate.name() + " [" + candidate.variantId() + "]  " + db(candidate.rms()) + "  " + candidate.output());
         }
@@ -158,7 +159,7 @@ public final class ReconstructionAudition {
             if (!variants.isEmpty()) throw new IllegalArgumentException("Choose --shortlist or --variant");
             var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
             var allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
-            int from = ReconstructionOverrides.tick(startSeconds), to = ReconstructionOverrides.tick(endSeconds);
+            int from = timeline.tick(startSeconds), to = timeline.tick(endSeconds);
             String selectedLane = lane;
             var notes = allocation.notes().stream().filter(entry -> selectedLane.equals(entry.lane())
                     && entry.startTick() < to && entry.endTick() > from).toList();
@@ -169,17 +170,19 @@ public final class ReconstructionAudition {
         }
         if (variants.isEmpty() || variants.size() > MAX_VARIANTS || new HashSet<>(variants).size() != variants.size())
             throw new IllegalArgumentException("Expected 1–" + MAX_VARIANTS + " distinct variant IDs");
-        int start = ReconstructionOverrides.tick(startSeconds), end = ReconstructionOverrides.tick(endSeconds);
-        int length = end - start;
+        int start = timeline.tick(startSeconds), end = timeline.tick(endSeconds);
+        int firstFrame = (int) timeline.clock().frameAtTick(start);
+        int endFrame = (int) timeline.clock().frameAtTick(end);
+        int length = endFrame - firstFrame;
         if (length < 1 || length > 3600)
             throw new IllegalArgumentException("Audition must span 1 tick to 60 seconds");
 
         var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
-        if (end > report.get("presentations").getAsInt())
+        if (endFrame > report.get("presentations").getAsInt())
             throw new IllegalArgumentException("Audition ends after the assembled render");
         var project = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         if (project.nativeProgram() != null || project.arrangementVersion() < 4 || project.tempo() != 0)
-            throw new IllegalArgumentException("Audition requires an editable reconstruction at 60 project ticks per second");
+            throw new IllegalArgumentException("Audition requires an editable reconstruction with its original tempo");
         final String auditionLane = lane;
         var clips = project.formatVersion() == 6 ? GroupArrangement.flatten(project) : project.clips();
         if (clips.stream().noneMatch(clip -> auditionLane.equals(clip.lane()) && overlaps(clip, start, end)))
@@ -198,14 +201,16 @@ public final class ReconstructionAudition {
             outputs.add(file);
         }
 
-        var banks = matches.stream().map(match -> ProjectCompiler.compileWithAssets(
-                overlay(project, clips, auditionLane, start, end, match.asset(), gain))).toList();
+        var banks = matches.stream().map(match -> {
+            var probe = overlay(project, clips, auditionLane, start, end, match.asset(), gain);
+            return probe.nativeTempo() == null ? ProjectCompiler.compileWithAssets(probe) : ReconstructionCli.compileTarget(probe);
+        }).toList();
         float[] referencePcm = null;
         if (reference != null) {
             if (ReconstructionStages.usesSteadyReference(work.resolve("report.json"), reference))
                 reference = work.resolve(ReconstructionStages.STEADY_REFERENCE);
             referencePcm = ReferenceAudio.stereoRange(reference, SAMPLE_RATE,
-                    (long) start * STEREO_FRAMES_PER_PRESENTATION, length * STEREO_FRAMES_PER_PRESENTATION);
+                    (long) firstFrame * STEREO_FRAMES_PER_PRESENTATION, length * STEREO_FRAMES_PER_PRESENTATION);
         }
         var results = new ArrayList<Candidate>();
         int fmBit = 1 << ReconstructionAllocation.FM.indexOf(lane);
@@ -213,12 +218,18 @@ public final class ReconstructionAudition {
         for (int i = 0; i < matches.size(); i++) {
             var match = matches.get(i);
             var pcm = new float[length * FRAME_SAMPLES];
-            int[] tick = {0};
-            S3kRenderer.render(banks.get(i), end, mask, samples -> {
-                int t = tick[0]++ - start;
+            int[] frame = {0};
+            S3kRenderer.PcmSink collect = samples -> {
+                int t = frame[0]++ - firstFrame;
                 if (t >= 0) for (int sample = 0; sample < samples.length; sample++)
                     pcm[t * FRAME_SAMPLES + sample] = samples[sample] / 32768f;
-            });
+            };
+            if (project.nativeTempo() == null)
+                S3kRenderer.render(banks.get(i), endFrame, mask, collect);
+            else {
+                var driver = (ClassicPackageDriver) PackageDriver.supported(project.target().id());
+                driver.render(banks.get(i), endFrame, mask, collect, ChipWriteObserver.NONE);
+            }
             PhraseAudio.write(outputs.get(i), length, pcm, referencePcm);
             results.add(new Candidate(match.variant().id(), match.variant().name(), outputs.get(i).toString(), envelope(pcm)));
         }
@@ -279,7 +290,7 @@ public final class ReconstructionAudition {
             }
         }
         return new StudioProject(project.arrangementVersion(), project.name(), project.mode(), project.ticksPerBeat(),
-                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples()).withTarget(project.target());
+                project.tempo(), voices, sequences, placements, project.envelopes(), project.samples()).withTarget(project.target()).withNativeTempo(project.nativeTempo());
     }
 
     private static String uniqueSource(HashMap<String, Sequence> sources, int index) {

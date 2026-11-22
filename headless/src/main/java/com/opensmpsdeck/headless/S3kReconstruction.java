@@ -12,6 +12,8 @@ import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.TargetClock;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -190,8 +192,8 @@ final class S3kReconstruction {
                 continue;
             }
             var asset = catalogue.asset(choice.assetId());
-            int start = Math.min(frames - 1, toTicks(note.startUs()));
-            int end = Math.min(frames, Math.max(start + 1, toTicks(note.endUs())));
+            int start = Math.min(frames - 1, toTicks(note.startUs(), profile.clock()));
+            int end = Math.min(frames, Math.max(start + 1, toTicks(note.endUs(), profile.clock())));
             if (part.drums()) {
                 String sampleId = asset.id() + "-" + choice.sampleRate();
                 samples.computeIfAbsent(sampleId, id -> DacSample.of(id, choice.name(),
@@ -222,7 +224,7 @@ final class S3kReconstruction {
         List<List<Placement>> psg = allocateTones(spill, PSG_LANES, reductions, unplacedPsg);
         unplacedPsg.forEach(event -> reductions.add(new Reduction(event.note(), Change.PSG_BUSY)));
         int fmNotes = fm.stream().mapToInt(List::size).sum();
-        int echoNotes = addEchoes(fm, echoes, frames, 0);
+        int echoNotes = addEchoes(fm, echoes, frames, 0, profile.clock());
         List<Event> dac = allocateDac(drumHits, reductions);
         if (fm.stream().allMatch(List::isEmpty) && dac.isEmpty())
             throw new IllegalArgumentException("No MIDI notes had a playable catalogue match in the requested interval");
@@ -239,7 +241,9 @@ final class S3kReconstruction {
         StudioProject project = new StudioProject(4, name, "S3K", ticksPerBeat, 0,
                 voices.values().stream().filter(voice -> usedVoices.contains(voice.id())).toList(),
                 sequences, clips, List.copyOf(envelopes.values()),
-                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList());
+                samples.values().stream().filter(sample -> usedSamples.contains(sample.id())).toList())
+                .withTarget(profile.game())
+                .withNativeTempo(profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
         return new Result(project, fmNotes, psg.stream().mapToInt(List::size).sum(),
                 dac.size(), echoNotes, List.copyOf(reductions), List.of(), List.of());
     }
@@ -569,7 +573,7 @@ final class S3kReconstruction {
                         current = next;
                     }
                     placed.bend = ReconstructionBendEncoding.fit(entry.note(), start, duration, placed.detune,
-                            voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes);
+                            voices.get(placed.attackTone().asset()), placed.attackTone().vibrato(), changes, profile.clock());
                     if (placed.bend != null) applied.add(new ReconstructionBendEncoding.Applied(entry.note().id(),
                             lane, start, placed.end, placed.bend.mode(), placed.bend.rmseCents(),
                             curve.editReason() == null ? ReconstructionBends.REASON : curve.editReason()));
@@ -592,7 +596,7 @@ final class S3kReconstruction {
         int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
         var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, psg, candidates, voices, envelopes,
                 levels, catalogue, sourceInstruments, policyDecisions, profile);
-        int echoNotes = addEchoes(fm, echoes, frames, 2);
+        int echoNotes = addEchoes(fm, echoes, frames, 2, profile.clock());
         if (copies) echoNotes += addVoicingCopies(fm, frames);
         var lanePolicyCopies = new ArrayList<CopyWindow>();
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
@@ -626,7 +630,8 @@ final class S3kReconstruction {
             }
         }
         var project = new StudioProject(4, name, "S3K", ticksPerBeat, 0, List.copyOf(voices.values()),
-                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values())).withTarget(profile.game());
+                sequences, clips, List.copyOf(envelopes.values()), List.copyOf(samples.values())).withTarget(profile.game())
+                .withNativeTempo(profile.clock().game() == TargetGame.S3K ? null : profile.clock().tempo());
         return new Result(project, fmNotes, psgNotes, dac.size(), echoNotes,
                 List.copyOf(reductions), List.copyOf(applied), List.copyOf(gates), assignmentClipCost, arpeggioExtraNoteBytes,
                 coverage, layerResults, List.copyOf(lanePolicyCopies), decisions == null ? List.of() : List.copyOf(decisions));
@@ -1284,7 +1289,7 @@ final class S3kReconstruction {
     }
 
     private static int addEchoes(List<? extends List<Placement>> lanes, Map<Integer, ReconstructionEcho.Estimate> estimates,
-                                 int frames, int firstEchoLane) {
+                                 int ticks, int firstEchoLane, TargetClock clock) {
         if (estimates.values().stream().noneMatch(e -> e.delayTicks() != null)) return 0;
         var dry = lanes.stream().flatMap(List::stream).sorted(Comparator.comparingInt(p -> p.event.start())).toList();
         int count = 0;
@@ -1293,10 +1298,10 @@ final class S3kReconstruction {
             Event event = original.event;
             var estimate = estimates.get(event.note().partId());
             int duration = original.end - event.start();
-            if (estimate == null || estimate.delayTicks() == null || duration < 2
-                    || duration >= estimate.delayTicks() - 1) continue;
-            int start = event.start() + estimate.delayTicks();
-            int end = Math.min(start + duration, frames);
+            if (estimate == null || estimate.delayTicks() == null || duration < 2) continue;
+            int start = (int) clock.nearestTick(clock.frameAtTick(event.start()) + estimate.delayTicks());
+            if (duration >= start - event.start() - 1) continue;
+            int end = Math.min(start + duration, ticks);
             if (end <= start) continue;
             int attenuation = (int) Math.round(-20 * Math.log10(estimate.amplitudeRatio()) / .75);
             var echo = new Event(event.note(), start, end, event.priority(), event.assetId(),
@@ -1593,6 +1598,11 @@ final class S3kReconstruction {
 
     private static List<Integer> unsigned(byte[] bytes) {
         return IntStream.range(0, bytes.length).mapToObj(i -> Byte.toUnsignedInt(bytes[i])).toList();
+    }
+
+    static int toTicks(long micros, TargetClock clock) {
+        return clock.equals(TargetClock.FRAME_CLOCK) ? toTicks(micros)
+                : (int) clock.nearestTick(micros * (PRESENTATIONS_PER_SECOND / 1_000_000.0));
     }
 
     static int toTicks(long micros) {

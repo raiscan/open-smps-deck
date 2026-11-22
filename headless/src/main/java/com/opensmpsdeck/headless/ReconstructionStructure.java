@@ -253,7 +253,8 @@ final class ReconstructionStructure {
     private static List<Repeat> identicalBars(List<Bar> bars, List<Note> notes, List<ReconstructionPhrases.Match> phrases,
                                              ReconstructionTimeMap timeline) {
         java.util.function.DoubleToLongFunction toFrame = timeline != null && timeline.warped()
-                ? time -> S3kReconstruction.toTicks(Math.round(time * 1e6)) : time -> Math.round(time * 60);
+                ? time -> S3kReconstruction.toTicks(Math.round(time * 1e6), timeline.clock())
+                : timeline == null ? time -> Math.round(time * 60) : timeline::tick;
         var eligible = new HashSet<String>();
         for (var match : phrases) for (var window : match.windows()) for (var bar : window.bars()) eligible.add(bar.id());
         var groups = new LinkedHashMap<BarContent, List<String>>();

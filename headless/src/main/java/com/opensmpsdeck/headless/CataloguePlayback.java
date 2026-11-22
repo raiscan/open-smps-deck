@@ -324,7 +324,7 @@ public final class CataloguePlayback {
 
         StudioProject finish() {
             var result = new StudioProject(version, target.name(), target.mode(), target.ticksPerBeat(),
-                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom()).withTarget(target.target());
+                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom()).withTarget(target.target()).withNativeTempo(target.nativeTempo());
             ProjectFormat.validate(result);
             return result.equals(target) ? target : result;
         }

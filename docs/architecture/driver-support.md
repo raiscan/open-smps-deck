@@ -49,7 +49,8 @@ number of duration ticks per NTSC frame.
 For `n ≥ 1` frames from a cold load, the cumulative duration counts are
 `n − floor(n·t/256)` on S3K, `floor((n+1)·b/256)` on S2 with `b > 0`, and
 `n − floor(n/b)` on S1. S3K tempo zero ticks on every frame. Its nearest
-classic bytes are both 255, each with a tick-rate error of −0.390625%.
+classic bytes are both 255, with tick-rate errors of −0.392157% on S1 and
+−0.390625% on S2.
 At S2 weight zero the sequencer primes the tracks once and then freezes
 duration progression, so exports use only 1–255.
 
@@ -70,6 +71,24 @@ and conversion. The manifest stores the resulting native byte. Omitting the
 input leaves the normal tempo in effect. The rate model applies once the
 effect is active. Its transition phase depends on the driver's current
 accumulator or countdown.
+
+### Target-built reconstructions
+
+S1 and S2 reconstructions both use native tempo byte `0xFF` and divider one.
+Their nominal rates are `60 × 254/255` and `60 × 255/256` duration ticks per
+second respectively. Both advance on the load service (presentation
+index zero). S1 holds indices 254, 509, 764, and so on. S2 holds indices
+255, 511, 767, and so on. Zero-based tick `k` plays at presentation
+`k + floor(k/254)` on S1 or `k + floor(k/255)` on S2.
+
+Reconstruction maps source seconds through any selected beat warp, then
+selects the tick whose actual presentation is closest. Audio and reference
+exports still count 60 presentations per second. The score records the
+nominal `ticksPerSecond` and the editable arrangement records `nativeTempo`.
+A same-target portable or mod export writes that byte directly, including
+in strict-tempo mode. Explicit cross-target exports use the arrangement's
+fallback S3K `tempo`. Earlier arrangements without `nativeTempo` keep
+their existing S3K tempo conversion.
 
 ## Arrangement commands
 

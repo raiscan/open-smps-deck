@@ -325,7 +325,7 @@ final class ReconstructionLevels {
                     null, null, null, null, allocation.chordVoicings());
             var source = new S3kReconstruction.Score(score.source().parts(), List.of(), List.of());
             var arrangement = S3kReconstruction.arrangeAllocated("Level probe", score.inputs().ticksPerBeat(),
-                    timeline.frames(), source, group, null, catalogue, matches, Map.of(), voicing.lanes(),
+                    timeline.ticks(), source, group, null, catalogue, matches, Map.of(), voicing.lanes(),
                     true, false, Map.of(), playback.origins(), Map.of(), null, Map.of(), voicing.sourceInstruments());
             return ProjectCompiler.compileWithAssets(arrangement.project());
         }

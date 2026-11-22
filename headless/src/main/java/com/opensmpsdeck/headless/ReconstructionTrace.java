@@ -446,7 +446,7 @@ public final class ReconstructionTrace {
 
     private static boolean layerOverlaps(Row row, Span span, String lane, ReconstructionTimeMap timeline) {
         if (row.policyDecisions != null && row.policyDecisions.stream().anyMatch(decision ->
-                decision.attackTick() < timeline.frames() && policyLane(decision, lane) &&
+                decision.attackTick() < timeline.ticks() && policyLane(decision, lane) &&
                         span.overlaps(ticks(decision.attackTick(), decision.attackTick() + Math.max(1, decision.gate()), timeline))))
             return true;
         return row.layers != null && row.layers.stream().anyMatch(layer ->
@@ -689,7 +689,7 @@ public final class ReconstructionTrace {
             competitor = lanes.next(entry.lane(), entry.endTick());
         if (competitor == null && blockers == null && entry.outcome() == ReconstructionAllocation.Outcome.dropped
                 && entry.reason() != null && !ReconstructionChords.isAbsorbed(entry.reason())) {
-            int tick = (int) Math.clamp(note.timing.startTick, 0, timeline.frames() - 1);
+            int tick = (int) Math.clamp(note.timing.startTick, 0, timeline.ticks() - 1);
             var occupied = lanes.blockers(entry, expected, tick);
             if (occupied.size() == 1) competitor = occupied.getFirst();
             if (occupied.size() > 1) blockers = occupied;
@@ -900,12 +900,13 @@ public final class ReconstructionTrace {
         double start = projectTime ? note.start() : timeline.project(note.start());
         double end = projectTime ? note.end() : timeline.project(note.end());
         return new NoteAt(note, timing(projectTime ? timeline.source(start) : note.start(),
-                projectTime ? timeline.source(end) : note.end(), start, end, Math.round(start * 60), Math.round(end * 60)));
+                projectTime ? timeline.source(end) : note.end(), start, end, timeline.tick(start), timeline.tick(end)));
     }
 
     static Timing ticks(Integer start, Integer end, ReconstructionTimeMap timeline) {
-        return start == null || end == null ? null : timing(timeline.source(start / 60.0),
-                timeline.source(end / 60.0), start / 60.0, end / 60.0, start, end);
+        if (start == null || end == null) return null;
+        double projectStart = timeline.secondsAtTick(start), projectEnd = timeline.secondsAtTick(end);
+        return timing(timeline.source(projectStart), timeline.source(projectEnd), projectStart, projectEnd, start, end);
     }
 
     private static Timing timing(double sourceStart, double sourceEnd, double projectStart, double projectEnd,

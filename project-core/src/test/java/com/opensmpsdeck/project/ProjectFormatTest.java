@@ -26,6 +26,16 @@ class ProjectFormatTest {
                 () -> ProjectFormat.read(legacy.replace("\"mode\":", "\"target\": \"scd\", \"mode\":")));
     }
 
+    @Test void classicNativeTempoSurvivesSettingsAndReviewEdits() {
+        var target = fixture().withSettings("Classic", 30, 0)
+                .withTarget(TargetGame.S1).withNativeTempo(255);
+        assertEquals(target, ProjectFormat.read(ProjectFormat.write(target)));
+        assertEquals(255, target.withSettings("Renamed", 24, 0).withReview(List.of(), List.of()).nativeTempo());
+        assertNull(target.withSettings("Retimed", 30, 64).nativeTempo());
+        assertNull(target.withTarget(TargetGame.S2).nativeTempo());
+        assertThrows(IllegalArgumentException.class, () -> ProjectFormat.validate(target.withNativeTempo(1)));
+    }
+
     @Test void targetProfilesExposeDriverLimits() {
         int[] cycles = {301, 295, 297};
         for (var game : TargetGame.values()) {
@@ -41,7 +51,11 @@ class ProjectFormatTest {
             assertEquals(s3k, profile.ssgEg());
             assertEquals(s3k ? TargetProfile.CarrierSelection.TL_HIGH_BIT : TargetProfile.CarrierSelection.ALGORITHM,
                     profile.carrierSelection());
-            assertEquals(60, profile.ticksPerSecond());
+            assertEquals(switch (game) {
+                case S1 -> 60 * 254.0 / 255;
+                case S2 -> 60 * 255.0 / 256;
+                case S3K -> 60.0;
+            }, profile.ticksPerSecond());
             assertEquals(32_768, profile.bankLimitBytes());
         }
         assertEquals(DacSample.sampleRateHz(0), TargetProfile.S3K.dacSampleRateHz(0));

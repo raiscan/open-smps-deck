@@ -768,9 +768,9 @@ final class ReconstructionEdits {
             validateNote(note, score, part, at);
             if (index > 0) validateRoleLane(score, note, edit.role(), edit.lane(), at);
             var projected = timeline.projectNote(note);
-            int tick = projected.startTick(timeline.frames());
+            int tick = timeline.startTick(projected);
             require(tick >= previousEnd, at + ".attacks", "each attack needs a distinct non-overlapping project gate");
-            previousEnd = projected.endTick(timeline.frames());
+            previousEnd = timeline.endTick(projected);
             result.add(note);
         }
         result.forEach(note -> notes.put(note.id(), note));
@@ -784,10 +784,9 @@ final class ReconstructionEdits {
                 "split expects an effective single attack");
         double cut = edit.toSource(edit.splitAt, timeline);
         require(before.start() < cut && cut < before.end(), at + ".at", "split time must be inside the note gate");
-        int frames = timeline.frames();
-        int cutTick = timeline.projectNote(before.withTiming(cut, before.end())).startTick(frames);
+        int cutTick = timeline.startTick(timeline.projectNote(before.withTiming(cut, before.end())));
         var originalGate = timeline.projectNote(before);
-        require(cutTick > originalGate.startTick(frames) && cutTick < originalGate.endTick(frames),
+        require(cutTick > timeline.startTick(originalGate) && cutTick < timeline.endTick(originalGate),
                 at + ".at", "each half must occupy at least one project tick");
         var left = new Note(edit.insertedId() + "-left", before.part(), before.start(), cut, before.pitch(),
                 before.velocity(), "edit", before.confidence());
@@ -915,8 +914,8 @@ final class ReconstructionEdits {
             var previous = members.get(i - 1);
             var next = members.get(i);
             if (previous.pitch() == next.pitch()) continue;
-            require(ReconstructionOverrides.tick(timeline.project(next.start()))
-                            - ReconstructionOverrides.tick(timeline.project(previous.start())) >= 4,
+            require(timeline.tick(timeline.project(next.start()))
+                            - timeline.tick(timeline.project(previous.start())) >= 4,
                     at + ".glide", "pitch changes require at least four project ticks between attacks");
             double begin = Math.max(previous.start(),
                     edit.toSource(edit.inBase(next.start(), timeline) - .12, timeline));
@@ -1207,8 +1206,8 @@ final class ReconstructionEdits {
         require(from.part() == to.part() && from.start() < to.start() && from.pitch() != to.pitch()
                         && to.run() == null && !"external".equals(to.source()),
                 at + ".toNoteId", "expected a later single attack of a different pitch in the same part");
-        require(ReconstructionOverrides.tick(timeline.project(to.start()))
-                        - ReconstructionOverrides.tick(timeline.project(from.start())) >= 4,
+        require(timeline.tick(timeline.project(to.start()))
+                        - timeline.tick(timeline.project(from.start())) >= 4,
                 at + ".toNoteId", "glide requires at least four project ticks between attacks");
         double landing = edit.inBase(to.start(), timeline);
         double length = landing - edit.inBase(from.start(), timeline);

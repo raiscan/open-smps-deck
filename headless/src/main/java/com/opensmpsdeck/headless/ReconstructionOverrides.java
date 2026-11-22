@@ -42,14 +42,17 @@ final class ReconstructionOverrides {
 
     private ReconstructionOverrides() {}
 
-    static int tick(double seconds) {
-        return (int) Math.round(seconds * S3kRenderer.PRESENTATIONS_PER_SECOND);
-    }
-
     static Map<String, List<Span>> resolve(String lane, List<Settings> scopes,
                                            List<ReconstructionAllocation.Entry> notes, int frames,
                                            InstrumentCatalogue catalogue) {
+        return resolve(lane, scopes, notes, new ReconstructionTimeMap(null, null, frames / 60.0), catalogue);
+    }
+
+    static Map<String, List<Span>> resolve(String lane, List<Settings> scopes,
+                                           List<ReconstructionAllocation.Entry> notes, ReconstructionTimeMap timeline,
+                                           InstrumentCatalogue catalogue) {
         if (scopes == null || scopes.isEmpty()) return Map.of();
+        int frames = timeline.ticks();
         var targets = new HashMap<String, ReconstructionAllocation.Entry>();
         for (var note : notes) targets.put(note.note().id(), note);
         var result = new HashMap<String, List<Span>>();
@@ -69,10 +72,10 @@ final class ReconstructionOverrides {
             }
             if (seconds) {
                 require(scope.startSeconds != null && scope.endSeconds != null
-                                && scope.startSeconds >= 0 && scope.endSeconds <= frames / 60.0,
+                                && scope.startSeconds >= 0 && scope.endSeconds <= timeline.frames() / 60.0,
                         at, "expected startSeconds and endSeconds within the project");
-                start = tick(scope.startSeconds);
-                end = tick(scope.endSeconds);
+                start = Math.min(frames, timeline.tick(scope.startSeconds));
+                end = Math.min(frames, timeline.tick(scope.endSeconds));
             }
             require(start >= 0 && end <= frames && end > start, at, "expected a nonempty range within the project");
             if (scope.noteIds == null) {

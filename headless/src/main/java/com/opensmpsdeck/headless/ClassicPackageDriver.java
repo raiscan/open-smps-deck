@@ -27,6 +27,7 @@ import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.TargetClock;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -98,6 +99,12 @@ enum ClassicPackageDriver implements PackageDriver {
         }
     }
 
+    TempoConversion projectTempo(StudioProject project) {
+        if (project.nativeTempo() != null && project.target().id().equals(id()))
+            return new TempoConversion(project.nativeTempo(), 0);
+        return convertTempo(project.tempo());
+    }
+
     /** The source clock is S3K's NTSC duration clock. See docs/architecture/driver-support.md. */
     TempoConversion convertTempo(int sourceByte) {
         require(sourceByte >= 0 && sourceByte <= 255, "S3K tempo must be in 0..255");
@@ -139,7 +146,7 @@ enum ClassicPackageDriver implements PackageDriver {
 
     private long framesForTicks(long ticks, int tempo) {
         validateTempo(tempo);
-        return this == S1 ? ceil(ticks * tempo, tempo - 1) : ceil(ticks * 256, tempo);
+        return new TargetClock(profile.game(), tempo).frameAtTick(ticks - 1) + 1;
     }
 
     void validateTempo(int tempo) {
@@ -195,9 +202,14 @@ enum ClassicPackageDriver implements PackageDriver {
     }
 
     void render(CompiledProject project, int frames, S3kRenderer.PcmSink sink, ChipWriteObserver observer) throws IOException {
+        render(project, frames, S3kRenderer.ChannelMask.NONE, sink, observer);
+    }
+
+    void render(CompiledProject project, int frames, S3kRenderer.ChannelMask mask,
+                S3kRenderer.PcmSink sink, ChipWriteObserver observer) throws IOException {
         var data = playbackData(project);
         var dac = S3kRenderer.nativeDac(project.samples(), project.nativeProgram(), profile.dacBaseCycles());
-        S3kRenderer.renderPackageMusic(id, data, dac, config, policy, frames, sink, observer);
+        S3kRenderer.renderPackageMusic(id, data, dac, config, policy, frames, mask, sink, observer);
     }
 
     void require(boolean condition, String message) {

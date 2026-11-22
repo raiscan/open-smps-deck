@@ -181,7 +181,7 @@ final class LeadEffectMatcher {
                     volume, s.notes(), commands, s.repeatState(), s.psgEnvelopeId(), s.modulationEnvelopeId(), s.triggers()));
         }
         return new StudioProject(Math.max(2, project.formatVersion()), project.name(), project.mode(), project.ticksPerBeat(),
-                project.tempo(), project.voices(), sequences, project.clips(), project.envelopes(), project.samples()).withTarget(project.target());
+                project.tempo(), project.voices(), sequences, project.clips(), project.envelopes(), project.samples()).withTarget(project.target()).withNativeTempo(project.nativeTempo());
     }
 
     private static boolean startsWith(List<CommandEvent> commands, String prefix) {

@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.project.TargetProfile;
+import com.opensmpsdeck.project.TargetClock;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -88,7 +89,7 @@ final class ReconstructionAllocation {
                         List<Integer> retainedSteps, String reason) {}
 
     record Fm1Gaps(Map<Integer, Integer> before, Map<Integer, Integer> after) {
-        static Fm1Gaps of(List<Entry> allocated, List<ReconstructionRoles.Decision> decisions, int frames) {
+        static Fm1Gaps of(List<Entry> allocated, List<ReconstructionRoles.Decision> decisions, int frames, TargetClock clock) {
             var originalEnds = new HashMap<String, Double>();
             for (var decision : decisions) {
                 if (decision.preLegatoEnd() != null)
@@ -104,7 +105,7 @@ final class ReconstructionAllocation {
                 int end = prior.endTick;
                 var original = originalEnds.get(prior.note.id());
                 int beforeEnd = original == null ? end : Math.min(end,
-                        prior.note.withTiming(prior.note.start(), original).endTick(frames));
+                        prior.note.withTiming(prior.note.start(), original).endTick(frames, clock));
                 before.merge(onset - beforeEnd, 1, Integer::sum);
                 after.merge(onset - end, 1, Integer::sum);
             }
@@ -244,7 +245,7 @@ final class ReconstructionAllocation {
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
             Note note = decision.note();
-            int start = note.startTick(frames);
+            int start = note.startTick(frames, profile.clock());
             boolean drum = decision.role() == Role.drums;
             var pin = roles.lanePins() == null ? null : roles.lanePins().get(note.id());
             var voiceType = voiceTypes.get(note.id());
@@ -252,7 +253,7 @@ final class ReconstructionAllocation {
                 pin = new ReconstructionEdits.Pin(null, VOICE_ASSIGNMENT, Integer.MAX_VALUE, voiceType);
             boolean noise = drum && (pin == null ? !fmOnly && isNoise(names.get(note.part()))
                     : "PSG3".equals(pin.lane()) || pin.laneType() == ReconstructionLaneType.NOISE);
-            int end = drum && !noise ? start + 1 : note.endTick(frames);
+            int end = drum && !noise ? start + 1 : note.endTick(frames, profile.clock());
             if (noise && pin != null && pin.laneType() == ReconstructionLaneType.NOISE && ReconstructionCymbals.eligible(note.pitch()))
                 end = Math.min(frames, start + ReconstructionCymbals.gate(note.pitch()));
             return new Attack(decision, start, end, noise, pin, null, false);
@@ -355,7 +356,7 @@ final class ReconstructionAllocation {
                 runs.add(new RunPlacement(entry.note().id(), null, null, null, List.of(), entry.reason()));
                 continue;
             }
-            var steps = ReconstructionFastRuns.quantize(figure, entry.startTick(), entry.endTick());
+            var steps = ReconstructionFastRuns.quantize(figure, entry.startTick(), entry.endTick(), profile.clock());
             boolean merged = steps.size() < figure.size();
             String reason = merged ? entry.note().source() + "-subframe-merge" : entry.note().source();
             runs.add(new RunPlacement(entry.note().id(), entry.lane(), entry.startTick(), entry.endTick(),
@@ -373,7 +374,7 @@ final class ReconstructionAllocation {
                 .sorted(Comparator.comparingInt(Entry::startTick).thenComparing(e -> e.note.id())).forEach(placed::add);
         return new Result(VERSION, List.copyOf(placed), roles.timeBase(), !hasStems && continuity.isEmpty() ? null : continuity,
                 ReconstructionMelodyGapFill.Stats.of(roles.notes()),
-                hasStems ? Fm1Gaps.of(placed, roles.notes(), frames) : null, runs.isEmpty() ? null : List.copyOf(runs),
+                hasStems ? Fm1Gaps.of(placed, roles.notes(), frames, profile.clock()) : null, runs.isEmpty() ? null : List.copyOf(runs),
                 placedChords.isEmpty() ? null : placedChords);
     }
 
@@ -389,23 +390,27 @@ final class ReconstructionAllocation {
 
     /** Project a kept lane layout back into source time for the existing voice probes. */
     static Result sourcePlacement(Result allocation, int frames, ReconstructionTimeMap timeline) {
-        if (!timeline.warped()) return allocation;
+        boolean nativeClock = !timeline.clock().equals(TargetClock.FRAME_CLOCK);
+        if (!timeline.warped() && !nativeClock) return allocation;
         var entries = new ArrayList<Entry>();
         var nextAttack = new HashMap<String, Integer>();
         var placement = allocation.notes().stream().filter(entry -> entry.lane != null)
                 .sorted(Comparator.comparingInt(Entry::startTick).reversed()).toList();
         for (var entry : placement) {
             var note = timeline.sourceNote(entry.note);
-            int start = note.startTick(frames);
+            int start = nativeClock ? Math.clamp(sourceFrame(timeline, entry.startTick), 0, frames - 1) : note.startTick(frames);
             int next = nextAttack.getOrDefault(entry.lane, frames);
             if (start >= next) continue;
             int end = entry.lane.equals("DAC") ? start + 1 : note.endTick(frames);
-            if (ReconstructionCymbals.voiced(entry))
+            if (nativeClock && !entry.lane.equals("DAC")) {
+                end = Math.clamp(sourceFrame(timeline, entry.endTick), start + 1, frames);
+            } else if (ReconstructionCymbals.voiced(entry)) {
                 end = Math.min(frames, start + entry.endTick - entry.startTick);
+            }
             if (allocation.chords().containsKey(entry.note.id())) {
-                end = Math.clamp((int) Math.round(timeline.source(entry.endTick / 60.0) * 60), start + 1, frames);
+                end = Math.clamp(sourceFrame(timeline, entry.endTick), start + 1, frames);
             } else if (entry.outcome == Outcome.shortened) {
-                int shortened = (int) Math.round(timeline.source(entry.endTick / 60.0) * 60);
+                int shortened = sourceFrame(timeline, entry.endTick);
                 end = Math.min(end, Math.max(start + 1, shortened));
             }
             entries.add(new Entry(note, entry.role, entry.lane, start, Math.min(end, next),
@@ -413,6 +418,10 @@ final class ReconstructionAllocation {
             nextAttack.put(entry.lane, start);
         }
         return new Result(allocation.version, entries.stream().sorted(Comparator.comparingInt(Entry::startTick)).toList());
+    }
+
+    private static int sourceFrame(ReconstructionTimeMap timeline, int tick) {
+        return (int) Math.round(timeline.source(timeline.secondsAtTick(tick)) * TargetClock.FRAMES_PER_SECOND);
     }
 
     static boolean isNoise(String name) {
@@ -736,7 +745,7 @@ final class ReconstructionAllocation {
                 || continuations.containsKey(pad.note.id())) return;
         var original = pad.note;
         String id = original.id() + "-resume-" + stab.end;
-        var resumed = new Note(id, original.part(), stab.end / 60.0, original.end(),
+        var resumed = new Note(id, original.part(), profile.clock().secondsAtTick(stab.end), original.end(),
                 original.pitch(), original.velocity(), original.source(), original.confidence());
         continuations.put(id, original.id());
         pending.add(new Attack(new ReconstructionRoles.Decision(resumed, pad.role, "pad-resumed", null),

@@ -190,7 +190,8 @@ final class ReconstructionLanePolicies {
                                 Configuration configuration) throws IOException {
         if (configuration == null || configuration.rules().isEmpty()) return List.of();
         var rules = configuration.rules();
-        int frames = ReconstructionTimeMap.of(score).frames();
+        var timeline = ReconstructionTimeMap.of(score);
+        int ticks = timeline.ticks();
         var sections = rules.stream().anyMatch(rule -> rule != null && rule.section() != null)
                 ? ReconstructionSections.load(work, score, structure) : null;
         var voicePlan = rules.stream().anyMatch(rule -> rule != null && rule.voice() != null)
@@ -203,17 +204,17 @@ final class ReconstructionLanePolicies {
             if (score.inputs().fmOnly() && configuration.preset() != null && rule.policy() == Kind.psgDouble) continue;
             require(!score.inputs().fmOnly() || rule.policy() == Kind.fmDouble,
                     at, "PSG policies require PSG channels");
-            int start = 0, end = frames;
+            int start = 0, end = ticks;
             if (rule.span() != null) {
                 start = rule.span().getFirst();
                 end = rule.span().getLast();
             }
             if (rule.section() != null) {
                 var section = sections.select(rule.section());
-                start = (int) Math.round(section.projectStart() * S3kRenderer.PRESENTATIONS_PER_SECOND);
-                end = (int) Math.round(section.projectEnd() * S3kRenderer.PRESENTATIONS_PER_SECOND);
+                start = timeline.tick(section.projectStart());
+                end = timeline.tick(section.projectEnd());
             }
-            require(start >= 0 && start < end && end <= frames, at, "scope must fit the project render");
+            require(start >= 0 && start < end && end <= ticks, at, "scope must fit the project render");
             Set<String> notes = null;
             if (rule.voice() != null) {
                 var voice = voicePlan == null ? null : voicePlan.voices().stream()

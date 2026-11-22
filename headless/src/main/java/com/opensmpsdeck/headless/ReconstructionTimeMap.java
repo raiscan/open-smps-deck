@@ -1,9 +1,13 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetClock;
 import java.util.List;
 
 /** Project zero is source zero, including when the first downbeat follows a pickup. */
-record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sourceDuration) {
+record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sourceDuration, TargetClock clock) {
+    ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sourceDuration) {
+        this(beats, bpm, sourceDuration, TargetClock.FRAME_CLOCK);
+    }
     static final double DRIFT_THRESHOLD = .0085;
     static final double MIN_CONFIDENCE = .40;
 
@@ -21,6 +25,10 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
     }
 
     static ReconstructionTimeMap of(ReconstructionStages.Score score) {
+        return of(score, score.profile().clock());
+    }
+
+    static ReconstructionTimeMap of(ReconstructionStages.Score score, TargetClock clock) {
         var beats = score.beatMap();
         var grid = score.inputs() == null ? null : score.inputs().grid();
         String option = grid == null ? null : grid.steady();
@@ -30,7 +38,7 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
             else if ((grid == null || grid.bpm() == null) && beats.confidence() >= MIN_CONFIDENCE
                     && beats.deviation() >= DRIFT_THRESHOLD) bpm = beats.openingBpm();
         }
-        return new ReconstructionTimeMap(beats, bpm, score.durationUs() / 1e6);
+        return new ReconstructionTimeMap(beats, bpm, score.durationUs() / 1e6, clock);
     }
 
     boolean warped() { return bpm != null; }
@@ -52,6 +60,20 @@ record ReconstructionTimeMap(ReconstructionBeatMap beats, Double bpm, double sou
     int frames() {
         return (int) Math.ceil(projectDuration() * 60 - 1e-8);
     }
+
+    int ticks() { return (int) clock.ticksAfterFrames(frames()); }
+
+    int tick(double seconds) { return (int) clock.nearestTick(seconds * 60); }
+
+    int firstTickAtOrAfter(double seconds) {
+        return (int) clock.ticksAfterFrames((long) Math.ceil(seconds * 60 - 1e-9));
+    }
+
+    double secondsAtTick(long tick) { return clock.secondsAtTick(tick); }
+
+    int startTick(ReconstructionStages.Note note) { return note.startTick(ticks(), clock); }
+
+    int endTick(ReconstructionStages.Note note) { return note.endTick(ticks(), clock); }
 
     ReconstructionStages.Note projectNote(ReconstructionStages.Note note) {
         return warped() ? note.mapTime(this::project) : note;

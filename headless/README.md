@@ -385,8 +385,10 @@ the selected target in its runnable request. Subsequent stages and
 `reconstruct rerun` inherit the saved target. You can also pass `--target`
 to those commands to assert the saved choice.
 
-S1 and S2 reconstruction are in progress. Analysis still uses the S3K
-fitting tools and a 60 Hz editing clock. Assembly uses the selected native
+S1 and S2 reconstruction use the selected driver's NTSC duration clock.
+Notes are placed at the nearest playable presentation, accounting for the
+driver's periodic duration holds. The score's `ticksPerSecond` is nominal
+and `frames` counts 60 Hz audio presentations. Assembly uses the selected native
 compiler and reports incompatible assets or commands, such as S3K PSG
 control bytes or unsupported envelope and noise commands. A successful
 classic assembly writes a portable package and a render for the selected
@@ -395,7 +397,8 @@ driver. Studio editing and its live preview use the S3K editing dialect.
 The target is saved as `inputs.target` in `score.json`, `options.target`
 in `manifest.json`, and `target` in the arrangement project. An omitted
 field means S3K. Portable and mod export default to the project target.
-An explicit `--driver` overrides that default.
+An explicit `--driver` overrides that default. Classic builds store
+`nativeTempo` in the project so same-target exports use the exact native byte.
 
 ## Import a Suno download
 

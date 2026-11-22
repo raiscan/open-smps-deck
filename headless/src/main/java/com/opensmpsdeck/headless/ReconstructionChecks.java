@@ -24,11 +24,12 @@ final class ReconstructionChecks {
 
     static void score(ReconstructionStages.Score value) {
         String at = "score.json";
-        int ticksPerSecond = value.profile().ticksPerSecond();
-        require(value.ticksPerSecond() == ticksPerSecond, at + ".ticksPerSecond", "expected " + ticksPerSecond);
+        double ticksPerSecond = value.profile().ticksPerSecond();
+        require(value.ticksPerSecond() != null && value.ticksPerSecond().doubleValue() == ticksPerSecond,
+                at + ".ticksPerSecond", "expected " + ticksPerSecond);
         require(value.durationUs() > 0 && value.durationUs() <= 600_000_000
-                        && (value.durationUs() * ticksPerSecond + 999_999) / 1_000_000 == value.frames(),
-                at + ".frames", "must be the " + ticksPerSecond + " Hz presentation count for durationUs (maximum 600 seconds)");
+                        && (value.durationUs() * 60 + 999_999) / 1_000_000 == value.frames(),
+                at + ".frames", "must be the 60 Hz presentation count for durationUs (maximum 600 seconds)");
         var inputs = value.inputs();
         require(inputs != null, at + ".inputs", "required");
         require(!inputs.name().isBlank() && inputs.ticksPerBeat() > 0, at + ".inputs", "invalid name or ticksPerBeat");
@@ -351,7 +352,7 @@ final class ReconstructionChecks {
 
     static void allocation(ReconstructionAllocation.Result allocation, ReconstructionStages.Score score) {
         var timeline = ReconstructionTimeMap.of(score);
-        int projectFrames = timeline.frames();
+        int projectTicks = timeline.ticks();
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
@@ -369,7 +370,7 @@ final class ReconstructionChecks {
         var lanes = new HashMap<String, java.util.ArrayList<ReconstructionAllocation.Entry>>();
         var entries = new HashMap<String, ReconstructionAllocation.Entry>();
         for (var entry : allocation.notes()) entries.put(entry.note().id(), entry);
-        var members = ReconstructionChords.validate(allocation.chords(), entries, projectFrames);
+        var members = ReconstructionChords.validate(allocation.chords(), entries, timeline);
         for (var entry : allocation.notes()) {
             String where = at + ".notes." + entry.note().id();
             checkRole(parts, entry.note(), entry.role(), where);
@@ -401,7 +402,7 @@ final class ReconstructionChecks {
                 case drop -> false;
             }), where, "invalid lane for " + entry.role());
             require(entry.startTick() != null && entry.endTick() != null && entry.startTick() >= 0
-                            && entry.startTick() < entry.endTick() && entry.endTick() <= projectFrames
+                            && entry.startTick() < entry.endTick() && entry.endTick() <= projectTicks
                             && (!lane.equals("DAC") || entry.endTick() == entry.startTick() + 1),
                     where, "invalid startTick/endTick for " + lane);
             require(entry.mergedInto() == null && (entry.outcome() != ReconstructionAllocation.Outcome.shortened

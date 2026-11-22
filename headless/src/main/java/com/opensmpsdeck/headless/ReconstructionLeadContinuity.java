@@ -192,7 +192,7 @@ final class ReconstructionLeadContinuity {
                 // Motion-based releases and inferred attacks get first claim on the gap.
                 // Apply legato only to the remaining consecutive attacks after role promotion.
                 if (stem != null && prior.run() == null && following.run() == null && prior.part() == following.part()
-                        && prior.endTick(timeline.frames()) < following.startTick(timeline.frames())
+                        && timeline.endTick(prior) < timeline.startTick(following)
                         && !hasReason(anchor, EXTENDED)) {
                     var sourcePrior = timeline.sourceNote(prior);
                     var sourceFollowing = timeline.sourceNote(following);

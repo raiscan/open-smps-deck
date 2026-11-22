@@ -501,7 +501,9 @@ final class ReconstructionVoicing {
         return new Result(fitted.version(), lanes, fitted.fitWindows(), null, null, sources, previous.lanePolicies());
     }
 
-    static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation, InstrumentCatalogue catalogue, int frames) {
+    static Map<String, List<ReconstructionOverrides.Span>> validate(Result result, ReconstructionAllocation.Result allocation,
+                                                                  InstrumentCatalogue catalogue, ReconstructionTimeMap timeline) {
+        int frames = timeline.ticks();
         var allocated = byLane(allocation);
         require(result.lanes().keySet().equals(allocated.keySet()), "voicing.json.lanes", "must cover every allocated lane");
         var copies = new HashSet<String>();
@@ -560,7 +562,7 @@ final class ReconstructionVoicing {
                 if (instrument.variantId() != null)
                     kind(catalogue, instrument.variantId(), dac ? Kind.DAC_SAMPLE : Kind.PSG_VOLUME, at + ".instruments");
             }
-            scopes.putAll(ReconstructionOverrides.resolve(id, lane.overrides(), allocated.get(id), frames, catalogue));
+            scopes.putAll(ReconstructionOverrides.resolve(id, lane.overrides(), allocated.get(id), timeline, catalogue));
             var effects = lane.effects();
             require(!dac || effects.detune() == 0 && effects.vibrato() == null, at + ".effects",
                     "DAC does not support pitch effects");
