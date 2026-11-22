@@ -286,40 +286,61 @@ external revision; undo never secretly crosses into another writer's version.
 
 Choose **Open reconstruction…** from the Studio toolbar and select the
 stage work directory created by `reconstruct import --run` (the
-`reconstruction` subdirectory) or `reconstruct run`. Studio reads the stage
-artifacts and opens an editing workspace. It uses recorded WAV paths for the
-mix and mapped stems, and reads `render.wav` for the chip spectrogram and
-playback.
+`reconstruction` subdirectory) or `reconstruct run`. Studio opens on **Roles**,
+with the song or work-folder name and a suggested next step. The **Workspace** switch stays above the plot.
 
-- Choose a **Source** to change the spectrogram and playback together. In
-  **Detail** and **Roles**, scroll over the plot to zoom time at the pointer.
-  Hold **Shift** while scrolling to zoom pitch at the pointer. With the plot
-  focused, hold **Space** and left-drag to pan time and pitch, or drag with
-  the middle mouse button. You can also use **Time zoom**, **Pitch zoom**
-  and the scrollbars. **Fit song** restores the overview. **Fit pitch**
-  follows the tonal notes in the visible time window with a small margin.
-  It starts enabled. The ruler starts in source seconds. Toggle **Project
-  time** to see the steady project clock on the same aligned view.
-- Adjust the **Spectrum** dB range to bring out quiet evidence or reduce
-  background detail. **Ridges** marks the three strongest spectral peaks in
-  each analysis column. **Note opacity** controls the fill. Press **O** to
-  toggle outlines. The bands above show sections, periods and phrases.
-- Filter notes by **role** and **Lanes**. Zoom or hover to read pitch, lane and
-  patch. Dashed bars mark dropped or merged notes. Hover for the fate and any
-  competing note IDs. Click the pitch overlay or a note in the chip lane
-  strip to read its full trace. For a bend, the curve shows the applied FM
-  pitch when available and the stage pitch curve otherwise.
-- Click the ruler or a note to seek. Tap **Space** in the plot or click
-  **Play** to toggle playback. Press **R** to switch between the chip and
-  the last mix or stem at the same aligned position. On tempo-warped
-  projects, reference playback follows the project clock. Shift-drag on
-  the ruler to loop a range.
-  Click **Clear loop** or press **Esc** to remove the loop.
-- Click a lane or a sounding note, then choose **Solo lane** or **Solo note**
-  to audition that lane through the chip renderer. **Solo note** loops the
-  selected gate. Turn it off to return to your previous loop selection.
+- **Roles** is for assigning musical roles and voices. Click a note, drag a
+  selection or select by role in the legend. Use **Set role** for the selection
+  or **Assign** beside a voice to move the notes to that voice.
+- **Notes** is for editing notes on the spectrogram. The inspector follows
+  the selection and includes **Note evidence** for a single note.
+- **Review** is for deciding on agent proposals, checking edit history and
+  reading the latest **Trace diff**.
+- **Export** opens the built song in the arrangement editor or saves it as
+  audio, native data or a game package.
 
-- Choose the target's preset under **Lane policies** (**S1 layering**,
+Selection, zoom, scrolling and playback survive a workspace change. The header
+counts unsaved changes. **Apply & rebuild** saves the edits and rebuilds the chip
+result. Use **Changes** to undo or redo drafts.
+
+### Listen to the reconstruction
+
+In the bottom transport, choose **Play range** then click **Play**, or tap
+**Space** outside a text field. **Song** plays from the current playhead. For
+**Section**, click a section, period or phrase band above the plot to choose a
+range. **Selection** plays the time spanned by the selected notes. **Voice**
+auditions the chosen voice's built notes. **Lane** solos the chosen chip lane.
+Click a note or lane to bring its voice or lane into the corresponding picker.
+
+Choose **Original** for the reference audio, **Chip** for the built result, or
+**A/B** to switch between them at the current playhead. Press **R** to flip the
+A/B side, or to switch between Original and Chip outside A/B. For Voice, Studio
+uses the source stem when one is mapped to that voice. A stem can contain other
+voices. For Lane, the Original side uses the chosen reference for comparison.
+
+**Set loop…** lets you enter a start and end in source seconds. You can also
+Shift-drag on the ruler. The transport shows the active loop; use **Clear loop**
+or press **Esc** to remove it.
+
+### Adjust the view
+
+Open **View** for time and pitch zoom, spectrum range, ridges, note opacity,
+outlines, lane visibility and the spectrum source. Choosing a mix or stem also
+sets the **Original** reference. Choosing the chip spectrum keeps the current
+reference. **Project time** switches both the ruler and the transport clock
+to the steady project clock.
+
+Scroll over the plot to zoom time at the pointer. Hold **Shift** while
+scrolling to zoom pitch. Hold **Space** and left-drag or use the middle mouse
+button to pan. **Fit song** restores the overview. **Fit pitch** follows the
+tonal notes in the visible time window. Press **O** to toggle outlines.
+
+Zoom to read pitch, voice and lane labels. Hover to see the patch, note fate
+and any competing notes. Dashed bars mark dropped or merged notes. For a bend,
+the curve shows the applied FM pitch when available and the stage curve
+otherwise.
+
+- Choose the target's preset under **Notes → Lane policies** (**S1 layering**,
   **S2 layering**, or **S3K layering**) to rebuild with octave-up PSG doubling
   and a 14-tick FM echo on available channels. The echo uses
   11 carrier TL steps of attenuation relative to the dry note by default.
@@ -329,11 +350,12 @@ playback.
 ### Review agent proposals
 
 Agent proposals appear as magenta dashed outlines on the pitch plot. Hover
-to read the reason. Open **Proposals** to see the dry-run results and review
-individual edits or a whole batch. **Preview A/B** builds a sibling preview
+to read the reason. Open **Review → Proposals** to decide on individual
+edits or a batch. Expand **Details** to see the proposal ID and source evidence. **Preview A/B**
+builds a sibling preview
 and plays the same span twice, built first and proposal second. The playhead
 returns to the start of the span for the second pass. **Accept** stages an
-edit for **Apply**, and undo can bring the proposal back before Apply.
+edit for **Apply & rebuild**. Undo can bring the proposal back while it is staged.
 **Reject** removes it from the shared journal immediately. Studio picks up
 new proposals from agents while the reconstruction window is open.
 
@@ -374,41 +396,39 @@ composer stays available across a refresh. The
   or hold **Alt** while placing or dragging to work freely. Zoom in to grab
   short note edges.
 - In **Select**, drag from empty space to box-select. Hold **Shift** to add
-  or **Ctrl** to toggle notes, including when the box starts on an overlay.
-  A plain drag on a note still moves or resizes it. In **Selection**, filter
-  the current selection by role, identified voice or lane. Click a colored
-  role name above the plot to select that role across the whole song.
-  Shift-click, Ctrl-click or Cmd-click adds the role to the selection.
-  The checkbox next to each role name controls its visibility. Shift-drag
-  on the ruler still sets a loop.
+  or **Ctrl** to toggle notes. A plain drag on a note still moves or resizes it.
+  In **Notes**, filter the current selection by role, voice or lane. To
+  select a role across the song, open **Musical roles** in the Roles legend
+  and use the pointer icon. Shift-click, Ctrl-click or Cmd-click adds the
+  role to the selection.
 - With the reconstruction plot focused, press **+**, **=** or **Numpad
   Add** for one semitone up, and **−** or **Numpad Subtract** for one down.
-  Hold **Shift** to move by an octave. The **Selection** tab also has
+  Hold **Shift** to move by an octave. The **Notes** inspector also has
   **−1**, **+1**, **−Oct** and **+Oct** buttons. Each step previews immediately
   and can be undone separately. Studio skips drums, noise and generated
   notes without a score attack. If a pitched note would leave its chip's
   range, Studio refuses the move and
-  explains why in the status line. Use **Apply** to rebuild with the new pitches.
-- Use **Selection** to set roles, move notes to a voice, create a named voice,
+  explains why in the status line. Use **Apply & rebuild** to rebuild with the new pitches.
+- Use the **Notes** inspector to set roles, move notes to a voice, create a named voice,
   choose FM, PSG tone, PSG noise or DAC, pin an exact lane, or set or scale
   velocity. An incompatible chip choice shows the reason. **This voice**
   sets the instrument for the whole identified voice. **These notes only**
   applies it to the selected attacks. Search the catalogue and use **Audition
   selection** to hear the chosen instrument on the selected allocated notes.
-- In **Selection → Retrigger**, select a single tonal note, enter the interval
+- In **Notes → Retrigger**, select a single tonal note, enter the interval
   and gate in milliseconds and the number of attacks, then choose
-  **Queue retrigger** and **Apply**. The first attack keeps its note ID.
-- In **Selection → Layer**, choose **Echo**, **Chorus**, **Double** or
+  **Queue retrigger** and **Apply & rebuild**. The first attack keeps its note ID.
+- In **Notes → Layers**, choose **Echo**, **Chorus**, **Double** or
   **Off**. Pick a spare FM or PSG target and set the level. Echo shows the
   delay in frames and milliseconds. The default is 14 frames (233.3 ms)
   and a −3 dB trim from the original 7-TL echo, for 11 TL below dry.
   Clear **Trim from 7 TL echo** to enter dB relative to the dry note.
   With that setting, 10 frames is 166.7 ms and −9 dB is 12 TL.
   Use **Preview A/B** to hear the built span and then the selected setting.
-  Choose **Queue layer** to stage the edit, then **Apply**. The plot draws
+  Choose **Queue layer** to stage the edit, then **Apply & rebuild**. The plot draws
   the copy beneath the pitch in its lane color. A small × marks a skipped
   copy. Hover over it to see competing note IDs and lanes, or open the
-  **Note** tab for details. With **Off**, check the policies to mask. Leave
+  **Note evidence** for details. With **Off**, check the policies to mask. Leave
   them all clear to suppress every layer and policy for the selected notes.
 - **Collapse repeats** sustains same-pitch attacks from one part. Select
   two notes of different pitches for **Merge with glide**. Select
@@ -416,7 +436,7 @@ composer stays available across a refresh. The
 - In **Cut**, click inside a scored note. Select the note first and
   **Alt-click** at the desired pitch within the note's time span to retune
   the second half. You can also Alt-drag from the cut time to the new pitch.
-- In **Bend / slide**, grab the point where the slide should begin and
+- In **Bend**, grab the point where the slide should begin and
   drag up or down. Drag farther right for a longer slide. Hold **Shift**
   to snap to semitones. Drag a handle on the selected curve to revise it.
   The driver plays authored bends on FM.
@@ -425,16 +445,16 @@ composer stays available across a refresh. The
   Start inside the note to leave the opening plain, then add another stage
   farther right to deepen it. Drag from a gold marker to edit that stage.
   **Alt-click** a marker to remove it. Drag down to zero depth to stop the
-  vibrato from that point. The Note tab lists the stages in ticks, Hz, and
+  vibrato from that point. **Note evidence** lists the stages in ticks, Hz, and
   cents.
 - Select a scored note to set its velocity or delete it with **Delete**.
-  Set a role or pin a lane from the **Note** tab. Delete on a note generated
+  Use **Set role** in Roles or **Pin lane** in Notes. Delete on a note generated
   during role assignment records a drop. The trace shows the fate and reason,
   role, lane, instrument, both clocks, competing note IDs, and applied edits.
   Expand **Raw trace JSON** for detailed evidence.
-- Gold outlines mark pending edits. **Undo** and **Redo** change the draft,
-  including removals from the **Edits** tab. Press **Apply** to save the
-  shared `edits.json` and rebuild from the first affected stage. Cancel before
+- Gold outlines mark pending edits. **Changes → Undo** and **Redo** change
+  the draft, including removals from **Review → Edits**. Press
+  **Apply & rebuild** to save the shared `edits.json` and rebuild from the first affected stage. Cancel before
   publication to keep the draft. The **Trace diff** tab summarizes changed
   notes, lane permutations, compiled events and PCM outside the edited span.
 - The **Edits** tab lists the shared intents with their author, reason and
@@ -442,7 +462,7 @@ composer stays available across a refresh. The
   Studio adopts updates to `edits.json` and `sections.json` when the draft
   is clean. When pending edits conflict, **Resolve conflict…** can reload
   the disk version and discard the draft, or keep the draft visible.
-- Click a section, period or phrase to loop it. Drag a boundary or right-click
+- Click a section, period or phrase to set the transport range. Drag a boundary or right-click
   a band to rename, split at the pointer or merge with the next sibling.
   These changes go directly to `sections.json` as human edits.
 
@@ -509,11 +529,11 @@ To hear the song on the Sonic 3 & Knuckles title screen, register a verified
 locked-on ROM under **ROM settings…** and choose **Export… → Test in game…**.
 [Test in game setup and options](14-test-in-game.md)
 
-In the reconstruction window, choose **Open as arrangement** to edit the
+In the reconstruction window, choose **Export → Open as arrangement** to edit the
 final sequence in the Studio timeline, piano roll and command editor. The
 first hand edit marks the arrangement as **Detached from reconstruction**.
-Save the project to persist that state. Returning to Analysis and pressing
-**Apply** opens a warning for both saved and unsaved hand edits. Cancel,
+Save the project to persist that state. Returning to the reconstruction and pressing
+**Apply & rebuild** opens a warning for both saved and unsaved hand edits. Cancel,
 keep a sibling copy and apply, save a separate project and apply, or
 explicitly overwrite the arrangement.
 
@@ -521,35 +541,22 @@ Make-unique, remaining DAC commands, FM6 switching, envelope semantics and other
 native commands are subsequent work. The [S3K support matrix](../architecture/s3k-support.md)
 records coverage for the retail importer and the remaining driver gaps.
 
-### Classify notes in Analysis
+### Classify notes in Roles
 
-Switch between **Detail** and **Roles** in the Analysis toolbar. Both views
-share the time and pitch viewport over the spectrogram. Roles uses voice
-colors and patterns that match the swatches in **Voices**. Notes show short
-tags when space allows. Hover for the full voice name and the note's role.
-Unassigned notes are grey with a **?** tag. Gold dots mark notes with detail
-edits.
+The **Roles** canvas uses voice colours and patterns that match the swatches
+in the **Voice and role legend**. Notes show short tags when space allows.
+Hover for the voice and patch names. Unassigned notes are grey with a **?** tag.
+Gold dots mark notes with detail edits. Turn on **Show drums** to see kick,
+snare and hat shapes in a separate strip. Drum hits are also available in the
+Notes chip lanes.
 
-Drum hits are hidden when Roles opens. Turn on **Show drums** in **Voices**
-to see small, unlabelled hits in a separate strip beneath the pitch plot.
-Kick, snare and hat use different shapes. Drum hits stay available in Detail's
-chip lanes.
+Use the pointer icon to select a voice or role. The eye icon shows or hides
+it, and the target icon highlights it on the plot. Drag selected notes onto
+a voice row or click **Assign** to move them to that voice. Double-click a note
+to focus the selection in **Notes**.
 
-Click a voice name in **Voices** to select all its notes. The checkbox hides
-or shows the voice, and **S** highlights it against the other voices.
-Drag from empty space to box-select notes. Use **Shift** to add and **Ctrl**
-to toggle. To assign the selection, click the destination voice's **→**
-button or drag the selected notes from the Roles plot onto its legend entry.
-
-Use **New voice** to create an empty tonal or drum voice or create a voice
-from selected notes. Use **⋯** to rename, split or merge a voice. Choose
-**Edit tag…** in the same menu to change its label, or clear the field to
-restore the automatic tag. Studio saves tags and swatches locally for the
-reconstruction. Use
-**Selection** to change a role or chip lane type in bulk. Studio checks
-whether a classification change would orphan a detail edit target before
-queuing the change.
-
-Both views share the selection, playhead, loop, zoom and undo history.
-Double-click a note in Roles to focus its selection in Detail. Choose
-**Apply** in either view to rebuild with the shared edits.
+Use **New voice** to create an empty tonal or drum voice, or to create a voice
+from the selection. Open **⋯** to rename, split or merge a voice. **Edit tag…**
+changes its short label. Clear the field to restore the automatic tag. Studio
+saves tags and swatches locally for the reconstruction and checks whether a
+classification change would orphan detail edits before queuing the change.

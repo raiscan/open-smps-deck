@@ -17,7 +17,7 @@ import java.util.Set;
 final class ReconstructionTools {
     enum Mode {
         SELECT("Select"), INSERT("Insert"), CUT("Cut"),
-        BEND("Bend / slide"), VIBRATO("Vibrato");
+        BEND("Bend"), VIBRATO("Vibrato");
 
         final String label;
         Mode(String label) { this.label = label; }

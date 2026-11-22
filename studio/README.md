@@ -116,6 +116,7 @@ review and vocal proposals require corresponding data in the supplied project.
 
 The suite uses a temporary Studio profile and leaves the open projects and
 reconstruction journals untouched. It stages an unsaved edit in memory and
-captures the audition controls with audio loaded. It does not require an
-audio device or a registered ROM. Without Xvfb it uses the current Linux
+captures Roles, Notes, Review and Export, along with the five transport
+scopes and the loop controls. Capture runs have no audio device or ROM
+requirement. Without Xvfb it uses the current Linux
 display for JavaFX snapshots and skips the native screenshot.

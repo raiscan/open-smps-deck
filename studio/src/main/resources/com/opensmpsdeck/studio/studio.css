@@ -74,3 +74,45 @@
 }
 .voice-legend-content .toggle-button:selected, .voice-legend-row:drop-target { -fx-background-color: #245f58; }
 .voice-legend-row .voice-name { -fx-font-weight: bold; -fx-text-fill: #ecf6ff; }
+
+.reconstruction-header {
+    -fx-background-color: #101722;
+    -fx-padding: 12 16 11;
+}
+.reconstruction-phase {
+    -fx-text-fill: #a6bbd1;
+    -fx-padding: 3 10;
+    -fx-background-color: #1d2a3b;
+    -fx-background-radius: 4;
+}
+.reconstruction-next-step { -fx-text-fill: #c9d9ea; }
+.reconstruction-workspaces {
+    -fx-background-color: #1b2737;
+    -fx-padding: 8 16;
+}
+.reconstruction-workspaces .label { -fx-padding: 0 10 0 0; }
+.reconstruction-workspaces .toggle-button { -fx-min-width: 79; -fx-padding: 6 12; }
+.reconstruction-workspaces .toggle-button:selected,
+.reconstruction-transport .primary-action,
+.reconstruction-header .primary-action,
+.reconstruction-export .primary-action {
+    -fx-background-color: #245f58;
+    -fx-text-fill: #f0fffa;
+}
+.reconstruction-transport {
+    -fx-background-color: #1b2737;
+    -fx-padding: 8 16;
+    -fx-border-color: #34465a transparent transparent transparent;
+}
+.reconstruction-transport .status { -fx-padding: 0; }
+.reconstruction-clock { -fx-font-family: monospace; -fx-font-size: 16; -fx-alignment: center-right; }
+.reconstruction-role-inspector { -fx-background-color: #101722; }
+.reconstruction-proposal, .reconstruction-export {
+    -fx-background-color: #182434;
+    -fx-background-radius: 6;
+    -fx-padding: 12;
+}
+.reconstruction-export { -fx-padding: 24; }
+.reconstruction-inspector-scroll > .viewport { -fx-background-color: #162130; }
+.voice-legend .visibility-icon { -fx-fill: transparent; -fx-stroke: #a6bbd1; }
+.voice-legend .toggle-button:selected .visibility-icon { -fx-stroke: #ecfffa; }
