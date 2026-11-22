@@ -197,6 +197,48 @@ when a mapped or unmatched stem needs a separate transcriber.
    `reconstruct_run` with `from: "transcribe"`). Review the rebuilt
    phrase and audition the FM1 excerpt again.
 
+### Arrange for cleanliness
+
+When the source is denser than the hardware can reproduce, simplify by
+part and section before resorting to note-ID edits. Save the controls
+under `voicing.json.arrangement`. In MCP, read and write the full
+`voicing` artifact with `artifact_read` and `artifact_write`.
+
+- Use `partChips: [{"part":3,"chip":"FM","lanes":["FM3","FM4","FM5"]}]`
+  to keep backing on one chip. Use `"PSG"` for intentional PSG parts.
+- Apply `polyphony: [{"part":3,"maxVoices":3,"span":[8,24]}]` to thin
+  chords while retaining their extremes. Omit `span` for the full part.
+- Apply `bassHarmonics: [{"part":3,"bassPart":1}]` when simultaneous
+  octave, twelfth or double-octave notes are weaker than the bass.
+  Compare the dropped IDs with the stem and adjust the overlap, pitch
+  or level tolerances if the rule removes a real line.
+- Use `hats: "all"` to reserve DAC tails for other drums, or
+  `hats: "overflow"` to keep hats that would otherwise collide.
+  On an isolated drum stem, `drumDynamics: {"part":0,"levels":true,
+  "dropBelowDb":-15}` measures hit levels and drops hits far below the
+  median of their class.
+- Run `reconstruct run --from allocate "$work"` for these allocation
+  edits. Read drop reasons and competing IDs in `reconstruct trace`
+  and the assembly report.
+- Compare `reconstruct part-render "$work" --part 3 PART.wav` with
+  the mapped stem (MCP `reconstruct_part_render`). The solo includes
+  every placed lane and layer of that part. Set
+  `sectionFit: [{"part":3,"maxJumpDb":3}]` and rebuild from assemble
+  to fit the part's section levels against active stem audio.
+- For a lead deliberately placed at +24, set `vocalLead.registerShift`
+  in the transcriber config or `arrangement.vocalRegisterShift` for an
+  existing transposed lead. Review octave proposals in that register.
+  Set `monophonicStems.guitar: {"adapter":"rmvpe","span":[8,24],
+  "registerShift":12}` in the config to transcribe a guitar solo span
+  via F0. Author the solo's lane and role separately.
+- Shortlist patches with `catalog search INDEX.json --role lead
+  --min-centroid-hz 500 --max-centroid-hz 2600 --max-decay-db 4`.
+  Read the held-note measurements, then audition a few matching patches
+  against the part in context.
+
+[Headless arrangement controls](../../headless/README.md#arrange-for-cleanliness)
+describes the complete fields, defaults and MCP calls.
+
 ## 4. Propose or apply a scoped edit
 
 For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`

@@ -47,7 +47,7 @@ public final class ExternalTranscribers {
     }
 
     record Config(Path file, Map<String, List<String>> tonal, Map<String, List<String>> drums,
-                  Map<String, String> defaults, VocalOptions vocalLead) {
+                  Map<String, String> defaults, VocalOptions vocalLead, Map<String, ReconstructionMonophonicStem> monophonicStems) {
         String drumName(String override) {
             return override == null ? defaults.getOrDefault("drums", "spectral") : override;
         }
@@ -95,7 +95,7 @@ public final class ExternalTranscribers {
         if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
             String override = System.getenv(CONFIG_ENV);
             if (optional && path == null && (override == null || override.isBlank()))
-                return new Config(file, Map.of(), Map.of(), Map.of(), VocalOptions.DEFAULT);
+                return new Config(file, Map.of(), Map.of(), Map.of(), VocalOptions.DEFAULT, Map.of());
             throw new IllegalArgumentException("External transcription needs a configured transcriber. No configuration at " + file);
         }
         JsonElement tree = ReconstructionArtifacts.readTree(file);
@@ -104,6 +104,7 @@ public final class ExternalTranscribers {
         var roleEntries = object(entries.remove("defaults"), file + ".defaults");
         var drumEntries = object(entries.remove("drumTranscribers"), file + ".drumTranscribers");
         var vocal = object(entries.remove("vocalLead"), file + ".vocalLead");
+        var mono = object(entries.remove("monophonicStems"), file + ".monophonicStems");
         var tonal = ExternalCommands.commands(entries, file.toString(), PLACEHOLDER, "{input}", "{output}");
         var drums = ExternalCommands.commands(drumEntries, file + ".drumTranscribers", PLACEHOLDER, "{input}", "{output}");
         require(!drums.containsKey("spectral"), file.toString(), "spectral is a built-in drum detector");
@@ -130,7 +131,17 @@ public final class ExternalTranscribers {
                 : VocalOptions.DEFAULT.registerShift();
         require(shift == Math.rint(shift) && shift >= -48 && shift <= 48,
                 file + ".vocalLead.registerShift", "expected integer semitones between -48 and 48");
-        return new Config(file, tonal, drums, defaults, new VocalOptions(choice, (int) shift));
+        var monophonic = new TreeMap<String, ReconstructionMonophonicStem>();
+        for (var entry : mono.entrySet()) {
+            String label = ReconstructionAudioOnly.label(entry.getKey());
+            var at = file + ".monophonicStems." + label;
+            var value = object(entry.getValue(), at);
+            ReconstructionArtifacts.shape(at, ReconstructionMonophonicStem.class, value);
+            var rule = new com.google.gson.Gson().fromJson(value, ReconstructionMonophonicStem.class);
+            rule.validate(tonal);
+            require(monophonic.putIfAbsent(label, rule) == null, at, "duplicate normalized stem label");
+        }
+        return new Config(file, tonal, drums, defaults, new VocalOptions(choice, (int) shift), Map.copyOf(monophonic));
     }
 
     private static JsonObject object(JsonElement element, String at) {
@@ -165,13 +176,14 @@ public final class ExternalTranscribers {
                                            String name, Path config, Map<Integer, String> roles, String device,
                                            Map<Integer, Import> imports) throws IOException {
         return collect(score, stems, name, name == null ? null : config(config, false), Map.of(),
-                false, roles, device, imports, null);
+                false, roles, device, imports, null, Map.of());
     }
 
     static Map<Integer, PartNotes> collect(MidiScore score, Map<Integer, String> stems,
                                            String name, Config config, Map<String, String> overrides, boolean audioOnly,
                                            Map<Integer, String> roles, String device, Map<Integer, Import> imports,
-                                           ReconstructionManifest.Capture capture) throws IOException {
+                                           ReconstructionManifest.Capture capture,
+                                           Map<Integer, ReconstructionAudioOnly.Stem> audioStems) throws IOException {
         if (roles.isEmpty() && imports.isEmpty()) return null;
         String context = "External transcription";
         for (int id : imports.keySet()) validatePart(id, score.parts());
@@ -193,21 +205,36 @@ public final class ExternalTranscribers {
         if (!roles.isEmpty()) {
             require(LABEL.matcher(device).matches(), context, "invalid device");
             String fallback = config.fallback(name, audioOnly);
-            for (String role : roles.values()) {
-                if (audioOnly) config.audioRole(role, fallback, overrides, name != null);
-                else config.forRole(role, fallback, overrides, name != null);
+            for (var entry : roles.entrySet()) {
+                var stem = audioStems.get(entry.getKey());
+                var mono = stem == null ? null : config.monophonicStems().get(stem.label());
+                if (mono != null) {
+                    require(!entry.getValue().equals("vocals"), context, "use vocalLead for vocal stems");
+                    if (mono.span() == null) continue;
+                }
+                if (audioOnly) config.audioRole(entry.getValue(), fallback, overrides, name != null);
+                else config.forRole(entry.getValue(), fallback, overrides, name != null);
             }
             String configHash = ReconstructionCli.audioHash(config.file);
             if (capture != null) capture.config(config.file);
             for (var entry : new TreeMap<>(roles).entrySet()) {
                 int part = entry.getKey();
                 String role = entry.getValue();
-                String selected = audioOnly ? config.audioRole(role, fallback, overrides, name != null)
+                var stem = audioStems.get(part);
+                var mono = stem == null ? null : config.monophonicStems().get(stem.label());
+                String selected = mono != null && mono.span() == null ? mono.adapter()
+                        : audioOnly ? config.audioRole(role, fallback, overrides, name != null)
                         : config.forRole(role, fallback, overrides, name != null);
                 try {
                     Path input = Path.of(stems.get(part));
                     var selectedNames = names(role.toLowerCase(java.util.Locale.ROOT), selected);
-                    if (selectedNames.size() == 1) {
+                    if (mono != null) {
+                        var f0 = run(config.tonal.get(mono.adapter()), mono.adapter(), configHash, input,
+                                "vocals", device, part, null);
+                        var poly = mono.span() == null ? null
+                                : run(config.tonal.get(selected), selected, configHash, input, role, device, part, null);
+                        result.put(part, mono.snapshot(poly, f0));
+                    } else if (selectedNames.size() == 1) {
                         result.put(part, run(config.tonal.get(selected), selected, configHash, input, role, device, part, capture));
                     } else {
                         require(audioOnly, context, "multi-command vocal selection requires audio-only mode");

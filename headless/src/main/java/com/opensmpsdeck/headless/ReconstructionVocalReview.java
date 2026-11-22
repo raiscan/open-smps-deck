@@ -129,7 +129,10 @@ public final class ReconstructionVocalReview {
         var metadata = imported.provenance().metadata();
         var evidence = syllableEvidence(imported.provenance());
         require(evidence != null, "vocal-review", "the selected lead has no RMVPE syllable snapshot");
-        int shift = Integer.parseInt(metadata.getOrDefault("vocalRegisterShift", "0"));
+        var arrangement = ReconstructionStages.arrangement(work.resolve("voicing.json"));
+        int shift = arrangement != null && arrangement.vocalRegisterShift() != null
+                ? arrangement.vocalRegisterShift()
+                : Integer.parseInt(metadata.getOrDefault("vocalRegisterShift", "0"));
         var contour = ByteBuffer.wrap(Base64.getDecoder().decode(evidence.get("f0Cents10ms")))
                 .order(ByteOrder.LITTLE_ENDIAN).asShortBuffer();
         double[] pitches = new double[contour.remaining()];
@@ -236,8 +239,12 @@ public final class ReconstructionVocalReview {
                 continue;
             }
 
-            var octave = octaveFlag(part, note, before, after, notes, contour, profile, repeat, evidence);
-            if (octave == null && audio != null && onset == null && after != null
+            // At a deliberately changed register, a lower partial by itself is
+            // insufficient evidence of an octave error in a contour-supported note.
+            boolean registered = shift != ExternalTranscribers.VocalOptions.DEFAULT.registerShift()
+                    && shift != 0 && contour.pitchConfidence >= .65;
+            var octave = octaveFlag(part, note, before, after, notes, contour, profile, repeat, evidence, registered);
+            if (octave == null && !registered && audio != null && onset == null && after != null
                     && after.pitch() == note.pitch() - 12 && after.start() - note.end() < .025
                     && note.end() - note.start() <= .16 && contour.vibratoRmsSemitones != null
                     && contour.vibratoRmsSemitones > 2) {
@@ -289,7 +296,8 @@ public final class ReconstructionVocalReview {
     }
 
     private static Flag octaveFlag(int part, Note note, Note before, Note after, List<Note> phrase, Contour contour,
-                                   VocalStemEvidence.Profile profile, VocalPhraseRepeats.Consensus repeat, String evidence) {
+                                   VocalStemEvidence.Profile profile, VocalPhraseRepeats.Consensus repeat, String evidence,
+                                   boolean registered) {
         boolean lower = profile != null && profile.supportsLowerOctave();
         if (!lower && (profile != null && profile.supportsSungOctave()
                 || repeat != null && repeat.pitch() == note.pitch())) return null;
@@ -299,7 +307,7 @@ public final class ReconstructionVocalReview {
                 && Math.abs(low - before.pitch()) <= 2 && Math.abs(low - after.pitch()) <= 2;
         if (lower && low >= 12 && (neighbouringRegister
                 || repeat != null && repeat.pitch() == low
-                || profile.subharmonicDb() > profile.oddHarmonicDb() + 4)
+                || !registered && profile.subharmonicDb() > profile.oddHarmonicDb() + 4)
                 && (repeat == null || repeat.pitch() != note.pitch() || profile.subharmonicDb() > profile.oddHarmonicDb() + 4))
             return flag(part, note.start(), "octaveJump", "Half and three-half partials support the lower octave",
                     "setNote", Map.of("noteId", note.id(), "pitch", note.pitch() - 12), evidence);

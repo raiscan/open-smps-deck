@@ -1032,7 +1032,7 @@ public final class SunoImport {
         var stems = new TreeMap<String, String>();
         var roles = new TreeMap<String, String>();
         var seen = new HashSet<String>();
-        var activeRoles = new java.util.TreeSet<String>();
+        var activeRoles = new java.util.TreeMap<String, String>();
         var transcribersByRole = new TreeMap<String, String>();
         transcriberFor.forEach((role, name) -> ExternalTranscribers.putRoleOverride(transcribersByRole, role + "=" + name));
         for (var file : files) {
@@ -1057,7 +1057,7 @@ public final class SunoImport {
             file.evidence.put("audioOnlyRole", role);
             // Metadata reports whole-file RMS. The run keeps stems with an audible local window.
             if (!file.silent || mix != null && !ReconstructionAudioOnly.silent(file.path, Math.min(mix.seconds, file.seconds)))
-                activeRoles.add(ReconstructionAudioOnly.transcriberRole(label, role));
+                activeRoles.put(label, ReconstructionAudioOnly.transcriberRole(label, role));
         }
         for (String key : new java.util.TreeSet<>(overrides.keySet())) {
             if (!seen.contains(key)) issues.add(new Issue(Status.error, "unknown_stem_role",
@@ -1076,10 +1076,18 @@ public final class SunoImport {
             throw new IllegalArgumentException("Choose either --transcriber-for drums=NAME or --drum-detector");
         String drum = config.drumName(transcribersByRole.getOrDefault("drums", drumDetector));
         AudioDrumDetector.select(config, drum, device == null ? "auto" : device);
-        for (String role : activeRoles) {
-            if (!role.equals("drums")) selected.put(role, config.audioRole(role, fallback, transcribersByRole, transcriber != null));
+        for (var entry : activeRoles.entrySet()) {
+            String role = entry.getValue();
+            if (role.equals("drums")) continue;
+            var mono = config.monophonicStems().get(entry.getKey());
+            if (mono != null) {
+                if (role.equals("vocals")) throw new IllegalArgumentException("Use vocalLead for vocal stems");
+                selected.put(entry.getKey() + " (monophonic)", mono.adapter());
+                if (mono.span() == null) continue;
+            }
+            selected.put(role, config.audioRole(role, fallback, transcribersByRole, transcriber != null));
         }
-        if (activeRoles.contains("drums")) selected.put("drums", drum);
+        if (activeRoles.containsValue("drums")) selected.put("drums", drum);
         issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only transcribers by role " + selected));
         var options = new LinkedHashMap<String, Object>();
         if (!roles.isEmpty()) options.put("stemRoles", roles);

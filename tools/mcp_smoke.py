@@ -171,7 +171,7 @@ for stem in stems:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_vibrato_review reconstruct_vocal_review reconstruct_vocal_render reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
+            reconstruct_audition reconstruct_vibrato_review reconstruct_vocal_review reconstruct_vocal_render reconstruct_part_render reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
             artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect rom_patch
             render_clip render_compare notes_list notes_add notes_resolve reference_add
             catalog_search catalog_audition bench_compare rom_list rom_set
@@ -202,6 +202,8 @@ for stem in stems:
         assert rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice", target="s3k") == results
         assert rpc.call("catalog_search", catalogue=inputs["catalogue"], kind="fm-voice", target="s2")["total"] == 0
         variant = results["items"][0]["variantId"]
+        measured = rpc.call("catalog_search", catalogue=inputs["catalogue"], role="lead", minCentroidHz=1)
+        assert measured["total"] and measured["items"][0]["heldNote"]["centroidHz"] > 0
         rpc.call("catalog_audition", catalogue=inputs["catalogue"], variant=variant, target="s3k",
                  workDir=root, output=root / "audition.wav")
         download = root / "download"
@@ -224,6 +226,8 @@ for stem in stems:
         voice_work = recipe["workDir"]
         voicing = rpc.call("artifact_read", workDir=voice_work, artifact="voicing")["value"]
         assert voicing["lanePolicies"] == {"preset": "s3k-layering"}
+        solo = rpc.call("reconstruct_part_render", workDir=voice_work, part=0, output="part.wav")
+        assert solo["lanes"] and Path(solo["output"]).read_bytes() == (Path(voice_work) / "render.wav").read_bytes()
         voice_list = rpc.call("reconstruct_voices", workDir=voice_work)
         original_voice = next(voice for voice in voice_list["voices"] if voice["kind"] == "tonal")
         voice_id = original_voice["id"]
@@ -252,6 +256,26 @@ for stem in stems:
         assert assignments and all(value["instrument"] == variant for value in assignments.values())
         traced = rpc.call("reconstruct_trace", workDir=voice_work, lane="FM1")["notes"]
         assert traced and traced[0]["voice"]["name"] == "Lead instrument 1"
+        arranged = root / "arranged-parts"
+        rpc.call("reconstruct_run", workDir=arranged,
+                 inputs={**inputs, "stems": {"0": inputs["wav"]}},
+                 options={"tempo": 120, "lanePolicyPreset": "off"})
+        rules = {"partChips": [{"part": 0, "chip": "FM", "lanes": ["FM3"]}],
+                 "polyphony": [{"part": 0, "maxVoices": 1}],
+                 "sectionFit": [{"part": 0, "maxJumpDb": 3}]}
+        voicing = rpc.call("artifact_read", workDir=arranged, artifact="voicing")["value"]
+        voicing["arrangement"] = rules
+        rpc.call("artifact_write", workDir=arranged, artifact="voicing", value=voicing)
+        rpc.call("reconstruct_run", workDir=arranged, **{"from": "allocate"})
+        saved = rpc.call("artifact_read", workDir=arranged, artifact="voicing")["value"]["arrangement"]
+        assert all(saved[key] == value for key, value in rules.items()), saved
+        report = rpc.call("artifact_read", workDir=arranged, artifact="report")["value"]
+        assert report["sectionGains"] and all(row["part"] == 0 for row in report["sectionGains"])
+        allocated = rpc.call("artifact_read", workDir=arranged, artifact="allocation")["value"]["notes"]
+        assert {row["lane"] for row in allocated if "lane" in row} == {"FM3"}
+        solo = rpc.call("reconstruct_part_render", workDir=arranged, part=0, output="part.wav")
+        assert set(solo["lanes"]) == {"FM3", *report["effectCopyLanes"]} and solo["stem"] == inputs["wav"], solo
+        assert Path(solo["output"]).read_bytes() == (arranged / "render.wav").read_bytes()
         files = rpc.call("reconstruct_run", workDir=work, inputs=inputs,
                          options={"seconds": 2, "lanePolicyPreset": "off"}, progress=True)["files"]
         assert Path(files["manifest.json"]) == work / "manifest.json"

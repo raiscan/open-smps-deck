@@ -220,6 +220,9 @@ final class McpTools {
             tool("reconstruct_vocal_render", "Render an FM1-only phrase and compare it with the vocal stem.",
                     (args, progress) -> McpReconstruction.vocalRender(args), WORK,
                     field("phrase", "string", "Phrase ID from vocal review"), OUTPUT),
+            tool("reconstruct_part_render", "Render all placed lanes and layers of one source part to a WAV.",
+                    (args, progress) -> McpReconstruction.partRender(args), WORK, OUTPUT,
+                    field("part", "integer", "Source part ID")),
             tool("reconstruct_trace", "Follow source notes through voicing, including saved policy decisions and drum lane blockers.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
                     field("start", "number", "Inclusive start in the selected time base").optional(),
@@ -302,6 +305,9 @@ final class McpTools {
                     field("role", "string", "Role filter").optional(),
                     field("source", "string", "Source filter").optional(),
                     field("variant", "string", "Variant ID filter").optional(),
+                    field("minCentroidHz", "number", "Minimum held-note centroid in Hz").optional(),
+                    field("maxCentroidHz", "number", "Maximum held-note centroid in Hz").optional(),
+                    field("maxDecayDb", "number", "Maximum held-note decay in dB").optional(),
                     field("offset", "integer", "Page start").optional(),
                     field("limit", "integer", "Page size").optional()),
             tool("catalog_audition", "Render a catalogue variant to a new WAV inside the work directory.",
@@ -374,7 +380,8 @@ final class McpTools {
         var index = McpPaths.input(string(args, "catalogue"));
         var command = new ArrayList<>(List.of("catalog", audition ? "audition" : "search", index.toString()));
         if (!audition) {
-            options(command, args, "query", "kind", "driver", "target", "role", "source", "variant", "offset", "limit");
+            options(command, args, "query", "kind", "driver", "target", "role", "source", "variant", "offset", "limit",
+                    "minCentroidHz", "maxCentroidHz", "maxDecayDb");
             return McpJson.parse(cli(command)).getAsJsonObject();
         }
         var work = McpPaths.directory(string(args, "workDir"));
