@@ -57,6 +57,8 @@ public final class ProjectFormat {
                 root.remove("groupPlacements");
                 root.remove("arrangementVersion");
             }
+            var target = root.remove("target");
+            TargetGame game = target == null ? TargetGame.S3K : TargetGame.parse(string(target, "target"));
             JsonObject o = version==5 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "voices", "envelopes", "samples", "nativeProgram")
                     : arrangement==4 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes", "samples")
                     : arrangement==3 ? object(tree, "project", "formatVersion", "name", "mode", "ticksPerBeat", "tempo", "voices", "sequences", "clips", "envelopes")
@@ -68,7 +70,7 @@ public final class ProjectFormat {
                     version==5?List.of():list(o,"clips",ProjectFormat::clip),
                     arrangement>=3?list(o,"envelopes",ProjectFormat::envelope):List.of(),
                     arrangement>=4?list(o,"samples",ProjectFormat::sample):List.of(),nativeProgram,references,notes,arrangement,groups,placements,
-                    detached != null && detached.getAsBoolean(), retailSongOrigin(derivedFrom));
+                    detached != null && detached.getAsBoolean(), retailSongOrigin(derivedFrom), game);
             validate(project);
             return project;
         } catch (IOException | IllegalStateException e) {
@@ -153,6 +155,7 @@ public final class ProjectFormat {
         validate(project);
         JsonObject o = new JsonObject();
         o.addProperty("formatVersion",project.formatVersion()); o.addProperty("name",project.name()); o.addProperty("mode",project.mode());
+        if (project.target() != TargetGame.S3K) o.addProperty("target", project.target().id());
         o.addProperty("ticksPerBeat",project.ticksPerBeat());
         if (project.nativeProgram()==null) o.addProperty("tempo",project.tempo());
         JsonArray voices = new JsonArray();
@@ -546,8 +549,8 @@ public final class ProjectFormat {
         for (String key : names) if (!o.has(key)) throw invalid(at+"."+key,"required field is missing");
         return o;
     }
-    private static String string(JsonObject o,String key) {
-        JsonElement e=o.get(key);
+    private static String string(JsonObject o,String key) { return string(o.get(key), key); }
+    private static String string(JsonElement e,String key) {
         if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) throw invalid(key,"must be a string");
         return e.getAsString();
     }

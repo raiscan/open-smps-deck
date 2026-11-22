@@ -8,6 +8,7 @@ import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import com.opensmpsdeck.project.ProjectFormat;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -17,12 +18,30 @@ import java.util.stream.IntStream;
 interface StockAssets {
     byte[] payload(StockRef ref);
 
+    default byte[] retailBank(String game, int songId) throws IOException { return null; }
+
+    final class Unavailable extends IllegalArgumentException {
+        Unavailable(String message, Throwable cause) { super(message, cause); }
+    }
+
     static byte[] resolve(String asset, StockRef ref, List<AssetOrigin.Transform> transforms,
                           String resultSha256, List<? extends StockAssets> sources) {
+        return resolve(asset, ref, transforms, resultSha256, sources, false);
+    }
+
+    private static byte[] resolve(String asset, StockRef ref, List<AssetOrigin.Transform> transforms,
+                                  String resultSha256, List<? extends StockAssets> sources, boolean editableVoice) {
         byte[] bytes = null;
         var actual = new java.util.LinkedHashSet<String>();
+        var problems = new java.util.LinkedHashSet<String>();
         for (var source : sources) {
-            var candidate = source.payload(ref);
+            byte[] candidate;
+            try {
+                candidate = source.payload(ref);
+            } catch (Unavailable error) {
+                problems.add(error.getMessage());
+                continue;
+            }
             if (candidate == null) continue;
             String hash = StockTable.hash(candidate);
             if (hash.equals(ref.sha256())) {
@@ -33,7 +52,9 @@ interface StockAssets {
         }
         if (bytes == null)
             throw new IllegalArgumentException("Stock asset " + asset + " " + ref + ": expected "
-                    + ref.sha256() + ", actual " + (actual.isEmpty() ? "missing" : String.join(", ", actual)));
+                    + ref.sha256() + ", actual " + (actual.isEmpty() ? "missing" : String.join(", ", actual))
+                    + (problems.isEmpty() ? "" : " (" + String.join("; ", problems) + ")"));
+        if (editableVoice) ClassicPackageDriver.S2.voiceBytes(bytes);
         if (transforms != null) {
             for (var transform : transforms) {
                 switch (transform.op()) {
@@ -84,9 +105,9 @@ interface StockAssets {
     }
 
     private static byte[] resolveProjectAsset(String id, AssetOrigin origin, List<? extends StockAssets> sources) {
-        if (!origin.ref().game().equals("s3k"))
-            throw new IllegalArgumentException("Stock asset " + id + ": driver not yet supported: " + origin.ref().game());
-        return resolve(id, origin.ref(), origin.transforms(), null, sources);
+        StockRef ref = origin.ref();
+        return resolve(id, ref, origin.transforms(), null, sources,
+                ref.game().equals("s2") && ref.kind().equals("FM_VOICE"));
     }
 
     static List<Integer> unsigned(byte[] bytes) {

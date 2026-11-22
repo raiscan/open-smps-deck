@@ -82,14 +82,15 @@ public final class ReconstructionEditing {
                 overlay.interval().sourceStart(), overlay.interval().sourceEnd(), overlay.pitch(), 96, "edit", 1));
         boolean percussion = drums.getOrDefault(overlay.part(), false);
         boolean fmOnly = score.inputs().fmOnly();
-        if (lane != null && !ReconstructionEdits.pinCompatible(note, percussion, lane, fmOnly))
+        var profile = score.inputs().profile();
+        if (lane != null && !ReconstructionEdits.pinCompatible(note, percussion, lane, fmOnly, profile))
             return lane + " cannot play this note's part, pitch or attack in the current chip configuration";
         boolean authoredBend = note.bend() != null && note.bend().editReason() != null
                 || overlay.fate().startsWith("Pending") && !overlay.bend().isEmpty() && note.bend() == null;
         if (authoredBend && (lane != null && lane.startsWith("PSG")
                 || type == ReconstructionLaneType.PSG || type == ReconstructionLaneType.NOISE))
             return "Authored bends require FM";
-        return type == null ? null : ReconstructionEdits.laneTypeIssue(note, percussion, type, fmOnly);
+        return type == null ? null : ReconstructionEdits.laneTypeIssue(note, percussion, type, fmOnly, profile);
     }
 
     private static boolean single(ReconstructionStages.Note note) {

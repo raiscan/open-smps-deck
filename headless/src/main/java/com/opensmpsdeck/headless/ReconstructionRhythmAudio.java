@@ -10,7 +10,7 @@ import java.util.function.DoubleUnaryOperator;
 final class ReconstructionRhythmAudio {
     private static final double HOP = .01;
     private static final int RATE = 8192;
-    private static final int FFT_SIZE = 1024;
+    static final int FFT_SIZE = 1024;
 
     record Onset(double time, double weight) {}
     private record Frame(double energy, double[] chroma) {}
@@ -139,7 +139,7 @@ final class ReconstructionRhythmAudio {
         }
     }
 
-    private static void fft(double[] real, double[] imaginary) {
+    static void fft(double[] real, double[] imaginary) {
         for (int i = 1; i < FFT_SIZE; i++) {
             int j = Integer.reverse(i) >>> (32 - Integer.numberOfTrailingZeros(FFT_SIZE));
             if (j <= i) continue;

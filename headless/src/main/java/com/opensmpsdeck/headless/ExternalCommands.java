@@ -24,9 +24,7 @@ final class ExternalCommands {
     static Path defaultConfig(String environment, String filename) {
         String override = System.getenv(environment);
         if (override != null && !override.isBlank()) return Path.of(override);
-        String xdg = System.getenv("XDG_CONFIG_HOME");
-        Path root = xdg == null || xdg.isBlank() ? Path.of(System.getProperty("user.home"), ".config") : Path.of(xdg);
-        return root.resolve("opensmpsdeck/" + filename);
+        return UserConfig.file(filename);
     }
 
     static Map<String, List<String>> commands(Path file, Pattern placeholders, String... requiredArguments) throws IOException {

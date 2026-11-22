@@ -216,7 +216,8 @@ final class VoiceWindows {
             choices.put(lane, ReconstructionVoiceStage.choices(catalogue, settings, entries));
             voicing.put(lane, settings);
         });
-        if (choices.values().stream().flatMap(map -> map.values().stream()).noneMatch(choice -> choice.assetId() != null)
+        if (choices.values().stream().flatMap(map -> map.values().stream()).noneMatch(choice -> choice.assetId() != null
+                        || choice.drums() != null && choice.drums().fallbackLane() != null)
                 && notes.stream().noneMatch(note -> note.role() == ReconstructionRoles.Role.drums
                         && "PSG3".equals(note.lane()))) return new float[frames * SAMPLES_PER_TICK];
         var project = S3kReconstruction.arrangeAllocated("Voicing probe", 30, frames, score, allocation,

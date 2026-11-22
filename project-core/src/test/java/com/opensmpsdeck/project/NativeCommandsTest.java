@@ -17,7 +17,7 @@ class NativeCommandsTest {
         return new StudioProject(2,"Commands","S3K",24,128,List.of(ProjectCompilerTest.VOICE),List.of(sequence),List.of(new Clip("c","s",sequence.type()+"1",0,clipLength)));
     }
     static byte[] track(StudioProject project) {
-        byte[] bank=ProjectCompiler.compile(project); return Arrays.copyOfRange(bank,word(bank,10),word(bank,0));
+        byte[] bank=ProjectCompiler.compile(project, ProjectCompiler.Encoding.LINEAR); return Arrays.copyOfRange(bank,word(bank,10),word(bank,0));
     }
     static byte[] fmReset() { return bytes(0xEF,0,0xE4,100,0xE0,0xC0,0xED,0x40,0xE1,0,0xE8,0,0xFA); }
     static byte[] join(byte[]... parts) {

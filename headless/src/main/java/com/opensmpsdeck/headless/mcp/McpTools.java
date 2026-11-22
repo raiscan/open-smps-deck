@@ -56,6 +56,12 @@ final class McpTools {
     private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "import", "manifest", "edits", "edit-results", "sections", "voices", "voice-edits"};
 
     private static final List<Tool> TOOLS = List.of(
+            tool("rom_list", "Verify and list the ROM paths saved in the server owner's settings.",
+                    (args, progress) -> McpRoms.list()),
+            tool("rom_set", "Verify a clean retail ROM and save its absolute path in the server owner's settings.",
+                    (args, progress) -> McpRoms.set(args),
+                    choice("game", "Game ID", "s1", "s2", "s3k"),
+                    path("path", "Absolute path to a clean retail ROM")),
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
                     (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames(),
                             "drumTranscribers", ExternalTranscribers.configuredDrums()))),
@@ -69,6 +75,7 @@ final class McpTools {
             tool("reconstruct_import", "Check a Suno download, separated folder or aligned audio-only folder and write import.json with file status, mapping evidence and available run arguments.",
                     McpReconstruction::importFolder, path("folder", "Absolute path to the input folder"), WORK,
                     CATALOGUE.optional(),
+                    choice("target", "Target game (default s3k)", "s1", "s2", "s3k").optional(),
                     field("assign", object(Map.of("type", "object", "additionalProperties", Map.of("type", "integer"))),
                             "Map of folder-relative stem files to MIDI part IDs").optional(),
                     field("exclude", object(Map.of("type", "array", "items", Map.of("type", "string"))),
@@ -97,6 +104,18 @@ final class McpTools {
                     field("keepVoicing", "boolean", "Keep compatible voicing").optional(),
                     field("search", object(Map.of("type", "array", "items", Map.of("type", "string"))),
                             "Directories to search for moved inputs on new-directory replay").optional()),
+            tool("rom_patch", "Test in game in Sonic 1 or 2 World REV01, or locked-on S3&K. Set out (personal-use ROM), bps, or both.",
+                    (args, progress) -> McpRomPatch.export(args),
+                    path("project", "an editable project, legacy S3K package, or S1/S2 portable package"),
+                    choice("driver", "Target for editable projects (default s3k); packages declare their own driver", "s1", "s2", "s3k").optional(),
+                    path("rom", "a clean retail ROM override (defaults to the ROM library)").optional(),
+                    path("out", "the patched ROM destination").optional(),
+                    path("bps", "the verified BPS patch destination").optional(),
+                    field("slot", "integer", "Music slot: S3K 1–51 (default 37); S1 129–147 (default 138); S2 129–159 (default 153)").optional(),
+                    field("titleMusic", "boolean", "Request the selected slot from the title screen").optional(),
+                    field("noDemo", "boolean", "Disable title demo timeouts").optional(),
+                    field("loop", "boolean", "Loop duration-aligned channels (S2 and S3K)").optional(),
+                    field("force", "boolean", "Replace existing output files").optional()),
             tool("project_export", "Export a project or reconstruction as audio, SMPS or a disassembly kit. Disasm also accepts a portable package as project.",
                     McpTools::export, PROJECT.optional(), WORK.optional(),
                     field("output", "string", "New file or directory inside the project or work directory"),
@@ -105,8 +124,11 @@ final class McpTools {
                     field("dpcmClosed", "boolean", "Quantise disassembly WAVs to DPCM-representable PCM").optional(),
                     field("replaceDac", object(Map.of("type", "array", "items", Map.of("type", "integer"))),
                             "Unused retail DAC notes (129–196) to repurpose, in order").optional(),
-                    choice("driver", "Portable target driver", "s3k").optional(),
+                    choice("driver", "Portable target driver (defaults to the project target)", "s1", "s2", "s3k").optional(),
+                    field("speedUpTempo", "integer", "S3K-clock speed-shoes tempo byte (0..255) for S1/S2 exports").optional(),
+                    field("strictTempo", "boolean", "Reject inexact tempo conversions for portable or mod export").optional(),
                     field("noSource", "boolean", "Omit portable source").optional(),
+                    field("retailPatch", "boolean", "Store a native retail bank delta and omit source (edited banks need roms)").optional(),
                     field("license", "string", "SPDX license expression").optional(),
                     field("packageId", "string", "Portable package ID").optional(),
                     field("packageVersion", "string", "Portable package version").optional(),
@@ -172,13 +194,17 @@ final class McpTools {
                     choice("action", "Edit command (defaults to list, or add with propose)", "add", "list", "remove", "proposals", "accept", "reject").optional(),
                     field("propose", "boolean", "Save as an agent proposal and dry-run it without rebuilding").optional(),
                     field("group", "string", "Select a proposal group for proposals, accept or reject").optional(),
-                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down). layer uses noteIds, point selectors or a filtered span with mode echo, chorus, double or off; copies specify laneType FM or PSG and can set attenuation (TL) or levelDb.").optional(),
+                    field("edit", object(Map.of("type", "object")), "Intent with id, reason, op and operation fields. Supports splitNote, retrigger (attacks with second offsets and gates, or rate in seconds and count), mergeNotes and pinLane (lane or laneType). arpeggio and chordInstrument use noteIds or part and span (including {section}); arpeggio takes rate in driver ticks and order (up, down, up-down). layer uses noteIds, point selectors or a filtered span with mode echo, chorus, double or off; copies specify laneType FM or PSG and can set attenuation (TL) or levelDb. Off can mask a list of named policies.").optional(),
                     field("edits", object(Map.of("type", "array", "items", Map.of("type", "object"))),
                             "Batch of intent objects for add, instead of edit").optional(),
                     field("id", "string", "Edit ID to remove or review").optional(),
                     field("rerun", "boolean", "Rebuild from the affected stage and return a trace diff").optional(),
                     field("dryRun", "boolean", "Resolve proposed edits without writing artifacts").optional()),
-            tool("reconstruct_trace", "Follow individual source notes through score, roles, hardware allocation, and voicing.",
+            tool("reconstruct_vocal_review", "Review a vocal lead against captured syllables and RMVPE pitch.",
+                    (args, progress) -> McpReconstruction.vocalReview(args), WORK,
+                    field("phrase", "string", "Limit to one phrase ID").optional(),
+                    field("propose", "boolean", "Save suggestions as reviewable edits.json proposals").optional()),
+            tool("reconstruct_trace", "Follow source notes through voicing, including saved policy decisions and drum lane blockers.",
                     (args, progress) -> McpReconstruction.trace(args), WORK,
                     field("start", "number", "Inclusive start in the selected time base").optional(),
                     field("end", "number", "Exclusive end in the selected time base").optional(),
@@ -360,8 +386,8 @@ final class McpTools {
         }
         var output = McpPaths.output(work ? input : input.getParent(), string(args, "output"));
         if (string(args, "format").equalsIgnoreCase("disasm")) {
-            if (List.of("start", "end", "fade", "loops", "stems", "zip", "driver", "noSource", "license",
-                    "packageId", "packageVersion", "authors", "replace").stream().anyMatch(args::has))
+            if (List.of("start", "end", "fade", "loops", "stems", "zip", "driver", "speedUpTempo",
+                    "strictTempo", "noSource", "retailPatch", "license", "packageId", "packageVersion", "authors", "replace").stream().anyMatch(args::has))
                 throw new IllegalArgumentException("Disassembly export accepts roms, dpcmClosed and replaceDac");
             var slots = args.has("replaceDac") ? args.getAsJsonArray("replaceDac").asList().stream()
                     .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
@@ -372,28 +398,36 @@ final class McpTools {
             throw new IllegalArgumentException("dpcmClosed and replaceDac require format disasm");
         var format = ProjectExport.Format.valueOf(string(args, "format").toUpperCase(Locale.ROOT));
         boolean portable = format == ProjectExport.Format.PORTABLE || format == ProjectExport.Format.MOD;
-        if (!portable && List.of("driver", "noSource", "license", "packageId", "packageVersion", "authors", "replace")
+        if (!portable && List.of("driver", "speedUpTempo", "strictTempo", "noSource", "retailPatch", "license", "packageId", "packageVersion", "authors", "replace")
                 .stream().anyMatch(args::has))
             throw new IllegalArgumentException("Portable metadata requires format portable or mod");
         var authors = args.has("authors") ? args.getAsJsonArray("authors").asList().stream()
                 .map(com.google.gson.JsonElement::getAsString).toList() : List.<String>of();
         var replace = args.has("replace") ? args.getAsJsonArray("replace").asList().stream()
                 .map(number -> number.getAsBigDecimal().intValueExact()).toList() : List.<Integer>of();
-        var settings = new ProjectExport.PortableSettings(args.has("driver") ? string(args, "driver") : "s3k",
+        var romPaths = roms(args);
+        var settings = new ProjectExport.PortableSettings(optionalString(args, "driver"),
                 !flag(args, "noSource"), optionalString(args, "license"), optionalString(args, "packageId"),
-                optionalString(args, "packageVersion"), authors, replace);
+                optionalString(args, "packageVersion"), authors, replace,
+                args.has("speedUpTempo") ? args.get("speedUpTempo").getAsBigDecimal().intValueExact() : null,
+                flag(args, "strictTempo"), flag(args, "retailPatch"), romPaths);
         var options = new ProjectExport.Options(format, decimal(args, "start"), decimal(args, "end"), decimal(args, "fade"),
                 args.has("loops") ? args.get("loops").getAsBigDecimal().intValueExact() : null,
                 flag(args, "stems"), flag(args, "zip"), settings);
-        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input, roms(args));
+        var warnings = new java.util.TreeSet<String>();
+        var project = PortablePackages.openProject(work ? input.resolve("arrangement.smps.json") : input,
+                romPaths, warnings::add);
         JsonObject result;
         if (portable) {
             result = ProjectExport.exportPortable(project, output, options, progress);
         } else {
-            var warnings = ProjectExport.write(project, work ? input : null, output, options, progress);
+            warnings.addAll(ProjectExport.write(project, work ? input : null, output, options, progress));
             result = new JsonObject();
-            if (format == ProjectExport.Format.PACKAGE) result.add("warnings", McpJson.JSON.toJsonTree(warnings));
         }
+        if (result.has("warnings"))
+            result.getAsJsonArray("warnings").forEach(value -> warnings.add(value.getAsString()));
+        if (portable || format == ProjectExport.Format.PACKAGE || !warnings.isEmpty())
+            result.add("warnings", McpJson.JSON.toJsonTree(warnings));
         result.addProperty("output", output.toString());
         result.addProperty("format", string(args, "format"));
         return result;
@@ -446,7 +480,7 @@ final class McpTools {
         var errors = new ByteArrayOutputStream();
         try (var out = new PrintStream(output, false, StandardCharsets.UTF_8);
              var err = new PrintStream(errors, false, StandardCharsets.UTF_8)) {
-            if (Main.run(command.toArray(String[]::new), out, err) != 0) {
+            if (Main.runForMcp(command.toArray(String[]::new), out, err) != 0) {
                 String detail = errors.toString(StandardCharsets.UTF_8);
                 int usage = detail.indexOf("\nUsage:");
                 throw new IOException((usage < 0 ? detail : detail.substring(0, usage)).strip());

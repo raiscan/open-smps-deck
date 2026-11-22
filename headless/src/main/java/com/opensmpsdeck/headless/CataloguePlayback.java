@@ -111,7 +111,7 @@ public final class CataloguePlayback {
         install.sequences.add(probe);
         install.clips.add(new Clip("probe-clip", probe.id(), lane, 0, probe.lengthTicks()));
         StudioProject result = install.finish();
-        byte[] linear = ProjectCompiler.compile(result);
+        byte[] linear = ProjectCompiler.compile(result, ProjectCompiler.Encoding.LINEAR);
         int frames = ProjectRenderTiming.presentationCount(result);
         if (asset.kind() == Kind.DAC_SAMPLE && recipe.pan() != null && recipe.pan() != 0xC0)
             return pannedDac(result, linear, recipe.pan(), frames);
@@ -324,7 +324,7 @@ public final class CataloguePlayback {
 
         StudioProject finish() {
             var result = new StudioProject(version, target.name(), target.mode(), target.ticksPerBeat(),
-                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom());
+                    target.tempo(), voices, sequences, clips, envelopes, samples).withDerivedFrom(target.derivedFrom()).withTarget(target.target());
             ProjectFormat.validate(result);
             return result.equals(target) ? target : result;
         }

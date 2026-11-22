@@ -24,12 +24,14 @@ final class S3kPackageDriver implements PackageDriver {
 
     // The resolver lazily caches local FM tables while the ROM is open.
     static final class RomSource implements StockAssets {
+        private final Rom rom;
         private final Sonic3kAudioResourceProfile profile;
         private final Sonic3kSmpsLoader loader;
         private final Map<Integer, Sonic3kSmpsData> songs = new HashMap<>();
         private final DacData dac;
 
         RomSource(Rom rom, Sonic3kAudioResourceProfile profile) {
+            this.rom = rom;
             this.profile = profile;
             loader = new Sonic3kSmpsLoader(rom, profile);
             dac = loader.loadDacData();
@@ -45,6 +47,18 @@ final class S3kPackageDriver implements PackageDriver {
                 case "dac" -> dacPayload(dac, ref.note());
                 default -> throw new AssertionError(ref.table());
             };
+        }
+
+        @Override public byte[] retailBank(String game, int songId) throws IOException {
+            if (!game.equals("s3k")) return null;
+            final int musicId;
+            try {
+                musicId = profile.musicId(songId);
+            } catch (IllegalArgumentException absent) {
+                return null;
+            }
+            int address = loader.findMusicOffset(musicId);
+            return address < 0 ? null : S3kRomImporter.readBank(rom, address);
         }
 
         private byte[] localVoice(int songId, int slot) {

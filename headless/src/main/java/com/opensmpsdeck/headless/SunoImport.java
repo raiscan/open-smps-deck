@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -190,6 +191,23 @@ public final class SunoImport {
                                  String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
                                  String drumDetector, String device, Path configFile, String lanePolicyPreset,
                                  Path separatorConfig, ReconstructionStages.Progress progress) throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, transcriber, audioOnly, audioTranscriber,
+                stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig,
+                TargetGame.S3K, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, ReconstructionStages.Progress progress, TargetGame target)
+            throws IOException {
+        return inspect(folder, workDir, catalogue, assignments, exclusions, null, false, null,
+                Map.of(), Map.of(), null, null, null, null, null, target, progress);
+    }
+
+    public static Report inspect(Path folder, Path workDir, Path catalogue, Map<String, Integer> assignments,
+                                 Set<String> exclusions, String transcriber, boolean audioOnly,
+                                 String audioTranscriber, Map<String, String> stemRoles, Map<String, String> transcriberFor,
+                                 String drumDetector, String device, Path configFile, String lanePolicyPreset,
+                                 Path separatorConfig, TargetGame target, ReconstructionStages.Progress progress) throws IOException {
         if (lanePolicyPreset != null && !Set.of("off", ReconstructionLanePolicies.S3K_LAYERING).contains(lanePolicyPreset))
             throw new IllegalArgumentException("--lane-policy-preset expects s3k-layering or off");
         Path source = folder.toRealPath();
@@ -280,8 +298,9 @@ public final class SunoImport {
         if (!gaps.isEmpty() && status == Status.ok) status = Status.warning;
         var request = audioOnly ? (status == Status.error ? null : audioRequest)
                 : runRequest(work, index, mix, midi, inputs, lead, status, transcriber);
-        if (request != null && (lanePolicyPreset != null || separatorConfig != null)) {
+        if (request != null && (lanePolicyPreset != null || separatorConfig != null || target != TargetGame.S3K)) {
             var options = new LinkedHashMap<>(request.options);
+            if (target != TargetGame.S3K) options.put("target", target.id());
             if (lanePolicyPreset != null) options.put("lanePolicyPreset", lanePolicyPreset);
             if (separatorConfig != null) options.put("separatorConfig", separatorConfig.toString());
             request = new RunRequest(request.workDir, request.inputs, options);
@@ -332,6 +351,7 @@ public final class SunoImport {
         var transcriberFor = new TreeMap<String, String>();
         String drumDetector = null, device = null, lanePolicyPreset = null;
         Path configFile = null, separatorConfig = null;
+        TargetGame target = null;
         var assignments = new LinkedHashMap<String, Integer>();
         var exclusions = new HashSet<String>();
         for (int i = 2; i < args.length; i++) {
@@ -347,6 +367,10 @@ public final class SunoImport {
             if (i + 1 >= args.length) throw new IllegalArgumentException("Missing value for " + option);
             String value = args[++i];
             switch (option) {
+                case "--target" -> {
+                    if (target != null) throw new IllegalArgumentException("Duplicate option --target");
+                    target = TargetGame.parse(value);
+                }
                 case "--catalogue" -> catalogue = Path.of(value);
                 case "--exclude" -> exclusions.add(value);
                 case "--transcribe-unmapped" -> {
@@ -381,7 +405,8 @@ public final class SunoImport {
             }
         }
         var report = inspect(Path.of(args[0]), Path.of(args[1]), catalogue, assignments, exclusions, transcriber,
-                audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig, (a, b, c) -> {});
+                audioOnly, audioTranscriber, stemRoles, transcriberFor, drumDetector, device, configFile, lanePolicyPreset, separatorConfig,
+                target == null ? TargetGame.S3K : target, (a, b, c) -> {});
         report.print(out);
         out.println("Report: " + printable(report.workDir) + "/" + FILE);
         if (report.status == Status.error) throw new IllegalArgumentException("Import checks found errors");
@@ -1035,7 +1060,7 @@ public final class SunoImport {
         String drum = config.drumName(transcribersByRole.getOrDefault("drums", drumDetector));
         AudioDrumDetector.select(config, drum, device == null ? "auto" : device);
         for (String role : activeRoles) {
-            if (!role.equals("drums")) selected.put(role, config.forRole(role, fallback, transcribersByRole, transcriber != null));
+            if (!role.equals("drums")) selected.put(role, config.audioRole(role, fallback, transcribersByRole, transcriber != null));
         }
         if (activeRoles.contains("drums")) selected.put("drums", drum);
         issues.add(new Issue(Status.ok, "audio_only_transcription", "Audio-only transcribers by role " + selected));
@@ -1102,7 +1127,7 @@ public final class SunoImport {
             });
         }
         for (String[] option : List.of(new String[]{"lanePolicyPreset", "--lane-policy-preset"},
-                new String[]{"separatorConfig", "--separator-config"})) {
+                new String[]{"separatorConfig", "--separator-config"}, new String[]{"target", "--target"})) {
             if (!request.options.containsKey(option[0])) continue;
             args.add(option[1]);
             args.add(request.options.get(option[0]).toString());

@@ -2,7 +2,11 @@ package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.S3kRomImporter;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.google.gson.JsonObject;
 import com.opensmpsdeck.project.*;
+import com.opensmpsdeck.project.TargetGame;
 import javafx.application.Platform;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.event.Event;
@@ -37,6 +41,156 @@ class StudioWindowTest {
         fx(()->{stage=new Stage();window=new StudioWindow(stage,file);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
+
+    @Test void testInGameReportsMissingAndChangedRomsAndCanOpenSettings() throws Exception {
+        Path config = folder.resolve("roms.json");
+        var library = new RomLibrary(config);
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null
+                && ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("Select a clean"));
+        assertTrue(fx(() -> dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled()));
+
+        Path invalid = Files.writeString(folder.resolve("invalid.gen"), "invalid ROM");
+        var settings = new JsonObject();
+        settings.addProperty("s3k", invalid.toString());
+        Files.writeString(config, settings.toString());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-rom-settings")).fire());
+        await(() -> dialogPane("rom-settings-dialog") != null
+                && ((Label) dialogPane("rom-settings-dialog").lookup("#rom-status-s3k")).getText().equals("Changed on disk"));
+        fx(() -> {
+            var pane = dialogPane("rom-settings-dialog");
+            assertEquals("Missing", ((Label) pane.lookup("#rom-status-s1")).getText());
+            assertEquals("Missing", ((Label) pane.lookup("#rom-status-s2")).getText());
+            ((Button) pane.lookup("#rom-clear-s3k")).fire();
+            return null;
+        });
+        await(() -> ((Label) dialogPane("rom-settings-dialog").lookup("#rom-status-s3k")).getText().equals("Missing"));
+        assertEquals("invalid ROM", Files.readString(invalid));
+        closeDialog("rom-settings-dialog", ButtonType.CLOSE);
+        await(() -> ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("Select a clean"));
+        closeDialog("export-dialog", ButtonType.CANCEL);
+    }
+
+    @Test void verifiedRomEnablesTestInGameAndShowsSafeDefaults() throws Exception {
+        String clean = System.getenv("OPENSMPSDECK_S3K_ROM");
+        Assumptions.assumeTrue(clean != null && !clean.isBlank());
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        library.set(RomGame.S3K, Path.of(clean));
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null
+                && !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        fx(() -> {
+            snapshotDialog("export-dialog", ".export.png");
+            return null;
+        });
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-rom-settings")).fire());
+        await(() -> dialogPane("rom-settings-dialog") != null
+                && ((Label) dialogPane("rom-settings-dialog").lookup("#rom-status-s3k")).getText().startsWith("OK"));
+        fx(() -> {
+            snapshotDialog("rom-settings-dialog", ".rom-settings.png");
+            return null;
+        });
+        closeDialog("rom-settings-dialog", ButtonType.CLOSE);
+        await(() -> !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-test-in-game")).fire());
+        await(() -> dialogPane("test-in-game-dialog") != null);
+        fx(() -> {
+            var pane = dialogPane("test-in-game-dialog");
+            assertTrue(((CheckBox) pane.lookup("#rom-skip-demo")).isSelected());
+            assertFalse(((CheckBox) pane.lookup("#rom-loop")).isSelected());
+            assertTrue(pane.lookupButton(pane.getButtonTypes().getFirst()).isDisabled());
+            snapshotDialog("test-in-game-dialog", ".test-in-game.png");
+            return null;
+        });
+        closeDialog("test-in-game-dialog", ButtonType.CANCEL);
+    }
+
+    @Test void selectingSonic2UsesItsVerifiedRomAndOpensItsExportDialog() throws Exception {
+        String clean = System.getenv("OPENSMPSDECK_S2_ROM");
+        Assumptions.assumeTrue(clean != null && !clean.isBlank());
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        library.set(RomGame.S2, Path.of(clean));
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null
+                && ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("clean S3K"));
+        fx(() -> {
+            @SuppressWarnings("unchecked")
+            var target = (ChoiceBox<RomGame>) dialogPane("export-dialog").lookup("#test-in-game-driver");
+            assertEquals(RomGame.S3K, target.getValue());
+            target.setValue(RomGame.S2);
+            return null;
+        });
+        await(() -> !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-test-in-game")).fire());
+        await(() -> dialogPane("test-in-game-dialog") != null);
+        fx(() -> {
+            assertEquals("Export to Sonic 2", dialogPane("test-in-game-dialog").getHeaderText());
+            return null;
+        });
+        closeDialog("test-in-game-dialog", ButtonType.CANCEL);
+    }
+
+    @Test void sonic1IsSelectableAndUsesItsVerifiedRom() throws Exception {
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        String clean = System.getenv("OPENSMPSDECK_S1_ROM");
+        boolean verified = clean != null && !clean.isBlank();
+        if (verified) library.set(RomGame.S1, Path.of(clean));
+        showExport(library);
+        await(() -> dialogPane("export-dialog") != null);
+        fx(() -> {
+            @SuppressWarnings("unchecked")
+            var target = (ChoiceBox<RomGame>) dialogPane("export-dialog").lookup("#test-in-game-driver");
+            assertTrue(target.getItems().contains(RomGame.S1));
+            target.setValue(RomGame.S1);
+            return null;
+        });
+        if (!verified) {
+            await(() -> ((Label) dialogPane("export-dialog").lookup("#export-rom-hint")).getText().contains("clean S1"));
+            assertTrue(fx(() -> dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled()));
+            closeDialog("export-dialog", ButtonType.CANCEL);
+            return;
+        }
+        await(() -> !dialogPane("export-dialog").lookup("#export-test-in-game").isDisabled());
+        Platform.runLater(() -> ((Button) dialogPane("export-dialog").lookup("#export-test-in-game")).fire());
+        await(() -> dialogPane("test-in-game-dialog") != null);
+        fx(() -> {
+            var pane = dialogPane("test-in-game-dialog");
+            assertEquals("Export to Sonic 1", pane.getHeaderText());
+            assertNull(pane.lookup("#rom-loop"));
+            return null;
+        });
+        closeDialog("test-in-game-dialog", ButtonType.CANCEL);
+    }
+
+    private void showExport(RomLibrary library) {
+        Platform.runLater(() -> ExportDialog.show(stage, window.document().project(), file, null, library,
+                task -> Thread.ofVirtual().start(task), ignored -> {}));
+    }
+
+    private static DialogPane dialogPane(String id) {
+        return Window.getWindows().stream().filter(Window::isShowing)
+                .map(window -> window.getScene().getRoot())
+                .filter(root -> root instanceof DialogPane && id.equals(root.getId()))
+                .map(DialogPane.class::cast).findFirst().orElse(null);
+    }
+
+    private static void closeDialog(String id, ButtonType button) throws Exception {
+        fx(() -> {
+            ((Button) dialogPane(id).lookupButton(button)).fire();
+            return null;
+        });
+    }
+
+    private static void snapshotDialog(String id, String suffix) throws Exception {
+        String target = System.getProperty("studio.snapshot");
+        if (target != null) {
+            var pane = dialogPane(id);
+            pane.applyCss();
+            pane.layout();
+            ImageIO.write(SwingFXUtils.fromFXImage(pane.getScene().snapshot(null), null),
+                    "png", Path.of(target + suffix).toFile());
+        }
+    }
 
     @Test void sunoImportBlocksErrorsUntilAnOverrideIsChecked() throws Exception {
         Path source = Files.createDirectory(folder.resolve("download"));
@@ -80,6 +234,16 @@ class StudioWindowTest {
             });
             await(() -> !scene.lookup("#suno-import-start").isDisabled());
             assertTrue(Files.readString(work.resolve("import.json")).contains("excluded"));
+            fx(() -> {
+                var picker = (ComboBox<?>) scene.lookup("#suno-import-target");
+                assertEquals(TargetGame.S3K, picker.getValue());
+                assertEquals(List.of(TargetGame.S1, TargetGame.S2, TargetGame.S3K), picker.getItems());
+                picker.getSelectionModel().select(0);
+                return null;
+            });
+            await(() -> !scene.lookup("#suno-import-start").isDisabled());
+            var report = com.google.gson.JsonParser.parseString(Files.readString(work.resolve("import.json"))).getAsJsonObject();
+            assertEquals("s1", report.getAsJsonObject("runRequest").getAsJsonObject("options").get("target").getAsString());
         } finally {
             fx(() -> { ((SunoImportPane) preview.getScene().getRoot()).close(); preview.close(); return null; });
         }

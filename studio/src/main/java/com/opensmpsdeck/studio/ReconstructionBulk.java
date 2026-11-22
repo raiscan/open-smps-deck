@@ -58,6 +58,10 @@ final class ReconstructionBulk extends VBox {
     private final Button pin = new Button("Pin lane");
     private final Button assign = new Button("Assign instrument");
     private final Button audition = new Button("Audition selection");
+    private final Button retrigger = new Button("Queue retrigger");
+    private final TextField retriggerRate = new TextField("83");
+    private final TextField retriggerCount = new TextField("4");
+    private final TextField retriggerGate = new TextField("60");
     private final Button collapse = new Button("Collapse repeats");
     private final Button glide = new Button("Merge with glide");
     private final Button arpeggio = new Button("Arpeggio");
@@ -68,6 +72,8 @@ final class ReconstructionBulk extends VBox {
     private final ComboBox<String> layerMode = combo("Layer mode", List.of("Echo", "Chorus", "Double", "Off"));
     private final ComboBox<ReconstructionLaneType> layerTarget = combo("Target",
             List.of(ReconstructionLaneType.FM, ReconstructionLaneType.PSG));
+    private final List<CheckBox> layerMasks = List.of("pads", "leadEcho", "psgDouble", "fmDouble")
+            .stream().map(CheckBox::new).toList();
     private final TextField layerDelay = new TextField(Integer.toString(ReconstructionLayers.DEFAULT_ECHO_DELAY_FRAMES));
     private final TextField echoLevel = new TextField(layerDbText(
             ReconstructionLayers.DEFAULT_ECHO_ATTENUATION - ReconstructionLayers.ECHO_REFERENCE_TL));
@@ -96,6 +102,9 @@ final class ReconstructionBulk extends VBox {
         route.setId("reconstruction-set-lane-type");
         type.setId("reconstruction-lane-type");
         scope.setValue(Scope.VOICE);
+        retrigger.setId("reconstruction-queue-retrigger");
+        retrigger.setOnAction(event -> retrigger());
+        for (var field : List.of(retriggerRate, retriggerCount, retriggerGate)) field.setPrefColumnCount(4);
         arpeggioOrder.setValue("up");
         arpeggioRate.setPromptText("Driver ticks");
         arpeggioRate.setPrefColumnCount(4);
@@ -155,6 +164,9 @@ final class ReconstructionBulk extends VBox {
                 new SeparatorLabel("Instrument"),
                 row(scope, instrumentType), instrumentSearch, instrument,
                 row(assign, audition, button("Stop audition", stop)),
+                new SeparatorLabel("Retrigger"),
+                row(new Label("Interval (ms)"), retriggerRate, new Label("Count"), retriggerCount),
+                row(new Label("Gate (ms)"), retriggerGate, retrigger),
                 new SeparatorLabel("Combine notes"),
                 row(collapse, glide), row(arpeggioOrder, arpeggioRate),
                 row(arpeggio, chord));
@@ -201,14 +213,17 @@ final class ReconstructionBulk extends VBox {
         detune.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Chorus"));
         octave.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Double"));
         layerTarget.disableProperty().bind(layerMode.valueProperty().isEqualTo("Off"));
-        for (var control : List.of(echo, level, detune, octave))
+        var masks = new VBox(4, new Label("Mask policies (clear all to disable all layers)"),
+                row(layerMasks.toArray(javafx.scene.Node[]::new)));
+        masks.visibleProperty().bind(layerMode.valueProperty().isEqualTo("Off"));
+        for (var control : List.of(echo, level, detune, octave, masks))
             control.managedProperty().bind(control.visibleProperty());
         var queue = button("Queue layer", () -> layer(edit -> submit.accept(List.of(edit))));
         queue.setId("reconstruction-queue-layer");
         var audition = button("Preview A/B", () -> layer(preview));
         audition.setId("reconstruction-preview-layer");
         return new VBox(6, new SeparatorLabel("Layer"), row(layerMode, new Label("Target"), layerTarget),
-                echo, level, detune, octave, row(queue, audition, button("Stop", stop)));
+                echo, level, detune, octave, masks, row(queue, audition, button("Stop", stop)));
     }
 
     private static String layerDbText(int attenuation) {
@@ -244,6 +259,24 @@ final class ReconstructionBulk extends VBox {
         }
     }
 
+    private void retrigger() {
+        if (selected.size() != 1) return;
+        var edit = ReconstructionDraft.human("retrigger", "Repeat the selected attack");
+        edit.addProperty("noteId", selected.getFirst().id());
+        edit.addProperty("timeBase", "project");
+        try {
+            edit.addProperty("rate", Double.parseDouble(retriggerRate.getText().strip()) / 1000);
+            edit.addProperty("count", Integer.parseInt(retriggerCount.getText().strip()));
+            edit.addProperty("gate", Double.parseDouble(retriggerGate.getText().strip()) / 1000);
+        } catch (NumberFormatException invalid) {
+            showIssue("Enter the interval and gate in milliseconds and a whole number of attacks.");
+            return;
+        }
+        String invalid = ReconstructionReview.validationIssue(edit);
+        showIssue(invalid);
+        if (invalid == null) submit.accept(List.of(edit));
+    }
+
     private void layer(Consumer<JsonObject> action) {
         if (selected.isEmpty()) return;
         String mode = layerMode.getValue();
@@ -259,6 +292,11 @@ final class ReconstructionBulk extends VBox {
             }
             switch (mode) {
                 case "Echo" -> edit.addProperty("delayFrames", Integer.parseInt(layerDelay.getText().strip()));
+                case "Off" -> {
+                    var policies = new JsonArray();
+                    layerMasks.stream().filter(CheckBox::isSelected).map(CheckBox::getText).forEach(policies::add);
+                    if (!policies.isEmpty()) edit.add("policies", policies);
+                }
                 case "Chorus" -> edit.addProperty("detune", Integer.parseInt(layerDetune.getText().strip()));
                 case "Double" -> edit.addProperty("octave", layerOctave.getSelectionModel().getSelectedIndex() == 2 ? -1
                         : layerOctave.getSelectionModel().getSelectedIndex());
@@ -347,6 +385,8 @@ final class ReconstructionBulk extends VBox {
         audition.setDisable(selected.isEmpty() || candidate == null || auditionIssue != null);
         boolean singlePart = selected.size() > 1 && selected.stream().allMatch(note -> kind(note) == Kind.tonal
                 && note.part() == selected.getFirst().part() && data.attack(note.id()) != null && data.attack(note.id()).single());
+        retrigger.setDisable(selected.size() != 1 || kind(selected.getFirst()) != Kind.tonal
+                || data.attack(selected.getFirst().id()) == null || !data.attack(selected.getFirst().id()).single());
         collapse.setDisable(!singlePart || selected.stream().map(Overlay::pitch).distinct().count() != 1);
         glide.setDisable(!singlePart || selected.size() != 2 || selected.getFirst().pitch() == selected.getLast().pitch()
                 || onsetTick(selected.getFirst()) == onsetTick(selected.getLast()));

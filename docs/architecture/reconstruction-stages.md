@@ -647,6 +647,25 @@ The trace includes `edit:<id>` reasons alongside the underlying fate detail.
 Consumed merge members link to the retained attack through
 `scoreDecision.successorId`.
 
+### Retrigger a held note
+
+Use a single `retrigger` intent with an ordered list of `attacks`, each with an
+`offset` from the original onset and a positive `gate`. Both are in seconds
+on the edit's `timeBase` (source by default). Each attack needs its own
+non-overlapping project gate. The original ID identifies the first attack
+and dry-run lists the remaining IDs as `edit-<id>-1`, `edit-<id>-2`, and so
+on. Use those IDs for later layer or voicing edits.
+
+```json
+{"id":"pulse","reason":"Match repeated attacks","op":"retrigger","noteId":"NOTE_ID",
+ "attacks":[{"offset":0,"gate":0.06},{"offset":0.083,"gate":0.06}]}
+```
+
+For an even run, replace `attacks` with `"rate":0.083,"count":4,"gate":0.06`.
+The rate is the interval between attacks and the optional gate defaults to
+that interval. An explicit attack can override `velocity`. Optional `role`
+and `lane` route the additional attacks. Rebuild from transcribe.
+
 ### One-channel chord voicing
 
 These edits select playable tonal notes of one MIDI part that attack on the
@@ -1200,16 +1219,31 @@ while the hit is still audible provides a lower bound on its decay. It compares 
 for kicks and toms. For hats, cymbals, sticks and claps it analyzes the same
 upper bands in the stem and candidate, and charges for excess low body in
 the DAC playback. It tests native DAC rate bytes around each catalogue
-recipe within a six-semitone search and uses named classes and verified
-S3K slots as soft priors. Without a mapped drum stem it uses the mix fit.
+recipe within a six-semitone search. Without a mapped drum stem it uses the
+mix fit and a smaller rate search.
 
-The catalogue evidence records the acoustic distance and class penalty.
-When several plausible samples share recorded DAC use in a catalogue song
-or belong to an authored bank, the fitter gives that kit a small bonus. A
-stronger match can come from any kit. Reusing the same PCM across classes
-costs more. The evidence records the preferred kit and whether the chosen
-asset belongs to it. To use another catalogue variant at its native rate,
-change `variantId` and remove `drumSelection`.
+The fitter profiles the decoded PCM at each tested rate. Speech-like and
+pitched/tonal samples are excluded from automatic drum fitting, including
+the legacy mix vote. A speech-like or tonal classification at any native
+catalogue rate excludes the asset across its rate variants. Hats and
+cymbals require a noise-like profile at the fitted rate. Named classes,
+played native kick and snare slots, and declared slots provide soft priors
+among eligible candidates. When several candidates share recorded DAC use
+in a catalogue song or belong to an authored bank, the fitter gives that
+kit a small bonus. Reusing the same PCM across classes costs more.
+
+The `drumSelection` evidence records the requested drum class, acoustic
+profile version, representative excluded rates and reasons, and the
+spectral fit and preferred kit for eligible candidates. When no DAC
+candidate qualifies, the catalogue fit uses the PSG3 noise envelope where
+the lane can accommodate the attack. Existing PSG3 notes have priority.
+Assembly records the actual PSG3 gate or a collision in the report. The
+FM-only option disables the fallback. In `auto` source mode, a candidate
+stem slice must pass the same eligibility check. The explicit `sliced` mode
+uses the chosen stem as its source. To deliberately use a DAC variant at its native rate,
+set `variantId` and remove `drumSelection` from the DAC instrument entry.
+This also works for an asset marked `excludeFromDrumFit` in the catalogue.
+
 Automatic PSG3 cymbals use tone-linked white noise. Closed and pedal hats
 start at 13.98 kHz for one driver tick (about 16.7 ms) and switch to 6.99 kHz
 for the decay. The envelope uses attenuation offsets 0, 4 and 9 before rest.
@@ -1306,13 +1340,32 @@ field on `lanes.DAC` to this array.
 ]
 ```
 
+#### Inspect lane policy decisions
+
+Run `reconstruct assemble WORK_DIR --policy-decisions` (or pass the flag to
+`reconstruct run`, or MCP `options.policyDecisions: true`) to include
+`policyDecisions` in `report.json`. Each entry identifies the source note,
+policy, target lane when available, attack tick, gate and delay in ticks,
+and applied or skipped status. Busy skips list the competing note and
+occupied interval on each candidate lane. `reconstruct trace` reads the
+decisions from the current assembly.
+
+A note-specific layer with `"mode":"off","policies":["fmDouble"]` masks only
+the FM policy, leaving the PSG double eligible. Name any combination of
+`pads`, `leadEcho`, `psgDouble`, and `fmDouble`. Omit `policies` to disable
+all layers and lane policies for the selected notes.
+
 #### Tune or override PSG3 hats
 
 Colliding cymbals and cymbal classes measured quiet in a dedicated drum stem
 can use PSG3 automatically. Kick and snare retain DAC priority. Review the
 default placement and its reason with `reconstruct trace WORK_DIR --lane PSG3`.
 The drum rows in the view and `trace --lane DAC --json` show remaining
-simultaneous DAC losses and PSG3 availability.
+simultaneous DAC losses and PSG3 availability. Use `trace --lane DAC`
+or `trace --lane PSG3` for `drums.droppedHits`. Its competitors include
+the busy interval and a `pinLane` suggestion for each compatible lane
+that is free over the competing tone's full gate. Dry-run the chosen pin
+and rebuild from roles to confirm the revised allocation.
 
 - **Tune automatic hats.** Set a pitch gain in `lanes.PSG3.drumGains` (for
   example `{"42":2}`) or edit the clock fields in `lanes.PSG3.psgPercussion`.

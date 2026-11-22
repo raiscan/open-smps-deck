@@ -79,6 +79,41 @@ class ReconstructionTraceTest {
         assertEquals("FM3", pin.lane());
     }
 
+    @Test void droppedHatReportsBusyIntervalsAndOnlySuggestsLanesFreeForTheWholeTone() {
+        var clock = new ReconstructionTimeMap(null, null, 1);
+        var hat = drumRow("hat", Role.drums, null, 16, 20, "psg-noise-lane-busy", "tone", clock);
+        var tone = drumRow("tone", Role.harmony, "PSG3", 10, 28, null, null, clock);
+        var later = drumRow("late", Role.harmony, "FM1", 26, 30, null, null, clock);
+        var boundary = drumRow("boundary", Role.harmony, "PSG1", 28, 32, null, null, clock);
+        var all = Map.of("tone", tone, "hat", hat, "late", later, "boundary", boundary);
+        var review = DrumEvidence.review(List.of(hat), all, 0, 1, clock, "PSG3", List.of(), false, com.opensmpsdeck.project.TargetProfile.S3K);
+        var hit = review.droppedHits().getFirst();
+        assertEquals("hat", hit.noteId());
+        assertEquals("PSG3", hit.lane());
+        var blocker = hit.competitors().getFirst();
+        assertEquals("tone", blocker.noteId());
+        assertEquals(10, blocker.busyInterval().startTick());
+        assertEquals(28, blocker.busyInterval().endTick());
+        var lanes = blocker.pinLaneEdits().stream().map(DrumEvidence.PinLane::lane).toList();
+        assertEquals(List.of("FM2", "FM3", "FM4", "FM5", "PSG1", "PSG2"), lanes);
+        assertEquals(List.of("tone"), blocker.pinLaneEdits().getFirst().noteIds());
+    }
+
+    private static ReconstructionTrace.Row drumRow(String id, Role role, String lane, int from, int to, String reason,
+                                                    String competitor, ReconstructionTimeMap clock) {
+        int pitch = role == Role.drums ? 42 : 60;
+        var note = new Note(id, 0, from / 60.0, to / 60.0, pitch, 90, "midi", 1);
+        var timing = ReconstructionTrace.ticks(from, to, clock);
+        var at = new ReconstructionTrace.NoteAt(note, timing);
+        var placed = new ReconstructionTrace.Allocation(at, role, List.of(), lane, lane == null ? null : timing,
+                lane == null ? ReconstructionAllocation.Outcome.dropped : ReconstructionAllocation.Outcome.kept,
+                reason, null, competitor, null, null, List.of());
+        return new ReconstructionTrace.Row(id, 0, "Fixture", pitch, timing, timing, null, at, null, null,
+                new ReconstructionTrace.Roles(at, role, null, null, null, List.of()), placed, List.of(),
+                lane == null ? ReconstructionTrace.Status.dropped : ReconstructionTrace.Status.kept,
+                "allocate", reason, null, null, null, null, null);
+    }
+
     private static ReconstructionTrace.Row placed(String id, String lane, int start) {
         var note = new Note(id, 0, start, start + .5, 60, 90, "midi", 1);
         var timing = new ReconstructionTrace.Timing(start, start + .5, .5, start, start + .5, .5,
@@ -87,7 +122,7 @@ class ReconstructionTraceTest {
         var allocation = new ReconstructionTrace.Allocation(at, Role.harmony, List.of("FM3", "FM4"), lane,
                 timing, ReconstructionAllocation.Outcome.kept, null, null, null, null, null, List.of());
         return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, timing, null, at, null, null, null,
-                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null, null, null);
+                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null, null, null, null);
     }
 
     @Test void samePitchAttacksHaveDistinctStableIdsInOneCluster(@TempDir Path work) throws Exception {

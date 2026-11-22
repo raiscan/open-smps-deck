@@ -50,9 +50,10 @@ java -jar "$jar" reconstruct import separated import-work \
 Omit `--run` to check `import.json` first. Verify the stem roles, then
 repeat the command with `--run` to build `import-work/reconstruction`.
 For a quick CLI baseline, cut an excerpt before separation.
-The bake-off recommends Basic Pitch for vocals and ADTOF for drums.
-This command uses MuScriptor Medium for all tonal stems and the built-in
-spectral detector for drums.
+Configure [RMVPE](../../tools/transcribers/rmvpe/) for syllable-aware vocal
+leads and ADTOF as an optional drum detector. This command uses MuScriptor
+Medium for tonal backing, RMVPE for vocals when configured, and the built-in
+spectral detector for drums by default. See the [vocal cleanup workflow](../../skills/opensmpsdeck/SKILL.md#clean-up-a-vocal-derived-lead).
 
 ## Connect MCP
 
@@ -143,7 +144,11 @@ tool_timeout_sec = 600
 5. **Output.** Call `project_export` with `workDir` or `project`, a new
    `output` and `format` of `wav`, `mp3`, `vgm`, `smps`, `package`, `portable`, `mod` or `disasm`.
    For WAV or MP3, use project seconds for optional span bounds and
-   `stems: true` for channel stems. Use `package_validate` on a portable
+   `stems: true` for channel stems. On portable or mod exports, set
+   `driver` to `s1`, `s2` or `s3k` (default). For S1/S2, optionally set
+   `speedUpTempo` to an S3K-clock byte for speed shoes and set `strictTempo`
+   to reject inexact conversion of either tempo. Use decimal engine
+   music IDs for the mod `replace` array. Use `package_validate` on a portable
    export and supply `roms` for stock references. Check the returned
    `warnings` before sharing. For a [skdisasm kit](../architecture/disassembly-kit.md),
    `project` also accepts a portable package. Disassembly options are
@@ -175,7 +180,15 @@ supplies a progress token. Keep input paths and path-bearing artifacts private.
 
 ## MCP tools
 
-The packaged server exposes **31 tools** through `tools/list`. Use the
+For a new reconstruction, set `target` on `reconstruct_import` or
+`options.target` on `reconstruct_run` and `reconstruct_stage` (transcribe).
+The values are `s1`, `s2` and `s3k`. The default is `s3k`.
+Resumed stages and `reconstruct_rerun` use the saved target. S1 and S2
+are in progress and assembly reports incompatible features with the
+target driver's error. For portable and mod output, `project_export`
+defaults its `driver` to the project's target.
+
+The packaged server exposes **35 tools** through `tools/list`. Use the
 returned schemas for optional fields and types.
 
 | Task | Tools |
@@ -184,8 +197,10 @@ returned schemas for optional fields and types.
 | Import, build and replay | `reconstruct_import`, `reconstruct_run`, `reconstruct_stage`, `reconstruct_rerun`, `transcribers_list` |
 | Inspect evidence | `reconstruct_describe`, `reconstruct_view`, `reconstruct_trace`, `reconstruct_trace_diff`, `artifact_read` |
 | Manage musical intent | `reconstruct_edit`, `reconstruct_voices`, `reconstruct_sections`, `reconstruct_plan_template`, `artifact_write` |
+| Review a vocal lead | `reconstruct_vocal_review` |
 | Audition and compare | `reconstruct_audition`, `render_clip`, `render_compare`, `catalog_search`, `catalog_audition` |
 | Track project feedback | `reference_add`, `notes_list`, `notes_add`, `notes_resolve` |
+| Test in game | `rom_list`, `rom_set`, `rom_patch` |
 | Validate, export and check regressions | `project_validate`, `project_export`, `package_validate`, `package_inspect`, `bench_compare` |
 
 `artifact_write` is available for validated configuration such as a
@@ -194,6 +209,14 @@ and zero-based indices as strings. Use `reconstruct_edit` for note and lane
 changes. `render_clip` remains available for an excerpt of an existing
 project, with project-time `start` and `end` and optional `solo` or `mute`
 lanes. Use `render_compare` for a reconstruction against its aligned source.
+
+For Test in game, set the clean ROM with `rom_set` or pass a one-off
+absolute `rom` path to `rom_patch`. Supply an absolute `project` path and
+at least one absolute `out` (personal-use ROM) or `bps` (shareable patch)
+path. The optional fields include `driver` (`s1`, `s2` or `s3k`), `slot`,
+`titleMusic`, `noDemo`, `loop`, and `force`. Read the returned `report` and
+`warnings` before handing off a patch.
+[CLI and MCP options](../../headless/README.md#test-an-arrangement-in-game)
 
 See the [agent skill](../../skills/opensmpsdeck/SKILL.md) for CLI and Studio
 equivalents, the [stage guide](../architecture/reconstruction-stages.md)

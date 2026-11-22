@@ -68,7 +68,10 @@ final class DisassemblyKit {
         var romWarnings = new TreeSet<String>();
         PortablePackageReader.Package artifact = null;
         if (input.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".smps.zip")) {
-            artifact = PortablePackageReader.read(input, manifest -> Emitter.forDriver(manifest.driver()));
+            artifact = PortablePackageReader.read(input);
+            Emitter.forDriver(artifact.manifest().driver());
+            if (artifact.manifest().bank().form().equals("patch"))
+                throw new IllegalArgumentException("Disassembly export requires an embedded portable bank");
         }
         for (Path path : romPaths) {
             var image = S3kPackageDriver.INSTANCE.openRom(path);

@@ -1,12 +1,19 @@
 package com.opensmpsdeck.headless;
 
+import com.google.gson.JsonParser;
+import com.opensmpsdeck.headless.rom.BpsPatch;
 import com.opensmpsdeck.project.Clip;
+import com.opensmpsdeck.project.DacSample;
+import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
+import com.opensmpsdeck.project.ProjectFormat;
+import com.opensmpsdeck.project.SampleTrigger;
 import com.opensmpsdeck.project.Sequence;
 import com.opensmpsdeck.project.StudioProject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +28,79 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ProjectCliTest {
     @TempDir Path directory;
+
+    @Test void testInGameRequiresAnOutputAndRejectsTheUnreleasedPositionalForm() {
+        assertTrue(run("rom-patch", "song.smps.json").err().contains("--out or --bps"));
+        assertTrue(run("rom-patch", "song.smps.json", "clean.gen", "patched.gen").err()
+                .contains("Unknown option clean.gen"));
+        assertTrue(run("rom-patch", "song.smps.json", "--out", "--loop").err()
+                .contains("Missing --out value"));
+        assertTrue(run("rom-patch", "song.smps.json", "--bps", "song.bps", "--slot", "0x34").err()
+                .contains("Music ID must be in"));
+    }
+
+    @Test void sonic1RejectsMusicSlotsOutsideItsRangeAndLoopRequests() throws Exception {
+        Path project = source("song.smps.json", validSource());
+        String bps = directory.resolve("song.bps").toString();
+        for (String slot : List.of("0x33", "0x94")) {
+            var result = run("rom-patch", project.toString(), "--driver", "s1", "--bps", bps, "--slot", slot);
+            assertEquals(2, result.exit());
+            assertTrue(result.err().contains("Sonic 1 music ID must be in 0x81–0x93"), result.err());
+        }
+        var loop = run("rom-patch", project.toString(), "--driver", "s1", "--bps", bps, "--loop");
+        assertEquals(2, loop.exit());
+        assertTrue(loop.err().contains("Sonic 1 Test in game does not support --loop"), loop.err());
+        assertFalse(Files.exists(Path.of(bps)));
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "OPENSMPSDECK_S1_ROM", matches = ".+")
+    void sonic1ProjectAndPortablePackageExportTheSameRomAndBps() throws Exception {
+        Path clean = Path.of(System.getenv("OPENSMPSDECK_S1_ROM"));
+        Path project = directory.resolve("song.smps.json");
+        Path rom = directory.resolve("song.gen");
+        Path bps = directory.resolve("song.bps");
+        Path pkg = directory.resolve("song.smps.zip");
+        var envelope = new Envelope("fade", "Fade", Envelope.PSG_VOLUME, List.of(0, 3, 6, 9, 0x80));
+        var sample = DacSample.of("pulse", "Pulse", 23, new byte[]{(byte) 129, (byte) 133, (byte) 136, (byte) 129});
+        var psg = new Sequence("tone", "Tone", "PSG", 24, null, 100,
+                List.of(new NoteEvent("a", 0, 20, 60)), List.of(), "RESET", envelope.id(), null);
+        var dac = new Sequence("drums", "Drums", "DAC", 24, null, 127,
+                List.of(), List.of(), "RESET", null, null, List.of(new SampleTrigger("hit", 0, sample.id())));
+        ProjectFiles.save(project, new StudioProject(4, "Sonic 1 fixture", "S3K", 12, 192, List.of(),
+                List.of(psg, dac), List.of(new Clip("psg-clip", psg.id(), "PSG1", 0, 24),
+                        new Clip("dac-clip", dac.id(), "DAC", 0, 24)), List.of(envelope), List.of(sample)), null);
+        var export = run("rom-patch", project.toString(), "--driver", "s1", "--rom", clean.toString(),
+                "--out", rom.toString(), "--bps", bps.toString(), "--no-demo");
+        assertEquals(0, export.exit(), export.err());
+        var report = JsonParser.parseString(export.out()).getAsJsonObject().getAsJsonObject("report");
+        assertEquals(0x8A, report.get("slot").getAsInt());
+        assertTrue(report.get("noDemo").getAsBoolean());
+        assertTrue(report.has("psgTable"), report.toString());
+        var drums = report.getAsJsonArray("dacNoteMap").get(0).getAsJsonObject();
+        assertEquals(0x84, drums.get("mappedNote").getAsInt());
+        assertEquals(23, drums.get("rate").getAsInt());
+        assertEquals(1030, report.get("z80CustomDpcmCapacity").getAsInt());
+        assertTrue(export.err().contains("TEMPO_APPROXIMATED"), export.err());
+        byte[] cleanBytes = Files.readAllBytes(clean);
+        byte[] patched = Files.readAllBytes(rom);
+        assertArrayEquals(patched, BpsPatch.apply(Files.readAllBytes(bps), cleanBytes));
+
+        var portable = run("compile-package", project.toString(), pkg.toString(), "--portable", "--driver", "s1", "--no-source");
+        assertEquals(0, portable.exit(), portable.err());
+        Path aliasRom = directory.resolve("alias.gen");
+        var romAlias = run("export", pkg.toString(), aliasRom.toString(), "--format", "rom", "--rom", clean.toString(), "--no-demo");
+        assertEquals(0, romAlias.exit(), romAlias.err());
+        assertArrayEquals(patched, Files.readAllBytes(aliasRom));
+
+        Path aliasBps = directory.resolve("alias.bps");
+        var bpsAlias = run("export", pkg.toString(), aliasBps.toString(), "--format", "bps", "--rom", clean.toString(),
+                "--slot", "0x93", "--title-music");
+        assertEquals(0, bpsAlias.exit(), bpsAlias.err());
+        var redirected = JsonParser.parseString(bpsAlias.out()).getAsJsonObject().getAsJsonObject("report");
+        assertEquals(0x93, redirected.get("titleSlot").getAsInt());
+        assertEquals(1024 * 1024, BpsPatch.apply(Files.readAllBytes(aliasBps), cleanBytes).length);
+    }
 
     @Test void validatesProjectWithoutCreatingOutputAndReportsWhatWasValidated() throws Exception {
         Path source = source("phrase.json", validSource());
@@ -144,13 +224,21 @@ class ProjectCliTest {
     @Test void compilerBankLimitIsReportedBeforeAnyOutputIsCreated() throws Exception {
         Path source = source("too-long.json", validSource().replace("\"startTick\": 0, \"lengthTicks\": 36",
                 "\"startTick\": 0, \"lengthTicks\": 2147483647"));
-        for (String command : List.of("validate-project", "compile-project", "render-project")) {
+        var error = assertThrows(ProjectCompiler.BankLimitException.class,
+                () -> ProjectCompiler.compile(ProjectFormat.read(Files.readString(source))));
+        for (String command : List.of("validate-project", "compile-project", "compile-package", "render-project", "export")) {
             Path output = directory.resolve(command + ".output");
-            Result result = command.equals("validate-project") ? run(command, source.toString())
-                    : run(command, source.toString(), output.toString());
-            assertEquals(2, result.exit());
-            assertTrue(result.err().contains("32 KiB"), result.err());
-            assertFalse(Files.exists(output));
+            var format = command.equals("export") ? List.of("wav", "smps", "package") : List.of("");
+            for (String target : format) {
+                Result result = switch (command) {
+                    case "validate-project" -> run(command, source.toString());
+                    case "export" -> run(command, source.toString(), output.toString(), "--format", target);
+                    default -> run(command, source.toString(), output.toString());
+                };
+                assertEquals(2, result.exit(), command + " " + target);
+                assertEquals("Error: " + error.getMessage(), result.err().strip());
+                assertFalse(Files.exists(output));
+            }
         }
     }
 

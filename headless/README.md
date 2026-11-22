@@ -195,6 +195,102 @@ For `format: "disasm"`, `project` can also point to a portable package.
 Use optional `roms`, `dpcmClosed` and `replaceDac` (integer note array).
 Inspect the returned `warnings`.
 
+## ROM library and BPS output
+
+Set one clean retail ROM path per game for Test in game exports.
+
+```sh
+java -jar "$deck_jar" rom set s3k "/path/to/locked-on.gen"
+java -jar "$deck_jar" rom list
+java -jar "$deck_jar" rom clear s3k
+```
+
+Use `s1`, `s2` or `s3k`. The library stores absolute paths in
+`${XDG_CONFIG_HOME:-~/.config}/opensmpsdeck/roms.json`. It verifies the full-file
+SHA-1 on every use. `rom list` reports `missing` for an unset game, `ok` for a
+verified file or `changed-on-disk` when a saved path is unreadable or fails
+verification. `rom clear` removes the setting and leaves the file alone.
+MCP provides `rom_list` and `rom_set` with `game` and an absolute `path`.
+
+| Game ID | Supported raw retail image | Size (bytes) | CRC32 |
+|---|---|---:|---|
+| `s1` | Sonic 1 World REV01 | 524,288 | `AFE05EEE` |
+| `s2` | Sonic 2 World REV01 | 1,048,576 | `7B905383` |
+| `s3k` | Sonic 3 & Knuckles (locked-on) | 4,194,304 | `63522553` |
+
+Convert headered or interleaved SMD dumps to raw, deinterleaved `.bin` or
+`.gen` before setting a path. S3K export is available. S1 and S2 export are coming
+soon. An explicit `--rom PATH` overrides the library for the current export
+without changing the saved path.
+
+An engine binds its game ID with `RomTarget<S, O, R>` in
+`com.opensmpsdeck.headless.rom`. Its engine function takes
+`(VerifiedRom clean, S compiledSong, O options)` and returns
+`PatchedRom<R>` with the patched bytes and game-specific report.
+`RomLibrary.resolve(game, override)` checks the game and provides the verified
+snapshot. `RomExport.write(clean, patched, romPath, bpsPath, force)` takes
+either output path or both. Suggested names are `song.s3k.gen` and
+`song.s3k.bps`. The writer reapplies the staged BPS to the clean ROM and
+compares the result byte for byte before publication. Each destination is
+published atomically where the filesystem supports hard links. On FAT32 or
+exFAT cards, it falls back to a plain move that still refuses an existing file.
+
+A patched ROM contains copyrighted data from the retail ROM. Keep it for
+personal use and do not redistribute it. BPS is the shareable form and
+requires the matching clean ROM to apply. Material derived from stock assets
+used by the song remains subject to the original rights. Test the resulting ROM
+on your own emulator or hardware. Real-hardware testing is performed by users.
+
+## Test an arrangement in game
+
+Editable project JSON defaults to S3K. Pass `--driver s1` or `--driver s2`
+to compile for Sonic 1 or Sonic 2, or supply a portable package that declares
+one of those drivers. S3K also accepts legacy packages with embedded source
+and track. Select a clean World REV01 S1 or S2 ROM or a locked-on S3K ROM in
+the library, or pass `--rom`.
+
+```sh
+java -jar "$deck_jar" rom-patch song.smps.json --out song.s3k.gen --bps song.s3k.bps --no-demo
+java -jar "$deck_jar" rom-patch song.smps.zip --rom locked-on.gen --bps song.s3k.bps --slot 0x24 --title-music
+java -jar "$deck_jar" export song.smps.json song.s3k.gen --format rom --no-demo
+java -jar "$deck_jar" rom-patch song.smps.json --driver s1 --out song.s1.gen --no-demo
+java -jar "$deck_jar" rom-patch song.smps.json --driver s2 --out song.s2.gen --no-demo
+java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
+```
+
+- Supply at least one of `--out` (patched ROM) and `--bps` (verified BPS).
+  The CLI aliases `export PROJECT OUTPUT --format rom|bps` select the output
+  type for `OUTPUT` and accept the same ROM and music options.
+- `--slot ID` selects a music request from `0x01` to `0x33` for S3K
+  (title default `0x25`), `0x81` to `0x93` for S1 (title default `0x8A`),
+  or `0x81` to `0x9F` for S2 (title default `0x99`). Add `--title-music`
+  to request a different slot from the title. Game events that use the
+  selected slot also play the replacement.
+- `--no-demo` disables the idle title demo. Start still enters the game.
+  Studio enables this by default.
+- On S2 and S3K, `--loop` replaces each channel's final stop with a jump to
+  its start when the active channels reach their stops on the same tick and
+  loop control is supported. S2 loop generation requires tracks without
+  existing branches and is unavailable for the Extra Life slot.
+- `--force` allows replacing existing output files. Keep outputs separate from
+  the source project and clean ROM.
+
+MCP exposes `rom_patch` with absolute `project` and optional absolute
+`rom`, `out`, and `bps` paths. Provide at least one of `out` and `bps`.
+Other optional fields are `driver` (`s1`, `s2` or `s3k`), `slot` (integer),
+`titleMusic`, `noDemo`, `loop`, and `force` (booleans). CLI and MCP return
+output paths, `report` (cartridge hashes, patched ranges, DAC and envelope
+mappings), `warnings`, and `bpsStats` when a BPS is written.
+
+A patched ROM is for personal use only. Do not redistribute it. A BPS is
+the shareable form and requires the matching clean ROM. Material derived
+from stock assets remains subject to its original rights. The compiled song
+must fit in one 32 KB music bank. S2 uses an expansion bank and stock DAC
+samples. See the [Test in game user guide](../docs/user-guide/14-test-in-game.md)
+and the layouts for [S1](../docs/architecture/s1-rom-patch.md),
+[S2](../docs/architecture/s2-rom-patch.md) and
+[S3K](../docs/architecture/s3k-rom-patch.md).
+
 ## External stem separation
 
 Start with a local WAV or MP3 to build an S3K arrangement without MIDI.
@@ -260,18 +356,38 @@ checked `runRequest` to `reconstruct_run`.
 
 The [extraction bake-off](../experiments/extraction-bakeoff/RESULTS.md)
 supports starting with BS-RoFormer SW, MuScriptor Medium for bass, guitar,
-piano and other tonal material, Basic Pitch for vocals, and ADTOF for drums.
-Add [RMVPE](../tools/transcribers/rmvpe/) as a vocal candidate when its
-checkpoint is available.
+piano and other tonal material, and ADTOF for drums. Configure
+[RMVPE](../tools/transcribers/rmvpe/) for syllable-aware vocal leads.
+Basic Pitch remains a vocal alternative.
 In the four-track [Suno head-to-head](../experiments/extraction-bakeoff/README.md#original-midi-render-head-to-head),
 the local Medium + ADTOF route scored 0.775 onset F1 against 0.429 for the
 per-stem Suno MIDI after delay correction. The commands above explicitly
 select SW and Medium. The integrated
-audio-only build sends all tonal stems, including vocals, to the selected
-transcriber and uses the built-in spectral detector on drums. For separate
+audio-only build uses the configured RMVPE command for vocals when available
+and the built-in spectral detector on drums by default. For separate
 vocal and drum estimates, use the
 [bake-off environments and CLI](../experiments/extraction-bakeoff/README.md#run-basic-pitch-and-adtof-on-separated-stems).
 Those estimates are independent of the audio-only import.
+
+## Choose a reconstruction target
+
+Set `--target s1|s2|s3k` on `reconstruct import`, `run`, or `transcribe`
+to choose the game before analysis. The default is `s3k`. Import includes
+the selected target in its runnable request. Subsequent stages and
+`reconstruct rerun` inherit the saved target. You can also pass `--target`
+to those commands to assert the saved choice.
+
+S1 and S2 reconstruction are in progress. Analysis still uses the S3K
+fitting tools and a 60 Hz editing clock. Assembly uses the selected native
+compiler and reports incompatible assets or commands, such as S3K PSG
+control bytes or unsupported envelope and noise commands. A successful
+classic assembly writes a portable package and a render for the selected
+driver. Studio editing and its live preview use the S3K editing dialect.
+
+The target is saved as `inputs.target` in `score.json`, `options.target`
+in `manifest.json`, and `target` in the arrangement project. An omitted
+field means S3K. Portable and mod export default to the project target.
+An explicit `--driver` overrides that default.
 
 ## Import a Suno download
 
@@ -728,8 +844,10 @@ on stderr.
 
 ## Deliberately limited input contract
 
-The first CLI proof accepts a **finite linear subset** of standalone S3K SMPS.
-These restrictions are in its validator, not in the extracted OpenGGF core:
+The CLI accepts a finite subset of standalone S3K SMPS. The arrangement
+compiler packs repeated timed events into counted loops and shared
+subroutines. Use `compile-project PROJECT OUTPUT --linear` to emit the
+original linear encoding.
 
 - Six-byte S3K music header, little-endian file-relative pointers with base zero.
 - One mandatory first DAC header slot, up to five following FM slots, and up
@@ -752,9 +870,11 @@ These restrictions are in its validator, not in the extracted OpenGGF core:
   envelope if its ID is nonzero. All resources are validated, including
   unused ones.
 - Every track must terminate before the next track or voice-table boundary.
-  Calls, jumps, loops, other envelope commands, direct register writes,
-  DAC coordination flags and all other commands are rejected explicitly. Unknown commands
-  never silently fall through into notes or partially rendered audio.
+  Counted loops (F7) use counter zero, a nonzero finite count, and a backward
+  pointer. Calls (F8) target routines after the track stop that end in a
+  return (F9). Control flow is flat and timed events have explicit durations.
+  Unconditional jumps, direct register writes and other unlisted commands
+  are rejected.
 
 A normal legacy OpenSMPSDeck export may contain loops or require external
 resources and therefore be rejected. Raw binary rendering and locked-on
@@ -794,6 +914,8 @@ Run the headless build gate and smoke-test the packaged MCP server. Set
 mvn -B -pl headless -am verify
 python3 -I tools/mcp_smoke.py headless/target/opensmpsdeck-headless-0.1.0-SNAPSHOT.jar --scratch "$scratch"
 ```
+
+For title-music and demo-timeout checks on personal-use patched ROMs, see the [headless ROM probe for BizHawk and libretro](../tools/rom-probe/README.md).
 
 ## External transcription
 
@@ -917,20 +1039,28 @@ Install the adapters and replace the paths. Each command may choose its own devi
 }
 ```
 
-For vocals, pass up to three distinct comma-separated adapter names.
-The example evaluates MuScriptor, Basic Pitch, their fused notes, and the
-monophonic line from RMVPE. Use the same list with `--transcriber-for vocals=...`
-or MCP `transcriberFor.vocals`. The comparison balances coverage of audible
-vocal frames and F0 agreement within one semitone. With RMVPE in the set,
-all candidates use periodicity measured directly on the stem as the pitch
-reference. With MuScriptor and Basic Pitch alone, the Basic Pitch contour
-can fill gaps in the reference. The manifest records the winner, reference,
-and each score. A single name uses that adapter alone. RMVPE's fractional
-contour can also supply bends for held notes with smooth, sustained motion.
+With an adapter named `rmvpe` configured, audio-only runs select its
+syllable-aware transcription for vocals by default. Use the
+`vocalLead` object in `transcribers.json` to choose another method or
+change the vocal register:
 
-Audio-only vocal cleanup follows a monophonic line using pitch salience,
-continuity and a range learned from the stem. It joins supported syllables,
-bridges short voiced gaps and can fill sustained pitches. When other tonal stems are present, vocals need at least two seconds of
+```json
+"vocalLead": {"choice": "auto", "registerShift": 12}
+```
+
+`choice` accepts `auto`, a configured adapter name, or `fusion`. Fusion
+uses at least two note adapters listed in `defaults.vocals`. For an
+individual run, pass `--transcriber-for vocals=NAME` or MCP
+`transcriberFor.vocals`. A comma-separated list runs up to three candidates,
+including RMVPE if listed. The comparison measures audible frame coverage
+and one-semitone F0 agreement. With an RMVPE contour available, stem
+periodicity supplies the comparison reference. The manifest and report
+record the selected method, register shift, gate and candidate metrics.
+
+The syllable mode preserves separate attacks on repeated pitches and
+snapshots its pitch contour and detected boundaries. Alternative note
+transcribers use the existing monophonic cleanup and pitch salience.
+When other tonal stems are present, vocals need at least two seconds of
 audible periodic pitch (or 15% of a short excerpt, whichever is smaller)
 and an RMS level of at least 3.5% of the strongest other tonal stem.
 Residual vocals are skipped and normal lead selection resumes.
@@ -939,6 +1069,12 @@ The vocal-derived FM1 part uses a bright sustained patch selected from the catal
 held-note probe. When the stem supports a vibrato estimate, it is encoded
 using the usual FM modulation controls. Edit the source instrument and its
 effects in `voicing.json` to override these choices.
+
+Review the saved vocal contour and suggested edits by phrase with
+`reconstruct vocal-review WORK_DIR [--phrase ID]` or MCP
+`reconstruct_vocal_review`. `--propose` (MCP `propose: true`) saves the
+suggestions to the existing proposal journal for CLI or Studio review.
+See [Clean up a vocal-derived lead](../skills/opensmpsdeck/SKILL.md#clean-up-a-vocal-derived-lead).
 
 A `drums` stem feeds DAC and PSG3 routing. When the stem is absent, detection
 uses drums from local separation, or the mix if the separator is unavailable.
@@ -1108,46 +1244,72 @@ Warnings go to stderr for CLI package writers and appear in the `warnings` array
 MCP package exports and reconstruction runs. Export still succeeds.
 
 `stock-table build ROM OUT.json` rebuilds the public stock hash and locator
-table from a verified locked-on S3&K image. Choose a new output path.
+table. The default uses locked-on S3&K. For Sonic 1 or Sonic 2, pass
+`--driver s1` or `--driver s2` and use `--rom OTHER_REVISION.gen` to take
+the union of both verified revisions. Choose a new output path.
 
 ## Portable song packages
 
-Schema 4 stores an S3K bank with relocations and references to known game
+Schema 4 stores an S1, S2 or S3K bank with relocations and references to known game
 assets. Original payloads remain embedded. Stock matches are resolved
-from the player's own ROM at playback. Retail songs remain embedded and
-carry a redistribution warning.
+from the player's own ROM at playback. By default, retail-derived songs
+remain embedded and carry a redistribution warning.
 
 ```sh
 java -jar "$deck_jar" compile-package PROJECT.smps.json song.smps.zip --portable
-java -jar "$deck_jar" export WORK_DIR song.smps.zip --format portable --no-source
+java -jar "$deck_jar" export WORK_DIR song.smps.zip --format portable --driver s2 --no-source
 java -jar "$deck_jar" inspect-package song.smps.zip
 java -jar "$deck_jar" validate-package song.smps.zip --rom locked-on.gen --render verified.wav --frames 3600
-java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --replace 13
+java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --driver s1 --replace 129
 ```
 
 Portable exports include redacted source by default. Pass `--no-source`
-to omit it. `--driver s3k` is the default and the only supported writer
-driver. The package ID defaults to a lowercase slug of the project name,
+to omit it. Choose `--driver s1|s2|s3k` for an editable arrangement.
+Export defaults to the project target. Native v5 banks support `s3k`. Studio's
+**Portable SMPS package** export has the same driver choice. S1 and S2
+preserve the S3K duration tick rate as closely as their native clocks allow.
+`--speed-up-tempo BYTE` (decimal 0–255) uses the S3K clock for the optional
+gameplay speed-shoes tempo, then converts it to a native manifest byte.
+An absent value leaves gameplay tempo unchanged. Export reports
+`TEMPO_APPROXIMATED` with the source and target bytes and the signed
+relative tick-rate error for each inexact conversion. Pass `--strict-tempo`
+to reject either approximation. The package ID
+defaults to a lowercase slug of the project name,
 the version to `1.0.0`, the author list to empty, and the license to null.
 Use `--package-id`, `--package-version`, repeatable `--author`, and
 `--license` with an SPDX expression to set these fields. A mod JAR requires
-at least one decimal `--replace` stock music ID. Repeat the flag to map
+at least one decimal `--replace` stock music ID for the selected driver. Repeat the flag to map
 several IDs to the exported song. Its required mod author defaults to
 `Unknown` when no author was supplied.
 
-`inspect-package` returns the validated schema 4 manifest and warnings.
+For a native v5 project from `import-rom-song`, add `--retail-patch` to
+`compile-package --portable` or `export --format portable|mod`. Supply
+`--rom PATH` for an edited bank. An unchanged bank listed in the stock
+table can export without the ROM. The patch stores the changes and always
+omits the source. It warns that the composition still belongs to the game
+(`DERIVED_FROM_RETAIL_SONG`). Compiled arrangements from `copy-arrangement`
+require embedded export and retain `RETAIL_SONG_DATA`. OpenGGF's
+`smpsPackage` reader still rejects patch form, including in mod JARs.
+
+`inspect-package` returns the validated schema 4 manifest and warnings,
+including a patch's bank form and base song.
 `validate-package` returns a JSON report with `structureValidated` and
 `playbackValidated`. Repeat `--rom` to supply several images. Without a ROM,
-packages with references are checked structurally. `--render` writes a new
+packages with references are checked structurally. For a patch bank,
+`playbackPending` identifies the base song that needs a ROM. Pass the
+matching ROM to rebuild the bank and verify its hash. `--render` writes a new
 48 kHz WAV after resolution and native preflight. `--frames` overrides
-the stored preview length. When using an extracted redacted source, pass
+the stored preview length. `render-package PKG OUT.wav [--rom PATH ...]
+[--frames N]` runs the same native rendering path with a positional output.
+When using an extracted redacted source, pass
 `--rom PATH` to `validate-project`, `render-project`, `compile-package`
 or `export` to resolve its stock assets. Studio reports the missing assets
 when opening that source. The Studio ROM picker is a follow-up.
 
 MCP `project_export` accepts `format: "portable"` or `"mod"` and optional
-`driver`, `noSource`, `license`, `packageId`, `packageVersion`, `authors`,
-and `roms`. Use an integer `replace` array for mod export.
+`driver`, `speedUpTempo`, `strictTempo`, `noSource`, `retailPatch`,
+`license`, `packageId`, `packageVersion`, `authors`, and `roms`. Use an integer `replace` array for mod export.
 `package_validate` takes `package`, optional `roms` and a new `render` path
 beside the package with optional `frames`. `package_inspect` takes `package`.
-See the [normative portable package contract](../docs/architecture/portable-package.md).
+See the [driver feature matrix](../docs/architecture/driver-support.md)
+and the [normative package contract](../docs/architecture/portable-package.md).

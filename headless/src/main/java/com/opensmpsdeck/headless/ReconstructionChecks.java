@@ -24,10 +24,11 @@ final class ReconstructionChecks {
 
     static void score(ReconstructionStages.Score value) {
         String at = "score.json";
-        require(value.ticksPerSecond() == S3kRenderer.PRESENTATIONS_PER_SECOND, at + ".ticksPerSecond", "expected 60");
+        int ticksPerSecond = value.profile().ticksPerSecond();
+        require(value.ticksPerSecond() == ticksPerSecond, at + ".ticksPerSecond", "expected " + ticksPerSecond);
         require(value.durationUs() > 0 && value.durationUs() <= 600_000_000
-                        && (value.durationUs() * 60 + 999_999) / 1_000_000 == value.frames(),
-                at + ".frames", "must be the 60 Hz presentation count for durationUs (maximum 600 seconds)");
+                        && (value.durationUs() * ticksPerSecond + 999_999) / 1_000_000 == value.frames(),
+                at + ".frames", "must be the " + ticksPerSecond + " Hz presentation count for durationUs (maximum 600 seconds)");
         var inputs = value.inputs();
         require(inputs != null, at + ".inputs", "required");
         require(!inputs.name().isBlank() && inputs.ticksPerBeat() > 0, at + ".inputs", "invalid name or ticksPerBeat");
@@ -325,9 +326,9 @@ final class ReconstructionChecks {
             require(decision != null && pin.order() > 0 && nonblank(pin.editId())
                             && (pin.laneType() == null
                             ? ReconstructionEdits.pinCompatible(decision.note(), decision.role() == Role.drums,
-                                    pin.lane(), score.inputs().fmOnly())
+                                    pin.lane(), score.inputs().fmOnly(), score.inputs().profile())
                             : pin.lane() == null && decision.role() != Role.drop && ReconstructionEdits.laneTypeIssue(
-                                    decision.note(), decision.role() == Role.drums, pin.laneType(), score.inputs().fmOnly()) == null),
+                                    decision.note(), decision.role() == Role.drums, pin.laneType(), score.inputs().fmOnly(), score.inputs().profile()) == null),
                     at + ".lanePins." + target.getKey(), "invalid pin for the assigned note");
         }
         for (var choice : roles.notes()) {
@@ -387,16 +388,16 @@ final class ReconstructionChecks {
             String lane = entry.lane();
             boolean pinned = entry.pinnedLane() != null && entry.pinnedLane().equals(lane) && entry.role() != Role.drop
                     && (entry.laneType() == null
-                    ? ReconstructionEdits.pinCompatible(entry.note(), entry.role() == Role.drums, lane, score.inputs().fmOnly())
+                    ? ReconstructionEdits.pinCompatible(entry.note(), entry.role() == Role.drums, lane, score.inputs().fmOnly(), score.inputs().profile())
                     : entry.laneType().lanes().contains(lane) && ReconstructionEdits.laneTypeIssue(
-                            entry.note(), entry.role() == Role.drums, entry.laneType(), score.inputs().fmOnly()) == null);
+                            entry.note(), entry.role() == Role.drums, entry.laneType(), score.inputs().fmOnly(), score.inputs().profile()) == null);
             require(entry.laneType() == null || entry.pinnedLane() != null, where, "lane type requires a pinned placement");
             require(lane != null && (entry.pinnedLane() != null ? pinned : switch (entry.role()) {
                 case melody -> lane.equals("FM1");
                 case bass -> lane.equals("FM2");
                 case drums -> lane.equals("DAC") || lane.equals("PSG3") && !score.inputs().fmOnly();
                 case harmony, counter -> ReconstructionAllocation.INNER_FM.contains(lane)
-                        || ReconstructionAllocation.PSG.contains(lane) && !score.inputs().fmOnly() && entry.note().pitch() >= 45;
+                        || ReconstructionAllocation.PSG.contains(lane) && !score.inputs().fmOnly() && entry.note().pitch() >= score.inputs().profile().psg().low();
                 case drop -> false;
             }), where, "invalid lane for " + entry.role());
             require(entry.startTick() != null && entry.endTick() != null && entry.startTick() >= 0

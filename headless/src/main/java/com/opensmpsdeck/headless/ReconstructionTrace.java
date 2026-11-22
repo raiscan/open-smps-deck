@@ -73,7 +73,8 @@ public final class ReconstructionTrace {
                ReconstructionStages.ScoreDecision scoreDecision, Structure structure, Roles roles,
                Allocation allocation, List<Voiced> voiced,
                Status status, String stage, String reason, List<String> editReasons, String fateDetail,
-               ReconstructionVoicePlan.Identity voice, List<ReconstructionLayers.Result> layers) {}
+               ReconstructionVoicePlan.Identity voice, List<ReconstructionLayers.Result> layers,
+               List<ReconstructionLanePolicies.Decision> policyDecisions) {}
     record Summary(int part, int pitch, Timing sourceTiming, Status status, String stage, String reason,
                    ReconstructionRoles.Role role, String roleReason, String lane, Timing placement,
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced,
@@ -252,7 +253,8 @@ public final class ReconstructionTrace {
             throw new IllegalArgumentException("--lane expects FM1–FM5, PSG1–PSG3, or DAC");
         Status status = flags.containsKey("--status") ? Status.valueOf(flags.get("--status")) : null;
         var notes = new ArrayList<Row>();
-        var rows = read(work, score).values();
+        var rowsById = read(work, score);
+        var rows = rowsById.values();
         for (var row : rows) {
             if ((clustered ? !span.contains(writtenOnset(row))
                     : !overlaps(span, row) && !layerOverlaps(row, span, lane, timeline))
@@ -260,7 +262,9 @@ public final class ReconstructionTrace {
                     || min != null && row.pitch() < min || max != null && row.pitch() > max
                     || status != null && row.status != status) continue;
             if (lane != null && (row.allocation == null || !lane.equals(row.allocation.lane)
-                    && !(lane.equals("DAC") && "simultaneous-dac-hit".equals(row.allocation.reason))
+                    && !lane.equals(DrumEvidence.blockedLane(row, rowsById))
+                    && (row.policyDecisions == null || row.policyDecisions.stream().noneMatch(decision ->
+                            policyLane(decision, lane)))
                     && row.voiced.stream().noneMatch(gate -> lane.equals(gate.lane))
                     && (row.layers == null || row.layers.stream().noneMatch(layer -> lane.equals(layer.lane()))))) continue;
             notes.add(row);
@@ -272,12 +276,16 @@ public final class ReconstructionTrace {
                         .sorted(Comparator.comparingInt(ClusterNote::pitch).reversed().thenComparing(ClusterNote::id)).toList();
                 clusters.add(new AttackCluster(cluster.part(), cluster.start(), timeline.project(cluster.start()), pitches));
             }
-            return JSON.newBuilder().serializeNulls().create().toJsonTree(Map.of("clusters", clusters)).getAsJsonObject();
+            var result = JSON.newBuilder().serializeNulls().create().toJsonTree(Map.of("clusters", clusters)).getAsJsonObject();
+            var decisions = notes.stream().filter(row -> row.policyDecisions != null)
+                    .flatMap(row -> row.policyDecisions.stream()).toList();
+            if (!decisions.isEmpty()) result.add("policyDecisions", JSON.toJsonTree(decisions));
+            return result;
         }
         var result = JSON.toJsonTree(Map.of("notes", notes)).getAsJsonObject();
-        var drums = DrumEvidence.review(notes, rows, span.start() == null ? 0 : span.start(),
+        var drums = DrumEvidence.review(notes, rowsById, span.start() == null ? 0 : span.start(),
                 span.end() == null ? timeline.sourceDuration() : span.end(), timeline,
-                lane == null || lane.equals("DAC"), List.of());
+                lane, List.of(), score.inputs() != null && score.inputs().fmOnly(), score.profile());
         if (drums != null) result.add("drums", JSON.toJsonTree(drums));
         return result;
     }
@@ -431,7 +439,16 @@ public final class ReconstructionTrace {
                 || row.score != null && span.overlaps(row.score.timing));
     }
 
+    private static boolean policyLane(ReconstructionLanePolicies.Decision decision, String lane) {
+        return lane == null || lane.equals(decision.lane()) || decision.blockers() != null
+                && decision.blockers().stream().anyMatch(blocker -> lane.equals(blocker.lane()));
+    }
+
     private static boolean layerOverlaps(Row row, Span span, String lane, ReconstructionTimeMap timeline) {
+        if (row.policyDecisions != null && row.policyDecisions.stream().anyMatch(decision ->
+                decision.attackTick() < timeline.frames() && policyLane(decision, lane) &&
+                        span.overlaps(ticks(decision.attackTick(), decision.attackTick() + Math.max(1, decision.gate()), timeline))))
+            return true;
         return row.layers != null && row.layers.stream().anyMatch(layer ->
                 layer.status() == ReconstructionLayers.Status.applied
                         && (lane == null || lane.equals(layer.lane()))
@@ -547,7 +564,7 @@ public final class ReconstructionTrace {
                     gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
-                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers));
+                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers, played.policyDecisions.get(id)));
         }
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
@@ -797,11 +814,12 @@ public final class ReconstructionTrace {
     private record Playback(Map<String, List<Voiced>> byId, Map<String, S3kReconstruction.Reduction> unmatched,
                             Map<String, List<ReconstructionAllocation.RunPlacement>> figures,
                             Map<String, List<Voiced>> figureGates,
-                            Map<String, List<ReconstructionLayers.Result>> layers) {}
+                            Map<String, List<ReconstructionLayers.Result>> layers,
+                            Map<String, List<ReconstructionLanePolicies.Decision>> policyDecisions) {}
 
     private static Playback playback(ReconstructionStages.Score score, ReconstructionAllocation.Result allocation,
                                      ReconstructionVoicing.Result voicing, JsonObject report, ReconstructionTimeMap timeline) {
-        if (allocation == null || voicing == null) return new Playback(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+        if (allocation == null || voicing == null) return new Playback(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         boolean exact = report.has("voicedGates") && JSON.toJsonTree(ReconstructionCli.assemblyInputs(score, allocation, voicing))
                 .equals(report.get("assemblyInputs"));
         boolean legacy = report.has("version") && !report.has("assemblyInputs");
@@ -844,7 +862,9 @@ public final class ReconstructionTrace {
         return new Playback(group(gates, Voiced::id), reductions, figureInfo,
                 group(gates.stream().filter(gate -> parents.containsKey(gate.id)).toList(), gate -> parents.get(gate.id)),
                 group(reportList(report, "noteLayers", ReconstructionLayers.Result.class, exact),
-                        ReconstructionLayers.Result::noteId));
+                        ReconstructionLayers.Result::noteId),
+                group(reportList(report, "policyDecisions", ReconstructionLanePolicies.Decision.class, exact),
+                        ReconstructionLanePolicies.Decision::sourceNoteId));
     }
 
     private static <T> List<T> reportList(JsonObject report, String name, Class<T> type, boolean available) {
@@ -986,6 +1006,14 @@ public final class ReconstructionTrace {
                 for (var loss : drums.simultaneousDacLosses())
                     out.printf("DAC loss %s %s • PSG3 %s%n", loss.noteId(), format(loss.gate()),
                             loss.psg3CanFit() ? "free for full gate" : "occupied during gate");
+                for (var hit : drums.droppedHits()) {
+                    out.printf("%s dropped %s • %s • %s%n", hit.lane(), hit.noteId(), hit.reason(), format(hit.requestedGate()));
+                    for (var opponent : hit.competitors()) {
+                        out.printf("  %s busy %s • %s (MIDI %d)%n", opponent.lane(),
+                                format(opponent.busyInterval()), opponent.noteId(), opponent.pitch());
+                        for (var pin : opponent.pinLaneEdits()) out.println("    " + JSON.toJson(pin));
+                    }
+                }
             }
         }
     }
@@ -1021,6 +1049,11 @@ public final class ReconstructionTrace {
             out.printf("%s  score figure %s → %s%n", indent, row.scoreDecision.reason(), row.scoreDecision.successorId());
         for (var gate : row.voiced) out.printf("%s  voiced %s MIDI %d %s%s%n", indent, gate.lane, gate.pitch, format(gate.gate),
                 gate.bend == null ? "" : " bend " + gate.bend.mode());
+        if (row.policyDecisions != null) for (var decision : row.policyDecisions)
+            out.printf("%s  policy %s %s • tick %d • gate %d • delay %d%s%s%n",
+                    indent, decision.policy(), decision.status(), decision.attackTick(), decision.gate(), decision.delay(),
+                    decision.lane() == null ? "" : " • " + decision.lane(),
+                    decision.reason() == null ? "" : " • " + decision.detail());
         if (row.layers != null) for (var layer : row.layers)
             out.printf("%s  layer %s %s • delay %d frames • %d TL%s%s%n", indent, layer.mode(), layer.status(),
                     layer.delayFrames(), layer.attenuation(), layer.lane() == null ? " • " + layer.reason()

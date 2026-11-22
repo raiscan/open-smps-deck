@@ -11,6 +11,13 @@ Run the examples from your private workspace. Set `jar` to the absolute
 path of the packaged JAR and `work` to the reconstruction work directory. Keep downloads, ROMs, catalogues derived
 from ROMs, work artifacts and renders outside public checkouts.
 
+Choose the target game before analysis. Use `--target s1|s2|s3k` on
+`reconstruct import` or a fresh `reconstruct run`. In MCP, use `target` on
+`reconstruct_import` or `options.target` on `reconstruct_run`. The default is
+`s3k`. Replays retain the saved target. S1 and S2 reconstruction are in
+progress and can stop at assembly on incompatible envelopes or commands.
+Portable and mod exports default to the saved project target.
+
 ## 1. Separate and check a local mix
 
 Start with a WAV or MP3. For FLAC, decode to WAV first
@@ -31,12 +38,12 @@ lets import recognize the audio-only source automatically. Override a role
 with `--stem-role stems/NAME.wav=ROLE` and repeat it on subsequent checks.
 
 The [local extraction guide](../../headless/README.md#external-stem-separation)
-covers model setup and config paths. The bake-off recommends SW, MuScriptor
-Medium for tonal instruments, Basic Pitch for vocals and ADTOF for drums.
-For vocal candidate selection, configure
-`vocals: "muscriptor-medium,basic-pitch,rmvpe"` in the transcriber defaults
-and let each role select its adapter. Inspect the candidate coverage, F0
-agreement and winner in `manifest.json`. A configured `bs-roformer`
+covers model setup and config paths. Use MuScriptor Medium for tonal backing, ADTOF for drums, and configure
+[RMVPE](../../tools/transcribers/rmvpe/) under the name `rmvpe` for
+syllable-aware vocal leads. The vocal gate and selected register are saved
+in `manifest.json`. Use `vocalLead.choice` in the transcriber configuration
+to choose Basic Pitch, MuScriptor or fusion, and `vocalLead.registerShift`
+to change the default +12 semitones. A configured `bs-roformer`
 separator supplies and snapshots aligned drums when the input has no mapped
 drum stem. Otherwise the CLI warns and fits drums against the mix.
 
@@ -160,9 +167,42 @@ Use [role plans](../../headless/README.md#inspect-the-score-and-plan-musical-rol
 for recurring lead and backing rules and [external transcription](../../headless/README.md#external-transcription)
 when a mapped or unmatched stem needs a separate transcriber.
 
+### Clean up a vocal-derived lead
+
+1. Run `reconstruct vocal-review "$work"` or call
+   `reconstruct_vocal_review` with `workDir`. Find the phrase you want
+   and pass `--phrase ID` (MCP `phrase`). Each note includes source and
+   project times, the nearby syllable onset, other boundary evidence, and
+   its RMVPE median and slope in the selected register. Vibrato is the
+   RMS variation around the linear pitch trend. Pitch confidence is the
+   fraction of voiced frames within 0.7 semitones of the note. Voicing
+   fraction counts the whole gate.
+2. Listen with MCP `render_clip` on the built project, using that phrase's
+   project seconds and `solo: ["FM1"]`. Audition the returned vocal
+   `stem` path over the corresponding **source** seconds. Compare the
+   attacks, releases and pitch before choosing edits.
+3. Add `--propose` or MCP `propose: true` to save the suggested intents
+   under the `vocal-lead-review` group. The same intents are returned in
+   `edits` so you can revise them before sending them to
+   `reconstruct edit propose`. Accept or reject individual proposals
+   with `reconstruct proposals`, `reconstruct_edit`, or Studio
+   **Proposals**. Audition overlapping suggestions individually.
+4. Run `reconstruct run --from transcribe "$work"` (MCP
+   `reconstruct_run` with `from: "transcribe"`). Re-check the phrase
+   with the review view and another solo render. The rebuild uses the
+   saved contour and boundaries.
+
 ## 4. Propose or apply a scoped edit
 
-Use `edits.json` for musical intent. Never hand-edit `score.json` or
+For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`
+or `--lane PSG3`. Review the busy intervals and competing notes in
+`drums.droppedHits`. Dry-run a suggested `pinLane` to move a tonal blocker.
+
+Use `edits.json` for musical intent. For a repeated pitch inside a held
+note, use `retrigger` with `attacks: [{"offset":0,"gate":0.06}, …]` or
+`rate` and `count` with an optional `gate`. Offsets, interval and gates are
+in seconds. Dry-run to get the stable IDs for layer edits and rebuild from
+transcribe. Never hand-edit `score.json` or
 `allocation.json`. Keep each batch scoped to a musical reason and record
 the evidence. Use stable note IDs or a point selector with part, pitch and
 onset. For spans, check the part, inclusive pitch bounds and voice rank
@@ -174,7 +214,7 @@ lists field names, selector rules and rebuild stages.
 
 | Goal | Operations |
 | --- | --- |
-| Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `mergeNotes` |
+| Fix or reshape attacks | `insertNote`, `deleteNote`, `setNote`, `splitNote`, `retrigger`, `mergeNotes` |
 | Route a line or register | `setRole`, `swapRoles`, `pinLane` with a lane or `laneType`, `unmerge` |
 | Shape articulation and level | `bend`, `glide`, `noteVoicing` for instrument or vibrato overrides, `setVelocity` |
 | Layer selected attacks | `layer` with `echo`, `chorus`, `double` or `off` |
@@ -187,7 +227,10 @@ echo, use 14 frames and 11 TL below dry. Studio shows this as a −3 dB
 trim from the original 7-TL echo. A layer edit overrides lane policies for
 its notes and rebuilds from `assemble`. In Studio, use **Selection → Layer**,
 then **Queue layer** and **Apply**. Check the dry-run and trace results for
-skipped copies before review.
+skipped copies before review. Use `off` with `"policies":["fmDouble"]` to
+keep other policies eligible. Assemble with `--policy-decisions` (MCP
+`options.policyDecisions: true`) to inspect each policy's attacks, gates and
+blockers in `report.json` and `trace`.
 
 **Propose by default when a human is reviewing.** For example, save an
 ordered array of intents to `batch.json` and preview the group before it
@@ -286,6 +329,25 @@ directory when preserving both versions. Studio **Apply** offers a warning
 with options to preserve the edited arrangement before rebuilding.
 [Export reference](../../headless/README.md#export-project-output)
 
+### Test in game
+
+Use `rom set s3k PATH` or MCP `rom_set` with `game: "s3k"` and an
+absolute `path` to register a verified clean locked-on Sonic 3 & Knuckles
+ROM. Check `rom list` or `rom_list` for its status.
+
+```sh
+java -jar "$jar" rom-patch song.smps.json --out song.s3k.gen --bps song.s3k.bps --no-demo
+```
+
+Use at least one output. Pass `--rom PATH` to override the saved ROM for
+one export. With MCP `rom_patch`, use absolute `project`, `out` and/or
+`bps` paths, with optional `rom`, `slot`, `titleMusic`, `noDemo`, `loop`,
+and `force`. Read the `report` and `warnings`, including any DPCM and
+envelope approximations. A patched ROM is for personal use only. Hand off
+the BPS when sharing, subject to rights on any stock-derived material.
+It requires the same clean ROM to apply. Studio offers **Export… → Test in
+game…** once the ROM verifies. [Test in game guide](../../docs/user-guide/14-test-in-game.md)
+
 ## Lessons from agent trials
 
 - Judge a change by attack, pitch, rhythm, timbre and balance evidence.
@@ -308,23 +370,37 @@ with options to preserve the edited arrangement before rebuilding.
 
 Package exports can warn about embedded ROM assets or retail song data.
 Keep flagged packages for personal use. Check CLI stderr or the MCP
-`warnings` array. Use `stock-table build ROM OUT.json` with a verified
-locked-on S3&K image to regenerate the hashes and locators for stock detection.
+`warnings` array. Use `stock-table build ROM OUT.json` to regenerate the
+S3&K hashes and locators. For S1 or S2, add `--driver s1|s2` and
+`--rom OTHER_REVISION.gen` to generate the revision union.
 
 Use `compile-package PROJECT OUT.smps.zip --portable` or
 `export PROJECT OUT.smps.zip --format portable` for schema 4. Use
-`--no-source` to omit the default redacted source. Set `--driver s3k`,
-`--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
+`--no-source` to omit the default redacted source. Set `--driver s1|s2|s3k`
+(default `s3k`, required for native v5 banks). S1 and S2 convert the S3K tempo
+to the nearest native tick rate. Supply `--speed-up-tempo BYTE` on the same
+S3K clock for optional speed shoes. Check `TEMPO_APPROXIMATED` diagnostics
+for the converted bytes and rate error. Use `--strict-tempo` to reject
+inexact normal or speed-shoes tempo conversions. Set `--license SPDX`, `--package-id ID`, `--package-version MAJOR.MINOR.PATCH`
 and repeatable `--author NAME` as needed. Use `export --format mod` with
-repeatable decimal `--replace ID` to create an OpenGGF patch mod JAR.
+repeatable decimal `--replace ID` from the target game to create an OpenGGF patch mod JAR.
+
+For native v5 S3K retail banks, use `--retail-patch` with either portable
+export or `export --format mod`. An edited bank needs `--rom PATH`.
+An unchanged bank in the stock table can export without a ROM. The patch
+omits source and carries the `DERIVED_FROM_RETAIL_SONG` composition warning.
+`copy-arrangement` requires embedded form. OpenGGF still rejects patch form.
 
 Run `inspect-package PKG` to read the manifest and
 `validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]` to
 verify hashes, resolve stock references and audition through the pinned
-driver. Pass `--rom PATH` to `validate-project`, `render-project`,
+driver. Use `render-package PKG OUT.wav [--rom PATH ...] [--frames N]` for
+a direct preview. Pass `--rom PATH` to `validate-project`, `render-project`,
 `compile-package` or `export` to resolve redacted source. In MCP, use
-`project_export` with `format: "portable"` or `"mod"`, then
-`package_inspect` or `package_validate`. Check the package warnings even
-when validation succeeds.
+`project_export` with `format: "portable"` or `"mod"`, optional `driver`
+`speedUpTempo`, `strictTempo`, and `retailPatch` (with `roms` for an edited bank).
+Use `package_inspect` to see the patch form and base song and
+`package_validate` with `roms` to verify the rebuilt bank. Check warnings
+even when validation succeeds.
 
 [Portable package CLI and MCP fields](../../headless/README.md#portable-song-packages)

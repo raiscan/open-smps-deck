@@ -29,7 +29,7 @@ Keywords: MUST, MUST NOT and SHOULD as in RFC 2119.
   and display names MUST NOT become paths.
 - Entry order:
   1. `manifest.json`
-  2. `track.bin`
+  2. `track.bin` (embedded) or `track.delta` (patch)
   3. optional `voices/global.bin`
   4. `psg/asset-NNN.bin`
   5. `mod/asset-NNN.bin`
@@ -123,16 +123,24 @@ The fields are:
     `containsRetailSongData` is false (patch form, §5.4).
   - `warnings`: the sorted unique warning codes from §7.
 - `requires.stockAssets` is true if any asset has a `ref` without an
-  embedded payload. `requires.games` is the sorted unique `ref.game` values.
+  embedded payload or the bank uses patch form. `requires.games` is the
+  sorted union of the `ref.game` values and the patch base game, if any.
 - `driverOptions`: `{}` for s3k. For s1 and s2:
-  `{"speedUpTempo": <0–255> | null}`, the speed-shoes tempo byte. Null means
-  speed shoes leave tempo unchanged.
+  `{"speedUpTempo": <0–255> | null}`, the target-native speed-shoes tempo byte. Null means
+  speed shoes leave tempo unchanged. On activation with speed shoes, or when
+  the effect turns on, a host MUST use this byte in place of the song's normal
+  tempo. Turning the effect off restores the normal tempo. Hosts MUST NOT
+  index the game's retail speed table by a replacement ID. The export inputs
+  `--speed-up-tempo` and MCP `speedUpTempo` are S3K-clock bytes. Writers
+  convert them before storing the native byte, using the same conversion
+  and warning or strictness policy as for the normal tempo.
 - `bank`: see §4.
 - `assets`, `envelopeBindings`, `dacBindings`, `globalVoices`: see §3.
 - `source`: `null`, or
   `{"path": "source.smps.json", "sha256": "<hex>", "redacted": true|false}`.
-  It is included by default. `--no-source` omits it. A redacted source
-  replaces each stock asset's bytes with its reference (§6).
+  Embedded-bank exports include it by default. `--no-source` omits it.
+  A redacted source replaces each stock asset's bytes with its reference
+  (§6). Patch-bank exports always omit it (§5.4).
 
 ## 3. Assets and bindings
 
@@ -176,7 +184,7 @@ Each `assets[]` entry:
 
 `ref.game` is the ROM family: `s1`, `s2` or `s3k`. In this version
 `ref.game` MUST equal the package `driver`. `ref.sha256` is the SHA-256 of
-the payload exactly as the pinned OpenGGF loader for that game returns it.
+the exact payload defined below, before transforms.
 
 | driver | `table` | Locator fields | Payload as resolved |
 |---|---|---|---|
@@ -185,12 +193,50 @@ the payload exactly as the pinned OpenGGF loader for that game returns it.
 | s3k | `psg` | `index` | `getPsgEnvelopes().get(index)` |
 | s3k | `mod` | `index` | `getPlaybackModEnvelopes().get(index)`: the playback view, with `82`/`84` operands resolved |
 | s3k | `dac` | `note` (`0x81`–`0xC4`) | decoded unsigned 8-bit PCM for that note from `loadDacData()` |
-| s1, s2 | `local-fm`, `psg`, `dac` | as above | Defined by the multi-driver PR from the pinned `Sonic1SmpsLoader` and `Sonic2SmpsLoader`. Until then, readers MUST reject s1 and s2 refs with a clear "driver not yet supported" error |
+| s1 | `local-fm` | `songId`, zero-based `slot` | Raw 25-byte slice of `Sonic1SmpsLoader.loadMusic(songId).getData()`, at the big-endian voice pointer plus `25*slot`. Do not use `getVoice(slot)`, which reorders operators |
+| s2 | `local-fm` | `songId`, zero-based `slot` | Raw 25-byte slice of `Sonic2SmpsLoader.loadMusic(songId).getData()`, at the little-endian voice pointer minus `getZ80StartAddress()` plus `25*slot` |
+| s1 | `psg` | `index` (1–9) | `Sonic1SmpsLoader.getPsgEnvelopes()[index - 1]`, including the `80` terminator |
+| s2 | `psg` | `index` (1–13) | The ROM's own decompressed Z80 `zPSG_EnvTbl` entry, including the `80` terminator, extracted as specified below |
+| s1 | `dac` | `note` (`81`–`83`, `88`–`8B` hex) | Decoded unsigned 8-bit PCM at `loadDacData().sample(mappingForNote(note).sampleId())`. Timpani aliases share PCM |
+| s2 | `dac` | `note` (`81`–`91` hex) | Same lookup through `Sonic2SmpsLoader.loadDacData()`. Pitch aliases share PCM |
 
-`songId` is the native music ID as the OpenSMPSDeck catalogue records it
-(the S3K locked-on numbering passed to `loadMusic`). A resolver given a
-standalone Sonic 3 or Sonic & Knuckles image maps the ID through
+`songId` is the **engine music ID** passed to `loadMusic`. S1 uses
+`Sonic1Music`. S2 uses `Sonic2Music.id`, including its sparse numbering.
+For example, Emerald Hill is `81` hex in the engine table.
+S3K uses the locked-on catalogue numbering. A resolver given a standalone
+Sonic 3 or Sonic & Knuckles image maps the ID through
 `Sonic3kAudioResourceProfile` and fails that asset if it is absent.
+
+An S1/S2 zero voice pointer has no local table. Count complete 25-byte
+slots to the loader view's end, except S1 `93` hex (Get Emerald, 2 slots)
+and S2 `BD` hex (Credits, 38 slots). These loader views extend beyond the
+voice table. The resolver MUST exclude the trailing bytes from the locator
+space. The `BANK` hash in §6.3 still covers the entire loader view.
+
+**S2 PSG extraction (REV00 and REV01).** Both revisions have these same
+coordinates. Offsets refer to the unheadered, linear Mega Drive ROM.
+
+| Field | REV00 | REV01 |
+|---|---:|---:|
+| `DecompressSoundDriver` (`LEA Snd_Driver(pc),A6`) | `0xEC04A` | `0xEC04A` |
+| `MOVE.W #size,D7` immediate (BE word) | `0xEC050` | `0xEC050` |
+| `Snd_Driver` payload start | `0xEC0E8` | `0xEC0E8` |
+| Payload length | `0x0F64` | `0x0F64` |
+| `zPSG_EnvTbl` after decompression | `0x1029` | `0x1029` |
+
+Verify the `4DFA` and `3E3C` instructions and their operands. The signed
+LEA displacement is relative to the address of its extension word at
+`0xEC04C`. Decompress exactly the indicated raw Saxman payload with no
+on-ROM size prefix (equivalent to `SaxmanDecompressor.decompressRaw`).
+Read 13 consecutive little-endian 16-bit offsets into decompressed Z80 RAM
+from `0x1029`. For index *i*, read the word at `0x1029 + 2*(i-1)`. Its
+target MUST be at or after `0x1043` and inside the decompressed driver.
+Starting at the target, read bytes below `0x80` until the first byte at or
+above `0x80`. That byte MUST be `0x80` and is included in the payload.
+Reject out-of-bounds pointers, missing terminators, other command bytes,
+programs longer than 256 bytes, or an unrecognized driver layout. Verify
+the resulting asset hash as usual. The pinned S2 loader's own PSG table
+is not a fallback.
 
 ### 3.2 Transforms (closed set, applied in list order)
 
@@ -209,27 +255,28 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
 
 - `envelopeBindings`: `[{"asset": "psg/0", "slot": 1}]`. PSG volume slots
   are 1–255 and modulation slots 1–127 (128 is reserved). The same
-  semantics as schema 3 `envelopeSlots`.
+  semantics as schema 3 `envelopeSlots`. S1 and S2 bind PSG volume only.
 - `dacBindings`: `[{"note": 129, "asset": "dac/0", "rate": 6}]`. One entry
   per note, sorted by note. `note` is in `0x81`–`0xDF` and `rate` is in
   0–255. A sample MAY appear in several bindings.
 - `globalVoices`: `null`, or `{"path": "voices/global.bin", "sha256": …,
   "voices": ["fm/3", …]}` for a v5 bank's ordered global table. Stock
   entries are zero-filled 25-byte holes, filled at load time like bank fills.
+  S1 and S2 MUST use null.
 
 ### 3.4 Asset validity
 
 | Kind | Rules |
 |---|---|
-| FM_VOICE | Exactly 25 bytes in native order for the driver. For s3k: algorithm/feedback, then DT·MUL, RS·AR, AM·D1R, D2R, D1L·RR and TL, each for 4 operators. No reordering |
-| PSG_VOLUME | 1–256 bytes. The existing project-core envelope profile applies |
-| MODULATION | 1–256 bytes. The existing project-core envelope profile applies |
-| DAC_SAMPLE | Unsigned 8-bit mono PCM, midpoint `0x80`, 1–65,535 bytes. At most 95 samples and 512 KiB in total. For s3k, rate *r* plays at 7,159,090 / (297 + 26·(*r*−1)) Hz (r=0 means 256) |
+| FM_VOICE | Exactly 25 bytes in native order for the driver. Algorithm/feedback, then DT·MUL, RS·AR, AM·D1R, D2R, D1L·RR and TL, each for 4 operators. S1 and S3K store each group in 4,3,2,1 order. S2 stores 4,2,3,1. The S1 data parser performs its own playback swap |
+| PSG_VOLUME | S3K uses the project-core playback profile. S1/S2 use 2–256 bytes consisting of attenuation bytes below `80` hex followed by one `80` hold terminator |
+| MODULATION | S3K only, 1–256 bytes. The existing project-core playback profile applies |
+| DAC_SAMPLE | Unsigned 8-bit mono PCM, midpoint `0x80`, 1–65,535 bytes. At most 95 samples and 512 KiB in total. Rate *r* plays nominally at 7,159,090 / (*baseCycles* + 26·(*r*−1)) Hz (r=0 means 256). Use 301 for S1, 295 for S2 and 297 for S3K. The binding rate is independent of the stock locator and its retail rate |
 
 ## 4. Bank
 
-- `form`: `"embedded"`. The value `"patch"` is reserved (§5.4). Readers that
-  do not implement it MUST reject it with a clear error.
+- `form` is `"embedded"` or `"patch"` (§5.4). Readers that do not implement
+  patch form MUST reject it with a clear error.
 - `track.bin` holds the complete bank. Every stock FM voice inside it (in
   the local voice table, or any other bank-resident voice) is stored as
   zeros and listed in `fills`.
@@ -241,23 +288,39 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
   `assembledSha256` equals `sha256`.
 - `base`, `headerOffset`, `localVoiceCount` and `previewFrames` have the
   meanings of schema 3. The header lives at `base + headerOffset`. For s3k,
-  `base` is 0 (normalized) or 32768 (absolute Z80 window). Other drivers'
-  base semantics are defined by the multi-driver PR.
+  `base` is 0 (normalized) or 32768 (absolute Z80 window). For S1, both
+  `base` and `headerOffset` MUST be 0. Its 16-bit big-endian header pointers
+  are relative to the song start. For S2, `headerOffset` MUST be 0 and
+  `base` is 0 (normalized) or 32768 (absolute Z80 window). Subtract `base`
+  from its little-endian pointer words. OpenSMPSDeck compiles both to base
+  zero. S1/S2 bank tracks precede the local 25-byte voice table, if any.
+  The header is the voice pointer, FM/DAC count, PSG count, timing divisor,
+  tempo, then four-byte FM/DAC entries and six-byte PSG entries. Slot zero
+  is DAC. PSG entries end with a zero modulation byte and a PSG binding slot.
+  The header tempo is target-native. Exporters convert the arrangement's S3K
+  tempo to the closest target duration rate per the [driver matrix](driver-support.md#tempo-conversion).
+  For an inexact rate, the writer MUST record `TEMPO_APPROXIMATED` and
+  report the source byte, target byte and relative rate error to the caller.
+  CLI `--strict-tempo` or MCP `strictTempo: true` MUST fail the export
+  with that diagnostic before writing the archive.
 - `relocations` is the sorted list of unique byte offsets of every 16-bit
-  little-endian bank pointer: header entries, voice pointer, and
-  call/jump/loop targets found by the traversal. `relocationsComplete` is
+  bank pointer word. Words are big-endian for S1 and little-endian for S2
+  and S3K. Include track pointers and a nonzero voice pointer. Programs
+  with control flow also list the pointer operands; native S1 branch
+  displacements are relative, so moving the whole bank does not change them. `relocationsComplete` is
   false when the traversal cannot prove that it found every pointer, for
   example in unreached bytes of an imported bank.
 
 ## 5. Playback mapping (OpenGGF and OpenSMPSDeck)
 
 1. Verify the manifest, the entries, the hashes and the limits.
-2. For each reference, get the payload from the game's loader, check
+2. For each reference, resolve the ROM payload as in §3.1 and check
    `ref.sha256`, apply the transforms, and check `resultSha256`. A missing
    ROM or a mismatch fails the whole package, with an error naming the asset
    key, the locator and the expected and actual hashes.
-3. Assemble the bank by applying `fills` and check `assembledSha256`.
-   Assemble `globalVoices` the same way.
+3. Assemble the embedded bank by applying `fills`, or rebuild the patch
+   bank as in §5.4. Check `assembledSha256`. Assemble `globalVoices` by
+   filling its referenced slots.
 4. For s3k, build the data from the assembled bank:
 
    ```java
@@ -272,20 +335,85 @@ kind's validity rules (§3.4) and hash to `resultSha256`.
    OpenGGF then calls `playSmps(data, dac)`. OpenSMPSDeck renders through
    `S3kRenderer`.
 
+5. For S1, construct `new Sonic1SmpsData(bank)` and install an array whose
+   index `slot - 1` contains the PSG binding bytes. For S2, construct
+   `new Sonic2SmpsData(bank, base)` and pass a map keyed by the PSG binding's
+   one-based slot to `setPsgEnvelopes`. Construct a fresh `DacData` from the
+   package PCM and bindings using that game's base cycles. Resolve all
+   stock references before constructing the data. Use the pinned game's
+   `SmpsSequencerConfig`, physical compatibility policy and normal music
+   activation, with immediate readiness for the assembled bank. The S2
+   retail Saxman load delay does not apply. The headless preview is a fresh
+   NTSC session with no preceding music, SFX or gameplay speed effects.
+
 ### 5.1 ROM acceptance
 
 Checks happen per asset. The host MAY first identify the image, using
 OpenGGF's ROM identity and header checks. A known image hash passes silently.
 An unknown hash with a valid header gives the warning `UNKNOWN_ROM_IMAGE`, and
 the per-asset hashes decide the result. Standalone S3 and S&K images work when
-they contain every referenced asset.
+they contain every referenced asset. S1 and S2 use unheadered 512 KiB and
+1 MiB images, respectively. Match the domestic or international title
+through `RomHeaderName` and check fingerprints with `RomIdentityTable`.
+REV00 and REV01 are known for both games. Both revisions of each game
+produce the same committed locators and hashes. S1 relocates ROM tables
+through `Sonic1RomProfile`. The S2 music and DAC load extents and the
+compressed driver are identical across the two tested revisions.
 
-### 5.4 Reserved: patch form for retail-derived banks
+### 5.4 Patch form for retail-derived banks
 
-`bank.form: "patch"` will store the bank as a delta against the retail bank
-named by `provenance.derivedFromRetailSong`. The package then carries no
-original song bytes, so `containsRetailSongData` is false. The delta format
-is defined later. Until then, writers MUST NOT emit this form.
+- Patch form is defined for S3K native v5 banks. The base locator is
+  `provenance.derivedFromRetailSong` with `game: "s3k"`, a locked-on
+  `songId`, and the SHA-256 of the original bank as `bankSha256`.
+  Apply the profile's music ID mapping (§3.1) to the requested ROM.
+  Use the pinned loader's `findMusicOffset` for that ID, round the discovered
+  ROM address down to a 32 KiB boundary, and read exactly 32 KiB from there.
+  This is the bank used by `import-rom-song` and the S3K stock table BANK
+  entries, including shared data and bytes outside the selected song.
+  Verify `bankSha256` before applying literals.
+- `bank.path` MUST be `track.delta` and `bank.sha256` MUST hash the stored
+  delta bytes. `bank.assembledSha256` MUST hash the complete rebuilt bank,
+  including its local voices. All other bank metadata addresses the rebuilt
+  bank. `fills` MUST be empty and assets MUST NOT use `bankOffset`. In-bank
+  voices come from the rebuilt bank. Separate global voices and other
+  assets follow §3.
+- The first two bytes of `track.delta` are the unsigned big-endian target
+  length, 10–32,768 bytes. Until end of entry, each run is an unsigned
+  big-endian 16-bit offset, an unsigned big-endian 16-bit positive length,
+  and exactly that many literal bytes. Offsets are zero-based. The initial
+  target is the base truncated to the target length, or extended to that
+  length with space for literals. Each run MUST fit within the target and
+  MUST be separated from its predecessor by at least one omitted byte.
+  Each literal within the base length MUST differ from the original byte
+  at the same offset. Every byte beyond the base length MUST be supplied
+  explicitly, including zero bytes. Thus runs are the maximal contiguous
+  ranges of changed or extension bytes. A bank equal to its base has no
+  runs. Truncation alone also needs no runs. The stored delta is at most
+  98,306 bytes (§8).
+- `source` MUST be null. OpenSMPSDeck's v5 source stores a complete bank,
+  so `--retail-patch` implies `--no-source`. The source-free writer also
+  omits unbound stock envelopes with no locator, such as raw ROM modulation
+  data kept for editing. The patch MUST set `containsRetailSongData: false`,
+  include `DERIVED_FROM_RETAIL_SONG`, and omit `RETAIL_SONG_DATA`.
+  Independently embedded ROM-derived assets still emit `ROM_DERIVED_DATA`.
+- OpenSMPSDeck accepts `--retail-patch` on `compile-package --portable` or
+  `export --format portable|mod`, and `retailPatch: true` in MCP
+  `project_export`. A writer with a ROM MUST verify the base hash and
+  rebuild the delta to check the result hash before writing. Without a ROM,
+  the writer MUST require a BANK entry matching the provenance game, song
+  ID and hash, and the target MUST hash to that entry. Without base bytes
+  it can only emit a delta with no runs for a byte-identical bank. An edited
+  bank needs a ROM to compare bytes. Compiled arrangements from
+  `copy-arrangement` use embedded form and retain `RETAIL_SONG_DATA`.
+- Structural validation without a ROM MUST check provenance, container
+  and delta framing and report that playback validation needs a ROM.
+  Reject missing or unexpected entries, out-of-range, truncated, adjacent
+  or overlapping runs, and all limit violations. With a ROM, also reject
+  unchanged literals or incomplete extension coverage. Diagnostics MUST
+  identify `track.delta` for a malformed delta or stored hash mismatch,
+  the game and song ID with expected and actual hashes (or missing data)
+  for a base mismatch, and the expected and actual hashes for an assembled
+  bank mismatch. Missing ROM diagnostics name the base game and song ID.
 
 ## 6. Project-format provenance (OpenSMPSDeck)
 
@@ -326,11 +454,12 @@ generation is reproducible.
 |---|---|
 | `RETAIL_SONG_DATA` | The package contains copyrighted retail song data. It is for personal use and must not be redistributed |
 | `ROM_DERIVED_DATA` | The package embeds bytes from the game ROM. It is for personal use and must not be redistributed |
-| `DERIVED_FROM_RETAIL_SONG` | Patch form: no retail bytes, but the composition is still the game's |
+| `DERIVED_FROM_RETAIL_SONG` | The patch stores only changes to the retail bank. The player's ROM supplies the original bank. The composition still belongs to the game |
 | `UNDECLARED_STOCK_CONVERTED` | An embedded payload matched a stock asset and was converted to a reference |
 | `SOURCE_AUDIO` | A sample was sliced from an input recording; check that you have the rights to it |
 | `THIRD_PARTY` | Embedded third-party material; check its license |
 | `UNKNOWN_ROM_IMAGE` | The ROM hash is unknown; asset hashes decide |
+| `TEMPO_APPROXIMATED` | The normal or speed-shoes tempo differs in long-run tick rate after conversion from S3K to the target driver |
 | `DPCM_INEXACT` | Report only: the sample will change when a disassembly build encodes it to DPCM |
 
 Legacy packages (schemas 1–3) gain an additive `provenance` object with the
@@ -341,7 +470,8 @@ Otherwise their bytes are unchanged.
 
 | Item | Limit |
 |---|---|
-| `track.bin` | 32 KiB |
+| `track.bin` or rebuilt bank | 32 KiB |
+| `track.delta` | 98,306 bytes (2-byte length, up to 32,768 literals and up to 16,384 four-byte run headers) |
 | `manifest.json` | 1 MiB |
 | `source.smps.json` | 16 MiB |
 | Whole package | 2 MiB without source, 20 MiB with source |
@@ -374,14 +504,32 @@ sfx: []
   mod manager and log show the corresponding warning.
 - Mod v1 manifests and streamed tracks are unchanged.
 
+The OpenGGF `smpsPackage` reader in
+[OpenGGF PR #452](https://github.com/OpenGGF/OpenGGF/pull/452) still
+rejects patch form. The follow-up reader must implement these steps.
+
+1. Accept `patch` for S3K and enforce the manifest constraints in §5.4.
+   Read the exploded `track.delta` with its own entry limit, verify
+   `bank.sha256`, and validate the run framing and target metadata bounds.
+2. Map the provenance song ID using the active base game's ROM profile.
+   Read the full 32 KiB bank aligned from the loader's music address and
+   verify `bankSha256`.
+3. Copy or truncate the verified base to the target length, apply the
+   literal runs with unchanged-byte and extension-coverage checks, and
+   verify `assembledSha256`. Use the rebuilt bank with the declared header
+   and local voice metadata and the regular asset bindings in §5.
+4. Surface `DERIVED_FROM_RETAIL_SONG` in the mod manager and log. Route
+   failures through the existing track-disable and stock fallback path.
+
+
 ## OpenSMPSDeck implementation
 
 The [headless guide](../../headless/README.md#portable-song-packages) lists
 the CLI options and MCP tools. `validate-package` checks a package with stock
 references structurally without a ROM. The report sets `playbackValidated`
 after resolution and native preflight. `--render` requires any ROMs needed
-by the package. Export and validation support S3K playback. Inspect can
-read S1/S2 metadata without references.
+by the package. Embedded exports support S1, S2 and S3K. S3K patch exports
+report `playbackPending` with the base song when the ROM is absent.
 
 Studio requires a resolved project. Use a ROM with the headless tools before
 rendering or compiling redacted source. A Studio ROM picker is a follow-up.

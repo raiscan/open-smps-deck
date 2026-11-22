@@ -97,10 +97,25 @@ public final class S3kRenderer {
         renderPrepared(activation, policy, presentations, mask, sink, ChipWriteObserver.NONE);
     }
 
+    static void renderPackageMusic(String game, AbstractSmpsData data, DacData dac, SmpsSequencerConfig config,
+                                   SmpsPhysicalPolicy policy, int presentations, PcmSink sink, ChipWriteObserver observer)
+            throws IOException {
+        var prepared = prepare(data, dac, config, () -> {
+            throw new IllegalStateException("music restoration requires a previous project");
+        }, true);
+        renderPrepared(prepared, policy, presentations, ChannelMask.NONE, sink, observer, game);
+    }
+
     private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
                                        int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer)
             throws IOException {
-        try (var session = newSession(observer, policy)) {
+        renderPrepared(prepared, policy, presentations, mask, sink, observer, "s3k");
+    }
+
+    private static void renderPrepared(PreparedSmpsMusicActivation prepared, SmpsPhysicalPolicy policy,
+                                       int presentations, ChannelMask mask, PcmSink sink, ChipWriteObserver observer,
+                                       String game) throws IOException {
+        try (var session = newSession(observer, policy, game)) {
             start(session, prepared, mask);
             var pcm = new short[STEREO_FRAMES_PER_PRESENTATION * 2];
             for (int frame = 0; frame < presentations; frame++) {
@@ -207,13 +222,20 @@ public final class S3kRenderer {
 
     private static PreparedSmpsMusicActivation prepare(AbstractSmpsData data, DacData dac,
                                                         SmpsSequencerConfig config, MusicRestoreSink restore) {
+        return prepare(data, dac, config, restore, false);
+    }
+
+    private static PreparedSmpsMusicActivation prepare(AbstractSmpsData data, DacData dac,
+                                                       SmpsSequencerConfig config, MusicRestoreSink restore,
+                                                       boolean ownFallbackVoice) {
         var source = SmpsSourceDescriptor.from(data);
         var detached = new SmpsDriver();
         var sequencer = new SmpsSequencer(data, dac, detached, detached, restore, config, source,
                 SmpsSequencer.SourceDescriptorTrust.PRECOMPUTED_IMMUTABLE);
+        if (ownFallbackVoice) sequencer.setFallbackVoiceData(data);
         var incoming = new SmpsDriverSnapshot.SequencerEntry(false, source,
                 SmpsSequencer.SourceDescriptorTrust.PRECOMPUTED_IMMUTABLE,
-                null, data, dac, restore, config, sequencer.captureSnapshot());
+                ownFallbackVoice ? source : null, data, dac, restore, config, sequencer.captureSnapshot());
         return new PreparedSmpsMusicActivation(
                 new SmpsMusicActivation(source, data.getChannels(), data.getPsgChannels()),
                 incoming, SmpsLogicalTransitionPolicies.forConfig(config), new SmpsDacSelection(source, dac));
@@ -239,14 +261,18 @@ public final class S3kRenderer {
     }
 
     private static SmpsDriverSession newSession(ChipWriteObserver observer, SmpsPhysicalPolicy policy) {
+        return newSession(observer, policy, "s3k");
+    }
+
+    private static SmpsDriverSession newSession(ChipWriteObserver observer, SmpsPhysicalPolicy policy, String game) {
         var settings = SmpsHardwareFrameBudget.presentationSettings(SAMPLE_RATE, PRESENTATIONS_PER_SECOND,
                 false, false, FmCoreSelection.ACCURATE, null);
         return new SmpsDriverSession(settings, policy, observer,
-                new SmpsSessionProfileFingerprint("s3k", 0, policy.identity(), settings),
+                new SmpsSessionProfileFingerprint(game, 0, policy.identity(), settings),
                 SmpsDriverSessionConfiguration.DEFAULT);
     }
 
-    private static Map<Integer, byte[]> nativeEnvelopes(Map<Integer, List<Integer>> source) {
+    static Map<Integer, byte[]> nativeEnvelopes(Map<Integer, List<Integer>> source) {
         Map<Integer, byte[]> owned = new HashMap<>();
         source.forEach((index, values) -> {
             byte[] bytes = new byte[values.size()];
@@ -257,6 +283,10 @@ public final class S3kRenderer {
     }
 
     static DacData nativeDac(List<DacSample> declarations, NativeProgram nativeProgram) {
+        return nativeDac(declarations, nativeProgram, DacSample.BASE_CYCLES);
+    }
+
+    static DacData nativeDac(List<DacSample> declarations, NativeProgram nativeProgram, int baseCycles) {
         Map<Integer, byte[]> samples = new HashMap<>();
         Map<Integer, DacData.DacEntry> mapping = new HashMap<>();
         Map<String, Integer> sampleIndices = new HashMap<>();
@@ -276,7 +306,7 @@ public final class S3kRenderer {
         }
         // DacData takes another private copy. The same immutable dependency is
         // supplied both to logical sequencing and production physical activation.
-        return new DacData(samples, mapping, DacSample.BASE_CYCLES);
+        return new DacData(samples, mapping, baseCycles);
     }
 
     private static final class NativeBankData extends Sonic3kSmpsData {

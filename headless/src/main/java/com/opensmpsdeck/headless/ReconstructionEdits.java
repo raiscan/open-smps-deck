@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless;
 
+import com.opensmpsdeck.project.TargetProfile;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -26,7 +27,7 @@ final class ReconstructionEdits {
     static final String FILE = "edits.json";
     static final String RESULTS = "edit-results.json";
 
-    enum Kind { insertNote, deleteNote, setNote, splitNote, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
+    enum Kind { insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, setRole, pinLane, unmerge, bend, glide, swapRoles, setVelocity, arpeggio, chordInstrument, voiceEdit, noteVoicing, layer }
     enum Status { applied, satisfied, orphaned, invalid, conflict }
 
     record Span(double start, double end, String section) {
@@ -59,7 +60,7 @@ final class ReconstructionEdits {
 
         Stage firstStage() {
             return switch (kind) {
-                case insertNote, deleteNote, setNote, splitNote, mergeNotes, bend, glide, setVelocity -> Stage.TRANSCRIBE;
+                case insertNote, deleteNote, setNote, splitNote, retrigger, mergeNotes, bend, glide, setVelocity -> Stage.TRANSCRIBE;
                 case setRole, swapRoles, pinLane, unmerge -> Stage.ROLES;
                 case voiceEdit -> Stage.VOICES;
                 case arpeggio, chordInstrument -> Stage.ALLOCATE;
@@ -128,7 +129,7 @@ final class ReconstructionEdits {
             this(id, op, status, noteIds, missingNoteIds, detail, original, null, null);
         }
 
-        boolean changesTopology() { return op == Kind.splitNote || op == Kind.mergeNotes; }
+        boolean changesTopology() { return op == Kind.splitNote || op == Kind.retrigger || op == Kind.mergeNotes; }
 
         String tag() { return "edit:" + id; }
 
@@ -234,13 +235,14 @@ final class ReconstructionEdits {
             case deleteNote -> List.of("noteId", "selector");
             case setNote -> List.of("noteId", "selector", "start", "end", "pitch", "velocity", "noExtension");
             case splitNote -> List.of("noteId", "selector", "at", "pitch");
+            case retrigger -> List.of("noteId", "selector", "attacks", "rate", "count", "gate", "role", "lane");
             case mergeNotes -> List.of("noteIds", "selectors", "span", "part", "pitch",
                     "allowDifferentPitches", "glide");
             case setRole -> List.of("noteIds", "selector", "span", "part", "pitchMin", "pitchMax", "fromRole", "role", "lane", "selectors", "voice", "others");
             case swapRoles -> List.of("span", "part", "from", "to", "voice");
             case voiceEdit -> List.of("voiceEdit");
             case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
-                    "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay");
+                    "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay", "policies");
             case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "modulationOff");
             case setVelocity -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",
@@ -352,8 +354,9 @@ final class ReconstructionEdits {
                 require(end != null, at + ".end", "required");
                 require(pitch != null, at + ".pitch", "required");
             }
-            case deleteNote, setNote, splitNote, bend -> {
+            case deleteNote, setNote, splitNote, retrigger, bend -> {
                 if (attack == null) ids = List.of(string(json, "noteId", at));
+                if (kind == Kind.retrigger) retriggerAttacks(json, at);
                 require(kind != Kind.splitNote || splitAt != null, at + ".at", "split time is required");
                 require(kind != Kind.setNote || start != null || end != null || pitch != null
                                 || velocity != null || noExtension != null, at,
@@ -639,6 +642,13 @@ final class ReconstructionEdits {
                         retired.put(id, outcome);
                         continue;
                     }
+                    case retrigger -> {
+                        var outcome = retrigger(edit, score, notes, before, at, timeline);
+                        outcomes.add(outcome);
+                        changed.addAll(outcome.noteIds());
+                        retired.put(id, outcome);
+                        continue;
+                    }
                     case deleteNote -> notes.remove(id);
                     case setNote -> {
                         if (!edit.changesAttack()) {
@@ -697,6 +707,68 @@ final class ReconstructionEdits {
                 .filter(decision -> notes.containsKey(decision.successorId())).toList();
         return score.withInputs(score.inputs(), score.bars(), notes.values().stream().sorted(NOTE_ORDER).toList(),
                 score.tempo(), score.midiBars(), score.beatMap(), voices, bursts, activeDecisions);
+    }
+
+    private record RetriggerAttack(double offset, double gate, Integer velocity) {}
+
+    private static List<RetriggerAttack> retriggerAttacks(JsonObject json, String at) {
+        var attacks = new ArrayList<RetriggerAttack>();
+        if (json.has("attacks")) {
+            require(!json.has("rate") && !json.has("count") && !json.has("gate"),
+                    at, "use attacks or rate and count");
+            var values = array(json, "attacks", at);
+            require(values.size() >= 2 && values.size() <= 600, at + ".attacks", "expected 2–600 attacks");
+            double end = 0;
+            for (var value : values) {
+                String field = at + ".attacks[" + attacks.size() + "]";
+                require(value.isJsonObject(), field, "expected offset and gate in seconds");
+                var step = value.getAsJsonObject();
+                fields(step, field, Set.of("offset", "gate", "velocity"));
+                Double offset = time(step, "offset", field);
+                Double gate = time(step, "gate", field);
+                require(offset != null && gate != null && gate > 0, field, "offset and positive gate are required");
+                require(offset + 1e-9 >= end, field + ".offset", "attacks must be ordered and gates must not overlap");
+                attacks.add(new RetriggerAttack(offset, gate, integer(step, "velocity", field, 1, 127)));
+                end = offset + gate;
+            }
+        } else {
+            Double rate = time(json, "rate", at);
+            Integer count = integer(json, "count", at, 2, 600);
+            Double gate = time(json, "gate", at);
+            require(rate != null && rate > 0 && count != null, at, "expected positive rate in seconds and count (2–600)");
+            require(gate == null || gate > 0 && gate <= rate, at + ".gate", "gate must be positive and at most rate");
+            for (int i = 0; i < count; i++) attacks.add(new RetriggerAttack(i * rate, gate == null ? rate : gate, null));
+        }
+        return attacks;
+    }
+
+    private static Outcome retrigger(Intent edit, Score score, Map<String, Note> notes, Note before, String at,
+                                     ReconstructionTimeMap timeline) {
+        var part = part(score, before.part());
+        require(!part.drums() && before.run() == null && before.bend() == null, at + ".noteId",
+                "retrigger expects a single tonal attack without an authored bend");
+        double anchor = edit.inBase(before.start(), timeline);
+        var result = new ArrayList<Note>();
+        int previousEnd = -1;
+        for (var attack : retriggerAttacks(edit.json(), at)) {
+            int index = result.size();
+            String id = index == 0 ? before.id() : edit.insertedId() + "-" + index;
+            require(index == 0 || !notes.containsKey(id), at + ".id", "derived retrigger note ID already exists: " + id);
+            var note = new Note(id, before.part(), edit.toSource(anchor + attack.offset(), timeline),
+                    edit.toSource(anchor + attack.offset() + attack.gate(), timeline), before.pitch(),
+                    attack.velocity() == null ? before.velocity() : attack.velocity(),
+                    index == 0 ? before.source() : "edit", index == 0 ? before.confidence() : 1);
+            validateNote(note, score, part, at);
+            if (index > 0) validateRoleLane(score, note, edit.role(), edit.lane(), at);
+            var projected = timeline.projectNote(note);
+            int tick = projected.startTick(timeline.frames());
+            require(tick >= previousEnd, at + ".attacks", "each attack needs a distinct non-overlapping project gate");
+            previousEnd = projected.endTick(timeline.frames());
+            result.add(note);
+        }
+        result.forEach(note -> notes.put(note.id(), note));
+        return new Outcome(edit.id, edit.kind, Status.applied, result.stream().map(Note::id).toList(), null,
+                "retriggered " + before.id(), null, List.of(before), List.copyOf(result));
     }
 
     private static Outcome split(Intent edit, Score score, Map<String, Note> notes, Note before, String at,
@@ -808,7 +880,7 @@ final class ReconstructionEdits {
                     && other.span != null && other.voice == null && other.fromRole == null
                     && members.stream().allMatch(note -> targets(other, note, timeline))) continue;
             boolean changesAnchorGate = switch (other.kind) {
-                case deleteNote, splitNote, bend, glide, unmerge -> true;
+                case deleteNote, splitNote, retrigger, bend, glide, unmerge -> true;
                 case setNote -> other.changesAttack();
                 default -> false;
             };
@@ -931,6 +1003,7 @@ final class ReconstructionEdits {
                     pins.putIfAbsent(id, new Pin(null, edit.id, order, ReconstructionLaneType.FM));
             }
             if (edit.kind == Kind.splitNote || edit.kind == Kind.mergeNotes || edit.kind == Kind.setVelocity
+                    || edit.kind == Kind.retrigger && edit.role == null && edit.lane == null
                     || edit.kind == Kind.setNote && !edit.changesAttack()) continue;
             boolean deferredDelete = edit.kind == Kind.deleteNote && (scoreResult == null || scoreResult.status == Status.orphaned);
             if (edit.kind == Kind.deleteNote && !deferredDelete) continue;
@@ -942,7 +1015,11 @@ final class ReconstructionEdits {
             var selectedRoles = new LinkedHashMap<String, Role>();
             List<String> requested;
             if (scoreEdit) {
-                requested = edit.kind == Kind.insertNote ? List.of(edit.insertedId()) : scoreResult.noteIds;
+                requested = switch (edit.kind) {
+                    case insertNote -> List.of(edit.insertedId());
+                    case retrigger -> scoreResult.noteIds.subList(1, scoreResult.noteIds.size());
+                    default -> scoreResult.noteIds;
+                };
             } else if (edit.span != null || edit.attack != null || !edit.selectors.isEmpty()) {
                 var candidates = new ArrayList<Note>();
                 for (var decision : decisions.values()) {
@@ -1006,7 +1083,7 @@ final class ReconstructionEdits {
                     validateRoleLane(score, decision.note(), role, edit.lane, at);
                     if (edit.laneType != null) {
                         String issue = laneTypeIssue(decision.note(), part(score, decision.note().part()).drums(),
-                                edit.laneType, score.inputs().fmOnly());
+                                edit.laneType, score.inputs().fmOnly(), score.inputs().profile());
                         require(issue == null, at + ".laneType", issue);
                     }
                     Role incoming = decision.role();
@@ -1194,24 +1271,28 @@ final class ReconstructionEdits {
         boolean drums = part(score, note.part()).drums();
         require(role == null || role == Role.drop || (role == Role.drums) == drums,
                 at + ".role", "drums role must match MIDI percussion part");
-        require(lane == null || pinCompatible(note, drums, lane, score.inputs().fmOnly()), at + ".lane",
+        require(lane == null || pinCompatible(note, drums, lane, score.inputs().fmOnly(), score.inputs().profile()), at + ".lane",
                 "lane " + lane + " cannot play this note with the current percussion, pitch or FM-only settings");
     }
 
-    static boolean pinCompatible(Note note, boolean drums, String lane, boolean fmOnly) {
+    static boolean pinCompatible(Note note, boolean drums, String lane, boolean fmOnly, TargetProfile profile) {
         if (drums) return lane.equals("DAC") || !fmOnly && lane.equals("PSG3");
         return ReconstructionAllocation.FM.contains(lane)
-                || !fmOnly && note.pitch() >= 45 && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
+                || !fmOnly && note.pitch() >= profile.psg().low() && note.run() == null && ReconstructionAllocation.PSG.contains(lane);
     }
 
     static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly) {
+        return laneTypeIssue(note, drums, type, fmOnly, TargetProfile.S3K);
+    }
+
+    static String laneTypeIssue(Note note, boolean drums, ReconstructionLaneType type, boolean fmOnly, TargetProfile profile) {
         return switch (type) {
             case FM -> drums ? "FM percussion voicing is not supported for MIDI drum parts" : null;
             case DAC -> drums ? null : "DAC requires a MIDI drum part and sampled drum voicing";
             case PSG -> {
                 if (drums) yield "PSG tone cannot voice MIDI drums; use NOISE or DAC";
                 if (fmOnly) yield "PSG tone is disabled in FM-only mode";
-                if (note.pitch() < 45 || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch 45 or higher";
+                if (note.pitch() < profile.psg().low() || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch " + profile.psg().low() + " or higher";
                 if (note.bend() != null && note.bend().editReason() != null) yield "authored bends require FM";
                 yield null;
             }
@@ -1261,7 +1342,7 @@ final class ReconstructionEdits {
         return value.getAsString();
     }
 
-    private static <E extends Enum<E>> E choice(Class<E> type, JsonObject json, String key, String at) {
+    static <E extends Enum<E>> E choice(Class<E> type, JsonObject json, String key, String at) {
         String value = string(json, key, at);
         return Arrays.stream(type.getEnumConstants()).filter(option -> option.name().equals(value)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException(at + "." + key + ": expected one of "

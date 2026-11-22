@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.bench.BenchCli;
+import com.opensmpsdeck.headless.rom.RomCli;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
@@ -23,6 +24,15 @@ public final class Main {
     public static void main(String[] args) { System.exit(run(args, System.out, System.err)); }
 
     public static int run(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, false);
+    }
+
+    /** Preserve the bank limit's structured fields for in-process MCP tool calls. */
+    public static int runForMcp(String[] args, PrintStream out, PrintStream err) {
+        return run(args, out, err, true);
+    }
+
+    private static int run(String[] args, PrintStream out, PrintStream err, boolean propagateBankLimit) {
         try {
             if (args.length == 1 && (args[0].equals("--help") || args[0].equals("-h"))) {
                 usage(out); return 0;
@@ -33,6 +43,7 @@ public final class Main {
                     requireArguments(args, 1);
                     com.opensmpsdeck.headless.mcp.McpServer.run(System.in, out);
                 }
+                case "rom" -> RomCli.run(args, out);
                 case "catalog" -> CatalogueCli.run(args, out);
                 case "notes", "reference" -> ReviewCli.run(args, out);
                 case "group" -> GroupCli.run(args, out);
@@ -55,10 +66,20 @@ public final class Main {
                     }
                 }
                 case "stock-table" -> {
-                    requireArguments(args, 4);
-                    if (!args[1].equals("build")) throw new IllegalArgumentException("Expected stock-table build ROM OUT.json");
-                    StockTable.build(Path.of(args[2]), Path.of(args[3]));
+                    if (args.length < 4 || !args[1].equals("build"))
+                        throw new IllegalArgumentException("Expected stock-table build ROM OUT.json [--driver DRIVER] [--rom REVISION ...]");
+                    var options = new PortableOptions.Cli();
+                    for (int at = 4; at < args.length;) {
+                        if (!List.of("--driver", "--rom").contains(args[at]))
+                            throw new IllegalArgumentException("Unknown stock-table option " + args[at]);
+                        at = options.read(args, at);
+                    }
+                    var roms = new java.util.ArrayList<Path>();
+                    roms.add(Path.of(args[2]));
+                    roms.addAll(options.roms());
+                    StockTable.build(roms, Path.of(args[3]), PackageDriver.supported(options.options().driver()));
                 }
+                case "rom-patch" -> RomPatchCommand.run(args, out, err);
                 case "list-rom-songs" -> {
                     requireArguments(args, 2);
                     for (var song : S3kRomImporter.listSongs(Path.of(args[1]))) {
@@ -78,7 +99,7 @@ public final class Main {
                 case "validate-project", "validate" -> {
                     if (args.length < 2) throw new IllegalArgumentException("validate-project expects PROJECT");
                     Path input = Path.of(args[1]);
-                    var project = PortablePackages.openProject(input, parseRoms(args, 2));
+                    var project = PortablePackages.openProject(input, parseRoms(args, 2), err);
                     var compiled = ProjectCompiler.compileWithAssets(project);
                     byte[] song = S3kBinary.validateAndCopy(compiled);
                     if (compiled.nativeProgram() != null) {
@@ -101,10 +122,13 @@ public final class Main {
                     inspect(compiled, out);
                 }
                 case "compile-project" -> {
-                    requireArguments(args, 3);
+                    boolean linear = args.length == 4 && args[3].equals("--linear");
+                    if (!linear) requireArguments(args, 3);
                     Path input = Path.of(args[1]), output = Path.of(args[2]);
                     requireDifferentFiles(input, output);
-                    var compiled = ProjectCompiler.compileWithAssets(ProjectFiles.load(input).project());
+                    var project = ProjectFiles.load(input).project();
+                    var compiled = linear ? ProjectCompiler.compileWithAssets(project, ProjectCompiler.Encoding.LINEAR)
+                            : ProjectCompiler.compileWithAssets(project);
                     byte[] song = ProjectExport.rawBytes(compiled);
                     writeNewBinary(output, song);
                     out.println("Compiled S3K project to " + output + " (" + song.length + " bytes)");
@@ -119,16 +143,16 @@ public final class Main {
                     if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires export --format mod");
                     if (!flags.portable() && flags.hasPackageOptions())
                         throw new IllegalArgumentException("Portable package options require --portable");
-                    var project = PortablePackages.openProject(input, flags.roms());
+                    var project = PortablePackages.openProject(input, flags.roms(), err);
                     if (flags.portable()) {
                         var payload = PortablePackageWriter.write(project, output, options);
                         PortablePackages.printWriteWarnings(payload, err);
                     } else {
                         ProjectProvenance.printWarnings(ProjectPackage.write(project, output), err);
                     }
-                    out.println("Exported S3K bank and declared resources to " + output);
+                    out.println("Exported " + options.driver().toUpperCase(Locale.ROOT) + " bank and declared resources to " + output);
                 }
-                case "validate-package", "inspect-package" -> {
+                case "validate-package", "inspect-package", "render-package" -> {
                     return PortablePackages.cli(args, out, err);
                 }
                 case "demo-project" -> {
@@ -138,13 +162,21 @@ public final class Main {
                     out.println("Created demo project " + output
                             + "; use validate-project, compile-project or render-project to work with it");
                 }
-                case "demo", "render", "render-project" -> render(args, out);
-                case "export" -> ProjectExport.cli(args, out, err);
+                case "demo", "render", "render-project" -> render(args, out, err);
+                case "export" -> {
+                    if (!RomPatchCommand.exportAlias(args, out, err)) ProjectExport.cli(args, out, err);
+                }
                 case "render-compare" -> RenderComparison.cli(args, out);
                 default -> throw new IllegalArgumentException("unknown command: " + args[0]);
             }
             return 0;
         } catch (IllegalArgumentException | IOException failure) {
+            var limit = ProjectCompiler.BankLimitException.from(failure);
+            if (limit != null) {
+                if (propagateBankLimit) throw limit;
+                err.println("Error: " + limit.getMessage());
+                return 2;
+            }
             String message = failure instanceof FileAlreadyExistsException exists
                     ? "output already exists: " + exists.getFile() : failure.getMessage();
             err.println("Error: " + message);
@@ -171,7 +203,7 @@ public final class Main {
         }
     }
 
-    private static void render(String[] args, PrintStream out) throws IOException {
+    private static void render(String[] args, PrintStream out, PrintStream err) throws IOException {
         boolean demo = args[0].equals("demo");
         boolean projectRender = args[0].equals("render-project");
         int positional = demo ? 2 : 3;
@@ -235,7 +267,7 @@ public final class Main {
             Path input = Path.of(args[1]);
             requireDifferentFiles(input, output);
             if (projectRender) {
-                var project = PortablePackages.openProject(input, roms);
+                var project = PortablePackages.openProject(input, roms, err);
                 song = ProjectCompiler.compileWithAssets(project);
                 if (start != null || end != null) projectEnd = ProjectRenderTiming.presentationCount(project);
                 if (!options.contains("--frames")) {
@@ -264,7 +296,7 @@ public final class Main {
                 else WaveFile.render(song, target.path(), presentations);
             } else {
                 requireDifferentFiles(previousPath, output);
-                var previous = ProjectCompiler.compileWithAssets(PortablePackages.openProject(previousPath, roms));
+                var previous = ProjectCompiler.compileWithAssets(PortablePackages.openProject(previousPath, roms, err));
                 WaveFile.renderWithPreviousMusic(previous, previousPresentations, song, target.path(), range, mask);
             }
             target.publish();
@@ -326,11 +358,13 @@ public final class Main {
     private static void usage(PrintStream out) {
         out.println("  validate-package PKG [--rom PATH ...] [--render OUT.wav --frames N]");
         out.println("  inspect-package PKG");
-        out.println("  stock-table build ROM OUT.json");
+        out.println("  render-package PKG OUT.wav [--rom PATH ...] [--frames N]");
+        out.println("  stock-table build ROM OUT.json [--driver DRIVER] [--rom REVISION ...]");
         out.println("Usage: java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render INPUT.bin OUTPUT.wav [--frames N]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar demo-project OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar list-rom-songs ROM");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar " + RomPatchCommand.USAGE);
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar import-rom-song ROM MUSIC_ID OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar copy-arrangement PROJECT.json OUTPUT.json");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar validate-project PROJECT.json");
@@ -338,13 +372,14 @@ public final class Main {
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group place PROJECT.json GROUP_ID PLACEMENT_ID START LENGTH [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar group ungroup PROJECT.json PLACEMENT_ID [--in GROUP_ID]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar inspect-project PROJECT.json");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin");
-        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-project PROJECT.json OUTPUT.bin [--linear]");
+        out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar compile-package PROJECT.json OUTPUT.smps.zip [--rom PATH] [--portable [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]]");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar render-project PROJECT.json OUTPUT.wav [--frames N] [--force]");
         out.println("           [--solo LANES] [--mute LANES] [--start S] [--end S]");
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
         out.println("       render-compare WORK_DIR (--start S --end S | --section NAME) [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
+        RomCli.usage(out);
         ReconstructionCli.usage(out);
         out.println("       mcp  (stdio Model Context Protocol server)");
         ReviewCli.usage(out);
@@ -353,7 +388,9 @@ public final class Main {
         out.println("N: 1..36000 NTSC presentations, default 120; native projects use previewFrames and arranged DAC projects include their sample tail.");
         out.println("Outputs must not already exist. Projects: strict JSON versions 1–5 with explicit native-bank dependencies.");
         out.println("       export PROJECT.json|WORK_DIR|PACKAGE.smps.zip OUTPUT --format wav|mp3|vgm|smps|package|portable|mod|disasm");
+        out.println("              Portable/mod: [--driver s1|s2|s3k] [--speed-up-tempo S3K_BYTE] [--strict-tempo] [--retail-patch]");
+        out.println("       export PROJECT OUTPUT --format rom|bps [ROM patch options]");
         out.println("              [--start SEC] [--end SEC] [--fade SEC] [--loops N] [--stems [--zip]]");
-        out.println("Binary input: finite linear S3K data, local FM voices; envelope/DAC dependencies require render-project.");
+        out.println("Binary input: finite standalone S3K data, local FM voices; envelope/DAC dependencies require render-project.");
     }
 }

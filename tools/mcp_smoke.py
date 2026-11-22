@@ -165,21 +165,26 @@ for stem in stems:
     config.write_text(json.dumps({"fixture": [sys.executable, str(adapter), "{input}", "{outputDir}", "{device}"]}))
     transcribers = root / "transcribers.json"
     transcribers.write_text("{}")
-    env = {**os.environ, "OPENSMPSDECK_SEPARATORS": str(config),
+    env = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"), "OPENSMPSDECK_SEPARATORS": str(config),
            "OPENSMPSDECK_TRANSCRIBERS": str(transcribers)}
     with Client(jar, env=env) as rpc:
         tools = rpc.request("tools/list")["tools"]
         expected = set("""
             transcribers_list separators_list separate reconstruct_import reconstruct_run reconstruct_stage reconstruct_describe reconstruct_plan_template
-            reconstruct_audition reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
-            artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect
+            reconstruct_audition reconstruct_vocal_review reconstruct_trace reconstruct_trace_diff reconstruct_view reconstruct_edit reconstruct_sections reconstruct_voices
+            artifact_read artifact_write project_validate project_export reconstruct_rerun package_validate package_inspect rom_patch
             render_clip render_compare notes_list notes_add notes_resolve reference_add
-            catalog_search catalog_audition bench_compare
+            catalog_search catalog_audition bench_compare rom_list rom_set
         """.split())
         assert {tool["name"] for tool in tools} == expected
         for tool in tools:
             schema = tool["inputSchema"]
             assert schema["type"] == "object" and set(schema["required"]) <= schema["properties"].keys()
+        assert {entry["game"]: entry["status"] for entry in rpc.call("rom_list")["roms"]} == {
+            "s1": "missing", "s2": "missing", "s3k": "missing",
+        }
+        rpc.call("rom_set", game="s1", path=inputs["midi"], error="Unsupported ROM")
+        assert not (root / "config" / "opensmpsdeck" / "roms.json").exists()
         assert rpc.call("separators_list") == {"separators": ["fixture"]}
         separated = root / "separated"
         result = rpc.call("separate", input=inputs["wav"], outputDir=separated,
@@ -265,6 +270,31 @@ for stem in stems:
         verified = rpc.call("package_validate", package=portable["output"], render="verified.wav", frames=30)
         assert verified["valid"] and verified["playbackValidated"]
         assert Path(verified["render"]).is_file()
+        linked_project = root / "signal-garden.smps.json"
+        linked_fixture = Path(__file__).resolve().parents[1] / "examples" / linked_project.name
+        linked_source = json.loads(linked_fixture.read_text())
+        linked_source["tempo"] = 64
+        linked_project.write_text(json.dumps(linked_source))
+        for driver, native_speed in (("s1", 4), ("s2", 192)):
+            classic = rpc.call("project_export", project=linked_project, output=f"{driver}.smps.zip",
+                               format="portable", driver=driver, speedUpTempo=64, strictTempo=True)
+            assert classic["warnings"] == [], classic
+            classic_manifest = rpc.call("package_inspect", package=classic["output"])
+            assert classic_manifest["driver"] == driver
+            assert classic_manifest["driverOptions"] == {"speedUpTempo": native_speed}
+            classic_render = rpc.call("package_validate", package=classic["output"],
+                                      render=f"{driver}.wav", frames=30)
+            assert classic_render["valid"] and classic_render["playbackValidated"], classic_render
+        diagnostic = "TEMPO_APPROXIMATED: Speed-shoes tempo S3K 0x00 to S2 0xFF (relative tick-rate error -0.390625%)"
+        approx = rpc.call("project_export", project=linked_project, output="approx.smps.zip",
+                          format="portable", driver="s2", speedUpTempo=0)
+        assert approx["warnings"] == [diagnostic], approx
+        approx_manifest = rpc.call("package_inspect", package=approx["output"])
+        assert approx_manifest["provenance"]["warnings"] == ["TEMPO_APPROXIMATED"], approx_manifest
+        assert approx_manifest["driverOptions"] == {"speedUpTempo": 255}
+        rpc.call("project_export", project=linked_project, output="strict.smps.zip",
+                 format="portable", driver="s2", speedUpTempo=0, strictTempo=True, error=diagnostic)
+        assert not (linked_project.parent / "strict.smps.zip").exists()
         arrangement = Path(files["arrangement.smps.json"])
         attached = arrangement.read_bytes()
         detached = json.loads(attached)

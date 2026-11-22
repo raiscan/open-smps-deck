@@ -24,6 +24,41 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionEditsTest {
+    @Test void retriggerKeepsTheFirstIdAndReplaysStableIndependentAttacks() {
+        var original = note("held", .10, .55, 68);
+        var score = new ReconstructionStages.Score(1, 1_000_000, 60, 60, inputs(), List.of(),
+                new MidiScore(List.of(new MidiScore.Part(0, "Synth", 0, false)), List.of(), List.of()),
+                Map.of(), List.of(original), List.of(), List.of(), null, null);
+        var edits = new ReconstructionEdits(List.of(intent("""
+                {"op":"retrigger","id":"pulse","reason":"repeated attacks","noteId":"held",
+                 "attacks":[{"offset":0,"gate":0.05},{"offset":0.1,"gate":0.06,"velocity":82}]}
+                """)));
+        var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+        var rebuilt = edits.applyScore(score, outcomes);
+        assertEquals(List.of("held", "edit-pulse-1"), outcomes.getFirst().noteIds());
+        assertEquals(List.of(original), outcomes.getFirst().removedNotes());
+        assertEquals(rebuilt.notes(), outcomes.getFirst().resultNotes());
+        assertEquals(82, rebuilt.notes().getLast().velocity());
+        assertEquals(68, rebuilt.notes().getLast().pitch());
+        assertEquals(.20, rebuilt.notes().getLast().start(), 1e-9);
+        assertEquals(rebuilt, edits.applyScore(score, new ArrayList<>()));
+        assertThrows(IllegalArgumentException.class, () -> intent("""
+                {"op":"retrigger","id":"pulse","reason":"invalid","noteId":"held",
+                 "attacks":[{"offset":0,"gate":0.12},{"offset":0.1,"gate":0.06}]}
+                """));
+    }
+
+    @Test void selectiveLayerOffAcceptsOnlyNamedPolicies() {
+        assertDoesNotThrow(() -> intent("""
+                {"op":"layer","id":"mask","reason":"keep octave","noteIds":["held"],
+                 "mode":"off","policies":["fmDouble"]}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> intent("""
+                {"op":"layer","id":"mask","reason":"keep octave","noteIds":["held"],
+                 "mode":"off","policies":["unknown"]}
+                """));
+    }
+
     @Test void rejectsAmbiguousSelectorsAndUnorderedBendPoints() {
         var ambiguous = json("""
                 {"id":"bad","reason":"evidence","op":"setRole","noteIds":["n"],

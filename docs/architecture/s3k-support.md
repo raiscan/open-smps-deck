@@ -15,12 +15,12 @@ Playback uses the exact OpenGGF revision recorded in
 
 | Feature | Source and compiler | Render/export boundary | Editor | Pinned engine |
 | --- | --- | --- | --- | --- |
-| FM1–FM5 and PSG1–PSG3 notes/rests | Supported, monophonic linked sequences and finite inline clips | Supported | Timeline and piano roll | Supported |
+| FM1–FM5 and PSG1–PSG3 notes/rests | Supported, monophonic linked sequences and finite clips | Supported | Timeline and piano roll | Supported |
 | Long sustained notes | Native HOLD continuations beyond 127 ticks | Supported | Note duration | Supported |
 | Pan/AMS/FMS, detune, absolute volume, FM/PSG volume change, absolute/additive transpose | Nine-command v2 catalogue below | Native finite stream | Commands table and raw-byte inspector | `E0` retains low six bits in FM and DAC |
 | Two-operand FM volume change `E5` | v5 native bytes | v5 preflight follows both operands | Native bank bytes and event list | First operand ignored, second is signed FM attenuation delta |
 | Four-byte custom modulation and modulation off | v2 at note attacks, v4 also on held notes | `F0` and `FA` accepted with exact arities | Command help and arguments | Pending setup and native attack preparation |
-| Event ordering and repetition state | Stable authored order at equal ticks; RESET/CARRY; independent clips reset | Compiles inline; trimmed events omitted | Reorder and repeat-state controls | Native mutable track state |
+| Event ordering and repetition state | Stable authored order at equal ticks; RESET/CARRY; independent clips reset | Trimmed events omitted before compaction | Reorder and repeat-state controls | Native mutable track state |
 | Local FM voices | Exact 25-byte entries; source selection and pure asset CRUD | Terminal local table; package manifest indices | Native algorithm/feedback, four stored operators, independent TL high-bit flags, raw bytes | Local/shared/global lookup |
 | Voice changes and shared/global/cross-song voices | v4 timed local voices, v5 native voice table binding | v5 resolves local FM `EF` and PSG envelope `EF`; cross-song FM voices pending | Commands asset picker and native bank | PSG `EF` preserves cursor and consumes its signed-index operand shape |
 | PSG noise | v4 typed `F3` and v5 native bytes | Native noise latch and reset | Commands table and native bank | PSG noise/reset implemented |
@@ -30,7 +30,7 @@ Playback uses the exact OpenGGF revision recorded in
 | FM6 and DAC/FM6 ownership | Dedicated DAC lane, FM6 switching pending | DAC + five FM slots | DAC lane | DAC shares physical FM6 |
 | FM3 special/raw-frequency data | Missing representation | `FD/FE` rejected | Missing | Raw frequency handler exists; `FE` retains state only |
 | Explicit note attacks, ties, note fill, duration reuse and zero-counter wrap | v4 can express ties, v5 preserves raw stream | Native saved duration, byte wrap, divider and fill through HOLD | Native bank bytes and event list | Timers follow the S3K byte counters and chip-specific tails |
-| Native jumps, calls, returns and counted loops | v5 preserves native pointers | Bounded `F6/F7/F8/F9` traversal includes pre-header targets and loops that advance time | Native bank bytes and event list | Native return/loop capacity and zero-count limitations below |
+| Native jumps, calls, returns and counted loops | Arrangements emit flat F7/F8/F9; v5 preserves native pointers | Bounded `F6/F7/F8/F9` traversal includes pre-header targets and loops that advance time | Native bank bytes and event list | Native return/loop capacity and zero-count limitations below |
 | Conditional loop exit | Missing | `EB` rejected | Missing | Native arity/behavior mismatch below |
 | Header transpose/volume/envelope state and bank addresses | v5 stores the exact header and offset at base 0 or 0x8000 | Seventh declared FM slot is inactive when PSG1 overwrites it | Native bank bytes; arrangement has normalized headers | Header decoder and full bank address space |
 | Tempo changes, dividing timing, PAL and speed changes | v5 preserves divider and `FF00` tempo changes | Native frame-limited NTSC preview at 48 kHz; `FF04` rejected | Explicit preview length; arrangement keeps its fixed-tempo playhead | Tempo/divider and session timing support exist |
@@ -39,7 +39,7 @@ Playback uses the exact OpenGGF revision recorded in
 | Legacy package for embedded assets (schemas 1–3) | v5 bank, voices and exact bindings | Deterministic ZIP of source, exact bank, manifest and hashed resources | Export package; resource-aware preview/WAV | Adapter installs resources |
 | [Portable package (schema 4)](portable-package.md) | Stock locators, transforms, local/global fills and relocation metadata | CLI/MCP export, inspect, validate, ROM resolution and PCM render. Mod JAR contains the exploded package | Redacted source requires external ROM resolution | OpenGGF mod playback integration tracked separately |
 
-Version 1 remains readable/writable with its original field set and compilation.
+Version 1 remains readable/writable with its original field set and playback.
 Version 2 adds ordered command events and repeat state. Version 3 adds typed envelope
 assets and stable source assignments. Version 4 adds DAC samples and one-shot
 triggers in the first native track slot. Voice-only editing preserves the source version.
@@ -80,10 +80,16 @@ For v2, RESET restores state each repetition; CARRY resets on clip entry and
 preserves state between repetitions of that clip. Every independent clip resets
 voice, volume, FM stereo pan, transpose, detune, fill and modulation. Native
 `E0` retains the previous low six bits, including AMS and FMS. V1 keeps its
-original reset bytes. No full-bank expansion is allocated for enormous timelines; output
-is bounded to one 32 KiB bank.
+original reset bytes. Arrangement compilation packs adjacent repeats with F7
+and shares non-adjacent runs within each track with F8/F9. All pointers are
+little-endian and bank-relative. The compiler keeps explicit durations and
+leaves relative commands and tie boundaries inline. It uses counter 0 and one
+return address, within the retail driver's two dedicated loop counters and
+four-byte return stack. The compiler counts the full encoded size and retains
+up to 32,768 bytes for export.
 
-The finite binary validator accepts the listed controls and FM FF05 and FF06.
+The finite binary validator accepts the listed controls, flat F7/F8/F9
+control flow and FM FF05 and FF06.
 Byte-only input rejects unresolved resources. The resource-aware path validates
 every declaration, including unused assets. Unsupported commands, pointers,
 unmapped DAC triggers, missing operands and unresolved resources fail before PCM

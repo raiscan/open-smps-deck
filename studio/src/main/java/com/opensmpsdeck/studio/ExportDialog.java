@@ -3,6 +3,12 @@ package com.opensmpsdeck.studio;
 import com.opensmpsdeck.headless.ProjectExport;
 import com.opensmpsdeck.headless.ProjectProvenance;
 import com.opensmpsdeck.headless.ProjectExport.Format;
+import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
+import com.opensmpsdeck.headless.TestInGame;
+import com.opensmpsdeck.headless.rom.RomGame;
+import com.opensmpsdeck.headless.rom.RomLibrary;
+import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -11,6 +17,7 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
@@ -19,8 +26,18 @@ import javafx.stage.Window;
 final class ExportDialog {
     private ExportDialog() {}
 
-    static void show(Window owner, boolean nativeBank, Callable<ProjectExport.Source> source,
-                     Executor worker, Consumer<String> status) {
+    static void show(Window owner, StudioProject project, Path projectPath, Path work,
+                     RomLibrary library, Executor worker, Consumer<String> status) {
+        show(owner, project, projectPath, work, TargetGame.S3K, library, worker, status);
+    }
+
+    static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
+                     RomLibrary library, Executor worker, Consumer<String> status) {
+        boolean nativeBank = project != null && project.nativeProgram() != null;
+        Callable<ProjectExport.Source> source = () -> project == null ? ProjectExport.open(work)
+                : new ProjectExport.Source(project, work);
+        RomGame game = project == null ? RomGame.parse(fallbackTarget.id()) : TestInGame.game(project);
+        String name = project == null ? work.getFileName().toString() : project.name();
         var dialog = new Dialog<ProjectExport.Options>();
         dialog.initOwner(owner);
         dialog.setTitle("Export");
@@ -49,6 +66,16 @@ final class ExportDialog {
 
             @Override public Format fromString(String value) { throw new UnsupportedOperationException(); }
         });
+        var drivers = new ChoiceBox<String>();
+        drivers.setId("export-driver");
+        drivers.getItems().setAll(nativeBank ? java.util.List.of("s3k") : java.util.List.of("s3k", "s1", "s2"));
+        drivers.setValue(nativeBank ? TargetGame.S3K.id() : game.id());
+        var driverLabel = new Label("Target driver");
+        var portableSelected = formats.valueProperty().isEqualTo(Format.PORTABLE);
+        drivers.visibleProperty().bind(portableSelected);
+        drivers.managedProperty().bind(portableSelected);
+        driverLabel.visibleProperty().bind(portableSelected);
+        driverLabel.managedProperty().bind(portableSelected);
         var span = new CheckBox("Limit to a span");
         var start = field("0", "export-start");
         var end = field("Song end", "export-end");
@@ -75,7 +102,8 @@ final class ExportDialog {
         if (nativeBank) form.addRow(5, new Label("Native loop count"), loops);
         form.add(stems, 1, 6);
         form.add(zip, 1, 7);
-        var body = new VBox(14, form, note, error);
+        form.addRow(8, driverLabel, drivers);
+        var body = new VBox(14, form, note, error, new Separator());
         body.setPadding(new Insets(8, 6, 4, 6));
         dialog.getDialogPane().setContent(body);
 
@@ -105,7 +133,9 @@ final class ExportDialog {
                         bounded ? seconds(start) : null, bounded ? seconds(end) : null,
                         audio ? seconds(fade) : null, audio && nativeBank && !loops.getText().isBlank()
                                 ? Integer.valueOf(loops.getText().strip()) : null,
-                        split, split && zip.isSelected());
+                        split, split && zip.isSelected(),
+                        format == Format.PORTABLE ? new ProjectExport.PortableSettings(drivers.getValue(), true,
+                                null, null, null, java.util.List.of(), java.util.List.of()) : null);
             } catch (IllegalArgumentException failure) {
                 error.setText(failure instanceof NumberFormatException
                         ? "Enter seconds as numbers and loop count as a whole number." : failure.getMessage());
@@ -113,7 +143,81 @@ final class ExportDialog {
             }
         });
         dialog.setResultConverter(button -> button == export ? result[0] : null);
-        dialog.showAndWait().ifPresent(options -> chooseDestination(owner, source, worker, status, options));
+        var testRequested = new javafx.beans.property.SimpleBooleanProperty();
+        var testDriver = new javafx.beans.property.SimpleObjectProperty<>(game);
+        addTestInGame(dialog, body, testDriver, !nativeBank, library, worker, () -> {
+            testRequested.set(true);
+            dialog.close();
+        });
+        var options = dialog.showAndWait();
+        if (testRequested.get()) {
+            TestInGameDialog.show(owner, name, source, projectPath, testDriver.get(), library, worker, status);
+        } else {
+            options.ifPresent(value -> chooseDestination(owner, source, worker, status, value));
+        }
+    }
+
+    private static void addTestInGame(Dialog<?> dialog, VBox body,
+                                      javafx.beans.property.ObjectProperty<RomGame> gameSelection,
+                                      boolean editable, RomLibrary library, Executor worker, Runnable openTestInGame) {
+        var test = new Button("Test in game…");
+        test.setId("export-test-in-game");
+        var settings = new Button("ROM settings…");
+        settings.setId("export-rom-settings");
+        var hint = new Label();
+        hint.setId("export-rom-hint");
+        hint.setWrapText(true);
+        hint.setMaxWidth(435);
+        var actions = new HBox(8, test, settings);
+        if (editable) {
+            var target = new ChoiceBox<RomGame>();
+            target.setId("test-in-game-driver");
+            target.setAccessibleText("Test in game target");
+            target.getItems().setAll(RomGame.S3K, RomGame.S1, RomGame.S2);
+            target.setConverter(new javafx.util.StringConverter<>() {
+                @Override public String toString(RomGame value) { return TestInGameDialog.gameName(value); }
+                @Override public RomGame fromString(String value) { throw new UnsupportedOperationException(); }
+            });
+            target.valueProperty().bindBidirectional(gameSelection);
+            actions.getChildren().addFirst(target);
+        }
+        body.getChildren().addAll(actions, hint);
+
+        var latest = new java.util.concurrent.atomic.AtomicReference<Task<RomLibrary.Entry>>();
+        Runnable refresh = () -> {
+            latest.set(null);
+            var game = gameSelection.get();
+            test.setDisable(true);
+            hint.setText("Checking the ROM library…");
+            var job = new Task<RomLibrary.Entry>() {
+                @Override protected RomLibrary.Entry call() throws Exception {
+                    return library.list().stream().filter(entry -> entry.game().equals(game.id()))
+                            .findFirst().orElseThrow();
+                }
+            };
+            latest.set(job);
+            job.setOnSucceeded(event -> {
+                if (latest.get() != job) return;
+                var entry = job.getValue();
+                test.setDisable(!entry.status().equals("ok"));
+                hint.setText(switch (entry.status()) {
+                    case "ok" -> entry.revision() + " ROM verified.";
+                    case "changed-on-disk" -> "The saved ROM changed on disk. Select a clean ROM in ROM settings.";
+                    default -> "Select a clean " + game.id().toUpperCase(java.util.Locale.ROOT) + " ROM in ROM settings.";
+                });
+            });
+            job.setOnFailed(event -> {
+                if (latest.get() == job) hint.setText("Could not read ROM settings. " + job.getException().getMessage());
+            });
+            worker.execute(job);
+        };
+        settings.setOnAction(event -> {
+            RomSettingsDialog.show(dialog.getDialogPane().getScene().getWindow(), library, worker);
+            refresh.run();
+        });
+        test.setOnAction(event -> openTestInGame.run());
+        gameSelection.addListener((observable, previous, selected) -> refresh.run());
+        refresh.run();
     }
 
     private static TextField field(String prompt, String id) {
@@ -161,7 +265,7 @@ final class ExportDialog {
                 if (options.format() == Format.PACKAGE || options.format() == Format.PORTABLE) {
                     var warnings = options.format() == Format.PACKAGE
                             ? ProjectProvenance.detect(opened.project()).warnings()
-                            : ProjectExport.portableWarnings(opened.project());
+                            : ProjectExport.portableWarnings(opened.project(), options.portable());
                     if (!warnings.isEmpty()) {
                         var confirmation = new java.util.concurrent.FutureTask<>(() -> {
                             if (isCancelled()) return false;
@@ -169,7 +273,7 @@ final class ExportDialog {
                                     .collect(java.util.stream.Collectors.joining("\n\n"));
                             var alert = new Alert(Alert.AlertType.CONFIRMATION, text, ButtonType.OK, ButtonType.CANCEL);
                             alert.initOwner(owner);
-                            alert.setTitle("Package provenance");
+                            alert.setTitle("Package warnings");
                             alert.setHeaderText("Export this package?");
                             return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
                         });
@@ -204,10 +308,15 @@ final class ExportDialog {
         });
         job.setOnFailed(event -> {
             progress.close();
-            status.accept("Export failed · " + job.getException().getMessage());
-            var alert = new Alert(Alert.AlertType.ERROR, job.getException().getMessage());
+            var failure = job.getException();
+            var bankLimit = BankLimitException.from(failure);
+            String detail = bankLimit == null ? failure.getMessage() : bankLimit.getMessage();
+            status.accept("Export failed · " + detail);
+            var alert = new Alert(Alert.AlertType.ERROR, detail);
             alert.initOwner(owner);
             alert.setHeaderText("Could not export arrangement");
+            alert.getDialogPane().setPrefWidth(500);
+            alert.setResizable(true);
             alert.show();
         });
         job.setOnCancelled(event -> {

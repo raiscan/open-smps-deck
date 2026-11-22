@@ -32,7 +32,11 @@ public final class InstrumentCatalogue {
 
     public enum Kind { FM_VOICE, PSG_VOLUME, MODULATION, DAC_SAMPLE, PSG_NOISE }
 
-    public record Asset(String id, Kind kind, String name, String payload) {
+    public record Asset(String id, Kind kind, String name, String payload, Boolean excludeFromDrumFit) {
+        public Asset(String id, Kind kind, String name, String payload) {
+            this(id, kind, name, payload, null);
+        }
+
         public Asset {
             Objects.requireNonNull(kind, "asset kind");
             requireText(name, "asset name");
@@ -191,12 +195,16 @@ public final class InstrumentCatalogue {
 
     private com.opensmpsdeck.project.AssetOrigin findOrigin(Asset asset) {
         var choices = assetVariants.getOrDefault(asset.id(), List.of());
-        String hash = digest(asset.bytes());
+        byte[] bytes = asset.bytes();
+        String hash = digest(bytes);
+        String s2VoiceHash = asset.kind() == Kind.FM_VOICE
+                ? digest(ClassicPackageDriver.S2.voiceBytes(bytes.clone())) : hash;
         com.opensmpsdeck.project.StockRef best = null;
         boolean stock = false;
         for (var variant : choices) {
             for (var usage : variant.occurrences()) {
-                if (!usage.driver().equalsIgnoreCase("s3k") || usage.songId() == null) continue;
+                String game = usage.driver().toLowerCase(Locale.ROOT);
+                if (!List.of("s1", "s2", "s3k").contains(game) || usage.songId() == null) continue;
                 stock = true;
                 if (usage.table() == null || usage.slot() == null) continue;
                 String table = switch (usage.table()) {
@@ -207,7 +215,8 @@ public final class InstrumentCatalogue {
                 };
                 if (table == null) continue;
                 try {
-                    var candidate = StockTable.ref(table, table.equals("local-fm") ? usage.songId() : null, usage.slot(), hash);
+                    var candidate = StockTable.ref(game, table, table.equals("local-fm") ? usage.songId() : null,
+                            usage.slot(), game.equals("s2") ? s2VoiceHash : hash);
                     if (candidate.kind().equals(asset.kind().name()))
                         best = best == null ? candidate : StockTable.prefer(best, candidate);
                 } catch (IllegalArgumentException invalidLocator) {
@@ -215,7 +224,7 @@ public final class InstrumentCatalogue {
                 }
             }
         }
-        if (best == null) best = StockTable.match(asset.kind().name(), asset.bytes());
+        if (best == null) best = StockTable.matchProjectAsset(asset.kind().name(), bytes);
         return stock || best != null ? com.opensmpsdeck.project.AssetOrigin.stock(best) : null;
     }
 
@@ -256,7 +265,9 @@ public final class InstrumentCatalogue {
         Variant variant = row.variant();
         if (query.kind() != null && row.asset().kind() != query.kind()) return false;
         if (!contains(variant.id(), query.variant())) return false;
-        if (!empty(query.driver()) && !contains("S3K", query.driver())) return false;
+        if (!empty(query.driver()) && (variant.occurrences().isEmpty()
+                ? !contains("S3K", query.driver())
+                : variant.occurrences().stream().noneMatch(usage -> contains(usage.driver(), query.driver())))) return false;
         if (!empty(query.role()) && variant.roles().stream().noneMatch(role -> contains(role, query.role())))
             return false;
         if (!empty(query.source()) && variant.occurrences().stream().noneMatch(o -> matchesSource(o, query.source())))

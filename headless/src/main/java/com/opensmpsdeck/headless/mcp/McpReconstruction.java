@@ -1,5 +1,6 @@
 package com.opensmpsdeck.headless.mcp;
 
+import com.opensmpsdeck.project.TargetGame;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -38,6 +39,7 @@ final class McpReconstruction {
             field("stems", object(Map.of("type", "object", "additionalProperties", Map.of("type", "string"))),
                     "Map of MIDI part IDs or audio-only stem labels to absolute aligned WAV paths").optional());
     static final JsonObject OPTIONS = schema(
+            choice("target", "Target game (default s3k, or the saved target when resuming)", "s1", "s2", "s3k").optional(),
             field("seconds", "number", "Duration from time zero, in (0, 600] seconds").optional(),
             field("name", "string", "Project title").optional(),
             field("ticksPerBeat", "integer", "Studio ruler ticks per beat").optional(),
@@ -49,6 +51,7 @@ final class McpReconstruction {
             field("candidates", "string", "Absolute external note candidates JSON path").optional(),
             field("leadPart", "integer", "Prefer this MIDI part as the song-wide lead. Fresh runs only").optional(),
             field("harmonyMaxHz", "number", "Harmony attack cap, 0 to disable").optional(),
+            field("policyDecisions", "boolean", "Include per-note lane policy decisions and blockers in the assembly report").optional(),
             choice("lanePolicyPreset", "S3K layering is the fresh-run default. Choose off to disable or select a preset to replace saved policies", "s3k-layering", "off").optional(),
             field("overwriteDetached", "boolean", "Allow a resumed run or assemble to replace a hand-edited arrangement").optional(),
             field("keepVoicing", "boolean", "Keep compatible voicing in a resumed run").optional(),
@@ -107,7 +110,8 @@ final class McpReconstruction {
         return SunoImport.inspect(folder, work, catalogue, assign, exclude,
                 optional(args, "transcribeUnmapped"), audioOnly, optional(args, "transcriber"), roles, transcriberFor,
                 optional(args, "drumDetector"), optional(args, "transcriberDevice"), null,
-                optional(args, "lanePolicyPreset"), null, progress).json();
+                optional(args, "lanePolicyPreset"), null,
+                args.has("target") ? TargetGame.parse(string(args, "target")) : TargetGame.S3K, progress).json();
     }
 
 
@@ -161,10 +165,10 @@ final class McpReconstruction {
         }
         if (args.has("options")) {
             var options = args.getAsJsonObject("options");
-            options(cli, options, "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
+            options(cli, options, "target", "seconds", "name", "ticksPerBeat", "keepOctaves", "fmOnly", "wholePartVoices",
                     "audioRefine", "noStemTemplateNotes", "leadPart", "harmonyMaxHz", "estimateTempo", "tempo",
                     "barOffset", "steadyTempo", "audioRepeats", "transcriber", "transcriberDevice", "drumDetector",
-                    "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset");
+                    "refitLevels", "keepVoicing", "overwriteDetached", "lanePolicyPreset", "policyDecisions");
             if (options.has("transcriberFor")) for (var entry : options.getAsJsonObject("transcriberFor").entrySet()) {
                 if (entry.getKey().contains("=")) throw new IllegalArgumentException("Invalid transcriber role " + entry.getKey());
                 cli.add("--transcriber-for");
@@ -282,6 +286,14 @@ final class McpReconstruction {
         if (group != null || propose && !action.equals("add"))
             throw new IllegalArgumentException("Use propose with add and include the group on each intent");
         return ReconstructionEditCommand.run(work, propose ? "propose" : action, edit, id, rerun, dryRun, progress);
+    }
+
+    static JsonObject vocalReview(JsonObject args) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        for (String file : List.of("score.json", "structure.json", ReconstructionSections.FILE, ReconstructionEditCommand.FILE))
+            McpPaths.managed(work, file);
+        return com.opensmpsdeck.headless.ReconstructionVocalReview.review(work, optional(args, "phrase"),
+                args.has("propose") && args.get("propose").getAsBoolean());
     }
 
     static JsonObject trace(JsonObject args) throws IOException {

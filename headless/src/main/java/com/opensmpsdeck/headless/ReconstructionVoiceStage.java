@@ -22,6 +22,8 @@ final class ReconstructionVoiceStage {
     // no catalogue candidate explains enough of the exposed attack spectrum.
     private static final double MIN_EXPOSED_ATTACK_MATCH = .16;
 
+    static final String VOCAL_SYNTH = "bright sustained vocal lead synth";
+
     private record Model(String id, Role role, ReconstructionAllocation.Result packed, int stem, ReconstructionAllocation.Result stemNotes,
                          List<RankedPatch> patches, List<Instrument> instruments, boolean shared) {}
 
@@ -53,9 +55,9 @@ final class ReconstructionVoiceStage {
         var context = byLane.values().stream().flatMap(List::stream).toList();
         var fitGroups = shared ? bySourceInstrument(context) : byLane;
         Integer lead = score.inputs().leadPart();
-        String vocalGroup = chosen != null || lead == null || !ReconstructionVocalLead.isVocal(score.inputs(), lead)
+        String vocalGroup = lead == null || !ReconstructionVocalLead.isVocal(score.inputs(), lead)
                 ? null : fitGroups.entrySet().stream()
-                .filter(entry -> entry.getValue().stream().anyMatch(note ->
+                .filter(entry -> !entry.getKey().equals(chosenLane) && entry.getValue().stream().anyMatch(note ->
                         "FM1".equals(note.lane()) && note.note().part() == lead))
                 .map(Map.Entry::getKey).findFirst().orElse(null);
         var foreground = new LinkedHashMap<String, List<ReconstructionAllocation.Entry>>();
@@ -91,6 +93,7 @@ final class ReconstructionVoiceStage {
         var models = new ArrayList<Model>();
         var initial = new ArrayList<Lane>();
         var incumbents = new ArrayList<String>();
+        String vocalSynth = null;
         for (var entry : fitGroups.entrySet()) {
             String lane = entry.getKey();
             var notes = foreground.getOrDefault(lane, entry.getValue());
@@ -100,8 +103,17 @@ final class ReconstructionVoiceStage {
                     : fm ? incumbent(catalogue, previous, lane) : null;
             var patches = leadPatches.get(lane);
             if (lane.equals(vocalGroup)) {
-                var synth = incumbent == null ? screening.leadSynth() : new RankedPatch(incumbent.id(), 0);
-                if (synth != null) patches = List.of(synth);
+                var savedLane = savedPatch(previous, lane);
+                if (incumbent != null && savedLane != null && confirmedVocalPatch(savedLane.patchReason())) {
+                    patches = List.of(new RankedPatch(incumbent.id(), 0));
+                    if (VOCAL_SYNTH.equals(savedLane.patchReason())) vocalSynth = incumbent.id();
+                } else {
+                    var synth = screening.leadSynth();
+                    if (synth != null) {
+                        vocalSynth = synth.id();
+                        patches = List.of(synth);
+                    }
+                }
             }
             if (patches == null) patches = fm
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane))
@@ -240,8 +252,10 @@ final class ReconstructionVoiceStage {
             String patchReason = EVIDENCE;
             if (model.id().equals(chosenLane)) {
                 patchReason = "explicit variant with fitted levels";
-            } else if (model.id().equals(vocalGroup) && incumbent == null) {
-                patchReason = "bright sustained vocal lead synth";
+            } else if (model.id().equals(vocalGroup) && patch != null && patch.equals(vocalSynth)) {
+                patchReason = VOCAL_SYNTH;
+            } else if (model.id().equals(vocalGroup) && patch != null && patch.equals(incumbent)) {
+                patchReason = savedPatch(previous, model.id()).patchReason();
             } else if (patch == null) {
                 patchReason = model.instruments().isEmpty() ? "not applicable" : "catalogue matcher";
             } else if (patch.equals(initial.get(i).variantId()) && (incumbent == null || patch.equals(incumbent))) {
@@ -287,7 +301,7 @@ final class ReconstructionVoiceStage {
                 int partId = fitGroups.get(model.id()).getFirst().note().part();
                 var part = source.parts().stream().filter(item -> item.id() == partId).findFirst().orElseThrow();
                 if (fm.variantId() == null) continue;
-                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled);
+                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled, score.inputs().profile());
                 instruments.put(model.id(), new SourceSound(fm, psg.variantId(), psg.volumeOffset()));
             }
             byLane.forEach((lane, notes) -> result.putIfAbsent(lane,
@@ -296,10 +310,14 @@ final class ReconstructionVoiceStage {
                 result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
             return new Result(ReconstructionStages.VERSION, result, windows.fitWindows()).withSourceInstruments(instruments);
         }
-        ReconstructionLevels.calibrate(score.frames(), source, catalogue, byLane, mix, options.stems(), result);
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
+    }
+
+    private static boolean confirmedVocalPatch(String reason) {
+        return VOCAL_SYNTH.equals(reason) || EVIDENCE.equals(reason)
+                || "explicit variant with fitted levels".equals(reason);
     }
 
     private static Effects vocalVibrato(ReconstructionStages.Score score, int part, Path mix,
@@ -347,9 +365,14 @@ final class ReconstructionVoiceStage {
         return lane.startsWith("FM") && notes.stream().allMatch(n -> lane.equals(n.lane()));
     }
 
+    private static Lane savedPatch(Result previous, String id) {
+        if (previous == null) return null;
+        var source = previous.sourceInstruments() == null ? null : previous.sourceInstruments().get(id);
+        return source == null ? previous.lanes().get(id) : source.fm();
+    }
+
     private static InstrumentCatalogue.Variant incumbent(InstrumentCatalogue catalogue, Result previous, String id) {
-        var source = previous == null || previous.sourceInstruments() == null ? null : previous.sourceInstruments().get(id);
-        var lane = source != null ? source.fm() : previous == null ? null : previous.lanes().get(id);
+        var lane = savedPatch(previous, id);
         if (lane == null || lane.variantId() == null) return null;
         InstrumentCatalogue.Match match;
         try {

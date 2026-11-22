@@ -51,7 +51,7 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
 
     private static void check(TreeSet<String> warnings, String kind, byte[] bytes, AssetOrigin origin) {
         if (origin == null) {
-            if (StockTable.match(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
+            if (StockTable.matchProjectAsset(kind, bytes) != null) warnings.add("ROM_DERIVED_DATA");
         } else {
             switch (origin.type()) {
                 case "stock" -> warnings.add("ROM_DERIVED_DATA");
@@ -85,10 +85,13 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
         return switch (code) {
             case "RETAIL_SONG_DATA" -> "This package contains copyrighted song data from the retail game. "
                     + "It is for personal use and must not be redistributed.";
+            case "DERIVED_FROM_RETAIL_SONG" -> "The patch carries only changed bytes from the retail song bank. "
+                    + "The player's ROM supplies the original bank. The composition still belongs to the game.";
             case "ROM_DERIVED_DATA" -> "This package contains assets derived from the game ROM. "
                     + "It is for personal use and must not be redistributed. Use portable mode to reference eligible stock assets when sharing.";
             case "UNKNOWN_ROM_IMAGE" -> "ROM image fingerprint is unknown. The stock asset hashes decide whether it can be used.";
             case "SOURCE_AUDIO" -> "This package contains audio derived from an input recording. Check that you have the rights to it.";
+            case "TEMPO_APPROXIMATED" -> "The target driver approximates the S3K tick rate for a tempo in this package.";
             case "THIRD_PARTY" -> "This package contains third-party material. Check its license.";
             default -> code;
         };

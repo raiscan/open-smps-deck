@@ -71,6 +71,13 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
     }
     private List<ProposalMark> proposals = List.of();
+    private record SkipHit(double x, double y, String reason) {
+        boolean contains(double px, double py) {
+            return px >= x - 2 && px <= x + 7 && py >= y - 2 && py <= y + 7;
+        }
+    }
+
+    private final List<SkipHit> layerSkips = new ArrayList<>();
     private final List<ProposalHit> proposalHits = new ArrayList<>();
     private List<Overlay> pending = List.of();
     private Map<String, Overlay> pendingByNote = Map.of();
@@ -157,7 +164,9 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             var proposalsAtPointer = proposalHits.stream().filter(mark -> mark.contains(event.getX(), event.getY()))
                     .map(mark -> mark.proposal().reason()).distinct().limit(4)
                     .collect(java.util.stream.Collectors.joining("\n"));
-            String text = !proposalsAtPointer.isEmpty() ? proposalsAtPointer
+            String blockers = layerSkips.stream().filter(mark -> mark.contains(event.getX(), event.getY()))
+                    .map(SkipHit::reason).distinct().limit(4).collect(java.util.stream.Collectors.joining("\n"));
+            String text = !blockers.isEmpty() ? blockers : !proposalsAtPointer.isEmpty() ? proposalsAtPointer
                     : hit != null ? description(hit.note()) : section != null
                     ? section.label() + " · " + section.author() : "";
             if (text.isEmpty()) hover.hide();
@@ -698,6 +707,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         double width = canvas.getWidth();
         hits.clear();
         proposalHits.clear();
+        layerSkips.clear();
         g.setFill(BACKGROUND);
         g.fillRect(0, 0, width, contentHeight);
         g.setFont(Font.font("Monospaced", 11));
@@ -919,6 +929,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             double barWidth = Math.max(3, x(ghost.interval().sourceEnd()) - left);
             double top = y(ghost.pitch()) + Math.min(7, rowHeight() / 2 + 2);
             if (ghost.layer().status() == ReconstructionLayers.Status.skipped) {
+                layerSkips.add(new SkipHit(left, top, ghost.layer().mode() + ": " + ghost.layer().reason()));
                 g.setStroke(Color.SALMON);
                 g.strokeLine(left, top, left + 5, top + 5);
                 g.strokeLine(left, top + 5, left + 5, top);

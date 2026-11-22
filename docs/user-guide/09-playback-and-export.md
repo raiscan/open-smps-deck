@@ -34,3 +34,9 @@ bindings. OpenGGF currently has no direct ZIP loader.
 
 See the [Studio guide](studio.md#listen-and-export) and
 [CLI and MCP export commands](../../headless/README.md#export-project-output).
+
+## Test in game
+
+Export a patched Sonic 3 & Knuckles ROM or a BPS patch to hear your song on
+the title screen. Register your clean ROM in Studio or with the CLI first.
+[Test in game setup and options](14-test-in-game.md)

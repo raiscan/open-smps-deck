@@ -76,7 +76,7 @@ class EnvelopeAssetsTest {
         for(String policy:List.of("RESET","CARRY")) {
             var p=project(source("FM",policy,null,"m"),envs,8);
             p=ProjectEdits.addClip(p,new Clip("d","s","FM1",8,2));
-            byte[] song=ProjectCompiler.compile(p);
+            byte[] song=ProjectCompiler.compile(p, ProjectCompiler.Encoding.LINEAR);
             assertArrayEquals(NativeCommandsTest.join(reset,bytes(0xB1,4),policy.equals("RESET")?reset:new byte[0],bytes(0xB1,4),reset,bytes(0xB1,2,0xF2)),Arrays.copyOfRange(song,word(song,10),word(song,0)));
         }
         var noAssets=project(source("PSG","RESET",null,null),List.of(),4);
@@ -136,7 +136,7 @@ class EnvelopeAssetsTest {
             String json=ProjectFormat.write(p);assertFalse(json.contains("envelopes"));assertFalse(json.contains("EnvelopeId"));
             assertEquals(p,ProjectFormat.read(json));assertEquals(json,ProjectFormat.write(ProjectFormat.read(json)));
             assertFalse(ProjectCompiler.compileWithAssets(p).requiresAssets());
-            byte[] song=ProjectCompiler.compileWithAssets(p).song();
+            byte[] song=ProjectCompiler.compileWithAssets(p, ProjectCompiler.Encoding.LINEAR).song();
             byte[] reset=p.formatVersion()==1?bytes(0xEF,0,0xE4,100,0xE0,0xC0,0xED,0x40):NativeCommandsTest.fmReset();
             byte[] repetition=p.formatVersion()==1?bytes(0xB1,12,0x80,12):bytes(0xB1,6,0xE0,128,0xE7,6,0x80,12);
             assertArrayEquals(NativeCommandsTest.join(reset,repetition,reset,repetition,bytes(0xF2)),Arrays.copyOfRange(song,word(song,10),word(song,0)));

@@ -158,20 +158,33 @@ public final class ReconstructionInspection {
 
     public List<ReconstructionLayers.Result> noteLayers(String noteId) {
         var row = trace.get(noteId);
-        return row == null || row.layers() == null ? List.of() : row.layers();
+        return row == null ? List.of() : displayLayers(row);
     }
 
     public static int laneRgb(String lane) { return EvidencePlot.laneColor(lane).getRGB() & 0xffffff; }
 
+    private static List<ReconstructionLayers.Result> displayLayers(ReconstructionTrace.Row row) {
+        var layers = new ArrayList<ReconstructionLayers.Result>();
+        if (row.layers() != null) layers.addAll(row.layers());
+        if (row.policyDecisions() != null) {
+            for (var decision : row.policyDecisions()) {
+                if (decision.status() != ReconstructionLanePolicies.Status.skipped
+                        || decision.blockers() == null || decision.blockers().isEmpty()) continue;
+                layers.add(new ReconstructionLayers.Result(row.id(), null, decision.policy().name(), null, decision.delay(),
+                        0, ReconstructionLayers.Status.skipped, decision.detail(), null, decision.pitch(),
+                        decision.attackTick(), decision.attackTick() + decision.gate(), null));
+            }
+        }
+        return layers;
+    }
+
     private static List<LayerOverlay> layerOverlays(ReconstructionTrace.Row row, ReconstructionTimeMap clock) {
-        if (row.layers() == null) return List.of();
         var role = row.allocation() != null ? row.allocation().role() : row.roles() == null ? null : row.roles().role();
         var color = role == null || role == ReconstructionRoles.Role.drop ? Role.UNASSIGNED
                 : Role.valueOf(role.name().toUpperCase(Locale.ROOT));
-        return row.layers().stream().filter(layer -> layer.status() != ReconstructionLayers.Status.off)
-                .map(layer -> new LayerOverlay(layer, row.part(), color,
-                        layer.status() == ReconstructionLayers.Status.applied ? layer.pitch() : row.pitch(),
-                        interval(layer.status() == ReconstructionLayers.Status.applied
+        return displayLayers(row).stream().filter(layer -> layer.status() != ReconstructionLayers.Status.off)
+                .map(layer -> new LayerOverlay(layer, row.part(), color, layer.pitch() == null ? row.pitch() : layer.pitch(),
+                        interval(layer.startTick() != null && layer.endTick() != null
                                 ? ReconstructionTrace.ticks(layer.startTick(), layer.endTick(), clock)
                                 : java.util.Objects.requireNonNullElse(row.effectiveTiming(), row.timing())))).toList();
     }

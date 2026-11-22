@@ -103,6 +103,7 @@ final class ReconstructionVocalLead {
         var tools = metadata.containsKey("vocalCandidates")
                 ? gson.fromJson(metadata.get("vocalCandidates"), ExternalTranscribers.Evidence[].class)
                 : new ExternalTranscribers.Evidence[]{imported.provenance()};
+        String syllableTool = null;
         int[] cleanup = periodic;
         var encoded = metadata.get("f0Midi10ms");
         if (encoded != null && !encoded.isBlank()) {
@@ -127,7 +128,10 @@ final class ReconstructionVocalLead {
             offset = end;
             var notes = ReconstructionStemParts.notes(part, source, duration, true);
             var f0 = tool.metadata().get("f0Cents10ms");
-            if (f0 != null) {
+            if ("syllable".equals(tool.metadata().get("vocalMode")) && f0 != null) {
+                syllableTool = tool.tool();
+                candidates.put(tool.tool(), notes);
+            } else if (f0 != null) {
                 candidates.put(tool.tool(), contourNotes(notes, f0, track.frames()));
             } else {
                 candidates.put(tool.tool(), clean(part, notes, track, cleanup));
@@ -149,12 +153,28 @@ final class ReconstructionVocalLead {
                 bestScore = measurement.score();
             }
         }
-        if (tools.length > 1 || hasSegmentedF0) {
+        String choice = metadata.get("vocalChoice");
+        if ("fusion".equals(choice)) {
+            ReconstructionArtifacts.require(candidates.containsKey(choice), "vocalLead.choice",
+                    "fusion needs at least two note transcribers in defaults.vocals");
+            best = choice;
+        } else if (syllableTool != null && (choice == null || choice.equals("auto"))) {
+            best = syllableTool;
+        } else if (choice != null && !choice.equals("auto") && candidates.containsKey(choice)) {
+            best = choice;
+        }
+        if (tools.length > 1 || hasSegmentedF0 || choice != null) {
             metadata.put("vocalSelection", best);
             metadata.put("vocalComparison", gson.toJson(report));
             metadata.put("vocalReference", hasSegmentedF0 ? "stem-periodicity" : "stem-periodicity-with-model-gap-fill");
         }
-        return new Selection(candidates.getOrDefault(best, List.of()), voiced * HOP, rms);
+        var selected = candidates.getOrDefault(best, List.of());
+        int shift = Integer.parseInt(metadata.getOrDefault("vocalRegisterShift", "0"));
+        if (shift != 0) selected = selected.stream()
+                .filter(note -> note.pitch() + shift >= 12 && note.pitch() + shift <= 106)
+                .map(note -> new Note(note.id(), note.part(), note.start(), note.end(), note.pitch() + shift,
+                        note.velocity(), note.source(), note.confidence(), note.motion(), note.run(), note.bend())).toList();
+        return new Selection(selected, voiced * HOP, rms);
     }
 
     private static List<Note> contourNotes(List<Note> notes, String encoded, int frames) {

@@ -42,8 +42,12 @@ public final class ExternalTranscribers {
         return ExternalCommands.defaultConfig(CONFIG_ENV, "transcribers.json");
     }
 
+    record VocalOptions(String choice, int registerShift) {
+        static final VocalOptions DEFAULT = new VocalOptions("auto", 12);
+    }
+
     record Config(Path file, Map<String, List<String>> tonal, Map<String, List<String>> drums,
-                  Map<String, String> defaults) {
+                  Map<String, String> defaults, VocalOptions vocalLead) {
         String drumName(String override) {
             return override == null ? defaults.getOrDefault("drums", "spectral") : override;
         }
@@ -51,6 +55,17 @@ public final class ExternalTranscribers {
         String fallback(String override, boolean audioOnly) {
             if (override != null) require(tonal.containsKey(override), file.toString(), "unknown transcriber " + override);
             return override != null ? override : audioOnly && tonal.size() == 1 ? tonal.keySet().iterator().next() : null;
+        }
+
+        String audioRole(String role, String fallback, Map<String, String> overrides, boolean explicitFallback) {
+            if (!role.equals("vocals") || overrides.containsKey(role))
+                return forRole(role, fallback, overrides, explicitFallback);
+            String choice = vocalLead.choice();
+            if (!choice.equals("auto") && !choice.equals("fusion"))
+                return forRole(role, fallback, Map.of(role, choice), explicitFallback);
+            if (choice.equals("auto") && tonal.containsKey("rmvpe"))
+                return "rmvpe";
+            return forRole(role, fallback, overrides, choice.equals("auto") && explicitFallback);
         }
 
         String forRole(String role, String fallback, Map<String, String> overrides, boolean explicitFallback) {
@@ -80,7 +95,7 @@ public final class ExternalTranscribers {
         if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
             String override = System.getenv(CONFIG_ENV);
             if (optional && path == null && (override == null || override.isBlank()))
-                return new Config(file, Map.of(), Map.of(), Map.of());
+                return new Config(file, Map.of(), Map.of(), Map.of(), VocalOptions.DEFAULT);
             throw new IllegalArgumentException("External transcription needs a configured transcriber. No configuration at " + file);
         }
         JsonElement tree = ReconstructionArtifacts.readTree(file);
@@ -88,6 +103,7 @@ public final class ExternalTranscribers {
         var entries = tree.getAsJsonObject();
         var roleEntries = object(entries.remove("defaults"), file + ".defaults");
         var drumEntries = object(entries.remove("drumTranscribers"), file + ".drumTranscribers");
+        var vocal = object(entries.remove("vocalLead"), file + ".vocalLead");
         var tonal = ExternalCommands.commands(entries, file.toString(), PLACEHOLDER, "{input}", "{output}");
         var drums = ExternalCommands.commands(drumEntries, file + ".drumTranscribers", PLACEHOLDER, "{input}", "{output}");
         require(!drums.containsKey("spectral"), file.toString(), "spectral is a built-in drum detector");
@@ -102,7 +118,19 @@ public final class ExternalTranscribers {
                     file.toString(), "unknown transcriber " + name + " for role " + role);
             require(defaults.putIfAbsent(role, name) == null, file.toString(), "duplicate default for " + role);
         }
-        return new Config(file, tonal, drums, defaults);
+        require(java.util.Set.of("choice", "registerShift").containsAll(vocal.keySet()),
+                file + ".vocalLead", "expected choice and/or registerShift");
+        var choiceValue = vocal.get("choice");
+        require(choiceValue == null || choiceValue instanceof JsonPrimitive p && p.isString(),
+                file + ".vocalLead.choice", "expected auto, fusion or a configured transcriber name");
+        var choice = choiceValue == null ? VocalOptions.DEFAULT.choice() : choiceValue.getAsString();
+        require(choice.equals("auto") || choice.equals("fusion") || tonal.containsKey(choice),
+                file + ".vocalLead.choice", "unknown choice " + choice);
+        double shift = vocal.has("registerShift") ? number(vocal.get("registerShift"), file + ".vocalLead.registerShift")
+                : VocalOptions.DEFAULT.registerShift();
+        require(shift == Math.rint(shift) && shift >= -48 && shift <= 48,
+                file + ".vocalLead.registerShift", "expected integer semitones between -48 and 48");
+        return new Config(file, tonal, drums, defaults, new VocalOptions(choice, (int) shift));
     }
 
     private static JsonObject object(JsonElement element, String at) {
@@ -165,13 +193,17 @@ public final class ExternalTranscribers {
         if (!roles.isEmpty()) {
             require(LABEL.matcher(device).matches(), context, "invalid device");
             String fallback = config.fallback(name, audioOnly);
-            for (String role : roles.values()) config.forRole(role, fallback, overrides, name != null);
+            for (String role : roles.values()) {
+                if (audioOnly) config.audioRole(role, fallback, overrides, name != null);
+                else config.forRole(role, fallback, overrides, name != null);
+            }
             String configHash = ReconstructionCli.audioHash(config.file);
             if (capture != null) capture.config(config.file);
             for (var entry : new TreeMap<>(roles).entrySet()) {
                 int part = entry.getKey();
                 String role = entry.getValue();
-                String selected = config.forRole(role, fallback, overrides, name != null);
+                String selected = audioOnly ? config.audioRole(role, fallback, overrides, name != null)
+                        : config.forRole(role, fallback, overrides, name != null);
                 try {
                     Path input = Path.of(stems.get(part));
                     var selectedNames = names(role.toLowerCase(java.util.Locale.ROOT), selected);
@@ -183,6 +215,11 @@ public final class ExternalTranscribers {
                         for (String tool : selectedNames)
                             contenders.add(run(config.tonal.get(tool), tool, configHash, input, role, device, part, null));
                         result.put(part, combine(contenders, selected, configHash, input, device, part, capture));
+                    }
+                    if (audioOnly && role.equals("vocals")) {
+                        var metadata = result.get(part).provenance.metadata();
+                        metadata.put("vocalChoice", overrides.containsKey(role) ? "auto" : config.vocalLead.choice());
+                        metadata.put("vocalRegisterShift", Integer.toString(config.vocalLead.registerShift()));
                     }
                 } catch (IllegalArgumentException | IOException error) {
                     throw new IOException("Transcriber " + selected + " for " + role + ": " + error.getMessage(), error);
@@ -225,7 +262,7 @@ public final class ExternalTranscribers {
             Path recorded = capture == null ? output : capture.external(part, output, false);
             var notes = readNotes(recorded);
             return new PartNotes(new Evidence(name, role, device, inputHash, ReconstructionCli.audioHash(recorded),
-                    configHash, metadata(output), notes.size(), true), notes);
+                    configHash, new TreeMap<>(metadata(output)), notes.size(), true), notes);
         });
     }
 

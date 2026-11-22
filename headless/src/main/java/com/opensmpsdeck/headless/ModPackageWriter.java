@@ -17,8 +17,8 @@ final class ModPackageWriter {
         var ids = new TreeSet<>(replacements);
         if (ids.isEmpty() || ids.size() != replacements.size())
             throw new IllegalArgumentException("Supply one or more distinct --replace music IDs");
-        var valid = S3kRomImporter.songs().stream().map(S3kRomImporter.Song::id).toList();
-        if (!valid.containsAll(ids)) throw new IllegalArgumentException("--replace requires a stock S3K music ID (decimal 1–51)");
+        var valid = PackageDriver.supported(manifest.driver()).musicIds();
+        if (!valid.containsAll(ids)) throw new IllegalArgumentException("--replace requires a stock " + manifest.driver() + " music ID (decimal)");
         String prefix = "audio/smps/" + info.id() + "/";
         var mod = new StringBuilder("formatVersion: 1\n")
                 .append("id: ").append(yaml(info.id())).append('\n')

@@ -1,11 +1,11 @@
 package com.opensmpsdeck.headless;
 
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.AssetOrigin;
 import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.DacSample;
 import com.opensmpsdeck.project.Envelope;
+import com.opensmpsdeck.project.NativeProgram;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.RetailSongOrigin;
@@ -23,14 +23,23 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageWriter {
-    record Payload(PackageManifest manifest, Map<String, byte[]> entries, List<String> converted) {
+    record Payload(PackageManifest manifest, Map<String, byte[]> entries, List<String> converted,
+                   List<String> tempoWarnings) {
         List<String> warnings() { return manifest.provenance().warnings(); }
+
+        List<String> exportWarnings() {
+            return warnings().stream()
+                    .flatMap(code -> code.equals("TEMPO_APPROXIMATED") ? tempoWarnings.stream() : java.util.stream.Stream.of(code))
+                    .toList();
+        }
     }
 
     private record Selection(Asset asset, AssetOrigin origin) {
@@ -38,6 +47,7 @@ final class PortablePackageWriter {
     }
 
     private final TreeSet<String> warnings = new TreeSet<>();
+    private final List<String> tempoWarnings = new ArrayList<>();
     private final List<String> converted = new ArrayList<>();
     private final List<Asset> assets = new ArrayList<>();
     private final Map<Kind, Map<String, byte[]>> files = new EnumMap<>(Kind.class);
@@ -60,11 +70,31 @@ final class PortablePackageWriter {
         return manifest.source() == null ? PortableArchive.WITHOUT_SOURCE : PortableArchive.WITH_SOURCE;
     }
 
+    private PackageDriver driver;
+
     private Payload buildPackage(StudioProject project, PortableOptions options) throws IOException {
-        var driver = PackageDriver.supported(options.driver());
+        driver = PackageDriver.supported(options.driver());
         var info = Metadata.make(project.name(), options.id(), options.version(), options.authors(), options.license());
         var nativeProgram = project.nativeProgram();
-        var arrangement = nativeProgram == null ? ProjectCompiler.compileArrangementLayout(project) : null;
+        var retail = retail(ProjectProvenance.retailOrigin(project));
+        boolean patch = options.retailPatch();
+        if (patch) {
+            require(driver.id().equals("s3k"), "--retail-patch supports only S3K native v5 banks");
+            require(nativeProgram != null, "--retail-patch requires a native v5 bank. "
+                    + "copy-arrangement produces a compiled arrangement; use the embedded export for it.");
+            require(retail != null && retail.game().equals(driver.id()), "--retail-patch requires a retail-derived S3K bank");
+        }
+        if (nativeProgram != null && !driver.id().equals("s3k"))
+            throw new IllegalArgumentException(driver.id() + ": native v5 banks are S3K-only");
+        int tempo = project.tempo();
+        Integer speedUpTempo = options.speedUpTempo();
+        if (driver instanceof ClassicPackageDriver classic) {
+            tempo = convertTempo(classic, "Normal tempo", tempo);
+            if (speedUpTempo != null) speedUpTempo = convertTempo(classic, "Speed-shoes tempo", speedUpTempo);
+            if (!tempoWarnings.isEmpty() && options.strictTempo())
+                throw new IllegalArgumentException(String.join("\n", tempoWarnings));
+        }
+        var arrangement = nativeProgram == null ? driver.compile(project, tempo) : null;
         byte[] original = arrangement == null ? ProjectCompiler.compile(project) : arrangement.bytes();
         var compiled = new CompiledProject(original, project.envelopes(), project.samples(), nativeProgram,
                 nativeProgram == null ? List.of() : project.voices());
@@ -72,12 +102,12 @@ final class PortablePackageWriter {
         int base = nativeProgram == null ? 0 : nativeProgram.bankBase();
         int header = nativeProgram == null ? 0 : nativeProgram.headerOffset();
         int localCount = nativeProgram == null ? project.voices().size() : nativeProgram.localVoiceCount();
-        int preview = nativeProgram == null ? ProjectRenderTiming.presentationCount(project) : nativeProgram.previewFrames();
-        int localStart = localCount == 0 ? -1 : word(original, header) - base;
+        int preview = nativeProgram == null ? driver.previewFrames(project, tempo) : nativeProgram.previewFrames();
+        int localStart = localCount == 0 ? -1 : driver.word(original, header) - base;
         require(localCount == 0 || localStart >= 0 && localStart + 25 * localCount <= original.length,
                 "Local FM table extends outside track.bin");
 
-        byte[] track = original.clone();
+        byte[] track = patch ? encodePatch(retail, original, options) : original.clone();
         var sourceVoices = new ArrayList<Voice>();
         var sourceEnvelopes = new ArrayList<Envelope>();
         var sourceSamples = new ArrayList<DacSample>();
@@ -88,18 +118,30 @@ final class PortablePackageWriter {
 
         for (int i = 0; i < project.voices().size(); i++) {
             var voice = project.voices().get(i);
-            byte[] bytes = StockTable.bytes(voice.bytes());
+            byte[] editable = StockTable.bytes(voice.bytes());
+            byte[] bytes = driver.voiceBytes(editable.clone());
+            var origin = voice.origin();
+            if (driver == ClassicPackageDriver.S2) {
+                if (origin != null && origin.ref() != null && origin.ref().game().equals("s2"))
+                    origin = ClassicPackageDriver.swapVoicePatchOffsets(origin);
+                else if (origin == null && StockTable.match("FM_VOICE", bytes, driver.id()) == null
+                        && StockTable.matchProjectAsset("FM_VOICE", editable) != null)
+                    origin = AssetOrigin.stock(null);
+            }
             Integer offset = nativeProgram == null ? localStart + i * 25 : null;
-            var selected = select(Kind.FM_VOICE, voice.id(), voice.name(), bytes, voice.origin(), offset);
+            var selected = select(Kind.FM_VOICE, voice.id(), voice.name(), bytes, origin, offset);
             if (selected.referenced() && offset != null) fill(track, offset, selected.asset().key());
             if (global != null) {
                 globalKeys.add(selected.asset().key());
                 if (!selected.referenced()) System.arraycopy(bytes, 0, global, i * 25, 25);
             }
-            sourceVoices.add(new Voice(voice.id(), voice.name(), selected.referenced() ? null : voice.bytes(), selected.origin()));
+            var sourceOrigin = selected.origin();
+            if (selected.referenced() && driver == ClassicPackageDriver.S2)
+                sourceOrigin = ClassicPackageDriver.swapVoicePatchOffsets(sourceOrigin);
+            sourceVoices.add(new Voice(voice.id(), voice.name(), selected.referenced() ? null : voice.bytes(), sourceOrigin));
         }
 
-        if (nativeProgram != null) {
+        if (nativeProgram != null && !patch) {
             for (int slot = 0; slot < localCount; slot++) {
                 int offset = localStart + slot * 25;
                 addBankVoice(original, track, offset, "bank-local-" + slot, "Local FM " + slot);
@@ -109,7 +151,7 @@ final class PortablePackageWriter {
             for (int offset = 0; offset <= original.length - 25; offset++) {
                 if (localCount > 0 && offset < localStart + localCount * 25 && offset + 25 > localStart) continue;
                 byte[] bytes = Arrays.copyOfRange(original, offset, offset + 25);
-                var ref = StockTable.match("FM_VOICE", bytes);
+                var ref = StockTable.match("FM_VOICE", bytes, driver.id());
                 if (ref == null) continue;
                 addBankVoice(original, track, offset, "bank-voice-" + offset, "Bank FM " + offset);
                 offset += 24;
@@ -117,9 +159,16 @@ final class PortablePackageWriter {
             if (options.includeSource() && !fills.isEmpty()) romBytes = true;
         }
 
+        // The importer keeps raw ROM envelopes alongside their bound playback
+        // versions for editing. A source-free patch needs only the latter.
+        var boundEnvelopes = patch ? nativeProgram.envelopeSlots().stream()
+                .map(NativeProgram.EnvelopeSlot::assetId).collect(Collectors.toSet()) : Set.<String>of();
         for (var envelope : project.envelopes()) {
+            var origin = envelope.origin();
+            if (patch && origin != null && origin.type().equals("stock") && origin.ref() == null
+                    && !boundEnvelopes.contains(envelope.id())) continue;
             Kind kind = Kind.valueOf(envelope.type());
-            var selected = select(kind, envelope.id(), envelope.name(), StockTable.bytes(envelope.bytes()), envelope.origin(), null);
+            var selected = select(kind, envelope.id(), envelope.name(), StockTable.bytes(envelope.bytes()), origin, null);
             envelopeKeys.put(envelope.id(), selected.asset().key());
             sourceEnvelopes.add(new Envelope(envelope.id(), envelope.name(), envelope.type(),
                     selected.referenced() ? null : envelope.bytes(), selected.origin()));
@@ -148,14 +197,17 @@ final class PortablePackageWriter {
             }
         }
 
-        var retail = ProjectProvenance.retailOrigin(project);
-        if (retail != null) {
+        if (patch) {
+            warnings.add("DERIVED_FROM_RETAIL_SONG");
+        } else if (retail != null) {
             romBytes = true;
             warnings.add("RETAIL_SONG_DATA");
         }
         if (romBytes) warnings.add("ROM_DERIVED_DATA");
-        var games = assets.stream().filter(a -> a.ref() != null).map(a -> a.ref().game()).distinct().sorted().toList();
-        byte[] sourceBytes = options.includeSource()
+        var games = new TreeSet<String>();
+        for (var asset : assets) if (asset.ref() != null) games.add(asset.ref().game());
+        if (patch) games.add(retail.game());
+        byte[] sourceBytes = options.includeSource() && !patch
                 ? ProjectFiles.encodeSource(project.withAssets(sourceVoices, sourceEnvelopes, sourceSamples)) : null;
         var source = sourceBytes == null ? null : new Source("source.smps.json", StockTable.hash(sourceBytes), true);
         var globalVoices = global == null ? null : new GlobalVoices("voices/global.bin", StockTable.hash(global), globalKeys);
@@ -176,20 +228,51 @@ final class PortablePackageWriter {
             }
         }
         fills.sort(java.util.Comparator.comparingInt(Fill::offset));
-        var bank = new Bank("embedded", "track.bin", StockTable.hash(track), StockTable.hash(original),
+        var bank = new Bank(patch ? "patch" : "embedded", patch ? RetailBankPatch.PATH : "track.bin",
+                StockTable.hash(track), StockTable.hash(original),
                 base, header, localCount, preview, relocations, relocationsComplete, List.copyOf(fills));
         var manifest = new PackageManifest(4, "portable", driver.id(), info, generator(),
-                new Provenance(romBytes, retail != null, retail(retail), List.copyOf(warnings)), new Requirements(!games.isEmpty(), games),
-                new JsonObject(), bank, List.copyOf(assets), envelopes, List.copyOf(dac.values()), globalVoices, source);
+                new Provenance(romBytes, retail != null && !patch, retail, List.copyOf(warnings)),
+                new Requirements(!games.isEmpty(), List.copyOf(games)),
+                options.driverOptions(speedUpTempo), bank, List.copyOf(assets), envelopes, List.copyOf(dac.values()), globalVoices, source);
         var entries = new LinkedHashMap<String, byte[]>();
         entries.put("manifest.json", manifest.encode());
-        entries.put("track.bin", track);
+        entries.put(bank.path(), track);
         if (global != null) entries.put("voices/global.bin", global);
         for (Kind kind : List.of(Kind.PSG_VOLUME, Kind.MODULATION, Kind.DAC_SAMPLE))
             entries.putAll(files.getOrDefault(kind, Map.of()));
         if (sourceBytes != null) entries.put("source.smps.json", sourceBytes);
         PortablePackageReader.validateStructure(manifest, entries);
-        return new Payload(manifest, entries, List.copyOf(converted));
+        return new Payload(manifest, entries, List.copyOf(converted), List.copyOf(tempoWarnings));
+    }
+
+    private byte[] encodePatch(Retail retail, byte[] target, PortableOptions options) throws IOException {
+        byte[] base;
+        String targetHash = StockTable.hash(target);
+        if (options.roms().isEmpty()) {
+            require(StockTable.entries().stream().anyMatch(entry -> entry.kind().equals("BANK")
+                            && entry.game().equals(retail.game()) && entry.songId() == retail.songId()
+                            && entry.sha256().equals(retail.bankSha256())),
+                    "No stock table BANK entry for " + retail.game() + " song " + retail.songId()
+                            + " with SHA-256 " + retail.bankSha256() + "; supply --rom");
+            require(retail.bankSha256().equals(targetHash), RetailBankPatch.romNeeded(retail)
+                    + " to compare the edited bank");
+            base = target;
+        } else {
+            base = RetailBankPatch.resolveBase(retail, PortablePackages.openRoms(options.roms(), driver, warnings));
+        }
+        byte[] delta = RetailBankPatch.encode(base, target);
+        StockAssets.verifyHash("Assembled bank", targetHash, RetailBankPatch.apply(delta, base));
+        return delta;
+    }
+
+    private int convertTempo(ClassicPackageDriver classic, String field, int sourceByte) {
+        var conversion = classic.convertTempo(sourceByte);
+        if (!conversion.exact()) {
+            warnings.add("TEMPO_APPROXIMATED");
+            tempoWarnings.add(conversion.warning(field, sourceByte, classic));
+        }
+        return conversion.targetByte();
     }
 
     private static List<Integer> headerRelocations(byte[] bytes, int base, int header) {
@@ -221,17 +304,28 @@ final class PortablePackageWriter {
         int ordinal = counts.merge(kind, 1, Integer::sum) - 1;
         String key = kind.prefix + "/" + ordinal;
         var origin = declared;
-        if (declared == null) {
-            var ref = StockTable.match(kind.name(), bytes);
+        boolean classicWithoutLocator = driver instanceof ClassicPackageDriver && declared != null
+                && declared.type().equals("stock") && declared.ref() == null;
+        if (declared == null || classicWithoutLocator) {
+            var ref = StockTable.match(kind.name(), bytes, driver.id());
             if (ref != null) {
                 origin = AssetOrigin.stock(ref);
-                warnings.add("UNDECLARED_STOCK_CONVERTED");
-                converted.add(id);
+                if (declared == null) {
+                    warnings.add("UNDECLARED_STOCK_CONVERTED");
+                    converted.add(id);
+                }
+            } else if (declared == null && StockTable.match(kind.name(), bytes) != null) {
+                origin = AssetOrigin.stock(null);
             }
+        }
+        if (origin != null && origin.type().equals("stock") && origin.ref() != null
+                && !origin.ref().game().equals(driver.id())) {
+            var match = StockTable.match(kind.name(), bytes, driver.id());
+            if (match != null) origin = AssetOrigin.stock(match);
         }
         if (origin != null && origin.type().equals("stock") && origin.ref() != null) {
             var transforms = origin.transforms() == null ? List.<AssetOrigin.Transform>of() : origin.transforms();
-            if (origin.ref().game().equals("s3k") && (!transforms.isEmpty() || origin.ref().sha256().equals(StockTable.hash(bytes)))) {
+            if (origin.ref().game().equals(driver.id()) && (!transforms.isEmpty() || origin.ref().sha256().equals(StockTable.hash(bytes)))) {
                 var asset = new Asset(key, kind, id, name, Origin.of(origin), origin.ref(), transforms,
                         transforms.isEmpty() ? null : StockTable.hash(bytes), null, null, null);
                 assets.add(asset);

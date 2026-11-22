@@ -11,10 +11,19 @@ public record StockRef(String game, String table, Integer songId, Integer slot, 
         boolean valid = switch (table) {
             case "global-fm" -> game.equals("s3k") && songId == null && inRange(slot, 0, 127) && index == null && note == null;
             case "local-fm" -> inRange(songId, 1, 65535) && inRange(slot, 0, 255) && index == null && note == null;
-            case "psg", "mod" -> songId == null && slot == null && inRange(index, 0, 255) && note == null
-                    && (!table.equals("mod") || game.equals("s3k"));
+            case "psg" -> songId == null && slot == null && note == null && switch (game) {
+                case "s1" -> inRange(index, 1, 9);
+                case "s2" -> inRange(index, 1, 13);
+                default -> inRange(index, 0, 255);
+            };
+            case "mod" -> songId == null && slot == null && inRange(index, 0, 255) && note == null
+                    && game.equals("s3k");
             case "dac" -> songId == null && slot == null && index == null
-                    && inRange(note, 0x81, game.equals("s3k") ? 0xC4 : 0xDF);
+                    && switch (game) {
+                        case "s1" -> inRange(note, 0x81, 0x83) || inRange(note, 0x88, 0x8B);
+                        case "s2" -> inRange(note, 0x81, 0x91);
+                        default -> inRange(note, 0x81, 0xC4);
+                    };
             default -> false;
         };
         if (!valid) throw new IllegalArgumentException("Invalid " + game + " stock locator: " + table);

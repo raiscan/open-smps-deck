@@ -25,7 +25,7 @@ import java.util.TreeSet;
 import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageReader {
-    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG",
+    static final Set<String> WARNING_CODES = Set.of("RETAIL_SONG_DATA", "ROM_DERIVED_DATA", "DERIVED_FROM_RETAIL_SONG", "TEMPO_APPROXIMATED",
             "UNDECLARED_STOCK_CONVERTED", "SOURCE_AUDIO", "THIRD_PARTY", "UNKNOWN_ROM_IMAGE", "DPCM_INEXACT");
 
     record Package(PackageManifest manifest, Map<String, byte[]> entries) {}
@@ -33,24 +33,16 @@ final class PortablePackageReader {
     private PortablePackageReader() {}
 
     static Package read(Path file) throws IOException {
-        return read(file, manifest -> {
-            if (!manifest.driver().equals("s3k") && manifest.requires().stockAssets())
-                PackageDriver.supported(manifest.driver());
-        });
-    }
-
-    static Package read(Path file, java.util.function.Consumer<PackageManifest> checkDriver) throws IOException {
         var entries = PortableArchive.read(file);
         var manifest = PackageManifest.decode(required(entries, "manifest.json"));
         validateStructure(manifest, entries);
-        checkDriver.accept(manifest);
         return new Package(manifest, entries);
     }
 
     static void validateStructure(PackageManifest manifest, Map<String, byte[]> entries) throws IOException {
         require(manifest.schemaVersion() == 4 && manifest.profile().equals("portable"), "Expected portable schema 4");
         String driver = manifest.driver();
-        require(Set.of("s1", "s2", "s3k").contains(driver), "Unknown package driver " + driver);
+        var dialect = PackageDriver.supported(driver);
         Metadata.validate(manifest.packageInfo());
         nonblank(manifest.generator().tool(), "generator.tool");
         nonblank(manifest.generator().version(), "generator.version");
@@ -58,11 +50,18 @@ final class PortablePackageReader {
         validateWarnings(manifest.provenance());
         validateDriverOptions(manifest);
         var bank = manifest.bank();
-        require(bank.form().equals("embedded"), "Unsupported bank form: " + bank.form());
-        require(bank.path().equals("track.bin"), "bank.path must be track.bin");
+        boolean patch = bank.form().equals("patch");
+        require(patch || bank.form().equals("embedded"), "Unsupported bank form: " + bank.form());
+        String bankPath = patch ? RetailBankPatch.PATH : "track.bin";
+        require(bank.path().equals(bankPath), "bank.path must be " + bankPath);
+        if (patch) validatePatchManifest(manifest);
         byte[] stored = required(entries, bank.path());
-        validateBank(driver, bank, stored);
+        validateBank(dialect, bank, stored, patch);
         var global = manifest.globalVoices();
+        if (dialect instanceof ClassicPackageDriver) {
+            require(bank.headerOffset() == 0, driver + ": bank.headerOffset must be 0");
+            require(global == null, driver + ": global FM voices are unsupported");
+        }
         byte[] globalBytes = null;
         var globalIndex = new HashMap<String, Integer>();
         if (global != null) {
@@ -81,16 +80,19 @@ final class PortablePackageReader {
             offsets.add(fill.offset());
             fillKeys.add(fill.asset());
         }
-        var expectedFiles = new ArrayList<>(List.of("manifest.json", "track.bin"));
+        var expectedFiles = new ArrayList<>(List.of("manifest.json", bankPath));
         if (global != null) expectedFiles.add(global.path());
         var paths = new EnumMap<Kind, List<String>>(Kind.class);
         var byKey = new HashMap<String, Asset>();
         var ordinals = new EnumMap<Kind, Integer>(Kind.class);
         var games = new TreeSet<String>();
+        if (patch) games.add(manifest.provenance().derivedFromRetailSong().game());
         int dacBytes = 0;
         for (var asset : manifest.assets()) {
             var kind = asset.kind();
             require(kind != null, "Unknown asset kind for " + asset.key());
+            require(!(dialect instanceof ClassicPackageDriver) || kind != Kind.MODULATION,
+                    driver + ": MODULATION envelopes are unsupported");
             int ordinal = ordinals.merge(kind, 1, Integer::sum) - 1;
             require(asset.key().equals(kind.prefix + "/" + ordinal), "Asset keys must be canonical: " + asset.key());
             byKey.put(asset.key(), asset);
@@ -103,6 +105,8 @@ final class PortablePackageReader {
             Integer globalSlot = globalIndex.get(asset.key());
             if (asset.ref() != null) {
                 require(asset.ref().game().equals(driver), asset.key() + " reference game must match package driver");
+                if (dialect instanceof ClassicPackageDriver && asset.ref().table().equals("local-fm"))
+                    require(dialect.musicIds().contains(asset.ref().songId()), asset.key() + " has unknown " + driver + " music ID");
                 if (asset.resultSha256() != null) hash(asset.resultSha256(), asset.key() + " resultSha256");
                 games.add(asset.ref().game());
                 if (globalSlot != null) {
@@ -112,6 +116,7 @@ final class PortablePackageReader {
                     require(fillKeys.contains(asset.key()), "Unbound FM reference " + asset.key());
                 }
             } else if (asset.bankOffset() != null) {
+                require(!patch, "Patch bank assets cannot use bankOffset");
                 int offset = asset.bankOffset();
                 require(kind == Kind.FM_VOICE && globalSlot == null, "Only local FM voices can use bankOffset");
                 range(offset, 0, stored.length - 25, asset.key() + " bankOffset");
@@ -125,6 +130,8 @@ final class PortablePackageReader {
                 }
                 byte[] payload = embedded(asset, entries, globalIndex, stored);
                 kind.validateLength(asset.key(), payload.length);
+                if (kind == Kind.PSG_VOLUME && dialect instanceof ClassicPackageDriver classic)
+                    ClassicPackageBank.validateEnvelope(classic, new Envelope(asset.id(), asset.name(), kind.name(), StockAssets.unsigned(payload)));
                 StockAssets.verifyHash(asset.key(), asset.sha256(), payload);
                 if (kind == Kind.DAC_SAMPLE) dacBytes += payload.length;
             }
@@ -134,14 +141,14 @@ final class PortablePackageReader {
         range(ordinals.getOrDefault(Kind.DAC_SAMPLE, 0), 0, DacSample.MAX_SAMPLES, "DAC asset count");
         range(dacBytes, 0, DacSample.MAX_TOTAL_PCM_BYTES, "total DAC bytes");
         require(manifest.requires().stockAssets() == !games.isEmpty()
-                && manifest.requires().games().equals(List.copyOf(games)), "requires does not match stock references");
+                && manifest.requires().games().equals(List.copyOf(games)), "requires does not match stock references or retail base");
         require(byKey.keySet().containsAll(globalIndex.keySet()), "Undefined global voice asset");
         for (String key : fillKeys) {
             var asset = byKey.get(key);
             require(asset != null && asset.kind() == Kind.FM_VOICE && asset.ref() != null,
                     "Bank fill must refer to an FM_VOICE reference: " + key);
         }
-        validateLocalOffsets(bank, stored, offsets);
+        if (!patch) validateLocalOffsets(dialect, bank, stored, offsets);
         validateBindings(manifest, byKey);
         for (Kind kind : List.of(Kind.PSG_VOLUME, Kind.MODULATION, Kind.DAC_SAMPLE))
             expectedFiles.addAll(paths.getOrDefault(kind, List.of()));
@@ -199,6 +206,19 @@ final class PortablePackageReader {
                 retail.game(), retail.songId(), retail.bankSha256());
     }
 
+    private static void validatePatchManifest(PackageManifest manifest) {
+        require(manifest.driver().equals("s3k"), "Patch banks are supported only for S3K native v5 banks");
+        var provenance = manifest.provenance();
+        var retail = provenance.derivedFromRetailSong();
+        require(retail != null && retail.game().equals(manifest.driver()),
+                "Patch bank requires provenance.derivedFromRetailSong for its driver");
+        require(!provenance.containsRetailSongData() && !provenance.warnings().contains("RETAIL_SONG_DATA")
+                        && provenance.warnings().contains("DERIVED_FROM_RETAIL_SONG"),
+                "Patch bank must declare DERIVED_FROM_RETAIL_SONG without RETAIL_SONG_DATA");
+        require(manifest.source() == null, "Patch bank must omit source");
+        require(manifest.bank().fills().isEmpty(), "Patch bank must have empty fills");
+    }
+
     private static void validateDriverOptions(PackageManifest manifest) {
         var options = manifest.driverOptions();
         if (manifest.driver().equals("s3k")) {
@@ -208,25 +228,31 @@ final class PortablePackageReader {
             var tempo = options.get("speedUpTempo");
             if (!tempo.isJsonNull()) {
                 require(tempo.isJsonPrimitive() && tempo.getAsJsonPrimitive().isNumber(), "speedUpTempo must be an integer");
-                range(tempo.getAsInt(), 0, 255, "speedUpTempo");
+                try {
+                    range(tempo.getAsBigDecimal().intValueExact(), 0, 255, "speedUpTempo");
+                } catch (ArithmeticException invalid) {
+                    throw new IllegalArgumentException("speedUpTempo must be an integer in 0..255", invalid);
+                }
             }
         }
     }
 
-    private static void validateBank(String driver, Bank bank, byte[] stored) {
-        range(stored.length, 1, PortableArchive.MAX_TRACK, "track.bin length");
+    private static void validateBank(PackageDriver driver, Bank bank, byte[] stored, boolean patch) {
+        if (!patch) range(stored.length, 1, PortableArchive.MAX_TRACK, "track.bin length");
         hash(bank.sha256(), "bank.sha256");
         hash(bank.assembledSha256(), "bank.assembledSha256");
         StockAssets.verifyHash(bank.path(), bank.sha256(), stored);
-        if (bank.fills().isEmpty()) require(bank.sha256().equals(bank.assembledSha256()), "A bank without fills must have matching hashes");
+        if (!patch && bank.fills().isEmpty())
+            require(bank.sha256().equals(bank.assembledSha256()), "A bank without fills must have matching hashes");
+        int length = patch ? RetailBankPatch.targetLength(stored) : stored.length;
         range(bank.base(), 0, 65535, "bank.base");
-        if (driver.equals("s3k")) PackageDriver.supported(driver).validateBase(bank.base());
-        range(bank.headerOffset(), 0, stored.length - 1, "bank.headerOffset");
+        driver.validateBase(bank.base());
+        range(bank.headerOffset(), 0, length - (patch ? 6 : 1), "bank.headerOffset");
         range(bank.localVoiceCount(), 0, 128, "bank.localVoiceCount");
         S3kRenderer.validatePresentations(bank.previewFrames());
         int previous = -1;
         for (int offset : bank.relocations()) {
-            range(offset, 0, stored.length - 2, "relocation offset");
+            range(offset, 0, length - 2, "relocation offset");
             require(offset > previous, "Relocations must be sorted and unique");
             previous = offset;
         }
@@ -239,11 +265,11 @@ final class PortablePackageReader {
         }
     }
 
-    private static void validateLocalOffsets(Bank bank, byte[] stored, Set<Integer> offsets) {
+    private static void validateLocalOffsets(PackageDriver driver, Bank bank, byte[] stored, Set<Integer> offsets) {
+        if (driver instanceof ClassicPackageDriver)
+            require(offsets.size() == bank.localVoiceCount(), driver.id() + ": FM assets must be local table slots");
         if (bank.localVoiceCount() > 0) {
-            require(bank.headerOffset() + 1 < stored.length, "Missing voice pointer");
-            int start = PortablePackageWriter.word(stored, bank.headerOffset()) - bank.base();
-            range(start, 0, stored.length - 25 * bank.localVoiceCount(), "local voice table offset");
+            int start = localVoiceStart(driver, bank, stored);
             for (int i = 0; i < bank.localVoiceCount(); i++)
                 require(offsets.contains(start + i * 25), "Missing local FM asset at " + (start + i * 25));
         }
@@ -252,6 +278,13 @@ final class PortablePackageReader {
             require(offset >= previous + 25, "Overlapping bank FM assets");
             previous = offset;
         }
+    }
+
+    private static int localVoiceStart(PackageDriver driver, Bank bank, byte[] track) {
+        require(bank.headerOffset() + 1 < track.length, "Missing voice pointer");
+        int start = driver.word(track, bank.headerOffset()) - bank.base();
+        range(start, 0, track.length - 25 * bank.localVoiceCount(), "local voice table offset");
+        return start;
     }
 
     private static void validateBindings(PackageManifest manifest, Map<String, Asset> byKey) {
@@ -277,11 +310,18 @@ final class PortablePackageReader {
 
     static CompiledProject assemble(Package artifact, List<? extends StockAssets> roms) {
         var manifest = artifact.manifest();
-        PackageDriver.supported(manifest.driver());
+        var driver = PackageDriver.supported(manifest.driver());
         var entries = artifact.entries();
         var bank = manifest.bank();
         byte[] stored = entries.get(bank.path());
-        byte[] track = stored.clone();
+        boolean patch = bank.form().equals("patch");
+        byte[] track = patch
+                ? RetailBankPatch.apply(stored, RetailBankPatch.resolveBase(manifest.provenance().derivedFromRetailSong(), roms))
+                : stored.clone();
+        if (patch) {
+            StockAssets.verifyHash("Assembled bank", bank.assembledSha256(), track);
+            if (bank.localVoiceCount() > 0) localVoiceStart(driver, bank, track);
+        }
         var global = manifest.globalVoices();
         var globalIndex = globalIndex(manifest);
         var payloads = new HashMap<String, byte[]>();
@@ -301,7 +341,7 @@ final class PortablePackageReader {
         }
         DacSample.validateAll(samples);
         for (var fill : bank.fills()) System.arraycopy(payloads.get(fill.asset()), 0, track, fill.offset(), 25);
-        StockAssets.verifyHash("Assembled bank", bank.assembledSha256(), track);
+        if (!patch) StockAssets.verifyHash("Assembled bank", bank.assembledSha256(), track);
         var globalVoices = new ArrayList<Voice>();
         if (global != null) {
             for (String key : global.voices()) globalVoices.add(new Voice(key, key, StockAssets.unsigned(payloads.get(key))));
@@ -317,10 +357,11 @@ final class PortablePackageReader {
         var manifest = artifact.manifest();
         var provenance = manifest.provenance();
         var warnings = new TreeSet<>(provenance.warnings());
-        boolean retail = provenance.containsRetailSongData() || provenance.derivedFromRetailSong() != null;
+        boolean patch = manifest.bank().form().equals("patch");
+        var bank = artifact.entries().get(manifest.bank().path());
+        boolean retail = !patch && (provenance.containsRetailSongData() || provenance.derivedFromRetailSong() != null
+                || StockTable.matchBank(bank) != null || StockTable.matchBankHash(manifest.bank().assembledSha256()) != null);
         boolean stock = provenance.containsRomDerivedData();
-        var bank = artifact.entries().get("track.bin");
-        if (StockTable.matchBank(bank) != null || StockTable.matchBankHash(manifest.bank().assembledSha256()) != null) retail = true;
         var globalIndex = globalIndex(manifest);
         for (var asset : manifest.assets()) {
             switch (asset.origin().type()) {

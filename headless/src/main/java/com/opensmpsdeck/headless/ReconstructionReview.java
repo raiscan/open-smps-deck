@@ -209,7 +209,7 @@ public final class ReconstructionReview {
                 if (voices == null || !voices.equals(ReconstructionVoicePlan.load(before))) from = "voices";
             }
             if (lanePolicyPreset == null) updated.write(after);
-            var args = new ArrayList<>(List.of("--from", from, after.toString()));
+            var args = new ArrayList<>(List.of("--from", from, after.toString(), "--policy-decisions"));
             if (detachedRevision != null) args.add("--overwrite-detached");
             if (lanePolicyPreset != null) args.addAll(List.of("--lane-policy-preset", lanePolicyPreset));
             var fromStage = ReconstructionStages.Stage.parse(from);
