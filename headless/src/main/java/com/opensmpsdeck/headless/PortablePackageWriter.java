@@ -32,8 +32,14 @@ import static com.opensmpsdeck.headless.PackageManifest.*;
 
 final class PortablePackageWriter {
     record Payload(PackageManifest manifest, Map<String, byte[]> entries, List<String> converted,
-                   List<String> tempoWarnings) {
-        List<String> warnings() { return manifest.provenance().warnings(); }
+                   List<String> tempoWarnings, List<String> matchedStockAssets, boolean unknownRom) {
+        List<String> warnings() {
+            if (!unknownRom || manifest.provenance().warnings().contains("UNKNOWN_ROM_IMAGE"))
+                return manifest.provenance().warnings();
+            var codes = new TreeSet<>(manifest.provenance().warnings());
+            codes.add("UNKNOWN_ROM_IMAGE");
+            return List.copyOf(codes);
+        }
 
         List<String> exportWarnings() {
             return warnings().stream()
@@ -54,16 +60,27 @@ final class PortablePackageWriter {
     private final Map<Kind, Integer> counts = new EnumMap<>(Kind.class);
     private final List<Fill> fills = new ArrayList<>();
     private boolean romBytes;
+    private boolean unknownRom;
 
     static Payload build(StudioProject project, PortableOptions options) throws IOException {
-        return new PortablePackageWriter().buildPackage(project, options);
+        var writer = new PortablePackageWriter();
+        var sources = PortablePackages.openExportRoms(options.roms(), warning -> writer.unknownRom = true);
+        return writer.buildPackage(project, options, sources);
+    }
+
+    static Payload build(StudioProject project, PortableOptions options, List<? extends StockAssets> sources) throws IOException {
+        return new PortablePackageWriter().buildPackage(project, options, sources);
     }
 
     static Payload write(StudioProject project, Path output, PortableOptions options) throws IOException {
-        require(output.getFileName().toString().endsWith(".smps.zip"), "Portable package output must end in .smps.zip");
         var payload = build(project, options);
-        PortableArchive.write(output, payload.entries(), archiveLimit(payload.manifest()));
+        publish(payload, output);
         return payload;
+    }
+
+    static void publish(Payload payload, Path output) throws IOException {
+        require(output.getFileName().toString().endsWith(".smps.zip"), "Portable package output must end in .smps.zip");
+        PortableArchive.write(output, payload.entries(), archiveLimit(payload.manifest()));
     }
 
     static int archiveLimit(PackageManifest manifest) {
@@ -72,7 +89,10 @@ final class PortablePackageWriter {
 
     private PackageDriver driver;
 
-    private Payload buildPackage(StudioProject project, PortableOptions options) throws IOException {
+    private Payload buildPackage(StudioProject project, PortableOptions options, List<? extends StockAssets> sources)
+            throws IOException {
+        var verification = new ExportStockCheck(sources);
+        project = verification.resolveProject(project);
         driver = PackageDriver.supported(options.driver());
         var info = Metadata.make(project.name(), options.id(), options.version(), options.authors(), options.license());
         var nativeProgram = project.nativeProgram();
@@ -107,7 +127,7 @@ final class PortablePackageWriter {
         require(localCount == 0 || localStart >= 0 && localStart + 25 * localCount <= original.length,
                 "Local FM table extends outside track.bin");
 
-        byte[] track = patch ? encodePatch(retail, original, options) : original.clone();
+        byte[] track = patch ? encodePatch(retail, original, sources) : original.clone();
         var sourceVoices = new ArrayList<Voice>();
         var sourceEnvelopes = new ArrayList<Envelope>();
         var sourceSamples = new ArrayList<DacSample>();
@@ -199,6 +219,7 @@ final class PortablePackageWriter {
 
         if (patch) {
             warnings.add("DERIVED_FROM_RETAIL_SONG");
+            if (unknownRom) warnings.add("UNKNOWN_ROM_IMAGE");
         } else if (retail != null) {
             romBytes = true;
             warnings.add("RETAIL_SONG_DATA");
@@ -243,13 +264,15 @@ final class PortablePackageWriter {
             entries.putAll(files.getOrDefault(kind, Map.of()));
         if (sourceBytes != null) entries.put("source.smps.json", sourceBytes);
         PortablePackageReader.validateStructure(manifest, entries);
-        return new Payload(manifest, entries, List.copyOf(converted), List.copyOf(tempoWarnings));
+        verification.verifyManifest(manifest);
+        return new Payload(manifest, entries, List.copyOf(converted), List.copyOf(tempoWarnings),
+                verification.matches(), unknownRom);
     }
 
-    private byte[] encodePatch(Retail retail, byte[] target, PortableOptions options) throws IOException {
+    private byte[] encodePatch(Retail retail, byte[] target, List<? extends StockAssets> sources) throws IOException {
         byte[] base;
         String targetHash = StockTable.hash(target);
-        if (options.roms().isEmpty()) {
+        if (sources.isEmpty()) {
             require(StockTable.entries().stream().anyMatch(entry -> entry.kind().equals("BANK")
                             && entry.game().equals(retail.game()) && entry.songId() == retail.songId()
                             && entry.sha256().equals(retail.bankSha256())),
@@ -259,7 +282,7 @@ final class PortablePackageWriter {
                     + " to compare the edited bank");
             base = target;
         } else {
-            base = RetailBankPatch.resolveBase(retail, PortablePackages.openRoms(options.roms(), driver, warnings));
+            base = RetailBankPatch.resolveBase(retail, sources);
         }
         byte[] delta = RetailBankPatch.encode(base, target);
         StockAssets.verifyHash("Assembled bank", targetHash, RetailBankPatch.apply(delta, base));

@@ -1,17 +1,16 @@
 package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonPrimitive;
-import java.io.IOException;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
 final class ModPackageWriter {
     private ModPackageWriter() {}
 
-    static void write(PortablePackageWriter.Payload payload, Path output, List<Integer> replacements) throws IOException {
+    static Map<String, byte[]> build(PortablePackageWriter.Payload payload, List<Integer> replacements) {
         var manifest = payload.manifest();
         var info = manifest.packageInfo();
         var ids = new TreeSet<>(replacements);
@@ -38,7 +37,7 @@ final class ModPackageWriter {
         entries.put("META-INF/openggf-mod.yaml", mod.toString().getBytes(StandardCharsets.UTF_8));
         entries.put("audio/audio-manifest.yaml", audio.getBytes(StandardCharsets.UTF_8));
         payload.entries().forEach((name, bytes) -> entries.put(prefix + name, bytes));
-        PortableArchive.write(output, entries, null);
+        return entries;
     }
 
     private static String yaml(String text) { return new JsonPrimitive(text).toString(); }

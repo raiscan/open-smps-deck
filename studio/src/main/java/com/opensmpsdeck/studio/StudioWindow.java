@@ -965,7 +965,24 @@ public final class StudioWindow implements AutoCloseable {
     }
 
     private FileChooser chooser(String heading,String extension){FileChooser chooser=new FileChooser();chooser.setTitle(heading);chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(extension.equals("json")?"SMPS Studio project":"Export ("+extension+")","*."+extension));return chooser;}
-    private void open(){if(!confirmLeave())return;var file=chooser("Open shared project","json").showOpenDialog(stage);if(file!=null)try{load(file.toPath());}catch(IOException|IllegalArgumentException e){error(e);}}
+    private void open() {
+        if (!confirmLeave()) return;
+        var file = chooser("Open shared project", "json").showOpenDialog(stage);
+        if (file == null) return;
+        Path path = file.toPath();
+        try {
+            var project = ProjectFiles.loadSource(path);
+            try {
+                ProjectFormat.requireResolved(project);
+            } catch (IllegalArgumentException redacted) {
+                ExportDialog.showRedacted(stage, project, path, RomLibrary.userLibrary(), io, status::setText);
+                return;
+            }
+            load(path);
+        } catch (IOException | IllegalArgumentException failure) {
+            error(failure);
+        }
+    }
     private void saveAs(){var chooser=chooser("Save a project copy (choose a new file)","json");chooser.setInitialFileName("project-copy.smps.json");var file=chooser.showSaveDialog(stage);if(file!=null)try{ProjectFiles.save(file.toPath(),relocateReview(document.project(),document.path(),file.toPath()),null);load(file.toPath());status.setText("Saved project copy");}catch(IOException|IllegalArgumentException e){error(e);}}
     static StudioProject relocateReview(StudioProject project, Path original, Path destination) {
         return project.withReview(project.references().stream().map(reference -> new AudioReference(reference.id(),

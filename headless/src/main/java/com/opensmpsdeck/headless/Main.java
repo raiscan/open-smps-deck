@@ -144,12 +144,17 @@ public final class Main {
                     if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires export --format mod");
                     if (!flags.portable() && flags.hasPackageOptions())
                         throw new IllegalArgumentException("Portable package options require --portable");
-                    var project = PortablePackages.openProject(input, flags.roms(), err);
+                    var project = ProjectFiles.loadSource(input);
                     if (flags.portable()) {
                         var payload = PortablePackageWriter.write(project, output, options);
                         PortablePackages.printWriteWarnings(payload, err);
                     } else {
-                        ProjectProvenance.printWarnings(ProjectPackage.write(project, output), err);
+                        var settings = new ProjectExport.PortableSettings(null, true, null, null, null,
+                                java.util.List.of(), java.util.List.of(), null, false, false, flags.roms());
+                        var export = new ProjectExport.Options(ProjectExport.Format.PACKAGE, null, null, null, null,
+                                false, false, settings);
+                        ProjectProvenance.printWarnings(ProjectExport.write(project, null, output, export,
+                                (done, total, message) -> {}), err);
                     }
                     out.println("Exported " + options.driver().toUpperCase(Locale.ROOT) + " bank and declared resources to " + output);
                 }

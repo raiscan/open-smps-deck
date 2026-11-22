@@ -26,7 +26,18 @@ public final class PortablePackages {
     public static StudioProject openProject(Path path, List<Path> roms, java.util.function.Consumer<String> warnings)
             throws IOException {
         if (roms.isEmpty()) return ProjectFiles.load(path).project();
-        var project = ProjectFiles.loadSource(path);
+        var sources = openExportRoms(roms, warnings);
+        return StockAssets.resolveProject(ProjectFiles.loadSource(path), sources);
+    }
+
+    public static StudioProject openExportProject(Path path, List<Path> roms, java.util.function.Consumer<String> warnings)
+            throws IOException {
+        if (roms.isEmpty()) return ProjectFiles.load(path).project();
+        return new ExportStockCheck(openExportRoms(roms, warnings)).resolveProject(ProjectFiles.loadSource(path));
+    }
+
+    static List<StockAssets> openExportRoms(List<Path> roms, java.util.function.Consumer<String> warnings)
+            throws IOException {
         var sources = new ArrayList<StockAssets>();
         boolean unknown = false;
         for (Path rom : roms) {
@@ -38,7 +49,7 @@ public final class PortablePackages {
             sources.add(image.assets());
         }
         if (unknown) warnings.accept("UNKNOWN_ROM_IMAGE");
-        return StockAssets.resolveProject(project, sources);
+        return sources;
     }
 
     static StudioProject openProject(Path path, List<Path> roms, PrintStream err) throws IOException {

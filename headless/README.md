@@ -1286,7 +1286,8 @@ Package exports warn when they embed assets derived from the ROM or
 copyrighted retail song data. Keep these packages for personal use and do
 not redistribute them. Portable mode can reference eligible stock assets.
 Warnings go to stderr for CLI package writers and appear in the `warnings` array for
-MCP package exports and reconstruction runs. Export still succeeds.
+MCP package exports and reconstruction runs. Studio shows them before writing.
+Provenance warnings permit export.
 
 `stock-table build ROM OUT.json` rebuilds the public stock hash and locator
 table. The default uses locked-on S3&K. For Sonic 1 or Sonic 2, pass
@@ -1310,8 +1311,8 @@ java -jar "$deck_jar" export PROJECT.smps.json replacement.jar --format mod --dr
 
 Portable exports include redacted source by default. Pass `--no-source`
 to omit it. Choose `--driver s1|s2|s3k` for an editable arrangement.
-Export defaults to the project target. Native v5 banks support `s3k`. Studio's
-**Portable SMPS package** export has the same driver choice. S1 and S2
+The `export` command and Studio use the project target by default.
+Native v5 banks support `s3k`. S1 and S2
 preserve the S3K duration tick rate as closely as their native clocks allow.
 `--speed-up-tempo BYTE` (decimal 0–255) uses the S3K clock for the optional
 gameplay speed-shoes tempo, then converts it to a native manifest byte.
@@ -1348,8 +1349,15 @@ the stored preview length. `render-package PKG OUT.wav [--rom PATH ...]
 [--frames N]` runs the same native rendering path with a positional output.
 When using an extracted redacted source, pass
 `--rom PATH` to `validate-project`, `render-project`, `compile-package`
-or `export` to resolve its stock assets. Studio reports the missing assets
-when opening that source. The Studio ROM picker is a follow-up.
+or `export` to resolve its stock assets. At export time, supplying a ROM
+also verifies stock references in already-resolved projects and packages. Export checks the base payload and compares the transformed bytes
+with the stored payload or manifest hash when present. A mismatch names the
+asset slot and prevents invalid output. Unknown ROM fingerprints warn, and
+matching asset hashes still permit export.
+
+Studio offers portable, mod and disassembly exports with an optional local ROM.
+See [Studio export](../docs/user-guide/studio.md#listen-and-export) for the picker
+and warning review.
 
 MCP `project_export` accepts `format: "portable"` or `"mod"` and optional
 `driver`, `speedUpTempo`, `strictTempo`, `noSource`, `retailPatch`,

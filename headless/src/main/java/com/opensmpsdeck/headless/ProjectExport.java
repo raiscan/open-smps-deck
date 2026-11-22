@@ -22,7 +22,7 @@ import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 
 public final class ProjectExport {
     public enum Format {
-        WAV("wav"), MP3("mp3"), VGM("vgm"), SMPS("bin"), PACKAGE("smps.zip"), PORTABLE("smps.zip"), MOD("jar");
+        WAV("wav"), MP3("mp3"), VGM("vgm"), SMPS("bin"), PACKAGE("smps.zip"), PORTABLE("smps.zip"), MOD("jar"), DISASM("zip");
 
         private final String extension;
 
@@ -32,7 +32,12 @@ public final class ProjectExport {
     }
 
     public record Options(Format format, Double start, Double end, Double fade, Integer loops,
-                          boolean stems, boolean zip, PortableSettings portable) {
+                          boolean stems, boolean zip, PortableSettings portable, DisasmSettings disasm) {
+        public Options(Format format, Double start, Double end, Double fade, Integer loops, boolean stems, boolean zip,
+                       PortableSettings portable) {
+            this(format, start, end, fade, loops, stems, zip, portable, null);
+        }
+
         public Options(Format format, Double start, Double end, Double fade, Integer loops, boolean stems, boolean zip) {
             this(format, start, end, fade, loops, stems, zip, null);
         }
@@ -45,6 +50,13 @@ public final class ProjectExport {
                 throw new IllegalArgumentException("Fade must be greater than zero and at most 600 seconds");
             if (loops != null && (!format.audio() || loops < 1 || loops > 99))
                 throw new IllegalArgumentException("Loop count requires WAV or MP3 and must be in 1..99");
+        }
+    }
+
+    public record DisasmSettings(List<Path> roms, boolean dpcmClosed, List<Integer> replaceDac) {
+        public DisasmSettings {
+            roms = List.copyOf(roms);
+            replaceDac = List.copyOf(replaceDac);
         }
     }
 
@@ -84,6 +96,10 @@ public final class ProjectExport {
 
     private ProjectExport() {}
 
+    public static boolean canExportRetailPatch(StudioProject project) {
+        return project.nativeProgram() != null && ProjectProvenance.retailOrigin(project) != null;
+    }
+
     public static Source open(Path input) throws IOException {
         Path work = Files.isDirectory(input) ? input : null;
         return new Source(ProjectFiles.load(work == null ? input : work.resolve("arrangement.smps.json")).project(), work);
@@ -93,15 +109,9 @@ public final class ProjectExport {
                              ReconstructionStages.Progress progress) throws IOException {
         output = output.toAbsolutePath().normalize();
         if (Files.exists(output, NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(output.toString());
-        if (options.format == Format.PACKAGE) {
-            progress.report(0, 1, "Writing SMPS package");
-            var warnings = ProjectPackage.write(project, output);
-            progress.report(1, 1, "Export complete");
-            return warnings;
-        }
-        if (options.format == Format.PORTABLE || options.format == Format.MOD) {
-            var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
-            return writePortable(project, output, options.format, settings, progress).exportWarnings();
+        if (options.format == Format.PACKAGE || options.format == Format.PORTABLE
+                || options.format == Format.MOD || options.format == Format.DISASM) {
+            return preparePackage(project, options).write(output, progress);
         }
         if (options.format == Format.SMPS) {
             progress.report(0, 1, "Writing raw S3K track");
@@ -174,20 +184,64 @@ public final class ProjectExport {
         return List.of();
     }
 
-    private static PortablePackageWriter.Payload writePortable(StudioProject project, Path output, Format format,
-                                                                 PortableOptions options, ReconstructionStages.Progress progress)
-            throws IOException {
-        progress.report(0, 1, "Writing portable SMPS package");
-        PortablePackageWriter.Payload payload;
-        if (format == Format.MOD) {
-            payload = PortablePackageWriter.build(project, options);
-            ModPackageWriter.write(payload, output, options.replacements());
-        } else {
-            if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires --format mod");
-            payload = PortablePackageWriter.write(project, output, options);
+    @FunctionalInterface
+    private interface PackageOutput {
+        void write(Path output) throws IOException;
+    }
+
+    /** A prepared export keeps the bytes checked and reviewed before publishing. */
+    public static final class PreparedPackage {
+        private final List<String> warnings;
+        private final List<String> matchedStockAssets;
+        private final PackageOutput output;
+
+        private PreparedPackage(List<String> warnings, List<String> matchedStockAssets, PackageOutput output) {
+            this.warnings = List.copyOf(warnings);
+            this.matchedStockAssets = List.copyOf(matchedStockAssets);
+            this.output = output;
         }
-        progress.report(1, 1, "Export complete");
-        return payload;
+
+        public List<String> warnings() { return warnings; }
+        public List<String> matchedStockAssets() { return matchedStockAssets; }
+
+        public List<String> write(Path path, ReconstructionStages.Progress progress) throws IOException {
+            progress.report(0, 1, "Writing export");
+            output.write(path.toAbsolutePath().normalize());
+            progress.report(1, 1, "Export complete");
+            return warnings;
+        }
+    }
+
+    public static PreparedPackage preparePackage(StudioProject project, Options options) throws IOException {
+        if (options.format == Format.DISASM) {
+            var settings = options.disasm == null ? new DisasmSettings(List.of(), false, List.of()) : options.disasm;
+            var kit = DisassemblyKit.prepare(project, project.target().id(), settings.roms(),
+                    settings.dpcmClosed(), settings.replaceDac());
+            return new PreparedPackage(List.copyOf(kit.warnings), kit.matchedStockAssets, kit::publish);
+        }
+        var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
+        if (options.format == Format.PACKAGE) {
+            var warnings = new java.util.TreeSet<String>();
+            var verification = new ExportStockCheck(PortablePackages.openExportRoms(settings.roms(), warnings::add));
+            var resolved = verification.resolveProject(project);
+            warnings.addAll(ProjectProvenance.detect(resolved).warnings());
+            return new PreparedPackage(List.copyOf(warnings), verification.matches(), output -> ProjectPackage.write(resolved, output));
+        }
+        return preparePortable(options.format, settings, PortablePackageWriter.build(project, settings));
+    }
+
+    private static PreparedPackage preparePortable(Format format, PortableOptions options, PortablePackageWriter.Payload payload) {
+        PackageOutput publisher;
+        if (format == Format.MOD) {
+            var entries = ModPackageWriter.build(payload, options.replacements());
+            publisher = output -> PortableArchive.write(output, entries, null);
+        } else if (format == Format.PORTABLE) {
+            if (!options.replacements().isEmpty()) throw new IllegalArgumentException("--replace requires --format mod");
+            publisher = output -> PortablePackageWriter.publish(payload, output);
+        } else {
+            throw new IllegalArgumentException("Expected a package export format");
+        }
+        return new PreparedPackage(payload.exportWarnings(), payload.matchedStockAssets(), publisher);
     }
 
     /** Provenance warnings for a default portable export, computed without writing a file. */
@@ -199,10 +253,23 @@ public final class ProjectExport {
         return PortablePackageWriter.build(project, settings == null ? PortableOptions.defaults(project.target()) : settings.options(project.target())).exportWarnings();
     }
 
+    public static String warningMessage(Format format, String warning) {
+        return switch (warning) {
+            case "DERIVED_FROM_RETAIL_SONG" -> ProjectProvenance.warningMessage(warning)
+                    + " Do not redistribute without the rights to the composition.";
+            case "SOURCE_AUDIO" -> "This export contains samples derived from an input recording. "
+                    + "Do not redistribute without the rights to that recording.";
+            case "UNDECLARED_STOCK_CONVERTED" -> DisassemblyKit.warningMessage(warning);
+            default -> format == Format.DISASM ? DisassemblyKit.warningMessage(warning)
+                    : ProjectProvenance.warningMessage(warning);
+        };
+    }
+
     public static com.google.gson.JsonObject exportPortable(StudioProject project, Path output, Options options,
                                                             ReconstructionStages.Progress progress) throws IOException {
         var settings = options.portable == null ? PortableOptions.defaults(project.target()) : options.portable.options(project.target());
-        var payload = writePortable(project, output, options.format, settings, progress);
+        var payload = PortablePackageWriter.build(project, settings);
+        preparePortable(options.format, settings, payload).write(output, progress);
         var result = new com.google.gson.JsonObject();
         var json = new com.google.gson.Gson();
         result.add("warnings", json.toJsonTree(payload.exportWarnings()));
@@ -396,14 +463,23 @@ public final class ProjectExport {
         Path input = Path.of(args[1]);
         Path work = Files.isDirectory(input) ? input : null;
         if (work != null) input = work.resolve("arrangement.smps.json");
-        var project = PortablePackages.openProject(input, flags.roms(), err);
-        var options = new Options(format, start, end, fade, loops, stems, zip);
         Path output = Path.of(args[2]);
+        var options = new Options(format, start, end, fade, loops, stems, zip);
         if (portable) {
-            var payload = writePortable(project, output, options.format(), flags.options(project.target()), (done, total, message) -> {});
+            var project = ProjectFiles.loadSource(input);
+            var settings = flags.options(project.target());
+            var payload = PortablePackageWriter.build(project, settings);
+            preparePortable(format, settings, payload).write(output, (done, total, message) -> {});
             PortablePackages.printWriteWarnings(payload, err);
         } else {
-            var warnings = write(project, work, output, options, (done, total, message) -> {});
+            var project = format == Format.PACKAGE ? ProjectFiles.loadSource(input)
+                    : PortablePackages.openExportProject(input, flags.roms(),
+                            warning -> ProjectProvenance.printWarnings(List.of(warning), err));
+            var settings = new PortableSettings(null, true, null, null, null, List.of(), List.of(),
+                    null, false, false, flags.roms());
+            var configured = new Options(format, options.start(), options.end(), options.fade(), options.loops(),
+                    options.stems(), options.zip(), settings);
+            var warnings = write(project, work, output, configured, (done, total, message) -> {});
             ProjectProvenance.printWarnings(warnings, err);
         }
         out.println("Exported " + format + " to " + args[2]);

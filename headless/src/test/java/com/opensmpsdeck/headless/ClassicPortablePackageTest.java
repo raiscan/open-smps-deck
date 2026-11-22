@@ -298,13 +298,13 @@ class ClassicPortablePackageTest {
             assertTrue(report.get("playbackValidated").getAsBoolean(), report.toString());
             assertTrue(report.get("valid").getAsBoolean(), report.toString());
             Path jar = directory.resolve(id + ".jar");
-            ModPackageWriter.write(payload, jar, List.of(129));
+            PortableArchive.write(jar, ModPackageWriter.build(payload, List.of(129)), null);
             try (var zip = new ZipFile(jar.toFile())) {
                 var manifest = zip.getEntry("META-INF/openggf-mod.yaml");
                 assertTrue(new String(zip.getInputStream(manifest).readAllBytes(), StandardCharsets.UTF_8)
                         .contains("baseGame: " + id + "\n"));
             }
-            assertThrows(IllegalArgumentException.class, () -> ModPackageWriter.write(payload, jar, List.of(13)));
+            assertThrows(IllegalArgumentException.class, () -> ModPackageWriter.build(payload, List.of(13)));
         }
     }
 

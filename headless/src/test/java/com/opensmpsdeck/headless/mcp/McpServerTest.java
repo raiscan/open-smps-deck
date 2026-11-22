@@ -3,6 +3,7 @@ package com.opensmpsdeck.headless.mcp;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.headless.S3kRomImporter;
+import com.opensmpsdeck.headless.ExportRomFixture;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.ProjectCompiler;
@@ -202,6 +203,14 @@ class McpServerTest {
         assertFalse(result.get("isError").getAsBoolean(), result::toString);
         var manifest = com.opensmpsdeck.headless.PortablePackages.inspect(directory.resolve("target.smps.zip"));
         assertEquals("s1", manifest.get("driver").getAsString());
+    }
+
+    @Test void portableExportChecksTransformedStockWhenGivenRom() throws Exception {
+        var fixture = ExportRomFixture.create(directory);
+        var source = fixture.writeProject(directory.resolve("stale.smps.json"), true);
+        assertToolError("project_export", Map.of("project", source.toString(), "format", "portable",
+                "output", "stale.smps.zip", "roms", List.of(fixture.rom().toString())), "Mismatch psg/0 (edited)");
+        assertFalse(Files.exists(directory.resolve("stale.smps.zip")));
     }
 
     @Test void bankLimitErrorsCarryTheCompiledAndLimitByteCounts() throws Exception {

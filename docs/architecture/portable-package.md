@@ -531,8 +531,20 @@ after resolution and native preflight. `--render` requires any ROMs needed
 by the package. Embedded exports support S1, S2 and S3K. S3K patch exports
 report `playbackPending` with the base song when the ROM is absent.
 
-Studio requires a resolved project. Use a ROM with the headless tools before
-rendering or compiling redacted source. A Studio ROM picker is a follow-up.
+For package and kit exports with a ROM, the writer resolves declared stock
+references even when the project already contains their bytes. It checks the ROM
+payload hash, applies any transforms and compares the result with the stored
+project payload (or the package manifest's result hash). The portable writer
+also verifies references inferred from exact stock matches. The report names
+each mismatching asset by slot and ID before any output is written. A redacted
+project can omit the payload used for comparison. The writer resolves it from
+its verified base reference and transforms.
+
+Studio offers portable packages, OpenGGF mod JARs and disassembly kits in
+[Export](../user-guide/studio.md#listen-and-export). The optional ROM path is
+remembered per game in Studio preferences. Studio shows the ROM check and
+provenance warnings before writing. Opening extracted redacted source in Studio
+offers package export with local ROM resolution.
 The [disassembly kit](disassembly-kit.md) reads an embedded portable bank
 and its asset bindings. It relocates pointers and remaps DAC notes for
 s1disasm, s2disasm or skdisasm according to the package driver. Stock DAC note reuse checks the asset identity and the retail

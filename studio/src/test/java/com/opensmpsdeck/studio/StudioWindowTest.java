@@ -1,6 +1,7 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.S3kRomImporter;
+import com.opensmpsdeck.headless.ProjectExport.Format;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
@@ -41,6 +42,50 @@ class StudioWindowTest {
         fx(()->{stage=new Stage();window=new StudioWindow(stage,file);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
+
+    @Test void exportDialogShowsPackageOptionsAndDriver() throws Exception {
+        var library = new RomLibrary(folder.resolve("roms.json"));
+        var project = ProjectFiles.load(Path.of("..", "examples", "native-evening-clock.smps.json")).project();
+        var nativeRetail = project.withDerivedFrom(new RetailSongOrigin("retail-song", "s3k", 13, "0".repeat(64)));
+        Platform.runLater(() -> ExportDialog.show(stage, nativeRetail, file, null, library,
+                task -> Thread.ofVirtual().start(task), ignored -> {}));
+        await(() -> dialogPane("export-dialog") != null);
+        fx(() -> {
+            var pane = dialogPane("export-dialog");
+            @SuppressWarnings("unchecked")
+            var formats = (ChoiceBox<Format>) pane.lookup("#export-format");
+            var portable = Format.PORTABLE;
+            var mod = Format.MOD;
+            var kit = Format.DISASM;
+            assertTrue(formats.getItems().containsAll(List.of(portable, mod, kit)));
+
+            formats.setValue(portable);
+            assertEquals("S3K", ((Label) pane.lookup("#export-driver")).getText());
+            var includeSource = (CheckBox) pane.lookup("#export-include-source");
+            assertTrue(includeSource.isSelected());
+            var patch = (CheckBox) pane.lookup("#export-retail-patch");
+            assertTrue(patch.isVisible());
+            patch.setSelected(true);
+            assertTrue(includeSource.isDisabled());
+            assertFalse(includeSource.isSelected());
+            snapshotDialog("export-dialog", ".portable.png");
+
+            patch.setSelected(false);
+            assertTrue(includeSource.isSelected());
+            formats.setValue(mod);
+            assertTrue(pane.lookup("#export-replace").getParent().isVisible());
+            snapshotDialog("export-dialog", ".mod.png");
+
+            formats.setValue(kit);
+            assertFalse(includeSource.isVisible());
+            assertTrue(pane.lookup("#export-dpcm-closed").isVisible());
+            assertFalse(((CheckBox) pane.lookup("#export-dpcm-closed")).isSelected());
+            assertTrue(pane.lookup("#export-choose-rom").isVisible());
+            snapshotDialog("export-dialog", ".kit.png");
+            return null;
+        });
+        closeDialog("export-dialog", ButtonType.CANCEL);
+    }
 
     @Test void testInGameReportsMissingAndChangedRomsAndCanOpenSettings() throws Exception {
         Path config = folder.resolve("roms.json");

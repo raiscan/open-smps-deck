@@ -1,23 +1,29 @@
 package com.opensmpsdeck.studio;
 
 import com.opensmpsdeck.headless.ProjectExport;
-import com.opensmpsdeck.headless.ProjectProvenance;
 import com.opensmpsdeck.headless.ProjectExport.Format;
 import com.opensmpsdeck.project.ProjectCompiler.BankLimitException;
 import com.opensmpsdeck.headless.TestInGame;
 import com.opensmpsdeck.headless.rom.RomGame;
 import com.opensmpsdeck.headless.rom.RomLibrary;
 import com.opensmpsdeck.project.StudioProject;
+import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.project.TargetGame;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.prefs.Preferences;
+import javafx.beans.binding.Bindings;
+import javafx.beans.value.ObservableBooleanValue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
@@ -33,23 +39,39 @@ final class ExportDialog {
 
     static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
                      RomLibrary library, Executor worker, Consumer<String> status) {
+        show(owner, project, projectPath, work, fallbackTarget, library, worker, status, false);
+    }
+
+    static void showRedacted(Window owner, StudioProject project, Path path, RomLibrary library,
+                             Executor worker, Consumer<String> status) {
+        show(owner, project, path, null, project.target(), library, worker, status, true);
+    }
+
+    private static void show(Window owner, StudioProject project, Path projectPath, Path work, TargetGame fallbackTarget,
+                             RomLibrary library, Executor worker, Consumer<String> status, boolean redacted) {
         boolean nativeBank = project != null && project.nativeProgram() != null;
         Callable<ProjectExport.Source> source = () -> project == null ? ProjectExport.open(work)
                 : new ProjectExport.Source(project, work);
         RomGame game = project == null ? RomGame.parse(fallbackTarget.id()) : TestInGame.game(project);
         String name = project == null ? work.getFileName().toString() : project.name();
+        var target = project == null ? fallbackTarget : project.target();
+        var packageOptions = new ExportPackageOptions(target,
+                nativeBank && ProjectExport.canExportRetailPatch(project),
+                Preferences.userNodeForPackage(ExportDialog.class).node("export-roms"));
         var dialog = new Dialog<ProjectExport.Options>();
         dialog.initOwner(owner);
         dialog.setTitle("Export");
-        dialog.setHeaderText("Export arrangement");
+        dialog.setHeaderText(redacted ? "Export redacted source" : "Export arrangement");
         dialog.getDialogPane().setId("export-dialog");
         dialog.getDialogPane().setPrefWidth(465);
         var export = new ButtonType("Choose output…", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(export, ButtonType.CANCEL);
 
         var formats = new ChoiceBox<Format>();
-        formats.getItems().setAll(Format.WAV, Format.MP3, Format.VGM, Format.SMPS, Format.PACKAGE, Format.PORTABLE);
-        formats.setValue(Format.WAV);
+        if (redacted) formats.getItems().setAll(Format.PORTABLE, Format.MOD, Format.DISASM);
+        else formats.getItems().setAll(Format.WAV, Format.MP3, Format.VGM, Format.SMPS, Format.PACKAGE,
+                Format.PORTABLE, Format.MOD, Format.DISASM);
+        formats.getSelectionModel().selectFirst();
         formats.setId("export-format");
         formats.setConverter(new javafx.util.StringConverter<>() {
             @Override public String toString(Format format) {
@@ -61,21 +83,12 @@ final class ExportDialog {
                     case PACKAGE -> "SMPS package (.smps.zip)";
                     case PORTABLE -> "Portable SMPS package (.smps.zip)";
                     case MOD -> "OpenGGF mod (.jar)";
+                    case DISASM -> "Disassembly kit (.zip)";
                 };
             }
 
             @Override public Format fromString(String value) { throw new UnsupportedOperationException(); }
         });
-        var drivers = new ChoiceBox<String>();
-        drivers.setId("export-driver");
-        drivers.getItems().setAll(nativeBank ? java.util.List.of("s3k") : java.util.List.of("s3k", "s1", "s2"));
-        drivers.setValue(nativeBank ? TargetGame.S3K.id() : game.id());
-        var driverLabel = new Label("Target driver");
-        var portableSelected = formats.valueProperty().isEqualTo(Format.PORTABLE);
-        drivers.visibleProperty().bind(portableSelected);
-        drivers.managedProperty().bind(portableSelected);
-        driverLabel.visibleProperty().bind(portableSelected);
-        driverLabel.managedProperty().bind(portableSelected);
         var span = new CheckBox("Limit to a span");
         var start = field("0", "export-start");
         var end = field("Song end", "export-end");
@@ -94,29 +107,104 @@ final class ExportDialog {
         var form = new GridPane();
         form.setHgap(14);
         form.setVgap(10);
-        form.addRow(0, new Label("Format"), formats);
-        form.add(span, 1, 1);
-        form.addRow(2, new Label("Start (seconds)"), start);
-        form.addRow(3, new Label("End (seconds)"), end);
-        form.addRow(4, new Label("Fade out (seconds)"), fade);
-        if (nativeBank) form.addRow(5, new Label("Native loop count"), loops);
-        form.add(stems, 1, 6);
-        form.add(zip, 1, 7);
-        form.addRow(8, driverLabel, drivers);
-        var body = new VBox(14, form, note, error, new Separator());
+        form.add(span, 1, 0);
+        form.addRow(1, new Label("Start (seconds)"), start);
+        form.addRow(2, new Label("End (seconds)"), end);
+        form.addRow(3, new Label("Fade out (seconds)"), fade);
+        if (nativeBank) form.addRow(4, new Label("Native loop count"), loops);
+        form.add(stems, 1, 5);
+        form.add(zip, 1, 6);
+
+        var audioSelected = Bindings.createBooleanBinding(() -> formats.getValue().audio(), formats.valueProperty());
+        showWhen(form, audioSelected);
+        start.disableProperty().bind(span.selectedProperty().not());
+        end.disableProperty().bind(start.disableProperty());
+        zip.disableProperty().bind(stems.selectedProperty().not());
+
+        var packageSelected = Bindings.createBooleanBinding(
+                () -> ExportPackageOptions.supports(formats.getValue()), formats.valueProperty());
+        var portableSelected = Bindings.createBooleanBinding(
+                () -> ExportPackageOptions.portable(formats.getValue()), formats.valueProperty());
+        var kitSelected = formats.valueProperty().isEqualTo(Format.DISASM);
+        var modSelected = formats.valueProperty().isEqualTo(Format.MOD);
+        var driver = new Label(target.id().toUpperCase(java.util.Locale.ROOT));
+        driver.setId("export-driver");
+        var includeSource = new CheckBox("Include redacted project source");
+        includeSource.setId("export-include-source");
+        includeSource.setSelected(true);
+        showWhen(includeSource, portableSelected);
+        var retailPatch = new CheckBox("Store changes as a retail song patch");
+        retailPatch.setId("export-retail-patch");
+        if (packageOptions.retailPatchAvailable()) showWhen(retailPatch, portableSelected);
+        else {
+            retailPatch.setVisible(false);
+            retailPatch.setManaged(false);
+        }
+        includeSource.disableProperty().bind(retailPatch.selectedProperty());
+        retailPatch.selectedProperty().addListener((ignored, previous, selected) -> {
+            if (selected) {
+                retailPatch.setUserData(includeSource.isSelected());
+                includeSource.setSelected(false);
+            } else {
+                includeSource.setSelected(Boolean.TRUE.equals(retailPatch.getUserData()));
+            }
+        });
+        var license = field("Optional SPDX expression", "export-license");
+        var modIds = field("Decimal IDs separated by commas", "export-replace");
+        var replaceDac = field("Optional hex notes separated by commas", "export-replace-dac");
+        var dpcmClosed = new CheckBox("DPCM closed (quantise WAV samples)");
+        dpcmClosed.setId("export-dpcm-closed");
+        showWhen(dpcmClosed, kitSelected);
+        var licenseRow = fieldRow("License", license);
+        showWhen(licenseRow, portableSelected);
+        var modRow = fieldRow("Replace music IDs", modIds);
+        showWhen(modRow, modSelected);
+        var dacRow = fieldRow("Replace DAC notes", replaceDac);
+        showWhen(dacRow, kitSelected);
+
+        var rom = new javafx.beans.property.SimpleObjectProperty<>(packageOptions.rememberedRom());
+        var romName = new Label();
+        romName.setId("export-package-rom");
+        romName.textProperty().bind(Bindings.createStringBinding(
+                () -> rom.get() == null ? "No ROM selected" : rom.get().getFileName().toString(), rom));
+        var chooseRom = new Button("Choose ROM…");
+        chooseRom.setId("export-choose-rom");
+        chooseRom.setOnAction(event -> {
+            var chooser = new FileChooser();
+            chooser.setTitle("Choose a " + driver.getText() + " ROM for export");
+            var file = chooser.showOpenDialog(dialog.getDialogPane().getScene().getWindow());
+            if (file != null) {
+                rom.set(file.toPath());
+                packageOptions.rememberRom(rom.get());
+            }
+        });
+        var clearRom = new Button("Clear");
+        clearRom.disableProperty().bind(rom.isNull());
+        clearRom.setOnAction(event -> {
+            rom.set(null);
+            packageOptions.rememberRom(null);
+        });
+        var driverRow = new HBox(8, new Label("Target driver"), driver);
+        showWhen(driverRow, portableSelected.or(kitSelected));
+        var romRow = new HBox(8, chooseRom, clearRom, romName);
+        romRow.setAlignment(Pos.CENTER_LEFT);
+        var packageForm = new VBox(10, driverRow, includeSource, retailPatch, licenseRow, modRow, dpcmClosed, dacRow, romRow);
+        showWhen(packageForm, packageSelected);
+
+        var body = new VBox(14, new HBox(14, new Label("Format"), formats), form, packageForm, note, error);
+        if (redacted) body.getChildren().addFirst(new Label("Choose a ROM to resolve this project's stock references."));
+        else body.getChildren().add(new Separator());
         body.setPadding(new Insets(8, 6, 4, 6));
         dialog.getDialogPane().setContent(body);
-
-        var nonAudio = javafx.beans.binding.Bindings.createBooleanBinding(
-                () -> !formats.getValue().audio(), formats.valueProperty());
-        span.disableProperty().bind(nonAudio);
-        start.disableProperty().bind(nonAudio.or(span.selectedProperty().not()));
-        end.disableProperty().bind(start.disableProperty());
-        fade.disableProperty().bind(nonAudio);
-        loops.disableProperty().bind(nonAudio);
-        stems.disableProperty().bind(nonAudio);
-        zip.disableProperty().bind(nonAudio.or(stems.selectedProperty().not()));
-        formats.valueProperty().addListener((ignored, previous, value) -> note.setText(formatNote(value)));
+        formats.valueProperty().addListener((ignored, previous, value) -> {
+            note.setText(formatNote(value));
+            error.setText("");
+            var window = dialog.getDialogPane().getScene().getWindow();
+            // Apply managed/visible changes before asking the window for its new preferred size.
+            dialog.getDialogPane().applyCss();
+            dialog.getDialogPane().layout();
+            window.sizeToScene();
+        });
         note.setText(formatNote(formats.getValue()));
 
         var result = new ProjectExport.Options[1];
@@ -129,13 +217,15 @@ final class ExportDialog {
             boolean bounded = audio && span.isSelected();
             boolean split = audio && stems.isSelected();
             try {
-                result[0] = new ProjectExport.Options(format,
-                        bounded ? seconds(start) : null, bounded ? seconds(end) : null,
-                        audio ? seconds(fade) : null, audio && nativeBank && !loops.getText().isBlank()
-                                ? Integer.valueOf(loops.getText().strip()) : null,
-                        split, split && zip.isSelected(),
-                        format == Format.PORTABLE ? new ProjectExport.PortableSettings(drivers.getValue(), true,
-                                null, null, null, java.util.List.of(), java.util.List.of()) : null);
+                if (redacted && rom.get() == null) throw new IllegalArgumentException("Choose a ROM to resolve stock assets.");
+                result[0] = packageSelected.get()
+                        ? packageOptions.options(format, rom.get(), includeSource.isSelected(), retailPatch.isSelected(),
+                                license.getText(), modIds.getText(), dpcmClosed.isSelected(), replaceDac.getText())
+                        : new ProjectExport.Options(format,
+                                bounded ? seconds(start) : null, bounded ? seconds(end) : null,
+                                audio ? seconds(fade) : null, audio && nativeBank && !loops.getText().isBlank()
+                                        ? Integer.valueOf(loops.getText().strip()) : null,
+                                split, split && zip.isSelected());
             } catch (IllegalArgumentException failure) {
                 error.setText(failure instanceof NumberFormatException
                         ? "Enter seconds as numbers and loop count as a whole number." : failure.getMessage());
@@ -145,7 +235,7 @@ final class ExportDialog {
         dialog.setResultConverter(button -> button == export ? result[0] : null);
         var testRequested = new javafx.beans.property.SimpleBooleanProperty();
         var testDriver = new javafx.beans.property.SimpleObjectProperty<>(game);
-        addTestInGame(dialog, body, testDriver, !nativeBank, library, worker, () -> {
+        if (!redacted) addTestInGame(dialog, body, testDriver, !nativeBank, library, worker, () -> {
             testRequested.set(true);
             dialog.close();
         });
@@ -153,7 +243,12 @@ final class ExportDialog {
         if (testRequested.get()) {
             TestInGameDialog.show(owner, name, source, projectPath, testDriver.get(), library, worker, status);
         } else {
-            options.ifPresent(value -> chooseDestination(owner, source, worker, status, value));
+            options.ifPresent(value -> {
+                Callable<ProjectExport.Source> exportSource = project == null && ExportPackageOptions.supports(value.format())
+                        ? () -> new ProjectExport.Source(ProjectFiles.loadSource(work.resolve("arrangement.smps.json")), work)
+                        : source;
+                chooseDestination(owner, exportSource, worker, status, value);
+            });
         }
     }
 
@@ -220,6 +315,18 @@ final class ExportDialog {
         refresh.run();
     }
 
+    private static void showWhen(javafx.scene.Node node, ObservableBooleanValue condition) {
+        node.visibleProperty().bind(condition);
+        node.managedProperty().bind(condition);
+    }
+
+    private static HBox fieldRow(String label, TextField field) {
+        var row = new HBox(8, new Label(label), field);
+        row.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(field, Priority.ALWAYS);
+        return row;
+    }
+
     private static TextField field(String prompt, String id) {
         var field = new TextField();
         field.setPromptText(prompt);
@@ -239,8 +346,9 @@ final class ExportDialog {
             case VGM -> "Full song register log for YM2612 and SN76489 VGM players.";
             case SMPS -> "Standalone track for a compatible S3K SMPS driver. Requires an arrangement without external chip assets.";
             case PACKAGE -> "Native S3K bank, bindings, resources and project source for Studio and OpenGGF integration.";
-            case PORTABLE -> "Shareable package: stock game assets become references resolved from the player's ROM.";
+            case PORTABLE -> "Eligible stock assets become references resolved from the player's ROM.";
             case MOD -> "OpenGGF music replacement mod.";
+            case DISASM -> "SMPS2ASM files for the project driver. A ROM materialises stock assets for personal use.";
         };
     }
 
@@ -259,39 +367,53 @@ final class ExportDialog {
         var destination = chooser.showSaveDialog(owner);
         if (destination == null) return;
         Path output = destination.toPath();
+        var progress = new Dialog<ButtonType>();
+        progress.initOwner(owner);
         var job = new Task<Boolean>() {
             @Override protected Boolean call() throws Exception {
                 var opened = source.call();
-                if (options.format() == Format.PACKAGE || options.format() == Format.PORTABLE) {
-                    var warnings = options.format() == Format.PACKAGE
-                            ? ProjectProvenance.detect(opened.project()).warnings()
-                            : ProjectExport.portableWarnings(opened.project(), options.portable());
-                    if (!warnings.isEmpty()) {
+                if (ExportPackageOptions.supports(options.format())) {
+                    updateMessage("Checking package and ROM references…");
+                    var prepared = ProjectExport.preparePackage(opened.project(), options);
+                    var messages = new ArrayList<String>();
+                    for (var warning : prepared.warnings()) {
+                        String detail = ProjectExport.warningMessage(options.format(), warning);
+                        messages.add(warning.equals(detail) ? detail : warning + "\n" + detail);
+                    }
+                    var roms = options.format() == Format.DISASM ? options.disasm().roms() : options.portable().roms();
+                    if (!roms.isEmpty()) {
+                        if (!prepared.warnings().contains("UNKNOWN_ROM_IMAGE")) messages.add("Known ROM image fingerprint verified.");
+                        var matches = prepared.matchedStockAssets();
+                        messages.add(matches.isEmpty() ? "There are no stock asset references to check."
+                                : "Matched stock assets\n" + String.join("\n", matches));
+                    }
+                    if (!messages.isEmpty()) {
                         var confirmation = new java.util.concurrent.FutureTask<>(() -> {
                             if (isCancelled()) return false;
-                            var text = warnings.stream().map(ProjectProvenance::warningMessage)
-                                    .collect(java.util.stream.Collectors.joining("\n\n"));
-                            var alert = new Alert(Alert.AlertType.CONFIRMATION, text, ButtonType.OK, ButtonType.CANCEL);
-                            alert.initOwner(owner);
-                            alert.setTitle("Package warnings");
+                            var alert = new Alert(Alert.AlertType.CONFIRMATION, "", ButtonType.OK, ButtonType.CANCEL);
+                            alert.initOwner(progress.getDialogPane().getScene().getWindow());
+                            alert.setTitle("Package review");
                             alert.setHeaderText("Export this package?");
+                            setDetails(alert, String.join("\n\n", messages));
                             return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
                         });
                         javafx.application.Platform.runLater(confirmation);
                         if (!confirmation.get()) return false;
                     }
+                    prepared.write(output, this::report);
+                } else {
+                    ProjectExport.write(opened.project(), opened.work(), output, options, this::report);
                 }
-                ProjectExport.write(opened.project(), opened.work(), output, options, (done, total, message) -> {
-                    if (isCancelled()) throw new java.util.concurrent.CancellationException();
-                    updateProgress(done, total);
-                    updateMessage(message);
-                });
                 return true;
+            }
+
+            private void report(int done, int total, String message) {
+                if (isCancelled()) throw new java.util.concurrent.CancellationException();
+                updateProgress(done, total);
+                updateMessage(message);
             }
         };
 
-        var progress = new Dialog<ButtonType>();
-        progress.initOwner(owner);
         progress.setTitle("Exporting");
         progress.setHeaderText("Exporting " + output.getFileName());
         var message = new Label("Preparing export…");
@@ -312,7 +434,8 @@ final class ExportDialog {
             var bankLimit = BankLimitException.from(failure);
             String detail = bankLimit == null ? failure.getMessage() : bankLimit.getMessage();
             status.accept("Export failed · " + detail);
-            var alert = new Alert(Alert.AlertType.ERROR, detail);
+            var alert = new Alert(Alert.AlertType.ERROR);
+            setDetails(alert, detail);
             alert.initOwner(owner);
             alert.setHeaderText("Could not export arrangement");
             alert.getDialogPane().setPrefWidth(500);
@@ -326,4 +449,14 @@ final class ExportDialog {
         progress.show();
         worker.execute(job);
     }
+    private static void setDetails(Alert alert, String detail) {
+        var text = new TextArea(detail);
+        text.setEditable(false);
+        text.setWrapText(true);
+        text.setPrefColumnCount(52);
+        text.setPrefRowCount(Math.clamp(detail.lines().count(), 3, 13));
+        alert.getDialogPane().setContent(text);
+        alert.setResizable(true);
+    }
+
 }
