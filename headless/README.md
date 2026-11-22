@@ -1280,6 +1280,12 @@ with `from: "allocate"` and `reconstruct_stage` with `stage: "assemble"`.
 Inspect `reconstruct trace WORK_DIR --part ID --json` and the report's
 `reductions` for dropped IDs, reasons and allocation blockers.
 
+For stem-backed holds, describe and trace flag missing or shortened gates
+and gates with much less tail energy than the source. Use
+`reconstruct proposals list WORK_DIR --group held-notes` to review the
+findings and suggested fixes. These are review suggestions supported by
+the assembled render.
+
 For an aligned solo of a built part, run
 `reconstruct part-render WORK_DIR --part ID OUT.wav` or use
 `reconstruct_part_render` with `workDir`, `part` and `output`.

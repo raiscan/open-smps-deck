@@ -22,6 +22,8 @@ final class ReconstructionAllocation {
     static final List<String> FM = List.of("FM1", "FM2", "FM3", "FM4", "FM5");
     static final List<String> PSG = List.of("PSG1", "PSG2", "PSG3");
     static final List<String> INNER_FM = FM.subList(2, FM.size());
+    static final String HOLD_RELOCATION = "relocated-for-stem-hold";
+    static final String HOLD_OVERFLOW = "routed-around-stem-hold";
     private static final String VOICE_ASSIGNMENT = "voice:assignment";
     private static final int RELEASE_TICKS = 2;
     private static final int SUSTAINED_SPILL_TICKS = 6;
@@ -135,6 +137,7 @@ final class ReconstructionAllocation {
     private final java.util.NavigableSet<Integer> explicitNoise = new java.util.TreeSet<>();
     private final Map<String, ReconstructionChordReduction.Tone> tones;
     private final Map<String, Double> salience;
+    private final Map<String, ReconstructionHeldNotes.Hold> stemHolds;
     private final Map<String, String> previousLanes;
     private final java.util.Set<String> chordAnchors = new java.util.HashSet<>();
     private final java.util.Set<String> fmChordAnchors = new java.util.HashSet<>();
@@ -145,12 +148,14 @@ final class ReconstructionAllocation {
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
     private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
-                                     Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience, TargetProfile profile) {
+                                     Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience,
+                                     TargetProfile profile, Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
         this.fmOnly = fmOnly;
         this.profile = profile;
         this.previousLanes = previousLanes;
         this.tones = tones;
         this.salience = salience;
+        this.stemHolds = stemHolds;
         var ordinal = new HashMap<String, Integer>();
         for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
         pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
@@ -256,6 +261,19 @@ final class ReconstructionAllocation {
                                        List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience,
                                        boolean chordReduction, TargetProfile profile,
                                        ReconstructionArrangement.Allocation arrangement) {
+        return allocateWithAffinity(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels,
+                voiceTypes, chords, outcomes, salience, chordReduction, profile, arrangement, Map.of());
+    }
+
+    static Result allocateWithAffinity(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                                       Map<String, ReconstructionLaneType> voiceTypes,
+                                       Map<String, ReconstructionChords.Group> chords,
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience,
+                                       boolean chordReduction, TargetProfile profile,
+                                       ReconstructionArrangement.Allocation arrangement,
+                                       Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
         var usableChords = usableChords(chords, arrangement, outcomes);
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
@@ -296,7 +314,7 @@ final class ReconstructionAllocation {
         }).toList();
         var tones = chordReduction ? ReconstructionChordReduction.classify(attacks.stream().filter(a -> a.role() != Role.drums && a.role() != Role.drop)
                 .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList()) : Map.<String, ReconstructionChordReduction.Tone>of();
-        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, profile);
+        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, profile, stemHolds);
         allocator.partPins = arrangement.pins();
         allocator.hats = arrangement.hats();
         var louderParts = new java.util.HashSet<Integer>();
@@ -550,6 +568,8 @@ final class ReconstructionAllocation {
         List<String> secondary = spillLanes(attack);
         String lane = free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
+        if (lane == null && (attack.role() == Role.bass || attack.role() == Role.melody))
+            lane = protectHold(primary.getFirst(), attack);
         if (lane == null && primary == INNER_FM && secondary.isEmpty() && !fmOnly)
             lane = freeFmForLowAttack(attack);
         if (lane == null && backing(attack.role()) && !tones.isEmpty()) {
@@ -573,9 +593,45 @@ final class ReconstructionAllocation {
                     .map(tail::get).filter(java.util.Objects::nonNull).map(entry -> entry.note.id()).toList());
         } else {
             String reason = continuations.containsKey(attack.note().id()) ? "pad-resumed"
+                    : !backing(attack.role()) && !primary.contains(lane) ? HOLD_OVERFLOW
                     : PSG.contains(lane) && !attack.noise ? "psg-spill" : null;
             keep(attack, lane, reason);
         }
+    }
+
+    private boolean protectedHold(Entry prior, Attack attack) {
+        return prior != null && prior.note.part() != attack.note().part()
+                && prior.pinnedLane == null && !chordAnchors.contains(prior.note.id())
+                && stemHolds.containsKey(prior.note.id()) && prior.startTick < attack.start
+                && prior.endTick - attack.start > RELEASE_TICKS
+                && prior.endTick - attack.start > attack.start - prior.startTick;
+    }
+
+    private String protectHold(String primary, Attack attack) {
+        var prior = tail.get(primary);
+        if (!protectedHold(prior, attack)) return null;
+
+        // Keep the new attack in its role's lane by moving the entire earlier
+        // gate. Only a lane idle since the previous onset can take that gate.
+        String alternate = INNER_FM.stream().filter(lane -> {
+            var last = tail.get(lane);
+            return last == null || last.endTick <= prior.startTick;
+        }).findFirst().orElse(null);
+        if (alternate != null) {
+            var moved = new Entry(prior.note, prior.role, alternate, prior.startTick, prior.endTick,
+                    prior.outcome, HOLD_RELOCATION, null, attack.note().id(), null, primary);
+            tail.put(alternate, moved);
+            entries.put(prior.note.id(), moved);
+            return primary;
+        }
+
+        alternate = free(INNER_FM, attack);
+        if (alternate == null && !fmOnly && !attack.fmRequired && attack.note().run() == null
+                && attack.note().pitch() >= profile.psg().low() && attack.note().pitch() <= profile.psg().high()) {
+            var psg = reservePsg3 || overlapsCymbal(attack.start, attack.end) ? PSG.subList(0, 2) : PSG;
+            alternate = free(psg, attack);
+        }
+        return alternate;
     }
 
     private String sustainedSpill(Attack attack) {
@@ -805,6 +861,7 @@ final class ReconstructionAllocation {
                 && last.role == Role.melody && next.role() == Role.melody
                 && (VOICE_ASSIGNMENT + " laneType=FM").equals(last.reason)))
             return false;
+        if (protectedHold(last, next) && last.role == Role.melody && next.role() != Role.melody) return false;
         if (last.role == Role.drums)
             return last.startTick < next.start && next.role() == Role.counter && ReconstructionCymbals.automatic(last.reason);
         if (last.startTick < next.start && (last.endTick - next.start <= RELEASE_TICKS
@@ -834,7 +891,8 @@ final class ReconstructionAllocation {
 
     private void keep(Attack attack, String lane, String reason) {
         var entry = new Entry(attack.note(), attack.role(), lane, attack.start, attack.end, Outcome.kept, reason, null,
-                null, null, null, attack.pin == null ? null : lane, attack.pin == null ? null : attack.pin.laneType());
+                null, null, HOLD_OVERFLOW.equals(reason) ? expectedLanes(attack.role(), attack.noise).getFirst() : null,
+                attack.pin == null ? null : lane, attack.pin == null ? null : attack.pin.laneType());
         entries.put(attack.note().id(), entry);
         tail.put(lane, entry);
         String parent = continuations.get(attack.note().id());

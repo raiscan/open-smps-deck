@@ -74,7 +74,7 @@ public final class ReconstructionTrace {
                Allocation allocation, List<Voiced> voiced,
                Status status, String stage, String reason, List<String> editReasons, String fateDetail,
                ReconstructionVoicePlan.Identity voice, List<ReconstructionLayers.Result> layers,
-               List<ReconstructionLanePolicies.Decision> policyDecisions) {}
+               List<ReconstructionLanePolicies.Decision> policyDecisions, ReconstructionHeldNotes.Finding heldNote) {}
     record Summary(int part, int pitch, Timing sourceTiming, Status status, String stage, String reason,
                    ReconstructionRoles.Role role, String roleReason, String lane, Timing placement,
                    String mergedInto, String competitorNoteId, List<String> blockingNoteIds, List<Voiced> voiced,
@@ -468,6 +468,11 @@ public final class ReconstructionTrace {
         var reportPath = work.resolve("report.json");
         var report = Files.exists(reportPath) ? ReconstructionArtifacts.readTree(reportPath).getAsJsonObject() : new JsonObject();
         var played = playback(score, allocation, voicing, report, timeline);
+        var held = JSON.fromJson(report.get("heldNotes"), ReconstructionHeldNotes.Report.class);
+        var findings = held == null || allocation == null || voicing == null
+                || !JSON.toJsonTree(ReconstructionCli.assemblyInputs(score, allocation, voicing)).equals(report.get("assemblyInputs"))
+                ? Map.<String, ReconstructionHeldNotes.Finding>of()
+                : index(held.findings(), ReconstructionHeldNotes.Finding::noteId);
         var plan = ReconstructionVoicePlan.saved(work);
         var voices = plan == null ? Map.<String, ReconstructionVoicePlan.Voice>of() : plan.byNote();
 
@@ -564,7 +569,7 @@ public final class ReconstructionTrace {
                     gate, origin, written, scoreDecision, effective == null && fixes.isEmpty() ? null
                             : new Structure(effective, fixes),
                     roleTrace, placement, List.copyOf(voiced), fate.status, fate.stage, reason,
-                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers, played.policyDecisions.get(id)));
+                    edits.isEmpty() ? null : List.copyOf(edits), reason.equals(fate.reason) ? null : fate.reason, identity, layers, played.policyDecisions.get(id), findings.get(id)));
         }
         rows.sort(Comparator.comparingDouble((Row row) -> row.timing.sourceStart).thenComparingInt(Row::part)
                 .thenComparingInt(Row::pitch).thenComparing(Row::id));
@@ -1023,6 +1028,7 @@ public final class ReconstructionTrace {
         out.printf(Locale.ROOT, "%s%s part %d (%s) MIDI %d %s  %s @ %s (%s)%n",
                 indent, row.id, row.part, row.partName, row.pitch, format(row.timing), row.status, row.stage, row.reason);
         if (row.voice != null) out.printf("%s  voice %s (%s)%n", indent, row.voice.name(), row.voice.id());
+        if (row.heldNote != null) out.printf("%s  %s · %s%n", indent, row.heldNote.kind(), row.heldNote.proposal());
         if (row.fateDetail != null) out.printf("%s  %s%n", indent, row.fateDetail);
         if (row.source != null) {
             out.printf("%s  source %s%n", indent, row.source.transcriber == null

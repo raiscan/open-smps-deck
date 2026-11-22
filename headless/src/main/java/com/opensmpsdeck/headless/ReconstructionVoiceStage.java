@@ -67,6 +67,9 @@ final class ReconstructionVoiceStage {
         });
         var savedWindows = previous == null ? null : previous.fitWindows();
         var windows = fitWindows(score.frames(), byLane, savedWindows, foreground, fitGroups);
+        var holds = ReconstructionHeldNotes.measure(score, context.stream()
+                .filter(n -> n.role() != Role.drums).map(ReconstructionAllocation.Entry::note).toList());
+        var sustainExamples = new HashMap<String, List<ReconstructionHeldNotes.Example>>();
         var screening = new VoicePatchShortlist(catalogue, options.target());
         var leadPatches = new HashMap<String, List<RankedPatch>>();
         var unsupported = new ArrayList<String>();
@@ -118,6 +121,13 @@ final class ReconstructionVoiceStage {
             if (patches == null) patches = fm
                     ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, foreground.containsKey(lane))
                     : List.of();
+            if (fm && !lane.equals(vocalGroup) && !lane.equals(chosenLane)) {
+                var examples = ReconstructionHeldNotes.examples(entry.getValue(), holds);
+                if (!examples.isEmpty()) {
+                    sustainExamples.put(lane, examples);
+                    patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
+                }
+            }
             incumbents.add(incumbent == null ? null : incumbent.id());
             var instruments = fm ? List.<Instrument>of() : fixedInstruments(lane, notes, tonalInstruments, drumInstruments);
             var toneContext = notes;
@@ -216,7 +226,8 @@ final class ReconstructionVoiceStage {
                 var articulations = new LinkedHashMap<String, Articulation>();
                 articulations.put(art.preset(), art);
                 articulations.put(WRITTEN.preset(), WRITTEN);
-                articulations.put("short", new Articulation("short", .72, 0));
+                if (!sustainExamples.containsKey(model.id()))
+                    articulations.put("short", new Articulation("short", .72, 0));
                 if (patch != null) articulations.put("fast-release", new Articulation("fast-release", art.gate(), 9));
                 boolean changed = choose(windows, references, source, catalogue, model, fit, i, articulations,
                         (name, setting) -> settings(role, patch, setting, DRY, model.instruments())
@@ -280,6 +291,10 @@ final class ReconstructionVoiceStage {
             var isolated = notes.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
             var stemContext = context.stream().filter(n -> stem.equals(options.stems().get(n.note().part()))).toList();
             var candidatesForBass = screening.lowCandidates(isolated, stemContext, stem, windows);
+            if (sustainExamples.containsKey(model.id())) {
+                var allowed = model.patches().stream().map(RankedPatch::id).collect(java.util.stream.Collectors.toSet());
+                candidatesForBass = candidatesForBass.stream().filter(patch -> allowed.contains(patch.id())).toList();
+            }
             var selected = LowRegisterFit.refine(source, catalogue, stem, notes.getFirst().lane(), lane,
                     notes, isolated, candidatesForBass);
             if (selected == null) continue;
@@ -301,7 +316,7 @@ final class ReconstructionVoiceStage {
                 int partId = fitGroups.get(model.id()).getFirst().note().part();
                 var part = source.parts().stream().filter(item -> item.id() == partId).findFirst().orElseThrow();
                 if (fm.variantId() == null) continue;
-                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled, score.inputs().profile());
+                var psg = ReconstructionSpill.match(catalogue, fm, part, spilled, score.inputs().profile(), holds);
                 instruments.put(model.id(), new SourceSound(fm, psg.variantId(), psg.volumeOffset()));
             }
             byLane.forEach((lane, notes) -> result.putIfAbsent(lane,

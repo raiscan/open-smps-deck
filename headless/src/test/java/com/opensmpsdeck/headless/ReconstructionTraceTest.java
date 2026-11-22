@@ -113,7 +113,7 @@ class ReconstructionTraceTest {
         return new ReconstructionTrace.Row(id, 0, "Fixture", pitch, timing, timing, null, at, null, null,
                 new ReconstructionTrace.Roles(at, role, null, null, null, List.of()), placed, List.of(),
                 lane == null ? ReconstructionTrace.Status.dropped : ReconstructionTrace.Status.kept,
-                "allocate", reason, null, null, null, null, null);
+                "allocate", reason, null, null, null, null, null, null);
     }
 
     private static ReconstructionTrace.Row placed(String id, String lane, int start) {
@@ -124,7 +124,7 @@ class ReconstructionTraceTest {
         var allocation = new ReconstructionTrace.Allocation(at, Role.harmony, List.of("FM3", "FM4"), lane,
                 timing, ReconstructionAllocation.Outcome.kept, null, null, null, null, null, List.of());
         return new ReconstructionTrace.Row(id, 0, "Synth", 60, timing, timing, null, at, null, null, null,
-                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null, null, null, null);
+                allocation, List.of(), ReconstructionTrace.Status.kept, "allocate", "kept", null, null, null, null, null, null);
     }
 
     @Test void samePitchAttacksHaveDistinctStableIdsInOneCluster(@TempDir Path work) throws Exception {

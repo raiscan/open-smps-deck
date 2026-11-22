@@ -451,6 +451,8 @@ final class ReconstructionCli {
             }
             if (!allocation.chords().isEmpty()) report.add("chordVoicings", json.toJsonTree(allocation.chords()));
             report.add("sustainProbe", json.toJsonTree(sustain));
+            var heldNotes = matchQuietly(() -> ReconstructionHeldNotes.inspect(score, allocation, rendered));
+            if (heldNotes.sourceHolds() != 0) report.add("heldNotes", json.toJsonTree(heldNotes));
             var voicingWarnings = new ArrayList<String>();
             if (sustain.warning() != null) voicingWarnings.add(sustain.warning());
             if (voicing.leadProminenceWarning() != null) voicingWarnings.add(voicing.leadProminenceWarning());
