@@ -109,6 +109,7 @@ final class PortableArchive {
         return switch (path) {
             case "manifest.json", "LICENSE.txt" -> MAX_MANIFEST;
             case "track.bin" -> MAX_TRACK;
+            case RetailBankPatch.PATH -> RetailBankPatch.MAX_BYTES;
             case "source.smps.json" -> MAX_SOURCE;
             case "voices/global.bin" -> 128 * 25;
             default -> {

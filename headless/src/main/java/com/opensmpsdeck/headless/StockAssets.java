@@ -8,6 +8,7 @@ import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.Voice;
 import com.opensmpsdeck.project.ProjectFormat;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -16,6 +17,8 @@ import java.util.stream.IntStream;
 @FunctionalInterface
 interface StockAssets {
     byte[] payload(StockRef ref);
+
+    default byte[] retailBank(String game, int songId) throws IOException { return null; }
 
     final class Unavailable extends IllegalArgumentException {
         Unavailable(String message, Throwable cause) { super(message, cause); }

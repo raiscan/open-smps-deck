@@ -85,6 +85,8 @@ public record ProjectProvenance(boolean containsRomDerivedData, boolean contains
         return switch (code) {
             case "RETAIL_SONG_DATA" -> "This package contains copyrighted song data from the retail game. "
                     + "It is for personal use and must not be redistributed.";
+            case "DERIVED_FROM_RETAIL_SONG" -> "The patch carries only changed bytes from the retail song bank. "
+                    + "The player's ROM supplies the original bank. The composition still belongs to the game.";
             case "ROM_DERIVED_DATA" -> "This package contains assets derived from the game ROM. "
                     + "It is for personal use and must not be redistributed. Use portable mode to reference eligible stock assets when sharing.";
             case "UNKNOWN_ROM_IMAGE" -> "ROM image fingerprint is unknown. The stock asset hashes decide whether it can be used.";

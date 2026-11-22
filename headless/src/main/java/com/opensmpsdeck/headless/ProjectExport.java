@@ -49,7 +49,16 @@ public final class ProjectExport {
 
     public record PortableSettings(String driver, boolean includeSource, String license, String id,
                                    String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
-                                   boolean strictTempo) {
+                                   boolean strictTempo, boolean retailPatch, List<Path> roms) {
+        public PortableSettings {
+            roms = List.copyOf(roms);
+        }
+
+        public PortableSettings(String driver, boolean includeSource, String license, String id,
+                                String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo,
+                                boolean strictTempo) {
+            this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo, false, List.of());
+        }
         public PortableSettings(String driver, boolean includeSource, String license, String id,
                                 String version, List<String> authors, List<Integer> replacements, Integer speedUpTempo) {
             this(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, false);
@@ -59,7 +68,8 @@ public final class ProjectExport {
             this(driver, includeSource, license, id, version, authors, replacements, null);
         }
         PortableOptions options() {
-            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo);
+            return new PortableOptions(driver, includeSource, license, id, version, authors, replacements, speedUpTempo, strictTempo,
+                    retailPatch, roms);
         }
     }
 
