@@ -129,7 +129,11 @@ enum ClassicPackageDriver implements PackageDriver {
     }
 
     @Override public ProjectCompiler.BankLayout compile(StudioProject project, int tempo) {
-        return new ClassicArrangementCompiler(this, project, tempo).compile();
+        return compile(project, tempo, ProjectCompiler.Encoding.COMPACT);
+    }
+
+    ProjectCompiler.BankLayout compile(StudioProject project, int tempo, ProjectCompiler.Encoding encoding) {
+        return new ClassicArrangementCompiler(this, project, tempo, encoding).compile();
     }
 
     @Override public int previewFrames(StudioProject project, int tempo) {

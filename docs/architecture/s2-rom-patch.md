@@ -102,8 +102,9 @@ little-endian header and validated `F6`/ `F7`/ `F8` operands by
 commands, checks pointer and voice bounds and rejects conflicting instruction
 boundaries or non-advancing loops. S2 subroutines return with `E3`
 (`s2.sounddriver.asm:2888,3060–3079,3628–3699`). The optional generated
-loop requires active tracks with aligned finite durations, without existing
-branches. It rewinds relative volume and transposition at the loop boundary.
+loop requires active tracks with aligned finite durations and no existing
+`F6` jumps. It retains finite loops and calls and rewinds relative volume
+and transposition at the loop boundary.
 Extra Life requires a finite end for restoration. Speed shoes retain the
 selected retail slot's fast tempo.
 

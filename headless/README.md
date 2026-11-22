@@ -310,7 +310,7 @@ java -jar "$deck_jar" rom-patch song.s2.smps.zip --bps song.s2.bps --no-demo
 - On S2 and S3K, `--loop` replaces each channel's final stop with a jump to
   its start when the active channels reach their stops on the same tick and
   loop control is supported. S2 loop generation requires tracks without
-  existing branches and is unavailable for the Extra Life slot.
+  existing `F6` jumps and is unavailable for the Extra Life slot.
 - `--force` allows replacing existing output files. Keep outputs separate from
   the source project and clean ROM.
 

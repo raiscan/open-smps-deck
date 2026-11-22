@@ -350,7 +350,14 @@ final class PortablePackageReader {
         var nativeBank = NativeProgram.of(bank.base(), bank.headerOffset(), bank.localVoiceCount(), bank.previewFrames(),
                 track, manifest.envelopeBindings().stream().map(binding -> new NativeProgram.EnvelopeSlot(binding.asset(), binding.slot())).toList(),
                 manifest.dacBindings().stream().map(binding -> new NativeProgram.DacSlot(binding.note(), binding.asset(), binding.rate())).toList());
-        return new CompiledProject(track, envelopes, samples, nativeBank, globalVoices);
+        var compiled = new CompiledProject(track, envelopes, samples, nativeBank, globalVoices);
+        if (driver instanceof ClassicPackageDriver classic) {
+            var relocations = ClassicPackageBank.validate(classic, compiled);
+            require(bank.relocationsComplete() ? relocations.equals(bank.relocations())
+                            : relocations.containsAll(bank.relocations()),
+                    "Declared relocations differ from " + driver.id() + " bank pointers");
+        }
+        return compiled;
     }
 
     static TreeSet<String> warnings(Package artifact) throws IOException {
