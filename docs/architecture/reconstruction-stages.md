@@ -1026,6 +1026,9 @@ S3K transcription also tracks backward from a stable landing in the mapped
 stem. This finds upward scoops that begin below the attack window and can
 join short, ascending fragments that follow one continuous ridge. A
 stationary pitch between fragments or a pitch jump keeps separate attacks.
+If the full ridge fails around a touching lower gate, the detector can
+retry around the written landing attack. A supported residual rise becomes
+a single-note proposal and preserves both written gates.
 When a continuous ridge crosses a drop in energy at a fragment boundary,
 the join stays in review to allow for another pick on the sliding string.
 The merged gate keeps the first ID and

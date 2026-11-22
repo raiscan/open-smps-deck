@@ -95,7 +95,16 @@ final class ReconstructionBendRecovery {
             var landing = sorted.get(i);
             if ("external".equals(landing.source())) continue;
             var approach = tracker.approach(landing);
-            if (approach == null) continue;
+            if (approach == null) {
+                // The previous gate can carry the pickup, while only the
+                // motion at the later attack needs a bend. Keep both gates.
+                if (landing.bend() == null && hasLowerPickup(sorted, endThrough, i)) {
+                    var attack = tracker.attackApproach(landing);
+                    if (attack != null && attack.landing() - landing.start() >= .021)
+                        candidates.add(new Candidate(List.of(landing), landing.start(), attack, false, false));
+                }
+                continue;
+            }
             var members = new ArrayList<Note>();
             boolean separate = false;
             double earliest = approach.start() - TIME_SLOP;
@@ -148,6 +157,18 @@ final class ReconstructionBendRecovery {
         return recovered.stream()
                 .sorted(java.util.Comparator.comparingInt((Candidate candidate) -> candidate.members().size()).reversed()
                         .thenComparingDouble(Candidate::start)).toList();
+    }
+
+    private static boolean hasLowerPickup(List<Note> notes, double[] endThrough, int index) {
+        var landing = notes.get(index);
+        double earliestEnd = landing.start() - .012;
+        for (int j = index - 1; j >= 0 && endThrough[j] >= earliestEnd; j--) {
+            var note = notes.get(j);
+            if (note.start() < landing.start() && note.end() >= earliestEnd && note.end() <= landing.start() + .012
+                    && note.pitch() < landing.pitch() && landing.pitch() - note.pitch() <= 3
+                    && note.run() == null && !"external".equals(note.source())) return true;
+        }
+        return false;
     }
 
     private static LinkedHashMap<String, Candidate> parallelVoices(ReconstructionBends.Tracker tracker,

@@ -178,6 +178,26 @@ class ReconstructionBendsTest {
         assertEquals(ReconstructionEdits.Kind.bend, candidates.getFirst().intent().kind());
     }
 
+    @Test void offersAnAttackScoopForReviewWhenTheLandingRidgeEndsEarly() {
+        var pickup = fragment("pickup", .04, .20, PITCH - 2);
+        var landing = fragment("landing", .20, .38, PITCH);
+        var notes = List.of(pickup, landing);
+        var audio = fixture(frame -> -200 * (1 - Math.clamp((frame / 60 - .191) / .042, 0, 1)));
+        Arrays.fill(audio.samples(), (int) (.29 * audio.sampleRate()), audio.samples().length, 0);
+
+        var candidates = ReconstructionBendRecovery.detect(audio, notes, true);
+        assertEquals(1, candidates.size());
+        var candidate = candidates.getFirst();
+        assertEquals(List.of(landing), candidate.members());
+        assertEquals(landing.start(), candidate.start());
+        assertTrue(candidate.intent().proposed());
+        assertFalse(candidate.automatic());
+
+        var step = fixture(frame -> frame / 60 < .20 ? -200 : 0);
+        Arrays.fill(step.samples(), (int) (.29 * step.sampleRate()), step.samples().length, 0);
+        assertTrue(ReconstructionBendRecovery.detect(step, notes, true).isEmpty());
+    }
+
     private static ReconstructionStages.Note fragment(String id, double start, double end, int pitch) {
         return new ReconstructionStages.Note(id, 0, start, end, pitch, 96, "midi", 1);
     }
