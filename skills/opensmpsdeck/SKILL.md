@@ -249,6 +249,11 @@ describes the complete fields, defaults and MCP calls.
 
 ## 4. Propose or apply a scoped edit
 
+For dropped tonal notes, inspect `chordAudit.losses` in `describe --json`
+or MCP `reconstruct_describe`. Review the role and reason before proposing
+a change. A covered source unison already sounds through another note.
+Studio Detail and `reconstruct trace` show the competing IDs when known.
+
 For dropped percussion, use `reconstruct trace WORK_DIR --lane DAC --json`
 or `--lane PSG3`. Review the busy intervals and competing notes in
 `drums.droppedHits`. Dry-run a suggested `pinLane` to move a tonal blocker.

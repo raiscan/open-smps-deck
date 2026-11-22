@@ -507,7 +507,10 @@ Record musical changes with [persistent edits](#persistent-musical-edits) and us
 - `report.json` records input and output hashes, source part IDs, instrument
   shortlists, effect-copy lanes, and allocation drops and shortenings.
   `chordAudit` classifies unallocated tonal notes by song and effective musical
-  section. The same allocation audit appears in `describe`. Ten-second
+  section. The same allocation audit appears in `describe` and MCP
+  `reconstruct_describe`. Audio-only losses include roles and recorded
+  competing note IDs. Select a missed note in Studio Detail to see its
+  reason. Ten-second
   audio sections report mono RMS and pair volume rises within 100 ms. The
   audio statistics measure level and timing, with no estimate of timbre fidelity.
 

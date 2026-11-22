@@ -454,10 +454,10 @@ public final class ReconstructionStages {
                         var holds = allocationHolds(score, roles);
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                                 frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience,
-                                chordReduction, score.profile(), rules, holds);
+                                chordReduction, score.profile(), rules, holds, score.inputs.audioOnly != null);
                         var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
                                 score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
-                                chordReduction, score.profile(), rules, holds);
+                                chordReduction, score.profile(), rules, holds, score.inputs.audioOnly != null);
                         ReconstructionArtifacts.write(allocationFile, allocation);
                         ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
                                 ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
@@ -700,7 +700,7 @@ public final class ReconstructionStages {
                     ReconstructionTimeMap.of(score).ticks(),
                     score.inputs.fmOnly, !score.inputs.stems.isEmpty(), ReconstructionAllocation.lanes(previous),
                     ReconstructionCymbals.measure(score), laneTypes, chords, outcomes, salience,
-                    chordReduction, score.profile(), rules, allocationHolds(score, roles));
+                    chordReduction, score.profile(), rules, allocationHolds(score, roles), score.inputs.audioOnly != null);
             outcomes.addAll(edits.allocationOutcomes(allocation, pins).stream()
                     .filter(outcome -> allPins || outcome.laneType() != null).toList());
             ReconstructionEdits.reportLostSound(allocation, scoreEdits, null, outcomes);
@@ -759,7 +759,9 @@ public final class ReconstructionStages {
         var timeline = ReconstructionTimeMap.of(score);
         return ReconstructionHeldNotes.measure(score, roles.notes().stream()
                 .filter(decision -> decision.role() == ReconstructionRoles.Role.bass
-                        || decision.role() == ReconstructionRoles.Role.melody)
+                        || decision.role() == ReconstructionRoles.Role.melody
+                        || score.inputs.audioOnly != null && (decision.role() == ReconstructionRoles.Role.counter
+                            || decision.role() == ReconstructionRoles.Role.harmony))
                 .map(decision -> timeline.sourceNote(decision.note())).toList());
     }
 

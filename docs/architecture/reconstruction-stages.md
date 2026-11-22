@@ -425,7 +425,11 @@ output. Replay uses that snapshot with the verified aligned stem.
 
 `describe` reports `chordAudit` after allocation. Assembly adds the audit to
 `report.json`, including losses from unavailable catalogue matches. Each
-loss has a reason, part, pitch, and source-clock onset. Song counts and
+loss has a reason, part, pitch, and source-clock onset. Audio-only runs
+also include the allocation role and any recorded competing note IDs.
+Studio shows the reason and competitors when you select a missed note in
+Detail. MCP clients can read the audit with `reconstruct_describe` or
+inspect a single decision with `reconstruct_trace`. Song counts and
 section counts use the effective section-level spans from `ReconstructionSections`.
 The categories are doubling, root in bass, fifth, extension, third, seventh,
 and onset-cluster top voice. Root and chord intervals are inferred from
@@ -1211,6 +1215,18 @@ Harmony spill avoids those PSG3 intervals. Counter lines, sustained
 harmony with no other playable lane, and explicit lane pins can take precedence. The allocation records `psg-cymbal-dac-collision`
 or `psg-cymbal-quiet-stem` for a substitute and `psg-noise-lane-busy` when
 the substitute cannot play.
+
+After audio-only allocation, a second pass checks the full requested gate
+against the lane schedule. It prioritizes lead and bass, then stem-backed
+holds, and can borrow idle FM1 or FM2 intervals. It restores shortened
+gates intact when another lane is free or their backing blockers can
+all move intact. In a release collision, an unshaped backing attack
+with substantially weaker stem evidence can start up to two ticks later.
+Notes with an explicit pin and authored chord voices
+retain their allocation rules. Dropped backing notes covered by a same-part
+unison near the same onset are reported as `covered-source-unison`. Gates
+under three ticks are reported as `too-short-for-overflow` if they lost
+the first allocation pass.
 
 ### Voice
 
