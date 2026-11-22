@@ -23,8 +23,6 @@ import static java.nio.file.StandardOpenOption.WRITE;
 
 /** An S3K assembly snapshot with frozen allocation and fitted sounds. */
 public final class ReconstructionLivePreview {
-    public static final double WINDOW_END = 2.5;
-
     public static final class RebuildNeeded extends IOException {
         RebuildNeeded(String detail) { super(detail); }
     }
@@ -109,22 +107,15 @@ public final class ReconstructionLivePreview {
         original = TargetPlayback.prepare(project.project());
         var rebuilt = TargetPlayback.prepare(baseline.project());
         var compiled = original.compiled();
-        if ((!Arrays.equals(rebuilt.compiled().song(), compiled.song())
+        if (!Arrays.equals(rebuilt.compiled().song(), compiled.song())
                 || !rebuilt.compiled().envelopes().equals(compiled.envelopes())
-                || !rebuilt.compiled().samples().equals(compiled.samples())) && !sameWindow(original, rebuilt))
-            throw new RebuildNeeded("The built audio differs from its saved assembly inputs");
+                || !rebuilt.compiled().samples().equals(compiled.samples())) {
+            var prefix = S3kProgramPrefix.between(compiled, rebuilt.compiled());
+            if (prefix == null || !prefix.equivalent())
+                throw new RebuildNeeded("The built audio differs from its saved assembly inputs");
+        }
         requireInputs();
         ReconstructionReview.requireRevision(work, revision);
-    }
-
-    private static boolean sameWindow(TargetPlayback first, TargetPlayback second) throws IOException {
-        int count = (int) Math.ceil(WINDOW_END * 60);
-        var pcm = new ArrayList<short[]>(count);
-        first.render(count, block -> pcm.add(block.clone()));
-        int[] index = {0};
-        boolean[] equal = {true};
-        second.render(count, block -> equal[0] &= Arrays.equals(block, pcm.get(index[0]++)));
-        return equal[0];
     }
 
     private static boolean flag(com.google.gson.JsonObject report, String key) {
@@ -149,16 +140,41 @@ public final class ReconstructionLivePreview {
      * Validate and assemble the suffix over the already-built score. Journal entries in the built prefix
      * are already reflected in the score and allocation and must never be replayed over them.
      */
+    public record Gate(double start, double end) {}
+
+    private record ChangedNote(ReconstructionStages.Note note, Gate gate) {}
+
     public final class Prepared {
         private final ReconstructionEdits journal;
         private final TargetPlayback playback;
+        private final Map<String, ChangedNote> changes;
 
-        private Prepared(ReconstructionEdits journal, TargetPlayback playback) {
+        private Prepared(ReconstructionEdits journal, TargetPlayback playback, Map<String, ChangedNote> changes) {
             this.journal = journal;
             this.playback = playback;
+            this.changes = Map.copyOf(changes);
+        }
+
+        /** Union of the old and new gates of notes changed by this journal revision. */
+        public List<Gate> changedGates(Prepared previous) {
+            var prior = previous == null ? Map.<String, ChangedNote>of() : previous.changes;
+            var ids = new HashSet<>(changes.keySet());
+            ids.addAll(prior.keySet());
+            var result = new ArrayList<Gate>();
+            for (String id : ids) {
+                var before = prior.get(id);
+                var after = changes.get(id);
+                if (Objects.equals(before, after)) continue;
+                Gate left = before == null ? gate(gates.get(id)) : before.gate();
+                Gate right = after == null ? gate(gates.get(id)) : after.gate();
+                result.add(new Gate(Math.min(left.start(), right.start()), Math.max(left.end(), right.end())));
+            }
+            return result.stream().sorted(java.util.Comparator.comparingDouble(Gate::start)).toList();
         }
 
         public TargetPlayback playback() { return playback; }
+
+        public boolean isBuilt() { return changes.isEmpty(); }
 
         /** Write the checked journal only if the same inputs and journal revision are still on disk. */
         public ReconstructionReview.Revision save(ReconstructionReview.Revision expected) throws IOException {
@@ -167,8 +183,8 @@ public final class ReconstructionLivePreview {
     }
 
     public Prepared prepare(JsonArray entries, double start, double end, double playhead) throws IOException {
-        if (!(start >= 0 && end > start && end <= WINDOW_END && playhead >= start && playhead < end))
-            throw new RebuildNeeded("Use Chip playback within the first 2.5 project seconds");
+        if (!(start >= 0 && end > start && playhead >= start && playhead < end))
+            throw new RebuildNeeded("Use an active Chip playback range");
         var journal = ReconstructionReview.parse(entries.deepCopy());
         var suffix = journal.accepted().intents();
         if (suffix.size() < baseEntries.size()) throw new RebuildNeeded("An edit from the built journal changed");
@@ -176,7 +192,7 @@ public final class ReconstructionLivePreview {
             if (!baseEntries.get(i).equals(suffix.get(i).json()))
                 throw new RebuildNeeded("An edit from the built journal changed");
         suffix = suffix.subList(baseEntries.size(), suffix.size());
-        if (suffix.isEmpty()) return new Prepared(journal, original);
+        if (suffix.isEmpty()) return new Prepared(journal, original, Map.of());
 
         var targets = new HashSet<String>();
         var dependencies = new HashSet<String>();
@@ -204,7 +220,6 @@ public final class ReconstructionLivePreview {
                     || !row.lane().matches("FM[1-5]|PSG[1-3]") || row.note().run() != null
                     || allocation.chords().containsKey(id))
                 throw new RebuildNeeded("The note needs allocation or voicing changes");
-            requireWindow(gate.startTick(), gate.endTick(), start, end);
         }
 
         var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
@@ -233,7 +248,6 @@ public final class ReconstructionLivePreview {
                 throw new RebuildNeeded("The edited note no longer fits its chip lane");
             int first = moved ? clock.startTick(note) : row.startTick();
             int last = resized || moved ? clock.endTick(note) : row.endTick();
-            requireWindow(first, last, start, end);
             replacement.put(id, new ReconstructionAllocation.Entry(note, row.role(), row.lane(), first, last, row.outcome(),
                     row.reason(), row.mergedInto(), row.competitorNoteId(), row.blockingNoteIds(),
                     row.relocatedFrom(), row.pinnedLane(), row.laneType()));
@@ -249,23 +263,24 @@ public final class ReconstructionLivePreview {
                 allocation.fastRuns(), allocation.chordVoicings());
         try {
             var result = assemble(editedScore, edited);
+            var changed = new HashMap<String, ChangedNote>();
             for (String id : targets) {
-                if (result.voicedGates().stream().noneMatch(gate -> gate.id().equals(id)
-                        && gate.lane().equals(replacement.get(id).lane())))
-                    throw new RebuildNeeded("Assembly could not keep the edited gate");
+                var played = result.voicedGates().stream().filter(gate -> gate.id().equals(id)
+                        && gate.lane().equals(replacement.get(id).lane())).findFirst().orElseThrow(
+                                () -> new RebuildNeeded("Assembly could not keep the edited gate"));
+                changed.put(id, new ChangedNote(replacement.get(id).note(), gate(played)));
                 if (replacement.get(id).note().bend() != null && replacement.get(id).note().bend().editReason() != null
                         && result.bends().stream().noneMatch(bend -> bend.id().equals(id)))
                     throw new RebuildNeeded("Assembly could not encode the edited bend");
             }
-            return new Prepared(journal, TargetPlayback.prepare(result.project()));
+            return new Prepared(journal, TargetPlayback.prepare(result.project()), changed);
         } catch (IllegalArgumentException failure) {
             throw new RebuildNeeded(failure.getMessage());
         }
     }
 
-    private void requireWindow(int first, int last, double start, double end) throws RebuildNeeded {
-        if (clock.secondsAtTick(first) < start - 1e-6 || clock.secondsAtTick(last) > end + 1e-6)
-            throw new RebuildNeeded("The edited note is outside the live window");
+    private Gate gate(S3kReconstruction.VoicedGate gate) {
+        return new Gate(clock.secondsAtTick(gate.startTick()), clock.secondsAtTick(gate.endTick()));
     }
 
     /** Save the checked journal using the same revision and file locks as a canonical publication. */

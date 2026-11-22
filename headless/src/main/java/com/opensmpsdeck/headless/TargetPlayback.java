@@ -55,6 +55,13 @@ public final class TargetPlayback {
 
     public TargetGame target() { return target; }
 
+    /** Independent readers for exact presentation-aligned S3K seeks. */
+    public CheckpointPlayback checkpoints() {
+        if (classic != null || compiled.nativeProgram() != null)
+            throw new IllegalStateException("Checkpoints require a compiled S3K arrangement");
+        return new CheckpointPlayback(this);
+    }
+
     CompiledProject compiled() { return compiled; }
 
     void writeWave(Path output, int frames) throws IOException {

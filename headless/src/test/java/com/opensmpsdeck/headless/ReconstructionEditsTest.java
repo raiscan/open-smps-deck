@@ -62,7 +62,7 @@ class ReconstructionEditsTest {
         }
         var outside = new com.google.gson.JsonArray();
         outside.add(entries.get(0));
-        assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(outside, 1, 2, 0));
+        assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(outside, 3, 4, 0));
         outside.add(json("""
                 {"id":"route","op":"setRole","reason":"fixture","noteIds":["n-0-0-60"],"role":"bass"}
                 """));
