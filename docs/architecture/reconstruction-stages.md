@@ -1219,16 +1219,31 @@ while the hit is still audible provides a lower bound on its decay. It compares 
 for kicks and toms. For hats, cymbals, sticks and claps it analyzes the same
 upper bands in the stem and candidate, and charges for excess low body in
 the DAC playback. It tests native DAC rate bytes around each catalogue
-recipe within a six-semitone search and uses named classes and verified
-S3K slots as soft priors. Without a mapped drum stem it uses the mix fit.
+recipe within a six-semitone search. Without a mapped drum stem it uses the
+mix fit and a smaller rate search.
 
-The catalogue evidence records the acoustic distance and class penalty.
-When several plausible samples share recorded DAC use in a catalogue song
-or belong to an authored bank, the fitter gives that kit a small bonus. A
-stronger match can come from any kit. Reusing the same PCM across classes
-costs more. The evidence records the preferred kit and whether the chosen
-asset belongs to it. To use another catalogue variant at its native rate,
-change `variantId` and remove `drumSelection`.
+The fitter profiles the decoded PCM at each tested rate. Speech-like and
+pitched/tonal samples are excluded from automatic drum fitting, including
+the legacy mix vote. A speech-like or tonal classification at any native
+catalogue rate excludes the asset across its rate variants. Hats and
+cymbals require a noise-like profile at the fitted rate. Named classes,
+played native kick and snare slots, and declared slots provide soft priors
+among eligible candidates. When several candidates share recorded DAC use
+in a catalogue song or belong to an authored bank, the fitter gives that
+kit a small bonus. Reusing the same PCM across classes costs more.
+
+The `drumSelection` evidence records the requested drum class, acoustic
+profile version, representative excluded rates and reasons, and the
+spectral fit and preferred kit for eligible candidates. When no DAC
+candidate qualifies, the catalogue fit uses the PSG3 noise envelope where
+the lane can accommodate the attack. Existing PSG3 notes have priority.
+Assembly records the actual PSG3 gate or a collision in the report. The
+FM-only option disables the fallback. In `auto` source mode, a candidate
+stem slice must pass the same eligibility check. The explicit `sliced` mode
+uses the chosen stem as its source. To deliberately use a DAC variant at its native rate,
+set `variantId` and remove `drumSelection` from the DAC instrument entry.
+This also works for an asset marked `excludeFromDrumFit` in the catalogue.
+
 Automatic PSG3 cymbals use tone-linked white noise. Closed and pedal hats
 start at 13.98 kHz for one driver tick (about 16.7 ms) and switch to 6.99 kHz
 for the decay. The envelope uses attenuation offsets 0, 4 and 9 before rest.

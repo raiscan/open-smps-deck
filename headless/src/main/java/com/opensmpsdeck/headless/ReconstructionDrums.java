@@ -23,7 +23,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Nullable;
 final class ReconstructionDrums {
     enum Source { catalogue, sliced, auto }
 
-    private static final int ANALYSIS_RATE = 24_000;
+    private static final int ANALYSIS_RATE = DacAcoustics.ANALYSIS_RATE;
     private static final int SLICE_RATE = 2;
     private static final int HITS_PER_CLASS = 5;
     private static final double REUSE_PENALTY = .12;
@@ -37,21 +37,26 @@ final class ReconstructionDrums {
 
     record Features(List<Double> bands, AudioFingerprint.Summary sound, @Nullable Double pitchHz) {}
     record Candidate(String assetId, String variantId, String name, int rate, double distance, Features features,
-                     @Nullable Double classPenalty) {
+                     @Nullable Double classPenalty, @Nullable DacAcoustics.Profile acoustics) {
         double score() { return distance + (classPenalty == null ? 0 : classPenalty); }
     }
     record Kit(String driver, String revision, @Nullable Integer songId, @Nullable String song) {}
     record Hit(double onset, double start, double length, int overlaps, @Nullable Boolean tailCensored) {}
+    record Exclusion(String assetId, String name, int rate, DacAcoustics.SampleClass sampleClass, String reason) {}
     record Evidence(String reference, ReconstructionTimeMap.TimeBase timeBase, List<Hit> hits, @Nullable Features target,
                     List<Candidate> alternatives, @Nullable Candidate catalogue, Source selected, String reason,
-                    @Nullable Kit preferredKit, @Nullable Boolean inPreferredKit) {}
+                    @Nullable Kit preferredKit, @Nullable Boolean inPreferredKit,
+                    @Nullable DrumClass drumClass, @Nullable Integer acousticProfileVersion,
+                    @Nullable List<Exclusion> exclusions,
+                    @Nullable String fallbackLane) {}
     record Selection(@Nullable String variantId, int rate, @Nullable DacSample slice, Evidence evidence) {}
 
     private record Clip(Hit hit, float[] samples, Features features, AudioFingerprint fingerprint, double isolation) {}
     private record Rated(InstrumentCatalogue.Variant variant, int rate, Features features,
-                         AudioFingerprint fingerprint, Map<Integer, AudioFingerprint> filtered) {}
+                         AudioFingerprint fingerprint, Map<Integer, AudioFingerprint> filtered,
+                         DacAcoustics.Profile acoustics, DacAcoustics.AssetProfile asset) {}
     private record Fit(List<Clip> clips, List<Candidate> candidates, DacSample slice, boolean stem,
-                       Candidate mixFallback) {}
+                       Candidate mixFallback, List<Exclusion> exclusions, boolean eligible) {}
     private record AssetRate(String id, int rate) {}
 
     private ReconstructionDrums() {}
@@ -76,13 +81,14 @@ final class ReconstructionDrums {
         var matched = new LinkedHashMap<ReconstructionVoices.Key, Fit>();
         boolean hasStem = classes.keySet().stream().anyMatch(key -> stems.containsKey(key.partId()));
         boolean needsMix = classes.keySet().stream().anyMatch(key -> !stems.containsKey(key.partId()));
-        var mixProbes = needsMix ? probes(catalogue, LEGACY_TUNING, Set.of()) : List.<Rated>of();
+        var acoustics = new DacAcoustics(catalogue);
+        var mixProbes = needsMix ? probes(catalogue, acoustics, LEGACY_TUNING, Set.of()) : List.<Rated>of();
         var filters = new HashSet<Integer>();
         classes.keySet().stream().filter(key -> stems.containsKey(key.partId()))
                 .map(key -> cutoff(key.drumPitch())).filter(hz -> hz > 0).forEach(filters::add);
-        var stemProbes = hasStem ? probes(catalogue, STEM_TUNING, filters) : List.<Rated>of();
+        var stemProbes = hasStem ? probes(catalogue, acoustics, STEM_TUNING, filters) : List.<Rated>of();
         var families = families(catalogue);
-        var labels = hasStem ? labels(catalogue, families) : Map.<String, DrumClass>of();
+        var labels = hasStem ? labels(catalogue, families, acoustics) : Map.<String, DrumClass>of();
         if (!timeline.warped()) {
             analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched);
         } else {
@@ -113,7 +119,7 @@ final class ReconstructionDrums {
         preserveUnisolatedMixChoices(score, catalogue, mix, stems, mixProbes, matched);
         var source = score.inputs().drumSource();
         return selectKit(catalogue, matched, hasStem ? kits(catalogue) : Map.of(),
-                timeline.timeBase(), source == null ? Source.catalogue : source);
+                timeline.timeBase(), source == null ? Source.catalogue : source, !score.inputs().fmOnly());
     }
 
     private static void analyze(Map<ReconstructionVoices.Key, List<MidiScore.Note>> classes,
@@ -127,9 +133,17 @@ final class ReconstructionDrums {
             var hits = cleanHits(stem == null ? mix : stem, entry.getValue(), context, key.drumPitch(), stem != null);
             var isolated = hits.stream().filter(clip -> clip.hit().overlaps() == 0).toList();
             if (stem != null && isolated.size() >= 2) hits = isolated;
-            var ranked = rank(hits, stem == null ? mixProbes : stemProbes, families, labels, key.drumPitch(), stem != null);
+            int pitch = key.drumPitch();
+            var allowed = new ArrayList<Rated>();
+            var exclusions = new LinkedHashMap<List<String>, Exclusion>();
+            for (var probe : stem == null ? mixProbes : stemProbes) {
+                var excluded = exclusion(probe, pitch);
+                if (excluded != null) exclusions.putIfAbsent(List.of(excluded.assetId(), excluded.reason()), excluded);
+                else if (stem == null || cutoff(pitch) == 0 || probe.filtered().containsKey(cutoff(pitch))) allowed.add(probe);
+            }
+            var ranked = rank(hits, allowed, families, labels, pitch, stem != null);
             DacSample sample = stem == null || hits.isEmpty() ? null : slice(hits.getFirst().samples(), key);
-            matched.put(key, new Fit(hits, ranked, sample, stem != null, null));
+            matched.put(key, new Fit(hits, ranked, sample, stem != null, null, List.copyOf(exclusions.values()), !allowed.isEmpty()));
         }
     }
 
@@ -150,13 +164,14 @@ final class ReconstructionDrums {
             var previous = legacy.get(key);
             if (previous == null || previous.assetId() == null) continue;
             var nativeProbe = probes.stream().filter(probe -> probe.variant().assetId().equals(previous.assetId())
-                    && probe.rate() == previous.sampleRate()).findFirst().orElse(null);
+                    && probe.rate() == previous.sampleRate() && exclusion(probe, key.drumPitch()) == null)
+                    .findFirst().orElse(null);
             if (nativeProbe == null) continue;
             var fit = fitted.get(key);
             var fallback = new Candidate(previous.assetId(), previous.variantId(), previous.name(),
                     previous.sampleRate(), distance(fit.clips(), nativeProbe, key.drumPitch(), false),
-                    nativeProbe.features(), null);
-            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback));
+                    nativeProbe.features(), null, nativeProbe.acoustics());
+            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback, fit.exclusions(), fit.eligible()));
         }
     }
 
@@ -276,7 +291,7 @@ final class ReconstructionDrums {
                 contrast - 1.1 * overlaps);
     }
 
-    private static List<Rated> probes(InstrumentCatalogue catalogue, int[] tuning, Set<Integer> filters)
+    private static List<Rated> probes(InstrumentCatalogue catalogue, DacAcoustics acoustics, int[] tuning, Set<Integer> filters)
             throws IOException {
         var result = new ArrayList<Rated>();
         var seen = new HashSet<AssetRate>();
@@ -285,15 +300,15 @@ final class ReconstructionDrums {
             if (asset.kind() != InstrumentCatalogue.Kind.DAC_SAMPLE) continue;
             int nativeRate = variant.recipe().rate();
             double nativeHz = DacSample.sampleRateHz(nativeRate);
-            byte[] bytes = asset.bytes();
-            float[] pcm = new float[bytes.length];
-            for (int i = 0; i < pcm.length; i++) pcm[i] = (Byte.toUnsignedInt(bytes[i]) - 128) / 128f;
+            float[] pcm = DacAcoustics.pcm(asset.bytes());
+            var assetProfile = acoustics.asset(asset.id());
             for (int semitones : tuning) {
                 if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException();
                 double targetHz = nativeHz * Math.pow(2, semitones / 12.0);
                 int rate = nearestRate(targetHz);
                 if (!seen.add(new AssetRate(asset.id(), rate))) continue;
                 float[] audio = resample(pcm, DacSample.sampleRateHz(rate), ANALYSIS_RATE);
+                var profile = acoustics.profile(asset.id(), rate, audio);
                 if (audio.length < ANALYSIS_RATE / 100) audio = Arrays.copyOf(audio, ANALYSIS_RATE / 100);
                 try {
                     var fingerprint = AudioFingerprint.extract(audio, ANALYSIS_RATE);
@@ -307,13 +322,31 @@ final class ReconstructionDrums {
                             if (!"Fingerprint audio is silent".equals(invalid.getMessage())) throw invalid;
                         }
                     }
-                    result.add(new Rated(variant, rate, features(fingerprint, audio), fingerprint, filtered));
+                    result.add(new Rated(variant, rate, features(fingerprint, audio), fingerprint, filtered, profile, assetProfile));
                 } catch (IllegalArgumentException invalid) {
                     if (!"Fingerprint audio is silent".equals(invalid.getMessage())) throw invalid;
                 }
             }
         }
         return result;
+    }
+
+    private static Exclusion exclusion(Rated probe, int pitch) {
+        var asset = probe.asset();
+        var rateClass = probe.acoustics().sampleClass();
+        var sampleClass = asset.sampleClass().pitched() ? asset.sampleClass() : rateClass;
+        String reason = asset.excludeFromDrumFit() ? "excludeFromDrumFit" : exclusionReason(sampleClass, pitch);
+        return reason == null ? null : new Exclusion(asset.assetId(), asset.name(), probe.rate(), sampleClass, reason);
+    }
+
+    private static String exclusionReason(DacAcoustics.SampleClass sampleClass, int pitch) {
+        return switch (sampleClass) {
+            case SPEECH_LIKE -> "speech-like";
+            case PITCHED_TONAL -> "pitched-tonal";
+            case UNCLASSIFIED -> "insufficient-acoustic-evidence";
+            default -> ReconstructionCymbals.eligible(pitch) && sampleClass != DacAcoustics.SampleClass.NOISE_LIKE
+                    ? "hat-or-cymbal-requires-noise" : null;
+        };
     }
 
     private static int nearestRate(double hz) {
@@ -336,11 +369,9 @@ final class ReconstructionDrums {
         for (var probe : probes) {
             var variant = probe.variant();
             String asset = variant.assetId();
-            int cutoff = cutoff(pitch);
-            if (stem && cutoff > 0 && !probe.filtered().containsKey(cutoff)) continue;
             double penalty = stem ? classPenalty(labels.get(asset), pitch) : familyPenalty(families.get(asset), pitch);
             var candidate = new Candidate(asset, variant.id(), variant.name(), probe.rate(),
-                    distance(clips, probe, pitch, stem), probe.features(), penalty);
+                    distance(clips, probe, pitch, stem), probe.features(), penalty, probe.acoustics());
             bestByAsset.merge(asset, candidate, (a, b) -> a.distance() <= b.distance() ? a : b);
         }
         return bestByAsset.values().stream().sorted(Comparator.comparingDouble(Candidate::score)
@@ -384,9 +415,10 @@ final class ReconstructionDrums {
         return .19;
     }
 
-    private enum DrumClass { KICK, SNARE, CLAP, STICK, TOM, HAT, CYMBAL, OTHER }
+    enum DrumClass { KICK, SNARE, CLAP, STICK, TOM, HAT, CYMBAL, OTHER }
 
-    private static Map<String, DrumClass> labels(InstrumentCatalogue catalogue, Map<String, S3kDacFamily> families) {
+    private static Map<String, DrumClass> labels(InstrumentCatalogue catalogue, Map<String, S3kDacFamily> families,
+                                                  DacAcoustics acoustics) {
         var labels = new HashMap<String, DrumClass>();
         for (var variant : catalogue.variants()) {
             var asset = catalogue.asset(variant.assetId());
@@ -395,6 +427,11 @@ final class ReconstructionDrums {
                     .toLowerCase(Locale.ROOT);
             DrumClass tagged = namedClass(description);
             if (tagged != DrumClass.OTHER) labels.putIfAbsent(asset.id(), tagged);
+        }
+        for (var variant : catalogue.variants()) {
+            var profile = acoustics.asset(variant.assetId());
+            if (profile != null && profile.playedRoles().size() == 1)
+                labels.putIfAbsent(profile.assetId(), DrumClass.valueOf(profile.playedRoles().getFirst()));
         }
         families.forEach((id, family) -> labels.putIfAbsent(id,
                 family == S3kDacFamily.KICK ? DrumClass.KICK : DrumClass.SNARE));
@@ -412,8 +449,8 @@ final class ReconstructionDrums {
         return DrumClass.OTHER;
     }
 
-    private static double classPenalty(DrumClass actual, int pitch) {
-        DrumClass expected = switch (pitch) {
+    private static DrumClass drumClass(int pitch) {
+        return switch (pitch) {
             case 35, 36 -> DrumClass.KICK;
             case 38, 40 -> DrumClass.SNARE;
             case 39 -> DrumClass.CLAP;
@@ -422,6 +459,10 @@ final class ReconstructionDrums {
             case 42, 44, 46 -> DrumClass.HAT;
             default -> ReconstructionCymbals.eligible(pitch) ? DrumClass.CYMBAL : DrumClass.OTHER;
         };
+    }
+
+    private static double classPenalty(DrumClass actual, int pitch) {
+        DrumClass expected = drumClass(pitch);
         if (expected == actual) return 0;
         if (actual == null) return expected == DrumClass.KICK || expected == DrumClass.SNARE ? .16 : .035;
         if (expected == DrumClass.CLAP && actual == DrumClass.SNARE
@@ -532,7 +573,7 @@ final class ReconstructionDrums {
 
     private static Map<ReconstructionVoices.Key, Selection> selectKit(InstrumentCatalogue catalogue,
             Map<ReconstructionVoices.Key, Fit> fitted, Map<Kit, Set<String>> kits,
-            ReconstructionTimeMap.TimeBase clock, Source mode) {
+            ReconstructionTimeMap.TimeBase clock, Source mode, boolean allowNoise) {
         Kit preferred = preferredKit(fitted, kits);
         var kitAssets = preferred == null ? Set.<String>of() : kits.get(preferred);
         var usage = new HashMap<String, Integer>();
@@ -555,6 +596,17 @@ final class ReconstructionDrums {
             var sliced = fit.slice();
             boolean useSlice = sliced != null && (mode == Source.sliced || mode == Source.auto
                     && (chosen == null || chosen.distance() > AUTO_THRESHOLD));
+            var exclusions = fit.exclusions();
+            if (useSlice && mode == Source.auto) {
+                var sampleClass = DacAcoustics.profile(sliced).sampleClass();
+                String exclusion = exclusionReason(sampleClass, entry.getKey().drumPitch());
+                if (exclusion != null) {
+                    useSlice = false;
+                    var rejected = new ArrayList<>(exclusions);
+                    rejected.add(new Exclusion(sliced.id(), sliced.name(), sliced.rate(), sampleClass, exclusion));
+                    exclusions = List.copyOf(rejected);
+                }
+            }
             AssetRate key = useSlice ? new AssetRate(sliced.id(), sliced.rate()) : chosen == null ? null : key(chosen);
             int size = useSlice ? sliced.pcm().length : chosen == null ? 0 : catalogue.asset(chosen.assetId()).bytes().length;
             if (key != null && !sizes.containsKey(key) && (sizes.size() >= DacSample.MAX_SAMPLES
@@ -568,14 +620,18 @@ final class ReconstructionDrums {
                 bytes += size;
             }
             if (!useSlice && chosen != null) usage.merge(chosen.assetId(), 1, Integer::sum);
-            String reason = useSlice ? mode == Source.auto ? "catalogue distance above threshold" : "requested"
+            boolean noEligibleDac = !useSlice && chosen == null && !fit.eligible();
+            String fallbackLane = noEligibleDac && allowNoise ? "PSG3" : null;
+            String reason = noEligibleDac ? "no acoustically eligible DAC sample"
+                    : useSlice ? mode == Source.auto ? "catalogue distance above threshold" : "requested"
                     : !fit.stem() && mode != Source.catalogue ? "no drum stem supplied"
                     : chosen == null ? "no eligible fit"
                     : chosen == fit.mixFallback() ? "legacy vote: fewer than two isolated hits in the mix" : "catalogue fit";
             var evidence = new Evidence(fit.stem() ? "stem" : "mix", clock, fit.clips().stream().map(Clip::hit).toList(),
                     summarize(fit.clips()), fit.candidates().stream().limit(5).toList(), chosen,
                     useSlice ? Source.sliced : Source.catalogue, reason, fit.stem() ? preferred : null,
-                    !fit.stem() || preferred == null || chosen == null ? null : kitAssets.contains(chosen.assetId()));
+                    !fit.stem() || preferred == null || chosen == null ? null : kitAssets.contains(chosen.assetId()),
+                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane);
             result.put(entry.getKey(), new Selection(chosen == null ? null : chosen.variantId(),
                     useSlice ? sliced.rate() : chosen == null ? 0 : chosen.rate(), useSlice ? sliced : null, evidence));
         }
@@ -655,7 +711,7 @@ final class ReconstructionDrums {
         return preferred;
     }
 
-    private static double median(double[] values) {
+    static double median(double[] values) {
         Arrays.sort(values);
         return (values[values.length / 2] + values[(values.length - 1) / 2]) / 2;
     }
@@ -673,7 +729,7 @@ final class ReconstructionDrums {
         return DacSample.of("stem-" + InstrumentCatalogue.digest(bytes), "Stem drum " + key.drumPitch(), SLICE_RATE, bytes);
     }
 
-    private static float[] resample(float[] signal, double inputRate, double outputRate) {
+    static float[] resample(float[] signal, double inputRate, double outputRate) {
         double ratio = inputRate / outputRate;
         int length = Math.clamp((int) Math.ceil(signal.length / ratio), 1, (int) (outputRate * .5));
         var output = new float[length];

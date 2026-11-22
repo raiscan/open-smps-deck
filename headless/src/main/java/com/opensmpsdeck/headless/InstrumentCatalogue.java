@@ -32,7 +32,11 @@ public final class InstrumentCatalogue {
 
     public enum Kind { FM_VOICE, PSG_VOLUME, MODULATION, DAC_SAMPLE, PSG_NOISE }
 
-    public record Asset(String id, Kind kind, String name, String payload) {
+    public record Asset(String id, Kind kind, String name, String payload, Boolean excludeFromDrumFit) {
+        public Asset(String id, Kind kind, String name, String payload) {
+            this(id, kind, name, payload, null);
+        }
+
         public Asset {
             Objects.requireNonNull(kind, "asset kind");
             requireText(name, "asset name");

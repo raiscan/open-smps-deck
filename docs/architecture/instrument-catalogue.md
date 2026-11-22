@@ -124,6 +124,25 @@ index bytes. Every variant was rendered through the pinned chips for up to
 24 presentations. The scan retained six unresolved-envelope diagnostics
 and marked the Extra Life cue's request to restore previous music.
 
+## DAC acoustic classes
+
+`catalog dac-classes INDEX.json` derives a versioned profile for each DAC asset
+and its recorded native rates. The fitter computes the same features for its
+retuned rate probes. The profile measures the first 500 ms at most, pooling
+active 32 ms frames on a 10 ms hop. It reports normalized autocorrelation
+strength, the fraction of periodic frames, median fundamental frequency and
+its spread, movement across broad spectral bands, upper-band spectral
+flatness, low and upper energy shares, and the time envelope. The classes are
+speech-like, pitched/tonal, noise-like, and membrane/body. PCM with too little
+signal to measure is unclassified. These rules estimate suitability for
+drum fitting and can group synthetic effects with speech-like sounds.
+Played, recognized S3K slots provide separate evidence of drum usage.
+
+To exclude a sound from automatic reconstruction, set the optional
+`excludeFromDrumFit` boolean to `true` on its DAC asset in the catalogue's
+`assets` array. The asset ID, native recipes, and manual selection remain
+available. Older catalogues can be used as inputs to the derived index.
+
 ## Matching a reference sound
 
 An agent can rank catalogue variants against a short WAV excerpt from a stem.
