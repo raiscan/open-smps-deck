@@ -296,7 +296,11 @@ final class InstrumentCataloguePane extends VBox implements AutoCloseable {
     private static String rowLabel(Match match) {
         var variant = match.variant();
         var recipe = variant.recipe();
-        var label = new StringBuilder(variant.name()).append(" · ").append(kindName(match.asset().kind()));
+        var label = new StringBuilder(variant.name());
+        var names = InstrumentCatalogue.labels(match);
+        if (!names.isEmpty()) label.append(" — ").append(names.stream().map(InstrumentCatalogue.Label::text)
+                .distinct().collect(java.util.stream.Collectors.joining(" / ")));
+        label.append(" · ").append(kindName(match.asset().kind()));
         if (variant.target() != com.opensmpsdeck.project.TargetGame.S3K)
             label.append(" · ").append(variant.driver().toUpperCase(java.util.Locale.ROOT));
         if (recipe.rate() != null) label.append(" · rate %02X".formatted(recipe.rate()));
@@ -315,6 +319,8 @@ final class InstrumentCataloguePane extends VBox implements AutoCloseable {
         var body = new StringBuilder(variant.name()).append("\n");
         fact(body, "Instrument", asset.name() + " · " + kindName(asset.kind()));
         fact(body, "Roles", String.join(", ", variant.roles()));
+        for (var name : InstrumentCatalogue.labels(match))
+            fact(body, "Name", name.text() + " · " + name.ref() + " · " + name.source());
         body.append("\nPlayback recipe\n");
         fact(body, "Rate", recipe.rate());
         fact(body, "Pan", recipe.pan());

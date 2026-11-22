@@ -42,6 +42,9 @@ final class S3kDisasmSamples {
 
     private S3kDisasmSamples() {}
 
+    /** skdisasm constants for retail notes 81h–C4h, in note order. */
+    static List<String> retailNoteNames() { return RETAIL_NOTES; }
+
     static Plan plan(DisassemblyKit kit) throws IOException {
         var notes = new LinkedHashMap<Integer, Note>();
         var custom = new ArrayList<PackageManifest.DacBinding>();
