@@ -74,6 +74,11 @@ final class ReconstructionBends {
     }
 
     record Approach(double start, double landing, List<Sample> samples, boolean strong) {
+        double holdUntil() {
+            var next = samples.get(1);
+            return next.cents() == samples.getFirst().cents() ? next.time() : start;
+        }
+
         Bend bend(double start, double end) {
             var points = new ArrayList<Point>();
             points.add(new Point(start, (int) Math.round(samples.getFirst().cents())));
@@ -86,7 +91,15 @@ final class ReconstructionBends {
             points.add(new Point(end, 0));
             var reduced = new ArrayList<Point>();
             reduced.add(points.getFirst());
-            simplify(points, 0, points.size() - 1, reduced);
+            // Keep the measured hold boundary even when a nearby moving
+            // point could approximate it within the curve simplifier's error.
+            int holdEnd = 0;
+            double heldUntil = holdUntil();
+            if (heldUntil > this.start) {
+                while (holdEnd + 1 < points.size() && points.get(holdEnd + 1).time() <= heldUntil) holdEnd++;
+                if (holdEnd > 0) reduced.add(points.get(holdEnd));
+            }
+            simplify(points, holdEnd, points.size() - 1, reduced);
             return new Bend(Kind.SCOOP_IN, 0, strong ? .95 : .82, reduced);
         }
     }
@@ -152,16 +165,103 @@ final class ReconstructionBends {
          * settled pitch, the onset does not have to resemble the MIDI note.
          */
         Approach approach(Note note) {
+            return approach(note, false);
+        }
+
+        Approach attackApproach(Note note) {
+            var approach = approach(note, true);
+            if (approach == null || approach.start() >= note.start()) return approach;
+
+            // Report the residual rise from the written attack. The first
+            // analysis windows can still be centered over the pickup gate.
+            var samples = approach.samples();
+            int next = 1;
+            while (samples.get(next).time() <= note.start()) {
+                if (++next == samples.size()) return null;
+            }
+            var left = samples.get(next - 1);
+            var right = samples.get(next);
+            double fraction = (note.start() - left.time()) / (right.time() - left.time());
+            double cents = left.cents() + fraction * (right.cents() - left.cents());
+            if (cents > -65) return null;
+            var clipped = new ArrayList<Sample>();
+            clipped.add(new Sample(note.start(), cents, Math.min(left.support(), right.support())));
+            clipped.addAll(samples.subList(next, samples.size()));
+            return new Approach(note.start(), approach.landing(), List.copyOf(clipped), approach.strong());
+        }
+
+        /**
+         * Recover the stationary part separately from rise classification. A
+         * held pitch is evidence about the attack, not extra glide duration.
+         */
+        Approach heldPickup(Note note, Approach rise, Note pickup) {
+            double firstCents = rise.samples().getFirst().cents();
+            double cents = pickup == null ? 100 * Math.rint(firstCents / 100)
+                    : (pickup.pitch() - note.pitch()) * 100;
+            if (cents > -70 || firstCents < cents - 45 || firstCents > cents + 145) return null;
+
+            double carrier = ReconstructionLeadAudio.hz(note.pitch());
+            int rate = audio.sampleRate();
+            double[] window = approachWindow(carrier, rate);
+            double earliest = pickup == null ? Math.max(0, rise.start() - .18)
+                    : Math.max(0, pickup.start() - .042);
+            var bridge = new ArrayList<Sample>();
+            Sample oldest = null, holdEnd = null;
+            int settled = 0, missing = 0;
+            double prior = firstCents;
+            for (double t = rise.start() - HOP; t >= earliest; t -= HOP) {
+                int at = (int) Math.round(t * rate) - window.length / 2;
+                if (at < 0 || at + window.length > audio.samples().length) break;
+                var point = sample(at, window, carrier, t, prior, false, APPROACH);
+                boolean inBand = point != null && point.support() >= .62 && Math.abs(point.cents() - cents) <= 42;
+                if (inBand) {
+                    if (holdEnd == null) holdEnd = point;
+                    oldest = point;
+                    settled++;
+                    prior = cents;
+                    missing = 0;
+                } else if (holdEnd == null && point != null && point.support() >= .62
+                        && point.cents() > cents && point.cents() <= prior + 36
+                        && rise.start() - t <= .060) {
+                    bridge.add(point);
+                    prior = Math.min(prior, point.cents());
+                    missing = 0;
+                } else if (++missing > 2 || holdEnd == null && rise.start() - t > .060) {
+                    break;
+                }
+            }
+            if (settled < 4 || oldest == null || holdEnd.time() - oldest.time() < .017) return null;
+
+            double attack = Math.max(0, oldest.time() - .007);
+            // Require an observed onset near the written pickup. A ridge that
+            // extends back to the search limit has no supported attack here.
+            if ((earliest > 0 && oldest.time() - earliest < .016)
+                    || (pickup != null && Math.abs(attack - pickup.start()) > .039)
+                    || (attack < .010 && pickup != null && pickup.start() >= .030)) return null;
+            var contour = new ArrayList<Sample>();
+            contour.add(new Sample(attack, cents, oldest.support()));
+            contour.add(new Sample(holdEnd.time(), cents, holdEnd.support()));
+            contour.addAll(bridge.reversed());
+            contour.addAll(rise.samples());
+            return new Approach(attack, rise.landing(), List.copyOf(contour), rise.strong());
+        }
+
+        private static double[] approachWindow(double carrier, int rate) {
+            double[] window = new double[(int) Math.round(rate * Math.clamp(5 / carrier, .013, .022))];
+            for (int i = 0; i < window.length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (window.length - 1));
+            return window;
+        }
+
+        private Approach approach(Note note, boolean attackOnly) {
             if (note.run() != null || note.pitch() < 48 || note.pitch() > 94 || note.end() - note.start() < .068)
                 return null;
             double carrier = ReconstructionLeadAudio.hz(note.pitch());
             int rate = audio.sampleRate();
-            int length = (int) Math.round(rate * Math.clamp(5 / carrier, .013, .022));
-            double[] window = new double[length];
-            for (int i = 0; i < length; i++) window[i] = .5 - .5 * Math.cos(Math.TAU * i / (length - 1));
+            double[] window = approachWindow(carrier, rate);
+            int length = window.length;
             var reverse = new ArrayList<Sample>();
-            double last = Math.min(note.start() + .210, note.end() - .018);
-            double first = Math.max(length / (2.0 * rate), note.start() - .55);
+            double last = Math.min(note.start() + (attackOnly ? .052 : .210), note.end() - .018);
+            double first = Math.max(length / (2.0 * rate), note.start() - (attackOnly ? .009 : .55));
             double prior = 0;
             int stable = 0;
             for (double t = last; t >= first; t -= HOP) {
@@ -181,7 +281,7 @@ final class ReconstructionBends {
                     break;
                 }
             }
-            return approach(note, reverse.reversed());
+            return approach(note, reverse.reversed(), attackOnly);
         }
 
         /** Look for the same motion in another written voice, even at a weak harmonic. */
@@ -229,16 +329,18 @@ final class ReconstructionBends {
             return new Approach(moving.getFirst().time(), landing.time(), List.copyOf(moving), true);
         }
 
-        private static Approach approach(Note note, List<Sample> track) {
+        private static Approach approach(Note note, List<Sample> track, boolean attackOnly) {
             if (track.size() < 7) return null;
             int first = 0;
             for (int i = 1; i < Math.min(3, track.size()); i++) {
                 if (track.get(i).cents() < track.get(first).cents() - 18) first = i;
             }
+            double settledCents = attackOnly ? 25 : 42;
             int landing = first + 1;
             int settled = 0;
             for (int i = landing; i < track.size(); i++) {
-                settled = Math.abs(track.get(i).cents()) <= 42 ? settled + 1 : 0;
+                if (attackOnly && track.get(i).cents() > settledCents) return null;
+                settled = Math.abs(track.get(i).cents()) <= settledCents ? settled + 1 : 0;
                 if (settled == 4) {
                     landing = i - 3;
                     break;
@@ -264,8 +366,10 @@ final class ReconstructionBends {
                 support += track.get(i).support();
             }
             if (back > Math.max(22, depth * .19) || longestFlat > 3 || largestStep > depth * .68) return null;
-            boolean strong = depth >= 85 && time - start >= .027 && back <= Math.max(12, depth * .09)
+            boolean strong = depth >= 85 && time - start >= (attackOnly ? .023 : .027)
+                    && back <= Math.max(12, depth * .09)
                     && longestFlat < 3 && largestStep <= depth * .47 && support / (landing - first + 1) >= .86;
+            if (attackOnly && !strong) return null;
             var samples = new ArrayList<>(track.subList(first, landing));
             var last = track.get(landing);
             samples.add(new Sample(last.time(), 0, last.support()));
