@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.synth.ChipWriteObserver;
+import com.openggf.audio.synth.PsgChip;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,9 +16,15 @@ final class EvidenceBends implements ChipWriteObserver {
 
     private final int[] high = new int[5];
     private final int[] packed = new int[5];
-    private final int[][] frequencies;
+    private final int[] periods = new int[3];
+    private final int[][] fmFrequencies;
+    private final int[][] psgPeriods;
+    private int latchedPsgRegister = -1;
 
-    EvidenceBends(int end) { frequencies = new int[5][end]; }
+    EvidenceBends(int end) {
+        fmFrequencies = new int[5][end];
+        psgPeriods = new int[3][end];
+    }
 
     @Override public void onYm2612Write(int port, int register, int value) {
         int channel = port * 3 + (register & 3);
@@ -26,10 +33,18 @@ final class EvidenceBends implements ChipWriteObserver {
         if ((register & ~3) == 0xa0) packed[channel] = (high[channel] << 8) | value;
     }
 
-    @Override public void onPsgWrite(int value) {}
+    @Override public void onPsgWrite(int value) {
+        boolean latch = (value & 0x80) != 0;
+        if (latch) latchedPsgRegister = (value >> 4) & 7;
+        if (latchedPsgRegister < 0 || latchedPsgRegister >= 6 || (latchedPsgRegister & 1) != 0) return;
+        int channel = latchedPsgRegister / 2;
+        if (latch) periods[channel] = (periods[channel] & 0x3f0) | (value & 0xf);
+        else periods[channel] = (periods[channel] & 0xf) | ((value & 0x3f) << 4);
+    }
 
     void frame(int tick) {
-        for (int channel = 0; channel < 5; channel++) frequencies[channel][tick] = packed[channel];
+        for (int channel = 0; channel < packed.length; channel++) fmFrequencies[channel][tick] = packed[channel];
+        for (int channel = 0; channel < periods.length; channel++) psgPeriods[channel][tick] = periods[channel];
     }
 
     static List<Curve> authored(Span span, Map<String, ReconstructionTrace.Row> rows, List<DrawnNote> visible, TimeBase clock) {
@@ -72,14 +87,21 @@ final class EvidenceBends implements ChipWriteObserver {
     List<Curve> curves(Span span, List<ReconstructionTrace.Voiced> gates) {
         var curves = new ArrayList<Curve>();
         for (var gate : gates) {
-            int[] lane = frequencies[ReconstructionAllocation.FM.indexOf(gate.lane())];
+            int fmChannel = ReconstructionAllocation.FM.indexOf(gate.lane());
+            int psgChannel = ReconstructionAllocation.PSG.indexOf(gate.lane());
+            if (fmChannel < 0 && psgChannel < 0) continue;
+            int[] lane = fmChannel >= 0 ? fmFrequencies[fmChannel] : psgPeriods[psgChannel];
             double from = Math.max(gate.gate().projectStart(), span.seconds(span.start(), TimeBase.project));
             double to = Math.min(gate.gate().projectEnd(), span.seconds(span.end(), TimeBase.project));
             var points = new ArrayList<Point>();
-            double reference = Math.scalb(LeadEffectMatcher.fmFnum(gate.pitch()), (gate.pitch() - 12) / 12);
+            double reference = fmChannel >= 0
+                    ? Math.scalb(LeadEffectMatcher.fmFnum(gate.pitch()), (gate.pitch() - 12) / 12)
+                    : ReconstructionLeadAudio.hz(gate.pitch());
             for (int tick = (int) Math.floor(from * 60 + 1e-8); tick < to * 60 - 1e-8 && tick < lane.length; tick++) {
                 if ((lane[tick] & 0x7ff) == 0) continue;
-                double hzRatio = Math.scalb(lane[tick] & 0x7ff, lane[tick] >> 11 & 7) / reference;
+                double frequency = fmChannel >= 0 ? Math.scalb(lane[tick] & 0x7ff, lane[tick] >> 11 & 7)
+                        : PsgChip.TICK_RATE_HZ / (2.0 * lane[tick]);
+                double hzRatio = frequency / reference;
                 double pitch = gate.pitch() + 12 * Math.log(hzRatio) / Math.log(2);
                 double time = Math.max(from, tick / 60.0);
                 points.add(point(span, span.base() == TimeBase.project ? time : span.timeline().source(time), pitch));

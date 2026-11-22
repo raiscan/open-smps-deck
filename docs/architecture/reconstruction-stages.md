@@ -1024,14 +1024,22 @@ grid marks upward and downward motion with ↗ and ↘.
 S3K transcription also tracks backward from a stable landing in the mapped
 stem. This finds upward scoops that begin below the attack window and can
 join short, ascending fragments that follow one continuous ridge. A
-stationary pitch between fragments, a pitch jump, or a drop in energy at
-the boundary keeps separate attacks. The merged gate keeps the first ID and
+stationary pitch between fragments or a pitch jump keeps separate attacks.
+When a continuous ridge crosses a drop in energy at a fragment boundary,
+the join stays in review to allow for another pick on the sliding string.
+The merged gate keeps the first ID and
 uses the landing pitch as its nominal pitch. A scoop can adjust the written
 start with the optional `start` field on a `bend` edit. Curve points use the
 same `[seconds, semitones]` format on `bend` and `mergeNotes`.
 
 High-confidence approaches on the selected lead or a mapped guitar part
-apply automatically and use FM. Other candidates enter `edits.json` as
+apply automatically. An automatic approach can guide a search
+for the same contour in other written chord voices, including octaves
+with a weaker ridge or slightly later transcribed onset. Each voice
+needs its own matching ridge through the rise and landing. The anchor
+uses FM, and the other chord voices can use FM or PSG tone. PSG plays
+the measured approach as tied period changes.
+Other candidates enter `edits.json` as
 `stem-pitch-approach` proposals. Use
 `reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect
 them. Retranscribe to recover approaches from existing work. Accepted and

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -19,17 +20,28 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Score;
 final class ReconstructionBendRecovery {
     static final String GROUP = "stem-pitch-approach";
     private static final String PREFIX = GROUP + "-";
+    private static final String PARALLEL_PREFIX = PREFIX + "parallel-";
     private static final double FRAGMENT_MAX = .145;
     private static final double TIME_SLOP = .018;
+    private static final double CHORD_ATTACK_SLOP = .125;
 
     private ReconstructionBendRecovery() {}
 
     static boolean generated(String id) { return id.startsWith(PREFIX); }
+    static boolean parallel(String id) { return id.startsWith(PARALLEL_PREFIX); }
+    static boolean psgCompatible(ReconstructionBends.Bend bend) {
+        return bend != null && bend.editReason() != null && bend.editReason().startsWith("edit:" + PARALLEL_PREFIX);
+    }
 
-    record Candidate(List<Note> members, double start, ReconstructionBends.Approach approach, boolean automatic) {
+    record Candidate(List<Note> members, double start, ReconstructionBends.Approach approach, boolean automatic,
+                     boolean parallel) {
         Note landing() { return members.getLast(); }
 
-        String id() { return PREFIX + landing().id(); }
+        String id() { return (parallel ? PARALLEL_PREFIX : PREFIX) + landing().id(); }
+
+        boolean decided(Set<String> ids) {
+            return ids.contains(id()) || ids.contains((parallel ? PREFIX : PARALLEL_PREFIX) + landing().id());
+        }
 
         ReconstructionEdits.Intent intent() {
             var note = landing();
@@ -60,7 +72,8 @@ final class ReconstructionBendRecovery {
             var evidence = new JsonObject();
             evidence.addProperty("text", String.format(Locale.ROOT,
                     "Part %d rises %.1f semitones in %.0f ms, reaching MIDI pitch %d at source %.3f s",
-                    note.part(), -bend.points().getFirst().cents() / 100.0, (approach.landing() - start) * 1000,
+                    note.part(), -approach.samples().getFirst().cents() / 100.0,
+                    (approach.landing() - approach.start()) * 1000,
                     note.pitch(), approach.landing()));
             evidence.addProperty("path", "score.json");
             edit.add("evidence", evidence);
@@ -109,31 +122,69 @@ final class ReconstructionBendRecovery {
                     : Math.abs(estimated - landing.start()) <= .012 ? landing.start() : estimated;
             if (Math.abs(start - approach.start()) > .035 || approach.landing() - start < .022) continue;
             boolean ordered = true;
+            boolean possibleReattack = false;
             for (int j = 1; j < members.size(); j++) {
                 var left = members.get(j - 1);
                 var right = members.get(j);
-                if (left.pitch() >= right.pitch() || Math.abs(left.end() - right.start()) > .040
-                        || attackDip(audio, right.start())) {
+                if (left.pitch() >= right.pitch() || Math.abs(left.end() - right.start()) > .040) {
                     ordered = false;
                     break;
                 }
+                possibleReattack |= attackDip(audio, right.start());
             }
             // A large pickup with incomplete fragment evidence is reviewable,
             // but cannot silently introduce an earlier overlapping attack.
             if (!ordered) continue;
             boolean covered = members.size() >= 3 || members.size() == 1 && Math.abs(landing.start() - start) <= .027;
-            boolean automatic = eligibleForAutomatic && covered && approach.strong();
-            candidates.add(new Candidate(List.copyOf(members), start, approach, automatic));
+            boolean automatic = eligibleForAutomatic && covered && approach.strong() && !possibleReattack;
+            candidates.add(new Candidate(List.copyOf(members), start, approach, automatic, false));
         }
-        return candidates.stream().filter(candidate -> candidates.stream().noneMatch(root ->
-                        root.automatic() && harmonicCopy(root, candidate)))
+        var companions = parallelVoices(tracker, sorted, candidates);
+        var recovered = new ArrayList<>(companions.values());
+        for (var candidate : candidates) {
+            if (!companions.containsKey(candidate.landing().id()) && candidates.stream().noneMatch(root ->
+                    root.automatic() && harmonicCopy(root, candidate))) recovered.add(candidate);
+        }
+        return recovered.stream()
                 .sorted(java.util.Comparator.comparingInt((Candidate candidate) -> candidate.members().size()).reversed()
                         .thenComparingDouble(Candidate::start)).toList();
     }
 
+    private static LinkedHashMap<String, Candidate> parallelVoices(ReconstructionBends.Tracker tracker,
+                                                                    List<Note> notes, List<Candidate> candidates) {
+        var result = new LinkedHashMap<String, Candidate>();
+        var independent = new HashSet<String>();
+        var fragmentLandings = new HashSet<String>();
+        for (var root : candidates) {
+            if (root.automatic() && candidates.stream().noneMatch(lower -> lower.automatic() && harmonicCopy(lower, root)))
+                independent.add(root.landing().id());
+            if (root.members().size() > 1) fragmentLandings.add(root.landing().id());
+        }
+        for (var root : candidates) {
+            if (!independent.contains(root.landing().id())) continue;
+            for (var note : notes) {
+                double offset = note.start() - root.landing().start();
+                if (offset > CHORD_ATTACK_SLOP) break;
+                if (offset < -.035 || note.start() > root.approach().landing() + .055
+                        || note.end() < root.approach().landing() + .04
+                        || note.pitch() == root.landing().pitch() || note.run() != null
+                        || "external".equals(note.source()) || note.bend() != null
+                        || independent.contains(note.id()) || fragmentLandings.contains(note.id())
+                        || result.containsKey(note.id())) continue;
+                var approach = tracker.parallelApproach(note, root.approach());
+                if (approach == null) continue;
+                double start = Math.max(0, Math.min(note.start(), approach.start() - .007));
+                if (notes.stream().anyMatch(other -> other.pitch() == note.pitch()
+                        && other.start() < note.start() && other.end() > start)) continue;
+                result.put(note.id(), new Candidate(List.of(note), start, approach, true, true));
+            }
+        }
+        return result;
+    }
+
     private static boolean attackDip(ReferenceAudio audio, double boundary) {
-        // A dip between two energized gates suggests a new attack. Check
-        // near the written boundary because transcription timing can drift.
+        // A dip can come from picking the same sliding string. When the
+        // spectral ridge survives it, keep the join available for review.
         double flank = Math.min(power(audio, boundary - .022), power(audio, boundary + .022));
         if (flank <= 0) return false;
         for (int hop = -2; hop <= 2; hop++) {
@@ -179,7 +230,7 @@ final class ReconstructionBendRecovery {
         var selected = new ArrayList<>(authored.intents());
         var claimed = new HashSet<String>();
         for (var candidate : candidates) {
-            if (!candidate.automatic() || existing.contains(candidate.id())) continue;
+            if (!candidate.automatic() || candidate.decided(existing)) continue;
             if (candidate.members().stream().anyMatch(note -> claimed.contains(note.id())
                     || authored.intents().stream().anyMatch(edit -> ReconstructionEdits.targets(edit, note, timeline))))
                 continue;
@@ -206,7 +257,10 @@ final class ReconstructionBendRecovery {
         updated.removeIf(edit -> edit.proposed() && generated(edit.id()) && !ids.contains(edit.id()));
         var existing = new HashSet<String>();
         updated.forEach(edit -> existing.add(edit.id()));
-        for (var candidate : eligible) if (existing.add(candidate.id())) updated.add(candidate.intent());
+        for (var candidate : eligible) if (!candidate.decided(existing)) {
+            updated.add(candidate.intent());
+            existing.add(candidate.id());
+        }
         if (updated.equals(journal.intents())) return journal;
         var result = new ReconstructionEdits(updated);
         result.write(work);

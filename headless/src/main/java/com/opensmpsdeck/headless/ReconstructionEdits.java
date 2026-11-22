@@ -1006,6 +1006,7 @@ final class ReconstructionEdits {
         var pins = new LinkedHashMap<String, Pin>();
         for (var outcome : scoreOutcomes) {
             if (outcome.status() != Status.applied || !ReconstructionBendRecovery.generated(outcome.id())) continue;
+            if (ReconstructionBendRecovery.parallel(outcome.id())) continue;
             var choice = decisions.get(outcome.noteIds().getFirst());
             if (choice != null && choice.role() != Role.drop && choice.note().bend() != null
                     && outcome.tag().equals(choice.note().bend().editReason()))
@@ -1327,7 +1328,8 @@ final class ReconstructionEdits {
                 if (drums) yield "PSG tone cannot voice MIDI drums; use NOISE or DAC";
                 if (fmOnly) yield "PSG tone is disabled in FM-only mode";
                 if (note.pitch() < profile.psg().low() || note.run() != null) yield "PSG tone requires a single attack at MIDI pitch " + profile.psg().low() + " or higher";
-                if (note.bend() != null && note.bend().editReason() != null) yield "authored bends require FM";
+                if (note.bend() != null && note.bend().editReason() != null
+                        && !ReconstructionBendRecovery.psgCompatible(note.bend())) yield "authored bends require FM";
                 yield null;
             }
             case NOISE -> {

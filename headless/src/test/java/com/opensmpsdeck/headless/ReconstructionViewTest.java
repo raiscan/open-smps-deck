@@ -14,6 +14,26 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionViewTest {
+    @Test void plotsTheAssembledPsgPitchFromTonePeriodWrites() {
+        var evidence = new EvidenceBends(2);
+        evidence.onPsgWrite(0xcb); // PSG3 tone period low nibble.
+        evidence.onPsgWrite(0x1a);
+        evidence.frame(0);
+        evidence.onPsgWrite(0xdf); // PSG3 volume.
+        evidence.onPsgWrite(0xc6);
+        evidence.onPsgWrite(0x0d);
+        evidence.frame(1);
+
+        double end = 2 / 60.0;
+        var time = ReconstructionTimeMap.TimeBase.project;
+        var span = new ReconstructionView.Span(0, end, time, new ReconstructionTimeMap(null, null, end));
+        var timing = new ReconstructionTrace.Timing(0, end, end, 0, end, end, 0, 2, 2);
+        var gate = new ReconstructionTrace.Voiced("upper", "PSG3", 72, timing, null, "assembled");
+        var points = evidence.curves(span, List.of(gate)).getFirst().points();
+        assertEquals(60, points.getFirst().pitch(), .1);
+        assertEquals(72, points.get(1).pitch(), .1);
+    }
+
     @Test void resolvesSyntheticFundamentalOnThePitchAxis() {
         var samples = new float[48_000];
         for (int i = 0; i < samples.length; i++)

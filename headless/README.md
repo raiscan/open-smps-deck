@@ -753,7 +753,7 @@ The legend also records the lane patch changes.
   the full numerical traces. `--shared-db` maps both spectrograms to the same
   30 dB window, using the higher peak as the ceiling.
 - Bends available in the stage artifacts are drawn on their gates. The
-  assembled curve comes from the rendered FM frequency registers.
+  assembled curve comes from rendered FM frequency or PSG period writes.
 - When there are simultaneous DAC losses, the legend and plot show the
   free PSG3 intervals at allocation. See the [hat recipe](../docs/architecture/reconstruction-stages.md#tune-or-override-psg3-hats).
 - `--force` replaces the PNG and any requested ridge JSON with staged exports.
@@ -1233,7 +1233,9 @@ for payloads, split and merge, and MCP equivalents.
 
 On S3K, transcription follows the source pitch backward from a settled
 note. A continuous rise can become an onset scoop or a single bent gate
-across adjacent transcription fragments. Use
+across adjacent transcription fragments. A confirmed approach also guides
+the search for matching rises in other written chord voices, which can
+play on FM or PSG tone lanes. Use
 `reconstruct proposals list WORK_DIR --group stem-pitch-approach` to inspect
 weaker candidates. Rebuild with `reconstruct run --from transcribe WORK_DIR`
 to scan an existing reconstruction. See
