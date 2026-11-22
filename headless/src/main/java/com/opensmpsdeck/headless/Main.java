@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.opensmpsdeck.headless.bench.BenchCli;
+import com.opensmpsdeck.headless.rom.RomCli;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
 import com.opensmpsdeck.project.ProjectFiles;
@@ -33,6 +34,7 @@ public final class Main {
                     requireArguments(args, 1);
                     com.opensmpsdeck.headless.mcp.McpServer.run(System.in, out);
                 }
+                case "rom" -> RomCli.run(args, out);
                 case "catalog" -> CatalogueCli.run(args, out);
                 case "notes", "reference" -> ReviewCli.run(args, out);
                 case "group" -> GroupCli.run(args, out);
@@ -355,6 +357,7 @@ public final class Main {
         out.println("           [--previous-project PROJECT.json --previous-frames N]");
         out.println("       render-compare WORK_DIR (--start S --end S | --section NAME) [--time source|project] [--reference WAV] [--render WAV] [--force] OUT.wav|OUT.mp3");
         out.println("       java -jar opensmpsdeck-headless-0.1.0-SNAPSHOT.jar catalog --help");
+        RomCli.usage(out);
         ReconstructionCli.usage(out);
         out.println("       mcp  (stdio Model Context Protocol server)");
         ReviewCli.usage(out);

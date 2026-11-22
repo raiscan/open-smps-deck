@@ -56,6 +56,12 @@ final class McpTools {
     private static final String[] READABLE_ARTIFACTS = {"score", "structure", "roles", "allocation", "voicing", "roleplan", "report", "import", "manifest", "edits", "edit-results", "sections", "voices", "voice-edits"};
 
     private static final List<Tool> TOOLS = List.of(
+            tool("rom_list", "Verify and list the ROM paths saved in the server owner's settings.",
+                    (args, progress) -> McpRoms.list()),
+            tool("rom_set", "Verify a clean retail ROM and save its absolute path in the server owner's settings.",
+                    (args, progress) -> McpRoms.set(args),
+                    choice("game", "Game ID", "s1", "s2", "s3k"),
+                    path("path", "Absolute path to a clean retail ROM")),
             tool("transcribers_list", "List the transcriber names from the server owner's local configuration.",
                     (args, progress) -> object(Map.of("transcribers", ExternalTranscribers.configuredNames(),
                             "drumTranscribers", ExternalTranscribers.configuredDrums()))),

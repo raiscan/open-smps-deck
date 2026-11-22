@@ -184,6 +184,52 @@ MCP exposes `project_export` with exactly one of `project` or `workDir`, plus
 `output`, `format`, and the optional `start`, `end`, `fade`, `loops`, `stems`
 and `zip` fields. Use a new output inside the project or work directory.
 
+## ROM library and BPS output
+
+Set one clean retail ROM path per game for Test in game exports.
+
+```sh
+java -jar "$deck_jar" rom set s3k "/path/to/locked-on.gen"
+java -jar "$deck_jar" rom list
+java -jar "$deck_jar" rom clear s3k
+```
+
+Use `s1`, `s2` or `s3k`. The library stores absolute paths in
+`${XDG_CONFIG_HOME:-~/.config}/opensmpsdeck/roms.json`. It verifies the full-file
+SHA-1 on every use. `rom list` reports `missing` for an unset game, `ok` for a
+verified file or `changed-on-disk` when a saved path is unreadable or fails
+verification. `rom clear` removes the setting and leaves the file alone.
+MCP provides `rom_list` and `rom_set` with `game` and an absolute `path`.
+
+| Game ID | Supported raw retail image | Size (bytes) | CRC32 |
+|---|---|---:|---|
+| `s1` | Sonic 1 World REV01 | 524,288 | `AFE05EEE` |
+| `s2` | Sonic 2 World REV01 | 1,048,576 | `7B905383` |
+| `s3k` | Sonic 3 & Knuckles (locked-on) | 4,194,304 | `63522553` |
+
+Convert headered or interleaved SMD dumps to raw, deinterleaved `.bin` or
+`.gen` before setting a path. The title-music patch engines and their export
+commands are supplied separately. An engine's CLI can pass its `--rom PATH`
+override to the library for the current export without changing the saved path.
+
+An engine binds its game ID with `RomTarget<S, O, R>` in
+`com.opensmpsdeck.headless.rom`. Its engine function takes
+`(VerifiedRom clean, S compiledSong, O options)` and returns
+`PatchedRom<R>` with the patched bytes and game-specific report.
+`RomLibrary.resolve(game, override)` checks the game and provides the verified
+snapshot. `RomExport.write(clean, patched, romPath, bpsPath, force)` takes
+either output path or both. Suggested names are `song.s3k.gen` and
+`song.s3k.bps`. The writer reapplies the staged BPS to the clean ROM and
+compares the result byte for byte before publication. Each destination is
+published atomically where the filesystem supports hard links. On FAT32 or
+exFAT cards, it falls back to a plain move that still refuses an existing file.
+
+A patched ROM contains copyrighted data from the retail ROM. Keep it for
+personal use and do not redistribute it. BPS is the shareable form and
+requires the matching clean ROM to apply. Material derived from stock assets
+used by the song remains subject to the original rights. Test the resulting ROM
+on your own emulator or hardware. Real-hardware testing is performed by users.
+
 ## External stem separation
 
 Start with a local WAV or MP3 to build an S3K arrangement without MIDI.
