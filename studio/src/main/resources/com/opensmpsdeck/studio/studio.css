@@ -64,3 +64,13 @@
 .reconstruction-controls .button, .reconstruction-controls .toggle-button,
 .reconstruction-controls .menu-button, .reconstruction-controls .combo-box { -fx-padding: 5 9; }
 .reconstruction-controls .toggle-button:selected { -fx-background-color: #245f58; }
+
+.voice-legend > .title { -fx-background-color: #253448; }
+.voice-legend > .title > .text { -fx-fill: #ecf6ff; }
+.voice-legend-content { -fx-padding: 3 6; -fx-background-color: #101722; }
+.voice-legend-content .button, .voice-legend-content .toggle-button, .voice-legend-content .menu-button {
+    -fx-padding: 3 5;
+    -fx-font-size: 12px;
+}
+.voice-legend-content .toggle-button:selected, .voice-legend-row:drop-target { -fx-background-color: #245f58; }
+.voice-legend-row .voice-name { -fx-font-weight: bold; -fx-text-fill: #ecf6ff; }

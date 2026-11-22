@@ -353,10 +353,8 @@ final class ReconstructionPane implements AutoCloseable {
         }
         laneFilters = new MenuButton("Lanes");
         refreshLaneFilters();
-        laneFilters.managedProperty().bind(laneFilters.visibleProperty());
         var detail = editor.visibility();
         detail.visibleProperty().bind(laneFilters.visibleProperty());
-        detail.managedProperty().bind(detail.visibleProperty());
         roles.getChildren().addAll(laneFilters, detail);
         roles.getStyleClass().addAll("panelbar", "reconstruction-controls");
         return roles;

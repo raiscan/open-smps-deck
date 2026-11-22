@@ -428,30 +428,44 @@ final class ReconstructionBulk extends VBox {
 
     private void move() {
         var target = voice.getValue();
-        if (selected.isEmpty() || target == null) return;
+        if (target != null && !selected.isEmpty()) showIssue(moveTo(target));
+    }
+
+    String moveTo(Voice target) {
+        if (selected.isEmpty()) return "Select notes to assign to a voice.";
+        if (selected.stream().anyMatch(note -> kind(note) != target.kind()))
+            return "Move tonal and drum notes to separate voices.";
         var assignment = target.assignment();
         String invalid = assignment == null ? null : laneIssue(assignment.laneType(), null, selected);
-        if (invalid != null) {
-            showIssue(invalid);
-            return;
-        }
-        submit.accept(List.of(voiceEdit("move", target.id(), "Move selection to " + target.name(), body -> body.add("noteIds", noteIds()))));
+        if (invalid != null) return invalid;
+        if (selected.stream().anyMatch(note -> !target.equals(owners.get(note.id()))))
+            submit.accept(List.of(voiceEdit("move", target.id(), "Move selection to " + target.name(),
+                    body -> body.add("noteIds", noteIds()))));
+        return null;
     }
 
     private void create() {
         String name = voiceName.getText().strip();
         if (name.isEmpty() || selected.isEmpty()) return;
-        var kind = kind(selected.getFirst());
-        if (selected.stream().anyMatch(note -> kind(note) != kind)) {
-            showIssue("Create separate voices for tonal notes and drums.");
-            return;
-        }
+        String issue = createVoice(name, null);
+        showIssue(issue);
+        if (issue == null) voiceName.clear();
+    }
+
+    String createVoice(String name, Kind emptyKind) {
+        if (emptyKind == null && selected.isEmpty()) return "Select notes to create a voice from them.";
+        var kind = emptyKind == null ? kind(selected.getFirst()) : emptyKind;
+        if (emptyKind == null && selected.stream().anyMatch(note -> kind(note) != kind))
+            return "Create separate voices for tonal notes and drums.";
         String id = "studio-voice-" + UUID.randomUUID();
-        submit.accept(List.of(voiceEdit("create", id, "Create voice " + name, body -> {
+        var create = voiceEdit("create", id, "Create voice " + name, body -> {
             body.addProperty("name", name);
             body.addProperty("kind", kind.name());
-        }), voiceEdit("move", id, "Move selection to " + name, body -> body.add("noteIds", noteIds()))));
-        voiceName.clear();
+        });
+        if (emptyKind != null) submit.accept(List.of(create));
+        else submit.accept(List.of(create, voiceEdit("move", id, "Move selection to " + name,
+                body -> body.add("noteIds", noteIds()))));
+        return null;
     }
 
     private void velocity(boolean scale) {

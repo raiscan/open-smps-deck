@@ -506,18 +506,25 @@ records coverage for the retail importer and the remaining driver gaps.
 
 ### Classify notes in Analysis
 
-Switch between **Detail** and **Roles** in the Analysis toolbar. Roles shows
-compact notes grouped by identified voice and role on the same time axis.
-Gold dots mark notes with detail edits. Both views share the selection,
-playhead, loop, zoom, and draft history.
+Switch between **Detail** and **Roles** in the Analysis toolbar. Both views
+use the same pitch and time coordinates over the spectrogram, including
+drum hits at their transcribed pitches. Roles colors each note by voice.
+Unassigned notes are grey with a **?** tag. Zoom in to read voice and role
+tags, or hover over a note for its full name and role. Gold dots mark notes
+with detail edits.
 
-Drag from empty space to box-select. Use **Shift** to add and **Ctrl** to
-toggle. Drag a note or selected set to another row to take its voice and role.
-Use **Selection** for bulk voice, role, and chip lane type changes and to create
-a voice. Right-click a voice row to rename it, split the selected notes into
-a new voice, or merge the voice into another. Studio checks for detail edit
-targets that would become orphaned before queuing the classification.
+Click a voice name in **Voices** to select all its notes. The checkbox hides
+or shows the voice, and **S** highlights it against the other voices.
+Drag from empty space to box-select notes. Use **Shift** to add and **Ctrl**
+to toggle. To assign the selection, click the destination voice's **→**
+button or drag the selected notes from the Roles plot onto its legend entry.
 
-Double-click a row label to open its notes in Detail, or double-click a note
-inside a selection to zoom to that selection. Choose **Apply** in either view
-to rebuild with the same shared edits.
+Use **New voice** to create an empty tonal or drum voice or create a voice
+from selected notes. Use **⋯** to rename, split or merge a voice. Use
+**Selection** to change a role or chip lane type in bulk. Studio checks
+whether a classification change would orphan a detail edit target before
+queuing the change.
+
+Both views share the selection, playhead, loop, zoom and undo history.
+Double-click a note in Roles to focus its selection in Detail. Choose
+**Apply** in either view to rebuild with the shared edits.

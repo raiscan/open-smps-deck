@@ -1530,7 +1530,7 @@ class StudioWindowTest {
                 down, false, false, false, false, true, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
     }
 
-    @Test void reconstructionRolesBoxDragAndDetailJumpShareSelection() throws Exception {
+    @Test void reconstructionRolesUseDetailCoordinatesForBoxSelectionAndJump() throws Exception {
         Path work = reconstructionFixture();
         var inspection = com.opensmpsdeck.headless.ReconstructionInspection.open(work);
         fx(() -> {
@@ -1538,30 +1538,32 @@ class StudioWindowTest {
             var kind = com.opensmpsdeck.headless.ReconstructionVoicePlan.Kind.tonal;
             var lead = new ReconstructionBulk.Voice("lead", "Lead 1", kind, null);
             var pad = new ReconstructionBulk.Voice("pad", "Pad", kind, null);
-            view.roleRows(Map.of("lead", lead, "pad", pad), Map.of("test-note", "lead"), Set.of("test-note"));
+            view.voices(ReconstructionVoices.of(inspection.overlays(), List.of(),
+                    Map.of("lead", lead, "pad", pad), Map.of("test-note", "lead"),
+                    new ReconstructionVoices.Palette(work)), Set.of("test-note"));
             var host = new Stage();
             host.setScene(new javafx.scene.Scene(view.scroll, 900, 520));
             host.show();
             try {
-                view.rolesView(true);
                 view.scroll.applyCss();
                 view.scroll.layout();
                 var plot = view.canvas;
-                double row = Math.clamp((plot.getHeight() - 85) / 2, 31, 56);
-                double leadY = 85 + row / 2;
-                double x = (plot.getWidth() + 154) / 2;
-                mouse(plot, MouseEvent.MOUSE_PRESSED, 160, leadY - 10, true);
-                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, leadY + 10, true);
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, leadY + 10, false);
+                double noteY = 85 + (plot.getHeight() - 105) * 4.5 / 8;
+                double x = (plot.getWidth() + 76) / 2;
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, noteY, false);
+                assertEquals("test-note", view.selectedNotes().getFirst().id());
+                view.select(null, null);
+
+                view.rolesView(true);
+                view.voiceVisible("lead", false);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x, noteY, false);
+                assertTrue(view.selectedNotes().isEmpty());
+                view.voiceVisible("lead", true);
+                mouse(plot, MouseEvent.MOUSE_PRESSED, x - 15, noteY - 12, true);
+                mouse(plot, MouseEvent.MOUSE_DRAGGED, x + 20, noteY + 12, true);
+                mouse(plot, MouseEvent.MOUSE_RELEASED, x + 20, noteY + 12, false);
                 assertEquals(List.of("test-note"), view.selectedNotes().stream()
                         .map(com.opensmpsdeck.headless.ReconstructionInspection.Overlay::id).toList());
-
-                var targets = new ArrayList<String>();
-                view.onRoleDrop = (target, notes) -> targets.add(target.voice().id() + "/" + notes.getFirst().id());
-                mouse(plot, MouseEvent.MOUSE_PRESSED, x, leadY, true);
-                mouse(plot, MouseEvent.MOUSE_DRAGGED, x, leadY + row, true);
-                mouse(plot, MouseEvent.MOUSE_RELEASED, x, leadY + row, false);
-                assertEquals(List.of("pad/test-note"), targets);
 
                 var jumped = new ArrayList<String>();
                 view.onDetailJump = notes -> {
@@ -1569,9 +1571,9 @@ class StudioWindowTest {
                     view.rolesView(false);
                     assertTrue(view.detailZoom(notes) > 0);
                 };
-                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, 42, leadY, 42, leadY,
+                Event.fireEvent(plot, new MouseEvent(MouseEvent.MOUSE_RELEASED, x, noteY, x, noteY,
                         MouseButton.PRIMARY, 2, false, false, false, false, false, false, false, false,
-                        false, true, new PickResult(plot, new javafx.geometry.Point3D(42, leadY, 0), 0)));
+                        false, true, new PickResult(plot, new javafx.geometry.Point3D(x, noteY, 0), 0)));
                 assertFalse(view.rolesView());
                 assertEquals(List.of("test-note"), jumped);
                 assertEquals("test-note", view.selectedNotes().getFirst().id());
@@ -1641,6 +1643,24 @@ class StudioWindowTest {
                         .map(Button.class::cast).filter(button -> button.getText().equals("Undo"))
                         .findFirst().orElseThrow().fire();
                 assertTrue(apply.isDisabled());
+
+                ((Button) scene.lookup("#reconstruction-voice-select-")).fire();
+                var newVoice = (MenuButton) scene.lookup("#reconstruction-new-voice");
+                nameNextVoice("Pad");
+                newVoice.getItems().get(1).fire(); // Empty tonal voice
+                var assign = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Assign selection to Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                assertFalse(assign.isDisabled());
+                assign.fire();
+                var pad = scene.getRoot().lookupAll(".button").stream().filter(Button.class::isInstance)
+                        .map(Button.class::cast).filter(button -> "Select all notes in Pad".equals(button.getAccessibleText()))
+                        .findFirst().orElseThrow();
+                assertFalse(pad.isDisabled());
+                assertTrue(pad.getTooltip().getText().contains("1 note"));
+                assertNull(scene.lookup("#reconstruction-voice-select-"));
+                pad.fire();
+                assertTrue(trace.getText().contains("test-note"));
                 return null;
             });
             try (var files = Files.list(work)) {
@@ -1650,6 +1670,15 @@ class StudioWindowTest {
         } finally {
             fx(() -> { pane.close(); return null; });
         }
+    }
+
+    private static void nameNextVoice(String name) {
+        Platform.runLater(() -> {
+            var dialog = dialogPane("reconstruction-voice-name");
+            if (dialog == null) return;
+            ((TextField) dialog.lookup(".text-field")).setText(name);
+            ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+        });
     }
 
     @Test void snapshotRealEditor() throws Exception {

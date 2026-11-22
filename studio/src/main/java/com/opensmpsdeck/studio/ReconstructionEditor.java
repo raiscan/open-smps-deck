@@ -138,6 +138,8 @@ final class ReconstructionEditor implements AutoCloseable {
     private final TabPane tabs = new TabPane(noteTab, bulkTab, editTab, proposalTab, diffTab);
     private final ReconstructionBulk bulk;
     private Map<String, List<JsonObject>> draftPitchEdits = Map.of();
+    private final ReconstructionVoiceLegend voiceLegend;
+    private final ReconstructionVoices.Palette voicePalette;
     private final StudioPlayback audition = new StudioPlayback();
 
     private Snapshot snapshot;
@@ -179,6 +181,8 @@ final class ReconstructionEditor implements AutoCloseable {
         sections = initial.inspection().sections().sections();
         draft = new ReconstructionDraft(accepted(initial.revision().entries()));
         bulk = new ReconstructionBulk(view::filterSelection, this::addBatch, this::transpose, this::audition, this::stopAudition, this::previewLayer);
+        voicePalette = new ReconstructionVoices.Palette(work);
+        voiceLegend = new ReconstructionVoiceLegend(view, this::assignVoice, this::createLegendVoice, this::voiceActions);
         view.onSelection = this::selectionChanged;
         view.onEffect = this::gesture;
         view.attack = this::attack;
@@ -188,8 +192,6 @@ final class ReconstructionEditor implements AutoCloseable {
         view.onPlacement = this::move;
         view.onSectionEdit = this::section;
         view.onSectionMenu = this::sectionMenu;
-        view.onRoleDrop = this::dropOnRole;
-        view.onRoleMenu = this::roleMenu;
         for (String filename : List.of("edits.json", "sections.json", ReconstructionVoicePlan.JOURNAL, "report.json")) {
             try {
                 watchers.add(new ProjectWatcher(work.resolve(filename), () -> Platform.runLater(this::readExternal)));
@@ -252,8 +254,8 @@ final class ReconstructionEditor implements AutoCloseable {
         progress.setPrefWidth(108);
         for (Control control : List.of(progress, cancel, conflict)) control.managedProperty().bind(control.visibleProperty());
         detailTools.addAll(List.of(parts, grid));
-        detailTools.forEach(control -> control.managedProperty().bind(control.visibleProperty()));
-        bar.getChildren().addAll(parts, grid, apply, cancel, progress, undo, redo, lanePolicies, pendingLabel, conflict);
+        bar.getChildren().addAll(0, List.of(apply, cancel, progress, undo, redo, lanePolicies, pendingLabel, conflict));
+        bar.getChildren().addAll(parts, grid);
         return bar;
     }
 
@@ -267,7 +269,7 @@ final class ReconstructionEditor implements AutoCloseable {
         return row;
     }
 
-    TabPane inspector() {
+    VBox inspector() {
         noteTitle.getStyleClass().add("inspector-title");
         noteTitle.setWrapText(true);
         noteTitle.setId("reconstruction-note-title");
@@ -357,11 +359,15 @@ final class ReconstructionEditor implements AutoCloseable {
         summary.getStyleClass().add("inspector");
         diffTab.setContent(scroll(summary));
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setPrefWidth(324);
-        tabs.setMinWidth(255);
+        tabs.setPrefHeight(170);
+        tabs.setMinHeight(110);
         updateDraft();
         readExternal();
-        return tabs;
+        VBox.setVgrow(tabs, Priority.ALWAYS);
+        var inspector = new VBox(voiceLegend, tabs);
+        inspector.setPrefWidth(324);
+        inspector.setMinWidth(255);
+        return inspector;
     }
 
     private static ScrollPane scroll(VBox content) {
@@ -486,8 +492,7 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void updateBulk() {
         var owners = new LinkedHashMap<String, ReconstructionBulk.Voice>();
-        var notes = view.selectedNotes().stream().filter(note -> note.part() >= 0
-                && !note.fate().equals("Pending deletion") && !note.fate().equals("Superseded draft")).toList();
+        var notes = view.selectedNotes().stream().filter(ReconstructionEditor::classifiable).toList();
         for (var note : notes) {
             String ownerId = draftMembership.get(note.id());
             var owner = ownerId == null ? null : draftVoices.get(ownerId);
@@ -496,48 +501,30 @@ final class ReconstructionEditor implements AutoCloseable {
         bulk.show(notes, draftVoices.values().stream().sorted(java.util.Comparator.comparing(ReconstructionBulk.Voice::name)).toList(), owners, snapshot.editing(), snapshot.inspection()::laneType);
     }
 
+    private static boolean classifiable(Overlay note) {
+        return note.part() >= 0 && !note.fate().equals("Pending deletion") && !note.fate().equals("Superseded draft");
+    }
+
     void rolesView(boolean roles) {
         detailTools.forEach(control -> control.setVisible(!roles));
         bulk.rolesView(roles);
         if (roles) tabs.getSelectionModel().select(bulkTab);
     }
 
-    private void dropOnRole(ReconstructionRoleRows.Row row, List<Overlay> notes) {
-        var voice = row.voice();
-        if (voice != null && notes.stream().anyMatch(note -> noteKind(note) != voice.kind())) {
-            status.accept("Move tonal and drum notes to separate voices");
-            return;
-        }
-        var ids = new JsonArray();
-        for (var note : notes) if (note.part() >= 0) ids.add(note.id());
-        if (ids.isEmpty()) return;
-        var edits = new ArrayList<JsonObject>();
-        if (voice != null && notes.stream().anyMatch(note -> !voice.id().equals(draftMembership.get(note.id()))))
-            edits.add(ReconstructionBulk.voiceEdit("move", voice.id(), "Move notes to " + voice.name(),
-                    body -> body.add("noteIds", ids)));
-        if (row.role() != null && notes.stream().anyMatch(note -> note.role() != row.role())) {
-            String role = row.role() == Role.UNASSIGNED ? "drop" : row.role().name().toLowerCase(Locale.ROOT);
-            if (notes.stream().anyMatch(note -> !role.equals("drop")
-                    && (noteKind(note) == ReconstructionVoicePlan.Kind.drum) != role.equals("drums"))) {
-                status.accept("The drums role requires a MIDI percussion part");
-                return;
-            }
-            var edit = ReconstructionDraft.human("setRole", "Classify notes as " + role);
-            edit.addProperty("role", role);
-            edit.add("noteIds", ids);
-            edits.add(edit);
-        }
-        addBatch(edits);
+    private boolean assignVoice(ReconstructionBulk.Voice voice) {
+        String issue = bulk.moveTo(voice);
+        if (issue != null) status.accept(issue);
+        return issue == null;
     }
 
-    private ReconstructionVoicePlan.Kind noteKind(Overlay note) {
-        boolean drums = snapshot.inspection().parts().stream().anyMatch(part -> part.id() == note.part() && part.drums());
-        return drums ? ReconstructionVoicePlan.Kind.drum : ReconstructionVoicePlan.Kind.tonal;
+    private void createLegendVoice(ReconstructionVoicePlan.Kind emptyKind) {
+        voiceName("New voice", "").ifPresent(name -> {
+            String issue = bulk.createVoice(name, emptyKind);
+            if (issue != null) status.accept(issue);
+        });
     }
 
-    private void roleMenu(ReconstructionCanvas.RoleMenu point) {
-        var voice = point.row().voice();
-        if (voice == null || busy || external != null) return;
+    private ContextMenu voiceActions(ReconstructionBulk.Voice voice) {
         var rename = new MenuItem("Rename voice…");
         rename.setOnAction(event -> voiceName("Rename voice", voice.name()).ifPresent(name ->
                 add(ReconstructionBulk.voiceEdit("rename", voice.id(), "Rename voice to " + name,
@@ -565,7 +552,7 @@ final class ReconstructionEditor implements AutoCloseable {
                     merge.getItems().add(item);
                 });
         merge.setDisable(merge.getItems().isEmpty());
-        new ContextMenu(rename, split, merge).show(owner, point.x(), point.y());
+        return new ContextMenu(rename, split, merge);
     }
 
     private java.util.Optional<String> voiceName(String title, String value) {
@@ -574,6 +561,7 @@ final class ReconstructionEditor implements AutoCloseable {
         dialog.setTitle(title);
         dialog.setHeaderText(null);
         dialog.setContentText("Voice name");
+        dialog.getDialogPane().setId("reconstruction-voice-name");
         return dialog.showAndWait().map(String::strip).filter(name -> !name.isEmpty());
     }
 
@@ -826,8 +814,10 @@ final class ReconstructionEditor implements AutoCloseable {
                 return;
             }
         }
-        if (view.rolesView() && intents.stream().anyMatch(intent ->
-                Set.of("setRole", "pinLane", "voiceEdit").contains(text(intent, "op", "")))
+        if (intents.stream().anyMatch(intent -> {
+                    String op = text(intent, "op", "");
+                    return op.equals("voiceEdit") || view.rolesView() && Set.of("setRole", "pinLane").contains(op);
+                })
                 && draft.entries().asList().stream().anyMatch(entry -> DETAIL_EDITS.contains(text(entry, "op", "")))) {
             previewClassification(intents);
         } else stageBatch(intents);
@@ -1310,7 +1300,8 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         draftPitchEdits = pitchEdits;
         updateVoiceProjection();
-        view.pending(overlays());
+        var pending = overlays();
+        view.pending(pending);
         var edited = new java.util.HashSet<String>();
         for (var entry : draft.entries()) if (DETAIL_EDITS.contains(text(entry, "op", ""))) {
             edited.addAll(targetIds(entry));
@@ -1322,7 +1313,9 @@ final class ReconstructionEditor implements AutoCloseable {
                 edited.add(prefix + "-right");
             }
         }
-        view.roleRows(draftVoices, draftMembership, Set.copyOf(edited));
+        var projection = ReconstructionVoices.of(snapshot.inspection().overlays(), pending, draftVoices, draftMembership, voicePalette);
+        view.voices(projection, Set.copyOf(edited));
+        voiceLegend.show(projection.entries());
         var rows = new ArrayList<EditRow>();
         var entries = draft.entries();
         var idCounts = entries.asList().stream().collect(Collectors.groupingBy(e -> text(e, "id", ""), Collectors.counting()));
@@ -1355,6 +1348,7 @@ final class ReconstructionEditor implements AutoCloseable {
         boolean editing = !busy && external == null && !externalError;
         view.editing(editing);
         bulk.setDisable(!editing);
+        voiceLegend.controls(editing, view.selectedNotes().stream().anyMatch(ReconstructionEditor::classifiable));
         proposalList.setDisable(!editing);
         stopPreview.setDisable(!previewPlaying);
         var entries = draft.entries();
