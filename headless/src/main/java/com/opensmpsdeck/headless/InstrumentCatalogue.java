@@ -114,6 +114,9 @@ public final class InstrumentCatalogue {
 
     public record Issue(String source, String reason, String detail) {}
 
+    /** A name for an asset from a named source, with the native coordinate it names. */
+    public record Label(String text, String source, String ref) {}
+
     public record Query(String text, Kind kind, String driver, String role, String source, String variant,
                         int offset, int limit) {
         public Query {
@@ -342,7 +345,23 @@ public final class InstrumentCatalogue {
         return contains(variant.name(), query.text()) || contains(row.asset().name(), query.text())
                 || contains(variant.id(), query.text()) || contains(row.asset().id(), query.text())
                 || variant.roles().stream().anyMatch(role -> contains(role, query.text()))
+                || labels(row).stream().anyMatch(label -> contains(label.text(), query.text())
+                        || contains(label.ref(), query.text()))
                 || variant.occurrences().stream().anyMatch(o -> matchesSource(o, query.text()));
+    }
+
+    /**
+     * Community names for exact retail S3K payloads, derived at read time so
+     * existing indices gain them without a rescan. DAC labels follow the rate.
+     */
+    public static List<Label> labels(Match row) {
+        if (row.variant().target() != TargetGame.S3K) return List.of();
+        return StockNames.labels(row.asset().kind(), row.asset().bytes(), row.variant().recipe().rate());
+    }
+
+    /** Names for every retail S3K coordinate that holds this exact payload. */
+    public static List<Label> labels(Asset asset) {
+        return StockNames.labels(asset.kind(), asset.bytes(), null);
     }
 
     /** Musical role hints from observed FM lane usage, including in existing indices. */

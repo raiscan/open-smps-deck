@@ -145,6 +145,25 @@ only variants for their target. An identical FM patch in two games is
 available through both games' own variants. This keeps the target's native
 FM carrier rules and avoids cross-game envelope and DAC playback assumptions.
 
+## Community names
+
+Search, show, and the Studio catalogue label exact retail S3K payloads with
+names from skdisasm. The 35 Universal Voice Bank slots `00h`–`22h` take the
+comments on `z80_UniVoiceBank` in `Sound/Z80 Sound Driver.asm`, such as
+`Wood Block` for `0Bh`. The 68 retail DAC notes `81h`–`C4h` take the S&K
+note constants in `Sound/_smps2asm_inc.asm`, such as `dKickS3` for `86h`.
+Each label gives its text, source, and coordinate, for example `UVB 0Bh` or
+`DAC 86h`.
+
+Labels come from the public stock table by payload hash when the index is
+read, so existing indices need no rescan, and an edited voice loses its
+name. A DAC variant takes only the notes that play its PCM at its rate. One
+power-kick blob is `dHipHopHitKick` at rate `0C` and `dLowestPowerKickHit`
+at rate `0B`. Variants for S1 or S2 have no labels. The names were chosen
+by ear in the community, not by Sega. Some are loose, and the source uses
+`Synth Brass 2` for both `11h` and `19h`. Local song voices have no
+community names.
+
 ## DAC acoustic classes
 
 `catalog dac-classes INDEX.json` derives a versioned profile for each DAC asset
