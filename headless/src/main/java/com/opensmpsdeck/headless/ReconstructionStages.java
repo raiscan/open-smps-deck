@@ -235,7 +235,7 @@ public final class ReconstructionStages {
     }
 
     static void run(String command, String[] args, PrintStream out, PrintStream err) throws IOException {
-        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {}, null);
+        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {}, null, true);
     }
 
     @FunctionalInterface
@@ -247,9 +247,16 @@ public final class ReconstructionStages {
     public static List<String> runForReview(String command, String[] args, Progress progress) throws IOException {
         var changes = new java.util.ArrayList<String>();
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run(command, args, out, out, true, progress, changes::add, null);
+            run(command, args, out, out, true, progress, changes::add, null, true);
         }
         return List.copyOf(changes);
+    }
+
+    /** Branch playback needs the canonical bank and WAV, but can skip diagnostic re-renders. */
+    static void runForBranch(String[] args, Progress progress) throws IOException {
+        try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
+            run("run", args, out, out, true, progress, ignored -> {}, null, false);
+        }
     }
 
     record LiveCompilation(TargetPlayback playback, ReconstructionAllocation.Result allocation) {}
@@ -259,7 +266,7 @@ public final class ReconstructionStages {
     static LiveCompilation runForLive(String[] args, Progress progress, LoadedProject existing) throws IOException {
         var result = new LiveCompilation[1];
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run("run", args, out, out, true, progress, ignored -> {}, new LiveRun(existing, playback -> result[0] = playback));
+            run("run", args, out, out, true, progress, ignored -> {}, new LiveRun(existing, playback -> result[0] = playback), true);
         }
         if (result[0] == null) throw new IOException("The reconstruction did not assemble");
         return result[0];
@@ -267,7 +274,7 @@ public final class ReconstructionStages {
 
     private static void run(String command, String[] args, PrintStream out, PrintStream err,
                             boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange,
-                            LiveRun live)
+                            LiveRun live, boolean heldNoteDiagnostics)
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
             Request request = request(command, args, progress, err, capture);
@@ -291,7 +298,7 @@ public final class ReconstructionStages {
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
-            execute(request, request.work, out, preserveReview, progress, refitChange, capture, live);
+            execute(request, request.work, out, preserveReview, progress, refitChange, capture, live, heldNoteDiagnostics);
             if (live != null) return;
             if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
@@ -339,7 +346,7 @@ public final class ReconstructionStages {
         var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false, null, false), oldWork, out, false,
-                (completed, total, message) -> {}, ignored -> {}, null, null);
+                (completed, total, message) -> {}, ignored -> {}, null, null, true);
         ProjectProvenance.printWarnings(packageWarnings(work), err);
         summarizeEdits(work, err);
     }
@@ -379,7 +386,7 @@ public final class ReconstructionStages {
     private static void execute(Request request, Path previousWork, PrintStream out, boolean preserveReview,
                                 Progress progress,
                                 java.util.function.Consumer<String> refitChange,
-                                ReconstructionManifest.Capture capture, LiveRun live) throws IOException {
+                                ReconstructionManifest.Capture capture, LiveRun live, boolean heldNoteDiagnostics) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
@@ -545,7 +552,9 @@ public final class ReconstructionStages {
                             voicing = voicing.withLanePolicies(preset);
                         }
                         if (live == null)
-                            ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions);
+                            ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out,
+                                    preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions,
+                                    heldNoteDiagnostics);
                         else live.result().accept(new LiveCompilation(
                                 ReconstructionCli.compileLive(work, score, structure, allocation, voicing, edits, outcomes,
                                         live.existing()), allocation));

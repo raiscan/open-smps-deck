@@ -145,9 +145,12 @@ public final class ReconstructionBranches {
                     "groups", "expected unique group IDs, labels and rationale");
         if (branch.order != null)
             require(Set.copyOf(branch.order).size() == branch.order.size(), "order", "duplicate order ID");
-        if (branch.removedEditIds != null)
-            require(Set.copyOf(branch.removedEditIds).size() == branch.removedEditIds.size(),
-                    "removedEditIds", "duplicate removal");
+        if (branch.removedEditIds != null) {
+            var removals = Set.copyOf(branch.removedEditIds);
+            require(removals.size() == branch.removedEditIds.size(), "removedEditIds", "duplicate removal");
+            require(branch.edits.stream().noneMatch(edit -> removals.contains(edit.get("id").getAsString())),
+                    "removedEditIds", "an edit cannot be replaced and removed");
+        }
     }
 
     public static Branch create(Path work, String name, String author) throws IOException {
@@ -155,7 +158,12 @@ public final class ReconstructionBranches {
     }
 
     public static Branch importJournal(Path work, String name, String author, Path copy) throws IOException {
-        return importEntries(work, name, author, ReconstructionReview.revision(copy.toRealPath()).entries());
+        var root = copy.toRealPath();
+        require(Files.isRegularFile(root.resolve(ReconstructionEdits.FILE), NOFOLLOW_LINKS)
+                        || !Files.exists(root.resolve(ReconstructionEdits.FILE), NOFOLLOW_LINKS)
+                                && Files.isRegularFile(root.resolve("score.json"), NOFOLLOW_LINKS),
+                "copy", "expected a reconstruction journal or a work directory with an empty journal");
+        return importEntries(work, name, author, ReconstructionReview.revision(root).entries());
     }
 
     private static Branch importEntries(Path work, String name, String author, JsonArray imported) throws IOException {
@@ -188,12 +196,16 @@ public final class ReconstructionBranches {
             var branch = show(root, name);
             var entries = indexed(array(branch.edits));
             remove.forEach(entries::remove);
-            indexed(edits).forEach(entries::put);
+            var additions = indexed(edits);
+            additions.forEach(entries::put);
+            var removals = branch.removedEditIds == null ? List.<String>of() : branch.removedEditIds.stream()
+                    .filter(id -> !additions.containsKey(id)).toList();
             var metadata = new LinkedHashMap<String, Group>();
             branch.groups.forEach(group -> metadata.put(group.id, group));
             groups.forEach(group -> metadata.put(group.id, group));
             var updated = new Branch(1, name, branch.author, branch.createdAt, branch.parent,
-                    List.copyOf(metadata.values()), List.copyOf(entries.values()), branch.removedEditIds, branch.order);
+                    List.copyOf(metadata.values()), List.copyOf(entries.values()),
+                    removals.isEmpty() ? null : removals, branch.order);
             write(root, updated);
             return updated;
         });
@@ -283,6 +295,12 @@ public final class ReconstructionBranches {
         return new State(branch, main.parent, stale(main, branch));
     }
 
+    /** Journal-only staleness check for branch lists. */
+    public static boolean isStale(Path work, String name) throws IOException {
+        var branch = show(work, name);
+        return !parentEntries(work, branch.parent).equals(ReconstructionReview.revision(work).entries());
+    }
+
     public static Parent mainParent(Path work) throws IOException {
         return main(work.toRealPath()).parent;
     }
@@ -296,7 +314,10 @@ public final class ReconstructionBranches {
         var main = main(work.toRealPath());
         var branch = show(main.work, name);
         current(main, branch);
-        return ReconstructionBranchBuild.build(main.work, main.journal, apply(main.entries(), branch), progress);
+        var output = ReconstructionBranchBuild.build(main.work, main.journal, apply(main.entries(), branch), progress);
+        main.check();
+        checkBranch(main.work, branch);
+        return output;
     }
 
     public static JsonObject diff(Path work, String name, ReconstructionStages.Progress progress) throws IOException {
@@ -306,6 +327,7 @@ public final class ReconstructionBranches {
         var before = ReconstructionBranchBuild.build(main.work, main.journal, main.entries(), progress);
         var after = ReconstructionBranchBuild.build(main.work, main.journal, apply(main.entries(), branch), progress);
         main.check();
+        checkBranch(main.work, branch);
         return ReconstructionBranchDiff.diff(before, after, branch);
     }
 
@@ -319,6 +341,9 @@ public final class ReconstructionBranches {
         var incoming = ReconstructionBranchDiff.effects(branch.name, old, apply(old, branch), before, after);
         var upstream = ReconstructionBranchDiff.effects("main", old, main.entries(), before, before);
         var conflicts = ReconstructionBranchDiff.direct(upstream, incoming);
+        var indirect = ReconstructionBranchDiff.indirect(before, after, incoming);
+        main.check();
+        checkBranch(main.work, branch);
         var updated = delta(branch.name, branch.author, branch.createdAt, main, branch.groups, entries);
         if (conflicts.isEmpty()) mutate(main.work, () -> {
             main.check();
@@ -328,7 +353,8 @@ public final class ReconstructionBranches {
             return null;
         });
         return JSON.toJsonTree(Map.of("rebased", conflicts.isEmpty(), "branch", conflicts.isEmpty() ? updated : branch,
-                "directConflicts", conflicts, "outcomes", ReconstructionBranchDiff.outcomes(after, branch))).getAsJsonObject();
+                "directConflicts", conflicts, "indirectConflicts", indirect,
+                "outcomes", ReconstructionBranchDiff.outcomes(after, branch))).getAsJsonObject();
     }
 
     private record Candidate(StitchPlan plan, Branch branch, Branch destination, List<Branch> originals) {}
@@ -477,6 +503,18 @@ public final class ReconstructionBranches {
 
     private static void checkBranch(Path work, Branch branch) throws IOException {
         if (!branch.equals(show(work, branch.name))) throw new ReconstructionReview.Changed();
+    }
+
+    public static void requireExport(Path work, Path output) throws IOException {
+        Path root = work.toRealPath();
+        Path absolute = output.toAbsolutePath().normalize();
+        Path parent = absolute.getParent().toRealPath();
+        Path target = parent.resolve(absolute.getFileName());
+        require(!target.startsWith(root.resolve("edits")) && !target.startsWith(root.resolve("snapshots"))
+                && (!parent.equals(root) || !ReconstructionReview.OUTPUTS.contains(target.getFileName().toString())
+                && !Set.of("roleplan.json", ReconstructionSections.FILE, ReconstructionVoicePlan.JOURNAL)
+                        .contains(target.getFileName().toString()))
+                && !Files.isSymbolicLink(absolute), "output", "choose a destination outside managed reconstruction files");
     }
 
     public static Path build(Path work, String name) throws IOException { return build(work, name, QUIET); }

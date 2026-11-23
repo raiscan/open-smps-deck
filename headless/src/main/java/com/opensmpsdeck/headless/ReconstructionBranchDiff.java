@@ -28,21 +28,25 @@ import static com.opensmpsdeck.headless.ReconstructionTrace.Timing;
 final class ReconstructionBranchDiff {
     private static final Gson JSON = new Gson();
 
+    private record Scope(int part, Range span) {}
+
     record Effect(String branch, String id, JsonObject before, JsonObject after, String family,
-                  Set<String> notes, Set<Integer> parts, Range span, boolean ordered) {
+                  Set<String> notes, Set<Integer> parts, Range span, List<Scope> scopes, boolean ordered) {
         boolean sameChange(Effect other) {
             return id.equals(other.id) && Objects.equals(after, other.after) && !ordered && !other.ordered;
         }
 
         boolean matches(Selection selection) {
             var entry = after == null ? before : after;
+            var window = selection.start() == null && selection.end() == null ? null
+                    : new Range(selection.start() == null ? 0 : selection.start(),
+                            selection.end() == null ? Double.MAX_VALUE : selection.end());
             return (selection.edits().isEmpty() || selection.edits().contains(id))
                     && (selection.groups().isEmpty() || entry.has("group")
                     && selection.groups().contains(entry.get("group").getAsString()))
                     && (selection.parts().isEmpty() || intersects(selection.parts(), parts))
-                    && (selection.start() == null && selection.end() == null || span != null
-                    && span.overlaps(new Range(selection.start() == null ? 0 : selection.start(),
-                    selection.end() == null ? Double.MAX_VALUE : selection.end())));
+                    && (window == null || scopes.stream().anyMatch(scope -> scope.span.overlaps(window)
+                    && (selection.parts().isEmpty() || selection.parts().contains(scope.part))));
         }
 
         EditRef ref() { return new EditRef(branch, id); }
@@ -89,6 +93,14 @@ final class ReconstructionBranchDiff {
         var plan = ReconstructionTrace.optional(work, ReconstructionVoicePlan.FILE, ReconstructionVoicePlan.Result.class);
         var assignments = plan == null ? Map.<String, ReconstructionVoicePlan.Voice>of() : plan.byNote();
         var voicing = ReconstructionTrace.optional(work, "voicing.json", ReconstructionVoicing.Result.class);
+        var byEdit = ReconstructionBranches.indexed(ReconstructionReview.revision(work).entries());
+        var authored = new LinkedHashMap<String, String>();
+        for (var outcome : ReconstructionEdits.Journal.read(work).all()) {
+            if (outcome.op() != Kind.noteVoicing || outcome.status() != ReconstructionEdits.Status.applied) continue;
+            var edit = byEdit.get(outcome.id());
+            if (edit != null && edit.has("instrument")) for (var id : outcome.noteIds())
+                authored.put(id, edit.get("instrument").getAsString());
+        }
         var notes = new LinkedHashMap<String, NoteState>();
         for (var row : rows.values()) {
             // The trace retains deleted IDs for diagnostics. Presence here means a surviving score note.
@@ -106,8 +118,11 @@ final class ReconstructionBranchDiff {
                     .map(ReconstructionVoicing.Instrument::variantId).filter(Objects::nonNull).findFirst().orElse(fitted.variantId());
             if (source != null && lane.startsWith("PSG") && source.psgVariantId() != null) variant = source.psgVariantId();
             if (voice != null && voice.assignment() != null) variant = voice.assignment().instrument();
-            var instrument = fitted == null && variant == null ? null : new Sound(lane, variant,
-                    fitted == null ? 1 : fitted.gain(), fitted == null ? null : fitted.effects());
+            variant = authored.getOrDefault(row.id(), variant);
+            double gain = fitted == null ? 1 : fitted.partGains() == null ? fitted.gain()
+                    : fitted.partGains().getOrDefault(row.part(), fitted.gain());
+            var instrument = fitted == null && variant == null ? null : new Sound(lane, variant, gain,
+                    fitted == null ? null : fitted.effects());
             notes.put(row.id(), new NoteState(row.part(), note == null ? row.pitch() : note.pitch(), row.effectiveTiming(),
                     role, lane, note == null ? null : note.velocity(), row.voice(), instrument,
                     note == null ? null : note.bend(), row.voiced().stream().map(RowVibrato::of).toList(),
@@ -126,7 +141,8 @@ final class ReconstructionBranchDiff {
             if (note.instrument instanceof Sound sound)
                 sounds.computeIfAbsent(note.part, ignored -> new LinkedHashSet<>()).add(sound);
         var result = new TreeMap<Integer, List<Sound>>();
-        sounds.forEach((part, values) -> result.put(part, List.copyOf(values)));
+        sounds.forEach((part, values) -> result.put(part, values.stream()
+                .sorted(java.util.Comparator.comparing(JSON::toJson)).toList()));
         return result;
     }
 
@@ -154,14 +170,11 @@ final class ReconstructionBranchDiff {
         var score = ReconstructionStages.readScore(newWork.resolve("score.json"));
         var clock = ReconstructionTimeMap.of(score);
         var journal = ReconstructionEdits.Journal.read(newWork);
-        var oldCommon = old.keySet().stream().filter(updated::containsKey).toList();
-        var newCommon = updated.keySet().stream().filter(old::containsKey).toList();
-        var moved = new LinkedHashSet<String>();
-        for (int i = 0; i < oldCommon.size(); i++) {
-            if (oldCommon.get(i).equals(newCommon.get(i))) continue;
-            moved.add(oldCommon.get(i));
-            moved.add(newCommon.get(i));
-        }
+        var moved = moved(old, updated);
+        var oldOutcomes = ReconstructionEdits.Journal.read(oldWork).all().stream()
+                .collect(java.util.stream.Collectors.groupingBy(ReconstructionEdits.Outcome::id));
+        var newOutcomes = journal.all().stream()
+                .collect(java.util.stream.Collectors.groupingBy(ReconstructionEdits.Outcome::id));
         var result = new ArrayList<Effect>();
         for (var id : union(updated.keySet(), old.keySet())) {
             var a = old.get(id);
@@ -170,7 +183,7 @@ final class ReconstructionBranchDiff {
             if (Objects.equals(a, b) && !ordered) continue;
             var notes = new LinkedHashSet<String>();
             var parts = new LinkedHashSet<Integer>();
-            Range span = null;
+            var scopes = new ArrayList<Scope>();
             String family = null;
             for (var entry : Arrays.asList(a, b)) {
                 if (entry == null) continue;
@@ -179,13 +192,17 @@ final class ReconstructionBranchDiff {
                 if (edit.part() != null) parts.add(edit.part());
                 notes.addAll(edit.noteIds());
                 if (edit.kind() == Kind.insertNote) notes.add(edit.insertedId());
-                var sourceSpan = ReconstructionEditCommand.span(edit, journal, oldRows, newRows, clock);
-                if (sourceSpan != null) span = join(span, new Range(sourceSpan.start(), sourceSpan.end()));
+                var explicit = edit.explicitSpan();
+                if (explicit != null && edit.part() != null) scopes.add(new Scope(edit.part(),
+                        new Range(edit.toSource(explicit.start(), clock), edit.toSource(explicit.end(), clock))));
+                for (var selector : edit.selectors()) scopes.add(new Scope(selector.part(), point(edit, selector, clock)));
+                if (edit.attack() != null) scopes.add(new Scope(edit.attack().part(), point(edit, edit.attack(), clock)));
                 if (edit.span() != null && edit.span().section() != null) {
                     var section = ReconstructionSections.load(newWork, score).sections().stream()
                             .filter(value -> value.id().equals(edit.span().section()) || value.label().equalsIgnoreCase(edit.span().section()))
                             .findFirst().orElse(null);
-                    if (section != null) span = join(span, new Range(section.sourceStart(), section.sourceEnd()));
+                    if (section != null && edit.part() != null)
+                        scopes.add(new Scope(edit.part(), new Range(section.sourceStart(), section.sourceEnd())));
                 }
                 if (edit.attack() != null) parts.add(edit.attack().part());
                 edit.selectors().forEach(selector -> parts.add(selector.part()));
@@ -193,30 +210,68 @@ final class ReconstructionBranchDiff {
                     var voice = ReconstructionVoicePlan.reviewEdit(entry, id);
                     if (voice.noteIds() != null) notes.addAll(voice.noteIds());
                     if (voice.part() != null) parts.add(voice.part());
-                    if (voice.span() != null) {
+                    if (voice.span() != null && voice.part() != null) {
                         boolean project = voice.timeBase() == ReconstructionVoicePlan.Clock.project;
-                        span = join(span, new Range(project ? clock.source(voice.span().getFirst()) : voice.span().getFirst(),
-                                project ? clock.source(voice.span().getLast()) : voice.span().getLast()));
+                        scopes.add(new Scope(voice.part(), new Range(
+                                project ? clock.source(voice.span().getFirst()) : voice.span().getFirst(),
+                                project ? clock.source(voice.span().getLast()) : voice.span().getLast())));
                     }
                     if (voice.noteIds() == null && voice.selectors() == null && voice.part() == null)
                         for (var row : oldRows.values()) if (row.voice() != null && (row.voice().id().equals(voice.voiceId())
                                 || row.voice().id().equals(voice.targetId()))) notes.add(row.id());
                 }
             }
-            for (var outcome : journal.all()) if (outcome.id().equals(id)) {
-                notes.addAll(outcome.noteIds());
-                if (outcome.removedNotes() != null) outcome.removedNotes().forEach(note -> notes.add(note.id()));
-                if (outcome.resultNotes() != null) outcome.resultNotes().forEach(note -> notes.add(note.id()));
-            }
+            for (var outcomes : List.of(oldOutcomes.getOrDefault(id, List.of()), newOutcomes.getOrDefault(id, List.of())))
+                for (var outcome : outcomes) {
+                    notes.addAll(outcome.noteIds());
+                    if (outcome.removedNotes() != null) outcome.removedNotes().forEach(note -> notes.add(note.id()));
+                    if (outcome.resultNotes() != null) outcome.resultNotes().forEach(note -> notes.add(note.id()));
+                }
             for (var rows : List.of(oldRows, newRows)) for (var note : notes) {
                 var row = rows.get(note);
                 if (row == null) continue;
                 parts.add(row.part());
-                span = join(span, range(row));
+                scopes.add(new Scope(row.part(), range(row)));
             }
-            result.add(new Effect(branch, id, a, b, family, Set.copyOf(notes), Set.copyOf(parts), span, ordered));
+            Range span = null;
+            for (var scope : scopes) span = join(span, scope.span);
+            result.add(new Effect(branch, id, a, b, family, Set.copyOf(notes), Set.copyOf(parts), span,
+                    List.copyOf(scopes), ordered));
         }
         return result;
+    }
+
+    /** Retain a longest in-order subsequence so moving one entry does not mark all shifted entries. */
+    private static Set<String> moved(Map<String, JsonObject> before, Map<String, JsonObject> after) {
+        var positions = new LinkedHashMap<String, Integer>();
+        for (var id : before.keySet()) positions.put(id, positions.size());
+        var common = after.keySet().stream().filter(positions::containsKey).toList();
+        var previous = new int[common.size()];
+        var tails = new int[common.size()];
+        int length = 0;
+        for (int i = 0; i < common.size(); i++) {
+            int position = positions.get(common.get(i));
+            int left = 0;
+            int right = length;
+            while (left < right) {
+                int mid = (left + right) / 2;
+                if (positions.get(common.get(tails[mid])) < position) left = mid + 1;
+                else right = mid;
+            }
+            previous[i] = left == 0 ? -1 : tails[left - 1];
+            tails[left] = i;
+            if (left == length) length++;
+        }
+        var moved = new LinkedHashSet<>(common);
+        for (int i = length == 0 ? -1 : tails[length - 1]; i >= 0; i = previous[i]) moved.remove(common.get(i));
+        return moved;
+    }
+
+    private static Range point(ReconstructionEdits.Intent edit, ReconstructionEdits.Attack selector,
+                               ReconstructionTimeMap clock) {
+        double tolerance = ReconstructionEdits.Attack.TOLERANCE;
+        return new Range(edit.toSource(Math.max(0, selector.at() - tolerance), clock),
+                edit.toSource(selector.at() + tolerance, clock));
     }
 
     private static Range range(Row row) {
@@ -242,11 +297,13 @@ final class ReconstructionBranchDiff {
     static List<DirectConflict> direct(List<Effect> left, List<Effect> right) {
         var result = new ArrayList<DirectConflict>();
         for (var a : left) for (var b : right) {
-            if (a.branch.equals(b.branch) || a.sameChange(b) || a.ordered && b.ordered && Objects.equals(a.after, b.after) && a.id.equals(b.id)) continue;
+            if (a.branch.equals(b.branch) || a.sameChange(b)) continue;
             var shared = new java.util.TreeSet<>(a.notes);
             shared.retainAll(b.notes);
             if (a.id.equals(b.id) || !shared.isEmpty() || a.family.equals(b.family) && intersects(a.parts, b.parts)
-                    && a.span != null && b.span != null && a.span.overlaps(b.span)) {
+                    && a.span != null && b.span != null && a.span.overlaps(b.span)
+                    && a.scopes.stream().anyMatch(x -> b.scopes.stream()
+                            .anyMatch(y -> x.part == y.part && x.span.overlaps(y.span)))) {
                 var reason = a.id.equals(b.id) ? "editId" : shared.isEmpty() ? "partSpanFamily" : "noteId";
                 result.add(new DirectConflict(a.ref(), b.ref(), reason, List.copyOf(shared), a.span, b.span));
             }

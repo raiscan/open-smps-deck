@@ -1229,7 +1229,7 @@ class ReconstructionEditsTest {
         return stdout.toString();
     }
 
-    private static void writeMidi(Path midi, boolean includeRemoved) throws Exception {
+    static void writeMidi(Path midi, boolean includeRemoved) throws Exception {
         var source = new Sequence(Sequence.PPQ, 480);
         var track = source.createTrack();
         for (int[] event : new int[][]{{60, 0, 420}, {64, 480, 720}, {67, 480, 770}, {62, 1200, 1450}}) {
@@ -1244,7 +1244,7 @@ class ReconstructionEditsTest {
         writeAudio(index, wav, false);
     }
 
-    private static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
+    static void writeAudio(Path index, Path wav, boolean psg) throws Exception {
         writeAudio(index, wav, psg, 120);
     }
 

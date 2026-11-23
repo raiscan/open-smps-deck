@@ -1007,6 +1007,15 @@ inline repeated content, positional stopped channels and local FM voices.
 Native envelope semantics outside the bounded profile, FM6/DAC ownership switching and
 arbitrary control flow remain future work.
 
+## Reconstruction edit branches
+
+Use `reconstruct branch create WORK NAME` with a built reconstruction.
+`reconstruct edit WORK --branch NAME add --file BATCH.json` saves a delta
+and `reconstruct run WORK --branch NAME` prints the isolated build location.
+Diff, rebase and dry-run merge let reviewers inspect and select changes.
+The MCP `reconstruct_branch` tool supports the same branch operations.
+See [the branch command and format reference](../docs/architecture/edit-branches.md).
+
 ## Embedding and verification
 
 `S3kDemo.song()` returns fresh standalone demo bytes.

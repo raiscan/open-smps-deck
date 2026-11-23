@@ -25,6 +25,24 @@ If the S3K layering preset adds an incompatible envelope on a classic
 target, use `--lane-policy-preset off` on the fresh reconstruction.
 Portable and mod exports default to the saved project target.
 
+## Work on a shared reconstruction branch
+
+Create a branch with `reconstruct branch create "$work" agent-pass --author "AGENT MODEL"`.
+Write intents with `reconstruct edit "$work" --branch agent-pass add --file BATCH.json`.
+Build with `reconstruct run "$work" --branch agent-pass` and inspect with
+`reconstruct branch diff "$work" agent-pass --json`. Add `--branch agent-pass`
+to describe, trace, assemble and render. The result stays isolated under
+the shared work directory. Keep build, diff and render outputs private.
+
+Rebase after main's journal changes. To combine work, use
+`reconstruct branch merge "$work" agent-pass human-pass --into review --dry-run`.
+Review direct and downstream conflicts, then select complete intents with
+`--parts`, `--span` (source seconds), `--groups` or `--edits`.
+Use `branch import "$work" agent-pass COPY` for a journal already edited in a copy.
+In MCP use `reconstruct_branch` with an `action` and `workDir`, and pass
+`branch` to `reconstruct_run`, `reconstruct_describe` and `reconstruct_trace`.
+[Branch CLI and storage](../../docs/architecture/edit-branches.md)
+
 ## Notes pasted from Studio
 
 Read `opensmpsdeck-notes v1` as line-oriented text with JSON objects on
