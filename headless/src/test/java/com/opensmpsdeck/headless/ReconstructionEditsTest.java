@@ -104,6 +104,13 @@ class ReconstructionEditsTest {
             cli("reconstruct", "run", "--from", "transcribe", full.toString(), "--keep-voicing");
             var canonical = ProjectExport.open(full);
             assertPcmEqual(TargetPlayback.prepare(canonical.project()), replay.playback(), target.id());
+            ReconstructionBranches.create(work, "audition", "agent fixture");
+            ReconstructionBranches.edit(work, "audition", edits, List.of(), java.util.Set.of());
+            var branch = ReconstructionBranches.build(work, "audition");
+            var branchPlayback = TargetPlayback.prepare(ProjectExport.open(branch).project());
+            assertEquals(target, branchPlayback.target());
+            assertPcmEqual(TargetPlayback.prepare(canonical.project()), branchPlayback, "branch " + target.id());
+            assertEquals(revision, ReconstructionReview.revision(work));
             assertEquals(com.opensmpsdeck.project.ProjectFormat.write(canonical.project()),
                     com.opensmpsdeck.project.ProjectFormat.write(export.project()));
             for (var format : ProjectExport.Format.values()) {
