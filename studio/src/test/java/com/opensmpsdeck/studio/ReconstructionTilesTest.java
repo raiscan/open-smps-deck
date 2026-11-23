@@ -34,4 +34,54 @@ final class ReconstructionTilesTest {
         assertEquals(0, ReconstructionTiles.block(-4));
         assertEquals(key, ReconstructionTiles.key(source, 0, 3, 5));
     }
+
+    @Test void rowDensityFollowsPitchZoomInPowersOfTwo() {
+        assertEquals(2, ReconstructionTiles.rows(.5));
+        assertEquals(2, ReconstructionTiles.rows(2));
+        assertEquals(4, ReconstructionTiles.rows(2.1));
+        assertEquals(16, ReconstructionTiles.rows(15));
+        assertEquals(ReconstructionTiles.MAX_ROWS, ReconstructionTiles.rows(80));
+        var source = new AudioSource(AudioKind.CHIP, "Chip render", Path.of("render.wav"), true);
+        // Row density and mode are part of the measurement, so tiles never mix.
+        assertNotEquals(ReconstructionTiles.key(source, 0, 3, 5, 4, false), ReconstructionTiles.key(source, 0, 3, 5, 8, false));
+        assertNotEquals(ReconstructionTiles.key(source, 0, 3, 5, 4, false), ReconstructionTiles.key(source, 0, 3, 5, 4, true));
+    }
+
+    @Test void colourScaleRunsDarkToBrightAcrossTheContrastWindow() {
+        var contrast = new ReconstructionTiles.Contrast(-10, 40);
+        assertEquals(-50, contrast.floor());
+        double previous = -1;
+        for (int db = -60; db <= 0; db += 2) {
+            double lightness = lightness(ReconstructionTiles.color(db, contrast));
+            assertTrue(lightness >= previous - 1e-9, "lightness rises at " + db + " dB");
+            previous = lightness;
+        }
+        assertEquals(ReconstructionTiles.color(-50, contrast), ReconstructionTiles.color(-90, contrast));
+        assertEquals(ReconstructionTiles.color(-10, contrast), ReconstructionTiles.color(0, contrast));
+        assertTrue(lightness(ReconstructionTiles.color(-50, contrast)) < .05);
+        assertTrue(lightness(ReconstructionTiles.color(-10, contrast)) > .9);
+    }
+
+    @Test void autoContrastFitsQuietAudio() {
+        // A quiet stem: background near -95 dB, partials up to about -38 dB.
+        var levels = new float[10_000];
+        var random = new java.util.Random(7);
+        for (int i = 0; i < levels.length; i++)
+            levels[i] = i % 50 == 0 ? (float) (-38 - 4 * random.nextDouble()) : (float) (-95 + 6 * random.nextGaussian());
+        levels[3] = Float.NEGATIVE_INFINITY;
+        var contrast = ReconstructionTiles.autoContrast(java.util.List.of(levels));
+        assertNotNull(contrast);
+        assertTrue(contrast.ceiling() >= -42 && contrast.ceiling() <= -36, contrast.toString());
+        assertTrue(contrast.floor() >= -100 && contrast.floor() <= -90, contrast.toString());
+        assertNull(ReconstructionTiles.autoContrast(java.util.List.of()));
+        // Extremes clamp to the slider range.
+        var flat = new float[1000];
+        java.util.Arrays.fill(flat, -20);
+        assertEquals(20, ReconstructionTiles.autoContrast(java.util.List.of(flat)).range());
+    }
+
+    private static double lightness(int argb) {
+        double r = (argb >> 16 & 255) / 255.0, g = (argb >> 8 & 255) / 255.0, b = (argb & 255) / 255.0;
+        return .2126 * r + .7152 * g + .0722 * b;
+    }
 }

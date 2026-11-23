@@ -7,6 +7,10 @@ import java.util.List;
 /** Centered Hann analysis on native audio time, sampled on a semitone display grid. */
 final class EvidenceSpectrum {
     static final double CONTEXT = .21;
+    /** Reassignment keeps bins within 50 dB of the band's peak. */
+    private static final double QUIET = 1e-5;
+    /** Hann's main lobe half-width, in bins of the four-times zero-padded FFT. */
+    private static final double LOBE_BINS = 8;
     private static final double LOG_2 = Math.log(2);
 
     record Audio(float[] samples, int rate, double offset, double duration) {}
@@ -26,7 +30,8 @@ final class EvidenceSpectrum {
         }
     }
 
-    private record Band(int firstRow, int endRow, Level audio, double[] window, LeadEffectMatcher.Spectrum fft) {}
+    private record Band(int firstRow, int endRow, Level audio, double[] window, LeadEffectMatcher.Spectrum fft,
+                        double[] slope, LeadEffectMatcher.Spectrum slopeFft, double normal) {}
 
     // Symmetric binomial low-pass before decimation, so sample zero stays
     // aligned to the original WAV. Bands stay comfortably below Nyquist.
@@ -43,7 +48,12 @@ final class EvidenceSpectrum {
     }
 
     record Peak(double pitch, double strength) {}
-    record Spectrum(float[] powers, int columns, int height, int minPitch, int maxPitch, double peak) {
+    record Spectrum(float[] powers, int columns, int height, int minPitch, int maxPitch, double peak,
+                    boolean reassigned) {
+        Spectrum(float[] powers, int columns, int height, int minPitch, int maxPitch, double peak) {
+            this(powers, columns, height, minPitch, maxPitch, peak, false);
+        }
+
         Double peakDb() { return peak > 0 ? db(peak) : null; }
 
         BufferedImage image(double ceiling) {
@@ -107,7 +117,12 @@ final class EvidenceSpectrum {
             if (center <= left || center < right) return null;
             double offset = 0;
             double level = db(center);
-            if (left > 0 && right > 0) {
+            if (reassigned) {
+                // Reassigned energy is already concentrated, so sum it and take its centroid.
+                double sum = left + center + right;
+                offset = (right - left) / sum;
+                level = db(sum);
+            } else if (left > 0 && right > 0) {
                 double a = db(left), b = db(right);
                 double curvature = a - 2 * level + b;
                 if (curvature < 0) {
@@ -136,6 +151,19 @@ final class EvidenceSpectrum {
 
     static Spectrum measure(Audio audio, double[] times, int minPitch, int maxPitch,
                             int height, double span, boolean emphasize) {
+        return measure(audio, times, minPitch, maxPitch, height, span, emphasize, false);
+    }
+
+    /**
+     * Measures power on the display grid.
+     *
+     * <p>With {@code reassigned}, each FFT bin moves to its measured instantaneous
+     * frequency, so a steady partial draws as a thin line instead of the window's
+     * main lobe. Bin powers are scaled so a full-scale sine keeps the same peak
+     * level in both modes. This is a display measurement only.
+     */
+    static Spectrum measure(Audio audio, double[] times, int minPitch, int maxPitch,
+                            int height, double span, boolean emphasize, boolean reassigned) {
         double[] frequencies = new double[height];
         for (int y = 0; y < height; y++)
             frequencies[y] = hz(pitch(minPitch, maxPitch, y, height));
@@ -156,7 +184,22 @@ final class EvidenceSpectrum {
             for (int i = 0; i < length; i++)
                 window[i] = (1 - Math.cos(Math.TAU * i / (length - 1))) / (length - 1);
             int bins = Integer.highestOneBit(length) << 2;
-            bands.add(new Band(from, end, levelAudio, window, new LeadEffectMatcher.Spectrum(bins)));
+            double[] slope = null;
+            double normal = 1;
+            if (reassigned) {
+                // The window's derivative gives each bin's frequency offset from its centre.
+                slope = new double[length];
+                double sum = 0, squares = 0;
+                for (int i = 0; i < length; i++) {
+                    slope[i] = Math.TAU / (length - 1) * Math.sin(Math.TAU * i / (length - 1)) / (length - 1);
+                    sum += window[i];
+                    squares += window[i] * window[i];
+                }
+                // A sine's bins sum to bins * sum(w^2) times its amplitude; its peak bin holds sum(w)^2.
+                normal = bins * squares / (sum * sum);
+            }
+            bands.add(new Band(from, end, levelAudio, window, new LeadEffectMatcher.Spectrum(bins),
+                    slope, reassigned ? new LeadEffectMatcher.Spectrum(bins) : null, normal));
             from = end;
         }
         float[] power = new float[times.length * height];
@@ -167,6 +210,11 @@ final class EvidenceSpectrum {
                 int center = (int) Math.round((times[x] - audio.offset) * band.audio.rate);
                 band.fft.transform(band.audio.samples, center - band.window.length / 2, band.window);
                 double binsPerHz = band.fft.real.length / band.audio.rate;
+                if (band.slopeFft != null) {
+                    band.slopeFft.transform(band.audio.samples, center - band.window.length / 2, band.slope);
+                    peak = Math.max(peak, reassign(band, binsPerHz, minPitch, maxPitch, height, power, x, times.length));
+                    continue;
+                }
                 for (int y = band.firstRow; y < band.endRow; y++) {
                     double bin = frequencies[y] * binsPerHz;
                     double fundamental = power(band.fft, bin);
@@ -181,7 +229,45 @@ final class EvidenceSpectrum {
                 }
             }
         }
-        return new Spectrum(power, times.length, height, minPitch, maxPitch, peak);
+        return new Spectrum(power, times.length, height, minPitch, maxPitch, peak, reassigned);
+    }
+
+    /** Moves each bin in a band to its instantaneous frequency and returns the band's strongest row. */
+    private static double reassign(Band band, double binsPerHz, int minPitch, int maxPitch, int height,
+                                   float[] power, int column, int columns) {
+        int size = band.fft.real.length;
+        double rowsPerPitch = height / (maxPitch - minPitch + 1.0);
+        double top = pitch(minPitch, maxPitch, band.firstRow, height) + .5 / rowsPerPitch;
+        double bottom = pitch(minPitch, maxPitch, band.endRow - 1, height) - .5 / rowsPerPitch;
+        // Hann's main lobe spans two bins either side, four times that after zero padding.
+        int first = Math.max(1, (int) Math.floor(hz(bottom) * binsPerHz) - 8);
+        int last = Math.min(size / 2 - 1, (int) Math.ceil(hz(top) * binsPerHz) + 8);
+        double loudest = 0;
+        for (int bin = first; bin <= last; bin++) loudest = Math.max(loudest, band.fft.power(bin));
+        double strongest = 0;
+        for (int bin = first; bin <= last; bin++) {
+            double re = band.fft.real[bin], im = band.fft.imag[bin];
+            double energy = re * re + im * im;
+            // Bins far below the band's peak are sidelobes and noise, whose reassignment scatters.
+            if (energy < 1e-14 || energy < loudest * QUIET) continue;
+            double offset = (band.slopeFft.imag[bin] * re - band.slopeFft.real[bin] * im) / energy;
+            double shift = offset * size / Math.TAU;
+            // A bin inside a partial's main lobe moves at most the lobe's half-width.
+            if (Math.abs(shift) > LOBE_BINS) continue;
+            double hz = (bin - shift) / binsPerHz;
+            if (hz <= 0) continue;
+            double pitch = 69 + 12 * Math.log(hz / 440) / LOG_2;
+            if (pitch > top || pitch <= bottom) continue;
+            double row = (maxPitch + .5 - pitch) * rowsPerPitch - .5;
+            int lower = (int) Math.floor(row);
+            double fraction = row - lower;
+            double share = energy / band.normal;
+            if (lower >= band.firstRow) strongest = Math.max(strongest,
+                    power[lower * columns + column] += (float) (share * (1 - fraction)));
+            if (lower + 1 < band.endRow) strongest = Math.max(strongest,
+                    power[(lower + 1) * columns + column] += (float) (share * fraction));
+        }
+        return strongest;
     }
 
     private static double power(LeadEffectMatcher.Spectrum fft, double bin) {

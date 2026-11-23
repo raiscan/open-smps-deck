@@ -19,11 +19,12 @@ import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
 /**
- * Caches measured tiles separately from display images, so a dB change only recolors pixels.
+ * Caches measured tiles separately from display images, so a contrast change only recolors pixels.
  *
  * <p>A tile covers a power-of-two slice of source time and one octave block of pitch.
  * Pitch zoom and pitch scroll therefore reuse measured tiles instead of measuring
- * the visible pitch range again.
+ * the visible pitch range again. Its row density follows the pitch zoom in powers of
+ * two, so tiles draw near one row per device pixel and stay crisp without smoothing.
  */
 final class ReconstructionTiles implements AutoCloseable {
     static final int WIDTH = 192;
@@ -31,8 +32,13 @@ final class ReconstructionTiles implements AutoCloseable {
     static final int MIN_LEVEL = -2;
     static final int MAX_LEVEL = 7;
     static final int BLOCK = 12;
+    static final int MIN_ROWS = 2;
+    static final int MAX_ROWS = 16;
+    /** Cache budgets in cells, so dense tiles evict sooner than sparse ones. */
+    private static final long MEASURED_CELLS = 8_000_000, DISPLAYED_CELLS = 6_000_000;
 
-    record Key(AudioSource source, int level, int index, int block) {
+    /** Rows per semitone, measured mode and time slice of one cached measurement. */
+    record Key(AudioSource source, int level, int index, int block, int rows, boolean reassigned) {
         double span() { return ReconstructionTiles.span(level); }
         double start() { return index * span(); }
         double end() { return (index + 1) * span(); }
@@ -41,7 +47,18 @@ final class ReconstructionTiles implements AutoCloseable {
     }
 
     static Key key(AudioSource source, int level, int index, int block) {
-        return new Key(source, level, index, block);
+        return key(source, level, index, block, MIN_ROWS, false);
+    }
+
+    static Key key(AudioSource source, int level, int index, int block, int rows, boolean reassigned) {
+        return new Key(source, level, index, block, rows, reassigned);
+    }
+
+    /** The smallest power-of-two row density that gives at least one row per device pixel. */
+    static int rows(double devicePixelsPerSemitone) {
+        int rows = MIN_ROWS;
+        while (rows < MAX_ROWS && rows < devicePixelsPerSemitone) rows *= 2;
+        return rows;
     }
 
     static double span(int level) { return Math.scalb(1.5, level); }
@@ -53,14 +70,69 @@ final class ReconstructionTiles implements AutoCloseable {
 
     static int block(int pitch) { return Math.clamp(pitch, 0, 127) / BLOCK; }
 
-    record ImageKey(Key tile, int dbRange) {}
+    /** Maps {@code ceiling - range} to {@code ceiling} dBFS onto the colour scale. */
+    record Contrast(int ceiling, int range) {
+        int floor() { return ceiling - range; }
+    }
+
+    record ImageKey(Key tile, Contrast contrast) {}
     record Tile(WritableImage image, List<Ridge> ridges) {}
+
+    // Magma anchors: dark for quiet bins, bright for strong partials, evenly spaced in lightness.
+    private static final int[][] MAGMA = {
+            {0, 0, 4}, {28, 16, 68}, {79, 18, 123}, {129, 37, 129}, {181, 54, 122},
+            {229, 80, 100}, {251, 135, 97}, {254, 194, 135}, {252, 253, 191}};
+    private static final int[] PALETTE = new int[256];
+    static {
+        for (int i = 0; i < PALETTE.length; i++) {
+            double at = i / 255.0 * (MAGMA.length - 1);
+            int low = Math.min((int) at, MAGMA.length - 2);
+            double t = at - low;
+            int rgb = 0;
+            for (int channel = 0; channel < 3; channel++)
+                rgb = rgb << 8 | (int) Math.round(MAGMA[low][channel] + t * (MAGMA[low + 1][channel] - MAGMA[low][channel]));
+            PALETTE[i] = 0xff000000 | rgb;
+        }
+    }
+
+    static int color(double dbfs, Contrast contrast) {
+        double level = Math.clamp((dbfs - contrast.floor()) / contrast.range(), 0, 1);
+        return PALETTE[(int) Math.round(level * 255)];
+    }
+
+    /**
+     * Chooses a contrast from measured levels: the loudest half-percent reaches the top
+     * and the quieter 40% sits at the bottom, so background stays dark and quiet stems fill the scale.
+     */
+    static Contrast autoContrast(List<float[]> levels) {
+        int total = 0;
+        for (var tile : levels) total += tile.length;
+        if (total == 0) return null;
+        int stride = Math.max(1, total / 60_000);
+        var samples = new float[total / stride + levels.size()];
+        int count = 0, seen = 0;
+        for (var tile : levels) {
+            for (float value : tile) {
+                if (seen++ % stride != 0) continue;
+                if (Float.isFinite(value) && value > -150) samples[count++] = value;
+            }
+        }
+        if (count < 64) return null;
+        java.util.Arrays.sort(samples, 0, count);
+        double top = samples[Math.min(count - 1, (int) (count * .995))];
+        double bottom = samples[(int) (count * .40)];
+        int ceiling = (int) Math.clamp(Math.ceil(top), -80, 0);
+        int range = (int) Math.clamp(Math.round(ceiling - bottom), 20, 85);
+        return new Contrast(ceiling, range);
+    }
 
     private final ReconstructionInspection model;
     private final Runnable repaint;
     private final Consumer<String> error;
-    private final Map<Key, SpectrumTile> measured = Collections.synchronizedMap(lru(512));
-    private final Map<ImageKey, Tile> displayed = lru(320);
+    private final Map<Key, SpectrumTile> measured = Collections.synchronizedMap(
+            sized(MEASURED_CELLS, (SpectrumTile tile) -> tile.dbfs().length));
+    private final Map<ImageKey, Tile> displayed = sized(DISPLAYED_CELLS,
+            (Tile tile) -> (long) (tile.image().getWidth() * tile.image().getHeight()));
     private final Map<ImageKey, Future<?>> pending = new HashMap<>();
     private final Set<ImageKey> failures = Collections.newSetFromMap(lru(64));
     private final java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(
@@ -80,7 +152,65 @@ final class ReconstructionTiles implements AutoCloseable {
         };
     }
 
-    Tile get(ImageKey key) { return displayed.get(key); }
+    /** Evicts least recently used entries once their total weight passes a budget. */
+    private static <K, V> Map<K, V> sized(long budget, java.util.function.ToLongFunction<V> weight) {
+        return new LinkedHashMap<>(64, .75f, true) {
+            private long used;
+
+            @Override public V put(K key, V value) {
+                var previous = super.put(key, value);
+                if (previous != null) used -= weight.applyAsLong(previous);
+                used += weight.applyAsLong(value);
+                var eldest = entrySet().iterator();
+                while (used > budget && size() > 1 && eldest.hasNext()) {
+                    var entry = eldest.next();
+                    if (entry.getKey().equals(key)) continue;
+                    used -= weight.applyAsLong(entry.getValue());
+                    eldest.remove();
+                }
+                return previous;
+            }
+
+            @Override public V remove(Object key) {
+                var removed = super.remove(key);
+                if (removed != null) used -= weight.applyAsLong(removed);
+                return removed;
+            }
+        };
+    }
+
+    /**
+     * Returns a displayable tile. A tile already measured under another contrast is recolored here,
+     * which is cheap, so contrast changes never blank the plot.
+     */
+    Tile get(ImageKey key) {
+        var tile = displayed.get(key);
+        if (tile != null) return tile;
+        var data = measured.get(key.tile());
+        if (data == null) return null;
+        tile = new Tile(image(data, colors(data, key.contrast())), data.ridges());
+        displayed.put(key, tile);
+        return tile;
+    }
+
+    /** Measured dBFS levels for a tile, if they are cached. */
+    float[] levels(Key key) {
+        var data = measured.get(key);
+        return data == null ? null : data.dbfs();
+    }
+
+    private static int[] colors(SpectrumTile data, Contrast contrast) {
+        int[] pixels = new int[data.dbfs().length];
+        for (int i = 0; i < pixels.length; i++) pixels[i] = color(data.dbfs()[i], contrast);
+        return pixels;
+    }
+
+    private static WritableImage image(SpectrumTile data, int[] pixels) {
+        var image = new WritableImage(data.columns(), data.rows());
+        image.getPixelWriter().setPixels(0, 0, data.columns(), data.rows(), PixelFormat.getIntArgbPreInstance(),
+                pixels, 0, data.columns());
+        return image;
+    }
 
     void request(Set<ImageKey> visible) {
         pending.entrySet().removeIf(entry -> {
@@ -90,6 +220,10 @@ final class ReconstructionTiles implements AutoCloseable {
         });
         for (var key : visible) {
             if (displayed.containsKey(key) || pending.containsKey(key) || failures.contains(key)) continue;
+            if (measured.containsKey(key.tile())) {
+                get(key);
+                continue;
+            }
             pending.put(key, workers.submit(() -> prepare(key)));
         }
     }
@@ -99,7 +233,8 @@ final class ReconstructionTiles implements AutoCloseable {
         try {
             var spectrum = measured.get(key);
             if (spectrum == null) {
-                var full = model.spectrum(key.source(), key.start(), key.end(), WIDTH, key.low(), key.high());
+                var full = model.spectrum(key.source(), key.start(), key.end(), WIDTH, key.low(), key.high(),
+                        key.rows(), key.reassigned());
                 // The edge rows have only one neighbour, so their peaks are not ridges.
                 var ridges = full.ridges().stream()
                         .filter(ridge -> ridge.pitch() >= key.low() && ridge.pitch() <= key.high()).toList();
@@ -107,21 +242,10 @@ final class ReconstructionTiles implements AutoCloseable {
                 measured.put(key, spectrum);
             }
             var data = spectrum;
-            int[] pixels = new int[data.dbfs().length];
-            for (int i = 0; i < pixels.length; i++) {
-                double level = Math.clamp(1 + (data.dbfs()[i] - CEILING_DB) / imageKey.dbRange(), 0, 1);
-                double energy = level * level;
-                int red = 12 + (int) (232 * energy);
-                int green = 18 + (int) (181 * energy);
-                int blue = 32 + (int) (101 * level);
-                pixels[i] = 0xff000000 | red << 16 | green << 8 | blue;
-            }
+            int[] pixels = colors(data, imageKey.contrast());
             Platform.runLater(() -> {
                 if (closed) return;
-                var image = new WritableImage(data.columns(), data.rows());
-                image.getPixelWriter().setPixels(0, 0, data.columns(), data.rows(), PixelFormat.getIntArgbPreInstance(),
-                        pixels, 0, data.columns());
-                displayed.put(imageKey, new Tile(image, data.ridges()));
+                displayed.put(imageKey, new Tile(image(data, pixels), data.ridges()));
                 pending.remove(imageKey);
                 repaint.run();
             });
