@@ -713,16 +713,31 @@ final class ReconstructionTransport implements AutoCloseable {
         liveMessage("Preparing live preview…");
     }
 
-    void liveSaved(LiveEdit edit, ReconstructionLivePreview.Prepared playback, long eventNanos, boolean hasUnbuiltEdits) {
+    boolean compareLive(LiveEdit edit, ReconstructionLivePreview.Prepared comparison, String label) {
+        if (edit.stream() != liveStream) return false;
+        liveStream.compare(comparison, edit.playhead());
+        liveMessage(label);
+        return true;
+    }
+
+    void liveFallback(String detail) {
+        liveMessage("Rebuild needed · Rebuilding in background · " + detail);
+    }
+
+    void liveSaved(LiveEdit edit, ReconstructionLivePreview.Prepared playback, long eventNanos,
+                   boolean hasUnbuiltEdits, String author) {
         preview = hasUnbuiltEdits ? playback : null;
         previewJournal = hasUnbuiltEdits;
         rebuildNeeded = false;
+        var message = hasUnbuiltEdits
+                ? author == null ? "Live preview · Saved edits" : "Live preview · Disk change by " + author
+                : "";
         if (edit.stream() == liveStream) {
             liveStream.replace(playback, eventNanos, edit.playhead(), transport.loop != null);
-            liveMessage(hasUnbuiltEdits ? "Live preview · Saved edits" : "");
+            liveMessage(message);
         } else if (playing) {
             rebuildNeeded("Playback range changed");
-        } else liveMessage(hasUnbuiltEdits ? "Live preview · Saved edits" : "");
+        } else liveMessage(message);
     }
 
     void rebuildNeeded(String detail) {

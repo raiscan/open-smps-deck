@@ -21,7 +21,7 @@ public final class PackagedStudioSmoke {
         CountDownLatch done=new CountDownLatch(1);AtomicReference<Throwable> failure=new AtomicReference<>();
         Platform.startup(()->{
             try {
-                Stage stage=new Stage();StudioWindow window=new StudioWindow(stage,Path.of(args[0]));stage.show();
+                Stage stage=new Stage();StudioWindow window=new StudioWindow(stage,Path.of(args[0]),StudioTestAudio::line);stage.show();
                 PauseTransition wait=new PauseTransition(Duration.millis(300));
                 wait.setOnFinished(event->{
                     try {

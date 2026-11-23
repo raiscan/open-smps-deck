@@ -117,6 +117,7 @@ final class StudioPlayback implements AutoCloseable {
         private CachedRevision built;
         private CachedRevision active;
         private Future<Handoff> pending;
+        private CachedRevision otherComparison;
         private boolean preparing;
         private boolean reset;
         private boolean closed;
@@ -137,9 +138,20 @@ final class StudioPlayback implements AutoCloseable {
 
         synchronized boolean ready() { return built != null && !closed; }
 
+        synchronized void compare(ReconstructionLivePreview.Prepared edit, double gesture) {
+            replace(edit, 0, gesture, true, true);
+        }
+
         synchronized void replace(ReconstructionLivePreview.Prepared edit, long eventNanos,
                                   double gesture, boolean looped) {
+            replace(edit, eventNanos, gesture, looped, false);
+        }
+
+        private void replace(ReconstructionLivePreview.Prepared edit, long eventNanos, double gesture,
+                             boolean looped, boolean comparing) {
             if (!ready()) return;
+            var alternate = comparing ? otherComparison : null;
+            otherComparison = comparing ? active : null;
             cancelPending();
             preparing = false;
             reset = false;
@@ -149,7 +161,9 @@ final class StudioPlayback implements AutoCloseable {
             pending = edits.submit(() -> {
                 var changes = edit.changedGates(previous.edit());
                 int cutoff = changes.isEmpty() ? Integer.MAX_VALUE : presentation(frame(changes.getFirst().start()));
-                var audio = edit.isBuilt() ? original : cached != null && cached.edit() == edit ? cached
+                var audio = edit.isBuilt() ? original
+                        : cached != null && cached.edit() == edit ? cached
+                        : alternate != null && alternate.edit() == edit ? alternate
                         : new CachedRevision(edit, previous.audio().revise(edit.playback(), cutoff));
 
                 long replayAt = -1, replayEnd = -1;

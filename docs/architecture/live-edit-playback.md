@@ -19,21 +19,33 @@ and assembly layout. It checks the assembly fingerprints and verifies that the
 rebuilt bank has the same assets and executed events as the attached bank.
 The loaded score already incorporates the built edit prefix.
 
-Each audition applies the ordered suffix of stable-note-ID intents with the
-existing `setNote`, `transpose`, `bend` and `glide` kernels. It projects changed
-notes onto their saved lanes, retains fitted patches and gains, and uses the
-canonical S3K assembly and bank compiler. A conflicting gate, a changed
-journal prefix, an unsupported edit or a bank limit leaves the built audio
-available and displays **Rebuild needed**. **Apply & rebuild** can
-reevaluate allocation and other upstream decisions. It updates the built
-project, reports, diagnostics and exportable WAV.
+Pitch, gate and supported bends use the existing note-edit kernels and stay
+on saved lanes when the edited gates fit. For a role or lane-pin edit, Studio
+can rerun allocation inside complete bars when the original and edited lanes
+have independent, non-overlapping gates and no dependency crosses either
+edge. Assembly-only vibrato and layer edits reuse the allocation. The bank
+always compiles through the S3K arrangement compiler.
 
-Studio saves a checked audition as an atomic `edits.json` replacement under
-the existing journal locks and revision check. Undo and redo save the
-corresponding journal revision while an audition is active. Proposals keep
-their existing statuses. An external accepted edit or rebuild reloads the
-snapshot through the existing watcher and can require **Apply & rebuild**
-before the next audition.
+Allocation for stem-backed material can depend on notes outside an edited
+bar. Other examples include a lane collision, a change to score topology, a
+new voice fit, and a modified built journal prefix. In those cases Studio
+shows **Rebuild needed** while it replays the canonical stages in a private
+directory. The replay uses the same allocation affinity, compatible voicing
+and bank size decisions as **Apply & rebuild**. It stops after compiling
+the bank. WAV export and listening diagnostics remain part of a published
+rebuild. Studio switches to the replayed bank on the existing audio line.
+
+Local audition saves the checked journal atomically under the existing locks
+and revision check. Undo and redo save their corresponding journal revision.
+The watcher adopts accepted disk edits while the draft is clean and labels
+the source of the change. If accepted edits arrive while local edits are
+unsaved, Studio retains the local draft and offers the journal conflict
+resolution. Proposed edits stay silent until auditioned or accepted.
+
+The A/B controls use the current playhead for history, stock FM voice and
+proposal comparisons. They keep the compared changes in memory until the
+reviewer applies one. Explicit refit uses the stock fitter on the current
+allocation in the background and offers the selected patch as B.
 
 ## Checkpoints and handoff
 
@@ -44,7 +56,9 @@ FM operator state and LFO, PSG noise, DAC playback, and resampler history.
 Studio captures them together at 60-presentation intervals. The initial
 state comes from the normal session activation.
 
-Each revision retains checkpoints strictly before the earliest changed gate.
+For edits with exact changed gates, each revision retains checkpoints strictly
+before the earliest changed gate. For a replayed bank, Studio uses the
+executed-prefix proof to find the last compatible checkpoint.
 The compiler may change CALL and LOOP packing or move a voice table when
 it recompiles the song. Before reusing a checkpoint, Studio compares each
 track's executed event bytes and verifies the asset bindings. It relocates
@@ -78,13 +92,14 @@ delay is outside that measurement.
 Synthetic tests compare restored PCM with continuous playback from
 several seeks and checkpoints. They cover compact and linear packing,
 address relocation, invalidation on a late pitch change, and canonical
-pitch, gate, bend and undo renders. The Studio tests cover journal and
-audio-line continuity, including a deliberately late handoff after a
-short unlooped note has passed.
+pitch, gate, bend and undo renders. Synthetic reconstruction tests compare allocation and PCM with a canonical
+rebuild after independent-bar role edits, deletion and a mixed journal.
+Studio tests use a silent audio line by default and cover late handoffs,
+deletion, undo and adoption of an agent edit on the same line.
 
-Phase 3 can extend the live path to incremental roles and allocation,
-external journal updates, patch and proposal A/B, explicit refitting,
-and additional drivers.
+Further work can extend the window proof to stem-backed allocation,
+reduce the cost of invalidated checkpoints, and support live playback
+for additional drivers.
 
 [Stage and edit contracts](reconstruction-stages.md) ·
 [Studio review and transport](../user-guide/studio.md#inspect-and-edit-a-reconstruction)

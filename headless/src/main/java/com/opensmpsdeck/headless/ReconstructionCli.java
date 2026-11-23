@@ -745,6 +745,78 @@ final class ReconstructionCli {
                 key.drumPitch() == null ? kind : Kind.DAC_SAMPLE, lane, key, choice.report())));
     }
 
+    private record AssemblyBank(S3kReconstruction.Result result, TargetPlayback playback,
+                                boolean echoBankLimit, boolean bendSizeLimit, int bankPass) {}
+
+    private static AssemblyBank compileAssembly(Arrangement arrangement, Map<Integer, ReconstructionEcho.Estimate> estimates,
+                                                boolean audioOnly, ReconstructionTimeMap timeline,
+                                                LoadedProject existing, Path source) throws IOException {
+        boolean echoBankLimit = false, bendSizeLimit = false;
+        int bankPass = 0;
+        S3kReconstruction.Result result;
+        TargetPlayback playback;
+        while (true) {
+            var echoes = echoBankLimit ? Map.<Integer, ReconstructionEcho.Estimate>of() : estimates;
+            try {
+                result = arrangement.arrange(echoes, !echoBankLimit, !bendSizeLimit, -1, bankPass);
+            } catch (IllegalArgumentException failure) {
+                if (!audioOnly || bankPass == 4
+                        || !bankOverflow(failure)) throw failure;
+                bankPass++;
+                continue;
+            }
+            var project = result.project();
+            if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
+            if (timeline.warped() || existing != null) {
+                var references = new ArrayList<>(project.references().stream()
+                        .filter(r -> !r.id().equals(REFERENCE_ID)).toList());
+                if (timeline.warped()) references.add(new com.opensmpsdeck.project.AudioReference(
+                        REFERENCE_ID, "Steady reference", STEADY_REFERENCE, 0, 0, "reference"));
+                project = project.withReview(references, project.notes());
+            }
+            try {
+                playback = TargetPlayback.prepare(result.project());
+            } catch (ProjectCompiler.BankLimitException failure) {
+                if (!result.bends().isEmpty()) bendSizeLimit = true;
+                else if (result.echoNotes() > 0) echoBankLimit = true;
+                else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
+                    throw new IllegalArgumentException(failure.getMessage() + " (arpeggios add "
+                            + result.arpeggioExtraNoteBytes() + " note bytes; use longer steps or a smaller scope)", failure);
+                else if (result.layers().stream().anyMatch(layer -> layer.status() == ReconstructionLayers.Status.applied))
+                    throw new IllegalArgumentException(failure.getMessage() + " (narrow the per-note layer scopes)", failure);
+                else if (!result.policyCoverage().isEmpty())
+                    throw new IllegalArgumentException(failure.getMessage() + " (narrow voicing.json.lanePolicies scopes)", failure);
+                else if (audioOnly && bankPass < 4) bankPass++;
+                else throw failure;
+                continue;
+            }
+            try {
+                ProjectFiles.save(source, project, null);
+            } catch (IOException failure) {
+                if (result.bends().isEmpty() || !failure.getMessage().endsWith("byte source limit")) throw failure;
+                bendSizeLimit = true;
+                continue;
+            }
+            return new AssemblyBank(result, playback, echoBankLimit, bendSizeLimit, bankPass);
+        }
+    }
+
+    static TargetPlayback compileLive(Path work, ReconstructionStages.Score score,
+                                      ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
+                                      ReconstructionVoicing.Result voicing, ReconstructionEdits intents,
+                                      List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.profile().game());
+        var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, false, null);
+        // Use the same source size and bank-limit decisions as a rebuild. The replay directory
+        // is private and its attachment is only used for matching the canonical source limit.
+        var existing = ReconstructionReview.requireAttached(work, false);
+        var bank = compileAssembly(assembly.arrangement(), Map.of(), score.inputs().audioOnly() != null,
+                ReconstructionTimeMap.of(score), existing, work.resolve(".live-arrangement.smps.json"));
+        for (var layer : bank.result().layers()) layer.report(outcomes);
+        ReconstructionEdits.reportLostSound(allocation, outcomes, bank.result(), outcomes);
+        return bank.playback();
+    }
+
     private static S3kReconstruction.Result render(Path midi, Path reference, Path index, Path target, Path destination,
                                Options options, ReconstructionStages.Score transcription, Matched matched,
                                Effects effects, ReconstructionStructure.Result structure, ReconstructionLeadContinuity.Stats leadContinuity,
@@ -759,58 +831,15 @@ final class ReconstructionCli {
         boolean audioOnly = transcription.inputs() != null && transcription.inputs().audioOnly() != null;
         boolean complete = false;
         try {
-            boolean echoBankLimit = false, bendSizeLimit = false;
-            int bankPass = 0;
-            S3kReconstruction.Result result;
-            TargetPlayback playback;
             Path source = target.resolve(OUTPUTS.get(0));
             Path packagePath = target.resolve(OUTPUTS.get(1));
             Path audio = target.resolve(OUTPUTS.get(2));
             Path aligned = timeline.warped() ? target.resolve(STEADY_REFERENCE) : reference;
-            while (true) {
-                var echoes = echoBankLimit ? Map.<Integer, ReconstructionEcho.Estimate>of() : effects.echoes();
-                try {
-                    result = arrangement.arrange(echoes, !echoBankLimit, !bendSizeLimit, -1, bankPass);
-                } catch (IllegalArgumentException failure) {
-                    if (!audioOnly || bankPass == 4
-                            || !bankOverflow(failure)) throw failure;
-                    bankPass++;
-                    continue;
-                }
-                var project = result.project();
-                if (existing != null) project = project.withReview(existing.project().references(), existing.project().notes());
-                if (timeline.warped() || existing != null) {
-                    var references = new ArrayList<>(project.references().stream()
-                            .filter(r -> !r.id().equals(REFERENCE_ID)).toList());
-                    if (timeline.warped()) references.add(new com.opensmpsdeck.project.AudioReference(
-                            REFERENCE_ID, "Steady reference", STEADY_REFERENCE, 0, 0, "reference"));
-                    project = project.withReview(references, project.notes());
-                }
-                try {
-                    playback = TargetPlayback.prepare(result.project());
-                } catch (ProjectCompiler.BankLimitException failure) {
-                    if (!result.bends().isEmpty()) bendSizeLimit = true;
-                    else if (result.echoNotes() > 0) echoBankLimit = true;
-                    else if (result.arpeggioExtraNoteBytes() != null && result.arpeggioExtraNoteBytes() > 0)
-                        throw new IllegalArgumentException(failure.getMessage() + " (arpeggios add "
-                                + result.arpeggioExtraNoteBytes() + " note bytes; use longer steps or a smaller scope)", failure);
-                    else if (result.layers().stream().anyMatch(layer -> layer.status() == ReconstructionLayers.Status.applied))
-                        throw new IllegalArgumentException(failure.getMessage() + " (narrow the per-note layer scopes)", failure);
-                    else if (!result.policyCoverage().isEmpty())
-                        throw new IllegalArgumentException(failure.getMessage() + " (narrow voicing.json.lanePolicies scopes)", failure);
-                    else if (audioOnly && bankPass < 4) bankPass++;
-                    else throw failure;
-                    continue;
-                }
-                try {
-                    ProjectFiles.save(source, project, null);
-                } catch (IOException failure) {
-                    if (result.bends().isEmpty() || !failure.getMessage().endsWith("byte source limit")) throw failure;
-                    bendSizeLimit = true;
-                    continue;
-                }
-                break;
-            }
+            var bank = compileAssembly(arrangement, effects.echoes(), audioOnly, timeline, existing, source);
+            var result = bank.result();
+            var playback = bank.playback();
+            boolean echoBankLimit = bank.echoBankLimit(), bendSizeLimit = bank.bendSizeLimit();
+            int bankPass = bank.bankPass();
             if (bankPass > 0) {
                 long removed = result.reductions().stream().filter(r -> "audio-only-bank-fit".equals(r.reason())).count();
                 out.println(options.target().name() + " bank fit omitted " + removed + " lower-priority backing attacks");

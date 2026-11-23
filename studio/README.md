@@ -86,8 +86,10 @@ actual scene mouse events and controls, saves notes/clips, replaces the file,
 checks invalid-write recovery and dirty conflicts, preserves selection/viewport,
 and exercises huge virtual timelines without allocating huge canvas buffers.
 Use `-Dstudio.snapshot=/path/to/editor.png` with the isolated UI test to capture a
-scene snapshot for visual QA. No browser, server or physical audio device is
-needed by these tests; audible preview requires an available audio output device.
+scene snapshot for visual QA. The tests inject a paced, silent audio line into
+the main window, reconstruction transport and audition controls. They require
+a display only. If you explicitly want the tests to use real audio, add
+`-Dstudio.test.realAudio=true` and select your intended output device first.
 
 ## Design captures
 

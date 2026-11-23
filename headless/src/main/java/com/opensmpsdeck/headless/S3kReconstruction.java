@@ -659,7 +659,7 @@ final class S3kReconstruction {
         var tonePsg = classicNoise ? psg.subList(0, 2) : psg;
         int fmNotes = fm.stream().mapToInt(List::size).sum();
         int psgNotes = psg.stream().mapToInt(List::size).sum();
-        if (fmNotes + psgNotes + dac.size() == 0)
+        if (fmNotes + psgNotes + dac.size() == 0 && allocation.notes().stream().anyMatch(row -> row.lane() != null))
             throw new IllegalArgumentException("No allocated notes had a playable catalogue match in the requested interval");
         int[] overlappingTone = policies.isEmpty() ? null : overlappingToneFrames(fm, psg, frames);
         var layerResults = applyNoteLayers(layers, frames, fmOnly, fm, tonePsg, candidates, voices, envelopes,

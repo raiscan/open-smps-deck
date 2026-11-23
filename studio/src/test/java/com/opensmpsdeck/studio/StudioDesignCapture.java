@@ -65,7 +65,7 @@ public class StudioDesignCapture {
             ProjectFiles.save(fixture, renamed, null);
             fx(() -> {
                 stage = new Stage();
-                window = new StudioWindow(stage, fixture);
+                window = new StudioWindow(stage, fixture, StudioTestAudio::line);
                 stage.show();
                 if (scene.endsWith("commands")) {
                     window.showCommands();

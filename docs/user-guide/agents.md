@@ -199,11 +199,15 @@ path and IDs after checking them against the intended project.
    `reconstruct_run`, `withProposals: true` and an optional `proposalId` or
    `group`. Review the sibling preview and its A/B WAVs, then accept or
    reject in Studio **Proposals** or with `reconstruct_edit`. CLI/MCP
-   acceptance returns the stage to rebuild. Studio rebuilds when the
-   reviewer presses **Apply**. For authorized direct edits, use
-   `reconstruct_edit` with `action: "add"` and optional `rerun: true`, or
-   resume with `reconstruct_run` and `from`. Use `options.keepVoicing` to
-   preserve compatible settings. Record musical intent in `edits.json`.
+   acceptance returns the stage to rebuild. For an authorized direct edit,
+   use `reconstruct_edit` with `action: "add"` and an edit whose `author`
+   is `"agent"`. An attached S3K reconstruction with active Chip playback
+   picks up saved accepted edits and shows **Disk change by agent**.
+   An unsaved human draft is preserved for conflict resolution. Leave
+   `rerun` off when the reviewer wants to audition during playback. Use
+   **Apply & rebuild** in Studio or `reconstruct_run` with `from` and
+   `options.keepVoicing` to publish the result. Record musical intent in
+   `edits.json`.
    Keep the score and allocation as generated evidence. For selected
    notes, use the `layer` edit or Studio **Selection → Layer** to add or
    suppress a copy. Choose the target's preset under **Lane policies** for

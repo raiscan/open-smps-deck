@@ -39,6 +39,7 @@ public final class ReconstructionLivePreview {
     private final Map<Path, Stamp> inputs = new HashMap<>();
     private final ReconstructionStages.Score score;
     private final ReconstructionStructure.Result structure;
+    private final ReconstructionRoles.Result roles;
     private final ReconstructionAllocation.Result allocation;
     private final ReconstructionVoicing.Result voicing;
     private final ReconstructionTimeMap clock;
@@ -59,7 +60,7 @@ public final class ReconstructionLivePreview {
     private ReconstructionLivePreview(Path work, ReconstructionReview.Revision revision) throws IOException {
         this.work = work;
         for (String file : List.of("score.json", "structure.json", "allocation.json", "voicing.json",
-                "roleplan.json", "assembly-layout.json", "edit-results.json", "report.json", ReconstructionReview.ARRANGEMENT))
+                "roleplan.json", "roles.json", "assembly-layout.json", "edit-results.json", "report.json", ReconstructionReview.ARRANGEMENT))
             remember(work.resolve(file));
         ReconstructionReview.requireRevision(work, revision);
         var project = ReconstructionReview.requireAttached(work, false);
@@ -68,17 +69,18 @@ public final class ReconstructionLivePreview {
         score = ReconstructionStages.readScore(work.resolve("score.json"));
         clock = ReconstructionTimeMap.of(score);
         structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
+        roles = ReconstructionTrace.optional(work, "roles.json", ReconstructionRoles.Result.class);
         allocation = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
         voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
         var journal = ReconstructionEdits.Journal.read(work);
-        base = ReconstructionReview.parse(revision.entries()).accepted();
-        baseEntries = new JsonArray();
-        for (var edit : base.intents()) baseEntries.add(edit.json());
         var builtIds = new HashSet<String>();
         journal.all().forEach(outcome -> builtIds.add(outcome.id()));
-        if (base.intents().stream().anyMatch(edit -> !builtIds.contains(edit.id()))
-                || !Objects.equals(journal.scoreRecipe(), base.scoreRecipe(work)))
-            throw new RebuildNeeded("Build the saved journal to prepare live preview");
+        base = new ReconstructionEdits(ReconstructionReview.parse(revision.entries()).accepted().intents().stream()
+                .filter(edit -> builtIds.contains(edit.id())).toList());
+        baseEntries = new JsonArray();
+        for (var edit : base.intents()) baseEntries.add(edit.json());
+        if (!Objects.equals(journal.scoreRecipe(), base.scoreRecipe(work)))
+            throw new RebuildNeeded("The built score uses a different edit journal");
         var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
         var json = new Gson();
         if (!json.toJsonTree(ReconstructionCli.assemblyInputs(score, allocation, voicing)).equals(report.get("assemblyInputs")))
@@ -89,7 +91,7 @@ public final class ReconstructionLivePreview {
             throw new RebuildNeeded("The built song uses bank size reductions");
         var cataloguePath = Path.of(score.inputs().catalogue());
         remember(cataloguePath);
-        catalogue = InstrumentCatalogue.open(cataloguePath, TargetGame.S3K);
+        catalogue = InstrumentCatalogue.openReconstruction(cataloguePath, TargetGame.S3K);
         var ordered = new ReconstructionAllocation.Result(allocation.version(), allocation.notes().stream()
                 .sorted(java.util.Comparator.comparingInt(entry -> entry.startTick() == null
                         ? clock.startTick(entry.note()) : entry.startTick())).toList());
@@ -131,8 +133,14 @@ public final class ReconstructionLivePreview {
 
     private S3kReconstruction.Result assemble(ReconstructionStages.Score editedScore,
                                                ReconstructionAllocation.Result editedAllocation) throws IOException {
+        return assemble(editedScore, editedAllocation, base, new ArrayList<>());
+    }
+
+    private S3kReconstruction.Result assemble(ReconstructionStages.Score editedScore,
+                                               ReconstructionAllocation.Result editedAllocation,
+                                               ReconstructionEdits edits, List<ReconstructionEdits.Outcome> outcomes) throws IOException {
         var assembly = ReconstructionCli.prepareAssembly(work, editedScore, structure, editedAllocation,
-                voicing, catalogue, base, new ArrayList<>(), false, gains, saved);
+                voicing, catalogue, edits, outcomes, false, gains, saved);
         return assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
     }
 
@@ -144,12 +152,24 @@ public final class ReconstructionLivePreview {
 
     private record ChangedNote(ReconstructionStages.Note note, Gate gate) {}
 
-    public final class Prepared {
+    static Prepared rebuilt(TargetPlayback playback, ReconstructionAllocation.Result allocation) {
+        return new Prepared(null, null, playback, Map.of(), allocation, false);
+    }
+
+    public static final class Prepared {
+        private final ReconstructionLivePreview owner;
         private final ReconstructionEdits journal;
         private final TargetPlayback playback;
         private final Map<String, ChangedNote> changes;
 
-        private Prepared(ReconstructionEdits journal, TargetPlayback playback, Map<String, ChangedNote> changes) {
+        private final ReconstructionAllocation.Result allocation;
+        private final boolean hasExactGates;
+
+        private Prepared(ReconstructionLivePreview owner, ReconstructionEdits journal, TargetPlayback playback,
+                         Map<String, ChangedNote> changes, ReconstructionAllocation.Result allocation, boolean hasExactGates) {
+            this.owner = owner;
+            this.hasExactGates = hasExactGates;
+            this.allocation = allocation;
             this.journal = journal;
             this.playback = playback;
             this.changes = Map.copyOf(changes);
@@ -157,6 +177,7 @@ public final class ReconstructionLivePreview {
 
         /** Union of the old and new gates of notes changed by this journal revision. */
         public List<Gate> changedGates(Prepared previous) {
+            if (!hasExactGates || previous != null && (!previous.hasExactGates || previous.owner != owner)) return List.of();
             var prior = previous == null ? Map.<String, ChangedNote>of() : previous.changes;
             var ids = new HashSet<>(changes.keySet());
             ids.addAll(prior.keySet());
@@ -165,8 +186,8 @@ public final class ReconstructionLivePreview {
                 var before = prior.get(id);
                 var after = changes.get(id);
                 if (Objects.equals(before, after)) continue;
-                Gate left = before == null ? gate(gates.get(id)) : before.gate();
-                Gate right = after == null ? gate(gates.get(id)) : after.gate();
+                Gate left = before == null ? owner.gate(owner.gates.get(id)) : before.gate();
+                Gate right = after == null ? owner.gate(owner.gates.get(id)) : after.gate();
                 result.add(new Gate(Math.min(left.start(), right.start()), Math.max(left.end(), right.end())));
             }
             return result.stream().sorted(java.util.Comparator.comparingDouble(Gate::start)).toList();
@@ -174,11 +195,19 @@ public final class ReconstructionLivePreview {
 
         public TargetPlayback playback() { return playback; }
 
-        public boolean isBuilt() { return changes.isEmpty(); }
+        public void requireCurrent(ReconstructionReview.Revision expected) throws IOException {
+            owner.requireInputs();
+            ReconstructionReview.requireRevision(owner.work, expected);
+        }
+
+        public boolean isBuilt() { return owner != null && playback == owner.original; }
+
+        ReconstructionAllocation.Result allocation() { return allocation; }
 
         /** Write the checked journal only if the same inputs and journal revision are still on disk. */
         public ReconstructionReview.Revision save(ReconstructionReview.Revision expected) throws IOException {
-            return saveJournal(expected, journal);
+            if (owner == null) throw new IllegalStateException("A private preview cannot save edits");
+            return owner.saveJournal(expected, journal);
         }
     }
 
@@ -192,7 +221,39 @@ public final class ReconstructionLivePreview {
             if (!baseEntries.get(i).equals(suffix.get(i).json()))
                 throw new RebuildNeeded("An edit from the built journal changed");
         suffix = suffix.subList(baseEntries.size(), suffix.size());
-        if (suffix.isEmpty()) return new Prepared(journal, original, Map.of());
+        if (suffix.isEmpty()) return new Prepared(this, journal, original, Map.of(), allocation, true);
+
+        if (suffix.stream().allMatch(edit -> edit.firstStage() == ReconstructionStages.Stage.ASSEMBLE)
+                && (voicing.arrangement() == null || voicing.arrangement().sectionFit().isEmpty())) {
+            try {
+                var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
+                var result = assemble(score, allocation, journal.accepted(), outcomes);
+                result.layers().forEach(layer -> layer.report(outcomes));
+                var ids = suffix.stream().map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
+                for (var outcome : outcomes)
+                    if (ids.contains(outcome.id()) && outcome.status() != ReconstructionEdits.Status.applied
+                            && outcome.status() != ReconstructionEdits.Status.satisfied)
+                        throw new RebuildNeeded(outcome.detail());
+                return new Prepared(this, journal, TargetPlayback.prepare(result.project()), Map.of(), allocation, false);
+            } catch (IllegalArgumentException failure) {
+                throw new RebuildNeeded(failure.getMessage());
+            }
+        }
+
+        if (!Files.exists(work.resolve("roleplan.json")) && voicing.arrangement() == null && (voicing.voiceAssignments() == null || voicing.voiceAssignments().isEmpty())) {
+            var local = ReconstructionLiveAllocation.tryAllocate(score, structure, roles, allocation, journal.accepted(), suffix);
+            if (local != null && ReconstructionVoicing.lanesNeedingFit(voicing, ReconstructionVoicing.byLane(local)).isEmpty()) {
+                try {
+                    var retained = ReconstructionCli.keepVoicing(score, local, voicing, ignored -> {});
+                    var canonical = ReconstructionCli.prepareAssembly(work, score, structure, local, retained,
+                            catalogue, journal.accepted(), new ArrayList<>(), false, null, null);
+                    var project = canonical.arrangement().arrange(Map.of(), true, true, -1, 0).project();
+                    return new Prepared(this, journal, TargetPlayback.prepare(project), Map.of(), local, false);
+                } catch (IllegalArgumentException failure) {
+                    throw new RebuildNeeded(failure.getMessage());
+                }
+            }
+        }
 
         var targets = new HashSet<String>();
         var dependencies = new HashSet<String>();
@@ -273,7 +334,7 @@ public final class ReconstructionLivePreview {
                         && result.bends().stream().noneMatch(bend -> bend.id().equals(id)))
                     throw new RebuildNeeded("Assembly could not encode the edited bend");
             }
-            return new Prepared(journal, TargetPlayback.prepare(result.project()), changed);
+            return new Prepared(this, journal, TargetPlayback.prepare(result.project()), changed, edited, true);
         } catch (IllegalArgumentException failure) {
             throw new RebuildNeeded(failure.getMessage());
         }

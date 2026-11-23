@@ -28,7 +28,7 @@ public final class DpiStudioSmoke {
         if(!ready.await(10,TimeUnit.SECONDS))throw new AssertionError("toolkit startup timed out");
         try {
             fx(()->{
-                stage=new Stage();window=new StudioWindow(stage,Path.of(args[1]));stage.show();stage.requestFocus();robot=new Robot();layout();
+                stage=new Stage();window=new StudioWindow(stage,Path.of(args[1]),StudioTestAudio::line);stage.show();stage.requestFocus();robot=new Robot();layout();
                 double expected=Double.parseDouble(args[0]);
                 check(Math.abs(stage.getOutputScaleX()-expected)<.03,"native scale "+stage.getOutputScaleX()+", expected "+expected);
                 var area=Screen.getPrimary().getVisualBounds();

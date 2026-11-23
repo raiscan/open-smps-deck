@@ -40,7 +40,7 @@ class StudioWindowTest {
     }
     @BeforeEach void open() throws Exception {
         file=folder.resolve("shared.smps.json");ProjectFiles.save(file,DemoProject.create(),null);
-        fx(()->{stage=new Stage();window=new StudioWindow(stage,file);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
+        fx(()->{stage=new Stage();window=new StudioWindow(stage,file,StudioTestAudio::line);stage.show();stage.getScene().getRoot().applyCss();stage.getScene().getRoot().layout();return null;});
     }
     @AfterEach void close() throws Exception {if(window!=null)fx(()->{window.close();stage.close();return null;});}
 
@@ -1307,10 +1307,10 @@ class StudioWindowTest {
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
             fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; });
-            await(() -> liveStatus(scene).equals("Rebuild needed · This change needs a full rebuild"));
-            assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            var withDelete = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
+            assertEquals("deleteNote", withDelete.entries().get(1).getAsJsonObject().get("op").getAsString());
             fx(() -> {
-                assertEquals("Pending deletion", view.selectedNotes().getFirst().fate());
                 assertEquals("Stop", ((Button) scene.lookup("#reconstruction-play")).getText());
                 assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
                 return null;
@@ -1335,13 +1335,37 @@ class StudioWindowTest {
             var replacement = Files.writeString(work.resolve("incoming-edits.json"), incoming.toString());
             Files.move(replacement, work.resolve("edits.json"), StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
-            await(() -> liveStatus(scene).contains("Saved changes from disk"));
+            await(() -> liveStatus(scene).contains("Disk change by agent"));
             fx(() -> {
-                assertEquals("Play", ((Button) scene.lookup("#reconstruction-play")).getText());
+                assertEquals("Stop", ((Button) scene.lookup("#reconstruction-play")).getText());
                 assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
                 return null;
             });
+            int beforeAgent = sink.blocks.size();
+            var agentExpected = new ArrayList<byte[]>();
+            prepared.prepare(external, loop.start(), loop.end(), 5.5).playback().render(projectBlock + 1,
+                    samples -> agentExpected.add(pcmBytes(samples)));
+            await(() -> sink.blocks.stream().skip(beforeAgent)
+                    .anyMatch(block -> Arrays.equals(block, agentExpected.get(projectBlock))));
+            assertEquals(1, sink.opens.get());
             assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+
+            Platform.runLater(() -> ((MenuButton) scene.lookup("#reconstruction-live-compare"))
+                    .getItems().getFirst().fire());
+            await(() -> openDialogPane() != null);
+            fx(() -> {
+                var dialog = openDialogPane();
+                ((Button) dialog.lookupButton(ButtonType.OK)).fire();
+                return null;
+            });
+            await(() -> liveStatus(scene).equals("A/B · A"));
+            int beforeB = sink.blocks.size();
+            fx(() -> { ((Button) scene.lookup("#reconstruction-live-switch")).fire(); return null; });
+            await(() -> liveStatus(scene).contains("before 1 edit"));
+            await(() -> sink.blocks.stream().skip(beforeB)
+                    .anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            assertEquals(1, sink.opens.get());
         } finally {
             fx(() -> { pane.stage().close(); pane.close(); return null; });
         }
@@ -1382,6 +1406,12 @@ class StudioWindowTest {
             await(() -> sink.blocks.stream().skip(firstNewBlock).anyMatch(bytes -> Arrays.equals(bytes, block)));
             assertEquals(1, sink.opens.get());
         }
+    }
+
+    private static DialogPane openDialogPane() {
+        return javafx.stage.Window.getWindows().stream().filter(javafx.stage.Window::isShowing)
+                .map(window -> window.getScene() == null ? null : window.getScene().getRoot())
+                .filter(DialogPane.class::isInstance).map(DialogPane.class::cast).findFirst().orElse(null);
     }
 
     private static String liveStatus(javafx.scene.Scene scene) {
@@ -1459,7 +1489,7 @@ class StudioWindowTest {
                 [{"id":"p1","level":"phrase","name":"Left","author":"agent","reason":"fixture","sourceStart":0,"sourceEnd":1},
                  {"id":"p2","level":"phrase","name":"Right","author":"agent","reason":"fixture","sourceStart":1,"sourceEnd":2}]
                 """));
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
@@ -1783,7 +1813,7 @@ class StudioWindowTest {
     @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {
         Path work = reconstructionFixture();
         addFixtureDrum(work);
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
@@ -1990,7 +2020,7 @@ class StudioWindowTest {
         Path work = reconstructionFixture();
         addFixtureDrum(work);
         // Give the drum a visible DAC gate at the same onset as the tonal fixture.
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
@@ -2230,7 +2260,7 @@ class StudioWindowTest {
 
     private void withReconstructionPlot(Path work, boolean narrow,
             java.util.function.BiConsumer<javafx.scene.Scene, ReconstructionCanvas> test) throws Exception {
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
@@ -2403,7 +2433,7 @@ class StudioWindowTest {
                     output, output), log::toString);
         }
 
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         var scene = pane.stage().getScene();
         try {
             await(() -> scene.lookup("#reconstruction-canvas") != null);
@@ -2524,7 +2554,7 @@ class StudioWindowTest {
 
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {
         Path work = reconstructionFixture();
-        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
         try {
             await(() -> pane.stage().getScene().getRoot().lookupAll(".status").stream()
                     .filter(Label.class::isInstance).map(Label.class::cast)
