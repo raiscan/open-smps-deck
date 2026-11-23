@@ -69,6 +69,7 @@ public final class ReconstructionInspection {
     private final List<LayerOverlay> layers;
     private final ReconstructionSections.Result sections;
     private final List<Part> parts;
+    private final Map<String, String> stockReasons;
     private final List<ReconstructionStructure.Bar> bars;
     private final ReconstructionBeatMap beats;
 
@@ -78,6 +79,7 @@ public final class ReconstructionInspection {
         this.noteContext = new ReconstructionNoteContext(work, score, noteRevision, trace);
         this.project = project;
         this.target = score.profile().game();
+        this.stockReasons = ReconstructionVoicing.stockReasons(work);
         this.layers = trace.values().stream().flatMap(row -> layerOverlays(row, clock).stream()).toList();
         this.sources = sources(work, score);
         var span = new ReconstructionView.Span(0, duration(), TimeBase.source, clock);
@@ -146,6 +148,12 @@ public final class ReconstructionInspection {
     public List<Overlay> overlays() { return overlays; }
     public ReconstructionSections.Result sections() { return sections; }
     public List<Part> parts() { return parts; }
+
+    public String stockVoiceReason(Overlay note) {
+        if (note.lane() == null || !note.lane().startsWith("FM")) return null;
+        String source = ReconstructionVoicePlan.SourceInstrument.id(note.part());
+        return stockReasons.getOrDefault(source, stockReasons.get(note.lane()));
+    }
 
     public double snap(double seconds, Grid grid) {
         return Math.clamp(gridTime(seconds, grid, false), 0, duration());

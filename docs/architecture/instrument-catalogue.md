@@ -51,7 +51,15 @@ would merge different pitches, envelopes, and rhythms.
 
 - **FM voices** carry a verified native patch and operator ordering. Record
   bank and slot aliases as occurrences. An audition can include modulation,
-  pan, or an envelope as a separate playback variant.
+  pan, or an envelope as a separate playback variant. Retail S3K scans
+  record optional `fmUsage` per observed FM occurrence, including song and
+  lane, gate count, MIDI pitch range and median, median gate length in
+  physical frames, and an inferred bass, lead, chord, or percussive role.
+  The scan groups aligned non-octave gates as chord evidence and uses
+  register and short, narrow-range gates to infer bass and percussion.
+  Declared but unused voices have no observation. Existing indices still
+  open and can be rescanned to add these summaries. Inspect them with
+  `catalog show`.
 - **DAC samples** store decoded unsigned PCM once, with variants for effective
   rate, timing profile, and pan. Retain original note slot, raw rate byte,
   and source encoding as provenance.

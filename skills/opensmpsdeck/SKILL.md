@@ -203,6 +203,9 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
 See the [view reference](../../headless/README.md#inspect-time-aligned-evidence)
 and [stage guide](../../docs/architecture/reconstruction-stages.md) for
 additional filters, voice assignments, section journals and detector details.
+For an isolated S3K part, `held-note fallback` in the stock FM choice means
+no candidate sustained every measured hold that survived FM allocation.
+Audition the selected patch on the reported holds before accepting it.
 Use [role plans](../../headless/README.md#inspect-the-score-and-plan-musical-roles)
 for recurring lead and backing rules and [external transcription](../../headless/README.md#external-transcription)
 when a mapped or unmatched stem needs a separate transcriber.
@@ -244,6 +247,13 @@ use a scoped `minimumReleaseRate` edit. The arrangement exports the changed
 instrument as a custom clone with its stock asset ID in `origin.clonedFrom`.
 In MCP, read and write the full
 `voicing` artifact with `artifact_read` and `artifact_write`.
+
+For isolated S3K parts, the FM fit uses catalogue voice names and observed
+retail register and role as bounded preferences. Rescan the S3K ROM with
+`catalog scan` to include retail usage. Inspect `patchReason` in `voicing`,
+`stockVoiceChoices` in `reconstruct describe "$work" --json` or MCP
+`reconstruct_describe`, or **Automatic FM fit** on a selected FM note in
+Studio Detail.
 
 - Use `partChips: [{"part":3,"chip":"FM","lanes":["FM3","FM4","FM5"]}]`
   to keep backing on one chip. Use `"PSG"` for intentional PSG parts.

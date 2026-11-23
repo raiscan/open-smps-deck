@@ -80,8 +80,16 @@ public final class InstrumentCatalogue {
         }
     }
 
+    /** Note-gate observations in physical frames from one retail song and FM lane. */
+    public record FmUsage(int notes, int lowMidi, int highMidi, int medianMidi, int medianFrames, String role) {}
+
     public record Occurrence(String source, String driver, String revision, String song, Integer songId,
-                             Integer slot, String lane, Integer tick, boolean played, String table) {
+                             Integer slot, String lane, Integer tick, boolean played, String table, FmUsage fmUsage) {
+        public Occurrence(String source, String driver, String revision, String song, Integer songId,
+                          Integer slot, String lane, Integer tick, boolean played, String table) {
+            this(source, driver, revision, song, songId, slot, lane, tick, played, table, null);
+        }
+
         public Occurrence(String source, String driver, String revision, String song, Integer songId,
                           Integer slot, String lane, Integer tick, boolean played) {
             this(source, driver, revision, song, songId, slot, lane, tick, played, null);
@@ -362,6 +370,14 @@ public final class InstrumentCatalogue {
         Asset asset = assets.get(id);
         if (asset == null) throw new IllegalArgumentException("Unknown asset " + id);
         return asset;
+    }
+
+    List<FmUsage> retailFmUsage(String assetId) {
+        return assetVariants.getOrDefault(assetId, List.of()).stream()
+                .filter(variant -> variant.target() == TargetGame.S3K)
+                .flatMap(variant -> variant.occurrences().stream())
+                .filter(usage -> usage.played() && usage.songId() != null)
+                .map(Occurrence::fmUsage).filter(Objects::nonNull).distinct().toList();
     }
 
     public Match match(String id) {

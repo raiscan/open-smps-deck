@@ -26,6 +26,7 @@ final class VoicePatchShortlist {
 
     record RankedPatch(String id, double score) {}
     private record Key(String asset, int pitch, TargetGame target) {}
+    private record Audibility(double peak, double tailRms) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
     private record AttackProbe(int pitch, VoiceAttackShape.Profile shape, VoiceSpectralBalance.Profile spectrum) {}
@@ -35,6 +36,7 @@ final class VoicePatchShortlist {
     private final InstrumentCatalogue catalogue;
     private final TargetGame target;
     private final List<InstrumentCatalogue.Variant> variants;
+    private final Map<Key, Audibility> audibility = new java.util.HashMap<>();
     private final VoiceSpectra spectra = new VoiceSpectra();
     private final LowRegisterSpectrum lowSpectrum = new LowRegisterSpectrum();
     private final VoiceAttackShape attackShape = new VoiceAttackShape();
@@ -97,7 +99,8 @@ final class VoicePatchShortlist {
 
     List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
                            Path mix, Map<Integer, Path> stems, VoiceWindows windows,
-                           InstrumentCatalogue.Variant incumbent, boolean foreground) throws IOException {
+                           InstrumentCatalogue.Variant incumbent, boolean foreground, StockVoicePrior prior,
+                           ReconstructionHeldNotes.StockScreen sustain) throws IOException {
         var available = new ArrayList<>(notes.stream().filter(n -> windows.trainingAttack(n.startTick(), ATTACK_TICKS)).toList());
         var occupied = new java.util.HashMap<String, int[]>();
         available.sort(Comparator.comparingInt((ReconstructionAllocation.Entry note) -> {
@@ -127,11 +130,16 @@ final class VoicePatchShortlist {
             if (probes.size() == PROBE_LIMIT) break;
         }
         var ranked = new ArrayList<RankedPatch>();
-        var availableVariants = probes.isEmpty() ? variants.stream().limit(1).toList() : variants;
+        var availableVariants = probes.isEmpty() && prior == null && sustain == null
+                ? variants.stream().limit(1).toList() : variants;
         for (var variant : availableVariants) ranked.add(rank(variant, probes));
-        ranked.sort(Comparator.comparingDouble(RankedPatch::score).reversed().thenComparing(RankedPatch::id));
-        var shortlist = new ArrayList<>(ranked.subList(0, Math.min(ranked.size(), SHORTLIST_LIMIT)));
-        if (incumbent != null && shortlist.stream().noneMatch(patch -> patch.id().equals(incumbent.id()))) {
+        // The incumbent can use another variant of an asset deduplicated from the pool.
+        if (sustain != null && incumbent != null && !variants.contains(incumbent))
+            ranked.add(rank(incumbent, probes));
+        var shortlist = shortlist(ranked, prior, SHORTLIST_LIMIT, sustain);
+        if (incumbent != null && (prior == null || eligible(incumbent, prior))
+                && (sustain == null || sustain.loss(incumbent.id()) == 0)
+                && shortlist.stream().noneMatch(patch -> patch.id().equals(incumbent.id()))) {
             if (shortlist.size() == SHORTLIST_LIMIT) shortlist.removeLast();
             shortlist.add(rank(incumbent, probes));
         }
@@ -227,7 +235,7 @@ final class VoicePatchShortlist {
     }
 
     List<RankedPatch> lowCandidates(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
-                          Path stem, VoiceWindows windows)
+                          Path stem, VoiceWindows windows, StockVoicePrior prior)
             throws IOException {
         if (!LowRegisterSpectrum.lowRegister(notes)) return List.of();
         long end = ReferenceAudio.durationMicros(stem);
@@ -258,8 +266,62 @@ final class VoicePatchShortlist {
         if (probes.size() < 2) return List.of();
         var ranked = new ArrayList<RankedPatch>();
         for (var variant : variants) ranked.add(new RankedPatch(variant.id(), 1 / (1 + lowDistance(variant, probes) / 100)));
-        ranked.sort(Comparator.comparingDouble(RankedPatch::score).reversed().thenComparing(RankedPatch::id));
-        return List.copyOf(ranked.subList(0, Math.min(ranked.size(), 8)));
+        return List.copyOf(shortlist(ranked, prior, 8, null));
+    }
+
+    ArrayList<RankedPatch> shortlist(List<RankedPatch> ranked, StockVoicePrior prior, int limit,
+                                     ReconstructionHeldNotes.StockScreen sustain)
+            throws IOException {
+        ranked.sort(Comparator.comparingDouble((RankedPatch patch) -> prior == null ? patch.score()
+                : patch.score() + prior.evidence(catalogue, catalogue.match(patch.id()).variant()).preference())
+                .reversed().thenComparing(RankedPatch::id));
+        var retained = new ArrayList<RankedPatch>();
+        RankedPatch fallback = null;
+        double bestLoss = Double.POSITIVE_INFINITY;
+        for (var patch : ranked) {
+            if (sustain != null) {
+                double loss = sustain.loss(patch.id());
+                if (loss < bestLoss || loss == bestLoss && betterAttack(patch, fallback)) {
+                    bestLoss = loss;
+                    fallback = patch;
+                }
+                if (loss > 0) continue;
+            }
+            if (prior == null || eligible(catalogue.match(patch.id()).variant(), prior)) retained.add(patch);
+            if (retained.size() == limit) break;
+        }
+        if (retained.isEmpty() && fallback != null) retained.add(fallback);
+        return retained;
+    }
+
+    private static boolean betterAttack(RankedPatch patch, RankedPatch other) {
+        return patch.score() > other.score() || patch.score() == other.score() && patch.id().compareTo(other.id()) < 0;
+    }
+
+    private boolean eligible(InstrumentCatalogue.Variant variant, StockVoicePrior prior) throws IOException {
+        var labels = InstrumentCatalogue.labels(catalogue.asset(variant.assetId()));
+        if (labels.stream().anyMatch(label -> label.text().equals("Silent Bass")
+                || prior.sustained && label.text().equals("Wood Block"))) return false;
+        var key = new Key(variant.assetId(), prior.pitch, target);
+        var probe = audibility.get(key);
+        if (probe == null) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("patch screening cancelled");
+            int ticks = 24;
+            var project = CataloguePlayback.matchProbe(catalogue, variant.id(), prior.pitch, ticks, true, target);
+            var rendered = VoiceWindows.renderMono(project, ticks);
+            double peak = 0;
+            for (float sample : rendered) peak = Math.max(peak, Math.abs(sample));
+            probe = new Audibility(peak, Math.sqrt(energy(rendered, rendered.length * 3 / 4, rendered.length)));
+            audibility.put(key, probe);
+        }
+        return audible(probe.peak(), probe.tailRms(), prior.sustained);
+    }
+
+    static boolean audible(double peak, double tailRms, boolean sustained) {
+        // Below -60 dBFS peak the raw patch offers little usable signal.
+        // Exclude near-impulses on held lines. The stem-backed sustain
+        // screen handles less extreme decay against the actual duration.
+        return peak >= .001 && (!sustained || tailRms >= Math.min(.0001, peak * .01));
     }
 
     private double lowDistance(InstrumentCatalogue.Variant variant, List<LowProbe> probes) throws IOException {
