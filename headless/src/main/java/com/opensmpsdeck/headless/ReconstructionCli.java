@@ -146,6 +146,7 @@ final class ReconstructionCli {
         out.println("       reconstruct plan-template WORK_DIR [--out FILE]");
         out.println("       reconstruct sections WORK_DIR | sections add|set|remove|rename WORK_DIR JSON");
         out.println("       reconstruct vibrato-review WORK_DIR [--part ID] [--propose]");
+        out.println("       reconstruct voice-switches WORK_DIR [--part ID] [--min-run SECONDS] [--no-figures] [--labels] [--propose | --apply]");
         out.println("       reconstruct vocal-review WORK_DIR [--phrase ID] [--propose] [--show-decided] [--json]");
         out.println("       reconstruct vocal-render WORK_DIR --phrase ID OUT.wav");
         out.println("       reconstruct part-render WORK_DIR --part ID OUT.wav");
@@ -185,6 +186,10 @@ final class ReconstructionCli {
         }
         if (args.length >= 2 && args[1].equals("view")) {
             ReconstructionView.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
+            return;
+        }
+        if (args.length >= 2 && args[1].equals("voice-switches")) {
+            VoiceSwitchReview.cli(java.util.Arrays.copyOfRange(args, 2, args.length), out);
             return;
         }
         if (args.length >= 2 && args[1].equals("vibrato-review")) {

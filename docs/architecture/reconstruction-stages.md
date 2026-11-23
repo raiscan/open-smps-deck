@@ -505,7 +505,7 @@ removes only the selected proposals. See the
 | `arpeggio` | `noteIds` or `span` with `part` and optional pitch bounds. `rate` is 1–127 driver ticks per step (default 2). `order` is `up`, `down`, or `up-down` (default `up`). | `allocate` |
 | `chordInstrument` | Same selectors as `arpeggio`. Replaces the selected chord with a catalogue-derived multi-carrier FM voice. | `allocate` |
 | `voiceEdit` | A `voiceEdit` object with the fields of a [voice journal entry](#identify-and-assign-voices), including its own `op` and `voiceId`. The outer intent supplies `id` and `author`. The voices stage replays these after `voice-edits.json`. | `voices` |
-| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, `vibratoEnvelope` for staged S3K vibrato, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. Vibrato here requires FM. | `assemble` |
+| `noteVoicing` | `noteIds` and at least one of `instrument` with `laneType`, `vibrato` with native F0 fields, `vibratoEnvelope` for staged S3K vibrato, or `modulationOff: true`. Instrument IDs use the same catalogue and named noise presets as voice assignments. An instrument can carry `gain` (above 0, up to 4), which replaces the lane gain on those notes. Vibrato here requires FM. | `assemble` |
 | `layer` | `noteIds`, point `selector` or `selectors`, or `span` with `part` and optional `pitchMin`, `pitchMax` and `fromRole` filters. Set `mode` to `echo`, `chorus`, `double` or `off`. Copies require `laneType` (`FM` or `PSG`). | `assemble` |
 
 At assembly, `noteVoicing` resolves each ID on its current chip, reports
@@ -1735,6 +1735,61 @@ With `--propose`, it saves candidates for review in the `staged-vibrato`
 group. Accept a proposal and rebuild assembly to hear it. Trace and describe
 show the stages on the rebuilt gate. The default reconstruction does not
 run this review or change its output.
+
+#### Patch changes within a part
+
+`reconstruct voice-switches WORK_DIR [--part ID] [--min-run SECONDS]
+[--no-figures] [--labels] [--propose | --apply]` looks for passages where a
+stem-backed source part is better explained by a second stock FM patch. The
+default reconstruction does not run it. Without `--propose` or `--apply` it
+only reports.
+
+The evidence is a decode over every note of the part:
+
+- Each note is compared with stock patches on its whole shape up to key-off
+  (48 mel bands at 8 ms hops, at most 0.5 s, one gain per note). Templates
+  come from the pinned chip at the note's pitch and full track volume.
+- A survey of up to 32 notes spread over the part picks 24 candidate patches
+  from the whole catalogue. The part's own patch is always a candidate.
+- One patch is chosen per note with a fixed cost for each change. A note
+  shorter than one 43 ms frame counts in proportion to its length.
+- Notes that repeat a figure (register, length and the step into them) lend
+  each other half their evidence. `--no-figures` turns this off.
+
+A passage is a run of notes given to a patch other than the part's own. It
+is applied without review only if it passes every guard:
+
+| Guard | Rule |
+| --- | --- |
+| Dwell | At least `--min-run` seconds sounding (default 4) over at least 8 key-ons. |
+| Home dwell | The part's own patch sounds that long on each side, unless the part starts or ends there. |
+| Separate phrases | Each half of the passage prefers the patch on its own, by 0.01 per note. |
+| No-switch null | At most 2% of 200 shuffles of the part, in one-second blocks, hold a run this strong. A patch that is better everywhere fails here. |
+| Attack and sustain | The first 85 ms match better by 0.01, and held notes match no worse after that. |
+| Bank explains stem | One patch is the best match for at least half the part's notes. Below that the stock bank does not explain the stem, as on most real instruments. |
+| Own stem | The part has a stem of its own. Shared stems, the sung lead and `--whole-part-voices` runs never apply. |
+
+`--propose` saves the passages that pass the dwell, separate-phrases, null
+and bank guards as `noteVoicing` proposals in the `voice-switch` group, with
+every guard result as evidence. The rest are only reported. A review that
+proposes or applies also saves its report as `voice-switches.json`. `--apply`
+adds the passages that pass every guard as accepted agent edits and proposes
+the others. Each edit selects the passage's notes, the stock patch and a lane
+gain that keeps the passage as loud as the part's own patch. A passage
+already in the journal, in any state, is left as decided, and notes with an
+instrument edit of their own are skipped.
+
+The report also gives each part's `modeShare`, the rank of its own patch
+among the candidates, and the patch the decode gives most notes. When that
+differs from the part's own patch, `majorityWinsAttacks` says whether the
+voice stage's level-matched comparison of exposed stem attacks agrees. The
+review never changes a part's own patch.
+
+`--apply` rebuilds assembly and compares the compiled bank. The result lists
+`bankBytes`, `fmPatchBankBytes` and `fmPatchSwitchBytes` before and after.
+If the build fails or the bank exceeds the target's limit, the last applied
+edit is removed and the build repeats. Remove an applied edit with
+`reconstruct edit WORK_DIR remove ID`, or reject a proposal, to undo it.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
 `run --from voice` also reuses existing voicing unless refit options are given,

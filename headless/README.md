@@ -1489,6 +1489,12 @@ in mapped stems. Omit `--propose` (MCP `propose`) for read-only detection.
 Review or accept the proposals in Studio or with `reconstruct proposals`.
 See the [envelope contract](../docs/architecture/reconstruction-stages.md#per-note-vibrato-envelopes).
 
+Run `reconstruct voice-switches WORK_DIR` to look for passages where a
+stem-backed part changes instrument. It reports by default. `--propose`
+saves reviewable `noteVoicing` proposals, and `--apply` also applies the
+passages that pass every guard and rebuilds. See
+[patch changes within a part](../docs/architecture/reconstruction-stages.md#patch-changes-within-a-part).
+
 ## Reconstruction benchmark
 
 Use `bench build-corpus` with a local locked-on ROM and catalogue, then

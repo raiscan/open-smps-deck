@@ -252,7 +252,7 @@ final class ReconstructionEdits {
             case voiceEdit -> List.of("voiceEdit");
             case layer -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin", "pitchMax",
                     "fromRole", "mode", "laneType", "delayFrames", "attenuation", "levelDb", "detune", "octave", "volumeDecay", "policies");
-            case noteVoicing -> List.of("noteIds", "instrument", "laneType", "vibrato", "vibratoEnvelope", "modulationOff");
+            case noteVoicing -> List.of("noteIds", "instrument", "laneType", "gain", "vibrato", "vibratoEnvelope", "modulationOff");
             case transpose -> List.of("noteIds", "semitones", "laneType");
             case setVelocity -> List.of("noteIds", "span", "part", "pitchMin", "pitchMax", "velocity", "scale", "voice");
             case pinLane -> List.of("noteIds", "selector", "selectors", "span", "part", "pitchMin",

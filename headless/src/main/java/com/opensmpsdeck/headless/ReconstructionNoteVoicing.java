@@ -25,6 +25,12 @@ final class ReconstructionNoteVoicing {
     static void validate(JsonObject json, ReconstructionLaneType type, String at) {
         require(json.has("instrument") == (type != null), at, "instrument requires laneType");
         if (type != null) string(json, "instrument", at);
+        // A second patch at the lane's gain can be much louder or quieter than the first.
+        require(!json.has("gain") || type != null, at, "gain requires instrument");
+        if (json.has("gain")) {
+            double gain = ReconstructionEdits.number(json.get("gain"), at + ".gain");
+            require(gain > 0 && gain <= 4, at + ".gain", "expected a lane gain above 0 and up to 4");
+        }
         boolean off = json.has("modulationOff");
         require(!off || json.get("modulationOff").isJsonPrimitive()
                 && json.getAsJsonPrimitive("modulationOff").isBoolean()
@@ -97,6 +103,7 @@ final class ReconstructionNoteVoicing {
             var json = edit.json();
             var type = edit.laneType();
             var instrument = type == null ? null : new ReconstructionVoicePlan.Assignment(type, json.get("instrument").getAsString());
+            Double gain = json.has("gain") ? json.get("gain").getAsDouble() : null;
             var bend = vibrato(json, edit.id());
             var envelope = envelope(json, edit.id());
             boolean off = json.has("modulationOff");
@@ -129,10 +136,17 @@ final class ReconstructionNoteVoicing {
                 }
                 for (String id : hits) {
                     if (instrument != null) instruments.put(id, instrument);
-                    if (off || bend != null || envelope != null) {
+                    if (off || bend != null || envelope != null || gain != null) {
                         var entry = entries.get(id);
                         var settings = new ReconstructionOverrides.Settings(null, null, null, null, List.of(id),
-                                null, null, null, null, bend, off, envelope);
+                                null, gain, null, null, bend, off, envelope);
+                        // A gain and a modulation edit on one note both apply. Otherwise the later edit replaces.
+                        var earlier = modulation.get(id);
+                        if (earlier != null && (gain == null) != (earlier.settings().gain() == null)) {
+                            var both = settings.combine(earlier.settings());
+                            settings = new ReconstructionOverrides.Settings(null, null, null, null, List.of(id), null,
+                                    both.gain(), null, null, both.vibrato(), both.modulationOff(), both.vibratoEnvelope());
+                        }
                         modulation.put(id, new ReconstructionOverrides.Span(entry.startTick(), entry.endTick(), settings, -1));
                     }
                 }
