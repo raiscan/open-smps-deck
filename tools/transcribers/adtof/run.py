@@ -9,6 +9,32 @@ import math
 from pathlib import Path
 
 
+PEAK_TARGET_DBFS = -4.0
+
+
+def normalization_gain_db(peak):
+    if not math.isfinite(peak) or peak < 0:
+        raise ValueError("ADTOF requires a finite, nonnegative input peak")
+    if peak == 0:
+        return 0.0
+    return min(24.0, PEAK_TARGET_DBFS - 20 * math.log10(peak))
+
+
+def model_input(path):
+    from adtof_pytorch.audio import create_adtof_processor
+    import numpy as np
+    import torch
+
+    processor = create_adtof_processor()
+    mono = processor.load_audio(str(path))
+    peak = float(np.max(np.abs(mono), initial=0))
+    gain_db = normalization_gain_db(peak)
+    mono *= 10 ** (gain_db / 20)
+    spectrum = processor.apply_filterbank(processor.compute_stft(mono))
+    # The frame RNN expects batch, time, frequency, channel.
+    return torch.from_numpy(spectrum.T)[None, :, :, None], peak, gain_db
+
+
 def infer(args):
     import adtof_pytorch as adtof
     import torch
@@ -24,12 +50,14 @@ def infer(args):
     engine = adtof.load_pytorch_weights(engine, str(checkpoint), strict=True).eval().to(device)
     picker = adtof.PeakPicker(thresholds=adtof.FRAME_RNN_THRESHOLDS, fps=100)
     with torch.inference_mode():
-        features = adtof.load_audio_for_model(str(args.input)).to(device)
-        predictions = engine(features).cpu().numpy()
+        features, peak, gain_db = model_input(args.input)
+        predictions = engine(features.to(device)).cpu().numpy()
     peaks = picker.pick(predictions, labels=adtof.LABELS_5, label_offset=0)[0]
     with Path(checkpoint).open("rb") as stream:
         weights_hash = hashlib.file_digest(stream, "sha256").hexdigest()
     return peaks, {"version": version("adtof-pytorch"), "device": device, "weightsSha256": weights_hash,
+                   "inputNormalization": "mono-peak", "peakTargetDbfs": PEAK_TARGET_DBFS,
+                   "appliedGainDb": gain_db, "inputMonoPeak": peak,
                    "thresholds": list(adtof.FRAME_RNN_THRESHOLDS), "framesPerSecond": 100}
 
 

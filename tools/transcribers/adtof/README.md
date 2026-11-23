@@ -14,6 +14,8 @@ tools/transcribers/adtof/setup.sh /path/to/adtof
 ```
 
 The adapter writes `[[seconds, gmPitch, velocity], ...]` in source seconds.
+ADTOF peak-normalizes its decoded mono signal to −4 dBFS with at most +24 dB gain before computing model features.
+The sidecar records this preprocessing in `inputNormalization`, `peakTargetDbfs`, `inputMonoPeak` and `appliedGainDb`.
 Velocities are fixed at 96. GM pitches are 35 (kick), 38 (snare), 47 (tom),
 42 (hi-hat) and 49 (cymbal). The `<output>.meta.json` sidecar saves the
 model, package version, checkpoint hash, thresholds and device. The setup
