@@ -370,8 +370,8 @@ final class McpReconstruction {
             return json ? McpJson.parse(new java.io.StringReader(description)).getAsJsonObject() : object(Map.of("text", description));
         }
         Path work = McpPaths.directory(string(args, "workDir"));
-        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", ReconstructionSections.FILE, "edit-results.json",
-                "edits.json", "voice-edits.json")) McpPaths.managed(work, file);
+        for (String file : List.of("score.json", "stem-template-candidates.json", "structure.json", "roles.json", "allocation.json", "voicing.json",
+                ReconstructionSections.FILE, "edit-results.json", "edits.json", "voice-edits.json")) McpPaths.managed(work, file);
         if (args.has("notes")) for (String file : ReconstructionDescribe.NOTE_FILES) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
         String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),

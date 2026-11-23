@@ -12,7 +12,10 @@ final class VoiceFit {
     // A near-tie that flipped the selected voice moved the fit error by about 0.18%.
     private static final double INCUMBENT_MARGIN = .005;
 
-    record Candidate(String id, float[] spectrum) {}
+    record Candidate(String id, float[] spectrum, double preference) {
+        Candidate(String id, float[] spectrum) { this(id, spectrum, 0); }
+        double adjusted(double loss) { return loss * (1 - preference); }
+    }
     record Selection(Candidate candidate, double gain) {}
     record Trial(Selection selection, double fit, double check) {}
 
@@ -74,10 +77,18 @@ final class VoiceFit {
     boolean select(int lane, List<Candidate> candidates, double relativeMargin) {
         var original = current();
         var best = original;
+        var incumbent = selection(lane).candidate();
+        double originalFit = incumbent.adjusted(original.fit());
+        double originalCheck = incumbent.adjusted(original.check());
+        double bestFit = originalFit;
         for (var candidate : candidates) {
             var trial = trial(lane, candidate);
-            if (trial.fit() < best.fit() && improves(original.fit(), trial.fit(), relativeMargin)
-                    && improves(original.check(), trial.check(), relativeMargin)) best = trial;
+            double candidateFit = candidate.adjusted(trial.fit());
+            if (candidateFit < bestFit && improves(originalFit, candidateFit, relativeMargin)
+                    && improves(originalCheck, candidate.adjusted(trial.check()), relativeMargin)) {
+                best = trial;
+                bestFit = candidateFit;
+            }
         }
         if (best == original) return false;
         replace(lane, best.selection());

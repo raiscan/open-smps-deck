@@ -519,6 +519,8 @@ final class ReconstructionEditor implements AutoCloseable {
                 note.fate(), note.reason() == null ? "" : "\n" + note.reason(), ReconstructionCanvas.roleName(note.role()),
                 orDash(note.lane()), orDash(note.patch()), time.sourceStart(), time.sourceEnd(),
                 time.projectStart(), time.projectEnd(), names(note.competitors()), names(detail.edits()));
+        String stockReason = inspection.stockVoiceReason(note);
+        if (stockReason != null) body += "\n\nAutomatic FM fit\n" + stockReason;
         var vibration = vibrato(note);
         if (!vibration.isEmpty()) body += "\n\nVibrato\n" + vibration.stream().map(ReconstructionCanvas::vibratoLabel)
                 .collect(Collectors.joining("\n"));

@@ -1287,6 +1287,49 @@ steal most of a stem-supported hold from another source part, allocation
 first tries moving the whole hold to a free inner FM lane. It can also route
 the new attack around the hold when another compatible lane is free.
 
+For isolated S3K source parts, the stem label or instrument role adds a
+bounded preference to the stock FM shortlist and joint training and
+held-out loss. To enter the joint fit, a candidate's chip probes must stay
+audible through every stem-supported hold that survives FM allocation,
+using the allocated pitch and project-time gate. A steady probe can satisfy
+a growing source note. If the acoustic shortlist has no sustaining patch,
+the fitter searches the whole stock catalogue. If every candidate fails,
+it keeps the patch with the smallest total sustain shortfall and records a
+`held-note fallback` in its selection reason.
+
+A name match adds up to 0.025 and a known mismatch subtracts
+0.0125. A retail register and role match adjusts the score by at most 0.015
+in either direction. The loss uses the same adjustments proportionally.
+The priors are fixed across songs. The acoustic fit can overcome them.
+The name categories are:
+
+| Source class | Compatible community name terms |
+| --- | --- |
+| Bass | Bass |
+| Guitar | Picked, Slap, Strike, Harpsichord |
+| Keyboard or piano | Piano, Harpsichord, Organ |
+| Synth | Synth, Metallic |
+| Vocals or lead | Lead, Flute, Bassoon, Trumpet |
+| Strings | Harpsichord, Picked |
+| Brass | Brass, Trumpet, Horn |
+| Organ | Organ |
+| Bells | Bell, Xylophone |
+| Drums | Wood Block is the FM percussion label. Drum fitting continues to use its DAC and PSG path. |
+
+Unclassified bass roles can use the Bass name category. Retail use compares
+the register of the source part with observed MIDI pitch ranges and medians.
+Melody and counter roles look for lead use, harmony for chord use and bass
+for bass use. Short median retail gates reduce support for sustained parts.
+Rescan a retail ROM with `catalog scan` to add usage observations to an index.
+Old indices still use community names. The automatic screen rejects Silent
+Bass, near-silent probes and one-shots on sustained parts. Explicit variant
+choices can still use these voices.
+
+Read the selected voice and evidence under `patchReason` in `voicing.json`
+or in the assembly report's matches. `reconstruct describe WORK_DIR --json`
+and MCP `reconstruct_describe` include `stockVoiceChoices`. In Studio, select
+an FM note and read **Automatic FM fit** in Detail.
+
 The `lanes` map retains DAC and PSG3 drum settings and explicit lane
 overrides. New tonal lanes start with unity gain and inherit their source
 profile. A lane-wide FM `variantId`, a PSG part entry in `lanes.*.instruments`,

@@ -20,6 +20,21 @@ final class ReconstructionVoicing {
     static final String DEFAULT = "default (inconclusive)";
     static final String EVIDENCE = "evidence";
 
+    static Map<String, String> stockReasons(java.nio.file.Path work) throws java.io.IOException {
+        var saved = ReconstructionTrace.optional(work, "voicing.json", Result.class);
+        if (saved == null) return Map.of();
+        var reasons = new TreeMap<String, String>();
+        saved.lanes().forEach((id, lane) -> addStockReason(reasons, id, lane));
+        if (saved.sourceInstruments() != null)
+            saved.sourceInstruments().forEach((id, sound) -> addStockReason(reasons, id, sound.fm()));
+        return Collections.unmodifiableMap(reasons);
+    }
+
+    private static void addStockReason(Map<String, String> reasons, String id, Lane lane) {
+        if (lane.patchReason() != null && lane.patchReason().startsWith(StockVoicePrior.REASON_PREFIX))
+            reasons.put(id, lane.patchReason());
+    }
+
     record Result(int version, Map<String, Lane> lanes, @Nullable FitWindows fitWindows,
                   @Nullable String sustainWarning,
                   @Nullable Map<String, ReconstructionVoicePlan.Assignment> voiceAssignments,

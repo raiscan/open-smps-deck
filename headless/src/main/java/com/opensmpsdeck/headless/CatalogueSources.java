@@ -105,6 +105,7 @@ public final class CatalogueSources {
             }
             for (NoiseSpan span : observer.noise.values()) observer.finishNoise(span);
             observer.finishNoiseFlags();
+            observer.finishRetailFm();
             if (observer.restored) catalogue.issue(source, "restore-context",
                     project.name() + ": scan ended at the request to restore prior music");
         } catch (IllegalArgumentException failure) {
@@ -113,6 +114,8 @@ public final class CatalogueSources {
     }
 
     private record Reference(String asset, String name, Integer slot, String table) {}
+    private record FmGate(Reference reference, String lane, int pitch, int start) {}
+    private record FmUse(Reference reference, String lane) {}
     private record Seen(Reference reference, String lane, Recipe recipe) {}
     private record PsgPitch(int note, int period, int pitch) {}
     private record NoiseState(int latch, int volume, int detune, Reference envelope,
@@ -141,6 +144,9 @@ public final class CatalogueSources {
         final Set<NoiseFlag> heardNoise = new HashSet<>();
         int frame;
         boolean restored;
+
+        private final Map<Track, FmGate> activeFm = new IdentityHashMap<>();
+        private final Map<FmUse, List<RetailFmUsage.Gate>> fmUses = new LinkedHashMap<>();
 
         Observer(StudioProject project, String source, String revision, Integer songId, Builder catalogue) {
             this.project = project;
@@ -284,13 +290,41 @@ public final class CatalogueSources {
             if (span != null) finishNoise(span);
         }
 
+        void observeRetailFm(Track track, String lane, boolean sounding) {
+            var ref = sounding && track.voiceData != null ? voices.get(track.voiceId) : null;
+            int pitch = 12 + ((track.note - 0x81 + track.keyOffset) & 0xFF) % 96;
+            var active = activeFm.get(track);
+            if (active != null && (!active.reference().equals(ref) || active.pitch() != pitch
+                    || attacks.contains(track))) finishFm(track);
+            if (ref != null) activeFm.putIfAbsent(track, new FmGate(ref, lane, pitch, frame));
+        }
+
+        void finishFm(Track track) {
+            var active = activeFm.remove(track);
+            if (active == null || frame <= active.start()) return;
+            fmUses.computeIfAbsent(new FmUse(active.reference(), active.lane()), ignored -> new ArrayList<>())
+                    .add(new RetailFmUsage.Gate(active.lane(), active.pitch(), active.start(), frame));
+        }
+
+        void finishRetailFm() {
+            List.copyOf(activeFm.keySet()).forEach(this::finishFm);
+            var song = fmUses.values().stream().flatMap(List::stream).toList();
+            fmUses.forEach((use, gates) -> {
+                var ref = use.reference();
+                catalogue.variant(ref.asset(), ref.name(), Recipe.plain(), new Occurrence(source, project.mode(),
+                        revision, project.name(), songId, ref.slot(), use.lane(), gates.getFirst().start(),
+                        true, ref.table(), RetailFmUsage.summarize(gates, song)));
+            });
+        }
+
         void observe(Track track) {
             if (track.type == TrackType.DAC) return;
             String lane = lane(track);
             boolean sounding = track.active && !track.resting && !track.overridden && track.note >= 0x81;
+            if (songId != null && track.type == TrackType.FM) observeRetailFm(track, lane, sounding);
             if (sounding) {
                 if (track.type == TrackType.FM && track.voiceData != null) {
-                    markHeard(voices.get(track.voiceId), lane, Recipe.plain());
+                    if (songId == null) markHeard(voices.get(track.voiceId), lane, Recipe.plain());
                     if (track.fmVolEnvData != null) {
                         markHeard(psg.get(fmEnvelope.get(track)), lane, Recipe.plain());
                     }
