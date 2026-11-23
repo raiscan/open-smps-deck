@@ -1357,7 +1357,9 @@ and takes the median distance within each MIDI drum class. A window cut
 while the hit is still audible provides a lower bound on its decay. It compares spectrum, attack, decay, and low resonance
 for kicks and toms. For hats, cymbals, sticks and claps it analyzes the same
 upper bands in the stem and candidate, and charges for excess low body in
-the DAC playback. It tests native DAC rate bytes around each catalogue
+the DAC playback. Hats and cymbals also compare air: the share of the energy
+above about 580 Hz that lies above about 4.6 kHz. Without it, a mid-band
+noise burst can match the hat's noisiness and pass the 950 Hz projection. It tests native DAC rate bytes around each catalogue
 recipe within a six-semitone search. Without a mapped drum stem it uses the
 mix fit and a smaller rate search.
 
