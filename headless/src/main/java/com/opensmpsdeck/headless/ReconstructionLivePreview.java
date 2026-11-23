@@ -259,6 +259,13 @@ public final class ReconstructionLivePreview {
             }
         }
 
+        // A frozen lane projection cannot prove parity when the score itself can
+        // change stem-backed recovery, repeat consensus, or measured section gains.
+        if (score.inputs().audioOnly() != null || !score.inputs().stems().isEmpty()
+                || !structure.repeats().isEmpty() || !structure.corrections().isEmpty()
+                || voicing.arrangement() != null && !voicing.arrangement().sectionFit().isEmpty())
+            throw new RebuildNeeded("Source evidence can change allocation outside the edited window");
+
         var targets = new HashSet<String>();
         var dependencies = new HashSet<String>();
         for (var edit : suffix) {

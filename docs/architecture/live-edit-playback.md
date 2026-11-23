@@ -20,7 +20,9 @@ rebuilt bank has the same assets and executed events as the attached bank.
 The loaded score already incorporates the built edit prefix.
 
 Pitch, gate and supported bends use the existing note-edit kernels and stay
-on saved lanes when the edited gates fit. For a role or lane-pin edit, Studio
+on saved lanes when the edited gates fit. Stem-backed edits, repeat and
+correction evidence, and measured section gains require canonical replay
+because the score changes can affect decisions outside those gates. For a role or lane-pin edit, Studio
 can rerun allocation inside complete bars when the original and edited lanes
 have independent, non-overlapping gates and no dependency crosses either
 edge. Assembly-only vibrato and layer edits reuse the allocation. The bank

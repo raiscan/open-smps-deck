@@ -73,6 +73,27 @@ class ReconstructionEditsTest {
         assertTrue(undo.save(built).entries().isEmpty());
     }
 
+    @Test void stemBackedPitchEditRequiresCanonicalReplay(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 60, 90), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 60, 0), 420));
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav);
+        var work = dir.resolve("live");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--stem", "0=" + wav);
+        var revision = ReconstructionReview.revision(work);
+        var entries = revision.entries();
+        entries.add(json("""
+                {"id":"pitch","op":"transpose","reason":"fixture","noteIds":["n-0-0-60"],"semitones":1}
+                """));
+        var live = ReconstructionLivePreview.open(work, revision);
+        var fallback = assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(entries, 0, 2, 0));
+        assertTrue(fallback.getMessage().contains("Source evidence"));
+    }
+
     @Test void liveDeletionMatchesCanonicalAllocationAndPcm(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
         writeMidi(midi, true);
