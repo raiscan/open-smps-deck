@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +51,42 @@ class ReconstructionHeldNotesTest {
             assertEquals(gate == toneGate ? "held-but-silent" : "truncated", finding.kind());
             assertEquals(0, finding.sourceDecayDb(), .1);
         }
+    }
+
+    @Test void sustainedShortlistSkipsTheBetterAttackAndReportsTheOnlyPatchAsFallback() throws Exception {
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] bytes = new byte[25];
+        bytes[0] = 7;
+        for (int op = 0; op < 4; op++) {
+            bytes[1 + op] = 1;
+            bytes[5 + op] = 31;
+            bytes[17 + op] = 15;
+            bytes[21 + op] = (byte) (op == 0 ? 0x80 : 0xff);
+        }
+        var sustained = addPatch(builder, "Sustain", bytes);
+        bytes[13] = 24;
+        var decay = addPatch(builder, "Decay", bytes);
+        var catalogue = builder.build();
+        var note = new Note("hold", 0, 0, 1.5, 69, 96, "test", 1);
+        var entry = new ReconstructionAllocation.Entry(note, Role.harmony, "FM3", 0, 90,
+                ReconstructionAllocation.Outcome.kept, null, null);
+        var hold = new ReconstructionHeldNotes.Hold(1.2, -20, 18);
+        var screen = ReconstructionHeldNotes.stockScreen(catalogue, List.of(entry), Map.of(note.id(), hold),
+                new ReconstructionTimeMap(null, null, 1.5));
+        var shortlist = new VoicePatchShortlist(catalogue, TargetProfile.S3K.game());
+        var first = new VoicePatchShortlist.RankedPatch(decay, 1);
+        var second = new VoicePatchShortlist.RankedPatch(sustained, .5);
+        assertEquals(List.of(second), shortlist.shortlist(new ArrayList<>(List.of(first, second)),
+                null, 1, screen));
+        assertEquals(0, screen.loss(sustained));
+        assertTrue(screen.loss(decay) > 0);
+        assertEquals(List.of(first), shortlist.shortlist(new ArrayList<>(List.of(first)),
+                null, 1, screen));
+    }
+
+    private static String addPatch(InstrumentCatalogue.Builder builder, String name, byte[] bytes) {
+        String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, name, bytes);
+        return builder.variant(asset, name, InstrumentCatalogue.Recipe.plain(), null);
     }
 
     @Test void spillWithSourceSustainSelectsAnAudibleTail() throws Exception {

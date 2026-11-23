@@ -1289,7 +1289,15 @@ the new attack around the hold when another compatible lane is free.
 
 For isolated S3K source parts, the stem label or instrument role adds a
 bounded preference to the stock FM shortlist and joint training and
-held-out loss. A name match adds up to 0.025 and a known mismatch subtracts
+held-out loss. To enter the joint fit, a candidate's chip probes must stay
+audible through every stem-supported hold that survives FM allocation,
+using the allocated pitch and project-time gate. A steady probe can satisfy
+a growing source note. If the acoustic shortlist has no sustaining patch,
+the fitter searches the whole stock catalogue. If every candidate fails,
+it keeps the patch with the smallest total sustain shortfall and records a
+`held-note fallback` in its selection reason.
+
+A name match adds up to 0.025 and a known mismatch subtracts
 0.0125. A retail register and role match adjusts the score by at most 0.015
 in either direction. The loss uses the same adjustments proportionally.
 The priors are fixed across songs. The acoustic fit can overcome them.

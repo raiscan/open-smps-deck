@@ -99,7 +99,8 @@ final class VoicePatchShortlist {
 
     List<RankedPatch> rank(List<ReconstructionAllocation.Entry> notes, List<ReconstructionAllocation.Entry> context,
                            Path mix, Map<Integer, Path> stems, VoiceWindows windows,
-                           InstrumentCatalogue.Variant incumbent, boolean foreground, StockVoicePrior prior) throws IOException {
+                           InstrumentCatalogue.Variant incumbent, boolean foreground, StockVoicePrior prior,
+                           ReconstructionHeldNotes.StockScreen sustain) throws IOException {
         var available = new ArrayList<>(notes.stream().filter(n -> windows.trainingAttack(n.startTick(), ATTACK_TICKS)).toList());
         var occupied = new java.util.HashMap<String, int[]>();
         available.sort(Comparator.comparingInt((ReconstructionAllocation.Entry note) -> {
@@ -129,10 +130,15 @@ final class VoicePatchShortlist {
             if (probes.size() == PROBE_LIMIT) break;
         }
         var ranked = new ArrayList<RankedPatch>();
-        var availableVariants = probes.isEmpty() && prior == null ? variants.stream().limit(1).toList() : variants;
+        var availableVariants = probes.isEmpty() && prior == null && sustain == null
+                ? variants.stream().limit(1).toList() : variants;
         for (var variant : availableVariants) ranked.add(rank(variant, probes));
-        var shortlist = shortlist(ranked, prior, SHORTLIST_LIMIT);
+        // The incumbent can use another variant of an asset deduplicated from the pool.
+        if (sustain != null && incumbent != null && !variants.contains(incumbent))
+            ranked.add(rank(incumbent, probes));
+        var shortlist = shortlist(ranked, prior, SHORTLIST_LIMIT, sustain);
         if (incumbent != null && (prior == null || eligible(incumbent, prior))
+                && (sustain == null || sustain.loss(incumbent.id()) == 0)
                 && shortlist.stream().noneMatch(patch -> patch.id().equals(incumbent.id()))) {
             if (shortlist.size() == SHORTLIST_LIMIT) shortlist.removeLast();
             shortlist.add(rank(incumbent, probes));
@@ -260,20 +266,36 @@ final class VoicePatchShortlist {
         if (probes.size() < 2) return List.of();
         var ranked = new ArrayList<RankedPatch>();
         for (var variant : variants) ranked.add(new RankedPatch(variant.id(), 1 / (1 + lowDistance(variant, probes) / 100)));
-        return List.copyOf(shortlist(ranked, prior, 8));
+        return List.copyOf(shortlist(ranked, prior, 8, null));
     }
 
-    private ArrayList<RankedPatch> shortlist(List<RankedPatch> ranked, StockVoicePrior prior, int limit)
+    ArrayList<RankedPatch> shortlist(List<RankedPatch> ranked, StockVoicePrior prior, int limit,
+                                     ReconstructionHeldNotes.StockScreen sustain)
             throws IOException {
         ranked.sort(Comparator.comparingDouble((RankedPatch patch) -> prior == null ? patch.score()
                 : patch.score() + prior.evidence(catalogue, catalogue.match(patch.id()).variant()).preference())
                 .reversed().thenComparing(RankedPatch::id));
         var retained = new ArrayList<RankedPatch>();
+        RankedPatch fallback = null;
+        double bestLoss = Double.POSITIVE_INFINITY;
         for (var patch : ranked) {
+            if (sustain != null) {
+                double loss = sustain.loss(patch.id());
+                if (loss < bestLoss || loss == bestLoss && betterAttack(patch, fallback)) {
+                    bestLoss = loss;
+                    fallback = patch;
+                }
+                if (loss > 0) continue;
+            }
             if (prior == null || eligible(catalogue.match(patch.id()).variant(), prior)) retained.add(patch);
             if (retained.size() == limit) break;
         }
+        if (retained.isEmpty() && fallback != null) retained.add(fallback);
         return retained;
+    }
+
+    private static boolean betterAttack(RankedPatch patch, RankedPatch other) {
+        return patch.score() > other.score() || patch.score() == other.score() && patch.id().compareTo(other.id()) < 0;
     }
 
     private boolean eligible(InstrumentCatalogue.Variant variant, StockVoicePrior prior) throws IOException {

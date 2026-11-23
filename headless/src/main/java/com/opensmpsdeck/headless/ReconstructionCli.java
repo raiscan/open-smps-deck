@@ -325,7 +325,8 @@ final class ReconstructionCli {
             chosen = match.variant();
         }
         var selected = chosen;
-        var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, previous, targets, selected));
+        var fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, sourcePlacement, allocation,
+                previous, targets, selected));
         var changedMaterial = ReconstructionVoicing.changedMaterial(previousAllocation, allocation);
         boolean stock = score.inputs().options(score.durationUs()).stockDrums();
         var retained = previous == null ? stock ? fitted : ReconstructionDrumBalance.fit(score, catalogue, allocation, fitted)
@@ -365,7 +366,8 @@ final class ReconstructionCli {
                 });
         if (!targets.isEmpty() || needsSourceFit) {
             var source = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), timeline);
-            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, previous, previous.sourceInstruments() == null ? targets : java.util.Set.of(), null));
+            fitted = matchQuietly(() -> ReconstructionVoiceStage.fit(score, catalogue, source, allocation,
+                    previous, previous.sourceInstruments() == null ? targets : java.util.Set.of(), null));
         }
         var result = ReconstructionVoicing.keepCompatible(previous, fitted, allocated, report);
         if (result.sourceInstruments() != null) {

@@ -58,6 +58,15 @@ public final class CataloguePlayback {
 
     static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
                                     boolean rawAsset, TargetGame target) {
+        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, target, 180);
+    }
+
+    static StudioProject heldFmProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks) {
+        return matchProbe(catalogue, id, midi, gateTicks, true, TargetGame.S3K, S3kRenderer.MAX_PRESENTATIONS);
+    }
+
+    private static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
+                                            boolean rawAsset, TargetGame target, int maxTicks) {
         Match match = catalogue.match(id, target);
         if (target == null) target = match.variant().target();
         Recipe source = recipe(match);
@@ -66,8 +75,8 @@ public final class CataloguePlayback {
         requirePlayable(match, source, rawAsset, target);
         if (match.asset().kind() == Kind.DAC_SAMPLE || match.asset().kind() == Kind.PSG_NOISE)
             return renderProbe(catalogue, match, source, rawAsset, target);
-        if (gateTicks < 1 || gateTicks > 180)
-            throw new IllegalArgumentException("Matching note length must be 1–180 ticks (was " + gateTicks + ").");
+        if (gateTicks < 1 || gateTicks > maxTicks)
+            throw new IllegalArgumentException("Matching note length must be 1–" + maxTicks + " ticks (was " + gateTicks + ").");
         String chip = probeChip(match, rawAsset);
         var profile = TargetProfile.of(target);
         var range = chip.equals("PSG") ? profile.psg() : profile.fm();

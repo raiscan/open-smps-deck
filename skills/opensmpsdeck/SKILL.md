@@ -178,6 +178,9 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
 See the [view reference](../../headless/README.md#inspect-time-aligned-evidence)
 and [stage guide](../../docs/architecture/reconstruction-stages.md) for
 additional filters, voice assignments, section journals and detector details.
+For an isolated S3K part, `held-note fallback` in the stock FM choice means
+no candidate sustained every measured hold that survived FM allocation.
+Audition the selected patch on the reported holds before accepting it.
 Use [role plans](../../headless/README.md#inspect-the-score-and-plan-musical-roles)
 for recurring lead and backing rules and [external transcription](../../headless/README.md#external-transcription)
 when a mapped or unmatched stem needs a separate transcriber.

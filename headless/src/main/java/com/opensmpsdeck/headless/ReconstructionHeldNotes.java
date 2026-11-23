@@ -112,6 +112,64 @@ final class ReconstructionHeldNotes {
         return List.copyOf(examples);
     }
 
+    static StockScreen stockScreen(InstrumentCatalogue catalogue, List<ReconstructionAllocation.Entry> entries,
+                                   Map<String, Hold> holds, ReconstructionTimeMap timeline) {
+        var byPitch = new LinkedHashMap<Integer, List<Example>>();
+        for (var entry : entries) {
+            var hold = holds.get(entry.note().id());
+            if (hold == null || !entry.lane().startsWith("FM") || entry.mergedInto() != null) continue;
+            double start = timeline.secondsAtTick(entry.startTick());
+            double tail = timeline.project(hold.tailTime());
+            if (tail <= start || timeline.secondsAtTick(entry.endTick()) <= tail + .025) continue;
+            var sourceNote = timeline.sourceNote(entry.note());
+            double open = openingTime(timeline, sourceNote, start, tail);
+            int pitch = TargetProfile.S3K.fm().clamp(entry.note().pitch());
+            byPitch.computeIfAbsent(pitch, ignored -> new ArrayList<>())
+                    .add(new Example(pitch, open - start, tail - start, hold));
+        }
+        return byPitch.isEmpty() ? null : new StockScreen(catalogue, byPitch);
+    }
+
+    static final class StockScreen {
+        static final String FALLBACK = " · held-note fallback (no stock patch sustains every supported hold)";
+
+        private final InstrumentCatalogue catalogue;
+        private final Map<Integer, List<Example>> byPitch;
+        private final Map<String, Double> losses = new HashMap<>();
+
+        private StockScreen(InstrumentCatalogue catalogue, Map<Integer, List<Example>> byPitch) {
+            this.catalogue = catalogue;
+            this.byPitch = byPitch;
+        }
+
+        double loss(String variant) throws IOException {
+            String asset = catalogue.match(variant).variant().assetId();
+            var cached = losses.get(asset);
+            if (cached != null) return cached;
+            double loss = 0;
+            for (var group : byPitch.entrySet()) {
+                var examples = group.getValue();
+                double tail = examples.stream().mapToDouble(Example::tailSeconds).max().orElseThrow();
+                int frames = Math.min(S3kRenderer.MAX_PRESENTATIONS, (int) Math.ceil(tail * 60) + 3);
+                var probe = CataloguePlayback.heldFmProbe(catalogue, variant, group.getKey(), frames);
+                double[] levels = power(TargetPlayback.prepare(probe), frames, S3kRenderer.ChannelMask.NONE);
+                for (var example : examples) {
+                    // A held patch can stay audible without reproducing a crescendo.
+                    double minimumDecay = Math.min(-12, example.source().minimumDecayDb());
+                    loss += sustainLoss(levels, example.earlySeconds(), example.tailSeconds(), minimumDecay);
+                }
+            }
+            losses.put(asset, loss);
+            return loss;
+        }
+    }
+
+    private static double sustainLoss(double[] levels, double early, double tail, double minimumDecay) {
+        double end = windowDb(levels, tail);
+        double decay = end - windowDb(levels, early);
+        return Math.max(0, minimumDecay - decay) + Math.max(0, MIN_RENDER_DB - end);
+    }
+
     static List<VoicePatchShortlist.RankedPatch> fittingPatches(InstrumentCatalogue catalogue,
             TargetProfile profile, List<VoicePatchShortlist.RankedPatch> candidates,
             List<Example> examples) throws IOException {
@@ -134,10 +192,7 @@ final class ReconstructionHeldNotes {
                         profile.game(), profile.game() == TargetGame.S3K ? null : clock.tempo());
                 double[] levels = power(TargetPlayback.prepare(probe),
                         Math.max(1, (int) clock.frameAtTick(ticks)), S3kRenderer.ChannelMask.NONE);
-                double end = windowDb(levels, tail);
-                double decay = end - windowDb(levels, example.earlySeconds());
-                loss += Math.max(0, example.source().minimumDecayDb() - decay)
-                        + Math.max(0, MIN_RENDER_DB - end);
+                loss += sustainLoss(levels, example.earlySeconds(), tail, example.source().minimumDecayDb());
             }
             if (loss == 0) compatible.add(candidate);
             if (loss < bestLoss) {
@@ -184,7 +239,7 @@ final class ReconstructionHeldNotes {
                 power.put(gate.lane(), levels);
             }
             double start = timeline.secondsAtTick(gate.startTick());
-            double openAt = Math.clamp(timeline.project(early(note)), start + .025, Math.max(start + .025, tail - .025));
+            double openAt = openingTime(timeline, note, start, tail);
             double open = windowDb(levels, openAt);
             double end = windowDb(levels, tail);
             double decay = end - open;
@@ -193,6 +248,11 @@ final class ReconstructionHeldNotes {
                         "Audition a sustaining " + (gate.lane().startsWith("PSG") ? "PSG envelope." : "FM patch for this source instrument.")));
         }
         return new Report(holds.size(), List.copyOf(findings));
+    }
+
+    private static double openingTime(ReconstructionTimeMap timeline, ReconstructionStages.Note sourceNote,
+                                      double start, double tail) {
+        return Math.clamp(timeline.project(early(sourceNote)), start + .025, Math.max(start + .025, tail - .025));
     }
 
     private static Finding finding(ReconstructionStages.Note note, Hold hold, String lane, String kind,
