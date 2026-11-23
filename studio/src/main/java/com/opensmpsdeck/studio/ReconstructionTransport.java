@@ -68,6 +68,10 @@ final class ReconstructionTransport implements AutoCloseable {
     private boolean rebuildNeeded;
     private boolean previewJournal;
     private final ReviewTransport transport = new ReviewTransport();
+    private final ReconstructionStemControls stems;
+    private Future<?> stemRead;
+    private long stemEpoch;
+    private StudioPlayback.Samples stemSamples;
     private final ExecutorService audioControl = worker("reconstruction-audio-control");
     // Only the loader touches this cache. Playback holds the current immutable waveform.
     private final LinkedHashMap<AudioSource, ReferenceWave> waves = new LinkedHashMap<>(4, .75f, true);
@@ -132,6 +136,7 @@ final class ReconstructionTransport implements AutoCloseable {
         this.model = model;
         this.status = status;
         this.stopAudition = stopAudition;
+        stems = new ReconstructionStemControls(work, this::stemsChanged);
         view.onLane = lane -> {
             selectedLane = lane;
             if (controlsReady && lane != null && lanes.getItems().contains(lane)) lanes.setValue(lane);
@@ -176,6 +181,7 @@ final class ReconstructionTransport implements AutoCloseable {
         refreshTargets();
         updatePosition(0, false);
         prepareAudio();
+        loadStems();
     }
 
     void refresh(ReconstructionInspection next) {
@@ -200,6 +206,7 @@ final class ReconstructionTransport implements AutoCloseable {
         refreshSources();
         refreshTargets();
         prepareAudio();
+        loadStems();
         updatePosition(model.toProject(sourcePosition), false);
     }
 
@@ -224,11 +231,11 @@ final class ReconstructionTransport implements AutoCloseable {
     ComboBox<AudioSource> spectrumSource() {
         sources.setId("reconstruction-source");
         sources.setPrefWidth(190);
-        sources.setTooltip(new Tooltip("Show a mix, stem or chip spectrum. Choosing a mix or stem also sets the Original reference."));
+        sources.setTooltip(new Tooltip("Choose the audio behind the notes. Stems sets the separated source monitor."));
         sources.valueProperty().addListener((ignored, previous, next) -> {
             if (updatingTargets) return;
             view.source(next);
-            if (next != null && next.kind() != AudioKind.CHIP) {
+            if (model.separatedStems() == null && next != null && next.kind() != AudioKind.CHIP) {
                 referenceSource = next;
                 transportChanged();
             }
@@ -252,7 +259,11 @@ final class ReconstructionTransport implements AutoCloseable {
         hearing.setTooltip(new Tooltip("Choose original audio, the chip result, or switch between A and B"));
         abSide.setId("reconstruction-ab-side");
         abSide.setTooltip(new Tooltip("Switch between Original and Chip at the current playhead · R"));
-        abSide.setOnAction(event -> updateMonitor());
+        abSide.setOnAction(event -> {
+            updateMonitor();
+            if (hearingOriginal()) showOriginalStatus();
+            else if (playing) status.setText("Playing");
+        });
         abSide.managedProperty().bind(abSide.visibleProperty());
         abSide.setVisible(false);
         voices.setId("reconstruction-play-voice");
@@ -299,7 +310,7 @@ final class ReconstructionTransport implements AutoCloseable {
         clock.setMinWidth(78);
         clock.getStyleClass().add("reconstruction-clock");
         var controls = new FlowPane(8, 6, play, new Label("Play range"), scopes, voices, lanes,
-                new Label("Hear"), hearing, abSide, branchVariant, setLoop, loopLabel, clearRange);
+                new Label("Hear"), hearing, abSide, stems.disclosure, branchVariant, setLoop, loopLabel, clearRange);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(controls, Priority.ALWAYS);
         var transportRow = new HBox(12, controls, clock);
@@ -310,7 +321,7 @@ final class ReconstructionTransport implements AutoCloseable {
         var hintRow = new HBox(10, scopeHint, spacer(), liveStatus, status);
         status.setMinWidth(0);
         scopeHint.setMinWidth(0);
-        var footer = new VBox(5, transportRow, hintRow);
+        var footer = new VBox(5, transportRow, stems.channels, hintRow);
         footer.getStyleClass().add("reconstruction-transport");
         return footer;
     }
@@ -369,7 +380,8 @@ final class ReconstructionTransport implements AutoCloseable {
 
     private boolean spaceAvailable() {
         var focus = stage.getScene().getFocusOwner();
-        return !(focus instanceof TextInputControl)
+        return focus != stems.disclosure && !StudioContextMenu.within(focus, stems.channels)
+                && !(focus instanceof TextInputControl)
                 && !(focus instanceof ComboBox<?> combo && combo.isShowing());
     }
 
@@ -389,6 +401,8 @@ final class ReconstructionTransport implements AutoCloseable {
     }
 
     private AudioSource original() {
+        if (model.separatedStems() != null) return model.sources().stream()
+                .filter(source -> source.kind() == AudioKind.MIX).findFirst().orElse(null);
         var choice = referenceSource;
         if (scopes.getValue() != Scope.Voice) return choice;
         var parts = voiceNotes().stream().map(Overlay::part).distinct().toList();
@@ -509,7 +523,8 @@ final class ReconstructionTransport implements AutoCloseable {
             description += " · Chip voice mix";
         var original = original();
         if (span != null && hearing.getValue() != Hearing.CHIP && original != null && liveChip()) {
-            description += original.kind() == AudioKind.STEM ? " · Original uses " + original.label()
+            description += model.separatedStems() != null && !stems.all() ? " · Original uses selected stems"
+                    : original.kind() == AudioKind.STEM ? " · Original uses " + original.label()
                     : " · Original uses the mix";
         }
         boolean hasOriginal = original != null;
@@ -572,7 +587,7 @@ final class ReconstructionTransport implements AutoCloseable {
                     originalSamples = reference;
                     chipSamples = rendered;
                     updateMonitor();
-                    status.setText((original == null ? chip.label() : original.label()) + " ready");
+                    status.setText(original == null ? chip.label() + " ready" : originalStatus(original));
                     if (playWhenLoaded) startPlayback();
                 });
             } catch (Exception failure) {
@@ -599,11 +614,103 @@ final class ReconstructionTransport implements AutoCloseable {
         return (seconds, channel) -> ready.sample(source.projectClock() ? seconds : inspection.toSource(seconds), channel);
     }
 
-    private void updateMonitor() {
-        boolean reference = hearing.getValue() == Hearing.ORIGINAL
+    private void loadStems() {
+        stemSamples = null;
+        stems.load(model.separatedStems());
+        updateStemLayers();
+        prepareStems();
+    }
+
+    private void stemsChanged() {
+        sources.setValue(original());
+        updateStemLayers();
+        updateTransport();
+        prepareStems();
+    }
+
+    private void updateStemLayers() {
+        var bank = model.separatedStems();
+        if (stems.all()) {
+            view.stemLayers(null, List.of());
+            return;
+        }
+        var layers = stems.selected().stream()
+                .map(name -> new ReconstructionCanvas.StemLayer(
+                        new AudioSource(AudioKind.STEM, name, bank.path(name), false), stems.color(name))).toList();
+        view.stemLayers(original(), layers);
+    }
+
+    HBox mixBackdropControl() {
+        var opacity = new javafx.scene.control.Slider(0, 60, 30);
+        opacity.setPrefWidth(80);
+        opacity.setAccessibleText("Mix backdrop opacity");
+        opacity.setTooltip(new Tooltip("Brightness of the original mix behind selected stems"));
+        opacity.valueProperty().addListener((ignored, old, next) -> view.mixOpacity(next.doubleValue() / 100));
+        var control = new HBox(4, new Label("Mix backdrop"), opacity);
+        control.setAlignment(Pos.CENTER_LEFT);
+        control.visibleProperty().bind(stems.disclosure.visibleProperty());
+        control.managedProperty().bind(control.visibleProperty());
+        return control;
+    }
+
+    private void prepareStems() {
+        if (stemRead != null) stemRead.cancel(true);
+        stemRead = null;
+        long request = ++stemEpoch;
+        if (stems.all()) {
+            stemSamples = null;
+            updateMonitor();
+            showOriginalStatus();
+            if (playWhenLoaded) startPlayback();
+            return;
+        }
+        var selected = stems.selected();
+        var bank = model.separatedStems();
+        var inspection = model;
+        stemRead = loader.submit(() -> {
+            try {
+                var mix = bank.mix(selected);
+                Platform.runLater(() -> {
+                    if (closed || request != stemEpoch) return;
+                    stemRead = null;
+                    stemSamples = (seconds, channel) -> mix.sample(inspection.toSource(seconds), channel);
+                    updateMonitor();
+                    showOriginalStatus();
+                    if (playWhenLoaded) startPlayback();
+                });
+            } catch (Exception failure) {
+                Platform.runLater(() -> {
+                    if (closed || request != stemEpoch) return;
+                    stems.selectAll();
+                    status.setText("Stems unavailable · " + failure.getMessage());
+                });
+            }
+        });
+        showOriginalStatus();
+    }
+
+    private void showOriginalStatus() {
+        if (model.separatedStems() != null && originalSamples != null && hearingOriginal())
+            status.setText(originalStatus(requestedOriginal));
+    }
+
+    private String originalStatus(AudioSource original) {
+        if (stemRead != null) return "Preparing stems…";
+        if (playing) return "Playing";
+        if (stemSamples != null) return stems.selected().isEmpty() ? "Original muted" : "Selected stems ready";
+        return original.label() + " ready";
+    }
+
+    private boolean hearingOriginal() {
+        return hearing.getValue() == Hearing.ORIGINAL
                 || hearing.getValue() == Hearing.AB && !abSide.isSelected();
-        monitorSamples = reference ? originalSamples : chipSamples;
-        liveMonitor = reference ? originalSamples : null;
+    }
+
+    private void updateMonitor() {
+        boolean reference = hearingOriginal();
+        var source = stemSamples == null ? originalSamples : stemSamples;
+        monitorSamples = reference ? source : chipSamples;
+        liveMonitor = reference ? source : null;
         abSide.setText(reference ? "A · Original" : "B · Chip");
     }
 
@@ -647,7 +754,8 @@ final class ReconstructionTransport implements AutoCloseable {
         var sourceSpan = span();
         var span = projectRange(sourceSpan);
         if (span == null || play.isDisabled()) return;
-        if (requestedOriginal != null && originalSamples == null || requestedChip != null && chipSamples == null) {
+        if (requestedOriginal != null && (originalSamples == null || stemRead != null)
+                || requestedChip != null && chipSamples == null) {
             playWhenLoaded = true;
             play.setText("Cancel");
             return;

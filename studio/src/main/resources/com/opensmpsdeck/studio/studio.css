@@ -106,6 +106,10 @@
     -fx-border-color: #34465a transparent transparent transparent;
 }
 .reconstruction-transport .status { -fx-padding: 0; }
+.reconstruction-stem-channels .toggle-button:selected {
+    -fx-base: #285450;
+    -fx-text-fill: #f0fffa;
+}
 .reconstruction-clock { -fx-font-family: monospace; -fx-font-size: 16; -fx-alignment: center-right; }
 .reconstruction-role-inspector { -fx-background-color: #101722; }
 .reconstruction-proposal, .reconstruction-export {

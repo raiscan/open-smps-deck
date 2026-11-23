@@ -375,7 +375,7 @@ final class ReconstructionPane implements AutoCloseable {
         refreshLaneFilters();
         var row = new FlowPane(9, 6,
                 new Label("Time zoom"), zoom, fit, pitch, contrast,
-                new Label("Spectrum source"), sources, sharp, ridges, project, laneFilters, editor.visibility());
+                new Label("Spectrum source"), sources, sharp, ridges, project, laneFilters, editor.visibility(), listen.mixBackdropControl());
         row.getStyleClass().addAll("panelbar", "reconstruction-controls");
         row.setAlignment(Pos.CENTER_LEFT);
         return row;

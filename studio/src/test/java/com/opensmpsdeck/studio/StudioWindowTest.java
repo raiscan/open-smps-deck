@@ -1250,6 +1250,122 @@ class StudioWindowTest {
         return work;
     }
 
+    @Test void sourceStemsSwitchPcmAndOverlaysWithoutReopeningTheLoopAndRestoreOnOpen() throws Exception {
+        var work = reconstructionFixture();
+        Files.createDirectory(work.resolve("stems"));
+        writeStemFixture(work.resolve("mix.wav"), 12_000, -8000);
+        writeStemFixture(work.resolve("stems/vocals.wav"), 7000, -3000);
+        writeStemFixture(work.resolve("stems/bass.wav"), 2000, 1000);
+        writeStemFixture(work.resolve("stems/piano.wav"), 5000, 4000);
+        writeStemFixture(work.resolve("render.wav"), -2000, -4000);
+        Files.writeString(work.resolve("separation.json"), """
+                {"tool":"synthetic","model":"fixture","version":"1","checkpointSha256":"%s",
+                 "settings":{},"stemOrder":["vocals","bass","piano"]}
+                """.formatted("0".repeat(64)));
+        var sink = new CapturedAudio();
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, sink::open));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-stem-piano") != null);
+            fx(() -> {
+                var view = pane.canvas();
+                assertFalse(view.dimmedSpectrum());
+                assertTrue(view.spectrumOverlays().isEmpty());
+                view.onRange.accept(new ReviewTransport.Range(.25, 1.75));
+                ((ToggleButton) scene.lookup("#reconstruction-stems")).fire();
+                @SuppressWarnings("unchecked")
+                var hearing = (ComboBox<ReconstructionTransport.Hearing>) scene.lookup("#reconstruction-hearing");
+                hearing.setValue(ReconstructionTransport.Hearing.AB);
+                ((Button) scene.lookup("#reconstruction-play")).fire();
+                return null;
+            });
+            var original = constantPcm(12_000, -8000);
+            sink.awaitBlock(0, block -> Arrays.equals(original, block), "original full-mix PCM");
+            int before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-stem-piano")).fire();
+                assertTrue(pane.canvas().dimmedSpectrum());
+                assertEquals(List.of("vocals", "bass"), pane.canvas().spectrumOverlays().stream()
+                        .map(layer -> layer.audio().label()).toList());
+                reconstructionWorkspace(scene, "detail");
+                reconstructionWorkspace(scene, "review");
+                assertEquals(2, pane.canvas().spectrumOverlays().size());
+                return null;
+            });
+            var subset = constantPcm(9000, -2000);
+            sink.awaitBlock(before, block -> Arrays.equals(fadedPcm(12_000, -8000, 9000, -2000), block),
+                    "the 5 ms blend of the original and selected stems");
+            sink.awaitBlock(before, block -> Arrays.equals(subset, block), "sample-exact subset PCM");
+            assertEquals(1, sink.opens.get());
+            before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-ab-side")).fire();
+                return null;
+            });
+            var chip = constantPcm(-2000, -4000);
+            sink.awaitBlock(before, block -> Arrays.equals(chip, block), "chip side PCM");
+            before = sink.blockCount();
+            fx(() -> {
+                ((ToggleButton) scene.lookup("#reconstruction-ab-side")).fire();
+                return null;
+            });
+            sink.awaitBlock(before, block -> Arrays.equals(subset, block), "A/B returned to selected stems");
+            assertEquals(1, sink.opens.get());
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+
+        var reopened = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
+        try {
+            var reopenedScene = reopened.stage().getScene();
+            await(() -> reopenedScene.lookup("#reconstruction-stem-piano") != null);
+            fx(() -> {
+                var vocals = (ToggleButton) reopenedScene.lookup("#reconstruction-stem-vocals");
+                ((ToggleButton) reopenedScene.lookup("#reconstruction-stems")).fire();
+                assertTrue(vocals.isSelected());
+                assertFalse(((ToggleButton) reopenedScene.lookup("#reconstruction-stem-piano")).isSelected());
+                assertTrue(reopened.canvas().dimmedSpectrum());
+                Event.fireEvent(vocals, new MouseEvent(MouseEvent.MOUSE_PRESSED, 2, 2, 2, 2,
+                        MouseButton.PRIMARY, 1, false, true, false, false, true, false, false,
+                        false, false, true, null));
+                assertEquals(List.of("vocals"), reopened.canvas().spectrumOverlays().stream()
+                        .map(layer -> layer.audio().label()).toList());
+                ((Button) reopenedScene.lookup("#reconstruction-stem-all")).fire();
+                assertFalse(reopened.canvas().dimmedSpectrum());
+                assertTrue(reopened.canvas().spectrumOverlays().isEmpty());
+                return null;
+            });
+        } finally {
+            fx(() -> { reopened.close(); return null; });
+        }
+    }
+
+    private static byte[] constantPcm(int left, int right) {
+        return fadedPcm(left, right, left, right);
+    }
+
+    private static byte[] fadedPcm(int fromLeft, int fromRight, int toLeft, int toRight) {
+        var pcm = new short[1600];
+        for (int frame = 0; frame < pcm.length / 2; frame++) {
+            double progress = Math.min(1, (frame + 1) / 240.0);
+            pcm[frame * 2] = (short) Math.round(fromLeft * (1 - progress) + toLeft * progress);
+            pcm[frame * 2 + 1] = (short) Math.round(fromRight * (1 - progress) + toRight * progress);
+        }
+        return pcmBytes(pcm);
+    }
+
+    private static void writeStemFixture(Path path, int left, int right) throws Exception {
+        var block = new short[1600];
+        for (int i = 0; i < block.length; i += 2) {
+            block[i] = (short) left;
+            block[i + 1] = (short) right;
+        }
+        Files.deleteIfExists(path);
+        com.opensmpsdeck.headless.WaveFile.write(path, 120, sink -> {
+            for (int i = 0; i < 120; i++) sink.accept(block);
+        });
+    }
+
     @Test void reconstructionMenuTransposeAndDeleteDuringLatePlaybackKeepTheAudioLine() throws Exception {
         var work = assembledLiveFixture(4800, 6100, 7);
         var loop = new ReviewTransport.Range(5, 7);

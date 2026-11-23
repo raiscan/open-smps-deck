@@ -359,7 +359,7 @@ velocity. Right-click empty space to paste at the clicked position.
 ### Listen to the reconstruction
 
 In the bottom transport, choose **Play range** then click **Play**, or tap
-**Space** outside a text field. **Song** plays from the current playhead. For
+**Space** with the plot focused. **Song** plays from the current playhead. For
 **Section**, click a section, period or phrase band above the plot to choose a
 range. **Selection** plays the time spanned by the selected notes. **Voice**
 auditions the chosen voice's built notes. **Lane** solos the chosen chip lane.
@@ -367,13 +367,36 @@ Click a note or lane to bring its voice or lane into the corresponding picker.
 
 Choose **Original** for the reference audio, **Chip** for the built result, or
 **A/B** to switch between them at the current playhead. Press **R** to flip the
-A/B side, or to switch between Original and Chip outside A/B. For Voice, Studio
-uses the source stem when one is mapped to that voice. A stem can contain other
-voices. For Lane, the Original side uses the chosen reference for comparison.
+A/B side, or to switch between Original and Chip outside A/B. When **Stems**
+is available, its selection applies to every play range. In other reconstructions,
+**Voice** uses its mapped source stem when available and **Lane** uses the chosen
+reference.
 
 **Set loop…** lets you enter a start and end in source seconds. You can also
 Shift-drag on the ruler. The transport shows the active loop; use **Clear loop**
 or press **Esc** to remove it.
+
+#### Listen to separated stems
+
+In Analysis **Roles**, **Notes** or **Review**, open **Stems** beside **Hear**
+when the reconstruction uses a separator folder. The buttons follow the
+separator's stem list. Toggle any combination, or Alt/Ctrl-click a stem to
+solo it. With a stem focused, Space toggles it and Alt+Space solos it.
+Soloing the same stem again restores **All**. With every stem enabled,
+**Original** plays the original mix. A subset plays the aligned stem sum at
+its source levels, with a shared gain reduction if needed to avoid clipping.
+Turning every stem off silences **Original**.
+
+Changes fade in at the current playhead once the selected audio is ready.
+The play range and loop still apply. In **A/B**, switch between the selected
+source audio and **Chip**. Studio remembers the selection for this work
+directory on this machine.
+
+The source spectrogram dims the full mix and draws the selected stems in
+their channel colours. A single stem uses the standard colour map at full
+strength. **Display** controls the **Mix backdrop**, spectrum contrast and
+**Sharp** for these layers. In **Auto**, the backdrop keeps its own mix contrast. You can still choose **Chip render** under
+**Spectrum source** to inspect the chip spectrogram while auditioning stems.
 
 ### Audition note edits while playing
 
@@ -416,8 +439,9 @@ returns to the current arrangement.
 ### Adjust the view
 
 Open **Display ▾** for time and pitch zoom, spectrum contrast, ridges, note opacity,
-outlines, lane visibility and the spectrum source. Choosing a mix or stem also
-sets the **Original** reference. Choosing the chip spectrum keeps the current
+outlines, lane visibility and the spectrum source. When **Stems** is available,
+**Spectrum source** controls the display. Otherwise, choosing a mix or stem
+also sets the **Original** reference. The chip spectrum keeps the current
 reference.
 
 The spectrogram measures more rows per semitone as you zoom pitch, so it stays

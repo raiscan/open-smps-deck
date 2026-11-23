@@ -114,6 +114,27 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private ReconstructionTiles tiles;
     private boolean spectrumReady;
 
+    record StemLayer(AudioSource audio, Color color) {}
+    private AudioSource stemBackdrop;
+    private List<StemLayer> stemLayers = List.of();
+    private double mixOpacity = .3;
+    private ReconstructionTiles.Contrast backdropContrast;
+    private List<ReconstructionTiles.Key> backdropSignature = List.of();
+
+    void stemLayers(AudioSource backdrop, List<StemLayer> layers) {
+        stemBackdrop = backdrop;
+        stemLayers = layers;
+        draw();
+    }
+
+    void mixOpacity(double opacity) {
+        mixOpacity = opacity;
+        draw();
+    }
+
+    List<StemLayer> spectrumOverlays() { return dimmedSpectrum() ? stemLayers : List.of(); }
+    boolean dimmedSpectrum() { return stemBackdrop != null && stemBackdrop.equals(source); }
+
     boolean spectrumReady() { return spectrumReady; }
     private final Consumer<String> error;
     private List<Section> sections;
@@ -1030,6 +1051,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     void autoContrast(boolean auto) {
         autoContrast = auto;
         autoSignature = null;
+        backdropSignature = List.of();
         draw();
     }
 
@@ -1402,50 +1424,79 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         int firstBlock = ReconstructionTiles.block(lowestPitch() - 1);
         int lastBlock = ReconstructionTiles.block(highestPitch() + 1);
         int firstIndex = (int) (from / tileSpan), lastIndex = (int) Math.ceil(end / tileSpan) - 1;
-        var keys = new ArrayList<ReconstructionTiles.Key>();
+        var overlays = spectrumOverlays();
+        var layers = new java.util.LinkedHashMap<AudioSource, Integer>();
+        layers.put(source, ReconstructionTiles.OPAQUE);
+        for (var stem : overlays) {
+            var color = stem.color();
+            int tint = (int) Math.round(color.getRed() * 255) << 16
+                    | (int) Math.round(color.getGreen() * 255) << 8 | (int) Math.round(color.getBlue() * 255);
+            layers.put(stem.audio(), overlays.size() == 1 ? ReconstructionTiles.SOLO : tint);
+        }
+        var keys = new java.util.LinkedHashMap<ReconstructionTiles.Key, Integer>();
         for (int index = firstIndex; index <= Math.max(firstIndex, lastIndex); index++)
             for (int block = firstBlock; block <= lastBlock; block++)
-                keys.add(ReconstructionTiles.key(source, level, index, block, rows, reassigned));
-        if (autoContrast) updateAutoContrast(keys);
+                for (var layer : layers.entrySet())
+                    keys.put(ReconstructionTiles.key(layer.getKey(), level, index, block, rows, reassigned), layer.getValue());
+        if (autoContrast) {
+            if (!overlays.isEmpty()) {
+                fitContrast(keys.keySet().stream().filter(key -> key.source().equals(source)).toList(), true);
+            }
+            fitContrast(keys.keySet().stream().filter(key -> overlays.isEmpty() || !key.source().equals(source)).toList(), false);
+        }
         var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
-        int drawn = 0, visible = 0;
+        var visibleRidges = new ArrayList<ReconstructionInspection.Ridge>();
+        int drawn = 0;
         // Tiles hold about one row per device pixel, so nearest-neighbour scaling stays crisp.
+        g.save();
         g.setImageSmoothing(false);
-        for (var key : keys) {
-            var imageKey = new ReconstructionTiles.ImageKey(key, contrast);
+        for (var entry : keys.entrySet()) {
+            var key = entry.getKey();
+            int tint = entry.getValue();
+            boolean background = dimmedSpectrum() && key.source().equals(source);
+            g.setGlobalAlpha(background ? mixOpacity : 1);
+            var scale = spectrumContrast(key.source());
+            var imageKey = new ReconstructionTiles.ImageKey(key, scale, tint);
             needed.add(imageKey);
-            visible++;
             var tile = tiles.get(imageKey);
             if (tile == null) {
-                drawFallbackTile(g, key);
+                drawFallbackTile(g, key, tint, scale);
                 continue;
             }
             drawTile(g, key, tile.image(), key.start(), key.end());
             drawn++;
-            if (ridges) {
-                g.setFill(RIDGE);
-                for (var ridge : tile.ridges()) if (ridge.dbfs() >= contrast.floor())
-                    g.fillRect(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
-            }
+            if (ridges && !background) visibleRidges.addAll(tile.ridges());
         }
-        g.setImageSmoothing(true);
+        g.restore();
+        if (ridges) {
+            g.setFill(RIDGE);
+            for (var ridge : visibleRidges)
+                if (ridge.dbfs() >= contrast.floor()) g.fillRect(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
+        }
         // Prefetch the neighbouring columns, so scrolling reveals finished tiles.
         double limit = model.duration();
         for (int index : new int[]{lastIndex + 1, firstIndex - 1}) {
             if (index < 0 || index * tileSpan >= limit) continue;
             for (int block = firstBlock; block <= lastBlock; block++)
-                needed.add(new ReconstructionTiles.ImageKey(
-                        ReconstructionTiles.key(source, level, index, block, rows, reassigned), contrast));
+                for (var layer : layers.entrySet())
+                    needed.add(new ReconstructionTiles.ImageKey(
+                            ReconstructionTiles.key(layer.getKey(), level, index, block, rows, reassigned),
+                            spectrumContrast(layer.getKey()), layer.getValue()));
         }
-        spectrumReady = drawn > 0 && drawn == visible;
+        spectrumReady = drawn > 0 && drawn == keys.size();
         tiles.request(needed);
+    }
+
+    private ReconstructionTiles.Contrast spectrumContrast(AudioSource layer) {
+        return autoContrast && dimmedSpectrum() && !stemLayers.isEmpty() && layer.equals(source) && backdropContrast != null
+                ? backdropContrast : contrast;
     }
 
     /**
      * Fits the contrast to the measured visible tiles. It recomputes only when the measured set
      * changes, and ignores shifts under 3 dB, so scrolling does not make the plot flicker.
      */
-    private void updateAutoContrast(List<ReconstructionTiles.Key> keys) {
+    private void fitContrast(List<ReconstructionTiles.Key> keys, boolean backdrop) {
         var levels = new ArrayList<float[]>();
         var measuredKeys = new ArrayList<ReconstructionTiles.Key>();
         for (var key : keys) {
@@ -1454,38 +1505,45 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             levels.add(data);
             measuredKeys.add(key);
         }
-        if (measuredKeys.equals(autoSignature)) return;
-        autoSignature = measuredKeys;
+        if (measuredKeys.equals(backdrop ? backdropSignature : autoSignature)) return;
+        if (backdrop) backdropSignature = measuredKeys;
+        else autoSignature = measuredKeys;
         var next = ReconstructionTiles.autoContrast(levels);
-        if (next == null || Math.abs(next.ceiling() - contrast.ceiling()) < 3
-                && Math.abs(next.floor() - contrast.floor()) < 3) return;
-        contrast = next;
-        contrastChanged.accept(next);
+        var previous = backdrop ? backdropContrast : contrast;
+        if (next == null || previous != null && Math.abs(next.ceiling() - previous.ceiling()) < 3
+                && Math.abs(next.floor() - previous.floor()) < 3) return;
+        if (backdrop) backdropContrast = next;
+        else {
+            contrast = next;
+            contrastChanged.accept(next);
+        }
     }
 
     /** Stands in a cached tile of another resolution or row density while the right one is measured. */
-    private void drawFallbackTile(GraphicsContext g, ReconstructionTiles.Key key) {
+    private void drawFallbackTile(GraphicsContext g, ReconstructionTiles.Key key, int tint,
+                                  ReconstructionTiles.Contrast scale) {
         var densities = new LinkedHashSet<Integer>();
         densities.add(key.rows());
         for (int rows = ReconstructionTiles.MAX_ROWS; rows >= ReconstructionTiles.MIN_ROWS; rows /= 2) densities.add(rows);
         for (int rows : densities) {
             var dense = ReconstructionTiles.key(key.source(), key.level(), key.index(), key.block(), rows, key.reassigned());
             if (rows != key.rows()) {
-                var same = tiles.get(new ReconstructionTiles.ImageKey(dense, contrast));
+                var same = tiles.get(new ReconstructionTiles.ImageKey(dense, scale, tint));
                 if (same != null) {
                     drawTile(g, dense, same.image(), key.start(), key.end());
                     return;
                 }
             }
-            if (drawFallbackLevels(g, dense, key)) return;
+            if (drawFallbackLevels(g, dense, key, tint, scale)) return;
         }
     }
 
-    private boolean drawFallbackLevels(GraphicsContext g, ReconstructionTiles.Key dense, ReconstructionTiles.Key key) {
+    private boolean drawFallbackLevels(GraphicsContext g, ReconstructionTiles.Key dense, ReconstructionTiles.Key key,
+                                       int tint, ReconstructionTiles.Contrast scale) {
         for (int level = key.level() + 1; level <= ReconstructionTiles.MAX_LEVEL; level++) {
             var parent = ReconstructionTiles.key(key.source(), level, key.index() >> (level - key.level()), key.block(),
                     dense.rows(), key.reassigned());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, contrast));
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, scale, tint));
             if (cached == null) continue;
             drawTile(g, parent, cached.image(), key.start(), key.end());
             return true;
@@ -1495,7 +1553,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int child = 0; child < 2; child++) {
             var finer = ReconstructionTiles.key(key.source(), key.level() - 1, key.index() * 2 + child, key.block(),
                     dense.rows(), key.reassigned());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, contrast));
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, scale, tint));
             if (cached != null) {
                 drawTile(g, finer, cached.image(), finer.start(), finer.end());
                 any = true;

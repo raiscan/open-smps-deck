@@ -75,7 +75,12 @@ final class ReconstructionTiles implements AutoCloseable {
         int floor() { return ceiling - range; }
     }
 
-    record ImageKey(Key tile, Contrast contrast) {}
+    static final int OPAQUE = -1;
+    static final int SOLO = -2;
+
+    record ImageKey(Key tile, Contrast contrast, int tint) {
+        ImageKey(Key tile, Contrast contrast) { this(tile, contrast, OPAQUE); }
+    }
     record Tile(WritableImage image, List<Ridge> ridges) {}
 
     // Magma anchors: dark for quiet bins, bright for strong partials, evenly spaced in lightness.
@@ -133,8 +138,12 @@ final class ReconstructionTiles implements AutoCloseable {
             sized(MEASURED_CELLS, (SpectrumTile tile) -> tile.dbfs().length));
     private final Map<ImageKey, Tile> displayed = sized(DISPLAYED_CELLS,
             (Tile tile) -> (long) (tile.image().getWidth() * tile.image().getHeight()));
-    private final Map<ImageKey, Future<?>> pending = new HashMap<>();
-    private final Set<ImageKey> failures = Collections.newSetFromMap(lru(64));
+    private static final class Measurement {
+        private Future<?> future;
+    }
+
+    private final Map<Key, Measurement> pending = new HashMap<>();
+    private final Set<Key> failures = Collections.newSetFromMap(lru(64));
     private final java.util.concurrent.ExecutorService workers = Executors.newFixedThreadPool(
             Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 2, 4),
             runnable -> Thread.ofPlatform().daemon().name("reconstruction-spectrum").unstarted(runnable));
@@ -188,7 +197,7 @@ final class ReconstructionTiles implements AutoCloseable {
         if (tile != null) return tile;
         var data = measured.get(key.tile());
         if (data == null) return null;
-        tile = new Tile(image(data, colors(data, key.contrast())), data.ridges());
+        tile = new Tile(image(data, colors(data, key)), data.ridges());
         displayed.put(key, tile);
         return tile;
     }
@@ -199,10 +208,31 @@ final class ReconstructionTiles implements AutoCloseable {
         return data == null ? null : data.dbfs();
     }
 
-    private static int[] colors(SpectrumTile data, Contrast contrast) {
+    private static int[] colors(SpectrumTile data, ImageKey key) {
         int[] pixels = new int[data.dbfs().length];
-        for (int i = 0; i < pixels.length; i++) pixels[i] = color(data.dbfs()[i], contrast);
+        for (int i = 0; i < pixels.length; i++) {
+            int base = color(data.dbfs()[i], key.contrast());
+            pixels[i] = key.tint() == OPAQUE ? base : overlayColor(base, data.dbfs()[i], key);
+        }
         return pixels;
+    }
+
+    private static int overlayColor(int base, float dbfs, ImageKey key) {
+        double level = Math.clamp((dbfs - key.contrast().floor()) / key.contrast().range(), 0, 1);
+        boolean solo = key.tint() == SOLO;
+        // Reveal the mix through quiet bins. Keep the original ramp's lightness variation
+        // and move its hue toward the stem swatch in stronger bins.
+        double alpha = solo ? Math.min(1, level * 2) : .8 * level * Math.sqrt(level);
+        int red = channel(base, key.tint(), 16, level, alpha);
+        int green = channel(base, key.tint(), 8, level, alpha);
+        int blue = channel(base, key.tint(), 0, level, alpha);
+        return (int) (255 * alpha) << 24 | red << 16 | green << 8 | blue;
+    }
+
+    private static int channel(int base, int tint, int shift, double level, double alpha) {
+        int value = base >> shift & 255;
+        if (tint >= 0) value = (int) (.35 * value + .65 * (tint >> shift & 255) * level);
+        return (int) (value * alpha);
     }
 
     private static WritableImage image(SpectrumTile data, int[] pixels) {
@@ -213,48 +243,45 @@ final class ReconstructionTiles implements AutoCloseable {
     }
 
     void request(Set<ImageKey> visible) {
+        var visibleMeasurements = visible.stream().map(ImageKey::tile).collect(java.util.stream.Collectors.toSet());
         pending.entrySet().removeIf(entry -> {
-            if (visible.contains(entry.getKey())) return false;
-            entry.getValue().cancel(false);
+            if (visibleMeasurements.contains(entry.getKey())) return false;
+            entry.getValue().future.cancel(false);
             return true;
         });
-        for (var key : visible) {
-            if (displayed.containsKey(key) || pending.containsKey(key) || failures.contains(key)) continue;
-            if (measured.containsKey(key.tile())) {
-                get(key);
+        for (var imageKey : visible) {
+            var key = imageKey.tile();
+            if (displayed.containsKey(imageKey) || pending.containsKey(key) || failures.contains(key)) continue;
+            if (measured.containsKey(key)) {
+                get(imageKey);
                 continue;
             }
-            pending.put(key, workers.submit(() -> prepare(key)));
+            var measurement = new Measurement();
+            pending.put(key, measurement);
+            measurement.future = workers.submit(() -> prepare(key, measurement));
         }
     }
 
-    private void prepare(ImageKey imageKey) {
-        var key = imageKey.tile();
+    private void prepare(Key key, Measurement measurement) {
         try {
-            var spectrum = measured.get(key);
-            if (spectrum == null) {
-                var full = model.spectrum(key.source(), key.start(), key.end(), WIDTH, key.low(), key.high(),
-                        key.rows(), key.reassigned());
-                // The edge rows have only one neighbour, so their peaks are not ridges.
-                var ridges = full.ridges().stream()
-                        .filter(ridge -> ridge.pitch() >= key.low() && ridge.pitch() <= key.high()).toList();
-                spectrum = new SpectrumTile(full.columns(), full.rows(), full.dbfs(), ridges);
-                measured.put(key, spectrum);
-            }
-            var data = spectrum;
-            int[] pixels = colors(data, imageKey.contrast());
+            var full = model.spectrum(key.source(), key.start(), key.end(), WIDTH, key.low(), key.high(),
+                    key.rows(), key.reassigned());
+            // The edge rows have only one neighbour, so their peaks are not ridges.
+            var ridges = full.ridges().stream()
+                    .filter(ridge -> ridge.pitch() >= key.low() && ridge.pitch() <= key.high()).toList();
+            measured.put(key, new SpectrumTile(full.columns(), full.rows(), full.dbfs(), ridges));
             Platform.runLater(() -> {
                 if (closed) return;
-                displayed.put(imageKey, new Tile(image(data, pixels), data.ridges()));
-                pending.remove(imageKey);
+                pending.remove(key, measurement);
                 repaint.run();
             });
         } catch (Exception failure) {
             Platform.runLater(() -> {
                 if (closed) return;
-                failures.add(imageKey);
-                if (pending.remove(imageKey) != null)
+                if (pending.remove(key, measurement)) {
+                    failures.add(key);
                     error.accept("Spectrogram unavailable · " + failure.getMessage());
+                }
             });
         }
     }
