@@ -51,6 +51,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.6.0</version>
+                    <configuration>
+                        <!-- Tests save voice colours, stem toggles and ROM paths through Java
+                             Preferences. Keep them out of the developer's own Studio settings. -->
+                        <argLine>-Djava.util.prefs.userRoot=${project.build.directory}/test-preferences</argLine>
+                    </configuration>
                 </plugin>
             </plugins>
         </pluginManagement>
