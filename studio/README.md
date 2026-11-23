@@ -105,11 +105,14 @@ spectrum workers. Pass scratch copies, since the probe writes journals:
 
 ```sh
 xvfb-run -a -s '-screen 0 1920x1080x24' java -Dprism.forceGPU=true \
-  -Djavafx.animation.fullspeed=true \
+  -Djavafx.animation.fullspeed=true -Djava.util.prefs.userRoot="$scratch/preferences" \
   -cp studio/target/opensmpsdeck-studio-0.1.0-SNAPSHOT.jar:studio/target/test-classes \
   com.opensmpsdeck.studio.StudioPerformanceProbe "$scratch/reconstruction" \
   "$scratch/reconstruction/arrangement.smps.json" "$scratch/report.tsv"
 ```
+
+The `userRoot` setting keeps the probe's voice colours out of your own Studio
+settings. Maven test runs use `target/test-preferences` for the same reason.
 
 Under Xvfb, `prism.forceGPU` selects llvmpipe, so rasterizing costs CPU. Compare
 FX-thread and render-thread CPU across builds, not absolute frame rates. Add

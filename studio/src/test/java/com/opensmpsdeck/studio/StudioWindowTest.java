@@ -1398,7 +1398,7 @@ class StudioWindowTest {
             var playedBefore = sink.awaitBlock(blockInLoop, block -> true, "initial loop PCM");
             awaitLiveStatus(scene, "Live preview · Saved edits", () -> fx(() -> {
                 var menu = contextNote(view, view.selectedNotes().getFirst().id());
-                var transpose = (javafx.scene.control.Menu) menuItem(menu, "Transpose");
+                var transpose = (Menu) menuItem(menu, "Transpose");
                 var up = transpose.getItems().getFirst();
                 assertEquals("+1", up.getText());
                 assertFalse(up.isDisable());
@@ -1991,6 +1991,54 @@ class StudioWindowTest {
                   {"note":%s,"role":"melody","lane":"FM1","startTick":30,"endTick":90,"outcome":"kept"},
                   {"note":%s,"role":"drums","lane":"DAC","startTick":30,"endTick":31,"outcome":"kept"}]}
                 """.formatted(notes.get(0), drum));
+    }
+
+    @Test void repeatSettingsInRolesWriteAnUndoablePartPolicy() throws Exception {
+        var work = reconstructionFixture();
+        var scorePath = work.resolve("score.json");
+        var score = com.google.gson.JsonParser.parseString(Files.readString(scorePath)).getAsJsonObject();
+        var input = score.getAsJsonObject("inputs");
+        input.remove("midi");
+        input.getAsJsonObject("stems").addProperty("0", work.resolve("mix.wav").toString());
+        input.add("audioOnly", com.google.gson.JsonParser.parseString("""
+                {"source":"audio-only","stems":{"0":{"label":"synth","role":"other","transcriberRole":"other"}},
+                 "skippedStems":[],"drumDetector":{"name":"fixture","version":"1","hits":[]}}
+                """));
+        Files.writeString(scorePath, score.toString());
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, StudioTestAudio::line));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                reconstructionWorkspace(scene, "roles");
+                var menu = (MenuButton) scene.lookup("#reconstruction-repeat-settings");
+                assertTrue(menu.isVisible());
+                menu.show();
+                var part = (Menu) menu.getItems().getFirst();
+                assertEquals("reconstruction-repeat-part-0", part.getId());
+                var fill = (Menu) part.getItems().getFirst();
+                assertTrue(((RadioMenuItem) fill.getItems().getFirst()).isSelected());
+                fill.getItems().getLast().fire();
+                menu.hide();
+                menu.show();
+                part = (Menu) menu.getItems().getFirst();
+                fill = (Menu) part.getItems().getFirst();
+                assertTrue(((RadioMenuItem) fill.getItems().getLast()).isSelected());
+                var lanes = (Menu) part.getItems().getLast();
+                lanes.getItems().get(1).fire();
+                menu.hide();
+                ((MenuButton) scene.lookup("#reconstruction-history")).getItems().getFirst().fire();
+                menu.show();
+                part = (Menu) menu.getItems().getFirst();
+                lanes = (Menu) part.getItems().getLast();
+                assertTrue(((RadioMenuItem) lanes.getItems().getFirst()).isSelected());
+                menu.hide();
+                ((MenuButton) scene.lookup("#reconstruction-history")).getItems().getFirst().fire();
+                return null;
+            });
+        } finally {
+            fx(() -> { pane.stage().close(); return null; });
+        }
     }
 
     @Test void roleButtonsSelectAndExtendForKeyboardTranspose() throws Exception {

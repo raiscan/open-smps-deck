@@ -416,6 +416,8 @@ public final class ReconstructionEditCommand {
                                                   Map<String, ReconstructionTrace.Row> before,
                                                   Map<String, ReconstructionTrace.Row> after,
                                                   ReconstructionTimeMap timeline) {
+        if (edit.kind() == ReconstructionEdits.Kind.repeatPolicy)
+            return new ReconstructionEdits.Span(0, timeline.sourceDuration());
         var range = edit.explicitSpan();
         if (range != null) range = new ReconstructionEdits.Span(edit.toSource(range.start(), timeline),
                 edit.toSource(range.end(), timeline));
