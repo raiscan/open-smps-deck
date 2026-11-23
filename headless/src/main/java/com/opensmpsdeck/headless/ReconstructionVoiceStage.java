@@ -24,9 +24,18 @@ final class ReconstructionVoiceStage {
     private static final double MIN_EXPOSED_ATTACK_MATCH = .16;
 
     static final String VOCAL_SYNTH = "bright sustained vocal lead synth";
+    // Challengers from each source that reach the paired attack comparison.
+    private static final int CHALLENGER_LIMIT = 4;
 
     private record Model(String id, Role role, ReconstructionAllocation.Result packed, int stem, ReconstructionAllocation.Result stemNotes,
-                         List<RankedPatch> patches, List<Instrument> instruments, boolean shared) {}
+                         List<RankedPatch> patches, List<Instrument> instruments, boolean shared,
+                         List<RankedPatch> challengers, Path challengeStem) {
+        Model withPatch(RankedPatch patch) {
+            var extended = new ArrayList<>(patches);
+            extended.add(patch);
+            return new Model(id, role, packed, stem, stemNotes, List.copyOf(extended), instruments, shared, List.of(), null);
+        }
+    }
 
     private ReconstructionVoiceStage() {}
 
@@ -104,12 +113,20 @@ final class ReconstructionVoiceStage {
         }
         var sustained = new java.util.HashSet<String>();
         var screening = new VoicePatchShortlist(catalogue, options.target());
-        var leadPatches = new HashMap<String, List<RankedPatch>>();
+        var leadPatches = new HashMap<String, VoicePatchShortlist.Ranking>();
+        // Only an S3K source part with its own stem has attacks to settle a challenge.
+        java.util.function.Predicate<String> challenged = id -> {
+            if (!shared || !id.startsWith("part-") || id.equals(vocalGroup) || options.target() != TargetGame.S3K) return false;
+            var stem = options.stems().get(fitGroups.get(id).getFirst().note().part());
+            return stem != null && !mix.equals(stem);
+        };
         var unsupported = new ArrayList<String>();
         for (var focus : foreground.entrySet()) {
             var candidates = screening.rank(focus.getValue(), context, mix, options.stems(), windows,
-                    incumbent(catalogue, previous, focus.getKey()), true, priors.get(focus.getKey()), null);
-            if (candidates.stream().anyMatch(patch -> patch.score() >= MIN_EXPOSED_ATTACK_MATCH))
+                    incumbent(catalogue, previous, focus.getKey()), true, priors.get(focus.getKey()), null,
+                    challenged.test(focus.getKey()));
+            // Challengers are scored on the same attacks and stay out of this decision.
+            if (candidates.clearestMatch() >= MIN_EXPOSED_ATTACK_MATCH)
                 leadPatches.put(focus.getKey(), candidates);
             else unsupported.add(focus.getKey());
         }
@@ -137,7 +154,8 @@ final class ReconstructionVoiceStage {
             boolean fm = instrument || lane.startsWith("FM");
             var incumbent = lane.equals(chosenLane) ? chosen
                     : fm ? incumbent(catalogue, previous, lane) : null;
-            var patches = leadPatches.get(lane);
+            var ranking = lane.equals(chosenLane) ? null : leadPatches.get(lane);
+            var patches = ranking == null ? null : ranking.clearest();
             if (lane.equals(chosenLane)) patches = List.of(new RankedPatch(chosen.id(), 0));
             var prior = priors.get(lane);
             boolean pinnedVocal = false;
@@ -160,20 +178,37 @@ final class ReconstructionVoiceStage {
                 }
             }
             boolean exposed = foreground.containsKey(lane);
-            if (patches == null) patches = fm
-                    ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, exposed, prior, null)
-                    : List.of();
+            if (patches == null && fm) {
+                ranking = screening.rank(notes, context, mix, options.stems(), windows, incumbent, exposed, prior, null,
+                        challenged.test(lane));
+                patches = ranking.clearest();
+            } else if (patches == null) patches = List.of();
+            // A pinned or explicit patch has no ranking, so it meets no challengers.
+            var pool = new ArrayList<RankedPatch>();
+            if (ranking != null && patches == ranking.clearest())
+                ranking.typical().stream().limit(CHALLENGER_LIMIT).forEach(pool::add);
+            Path challengeStem = null;
             if (fm && !pinnedVocal && (!lane.equals(vocalGroup) || prior != null) && !lane.equals(chosenLane)) {
                 var examples = ReconstructionHeldNotes.examples(entry.getValue(), holds);
                 if (!examples.isEmpty()) {
                     sustained.add(lane);
                     patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
+                    if (!pool.isEmpty()) {
+                        var both = new ArrayList<>(patches);
+                        both.addAll(pool);
+                        pool.retainAll(ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), both, examples));
+                    }
                 }
                 if (instrument && options.target() == TargetGame.S3K) {
                     int part = entry.getValue().getFirst().note().part();
                     var stem = options.stems().get(part);
-                    if (stem != null && !mix.equals(stem))
-                        patches = screening.fittingAttacks(patches, entry.getValue(), stem, windows, guitarParts.contains(part));
+                    if (stem != null && !mix.equals(stem)) {
+                        var fitting = screening.fittingAttacks(patches, entry.getValue(), stem, windows, guitarParts.contains(part));
+                        // Full-volume attacks can misjudge a quiet part, so the rejected patches may challenge.
+                        patches.stream().filter(patch -> !fitting.contains(patch)).limit(CHALLENGER_LIMIT).forEach(pool::add);
+                        patches = fitting;
+                        challengeStem = stem;
+                    }
                 }
                 var sustain = stockSustain.get(lane);
                 if (sustain != null) {
@@ -183,8 +218,10 @@ final class ReconstructionVoiceStage {
                     // Preserve the acoustic finalists when possible. If all fail, search
                     // the full catalogue before accepting a patch with inadequate sustain.
                     patches = eligible.isEmpty()
-                            ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, exposed, prior, sustain)
+                            ? screening.rank(notes, context, mix, options.stems(), windows, incumbent, exposed, prior, sustain,
+                                    false).clearest()
                             : List.copyOf(eligible);
+                    for (var patch : List.copyOf(pool)) if (sustain.loss(patch.id()) > 0) pool.remove(patch);
                 }
             }
             incumbents.add(incumbent == null ? null : incumbent.id());
@@ -200,7 +237,11 @@ final class ReconstructionVoiceStage {
             var stem = stemFor(toneContext, options.stems(), stems);
             var stemNotes = stem == null ? null : windows.pack(toneContext.stream()
                     .filter(note -> stem.equals(options.stems().get(note.note().part()))).toList());
-            models.add(new Model(lane, role, packed, stems.getOrDefault(stem, 0), stemNotes, patches, instruments, instrument));
+            var kept = patches;
+            pool.removeIf(kept::contains);
+            if (challengeStem == null) pool.clear();
+            models.add(new Model(lane, role, packed, stems.getOrDefault(stem, 0), stemNotes, patches, instruments, instrument,
+                    List.copyOf(pool), challengeStem));
             var settings = settings(role, patches.isEmpty() ? null : patches.getFirst().id(), WRITTEN, DRY, instruments);
             initial.add(lane.equals("PSG3") && !cymbalGains.isEmpty() ? settings.withDrumGains(cymbalGains) : settings);
         }
@@ -212,17 +253,9 @@ final class ReconstructionVoiceStage {
             if (model.patches().isEmpty()) {
                 trials.add(render(windows, references, source, catalogue, model, "", lane));
             } else {
-                for (var patch : model.patches()) {
-                    var setting = settings(model.role(), patch.id(), WRITTEN, DRY, model.instruments());
-                    var candidate = render(windows, references, source, catalogue, model, patch.id(), setting);
-                    var prior = priors.get(model.id());
-                    var sustain = stockSustain.get(model.id());
-                    if (prior != null && (sustain == null || sustain.loss(patch.id()) == 0)) {
-                        var evidence = prior.evidence(catalogue, catalogue.match(patch.id()).variant());
-                        candidate = new VoiceFit.Candidate(candidate.id(), candidate.spectrum(), evidence.preference());
-                    }
-                    trials.add(candidate);
-                }
+                for (var patch : model.patches())
+                    trials.add(patchTrial(windows, references, source, catalogue, model, patch,
+                            priors.get(model.id()), stockSustain.get(model.id())));
             }
             candidates.add(trials);
         }
@@ -247,6 +280,27 @@ final class ReconstructionVoiceStage {
             comparisons = allowed;
         }
         fit.patches(comparisons, incumbents);
+        if (chosen == null) {
+            // The decision above stands unless a challenger's attacks are closer
+            // to the stem. It then has to win the joint fit like any candidate.
+            boolean admitted = false;
+            for (int i = 0; i < models.size(); i++) {
+                var model = models.get(i);
+                if (model.challengers().isEmpty()) continue;
+                String held = fit.selection(i).candidate().id();
+                var holder = model.patches().stream().filter(patch -> patch.id().equals(held)).findFirst().orElse(null);
+                if (holder == null) continue;
+                var winner = screening.attackWinner(model.challengers(), holder, fitGroups.get(model.id()),
+                        model.challengeStem(), windows);
+                if (winner == null) continue;
+                candidates.get(i).add(patchTrial(windows, references, source, catalogue, model, winner,
+                        priors.get(model.id()), stockSustain.get(model.id())));
+                models.set(i, model.withPatch(winner));
+                admitted = true;
+            }
+            if (admitted) fit.patches(previous == null ? candidates : candidates.stream().map(trials -> trials.stream()
+                    .sorted(Comparator.comparing(VoiceFit.Candidate::id)).toList()).toList(), incumbents);
+        }
         var patchIds = new ArrayList<String>();
         var patchScores = new ArrayList<List<ScoredPatch>>();
         for (int i = 0; i < models.size(); i++) {
@@ -319,7 +373,7 @@ final class ReconstructionVoiceStage {
                 // will also sound at that level so its energy cannot inflate it.
                 var wholePart = windows.pack(fitGroups.get(model.id()));
                 var contextModel = new Model(model.id(), model.role(), wholePart, model.stem(),
-                        wholePart, model.patches(), model.instruments(), model.shared());
+                        wholePart, model.patches(), model.instruments(), model.shared(), List.of(), null);
                 var full = render(windows, references, source, catalogue, contextModel, "",
                         settings(role, patch, art, effects, model.instruments()));
                 gain = Math.min(gain, fit.trial(i, full).selection().gain());
@@ -402,6 +456,16 @@ final class ReconstructionVoiceStage {
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
+    }
+
+    private static VoiceFit.Candidate patchTrial(VoiceWindows windows, List<VoiceWindows.Reference> references,
+            S3kReconstruction.Score source, InstrumentCatalogue catalogue, Model model, RankedPatch patch,
+            StockVoicePrior prior, ReconstructionHeldNotes.StockScreen sustain) throws IOException {
+        var setting = settings(model.role(), patch.id(), WRITTEN, DRY, model.instruments());
+        var candidate = render(windows, references, source, catalogue, model, patch.id(), setting);
+        if (prior == null || sustain != null && sustain.loss(patch.id()) > 0) return candidate;
+        var evidence = prior.evidence(catalogue, catalogue.match(patch.id()).variant());
+        return new VoiceFit.Candidate(candidate.id(), candidate.spectrum(), evidence.preference());
     }
 
     private static boolean confirmedVocalPatch(String reason) {
