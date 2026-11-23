@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -31,6 +32,7 @@ final class ReconstructionVoiceStems {
 
     private record Stem(int part, Path path, List<Attack> notes) {}
     private record Tone(double level, double brightness) {}
+    private record ToneKey(Path path, double onset, int pitch) {}
     private record Probe(Attack attack, Stem stem, Tone tone, boolean isolated) {}
 
     private final Map<Integer, Stem> mapped = new HashMap<>();
@@ -208,21 +210,27 @@ final class ReconstructionVoiceStems {
 
     private Tone tone(Path path, Attack attack) {
         try {
-            var audio = ReferenceAudio.read(path, attack.onset() + SETTLE, WINDOW_SECONDS);
-            float[] input = VoiceSpectra.resample(audio, WINDOW);
-            spectrum.transform(input, 0, HANN);
-            double hz = ReconstructionLeadAudio.hz(attack.note().pitch());
-            double fundamental = peak(hz);
-            double total = 0;
-            for (float sample : input) total += sample * (double) sample;
-            double level = 4 * Math.sqrt(fundamental) / WINDOW;
-            if (level < MIN_LEVEL || fundamental < .02 * WINDOW * total) return null;
-            double color = (peak(2 * hz) + peak(3 * hz) + peak(4 * hz)) / fundamental;
-            return new Tone(level, 10 * Math.log10(Math.max(.0001, color)));
+            ReconstructionLiveEvidence.track(path);
+            var key = new ToneKey(path, attack.onset(), attack.note().pitch());
+            return ReconstructionLiveEvidence.gate(key, () -> Optional.ofNullable(measureTone(key))).orElse(null);
         } catch (IOException | IllegalArgumentException unavailable) {
             // A work directory can be reviewed without its optional source audio.
             return null;
         }
+    }
+
+    private Tone measureTone(ToneKey key) throws IOException {
+        var audio = ReferenceAudio.read(key.path(), key.onset() + SETTLE, WINDOW_SECONDS);
+        float[] input = VoiceSpectra.resample(audio, WINDOW);
+        spectrum.transform(input, 0, HANN);
+        double hz = ReconstructionLeadAudio.hz(key.pitch());
+        double fundamental = peak(hz);
+        double total = 0;
+        for (float sample : input) total += sample * (double) sample;
+        double level = 4 * Math.sqrt(fundamental) / WINDOW;
+        if (level < MIN_LEVEL || fundamental < .02 * WINDOW * total) return null;
+        double color = (peak(2 * hz) + peak(3 * hz) + peak(4 * hz)) / fundamental;
+        return new Tone(level, 10 * Math.log10(Math.max(.0001, color)));
     }
 
     private double peak(double hz) {
