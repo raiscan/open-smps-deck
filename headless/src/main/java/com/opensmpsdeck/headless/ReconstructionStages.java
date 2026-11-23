@@ -399,12 +399,12 @@ public final class ReconstructionStages {
         var editJournal = previousEdits.through(request.from);
         boolean trackEdits = !edits.isEmpty() || !previousEdits.stages().isEmpty();
 
+        Score replayScore = live == null ? null : readScore(scoreFile);
         if (request.initial == null) {
             progress.report(0, total, "Starting " + stageName(request.from));
-            if (preserveReview) checkInputFiles(readScore(scoreFile).inputs);
+            if (preserveReview) checkInputFiles((replayScore == null ? readScore(scoreFile) : replayScore).inputs);
         }
         ReconstructionVoicePlan.Result voicePlan = null;
-        Score replayScore = null;
         ReconstructionStructure.Result replayStructure = null;
         ReconstructionRoles.Result replayRoles = null;
         ReconstructionAllocation.Result replayAllocation = null;
@@ -413,7 +413,8 @@ public final class ReconstructionStages {
             if (stage.ordinal() < request.from.ordinal()) continue;
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
             if (stage == Stage.TRANSCRIBE) {
-                var transcription = request.initial != null ? request.initial : retranscribe(readScore(scoreFile));
+                var transcription = request.initial != null ? request.initial
+                        : retranscribe(replayScore == null ? readScore(scoreFile) : replayScore);
                 Score score = transcription.score();
                 if (request.initial != null && capture != null) score = capture.relocateGeneratedStems(work, score);
                 var bound = edits.bindSections(work, score, null, Stage.TRANSCRIBE, outcomes);
@@ -1201,7 +1202,7 @@ public final class ReconstructionStages {
         double seconds = score.durationUs / 1e6;
         var bars = tracker ? score.beatMap.bars(seconds) : score.bars;
         var audio = Boolean.TRUE.equals(score.inputs.audioRepeats)
-                ? ReconstructionRhythmAudio.read(Path.of(score.inputs.wav), seconds) : null;
+                ? rhythmAudio(Path.of(score.inputs.wav), seconds) : null;
         var timeline = ReconstructionTimeMap.of(score);
         var notes = score.notes.stream().map(timeline::projectNote).sorted(NOTE_ORDER).toList();
         var roleBars = timeline.projectBars(score.midiBars);
@@ -1226,6 +1227,14 @@ public final class ReconstructionStages {
                 roleBars, timeline, authoredIds, suppressed);
     }
 
+    private record RhythmKey(Path path, double seconds) {}
+
+    private static ReconstructionRhythmAudio rhythmAudio(Path path, double seconds) throws IOException {
+        ReconstructionLiveEvidence.track(path);
+        return ReconstructionLiveEvidence.memo(new RhythmKey(path, seconds),
+                () -> ReconstructionRhythmAudio.read(path, seconds));
+    }
+
     private static boolean trackedGrid(ReconstructionBeatMap beats, ReconstructionTempo.Options grid) {
         return beats != null && grid.bpm() == null
                 && beats.confidence() >= ReconstructionTimeMap.MIN_CONFIDENCE && beats.deviation() >= .006;
@@ -1242,6 +1251,8 @@ public final class ReconstructionStages {
     }
 
     static void warmLive(Path work) throws IOException {
+        for (String name : List.of("score.json", "structure.json", "roles.json", "allocation.json", "voicing.json"))
+            ReconstructionLiveEvidence.warmArtifact(work.resolve(name));
         var score = readScore(work.resolve("score.json"));
         if (score.inputs().stems().isEmpty()) return;
         var transcription = retranscribe(score);
@@ -1251,6 +1262,12 @@ public final class ReconstructionStages {
             if (Thread.currentThread().isInterrupted()) return;
             ReconstructionLeadAudio.Track.read(Path.of(path), timeline.sourceDuration());
         }
+        readStructure(work.resolve("structure.json"), score);
+        ReconstructionTrace.optional(work, "allocation.json", ReconstructionAllocation.Result.class);
+        arrangement(work.resolve("voicing.json"));
+        var roles = ReconstructionTrace.optional(work, "roles.json", ReconstructionRoles.Result.class);
+        if (roles != null && !Thread.currentThread().isInterrupted()) ReconstructionVoicePlan.preview(work, score, roles);
+        if (!Thread.currentThread().isInterrupted()) ReconstructionCymbals.measure(score);
     }
 
     private static Transcription transcribeWithSavedNotes(Inputs inputs, long durationUs) throws IOException {
