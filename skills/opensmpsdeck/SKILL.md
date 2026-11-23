@@ -188,10 +188,15 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `--by-onset` groups nearby attacks by part. MCP `reconstruct_trace` takes
   `byOnset: true`. In Studio, click a note or lane gate to inspect its trace
   and expand **Raw trace JSON**.
-- **Repeat consensus** repairs supported gaps in audio-only tonal stems.
-  Inspect a recovered note in Trace under `structure.repeatConsensus` for its
-  aligned references and local pitch evidence. Pattern lanes prefer the same
-  placement across repeats while existing edits keep their precedence.
+- **Part repeats** are opt-in for mapped audio-only pitched stems. Add or
+  propose a `repeatPolicy` op with the integer `part`, `fill` (`off`, `low`,
+  `medium`, `high`), and `lanes` (`off`, `on`, `strict`) via
+  `reconstruct edit` or MCP `reconstruct_edit`. For Brains, use High + On
+  for bass and Medium + Off for the backing synth. Try High on the synth
+  only if Medium misses a locally supported attack. Leave the other parts
+  off. Review `structure.repeatConsensus` for aligned notes and local
+  evidence, then compare drops and shortened gates across parts. Studio
+  exposes the same controls under **Roles → Part repeats**.
 - **Held notes** appear in describe and trace when a mapped stem sustains
   through a missing, shortened, silent or heavily decayed chip gate. Use
   `reconstruct proposals list WORK_DIR --group held-notes` for review

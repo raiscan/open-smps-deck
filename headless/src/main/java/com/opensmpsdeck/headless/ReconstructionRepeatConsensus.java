@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.opensmpsdeck.headless.ReconstructionRepeatPolicy.Fill;
+import static com.opensmpsdeck.headless.ReconstructionRepeatPolicy.Lanes;
 import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionStructure.Bar;
 import static com.opensmpsdeck.headless.ReconstructionStructure.Vote;
@@ -25,40 +27,44 @@ final class ReconstructionRepeatConsensus {
 
     record Member(String slot, boolean core, @ReconstructionStages.Nullable String reason,
                   @ReconstructionStages.Nullable List<Vote> votes,
-                  @ReconstructionStages.Nullable Double stemDb) {}
+                  @ReconstructionStages.Nullable Double stemDb,
+                  @ReconstructionStages.Nullable Lanes lanes) {
+        boolean keepsLanes() { return lanes != null && lanes != Lanes.off; }
+        boolean strict() { return lanes == Lanes.strict; }
+    }
 
     private record Pattern(int index, Bar bar, List<Note> notes) {
         double phase(Note note) { return bar.fraction(note.start()); }
     }
 
     private record Match(Pattern pattern, double shift, Map<String, Note> notes) {}
-    private record Fill(String slot, boolean core, Pattern target, Note anchor, double phase,
+    private record Candidate(String slot, Pattern target, Note anchor, double phase,
                         double duration, List<Note> donors, List<Vote> votes) {}
 
     private ReconstructionRepeatConsensus() {}
 
     static Map<String, Member> apply(ReconstructionStages.Score score, List<Bar> bars,
                                      ReconstructionTimeMap timeline, Set<String> authoredIds,
-                                     List<Note> suppressed, Map<String, Note> notes) throws IOException {
+                                     List<Note> suppressed, Map<String, Note> notes,
+                                     Map<Integer, ReconstructionRepeatPolicy> policies) throws IOException {
         if (score.inputs().audioOnly() == null || bars.size() < 3) return Map.of();
         var result = new LinkedHashMap<String, Member>();
         var ordered = notes.values().stream().sorted(ReconstructionStages.NOTE_ORDER).toList();
         for (var part : score.source().parts()) {
+            var policy = policies.get(part.id());
+            if (policy == null) continue;
             String stem = score.inputs().stems().get(part.id());
             var label = score.inputs().audioOnly().stems().get(part.id());
-            if (part.drums() || stem == null || label == null || "vocals".equals(label.transcriberRole())) continue;
             var local = ordered.stream().filter(n -> n.part() == part.id()).toList();
             var originals = local.stream().filter(n -> n.source().equals("audio-transcribed")
                     || n.source().equals("transcriber")).filter(n -> n.run() == null && !authoredIds.contains(n.id())).toList();
-            var fills = new ArrayList<Fill>();
+            var fills = new ArrayList<Candidate>();
             // Bass transcription often contains upper partials and stem bleed.
             // Compare the low line separately so those attacks cannot mask the groove.
-            if ("bass".equals(label.role())) {
-                collect(patterns(bars, originals.stream().filter(n -> n.pitch() < 48).toList()), result, fills);
-            } else {
-                collect(patterns(bars, originals.stream().filter(n -> n.pitch() < 48).toList()), result, fills);
-                collect(patterns(bars, originals.stream().filter(n -> n.pitch() >= 48).toList()), result, fills);
-            }
+            boolean bass = "bass".equals(label.role());
+            collect(patterns(bars, originals.stream().filter(n -> n.pitch() < 48).toList()), result, fills, policy);
+            if (!bass)
+                collect(patterns(bars, originals.stream().filter(n -> n.pitch() >= 48).toList()), result, fills, policy);
             if (fills.isEmpty()) continue;
             var evidence = new StemEvidence(Path.of(stem), score.durationUs() / 1e6, timeline, fills);
             var occupied = new ArrayList<>(local);
@@ -69,18 +75,18 @@ final class ReconstructionRepeatConsensus {
                 int pitch = fill.anchor.pitch();
                 end = Math.min(end, nextAttack(occupied, pitch, start));
                 if (start < fill.target.bar.start() || start >= fill.target.bar.end() || end - start < .045
-                        || conflicts(occupied, pitch, start, end, "bass".equals(label.role()))) continue;
-                Double support = evidence.support(fill, start, end);
+                        || conflicts(occupied, pitch, start, end, bass)) continue;
+                Double support = evidence.support(fill, start, end, policy.fill());
                 if (support == null) continue;
                 String id = SOURCE + "-" + fill.target.bar.id() + "-" + fill.anchor.id();
                 var note = new Note(id, part.id(), start, end, pitch, fill.anchor.velocity(), SOURCE, .78);
                 notes.put(id, note);
                 occupied.add(note);
-                result.putIfAbsent(fill.anchor.id(), new Member(fill.slot, fill.core, null, null, null));
                 String reason = fill.votes.size() >= 2 ? "aligned attacks in other bars and local stem pitch rise"
                         : "recurrent upper attack in an aligned bar and local stem pitch rise";
-                result.put(id, new Member(fill.slot, true, reason, fill.votes, support));
-                if (!fill.core) result.put(fill.anchor.id(), new Member(fill.slot, true, null, null, null));
+                result.put(id, new Member(fill.slot, true, reason, fill.votes, support, policy.lanes()));
+                if (policy.lanes() != Lanes.off)
+                    result.put(fill.anchor.id(), new Member(fill.slot, true, null, null, null, policy.lanes()));
             }
         }
         return result;
@@ -94,14 +100,14 @@ final class ReconstructionRepeatConsensus {
         var votes = new HashMap<String, Integer>();
         for (var note : notes) {
             var member = members.get(note.id());
-            if (member != null && member.core && roles.get(note.id()) == bass)
+            if (member != null && member.keepsLanes() && member.core && roles.get(note.id()) == bass)
                 votes.merge(member.slot, 1, Integer::sum);
         }
         var protectedLine = new ArrayList<Note>();
         var anchors = new HashMap<Integer, List<Note>>();
         for (var note : notes) {
             var member = members.get(note.id());
-            if (member != null && member.core && roles.get(note.id()) == bass
+            if (member != null && member.keepsLanes() && member.core && roles.get(note.id()) == bass
                     && votes.getOrDefault(member.slot, 0) >= 2)
                 anchors.computeIfAbsent(note.part(), ignored -> new ArrayList<>()).add(note);
         }
@@ -110,7 +116,7 @@ final class ReconstructionRepeatConsensus {
             int program = programs.getOrDefault(note.part(), -1);
             if (program < 32 || program > 39 || note.pitch() >= 48 || fixedGates.contains(note.id())
                     || roles.get(note.id()) == ReconstructionRoles.Role.melody) continue;
-            boolean repeated = member != null && member.core && votes.getOrDefault(member.slot, 0) >= 2;
+            boolean repeated = member != null && member.keepsLanes() && member.core && votes.getOrDefault(member.slot, 0) >= 2;
             // A decoder can collapse several pulses into one gate. Keep that
             // written gate on the same lane if the repeated line surrounds it.
             var nearby = anchors.getOrDefault(note.part(), List.of());
@@ -145,7 +151,8 @@ final class ReconstructionRepeatConsensus {
         return result;
     }
 
-    private static void collect(List<Pattern> patterns, Map<String, Member> members, List<Fill> fills) {
+    private static void collect(List<Pattern> patterns, Map<String, Member> members, List<Candidate> fills,
+                                ReconstructionRepeatPolicy policy) {
         var claimed = new HashSet<Integer>();
         var anchors = patterns.stream().sorted(Comparator.comparingInt((Pattern p) -> p.notes.size()).reversed()).toList();
         for (var anchor : anchors) {
@@ -187,19 +194,19 @@ final class ReconstructionRepeatConsensus {
                 }).toArray());
                 var donors = voters.stream().map(m -> m.notes.get(slot)).toList();
                 var votes = voters.stream().map(m -> new Vote(m.pattern.bar.id(), m.notes.get(slot).id())).toList();
-                if (consensus) members.put(note.id(), new Member(slot, core, null, null, null));
+                if (consensus && policy.lanes() != Lanes.off) members.put(note.id(), new Member(slot, core, null, null, null, policy.lanes()));
                 for (var peer : peers) {
                     var observed = peer.notes.get(slot);
                     if (observed != null) {
-                        if (consensus) members.put(observed.id(), new Member(slot, core, null, null, null));
+                        if (consensus && policy.lanes() != Lanes.off) members.put(observed.id(), new Member(slot, core, null, null, null, policy.lanes()));
                     } else {
                         boolean highLayer = anchor.notes.stream().anyMatch(n -> n.pitch() <= note.pitch() - 12
                                 && n.start() <= note.start() + .035 && n.end() > note.start());
                         boolean hasLayer = peer.notes.values().stream().anyMatch(n -> Math.abs(n.pitch() - note.pitch()) <= 4);
                         boolean sharedContour = recurrentUpperAttack && peer.notes.values().stream()
                                 .mapToInt(Note::pitch).distinct().count() >= 3;
-                        if ((!highLayer || hasLayer) && (consensus || sharedContour))
-                            fills.add(new Fill(slot, core, peer.pattern, note, phase + peer.shift, duration, donors, votes));
+                        if (policy.fill() != Fill.off && (!highLayer || hasLayer) && (consensus || sharedContour))
+                            fills.add(new Candidate(slot, peer.pattern, note, phase + peer.shift, duration, donors, votes));
                     }
                 }
             }
@@ -275,7 +282,7 @@ final class ReconstructionRepeatConsensus {
         private final ReconstructionTimeMap timeline;
         private final EvidenceSpectrum.Spectrum spectrum;
 
-        StemEvidence(Path path, double duration, ReconstructionTimeMap timeline, List<Fill> fills) throws IOException {
+        StemEvidence(Path path, double duration, ReconstructionTimeMap timeline, List<Candidate> fills) throws IOException {
             this.timeline = timeline;
             int low = Math.max(0, fills.stream().mapToInt(f -> f.anchor.pitch() - 27).min().orElseThrow());
             int high = Math.min(127, fills.stream().mapToInt(f -> f.anchor.pitch() + 3).max().orElseThrow());
@@ -285,7 +292,7 @@ final class ReconstructionRepeatConsensus {
             spectrum = EvidenceSpectrum.measure(audio, times, low, high, (high - low + 1) * 4, duration, false);
         }
 
-        Double support(Fill fill, double projectStart, double projectEnd) {
+        Double support(Candidate fill, double projectStart, double projectEnd, Fill sensitivity) {
             int pitch = fill.anchor.pitch();
             double start = timeline.source(projectStart);
             double length = timeline.source(projectEnd) - start;
@@ -296,7 +303,8 @@ final class ReconstructionRepeatConsensus {
             double late = ridge(start + Math.min(length * .78, probe + .055), pitch);
             double before = level(start - (pitch < 42 ? .14 : .10), pitch);
             boolean upper = fill.votes.size() == 1;
-            return donorLevel > -62 && early >= Math.max(-62, donorLevel - (upper ? 11 : 19))
+            int allowance = sensitivity.allowanceDb;
+            return donorLevel > -62 && early >= Math.max(-62 - allowance, donorLevel - (upper ? 11 : 19) - allowance)
                     && late >= early - 12 && early >= before + (upper ? 6 : 4)
                     && !tracksLowerPartial(pitch, start, probe, length) ? early : null;
         }

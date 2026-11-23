@@ -339,7 +339,8 @@ class ReconstructionEditsTest {
                 preview.allocation());
         assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()), preview.playback(),
                 "mixed live journal", 480);
-        assertEquals(java.util.EnumSet.allOf(ReconstructionEdits.Kind.class),
+        // Repeat policy replay uses the audio-only fixture in ReconstructionRepeatConsensusTest.
+        assertEquals(java.util.EnumSet.complementOf(java.util.EnumSet.of(ReconstructionEdits.Kind.repeatPolicy)),
                 ReconstructionEdits.read(work).intents().stream().map(ReconstructionEdits.Intent::kind)
                     .collect(java.util.stream.Collectors.toSet()));
         assertEquals(List.of("edit-cut-left", "edit-cut-right", "n-0-3500000-71"),

@@ -151,6 +151,7 @@ final class ReconstructionAllocation {
     private final java.util.PriorityQueue<Attack> pending;
     private final Map<String, ReconstructionRepeatConsensus.Member> repeatNotes;
     private final Map<String, String> repeatLanes = new HashMap<>();
+    private final Map<String, String> octaveRoots;
     private Map<String, ReconstructionArrangement.PartChip> partPins = Map.of();
     private ReconstructionArrangement.Hats hats;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
@@ -168,6 +169,8 @@ final class ReconstructionAllocation {
         this.salience = salience;
         this.stemHolds = stemHolds;
         this.repeatNotes = repeatNotes;
+        octaveRoots = repeatNotes.values().stream().anyMatch(ReconstructionRepeatConsensus.Member::strict)
+                ? octaveRoots(attacks) : Map.of();
         var ordinal = new HashMap<String, Integer>();
         for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
         pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
@@ -502,7 +505,7 @@ final class ReconstructionAllocation {
         var groups = new HashMap<String, List<Entry>>();
         for (var entry : first.notes()) {
             var member = repeats.get(entry.note().id());
-            if (member != null) groups.computeIfAbsent(member.slot(), ignored -> new ArrayList<>()).add(entry);
+            if (member != null && member.strict()) groups.computeIfAbsent(member.slot(), ignored -> new ArrayList<>()).add(entry);
         }
         var drops = new java.util.HashSet<String>();
         for (var group : groups.values()) {
@@ -619,16 +622,46 @@ final class ReconstructionAllocation {
     }
 
     private static int repeatPriority(ReconstructionRepeatConsensus.Member member) {
-        return member == null || member.core() ? 1 : 0;
+        return member == null || !member.strict() || member.core() ? 1 : 0;
     }
 
-    private int repeatPriority(Note note) {
-        return repeatPriority(repeatNotes.get(origin(note)));
+    private static Map<String, String> octaveRoots(List<Attack> attacks) {
+        record Pitch(int part, int pitch) {}
+        var byPitch = new HashMap<Pitch, List<Attack>>();
+        var roots = new HashMap<String, String>();
+        for (var attack : attacks) {
+            var note = attack.note();
+            byPitch.computeIfAbsent(new Pitch(note.part(), note.pitch()), ignored -> new ArrayList<>()).add(attack);
+        }
+        for (var attack : attacks) {
+            var note = attack.note();
+            if (!backing(attack.role()) || attack.pin != null || attack.upperLine()
+                    || note.run() != null || note.bend() != null || note.motion() != null
+                    || !(note.source().equals("audio-transcribed") || note.source().equals("transcriber"))) continue;
+            for (var root : byPitch.getOrDefault(new Pitch(note.part(), note.pitch() - 12), List.of())) {
+                if (root.start > attack.start + 2) break;
+                if (root.role() != Role.drop && Math.abs(root.start - attack.start) <= 2
+                        && Math.abs(root.end - attack.end) <= 4) {
+                    roots.put(note.id(), root.note().id());
+                    break;
+                }
+            }
+        }
+        return roots;
+    }
+
+    private boolean yieldsRepeatLane(Entry prior, Attack attack) {
+        var repeat = repeatNotes.get(attack.note().id());
+        if (repeat == null || !repeat.strict() || !repeat.core() || prior == null || prior.pinnedLane() != null
+                || chordAnchors.contains(prior.note().id()) || prior.endTick() <= attack.start()) return false;
+        var root = entries.get(octaveRoots.get(prior.note().id()));
+        return root != null && root.lane() != null && !root.lane().equals(prior.lane())
+                && root.startTick() <= attack.start() && root.endTick() >= prior.endTick();
     }
 
     private String repeatLane(Attack attack) {
         var member = repeatNotes.get(attack.note().id());
-        return member == null ? null : repeatLanes.get(member.slot());
+        return member == null || !member.keepsLanes() ? null : repeatLanes.get(member.slot());
     }
 
     private String origin(Note note) {
@@ -675,8 +708,24 @@ final class ReconstructionAllocation {
         List<String> primary = expectedLanes(attack.role(), attack.noise);
         List<String> secondary = spillLanes(attack);
         String preferred = repeatLane(attack);
-        String lane = preferred != null && (primary.contains(preferred) || secondary.contains(preferred)) && available(preferred, attack)
-                ? preferred : free(primary, attack);
+        String lane = null;
+        if (preferred != null && (primary.contains(preferred) || secondary.contains(preferred))) {
+            if (available(preferred, attack)) lane = preferred;
+            else {
+                var prior = tail.get(preferred);
+                if (yieldsRepeatLane(prior, attack)) {
+                    if (prior.startTick() == attack.start()) {
+                        entries.put(prior.note().id(), new Entry(prior.note(), prior.role(), null, null, null,
+                                Outcome.dropped, "yielded-to-repeat-pattern", null, attack.note().id(), null, null));
+                    } else {
+                        entries.put(prior.note().id(),
+                                prior.shorten(attack.start(), "yielded-to-repeat-pattern", attack.note().id()));
+                    }
+                    lane = preferred;
+                }
+            }
+        }
+        if (lane == null) lane = free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && (attack.role() == Role.bass || attack.role() == Role.melody))
             lane = protectHold(primary.getFirst(), attack);
@@ -707,7 +756,7 @@ final class ReconstructionAllocation {
                     : PSG.contains(lane) && !attack.noise ? "psg-spill" : null;
             keep(attack, lane, reason);
             var repeat = repeatNotes.get(attack.note().id());
-            if (repeat != null) repeatLanes.putIfAbsent(repeat.slot(), lane);
+            if (repeat != null && repeat.keepsLanes()) repeatLanes.putIfAbsent(repeat.slot(), lane);
         }
     }
 
@@ -1127,8 +1176,7 @@ final class ReconstructionAllocation {
 
     private String shorten(List<String> lanes, Attack attack) {
         String lane = lanes.stream().filter(l -> canShorten(tail.get(l), attack))
-                .min(Comparator.comparingInt((String l) -> repeatPriority(tail.get(l).note()))
-                        .thenComparingInt(l -> backing(attack.role()) ? tonePriority(tail.get(l).note()) : 0)
+                .min(Comparator.comparingInt((String l) -> backing(attack.role()) ? tonePriority(tail.get(l).note()) : 0)
                         .thenComparingDouble(l -> backing(attack.role()) ? salience(tail.get(l).note()) : 0)
                         .thenComparingInt(l -> tail.get(l).endTick - attack.start)
                         .thenComparing(l -> !l.equals(previousLanes.get(attack.note().id())))).orElse(null);
@@ -1167,8 +1215,6 @@ final class ReconstructionAllocation {
         if (backing(next.role()) && backing(last.role) && !chordAnchors.contains(last.note.id())) {
             boolean priorLead = upperLine.contains(last.note.id());
             if (priorLead != next.upperLine()) return next.upperLine();
-            int byRepeat = Integer.compare(repeatPriority(next.note()), repeatPriority(last.note()));
-            if (byRepeat != 0) return byRepeat > 0;
         }
         if (last.startTick < next.start && (last.endTick - next.start <= RELEASE_TICKS
                 || next.role() == Role.melody || next.role() == Role.bass || next.role() == Role.drums)) return true;
