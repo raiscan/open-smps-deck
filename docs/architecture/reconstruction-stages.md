@@ -960,6 +960,31 @@ To accept or reject a proposal by hand, edit this list and update its
 audit entry if needed. `corrections` is the decision history. External
 candidates stay in `score.json` as evidence.
 
+### Stem-backed repeat consensus
+
+Audio-only tonal stems are compared part by part on the tracked bar grid, with
+small differences in bar phase allowed. They use this stem-backed check in
+place of the MIDI-only consensus corrections. Matching transcribed attacks can vote for
+a missing attack. An upper line with repeated attacks can also use an aligned
+bar as a reference when the target shares the surrounding notes and register.
+The local stem must show a pitch ridge and energy rise at the expected attack.
+A ridge that tracks a stronger lower partial does not qualify on its own.
+Conflicting written gates and accepted score edits take precedence.
+
+The structure contains effective notes with source `repeat-consensus` and
+`repeatNotes` entries that record the slot, reference notes, and local pitch
+level. In Studio Analysis or `reconstruct trace`, inspect
+`structure.repeatConsensus` on a recovered note. The raw transcription
+remains in `score.json`. Resume from `structure` to evaluate an existing score.
+
+Recurring low notes on a bass stem can retain their bass role across section
+boundaries. The allocator prefers a compatible lane already used by the same
+slot and gives core notes priority over octave doubles. When a repeated octave
+double loses its lane and the lower note is kept throughout, the allocator
+omits the double consistently. Automatic lane-policy copies use a common free
+lane for aligned occurrences or yield to the dry notes. Explicit lane and role
+assignments take precedence.
+
 ### Stem-backed fast figures
 
 The staged transcriber reads aligned, mapped tonal stems before writing

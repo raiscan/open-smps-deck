@@ -165,6 +165,10 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   `--by-onset` groups nearby attacks by part. MCP `reconstruct_trace` takes
   `byOnset: true`. In Studio, click a note or lane gate to inspect its trace
   and expand **Raw trace JSON**.
+- **Repeat consensus** repairs supported gaps in audio-only tonal stems.
+  Inspect a recovered note in Trace under `structure.repeatConsensus` for its
+  aligned references and local pitch evidence. Pattern lanes prefer the same
+  placement across repeats while existing edits keep their precedence.
 - **Held notes** appear in describe and trace when a mapped stem sustains
   through a missing, shortened, silent or heavily decayed chip gate. Use
   `reconstruct proposals list WORK_DIR --group held-notes` for review
