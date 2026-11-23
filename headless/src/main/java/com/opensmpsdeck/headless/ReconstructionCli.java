@@ -502,7 +502,8 @@ final class ReconstructionCli {
     }
 
     record SavedAssembly(Map<String, List<ReconstructionOverrides.Span>> scopes,
-                         Map<String, Double> drumGains, ReconstructionClipLinks.Layout layout) {}
+                         Map<String, Double> drumGains, ReconstructionClipLinks.Layout layout,
+                         ReconstructionLanePolicies.Levels levels) {}
 
     static Assembly prepareAssembly(Path work, ReconstructionStages.Score score,
                                     ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
@@ -543,8 +544,9 @@ final class ReconstructionCli {
         var matched = voicedMatches(catalogue, ordered, voicing);
         var policies = ReconstructionLanePolicies.resolve(work, score, structure, voicing.lanePolicies());
         var layers = ReconstructionLayers.resolve(work, score, structure, allocation, intents, outcomes);
-        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : new ReconstructionLanePolicies.Levels(score.profile(),
-                ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, options.target()));
+        var policyLevels = policies.isEmpty() && layers.isEmpty() ? null : saved != null ? saved.levels()
+                : new ReconstructionLanePolicies.Levels(score.profile(),
+                        ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, options.target()));
         var instruments = voicing.sourceInstruments();
         var playback = ReconstructionRetriggers.articulate(ordered.notes(), score.retriggers(), timeline, voicing::articulation);
         var articulated = new ReconstructionAllocation.Result(ordered.version(), playback.notes(), ordered.timeBase(),

@@ -101,7 +101,11 @@ public final class ReconstructionLivePreview {
         var drumGains = new HashMap<String, Double>();
         if (report.has("drumHitGains"))
             report.getAsJsonObject("drumHitGains").asMap().forEach((id, value) -> drumGains.put(id, value.getAsDouble()));
-        saved = new ReconstructionCli.SavedAssembly(scopes, Map.copyOf(drumGains), ReconstructionClipLinks.Layout.read(work));
+        // The baseline assembles with the same pure loudness probes as every warm edit.
+        var levels = new ReconstructionLanePolicies.Levels(score.profile(),
+                ReconstructionPsgEnvelopes.classicCatalogueEnvelopes(catalogue, score.profile().game()), 4096);
+        saved = new ReconstructionCli.SavedAssembly(scopes, Map.copyOf(drumGains),
+                ReconstructionClipLinks.Layout.read(work), levels);
         score.notes().forEach(note -> notes.put(note.id(), note));
         allocation.notes().stream().filter(row -> row.lane() != null).forEach(row -> allocated.put(row.note().id(), row));
         var baseline = assemble(score, allocation);
