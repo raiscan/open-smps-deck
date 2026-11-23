@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.MusicRestoreSink;
+import com.openggf.audio.session.PreparedSmpsMusicActivation;
 import com.openggf.audio.session.SmpsDriverSession;
 import com.openggf.audio.session.SmpsPhysicalPolicy;
 import com.openggf.audio.smps.DacData;
@@ -223,6 +224,14 @@ enum ClassicPackageDriver implements PackageDriver {
 
     SmpsDriverSession openPlayback(CompiledProject project, S3kRenderer.ChannelMask mask, ChipWriteObserver observer) {
         return S3kRenderer.openPackageMusic(id, playbackData(project), dac(project), config, policy, mask, observer);
+    }
+
+    PreparedSmpsMusicActivation preparePlayback(CompiledProject project) {
+        return S3kRenderer.preparePackageMusic(playbackData(project), dac(project), config);
+    }
+
+    SmpsDriverSession openPlayback(PreparedSmpsMusicActivation activation) {
+        return S3kRenderer.openPlayback(activation, policy, id, S3kRenderer.ChannelMask.NONE, ChipWriteObserver.NONE);
     }
 
     SmpsSequencer timeline(CompiledProject project, MusicRestoreSink restore) {

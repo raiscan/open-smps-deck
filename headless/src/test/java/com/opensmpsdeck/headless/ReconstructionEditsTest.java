@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.opensmpsdeck.project.DemoProject;
 import com.opensmpsdeck.project.ProjectCompiler;
+import com.opensmpsdeck.project.TargetGame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,6 +72,60 @@ class ReconstructionEditsTest {
         var undo = live.prepare(empty, 0, 2, 0);
         assertPcmEqual(original, undo.playback(), "undo");
         assertTrue(undo.save(built).entries().isEmpty());
+    }
+
+    @Test void liveReplayAndExportMatchFullRunForEachDriver(@TempDir Path directory) throws Exception {
+        for (var target : TargetGame.values()) {
+            var dir = Files.createDirectory(directory.resolve(target.id()));
+            Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+            var source = new Sequence(Sequence.PPQ, 480);
+            var track = source.createTrack();
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 60, 90), 0));
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 60, 0), 420));
+            MidiSystem.write(source, 0, midi.toFile());
+            writeAudio(catalogue, wav, false, 120, target);
+            var work = dir.resolve("live");
+            var full = dir.resolve("full");
+            for (Path path : List.of(work, full))
+                cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), path.toString(),
+                        "--seconds", "2", "--fm-only", "--target", target.id(), "--stem", "0=" + wav);
+            var revision = ReconstructionReview.revision(work);
+            var edits = new com.google.gson.JsonArray();
+            edits.add(json("""
+                    {"id":"pitch","op":"transpose","reason":"fixture","noteIds":["n-0-0-60"],"semitones":1}
+                    """));
+            var live = ReconstructionLivePreview.open(work, revision);
+            var provisional = live.prepareProvisional(edits, 0, 2, 0);
+            assertEquals(target, provisional.playback().target());
+            var replay = ReconstructionReview.liveRebuild(work, revision, revision.entries(), edits, (a, b, c) -> {});
+            var export = ReconstructionReview.exportSource(work, revision, revision.entries(), edits, (a, b, c) -> {});
+            assertEquals(revision, ReconstructionReview.revision(work));
+            ReconstructionReview.parse(edits).write(full);
+            cli("reconstruct", "run", "--from", "transcribe", full.toString(), "--keep-voicing");
+            var canonical = ProjectExport.open(full);
+            assertPcmEqual(TargetPlayback.prepare(canonical.project()), replay.playback(), target.id());
+            assertEquals(com.opensmpsdeck.project.ProjectFormat.write(canonical.project()),
+                    com.opensmpsdeck.project.ProjectFormat.write(export.project()));
+            for (var format : ProjectExport.Format.values()) {
+                var portable = format == ProjectExport.Format.MOD
+                        ? new ProjectExport.PortableSettings(target.id(), false, null, null, null,
+                                List.of(), List.of(target == TargetGame.S3K ? 1 : 0x81))
+                        : null;
+                var options = new ProjectExport.Options(format, null, null, null, null, false, false, portable);
+                var fromSession = dir.resolve("live." + format.extension());
+                var fromRun = dir.resolve("full." + format.extension());
+                ProjectExport.write(export, fromSession, options, (a, b, c) -> {});
+                ProjectExport.write(canonical, fromRun, options, (a, b, c) -> {});
+                assertEquals(-1L, Files.mismatch(fromSession, fromRun), target + " " + format);
+                Files.delete(fromSession);
+                Files.delete(fromRun);
+            }
+            Path journal = full.resolve("edits.json");
+            var stdout = new ByteArrayOutputStream();
+            assertEquals(0, LiveEditBenchmark.run(new String[]{"bench", "live-edit", work.toString(),
+                    journal.toString(), "--target", target.id(), "--samples", "1"}, new PrintStream(stdout)));
+            assertTrue(stdout.toString().contains("\"pcmParity\":true"));
+        }
     }
 
     @Test void stemBackedPitchEditHasAnUnsavedProvisionalPreview(@TempDir Path dir) throws Exception {
@@ -1249,16 +1304,21 @@ class ReconstructionEditsTest {
     }
 
     private static void writeAudio(Path index, Path wav, boolean psg, int frames) throws Exception {
+        writeAudio(index, wav, psg, frames, TargetGame.S3K);
+    }
+
+    private static void writeAudio(Path index, Path wav, boolean psg, int frames,
+                                   TargetGame target) throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         var patch = DemoProject.create().voices().getFirst();
         var bytes = new byte[patch.bytes().size()];
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
+        String variant = builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target));
         if (psg) {
             String envelope = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Chord envelope",
                     new byte[]{0, (byte) 0x80});
-            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
+            builder.variant(envelope, "Chord envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock(target));
         }
         var catalogue = builder.build();
         catalogue.save(index);

@@ -251,7 +251,12 @@ final class ReconstructionPane implements AutoCloseable {
             var open = openProject.get();
             var snapshot = open != null && arrangement.equals(open.path()) ? open.project() : null;
             var fallback = model.project() == null ? TargetGame.S3K : model.project().target();
-            ExportDialog.show(stage, snapshot, arrangement, work, fallback, RomLibrary.userLibrary(), loader, status::setText);
+            try {
+                ExportDialog.showReconstruction(stage, snapshot, arrangement, work, fallback, RomLibrary.userLibrary(),
+                        loader, status::setText, editor.exportJournal(snapshot));
+            } catch (IllegalStateException failure) {
+                status.setText(failure.getMessage());
+            }
         });
         var card = new VBox(10, heading, new Label("Save audio or export a package for your target game."), output);
         if (openArrangement != null) {
@@ -260,10 +265,6 @@ final class ReconstructionPane implements AutoCloseable {
             edit.setOnAction(event -> openArrangement.run());
             card.getChildren().addAll(new Label("Continue editing chip sequences and instruments in Studio."), edit);
         }
-        editor.nextStep().textProperty().addListener((ignored, old, next) -> {
-            if (next.startsWith("Apply & rebuild")) heading.setText("Export the last build");
-            else heading.setText("Use your reconstruction");
-        });
         card.getStyleClass().add("reconstruction-export");
         card.setMaxSize(470, Region.USE_PREF_SIZE);
         return card;

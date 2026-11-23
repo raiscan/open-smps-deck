@@ -1,6 +1,7 @@
 package com.opensmpsdeck.headless;
 
 import com.openggf.audio.MusicRestoreSink;
+import com.openggf.audio.session.PreparedSmpsMusicActivation;
 import com.openggf.audio.session.SmpsDriverSession;
 import com.openggf.audio.smps.SmpsSequencer;
 import com.openggf.audio.synth.ChipWriteObserver;
@@ -55,11 +56,20 @@ public final class TargetPlayback {
 
     public TargetGame target() { return target; }
 
-    /** Independent readers for exact presentation-aligned S3K seeks. */
+    /** Independent readers for exact presentation-aligned seeks. */
     public CheckpointPlayback checkpoints() {
-        if (classic != null || compiled.nativeProgram() != null)
-            throw new IllegalStateException("Checkpoints require a compiled S3K arrangement");
+        if (compiled.nativeProgram() != null)
+            throw new IllegalStateException("Checkpoints require a compiled arrangement");
         return new CheckpointPlayback(this);
+    }
+
+    PreparedSmpsMusicActivation prepareCheckpointPlayback() {
+        return classic == null ? S3kRenderer.preparePlayback(compiled) : classic.preparePlayback(compiled);
+    }
+
+    SmpsDriverSession openCheckpointPlayback(PreparedSmpsMusicActivation activation) {
+        return classic == null ? S3kRenderer.openPlayback(activation, ChannelMask.NONE, ChipWriteObserver.NONE)
+                : classic.openPlayback(activation);
     }
 
     CompiledProject compiled() { return compiled; }

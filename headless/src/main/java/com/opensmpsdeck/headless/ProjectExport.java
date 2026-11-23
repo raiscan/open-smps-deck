@@ -86,7 +86,9 @@ public final class ProjectExport {
         }
     }
 
-    public record Source(StudioProject project, Path work) {}
+    public record Source(StudioProject project, Path work, Integer frames) {
+        public Source(StudioProject project, Path work) { this(project, work, null); }
+    }
 
     private record Stem(String name, S3kRenderer.ChannelMask mask) {}
 
@@ -107,6 +109,12 @@ public final class ProjectExport {
 
     public static List<String> write(StudioProject project, Path work, Path output, Options options,
                              ReconstructionStages.Progress progress) throws IOException {
+        return write(new Source(project, work), output, options, progress);
+    }
+
+    public static List<String> write(Source source, Path output, Options options,
+                                     ReconstructionStages.Progress progress) throws IOException {
+        var project = source.project();
         output = output.toAbsolutePath().normalize();
         if (Files.exists(output, NOFOLLOW_LINKS)) throw new FileAlreadyExistsException(output.toString());
         if (options.format == Format.PACKAGE || options.format == Format.PORTABLE
@@ -122,7 +130,7 @@ public final class ProjectExport {
 
         var playback = TargetPlayback.prepare(project);
         var compiled = playback.compiled();
-        int length = length(project, work);
+        int length = source.frames() == null ? length(project, source.work()) : source.frames();
         NativeExportLength.Loop loop = null;
         if (compiled.nativeProgram() != null) {
             var nativeLength = NativeExportLength.measure(compiled, options.loops == null ? 1 : options.loops);
