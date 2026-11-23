@@ -10,6 +10,15 @@ import run
 
 
 class AdapterTest(unittest.TestCase):
+    def test_normalization_gain(self):
+        for peak in (0.1, 1.0):
+            gain = run.normalization_gain_db(peak)
+            self.assertAlmostEqual(10 ** (-4 / 20), peak * 10 ** (gain / 20))
+        self.assertEqual(0, run.normalization_gain_db(0))
+        self.assertEqual(24, run.normalization_gain_db(0.001))
+        with self.assertRaises(ValueError):
+            run.normalization_gain_db(float("nan"))
+
     def test_serializes_valid_sorted_output_and_provenance(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "result.json"
@@ -44,6 +53,7 @@ class AdapterTest(unittest.TestCase):
             self.assertEqual(*results)
 
             sf.write(path, np.zeros(rate), rate, subtype="FLOAT")
-            features, peak = run.model_input(path)
+            features, peak, gain_db = run.model_input(path)
+            self.assertEqual(0, gain_db)
             self.assertEqual(0, peak)
             self.assertEqual(0, features.count_nonzero().item())
