@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import com.opensmpsdeck.project.*;
 import com.opensmpsdeck.project.TargetGame;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.embed.swing.SwingFXUtils;
 import javafx.event.Event;
 import javafx.scene.Node;
@@ -26,10 +27,13 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Actual scene/event tests. Run under an isolated display with -Dstudio.ui.test=true. */
 class StudioWindowTest {
+    private static final long PLAYBACK_WAIT_SECONDS = 60;
+
     @TempDir Path folder;
     StudioWindow window;Stage stage;Path file;
     @BeforeAll static void toolkit() throws Exception {
@@ -1275,9 +1279,8 @@ class StudioWindowTest {
             });
             await(() -> !scene.lookup("#reconstruction-play").isDisabled());
             fx(() -> { ((Button) scene.lookup("#reconstruction-play")).fire(); return null; });
-            await(() -> sink.blocks.size() > blockInLoop);
-            var playedBefore = sink.blocks.get(blockInLoop);
-            fx(() -> {
+            var playedBefore = sink.awaitBlock(blockInLoop, block -> true, "initial loop PCM");
+            awaitLiveStatus(scene, "Live preview · Saved edits", () -> fx(() -> {
                 var menu = contextNote(view, view.selectedNotes().getFirst().id());
                 var transpose = (javafx.scene.control.Menu) menuItem(menu, "Transpose");
                 var up = transpose.getItems().getFirst();
@@ -1287,33 +1290,24 @@ class StudioWindowTest {
                 menu.hide();
                 view.canvas.requestFocus();
                 return null;
-            });
-            await(() -> liveStatus(scene).contains("Saved edits"));
+            }));
             var journal = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
             assertEquals("transpose", journal.entries().get(0).getAsJsonObject().get("op").getAsString());
             var changed = prepared.prepare(journal.entries(), loop.start(), loop.end(), 5.5).playback();
             var expected = new ArrayList<byte[]>();
             changed.render(projectBlock + 1, samples -> expected.add(pcmBytes(samples)));
             assertFalse(Arrays.equals(expected.get(projectBlock), playedBefore));
-            await(() -> sink.blocks.stream().anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
-            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
-            await(() -> liveStatus(scene).isEmpty());
+            sink.awaitBlock(0, block -> Arrays.equals(block, expected.get(projectBlock)), "transpose PCM");
+            awaitLiveStatus(scene, "", () -> fx(() -> { key(view.canvas, KeyCode.Z, true); return null; }));
             assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
-            int beforeUndo = sink.blocks.size();
-            await(() -> sink.blocks.stream().skip(beforeUndo).anyMatch(block -> Arrays.equals(block, playedBefore)));
-            int beforeRedo = sink.blocks.size();
-            fx(() -> { key(view.canvas, KeyCode.Y, true); return null; });
-            await(() -> liveStatus(scene).contains("Saved edits"));
+            sink.awaitBlock(sink.blockCount(), block -> Arrays.equals(block, playedBefore), "undo PCM");
+            int beforeRedo = sink.blockCount();
+            awaitLiveStatus(scene, "Live preview · Saved edits",
+                    () -> fx(() -> { key(view.canvas, KeyCode.Y, true); return null; }));
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
-            await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
-            var liveMessages = new java.util.concurrent.CopyOnWriteArrayList<String>();
-            fx(() -> {
-                ((Label) scene.lookup("#reconstruction-live-status")).textProperty()
-                        .addListener((property, before, after) -> liveMessages.add(after));
-                key(view.canvas, KeyCode.DELETE, false);
-                return null;
-            });
-            await(() -> liveStatus(scene).contains("Saved edits"));
+            sink.awaitBlock(beforeRedo, block -> Arrays.equals(block, expected.get(projectBlock)), "redo PCM");
+            var liveMessages = awaitLiveStatus(scene, "Live preview · Saved edits",
+                    () -> fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; }));
             assertTrue(liveMessages.contains("Live preview · Provisional"));
             var withDelete = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
             assertEquals("deleteNote", withDelete.entries().get(1).getAsJsonObject().get("op").getAsString());
@@ -1325,11 +1319,10 @@ class StudioWindowTest {
             assertEquals(1, sink.opens.get());
             assertEquals(original, com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project());
 
-            int beforeDeleteUndo = sink.blocks.size();
-            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
-            await(() -> liveStatus(scene).contains("Saved edits"));
-            await(() -> sink.blocks.stream().skip(beforeDeleteUndo)
-                    .anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            int beforeDeleteUndo = sink.blockCount();
+            awaitLiveStatus(scene, "Live preview · Saved edits",
+                    () -> fx(() -> { key(view.canvas, KeyCode.Z, true); return null; }));
+            sink.awaitBlock(beforeDeleteUndo, block -> Arrays.equals(block, expected.get(projectBlock)), "delete undo PCM");
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             var external = journal.entries();
             var entry = external.get(0).getAsJsonObject().deepCopy();
@@ -1340,37 +1333,36 @@ class StudioWindowTest {
             incoming.addProperty("version", 1);
             incoming.add("edits", external);
             var replacement = Files.writeString(work.resolve("incoming-edits.json"), incoming.toString());
-            Files.move(replacement, work.resolve("edits.json"), StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-            await(() -> liveStatus(scene).contains("Disk change by agent"));
+            awaitLiveStatus(scene, "Live preview · Disk change by agent",
+                    () -> Files.move(replacement, work.resolve("edits.json"), StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING));
             fx(() -> {
                 assertEquals("Stop", ((Button) scene.lookup("#reconstruction-play")).getText());
                 assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
                 return null;
             });
-            int beforeAgent = sink.blocks.size();
+            int beforeAgent = sink.blockCount();
             var agentExpected = new ArrayList<byte[]>();
             prepared.prepare(external, loop.start(), loop.end(), 5.5).playback().render(projectBlock + 1,
                     samples -> agentExpected.add(pcmBytes(samples)));
-            await(() -> sink.blocks.stream().skip(beforeAgent)
-                    .anyMatch(block -> Arrays.equals(block, agentExpected.get(projectBlock))));
+            sink.awaitBlock(beforeAgent, block -> Arrays.equals(block, agentExpected.get(projectBlock)), "agent edit PCM");
             assertEquals(1, sink.opens.get());
             assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
 
             Platform.runLater(() -> ((MenuButton) scene.lookup("#reconstruction-live-compare"))
                     .getItems().getFirst().fire());
             await(() -> openDialogPane() != null);
-            fx(() -> {
+            awaitLiveStatus(scene, "A/B · A", () -> fx(() -> {
                 var dialog = openDialogPane();
                 ((Button) dialog.lookupButton(ButtonType.OK)).fire();
                 return null;
-            });
-            await(() -> liveStatus(scene).equals("A/B · A"));
-            int beforeB = sink.blocks.size();
-            fx(() -> { ((Button) scene.lookup("#reconstruction-live-switch")).fire(); return null; });
-            await(() -> liveStatus(scene).contains("before 1 edit"));
-            await(() -> sink.blocks.stream().skip(beforeB)
-                    .anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            }));
+            int beforeB = sink.pauseAtLoopBoundary(loop, () -> fx(() -> {
+                ((Button) scene.lookup("#reconstruction-live-switch")).fire();
+                assertEquals("A/B · B · before 1 edit", liveStatusLabel(scene).getText());
+                return sink.blockCount();
+            }));
+            sink.awaitBlock(beforeB, block -> Arrays.equals(block, expected.get(projectBlock)), "comparison B PCM");
             assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             assertEquals(1, sink.opens.get());
         } finally {
@@ -1408,9 +1400,9 @@ class StudioWindowTest {
             stream.beginEdit();
             // The renderer is deliberately late. The old note has already passed.
             await(() -> cursor.get() >= gate.end());
-            int firstNewBlock = sink.blocks.size();
+            int firstNewBlock = sink.blockCount();
             stream.replace(prepared, System.nanoTime(), gate.start() + .01, false);
-            await(() -> sink.blocks.stream().skip(firstNewBlock).anyMatch(bytes -> Arrays.equals(bytes, block)));
+            sink.awaitBlock(firstNewBlock, bytes -> Arrays.equals(bytes, block), "late unlooped edit PCM");
             assertEquals(1, sink.opens.get());
         }
     }
@@ -1421,8 +1413,32 @@ class StudioWindowTest {
                 .filter(DialogPane.class::isInstance).map(DialogPane.class::cast).findFirst().orElse(null);
     }
 
-    private static String liveStatus(javafx.scene.Scene scene) {
-        return ((Label) scene.lookup("#reconstruction-live-status")).getText();
+    private static Label liveStatusLabel(javafx.scene.Scene scene) {
+        return (Label) scene.lookup("#reconstruction-live-status");
+    }
+
+    private static List<String> awaitLiveStatus(javafx.scene.Scene scene, String expected, Callable<?> action)
+            throws Exception {
+        var published = new CompletableFuture<Void>();
+        var messages = new ArrayList<String>();
+        ChangeListener<String> listener = (property, before, after) -> {
+            messages.add(after);
+            if (expected.equals(after)) published.complete(null);
+        };
+        var status = fx(() -> {
+            var label = liveStatusLabel(scene);
+            label.textProperty().addListener(listener);
+            return label;
+        });
+        try {
+            action.call();
+            published.get(PLAYBACK_WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException timeout) {
+            fail("Expected live status '%s', last status was '%s'".formatted(expected, fx(status::getText)), timeout);
+        } finally {
+            fx(() -> { status.textProperty().removeListener(listener); return null; });
+        }
+        return List.copyOf(messages);
     }
 
     private Path assembledLiveFixture(int start, int end, int seconds) throws Exception {
@@ -1469,8 +1485,43 @@ class StudioWindowTest {
 
     private static final class CapturedAudio {
         final java.util.concurrent.atomic.AtomicInteger opens = new java.util.concurrent.atomic.AtomicInteger();
-        final java.util.concurrent.CopyOnWriteArrayList<byte[]> blocks = new java.util.concurrent.CopyOnWriteArrayList<>();
-        long frames;
+        private final List<byte[]> blocks = new ArrayList<>();
+        private long frames;
+        private volatile LoopPause loopPause;
+
+        private record LoopPause(long framesPerLoop, CountDownLatch reached, CountDownLatch resume) {}
+
+        synchronized int blockCount() { return blocks.size(); }
+
+        synchronized byte[] awaitBlock(int first, Predicate<byte[]> matches, String description)
+                throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PLAYBACK_WAIT_SECONDS);
+            int index = first;
+            while (true) {
+                while (index < blocks.size()) {
+                    byte[] block = blocks.get(index++);
+                    if (matches.test(block)) return block;
+                }
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) return fail("Playback did not write " + description);
+                TimeUnit.NANOSECONDS.timedWait(this, remaining);
+            }
+        }
+
+        <T> T pauseAtLoopBoundary(ReviewTransport.Range loop, Callable<T> action) throws Exception {
+            long loopFrames = Math.round((loop.end() - loop.start())
+                    * com.opensmpsdeck.headless.S3kRenderer.SAMPLE_RATE);
+            var pause = new LoopPause(loopFrames, new CountDownLatch(1), new CountDownLatch(1));
+            loopPause = pause;
+            try {
+                assertTrue(pause.reached().await(PLAYBACK_WAIT_SECONDS, TimeUnit.SECONDS),
+                        "Playback did not reach the loop boundary");
+                return action.call();
+            } finally {
+                loopPause = null;
+                pause.resume().countDown();
+            }
+        }
 
         javax.sound.sampled.SourceDataLine open(javax.sound.sampled.AudioFormat format) {
             opens.incrementAndGet();
@@ -1478,9 +1529,18 @@ class StudioWindowTest {
                     getClass().getClassLoader(), new Class<?>[]{javax.sound.sampled.SourceDataLine.class},
                     (line, method, args) -> switch (method.getName()) {
                         case "write" -> {
+                            var pause = loopPause;
+                            if (pause != null && frames > 0 && frames % pause.framesPerLoop() == 0) {
+                                // The previous block has been reported; the first block of the next lap has not.
+                                pause.reached().countDown();
+                                pause.resume().await();
+                            }
                             int count = (Integer) args[2];
                             frames += count / 4;
-                            blocks.add(Arrays.copyOf((byte[]) args[0], count));
+                            synchronized (this) {
+                                blocks.add(Arrays.copyOf((byte[]) args[0], count));
+                                notifyAll();
+                            }
                             java.util.concurrent.locks.LockSupport.parkNanos(4_000_000);
                             yield count;
                         }
@@ -2699,6 +2759,6 @@ class StudioWindowTest {
     private static void await(BooleanSupplier condition) throws Exception {
         long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
         while(System.nanoTime()<end){if(fx(condition::getAsBoolean))return;Thread.sleep(25);}
-        fail("UI did not observe file change within five seconds");
+        fail("UI condition did not become true within five seconds");
     }
 }
