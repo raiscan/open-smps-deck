@@ -226,6 +226,23 @@ public final class ReconstructionReview {
         return liveRebuild(work, expected, built, entries, false, progress).playback();
     }
 
+    /** Keep source-dependent evidence across journal revisions on a single replay worker. */
+    public static final class LiveReplay {
+        private final ReconstructionLiveEvidence evidence = new ReconstructionLiveEvidence();
+
+        public void warm(Path work) throws IOException {
+            evidence.run(() -> {
+                ReconstructionStages.warmLive(work);
+                return null;
+            });
+        }
+
+        public LiveUpdate rebuild(Path work, Revision expected, JsonArray built, JsonArray entries,
+                                  boolean save, ReconstructionStages.Progress progress) throws IOException {
+            return evidence.run(() -> liveRebuild(work, expected, built, entries, save, progress));
+        }
+    }
+
     public record LiveUpdate(ReconstructionLivePreview.Prepared playback, Revision revision) {}
 
     public static LiveUpdate liveRebuild(Path work, Revision expected, JsonArray built, JsonArray entries,
@@ -323,9 +340,15 @@ public final class ReconstructionReview {
                 checkCancelled();
             }
             requireRevision(before, expected);
-            var copied = arrangement(before);
-            if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
-                    copied == null ? null : copied.revision())) throw new Changed();
+            if (live == null) {
+                var copied = arrangement(before);
+                if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
+                        copied == null ? null : copied.revision())) throw new Changed();
+            } else {
+                var copied = before.resolve(ARRANGEMENT);
+                var revision = Files.exists(copied) ? ProjectFiles.fileRevision(copied) : null;
+                if (!Objects.equals(arrangement == null ? null : arrangement.revision(), revision)) throw new Changed();
+            }
             String from = lanePolicyPreset == null ? stage(before, changed, updated) : "assemble";
             if (built != null && changed.isEmpty() && from.equals("roles")) from = "assemble";
             if (expected.voices() != null && ReconstructionStages.Stage.parse(from).ordinal()
@@ -349,12 +372,13 @@ public final class ReconstructionReview {
                 progress.report(completed, total + 1, message);
             };
             if (live != null) {
-                var playback = ReconstructionStages.runForLive(args.toArray(String[]::new), checkedProgress);
-                var allocation = ReconstructionArtifacts.read(after.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+                var compiled = ReconstructionStages.runForLive(args.toArray(String[]::new), checkedProgress, arrangement);
                 for (String file : paths)
                     if (!same(work.resolve(file), before.resolve(file))) throw new Changed();
                 requireRevision(work, expected);
-                var prepared = ReconstructionLivePreview.rebuilt(playback, allocation);
+                ReconstructionLiveEvidence.requireCurrent();
+                checkCancelled();
+                var prepared = ReconstructionLivePreview.rebuilt(compiled.playback(), compiled.allocation());
                 var revision = expected;
                 if (live.save) {
                     var outcomes = ReconstructionEdits.Journal.read(after).all();

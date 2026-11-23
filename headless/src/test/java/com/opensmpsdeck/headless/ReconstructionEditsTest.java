@@ -73,7 +73,7 @@ class ReconstructionEditsTest {
         assertTrue(undo.save(built).entries().isEmpty());
     }
 
-    @Test void stemBackedPitchEditRequiresCanonicalReplay(@TempDir Path dir) throws Exception {
+    @Test void stemBackedPitchEditHasAnUnsavedProvisionalPreview(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
         var source = new Sequence(Sequence.PPQ, 480);
         var track = source.createTrack();
@@ -92,6 +92,43 @@ class ReconstructionEditsTest {
         var live = ReconstructionLivePreview.open(work, revision);
         var fallback = assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(entries, 0, 2, 0));
         assertTrue(fallback.getMessage().contains("Source evidence"));
+        var provisional = live.prepareProvisional(entries, 0, 2, 0);
+        assertEquals(61, provisional.allocation().notes().stream()
+                .filter(row -> row.note().id().equals("n-0-0-60")).findFirst().orElseThrow().note().pitch());
+        assertFalse(provisional.changedGates(null).isEmpty());
+        assertThrows(IllegalStateException.class, () -> provisional.save(revision));
+        assertEquals(revision, ReconstructionReview.revision(work));
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
+        var clock = ReconstructionTimeMap.of(score);
+        var backing = clock.projectNote(score.notes().getFirst());
+        var blocker = new ReconstructionAllocation.Entry(backing, ReconstructionRoles.Role.harmony, "FM4",
+                clock.startTick(backing), clock.endTick(backing), ReconstructionAllocation.Outcome.kept, null, null);
+        var inserted = new ReconstructionStages.Note("edit-insert", backing.part(), .15, .25, 64, 96, "edit", 1);
+        var attack = new ReconstructionRoles.Decision(inserted, ReconstructionRoles.Role.counter, null, null);
+        var roles = new ReconstructionRoles.Result(1, 7.5, List.of(attack), clock.timeBase(), null,
+                java.util.Map.of(inserted.id(), new ReconstructionEdits.Pin("FM4", "insert", 1)));
+        var changed = new java.util.HashSet<>(java.util.Set.of(inserted.id()));
+        var local = ReconstructionLiveAllocation.project(score, structure,
+                new ReconstructionAllocation.Result(1, List.of(blocker), clock.timeBase()),
+                roles, changed, java.util.Set.of(inserted.id()), clock);
+        assertEquals(List.of(backing.id(), inserted.id()), local.notes().stream().map(row -> row.note().id()).toList());
+        assertEquals(local.notes().getFirst().endTick(), local.notes().getLast().startTick());
+        assertTrue(changed.contains(backing.id()));
+
+        var replay = new ReconstructionReview.LiveReplay();
+        replay.warm(work);
+        var canonical = replay.rebuild(work, revision, revision.entries(), entries, false, (a, b, c) -> {}).playback();
+        var undo = live.prepareProvisional(revision.entries(), 0, 2, 0);
+        assertTrue(undo.isBuilt());
+        assertFalse(undo.changedGates(provisional).isEmpty());
+        assertEquals(revision, ReconstructionReview.revision(work));
+
+        ReconstructionReview.apply(work, revision, entries, (a, b, c) -> {});
+        assertEquals(ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class),
+                canonical.allocation());
+        assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()),
+                canonical.playback(), "stem-backed transpose");
     }
 
     @Test void liveDeletionMatchesCanonicalAllocationAndPcm(@TempDir Path dir) throws Exception {

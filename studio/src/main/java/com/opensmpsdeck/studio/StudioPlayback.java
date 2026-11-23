@@ -67,6 +67,7 @@ final class StudioPlayback implements AutoCloseable {
         final StudioProject project;
         final Future<CheckpointPlayback> built;
         volatile CachedRevision latest;
+        volatile CachedRevision canonical;
         Future<?> baselineWarmup;
         Future<?> editedWarmup;
 
@@ -110,7 +111,7 @@ final class StudioPlayback implements AutoCloseable {
     /** Each handle belongs to one transport run. The playback thread owns its readers. */
     final class LiveStream {
         private record Handoff(CachedRevision revision, CheckpointPlayback.Bookmark bookmark,
-                               long eventNanos, long replayAt, long replayEnd) {}
+                               long eventNanos, long replayAt, long replayEnd, Runnable settled) {}
 
         private final Runnable renderFailed;
         private Song song;
@@ -118,6 +119,7 @@ final class StudioPlayback implements AutoCloseable {
         private CachedRevision active;
         private Future<Handoff> pending;
         private CachedRevision otherComparison;
+        private Runnable deferredSettlement;
         private boolean preparing;
         private boolean reset;
         private boolean closed;
@@ -139,16 +141,34 @@ final class StudioPlayback implements AutoCloseable {
         synchronized boolean ready() { return built != null && !closed; }
 
         synchronized void compare(ReconstructionLivePreview.Prepared edit, double gesture) {
-            replace(edit, 0, gesture, true, true);
+            replace(edit, 0, gesture, true, true, null);
         }
 
         synchronized void replace(ReconstructionLivePreview.Prepared edit, long eventNanos,
                                   double gesture, boolean looped) {
-            replace(edit, eventNanos, gesture, looped, false);
+            replace(edit, eventNanos, gesture, looped, false, null);
+        }
+
+        synchronized void settle(ReconstructionLivePreview.Prepared edit, Runnable callback, long eventNanos) {
+            if (!ready()) return;
+            Runnable complete = () -> {
+                if (eventNanos != 0 && Boolean.getBoolean("opensmpsdeck.liveTiming"))
+                    java.util.logging.Logger.getLogger(StudioPlayback.class.getName()).info(String.format(
+                            java.util.Locale.ROOT, "Live canonical settled: %.3f ms", (System.nanoTime() - eventNanos) / 1e6));
+                callback.run();
+            };
+            if (pending != null) {
+                deferredSettlement = () -> settle(edit, callback, eventNanos);
+            } else if (active.edit() != null && edit.sameAudio(active.edit())) {
+                song.canonical = active;
+                complete.run();
+            } else {
+                replace(edit, 0, 0, true, false, complete);
+            }
         }
 
         private void replace(ReconstructionLivePreview.Prepared edit, long eventNanos, double gesture,
-                             boolean looped, boolean comparing) {
+                             boolean looped, boolean comparing, Runnable settled) {
             if (!ready()) return;
             var alternate = comparing ? otherComparison : null;
             otherComparison = comparing ? active : null;
@@ -158,6 +178,7 @@ final class StudioPlayback implements AutoCloseable {
             var previous = active;
             var original = built;
             var cached = song.latest;
+            var canonical = song.canonical;
             pending = edits.submit(() -> {
                 var changes = edit.changedGates(previous.edit());
                 int cutoff = changes.isEmpty() ? Integer.MAX_VALUE : presentation(frame(changes.getFirst().start()));
@@ -179,8 +200,16 @@ final class StudioPlayback implements AutoCloseable {
                 }
                 long target = replayAt >= 0 ? Math.min(replayAt, nextFrame) : nextFrame;
                 int at = Math.min(presentation(target), S3kRenderer.MAX_PRESENTATIONS);
+                // Provisional audio can invalidate an otherwise reusable canonical prefix.
+                // Keep the most recent settled grid available during the next handoff.
+                if (settled != null && canonical != null && canonical != previous && audio != original
+                        && canonical.audio().checkpointAtOrBefore(at) > audio.audio().checkpointAtOrBefore(at)) {
+                    var revised = canonical.audio().revise(edit.playback(), Integer.MAX_VALUE);
+                    if (revised.checkpointAtOrBefore(at) > audio.audio().checkpointAtOrBefore(at))
+                        audio = new CachedRevision(edit, revised);
+                }
                 try (var reader = audio.audio().reader()) {
-                    return new Handoff(audio, reader.bookmark(at), eventNanos, replayAt, replayEnd);
+                    return new Handoff(audio, reader.bookmark(at), eventNanos, replayAt, replayEnd, settled);
                 }
             });
             notifyAll();
@@ -222,7 +251,7 @@ final class StudioPlayback implements AutoCloseable {
                 if (reset) {
                     reset = false;
                     active = built;
-                    return new Handoff(built, null, 0, -1, -1);
+                    return new Handoff(built, null, 0, -1, -1, null);
                 }
                 task = pending;
                 if (closed || task == null || !waitForEdit && !task.isDone()) return null;
@@ -245,7 +274,13 @@ final class StudioPlayback implements AutoCloseable {
                 pending = null;
                 active = handoff.revision();
                 song.latest = active;
+                if (handoff.settled() != null) song.canonical = active;
                 if (active != built) song.warm(active);
+                if (deferredSettlement != null) {
+                    var settle = deferredSettlement;
+                    deferredSettlement = null;
+                    settle.run();
+                }
             }
             return handoff;
         }
@@ -259,6 +294,7 @@ final class StudioPlayback implements AutoCloseable {
         private void cancelPending() {
             if (pending != null) pending.cancel(true);
             pending = null;
+            deferredSettlement = null;
         }
     }
 
@@ -386,6 +422,7 @@ final class StudioPlayback implements AutoCloseable {
                                 && cursor >= handoff.replayEnd())
                             cursor = handoff.replayAt();
                         audio.swap(handoff);
+                        if (handoff.settled() != null) handoff.settled().run();
                     }
                 }
                 if (cursor >= end && loop == null) {

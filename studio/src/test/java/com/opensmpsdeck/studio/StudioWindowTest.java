@@ -1306,8 +1306,15 @@ class StudioWindowTest {
             await(() -> liveStatus(scene).contains("Saved edits"));
             assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
             await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
-            fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; });
+            var liveMessages = new java.util.concurrent.CopyOnWriteArrayList<String>();
+            fx(() -> {
+                ((Label) scene.lookup("#reconstruction-live-status")).textProperty()
+                        .addListener((property, before, after) -> liveMessages.add(after));
+                key(view.canvas, KeyCode.DELETE, false);
+                return null;
+            });
             await(() -> liveStatus(scene).contains("Saved edits"));
+            assertTrue(liveMessages.contains("Live preview · Provisional"));
             var withDelete = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
             assertEquals("deleteNote", withDelete.entries().get(1).getAsJsonObject().get("op").getAsString());
             fx(() -> {

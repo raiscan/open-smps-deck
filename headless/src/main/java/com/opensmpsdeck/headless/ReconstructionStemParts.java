@@ -82,6 +82,8 @@ final class ReconstructionStemParts {
         return new MidiScore.Part(id, role, program, false);
     }
 
+    private record SalienceGate(Path file, long durationUs, int pitch, double start, double end) {}
+
     static Map<String, Double> salience(ReconstructionStages.Score score, ReconstructionRoles.Result roles)
             throws IOException {
         var levels = new HashMap<String, Double>();
@@ -91,8 +93,12 @@ final class ReconstructionStemParts {
                     && (d.role() == ReconstructionRoles.Role.harmony || d.role() == ReconstructionRoles.Role.counter))
                     .map(d -> timeline.sourceNote(d.note())).toList();
             if (notes.isEmpty()) continue;
-            var spectrum = Spectrum.read(Path.of(stem.getValue()), score.durationUs() / 1e6);
-            for (var note : notes) levels.put(note.id(), spectrum.level(note, note.pitch()));
+            var path = Path.of(stem.getValue());
+            var spectrum = Spectrum.read(path, score.durationUs() / 1e6);
+            for (var note : notes) {
+                var key = new SalienceGate(path, score.durationUs(), note.pitch(), note.start(), note.end());
+                levels.put(note.id(), ReconstructionLiveEvidence.gate(key, () -> spectrum.level(note, note.pitch())));
+            }
         }
         return levels;
     }
@@ -203,8 +209,12 @@ final class ReconstructionStemParts {
     }
 
     record Spectrum(ReferenceAudio audio) {
+        private record Source(Path file, double duration) {}
+
         static Spectrum read(Path stem, double duration) throws IOException {
-            return new Spectrum(ReconstructionLeadAudio.readMono(stem, duration));
+            ReconstructionLiveEvidence.track(stem);
+            return ReconstructionLiveEvidence.memo(new Source(stem, duration),
+                    () -> new Spectrum(ReconstructionLeadAudio.readMono(stem, duration)));
         }
 
         boolean continuous(Note prior, Note next) {

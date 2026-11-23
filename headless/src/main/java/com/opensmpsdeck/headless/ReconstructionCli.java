@@ -793,7 +793,8 @@ final class ReconstructionCli {
                 continue;
             }
             try {
-                ProjectFiles.save(source, project, null);
+                if (source == null) ProjectFiles.encodeSource(project);
+                else ProjectFiles.save(source, project, null);
             } catch (IOException failure) {
                 if (result.bends().isEmpty() || !failure.getMessage().endsWith("byte source limit")) throw failure;
                 bendSizeLimit = true;
@@ -806,14 +807,13 @@ final class ReconstructionCli {
     static TargetPlayback compileLive(Path work, ReconstructionStages.Score score,
                                       ReconstructionStructure.Result structure, ReconstructionAllocation.Result allocation,
                                       ReconstructionVoicing.Result voicing, ReconstructionEdits intents,
-                                      List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+                                      List<ReconstructionEdits.Outcome> outcomes, LoadedProject existing) throws IOException {
         var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.profile().game());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, false, null);
         // Use the same source size and bank-limit decisions as a rebuild. The replay directory
         // is private and its attachment is only used for matching the canonical source limit.
-        var existing = ReconstructionReview.requireAttached(work, false);
         var bank = compileAssembly(assembly.arrangement(), Map.of(), score.inputs().audioOnly() != null,
-                ReconstructionTimeMap.of(score), existing, work.resolve(".live-arrangement.smps.json"));
+                ReconstructionTimeMap.of(score), existing, null);
         for (var layer : bank.result().layers()) layer.report(outcomes);
         ReconstructionEdits.reportLostSound(allocation, outcomes, bank.result(), outcomes);
         return bank.playback();

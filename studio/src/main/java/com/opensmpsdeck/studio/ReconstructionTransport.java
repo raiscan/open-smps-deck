@@ -64,6 +64,7 @@ final class ReconstructionTransport implements AutoCloseable {
     private StudioPlayback.LiveStream liveStream;
     private ReviewTransport.Range liveWindow;
     private ReconstructionLivePreview.Prepared preview;
+    private long liveStatusVersion;
     private boolean rebuildNeeded;
     private boolean previewJournal;
     private final ReviewTransport transport = new ReviewTransport();
@@ -724,17 +725,31 @@ final class ReconstructionTransport implements AutoCloseable {
         liveMessage("Rebuild needed · Rebuilding in background · " + detail);
     }
 
+    void liveAudition(LiveEdit edit, ReconstructionLivePreview.Prepared playback, long eventNanos) {
+        if (edit.stream() != liveStream) return;
+        liveStream.replace(playback, eventNanos, edit.playhead(), transport.loop != null);
+        liveMessage(playback.provisional() ? "Live preview · Provisional" : "Live preview");
+    }
+
     void liveSaved(LiveEdit edit, ReconstructionLivePreview.Prepared playback, long eventNanos,
-                   boolean hasUnbuiltEdits, String author) {
+                   boolean hasUnbuiltEdits, String author, boolean auditioning) {
         preview = hasUnbuiltEdits ? playback : null;
         previewJournal = hasUnbuiltEdits;
         rebuildNeeded = false;
         var message = hasUnbuiltEdits
                 ? author == null ? "Live preview · Saved edits" : "Live preview · Disk change by " + author
                 : "";
-        if (edit.stream() == liveStream) {
-            liveStream.replace(playback, eventNanos, edit.playhead(), transport.loop != null);
-            liveMessage(message);
+        if (edit.stream() == liveStream && liveStream != null) {
+            if (auditioning) {
+                long statusVersion = liveStatusVersion;
+                liveStream.settle(playback, () -> Platform.runLater(() -> {
+                    if (edit.stream() == liveStream && liveStatusVersion == statusVersion)
+                        liveMessage(message);
+                }), eventNanos);
+            } else {
+                liveStream.replace(playback, eventNanos, edit.playhead(), transport.loop != null);
+                liveMessage(message);
+            }
         } else if (playing) {
             rebuildNeeded("Playback range changed");
         } else liveMessage(message);
@@ -748,6 +763,7 @@ final class ReconstructionTransport implements AutoCloseable {
     }
 
     void liveMessage(String message) {
+        liveStatusVersion++;
         liveStatus.setText(message);
         liveStatus.setVisible(!message.isEmpty());
     }

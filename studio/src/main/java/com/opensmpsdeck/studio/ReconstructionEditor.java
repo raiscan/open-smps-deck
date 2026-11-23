@@ -105,6 +105,10 @@ final class ReconstructionEditor implements AutoCloseable {
     private final DoubleConsumer previewPosition;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(
             task -> Thread.ofPlatform().daemon().name("reconstruction-editor").unstarted(task));
+    private final ExecutorService canonicalWorker = Executors.newSingleThreadExecutor(
+            task -> Thread.ofPlatform().daemon().name("reconstruction-replay").unstarted(task));
+    private final ReconstructionReview.LiveReplay canonicalReplay = new ReconstructionReview.LiveReplay();
+    private volatile Thread canonicalThread;
     private final List<ProjectWatcher> watchers = new ArrayList<>();
     private final ReconstructionDraft draft;
     private ReconstructionTransport liveTransport;
@@ -113,11 +117,16 @@ final class ReconstructionEditor implements AutoCloseable {
     private JsonArray liveBase;
     private String liveVoiceJournal;
     private boolean liveSaving;
-    private long liveGeneration;
+    private volatile long liveGeneration;
+    private boolean preparingLive;
+    private LiveCandidate queuedCanonical;
     private LiveRequest queuedLiveEdit;
 
     private record LiveRequest(long generation, long eventNanos, JsonArray entries,
                                ReconstructionTransport.LiveEdit playback, String author) {}
+
+    private record LiveCandidate(LiveRequest request, Revision expected,
+                                 ReconstructionLivePreview.Prepared playback) {}
 
     private record LiveComparison(ReconstructionLivePreview.Prepared current,
                                   ReconstructionLivePreview.Prepared a,
@@ -1891,7 +1900,7 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private ReconstructionTransport.LiveEdit comparisonPlayhead() {
-        if (!editable() || liveSaving || draft.pending()) {
+        if (!editable() || liveSaving || preparingLive || draft.pending()) {
             status.accept("Finish pending changes before comparing");
             return null;
         }
@@ -2067,6 +2076,13 @@ final class ReconstructionEditor implements AutoCloseable {
         });
         if (current.inspection().project() == null || current.inspection().target() != com.opensmpsdeck.project.TargetGame.S3K)
             return;
+        canonicalWorker.execute(() -> {
+            try {
+                canonicalReplay.warm(work);
+            } catch (IOException | IllegalArgumentException ignored) {
+                // Replay validates the inputs again when an edit requests them.
+            }
+        });
         worker.execute(() -> {
             ReconstructionLivePreview prepared = null;
             String problem = null;
@@ -2090,8 +2106,7 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void journalChanged(long eventNanos) {
         endComparison(false);
-        long generation = ++liveGeneration;
-        queuedLiveEdit = null;
+        long generation = supersedeLive();
         if (liveTransport != null && liveTransport.chipPlaying()) {
             var playback = liveTransport.liveEdit();
             if (playback == null) liveTransport.rebuildNeeded("Use an active Chip play range");
@@ -2119,50 +2134,92 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         String author = after.asList().stream().filter(entry -> !before.contains(entry))
                 .map(entry -> text(entry, "author", "external")).distinct().collect(Collectors.joining(", "));
-        queueLive(++liveGeneration, 0, after, edit, author.isEmpty() ? "external" : author);
+        queueLive(supersedeLive(), System.nanoTime(), after, edit, author.isEmpty() ? "external" : author);
+    }
+
+    private long supersedeLive() {
+        long generation = ++liveGeneration;
+        queuedLiveEdit = null;
+        queuedCanonical = null;
+        var replay = canonicalThread;
+        if (replay != null) replay.interrupt();
+        return generation;
     }
 
     private void saveLive() {
-        if (liveSaving || queuedLiveEdit == null || busy || external != null || externalError) return;
+        if (preparingLive || queuedLiveEdit == null || busy || external != null || externalError) return;
         if (live == null && liveUnavailable == null) return;
         var request = queuedLiveEdit;
         queuedLiveEdit = null;
-        liveSaving = true;
+        preparingLive = true;
         var expected = snapshot.revision();
-        boolean voicesChanged = !Objects.equals(liveVoiceJournal, expected.voices());
-        var reconstruction = voicesChanged ? null : live;
+        boolean local = request.author() == null;
+        var entries = local ? forApply(expected.entries(), request.entries()) : expected.entries();
+        var reconstruction = Objects.equals(liveVoiceJournal, expected.voices()) ? live : null;
+        var unavailable = reconstruction == null && live != null ? "Voice assignments changed" : liveUnavailable;
+        worker.execute(() -> {
+            ReconstructionLivePreview.Prepared preview = null;
+            String fallback = unavailable;
+            if (reconstruction != null) {
+                try {
+                    var window = request.playback().window();
+                    var prepared = reconstruction.prepareProvisional(entries, window.start(), window.end(), request.playback().playhead());
+                    prepared.requireCurrent(expected);
+                    preview = prepared;
+                } catch (IOException | IllegalArgumentException failure) {
+                    fallback = describe(failure);
+                }
+            }
+            var prepared = preview;
+            var detail = fallback;
+            Platform.runLater(() -> {
+                preparingLive = false;
+                if (closed) return;
+                if (request.generation() == liveGeneration) {
+                    queuedCanonical = new LiveCandidate(request, expected, prepared);
+                    if (prepared != null) liveTransport.liveAudition(request.playback(), prepared, request.eventNanos());
+                    else liveTransport.liveFallback(detail);
+                    settleLive();
+                }
+                saveLive();
+                updateDraft();
+            });
+        });
+    }
+
+    private void settleLive() {
+        if (liveSaving || queuedCanonical == null || busy || external != null || externalError) return;
+        var candidate = queuedCanonical;
+        queuedCanonical = null;
+        var request = candidate.request();
+        var expected = snapshot.revision();
         boolean local = request.author() == null;
         var entries = local ? forApply(expected.entries(), request.entries()) : expected.entries();
         var built = liveBase;
-        var unavailable = voicesChanged ? "Voice assignments changed" : liveUnavailable;
-        worker.execute(() -> {
+        liveSaving = true;
+        canonicalWorker.execute(() -> {
             Revision written = null;
             ReconstructionLivePreview.Prepared playback = null;
             String problem = null;
             try {
-                var window = request.playback().window();
-                String fallback = unavailable;
-                if (reconstruction != null) {
-                    try {
-                        playback = reconstruction.prepare(entries, window.start(), window.end(), request.playback().playhead());
-                        if (local) written = playback.save(expected);
-                        else playback.requireCurrent(expected);
-                    } catch (ReconstructionLivePreview.RebuildNeeded failure) {
-                        fallback = failure.getMessage();
-                    }
-                }
-                if (playback == null) {
-                    String detail = fallback;
-                    Platform.runLater(() -> {
-                        if (!closed && request.generation() == liveGeneration) liveTransport.liveFallback(detail);
-                    });
-                    var rebuilt = ReconstructionReview.liveRebuild(work, expected, built, entries, local,
+                canonicalThread = Thread.currentThread();
+                if (request.generation() != liveGeneration) throw new java.util.concurrent.CancellationException();
+                var preview = candidate.playback();
+                if (preview != null && !preview.provisional() && expected.equals(candidate.expected())) {
+                    if (local) written = preview.save(expected);
+                    else preview.requireCurrent(expected);
+                    playback = preview;
+                } else {
+                    var rebuilt = canonicalReplay.rebuild(work, expected, built, entries, local,
                             (done, total, message) -> {});
                     playback = rebuilt.playback();
                     if (local) written = rebuilt.revision();
                 }
             } catch (Exception failure) {
                 problem = describe(failure);
+            } finally {
+                canonicalThread = null;
+                Thread.interrupted();
             }
             var revision = written;
             var result = playback;
@@ -2179,8 +2236,10 @@ final class ReconstructionEditor implements AutoCloseable {
                 }
                 if (request.generation() == liveGeneration) {
                     if (detail != null) liveTransport.rebuildNeeded(detail);
-                    else liveTransport.liveSaved(request.playback(), result, request.eventNanos(), externalUnbuilt, request.author());
+                    else liveTransport.liveSaved(request.playback(), result, request.eventNanos(), externalUnbuilt,
+                            request.author(), candidate.playback() != null);
                 }
+                settleLive();
                 saveLive();
                 updateDraft();
                 readExternal();
@@ -2261,8 +2320,8 @@ final class ReconstructionEditor implements AutoCloseable {
         stopPreview.setDisable(!previewPlaying);
         var entries = draft.entries();
         boolean unbuilt = entries.asList().stream().anyMatch(e -> !snapshot.outcomes().containsKey(text(e, "id", "")));
-        apply.setDisable(!editing || liveSaving || !draft.pending() && !unbuilt && !externalUnbuilt);
-        lanePolicies.setDisable(!editing || liveSaving || snapshot.report() == null || draft.pending() || unbuilt || externalUnbuilt);
+        apply.setDisable(!editing || liveSaving || preparingLive || !draft.pending() && !unbuilt && !externalUnbuilt);
+        lanePolicies.setDisable(!editing || liveSaving || preparingLive || snapshot.report() == null || draft.pending() || unbuilt || externalUnbuilt);
         undo.setDisable(!editing || !draft.canUndo(false));
         redo.setDisable(!editing || !draft.canUndo(true));
         cancel.setVisible(busy);
@@ -2419,8 +2478,7 @@ final class ReconstructionEditor implements AutoCloseable {
 
     private void setBusy() {
         endComparison(true);
-        queuedLiveEdit = null;
-        liveGeneration++;
+        supersedeLive();
         busy = true;
         stopAudition();
         synchronized (jobLock) {
@@ -2555,8 +2613,7 @@ final class ReconstructionEditor implements AutoCloseable {
         external = null;
         if (rebuilt) {
             endComparison(false);
-            queuedLiveEdit = null;
-            liveGeneration++;
+            supersedeLive();
             sections = next.inspection().sections().sections();
             refresh.accept(next.inspection());
             prepareLive();
@@ -2663,6 +2720,8 @@ final class ReconstructionEditor implements AutoCloseable {
         synchronized (jobLock) {
             if (running != null && !publishing) running.interrupt();
         }
+        supersedeLive();
+        canonicalWorker.shutdownNow();
         worker.shutdown();
     }
 }

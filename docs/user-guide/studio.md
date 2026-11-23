@@ -384,8 +384,11 @@ the **Song**, **Section** or **Selection** range.
 Drag pitch or length, transpose, draw a supported bend, or change a note's
 velocity, role, lane or voicing. You can also insert, delete, split, merge
 or retrigger attacks and audition chord and layer edits. **Live preview ·
-Saved edits** means Studio saved the change to `edits.json`. **Changes →
-Undo** and **Redo** update playback and the journal.
+Provisional** means Studio is playing the local edit with saved sounds while
+it checks the canonical arrangement. When that result is ready, Chip
+continues at the playhead. **Live preview · Saved edits** means Studio saved
+the checked changes to `edits.json`. **Changes → Undo** and **Redo** use the
+same playback and journal workflow.
 
 An edit ahead of the playhead is heard when playback reaches it. A loop
 plays a passed note on the next pass. If an unlooped short note passes
@@ -393,9 +396,9 @@ while its edit is preparing, Studio can briefly re-cue a pitch, gate or bend
 edit. Studio builds playback checkpoints in the background. Cold seeks
 and edits that invalidate earlier checkpoints can take longer.
 
-**Rebuild needed · Rebuilding in background** means the edit needs a
-canonical replay. Chip continues playing and switches to the compiled
-result when ready. A saved edit from disk is labelled with its author.
+**Rebuild needed · Rebuilding in background** means Studio needs a canonical
+replay to produce the first preview. Chip continues playing and switches to
+the compiled result when ready. A saved edit from disk is labelled with its author.
 Use **Apply & rebuild** to update the arrangement, trace and export files.
 
 While Chip is playing, open **A/B → Compare before last N edits…** to

@@ -143,6 +143,9 @@ snapshots, edit and planning journals, lane affinity and clip anchors.
 Use `--search DIR` or MCP `search` for relocated inputs, and
 `--keep-voicing` or MCP `keepVoicing` when replaying accepted voicing.
 Studio starts builds from Import and resumes them with **Apply** in Analysis.
+While playing Chip, Studio can audition the edit provisionally while the
+canonical stages replay. The checked journal is saved when the replay
+succeeds. Use **Apply & rebuild** to include the edits in exports.
 Use CLI or MCP for manifest replay. [Replay details](../../docs/architecture/reconstruction-stages.md#trace-and-reproducible-inputs)
 
 ## 3. Review the musical evidence

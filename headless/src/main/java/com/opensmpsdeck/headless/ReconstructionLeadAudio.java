@@ -57,8 +57,11 @@ final class ReconstructionLeadAudio {
         private final double rate;
         private final double duration;
 
+        private record Source(Path file, double duration) {}
+
         static Track read(Path wave, double duration) throws IOException {
-            return new Track(readMono(wave, duration));
+            ReconstructionLiveEvidence.track(wave);
+            return ReconstructionLiveEvidence.memo(new Source(wave, duration), () -> new Track(readMono(wave, duration)));
         }
 
         Track(ReferenceAudio audio) {

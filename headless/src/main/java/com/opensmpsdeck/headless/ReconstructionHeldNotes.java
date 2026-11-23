@@ -59,15 +59,24 @@ final class ReconstructionHeldNotes {
             Path path = Path.of(stem);
             if (!durations.containsKey(path)) durations.put(path, ReferenceAudio.durationMicros(path) / 1e6);
             if (tail + .1 >= durations.get(path)) continue;
-            double initial = pitchDb(path, fft, early, note);
-            double middle = pitchDb(path, fft, (early + tail) / 2, note);
-            double ending = pitchDb(path, fft, tail, note);
-            double decay = ending - Math.max(initial, middle);
-            if (Math.min(middle, ending) >= MIN_SOURCE_DB && decay >= -MAX_SOURCE_DECAY_DB
-                    && initial >= MIN_SOURCE_DB)
-                result.put(note.id(), new Hold(tail, ending, decay));
+            ReconstructionLiveEvidence.track(path);
+            var hold = ReconstructionLiveEvidence.gate(new HoldGate(path, note.pitch(), early, tail),
+                    () -> measureGate(path, fft, note, early, tail));
+            hold.ifPresent(value -> result.put(note.id(), value));
         }
         return result;
+    }
+
+    private record HoldGate(Path file, int pitch, double early, double tail) {}
+
+    private static java.util.Optional<Hold> measureGate(Path path, LeadEffectMatcher.Spectrum fft,
+            ReconstructionStages.Note note, double early, double tail) throws IOException {
+        double initial = pitchDb(path, fft, early, note);
+        double middle = pitchDb(path, fft, (early + tail) / 2, note);
+        double ending = pitchDb(path, fft, tail, note);
+        double decay = ending - Math.max(initial, middle);
+        return Math.min(middle, ending) >= MIN_SOURCE_DB && decay >= -MAX_SOURCE_DECAY_DB && initial >= MIN_SOURCE_DB
+                ? java.util.Optional.of(new Hold(tail, ending, decay)) : java.util.Optional.empty();
     }
 
     private static double early(ReconstructionStages.Note note) {

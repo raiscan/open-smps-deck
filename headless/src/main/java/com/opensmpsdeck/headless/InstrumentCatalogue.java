@@ -285,7 +285,14 @@ public final class InstrumentCatalogue {
                 .filter(asset -> selected.contains(asset.id())).toList(), filtered, issues()), target);
     }
 
+    private record ReconstructionIndex(Path path, TargetGame target) {}
+
     static InstrumentCatalogue openReconstruction(Path path, TargetGame target) throws IOException {
+        ReconstructionLiveEvidence.track(path);
+        return ReconstructionLiveEvidence.memo(new ReconstructionIndex(path, target), () -> readReconstruction(path, target));
+    }
+
+    private static InstrumentCatalogue readReconstruction(Path path, TargetGame target) throws IOException {
         var catalogue = open(path, target);
         var variants = catalogue.variants().stream().filter(variant -> {
             var asset = catalogue.asset(variant.assetId());
