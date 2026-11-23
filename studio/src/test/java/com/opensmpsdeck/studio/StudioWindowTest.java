@@ -21,6 +21,7 @@ import javafx.stage.WindowEvent;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import javax.imageio.ImageIO;
+import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -1401,19 +1402,26 @@ class StudioWindowTest {
         track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), start));
         track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), end));
         javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
-        var catalogue = inputs.resolve("index.json");
-        var voice = DemoProject.create().voices().getFirst();
-        var builder = new InstrumentCatalogue.Builder();
-        byte[] bytes = new byte[voice.bytes().size()];
-        for (int i = 0; i < bytes.length; i++) bytes[i] = voice.bytes().get(i).byteValue();
-        var asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), bytes);
-        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), null);
-        builder.build().save(catalogue);
+        var catalogue = writeStockCatalogue(inputs.resolve("index.json"));
         var work = folder.resolve("live-assembly");
         com.opensmpsdeck.headless.ReconstructionStages.runForReview("run", new String[]{
                 midi.toString(), inputs.resolve("mix.wav").toString(), catalogue.toString(), work.toString(),
                 "--seconds", Integer.toString(seconds)}, (done, total, message) -> {});
         return work;
+    }
+
+    private static Path writeStockCatalogue(Path catalogue) throws IOException {
+        var voice = DemoProject.create().voices().getFirst();
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] bytes = new byte[voice.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = voice.bytes().get(i).byteValue();
+        var asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), bytes);
+        // Model the song occurrence required for automatic stock selection using synthetic bytes.
+        var occurrence = new InstrumentCatalogue.Occurrence("fixture", TargetGame.S3K.id(), "test",
+                "Synthetic test song", 1, null, null, null, false);
+        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), occurrence);
+        builder.build().save(catalogue);
+        return catalogue;
     }
 
     private static byte[] pcmBytes(short[] samples) {
@@ -1689,6 +1697,12 @@ class StudioWindowTest {
             var first = piano.sequence.notes().getFirst();
             double x = PianoRollView.KEYBOARD + first.tick() * piano.scale - piano.offset + 2;
             double y = PianoRollView.HEADER + (piano.topPitch - first.pitch()) * PianoRollView.NOTE_ROW + 2;
+            double viewportHeight = piano.scroll.getViewportBounds().getHeight();
+            double scrollable = piano.contentHeight - viewportHeight;
+            if (scrollable > 0) {
+                piano.scroll.setVvalue(Math.clamp((y - viewportHeight / 2) / scrollable, 0, 1));
+                window.scene().getRoot().layout();
+            }
             var box = new javafx.geometry.Rectangle2D(x, y, 10, 7);
             assertEquals(List.of(first), piano.lassoNotes(box));
             var toggle = (ToggleButton) window.scene().lookup("#screenshot-lasso");
@@ -2038,7 +2052,10 @@ class StudioWindowTest {
             ((ToggleButton) scene.lookup("#reconstruction-" + mode + "-view")).fire();
             zoom.setValue(0);
             scene.getRoot().layout();
-            double x = 76 + (plot.getWidth() - 76) * .72;
+            double plotWidth = plot.getWidth() - 76;
+            double x = 76 + plotWidth * .72;
+            // ScrollPane snaps its content to pixels. The fixture spans two seconds at fit.
+            double onePixel = 2 / Math.max(100, plotWidth);
             var pointer = plot.localToScene(x, 12);
             mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
             double anchor = seeks.getLast();
@@ -2052,11 +2069,13 @@ class StudioWindowTest {
             x = plot.sceneToLocal(pointer).getX();
             mouse(plot, MouseEvent.MOUSE_RELEASED, x, 12, false);
             assertEquals(2, seeks.size());
-            assertEquals(anchor, seeks.getLast(), .005, mode + " at stage width " + width);
+            assertEquals(anchor, seeks.getLast(), onePixel, mode + " at stage width " + width);
 
             ((Button) scene.lookup("#reconstruction-fit-pitch")).fire();
             double fraction = .25;
-            double y = 85 + (plot.getHeight() - 105) * fraction; // Ruler, sections and empty lane header.
+            // The empty chip-lane header takes 20 pixels in Detail only.
+            double pitchHeight = plot.getHeight() - 85 - (view.rolesView() ? 0 : 20);
+            double y = 85 + pitchHeight * fraction;
             double fittedSpan = 128 - pitch.getMax();
             double startPitch = 127.5 - pitch.getValue() - fraction * fittedSpan;
             scrollPlot(plot, x, y, 4, true);
@@ -2375,7 +2394,7 @@ class StudioWindowTest {
         track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), 1440));
         var midiFile = input.resolve("fixture.mid");
         javax.sound.midi.MidiSystem.write(midi, 0, midiFile.toFile());
-        var catalogue = Path.of("src/test/fixtures/design-capture/catalogue.json").toAbsolutePath();
+        var catalogue = writeStockCatalogue(input.resolve("index.json"));
         var work = folder.resolve("built");
         var log = new java.io.ByteArrayOutputStream();
         try (var output = new java.io.PrintStream(log)) {
@@ -2521,7 +2540,9 @@ class StudioWindowTest {
                 return pixel.getRed() > .35; // The tone ridge is visible before the note starts.
             });
             fx(() -> {
-                mouse(plot, MouseEvent.MOUSE_RELEASED, plot.getWidth() / 2, noteY, false);
+                var view = (ReconstructionCanvas) plot.getParent();
+                var note = view.noteContextPoint("test-note").orElseThrow();
+                mouse(plot, MouseEvent.MOUSE_RELEASED, note.getX(), note.getY(), false);
                 var evidence = (TitledPane) pane.stage().getScene().lookup("#reconstruction-note-evidence");
                 evidence.setExpanded(true);
                 pane.stage().getScene().getRoot().applyCss();
