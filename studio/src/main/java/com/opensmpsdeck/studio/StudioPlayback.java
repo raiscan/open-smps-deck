@@ -15,6 +15,8 @@ import javax.sound.sampled.LineUnavailableException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -28,6 +30,7 @@ import java.util.function.Supplier;
 final class StudioPlayback implements AutoCloseable {
     private static final int RATE = S3kRenderer.SAMPLE_RATE;
     private static final int BLOCK = S3kRenderer.STEREO_FRAMES_PER_PRESENTATION;
+    private static final int SETTLED_HISTORY_LIMIT = 6;
 
     record Reference(AudioReference source, ReferenceWave wave) {
         long endFrame() { return frame(source.offsetSeconds() + wave.duration()); }
@@ -67,7 +70,7 @@ final class StudioPlayback implements AutoCloseable {
         final StudioProject project;
         final Future<CheckpointPlayback> built;
         volatile CachedRevision latest;
-        volatile CachedRevision canonical;
+        volatile List<CachedRevision> settled = List.of();
         Future<?> baselineWarmup;
         Future<?> editedWarmup;
 
@@ -86,6 +89,16 @@ final class StudioPlayback implements AutoCloseable {
                 revision.audio().warmThrough(presentationCount(project));
                 return null;
             });
+        }
+
+        synchronized void rememberSettled(CachedRevision revision) {
+            var recent = new ArrayList<CachedRevision>(SETTLED_HISTORY_LIMIT);
+            recent.add(revision);
+            for (var prior : settled) {
+                if (recent.size() == SETTLED_HISTORY_LIMIT) break;
+                if (prior.audio() != revision.audio()) recent.add(prior);
+            }
+            settled = List.copyOf(recent);
         }
 
         synchronized void cancelEditedWarmup() {
@@ -160,7 +173,9 @@ final class StudioPlayback implements AutoCloseable {
             if (pending != null) {
                 deferredSettlement = () -> settle(edit, callback, eventNanos);
             } else if (active.edit() != null && edit.sameAudio(active.edit())) {
-                song.canonical = active;
+                var canonical = new CachedRevision(edit, active.audio());
+                song.rememberSettled(canonical);
+                if (active.edit().provisional()) song.warm(canonical);
                 complete.run();
             } else {
                 replace(edit, 0, 0, true, false, complete);
@@ -178,14 +193,10 @@ final class StudioPlayback implements AutoCloseable {
             var previous = active;
             var original = built;
             var cached = song.latest;
-            var canonical = song.canonical;
+            var recent = song.settled;
             pending = edits.submit(() -> {
                 var changes = edit.changedGates(previous.edit());
                 int cutoff = changes.isEmpty() ? Integer.MAX_VALUE : presentation(frame(changes.getFirst().start()));
-                var audio = edit.isBuilt() ? original
-                        : cached != null && cached.edit() == edit ? cached
-                        : alternate != null && alternate.edit() == edit ? alternate
-                        : new CachedRevision(edit, previous.audio().revise(edit.playback(), cutoff));
 
                 long replayAt = -1, replayEnd = -1;
                 if (!looped && eventNanos != 0) {
@@ -200,13 +211,23 @@ final class StudioPlayback implements AutoCloseable {
                 }
                 long target = replayAt >= 0 ? Math.min(replayAt, nextFrame) : nextFrame;
                 int at = Math.min(presentation(target), S3kRenderer.MAX_PRESENTATIONS);
-                // Provisional audio can invalidate an otherwise reusable canonical prefix.
-                // Keep the most recent settled grid available during the next handoff.
-                if (settled != null && canonical != null && canonical != previous && audio != original
-                        && canonical.audio().checkpointAtOrBefore(at) > audio.audio().checkpointAtOrBefore(at)) {
-                    var revised = canonical.audio().revise(edit.playback(), Integer.MAX_VALUE);
-                    if (revised.checkpointAtOrBefore(at) > audio.audio().checkpointAtOrBefore(at))
-                        audio = new CachedRevision(edit, revised);
+                var audio = edit.isBuilt() ? original
+                        : cached != null && cached.edit() == edit ? cached
+                        : alternate != null && alternate.edit() == edit ? alternate
+                        : new CachedRevision(edit, previous.audio().revise(edit.playback(),
+                                settled == null ? cutoff : Math.min(cutoff, at + 1)));
+                if (settled != null && audio != original) {
+                    // Different edit stages can agree with different earlier revisions.
+                    var sources = new ArrayList<>(recent);
+                    sources.add(original);
+                    for (var source : sources) {
+                        if (source.audio() == previous.audio()
+                                || source.audio().checkpointAtOrBefore(at) <= audio.audio().checkpointAtOrBefore(at))
+                            continue;
+                        var revised = source.audio().revise(edit.playback(), at + 1);
+                        if (revised.checkpointAtOrBefore(at) > audio.audio().checkpointAtOrBefore(at))
+                            audio = new CachedRevision(edit, revised);
+                    }
                 }
                 try (var reader = audio.audio().reader()) {
                     return new Handoff(audio, reader.bookmark(at), eventNanos, replayAt, replayEnd, settled);
@@ -274,8 +295,8 @@ final class StudioPlayback implements AutoCloseable {
                 pending = null;
                 active = handoff.revision();
                 song.latest = active;
-                if (handoff.settled() != null) song.canonical = active;
-                if (active != built) song.warm(active);
+                if (handoff.settled() != null) song.rememberSettled(active);
+                if (active != built && !active.edit().provisional()) song.warm(active);
                 if (deferredSettlement != null) {
                     var settle = deferredSettlement;
                     deferredSettlement = null;

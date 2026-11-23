@@ -25,6 +25,11 @@ final class ReconstructionLiveEvidence {
     private final LinkedHashMap<Object, Object> gates = new LinkedHashMap<>(256, .75f, true);
     private final Map<Path, Stamp> stamps = new HashMap<>();
     private final LinkedHashMap<Object, Object> values = new LinkedHashMap<>(32, .75f, true);
+    private final LinkedHashMap<Object, Object> artifacts = new LinkedHashMap<>(16, .75f, true);
+    private final Map<Path, Copy> copies = new HashMap<>();
+
+    private record Copy(Path source, Stamp version, Stamp snapshot) {}
+    private record ArtifactKey(Path path, Stamp version, Class<?> type) {}
 
     synchronized <T> T run(Read<T> action) throws IOException {
         if (!current()) {
@@ -36,7 +41,35 @@ final class ReconstructionLiveEvidence {
         try {
             return action.read();
         } finally {
+            copies.clear();
             CURRENT.remove();
+        }
+    }
+
+    /** Bind both replay copies to the precise source version that was copied. */
+    static void copy(Path source, Path before, Path after) throws IOException {
+        var cache = CURRENT.get();
+        var version = cache == null ? null : Stamp.read(source);
+        Files.copy(source, before);
+        Files.copy(before, after);
+        if (cache != null && version.equals(Stamp.read(source))) {
+            cache.copies.put(before, new Copy(source, version, Stamp.read(before)));
+            cache.copies.put(after, new Copy(source, version, Stamp.read(after)));
+        }
+    }
+
+    static <T> T artifact(Path file, Class<T> type, Read<T> read) throws IOException {
+        var cache = CURRENT.get();
+        var copy = cache == null ? null : cache.copies.get(file);
+        if (copy == null || !copy.snapshot().equals(Stamp.read(file))) return read.read();
+        return memo(cache.artifacts, 16, new ArtifactKey(copy.source(), copy.version(), type), read);
+    }
+
+    static void warmArtifact(Path file) throws IOException {
+        var cache = CURRENT.get();
+        if (cache != null && Files.isRegularFile(file)) {
+            var version = Stamp.read(file);
+            cache.copies.put(file, new Copy(file, version, version));
         }
     }
 

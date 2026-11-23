@@ -36,7 +36,9 @@ that the two banks execute identically. If they differ, playback continues from
 the current playhead with the canonical chip and driver state.
 
 The canonical worker retains source transcription, stem spectra and exact
-gate measurements for unchanged source files. Changes to the note pitch or
+gate measurements, voice-identification probes and drum attack levels for
+unchanged source files. Replay also reuses decoded inputs from unchanged
+built artifacts. Changes to the note pitch or
 gate invalidate the relevant measurements. Replay uses the same role,
 allocation, compatible voicing and bank size decisions as **Apply & rebuild**.
 It skips the comparison with an unseeded allocation and the published WAV and
@@ -84,9 +86,9 @@ restores it on the open line and switches at the next unqueued block. It
 caps queued audio at two presentations on the editable transport. Newer
 edits supersede pending work, and each reader belongs to its own worker.
 The first pass builds the checkpoint grid in the background. The built,
-latest settled and current provisional revisions can retain a grid with
-up to 60 checkpoints per minute. Canonical handoff can reuse the last
-settled grid when its verified prefix reaches farther. Studio retains a
+active and six most recent settled revisions can retain grids with up to
+60 checkpoints per minute. Canonical handoff uses the longest verified
+prefix among those grids. Studio retains a
 transient handoff snapshot during a swap. Editable playback renders PCM
 in presentation-sized blocks.
 

@@ -28,7 +28,7 @@ final class ReconstructionArtifacts {
     private ReconstructionArtifacts() {}
 
     static <T> T read(Path file, Class<T> type) throws IOException {
-        return decode(file, type, readTree(file));
+        return ReconstructionLiveEvidence.artifact(file, type, () -> decode(file, type, readTree(file)));
     }
 
     static JsonElement readTree(Path file) throws IOException {

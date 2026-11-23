@@ -353,8 +353,7 @@ public final class ReconstructionReview {
             for (String file : paths) {
                 var source = work.resolve(file);
                 if (Files.isRegularFile(source, NOFOLLOW_LINKS)) {
-                    Files.copy(source, before.resolve(file));
-                    Files.copy(before.resolve(file), after.resolve(file));
+                    ReconstructionLiveEvidence.copy(source, before.resolve(file), after.resolve(file));
                 }
                 checkCancelled();
             }

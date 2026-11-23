@@ -131,6 +131,7 @@ final class ReconstructionCymbals {
                                     Map<ReconstructionVoices.Key, Double> result, boolean fit) throws IOException {
         var isolated = new HashMap<ReconstructionVoices.Key, List<Double>>();
         hits.sort(Comparator.comparingDouble(ReconstructionStages.Note::start));
+        ReconstructionLiveEvidence.track(stem);
         double duration = ReferenceAudio.durationMicros(stem) / 1e6;
         for (int i = 0; i < hits.size(); i++) {
             var hit = hits.get(i);
@@ -149,14 +150,20 @@ final class ReconstructionCymbals {
             for (int i = 0; i < count; i++) {
                 // Sample across the part so repeated fills at the start don't set the song-wide gain.
                 double t = onsets.get(i * (onsets.size() - 1) / (count - 1));
-                var audio = ReferenceAudio.read(stem, t - .060, .060 + ATTACK_WINDOW);
-                double attack = bandPower(audio.samples(), audio.sampleRate(), .060 - ATTACK_LEAD, ATTACK_WINDOW, hat);
-                double bleed = bandPower(audio.samples(), audio.sampleRate(), .005, .040, hat);
-                levels[i] = Math.sqrt(Math.max(0, attack - bleed)) * (hat ? HAT_PRESENCE_GAIN : 1);
+                levels[i] = ReconstructionLiveEvidence.gate(new LevelKey(stem, t, hat), () -> level(stem, t, hat));
             }
             java.util.Arrays.sort(levels);
             result.put(entry.getKey(), levels[count / 2]);
         }
+    }
+
+    private record LevelKey(Path stem, double onset, boolean hat) {}
+
+    private static double level(Path stem, double onset, boolean hat) throws IOException {
+        var audio = ReferenceAudio.read(stem, onset - .060, .060 + ATTACK_WINDOW);
+        double attack = bandPower(audio.samples(), audio.sampleRate(), .060 - ATTACK_LEAD, ATTACK_WINDOW, hat);
+        double bleed = bandPower(audio.samples(), audio.sampleRate(), .005, .040, hat);
+        return Math.sqrt(Math.max(0, attack - bleed)) * (hat ? HAT_PRESENCE_GAIN : 1);
     }
 
     private static double bandPower(float[] samples, int rate, double from, double length, boolean hat) {
