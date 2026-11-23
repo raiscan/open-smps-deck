@@ -281,8 +281,9 @@ final class ReconstructionVoiceStage {
         }
         fit.patches(comparisons, incumbents);
         if (chosen == null) {
-            // The decision above stands unless a challenger's attacks are closer
-            // to the stem. It then has to win the joint fit like any candidate.
+            // The decision above stands unless a challenger's attacks are closer to
+            // the stem and it then improves the joint fit by the incumbent margin.
+            var holders = new ArrayList<>(incumbents);
             boolean admitted = false;
             for (int i = 0; i < models.size(); i++) {
                 var model = models.get(i);
@@ -296,10 +297,11 @@ final class ReconstructionVoiceStage {
                 candidates.get(i).add(patchTrial(windows, references, source, catalogue, model, winner,
                         priors.get(model.id()), stockSustain.get(model.id())));
                 models.set(i, model.withPatch(winner));
+                holders.set(i, held);
                 admitted = true;
             }
             if (admitted) fit.patches(previous == null ? candidates : candidates.stream().map(trials -> trials.stream()
-                    .sorted(Comparator.comparing(VoiceFit.Candidate::id)).toList()).toList(), incumbents);
+                    .sorted(Comparator.comparing(VoiceFit.Candidate::id)).toList()).toList(), holders);
         }
         var patchIds = new ArrayList<String>();
         var patchScores = new ArrayList<List<ScoredPatch>>();

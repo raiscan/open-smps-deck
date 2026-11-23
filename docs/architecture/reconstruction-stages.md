@@ -1427,7 +1427,8 @@ estimate, one step to its other side, and at full volume wherever the onset
 does not rise 6 dB over the 20 ms before it or follow the part's own
 previous note. With fewer than three such blocks the selected patch stays.
 A winner then joins the joint fit and replaces the selection only if it
-improves both the training and the held-out loss. If none of the candidates explains enough of the
+improves both the training and the held-out loss by 0.5%, the margin a
+saved patch has on a refit. If none of the candidates explains enough of the
 line’s attack spectrum, the fit uses the whole part as evidence. The same
 profile plays the backing voices.
 Where stems are supplied, the stem objective compares the fit notes against
