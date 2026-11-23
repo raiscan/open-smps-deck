@@ -112,6 +112,12 @@ def fixtures(jar, root):
     cli("demo-project", demo)
     cli("render-project", demo, mix, "--frames", 120)
     cli("catalog", "scan", catalogue, "--rips", rips)
+    # The synthetic rip stands in for an indexed retail bank in reconstruction.
+    index = json.loads(catalogue.read_text())
+    for variant in index["variants"]:
+        for occurrence in variant["occurrences"]:
+            occurrence["songId"] = 1
+    catalogue.write_text(json.dumps(index))
     midi = root / "fixture.mid"
     # Format 0, 96 PPQ, 120 BPM default, four distinct notes.
     track = b"".join(bytes([0, 0x90, pitch, 96, 96, 0x80, pitch, 0])
@@ -284,7 +290,7 @@ for stem in stems:
         assert Path(exported["output"]).read_bytes() == Path(files["render.wav"]).read_bytes()
         portable = rpc.call("project_export", workDir=work, output="portable.smps.zip",
                             format="portable", noSource=True, packageId="smoke")
-        assert portable["warnings"] == []
+        assert portable["warnings"] == ["ROM_DERIVED_DATA"]
         inspected = rpc.call("package_inspect", package=portable["output"])
         assert inspected["schemaVersion"] == 4 and inspected["package"]["id"] == "smoke"
         assert inspected["source"] is None

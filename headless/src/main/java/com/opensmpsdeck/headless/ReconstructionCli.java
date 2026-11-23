@@ -276,7 +276,7 @@ final class ReconstructionCli {
         var prepared = new S3kReconstruction.Score(score.parts(),
                 transcription.notes().stream().map(ReconstructionStages.Note::midi).toList(), transcription.reductions());
         if (prepared.notes().isEmpty()) throw new IllegalArgumentException("No playable MIDI notes in the requested interval");
-        InstrumentCatalogue catalogue = InstrumentCatalogue.open(index, options.target());
+        InstrumentCatalogue catalogue = InstrumentCatalogue.openReconstruction(index, options.target());
         var forCatalogue = prepared;
         if (options.stockDrums()) {
             var drumParts = score.parts().stream().filter(MidiScore.Part::drums).map(MidiScore.Part::id).toList();
@@ -312,7 +312,7 @@ final class ReconstructionCli {
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
             java.util.Set<String> targets, boolean refitLevels, ReconstructionAllocation.Result previousAllocation, String variant)
             throws IOException {
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var sourcePlacement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), ReconstructionTimeMap.of(score));
         var allocated = ReconstructionVoicing.byLane(allocation);
         for (String target : targets)
@@ -352,7 +352,7 @@ final class ReconstructionCli {
     static ReconstructionVoicing.Result keepVoicing(ReconstructionStages.Score score,
             ReconstructionAllocation.Result allocation, ReconstructionVoicing.Result previous,
             java.util.function.Consumer<String> report) throws IOException {
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var timeline = ReconstructionTimeMap.of(score);
         var allocated = ReconstructionVoicing.byLane(allocation);
         var targets = ReconstructionVoicing.lanesNeedingFit(previous, allocated);
@@ -400,7 +400,7 @@ final class ReconstructionCli {
         Path midi = inputs.midi() == null ? null : Path.of(inputs.midi()), reference = Path.of(inputs.wav()), index = Path.of(inputs.catalogue());
         var options = inputs.options(score.durationUs());
         var timeline = ReconstructionTimeMap.of(score);
-        var catalogue = InstrumentCatalogue.open(index, options.target());
+        var catalogue = InstrumentCatalogue.openReconstruction(index, options.target());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, intents, outcomes, policyDecisions, null);
         var matched = assembly.matched();
         var instruments = voicing.sourceInstruments();
@@ -595,7 +595,7 @@ final class ReconstructionCli {
         var savedGains = report.has("sectionGains") ? List.of(json.fromJson(report.get("sectionGains"),
                 ReconstructionSectionLevels.Gain[].class)) : List.<ReconstructionSectionLevels.Gain>of();
         var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var assembly = prepareAssembly(work, score, structure, allocation, voice, catalogue,
                 ReconstructionEdits.read(work).accepted(), new ArrayList<>(), false, savedGains);
         boolean copies = !report.has("echoBankLimit") || !report.get("echoBankLimit").getAsBoolean();
@@ -634,7 +634,7 @@ final class ReconstructionCli {
         var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
         if (assignments != null)
             voicing = keepVoicing(score, allocation, voicing, ignored -> {}).withAssignments(assignments);
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var assembly = prepareAssembly(work, score, structure, allocation, voicing, catalogue, edits, outcomes, true, List.of());
         var arrangement = assembly.arrangement().arrange(Map.of(), true, true, -1, 0);
         for (var layer : arrangement.layers()) layer.report(outcomes);
@@ -716,25 +716,9 @@ final class ReconstructionCli {
                 var choice = ReconstructionVoiceStage.choice(catalogue, fm ? profile.variantId() : sound.psgVariantId(),
                         null, profile.patchReason(), fm ? profile.shortlist() : List.of());
                 choices.put(key, choice);
-                if (fm) {
-                    var asset = catalogue.asset(choice.assetId());
-                    var articulation = sound.settings(lane, true).articulation();
-                    String emitted = ReconstructionVoicing.patchId(asset, ReconstructionVoicing.patchBytes(asset, articulation));
-                    evidence.add(new MatchEvidence(kind, id, key, new ReconstructionVoices.Choice(emitted,
-                            choice.variantId(), choice.name(), null, choice.status(), choice.probes(), choice.shortlist())));
-                } else {
-                    evidence.add(new MatchEvidence(kind, id, key, choice.report()));
-                }
+                evidence.add(new MatchEvidence(kind, id, key, choice.report()));
             }
-            if (lane.variantId() != null && lane.articulation().minimumReleaseRate() > 0) {
-                var asset = catalogue.match(lane.variantId()).asset();
-                String emitted = ReconstructionVoicing.patchId(asset, ReconstructionVoicing.patchBytes(asset, lane.articulation()));
-                choices.forEach((key, choice) -> evidence.add(new MatchEvidence(kind, id, key,
-                        new ReconstructionVoices.Choice(emitted, choice.variantId(), choice.name(), null,
-                                choice.status(), choice.probes(), choice.shortlist()))));
-            } else {
-                recordMatches(evidence, id, kind, laneChoices);
-            }
+            recordMatches(evidence, id, kind, laneChoices);
         });
         return new Matched(result, evidence, List.of());
     }

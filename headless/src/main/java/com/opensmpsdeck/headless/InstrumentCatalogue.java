@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 import com.opensmpsdeck.project.AssetOrigin;
+import com.opensmpsdeck.project.Envelope;
 import com.opensmpsdeck.project.CommandEvent;
 import com.opensmpsdeck.project.NoteEvent;
 import com.opensmpsdeck.project.StockRef;
@@ -284,6 +285,74 @@ public final class InstrumentCatalogue {
                 .filter(asset -> selected.contains(asset.id())).toList(), filtered, issues()), target);
     }
 
+    static InstrumentCatalogue openReconstruction(Path path, TargetGame target) throws IOException {
+        var catalogue = open(path, target);
+        var variants = catalogue.variants().stream().filter(variant -> {
+            var asset = catalogue.asset(variant.assetId());
+            return switch (asset.kind()) {
+                case PSG_VOLUME -> S3kReconstruction.safePsg(asset.bytes(), target)
+                        && catalogue.origin(asset, target) != null;
+                case FM_VOICE, MODULATION -> catalogue.origin(asset, target) != null;
+                default -> true;
+            };
+        }).toList();
+        if (variants.size() == catalogue.variants().size()) return catalogue;
+        // Also remove the unavailable instrument payloads from asset-ID lookups.
+        var rejected = catalogue.variants().stream().map(Variant::assetId)
+                .collect(java.util.stream.Collectors.toCollection(java.util.HashSet::new));
+        for (var variant : variants) {
+            rejected.remove(variant.assetId());
+            rejected.remove(variant.recipe().volumeEnvelope());
+            rejected.remove(variant.recipe().modulationEnvelope());
+            for (var command : variant.recipe().commands()) rejected.remove(command.assetId());
+        }
+        return new InstrumentCatalogue(new Index(FORMAT_VERSION, catalogue.indexedSongs(),
+                catalogue.assets().stream().filter(asset -> !rejected.contains(asset.id())).toList(),
+                variants, catalogue.issues()), target);
+    }
+
+    private record ContourKey(TargetGame target, List<Integer> contour) {}
+    private final Map<ContourKey, java.util.Optional<Envelope>> stockContours =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    Envelope stockContour(TargetGame target, Envelope shape) {
+        var key = new ContourKey(target, shape.bytes());
+        return stockContours.computeIfAbsent(key, ignored -> {
+            var desired = contour(shape.bytes(), false);
+            return variants().stream().filter(variant -> variant.target() == target)
+                    .map(variant -> asset(variant.assetId())).distinct()
+                    .filter(asset -> asset.kind() == Kind.PSG_VOLUME && S3kReconstruction.safePsg(asset.bytes(), target))
+                    .filter(asset -> origin(asset, target) != null)
+                    .min(Comparator.comparingDouble((Asset asset) -> {
+                        var levels = contour(StockAssets.unsigned(asset.bytes()), target != TargetGame.S3K);
+                        double error = 0;
+                        for (int i = 0; i < desired.length; i++) error += Math.pow(desired[i] - levels[i], 2);
+                        return error;
+                    }).thenComparing(Asset::id))
+                    .map(asset -> new Envelope(asset.id(), asset.name(), Envelope.PSG_VOLUME,
+                            StockAssets.unsigned(asset.bytes()), origin(asset, target)));
+        }).orElse(null);
+    }
+
+    private static double[] contour(List<Integer> program, boolean classic) {
+        double[] levels = new double[16];
+        int cursor = 0, attenuation = 0;
+        for (int i = 0; i < levels.length; i++) {
+            if (cursor < program.size()) {
+                int value = program.get(cursor);
+                if (value == 0x80 && !classic && cursor > 0) value = program.get(cursor = 0);
+                if (value < 0x80) {
+                    attenuation = value;
+                    cursor++;
+                } else if (value == 0x83) {
+                    attenuation = 15;
+                }
+            }
+            levels[i] = attenuation >= 15 ? 0 : Math.pow(10, -attenuation / 10.0);
+        }
+        return levels;
+    }
+
     public List<Asset> assets() { return index.assets(); }
     public List<Variant> variants() { return index.variants(); }
     public List<Issue> issues() { return index.issues(); }
@@ -443,7 +512,7 @@ public final class InstrumentCatalogue {
         };
     }
 
-    private static String assetId(Kind kind, byte[] bytes) {
+    static String assetId(Kind kind, byte[] bytes) {
         return kind.name().toLowerCase(Locale.ROOT).replace('_', '-') + "-" + digest(bytes);
     }
 

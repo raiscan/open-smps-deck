@@ -49,12 +49,12 @@ class ReconstructionDrumsTest {
         byte[] raw = {0x40, (byte) 0x80};
         var mask = new S3kRenderer.ChannelMask(0x3f, 0x7);
         assertFalse(noiseIsSilent(List.of(0x40, 0x80), mask), "the fixture must reproduce the leakage");
-        assertTrue(noiseIsSilent(S3kReconstruction.psgAttenuation(raw), mask));
+        assertFalse(S3kReconstruction.safePsg(raw, TargetGame.S3K));
     }
 
-    @Test void attenuationLimitPreservesLoopOffsetAndMultiplierOperand() {
-        assertEquals(List.of(15, 0x82, 31, 0x84, 64, 15, 0x80),
-                S3kReconstruction.psgAttenuation(new byte[] {64, (byte) 0x82, 31, (byte) 0x84, 64, 31, (byte) 0x80}));
+    @Test void stockPsgSelectionRejectsUnsupportedControls() {
+        assertFalse(S3kReconstruction.safePsg(new byte[]{0, (byte) 0x82, 0}, TargetGame.S3K));
+        assertTrue(S3kReconstruction.safePsg(new byte[]{0, 11, (byte) 0x83}, TargetGame.S3K));
     }
 
     @Test void stagedRunUsesTheFittedRateOrAnEditableStemSample() throws Exception {
@@ -283,12 +283,12 @@ class ReconstructionDrumsTest {
         builder.variant(asset, "Kick", new InstrumentCatalogue.Recipe(12, null, 127, 60,
                 null, null, List.of(), List.of()), null);
         var env = builder.asset(InstrumentCatalogue.Kind.PSG_VOLUME, "Test envelope", new byte[]{0, (byte) 0x80});
-        builder.variant(env, "Test envelope", InstrumentCatalogue.Recipe.plain(), null);
+        builder.variant(env, "Test envelope", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         var voice = DemoProject.create().voices().getFirst();
         var patch = new byte[25];
         for (int i = 0; i < patch.length; i++) patch[i] = voice.bytes().get(i).byteValue();
         var fm = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Tone", patch);
-        builder.variant(fm, "Tone", InstrumentCatalogue.Recipe.plain(), null);
+        builder.variant(fm, "Tone", InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         Path index = directory.resolve("catalogue.json");
         builder.build().save(index);
 
@@ -334,7 +334,7 @@ class ReconstructionDrumsTest {
         var initialProject = ProjectFiles.load(work.resolve("arrangement.smps.json")).project();
         var automatic = initialProject.sequences().stream().filter(source -> source.id().startsWith("PSG3"))
                 .findFirst().orElseThrow();
-        assertEquals(ReconstructionCymbals.envelope(42).id(), automatic.psgEnvelopeId());
+        assertEquals(env, automatic.psgEnvelopeId());
         assertEquals(231, automatic.commands().getFirst().arguments().getFirst());
         assertEquals(96, automatic.volume());
         assertEquals(List.of(1, 2), automatic.notes().stream().map(NoteEvent::duration).toList());

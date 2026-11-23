@@ -206,7 +206,9 @@ class BenchCliTest {
     @Test void runsExistingReconstructionInProcessAndProducesIdenticalCards() throws Exception {
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(FM_VOICE, "Demo lead", voice(0));
-        String variant = builder.variant(asset, "Demo lead", InstrumentCatalogue.Recipe.plain(), null);
+        String variant = builder.variant(asset, "Demo lead", InstrumentCatalogue.Recipe.plain(),
+                new InstrumentCatalogue.Occurrence("fixture", "s3k", "test", "Synthetic test song",
+                        1, null, null, null, false));
         var catalogue = builder.build();
         Path index = directory.resolve("index.json");
         catalogue.save(index);

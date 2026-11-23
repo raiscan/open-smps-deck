@@ -157,7 +157,25 @@ public final class ProjectEdits {
         return withAssets(p,p.arrangementVersion(),voices,p.envelopes());
     }
     public static StudioProject updateVoice(StudioProject p,Voice voice) {
-        return changeVoice(p,voice.id(),old->voice);
+        return updateVoice(p, voice, "voice-" + java.util.UUID.randomUUID());
+    }
+
+    public static StudioProject updateVoice(StudioProject p, Voice voice, String cloneId) {
+        ProjectFormat.validate(p);
+        return withAssets(p, p.arrangementVersion(), cloneVoice(p, voice, cloneId), p.envelopes());
+    }
+
+    private static List<Voice> cloneVoice(StudioProject p, Voice replacement, String cloneId) {
+        var old = p.voices().stream().filter(v -> v.id().equals(replacement.id())).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown voice '" + replacement.id() + "'"));
+        var voices = new ArrayList<>(p.voices());
+        if (old.origin() != null && old.origin().isStock()) {
+            if (!old.bytes().equals(replacement.bytes()) || !old.name().equals(replacement.name()))
+                voices.add(new Voice(cloneId, replacement.name(), replacement.bytes(), AssetOrigin.cloneOf(old.id())));
+        } else {
+            voices.set(voices.indexOf(old), replacement.withOrigin(old.origin()));
+        }
+        return voices;
     }
     public static StudioProject deleteVoice(StudioProject p,String voiceId) {
         if (p.nativeProgram()!=null) throw new IllegalArgumentException("Native global voice indices must be preserved");
@@ -171,7 +189,20 @@ public final class ProjectEdits {
         return withAssets(p,3,p.voices(),envelopes);
     }
     public static StudioProject updateEnvelope(StudioProject p,Envelope envelope) {
-        return changeEnvelope(p,envelope.id(),old->envelope);
+        return updateEnvelope(p, envelope, "envelope-" + java.util.UUID.randomUUID());
+    }
+
+    public static StudioProject updateEnvelope(StudioProject p, Envelope envelope, String cloneId) {
+        ProjectFormat.validate(p);
+        var old = p.envelopes().stream().filter(e -> e.id().equals(envelope.id())).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown envelope '" + envelope.id() + "'"));
+        if (!old.type().equals(envelope.type())) throw new IllegalArgumentException("Cannot change envelope type");
+        if (old.origin() != null && old.origin().isStock()) {
+            if (old.bytes().equals(envelope.bytes()) && old.name().equals(envelope.name())) return p;
+            return addEnvelope(p, new Envelope(cloneId, envelope.name(), old.type(), envelope.bytes(),
+                    AssetOrigin.cloneOf(old.id())));
+        }
+        return changeEnvelope(p, old.id(), existing -> envelope.withOrigin(existing.origin()));
     }
     public static StudioProject deleteEnvelope(StudioProject p,String envelopeId) {
         ProjectFormat.validate(p);

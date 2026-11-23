@@ -28,8 +28,7 @@ final class LowRegisterFit {
         }
     }
 
-    record Selection(VoicePatchShortlist.RankedPatch patch, Articulation articulation, boolean changedArticulation,
-                     double fit, double check) {}
+    record Selection(VoicePatchShortlist.RankedPatch patch, double fit, double check) {}
 
     private final LowRegisterSpectrum spectra = new LowRegisterSpectrum();
     private final List<Probe> probes = new ArrayList<>();
@@ -81,16 +80,11 @@ final class LowRegisterFit {
         var best = baseline;
         Selection next = null;
         for (var patch : candidates) {
-            var art = current.articulation();
-            var alternatives = art.minimumReleaseRate() >= 9 ? List.of(art)
-                    : List.of(art, new Articulation("fast-release", art.gate(), 9));
-            for (var articulation : alternatives) {
-                if (patch.id().equals(current.variantId()) && articulation.equals(art)) continue;
-                var cost = probe.evaluate(source, catalogue, id, current, patch.id(), articulation);
-                if (cost.fit() + cost.check() < best.fit() + best.check() && cost.improves(baseline)) {
-                    best = cost;
-                    next = new Selection(patch, articulation, !articulation.equals(art), cost.fit(), cost.check());
-                }
+            if (patch.id().equals(current.variantId())) continue;
+            var cost = probe.evaluate(source, catalogue, id, current, patch.id(), current.articulation());
+            if (cost.fit() + cost.check() < best.fit() + best.check() && cost.improves(baseline)) {
+                best = cost;
+                next = new Selection(patch, cost.fit(), cost.check());
             }
         }
         return next;

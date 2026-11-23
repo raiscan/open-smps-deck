@@ -192,6 +192,11 @@ To exclude a sound from automatic reconstruction, set the optional
 `assets` array. The asset ID, native recipes, and manual selection remain
 available. Older catalogues can be used as inputs to the derived index.
 
+Automatic reconstruction uses FM voices and compatible PSG envelopes
+identified as stock for the selected target. Build its catalogue from the
+target ROM with `catalog scan --rom`. Rip assets without retail provenance
+remain available for catalogue audition and manual project editing.
+
 ## Matching a reference sound
 
 An agent can rank catalogue variants against a short WAV excerpt from a stem.

@@ -270,8 +270,10 @@ final class VoiceEditorPane extends BorderPane {
             for (int slot = 0; slot < operators.size(); slot++)
                 for (var field : operators.get(slot).entrySet()) updated = NativeFmVoice.with(updated, slot, field.getKey(), readControl(field.getValue(), field.getKey()));
             Voice replacement = updated;
-            submit(p -> ProjectEdits.updateVoice(guardVoice(p, expected), replacement));
-            if (replacement.equals(findVoice(project, selectedId))) fillParameters(replacement);
+            String cloneId = "voice-" + UUID.randomUUID();
+            submit(p -> ProjectEdits.updateVoice(guardVoice(p, expected), replacement, cloneId));
+            if (findVoice(project, cloneId) != null) selectVoice(cloneId);
+            else if (replacement.equals(findVoice(project, selectedId))) fillParameters(replacement);
             updateState();
         } catch (IllegalArgumentException e) { report(e.getMessage()); }
     }
@@ -282,11 +284,11 @@ final class VoiceEditorPane extends BorderPane {
             Voice expected = rawBaseline;
             guardVoice(project, expected);
             var bytes = parseVoiceBytes(raw.getText());
-            var origin = expected.origin();
-            Voice replacement = new Voice(expected.id(), expected.name(), bytes,
-                    origin == null ? null : origin.withPatch(expected.bytes(), bytes));
-            submit(p -> ProjectEdits.updateVoice(guardVoice(p, expected), replacement));
-            if (replacement.equals(findVoice(project, selectedId))) fillRaw(replacement);
+            Voice replacement = new Voice(expected.id(), expected.name(), bytes, expected.origin());
+            String cloneId = "voice-" + UUID.randomUUID();
+            submit(p -> ProjectEdits.updateVoice(guardVoice(p, expected), replacement, cloneId));
+            if (findVoice(project, cloneId) != null) selectVoice(cloneId);
+            else if (replacement.equals(findVoice(project, selectedId))) fillRaw(replacement);
             updateState();
         } catch (IllegalArgumentException e) { report(e.getMessage()); }
     }
@@ -303,7 +305,10 @@ final class VoiceEditorPane extends BorderPane {
         if (apply == null) return;
         Voice current = findVoice(project, selectedId);
         Voice displayed = current == null ? parameterBaseline : current;
-        selected.setText(displayed == null ? "Choose an FM voice" : displayed.name() + (current == null ? " · removed" : ""));
+        selected.setText(displayed == null ? "Choose an FM voice" : displayed.name()
+                + (displayed.origin() != null && displayed.origin().clonedFrom() != null
+                        ? " · clone of " + displayed.origin().clonedFrom() : "")
+                + (current == null ? " · removed" : ""));
         selected.setTooltip(selectedId == null ? null : new Tooltip("Asset ID " + selectedId));
         selected.setAccessibleHelp(selectedId == null ? null : "Asset ID " + selectedId);
         Set<String> sources = project == null || selectedId == null ? Set.of() : project.sequences().stream()

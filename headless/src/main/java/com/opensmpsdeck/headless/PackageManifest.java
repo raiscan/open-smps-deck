@@ -66,10 +66,14 @@ record PackageManifest(int schemaVersion, String profile, String driver, Metadat
         }
     }
 
-    record Origin(String type, String license, String attribution) {
+    record Origin(String type, String license, String attribution, String clonedFrom) {
+        Origin(String type, String license, String attribution) {
+            this(type, license, attribution, null);
+        }
+
         static Origin of(AssetOrigin origin) {
             return origin == null ? new Origin("original", null, null)
-                    : new Origin(origin.type(), origin.license(), origin.attribution());
+                    : new Origin(origin.type(), origin.license(), origin.attribution(), origin.clonedFrom());
         }
     }
 
@@ -150,6 +154,10 @@ record PackageManifest(int schemaVersion, String profile, String driver, Metadat
                 shape(String.class, origin.get(key), at + ".origin." + key);
                 originKeys.add(key);
             }
+        }
+        if ("custom".equals(origin.get("type").getAsString())) {
+            shape(String.class, origin.get("clonedFrom"), at + ".origin.clonedFrom");
+            originKeys.add("clonedFrom");
         }
         require(origin.keySet().equals(originKeys), at + ".origin contains unknown fields");
         if (asset.has("ref")) {

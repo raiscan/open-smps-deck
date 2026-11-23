@@ -84,7 +84,8 @@ final class ReconstructionPsgEnvelopes {
     static Set<String> classicCatalogueEnvelopes(InstrumentCatalogue catalogue, TargetGame target) {
         if (target == TargetGame.S3K) return Set.of();
         return catalogue.forTarget(target).assets().stream()
-                .filter(asset -> asset.kind() == InstrumentCatalogue.Kind.PSG_VOLUME)
+                .filter(asset -> asset.kind() == InstrumentCatalogue.Kind.PSG_VOLUME
+                        && S3kReconstruction.safePsg(asset.bytes(), target))
                 .map(InstrumentCatalogue.Asset::id).collect(Collectors.toUnmodifiableSet());
     }
 
@@ -140,7 +141,13 @@ final class ReconstructionPsgEnvelopes {
             }
             Integer gate = gates.get(envelope.id());
             if (gate == null) continue;
-            var translation = translation(envelope, gate, classicSources.contains(envelope.id()));
+            if (classicSources.contains(envelope.id())) {
+                var existing = byProgram.computeIfAbsent(envelope.bytes(), ignored -> envelope);
+                ids.put(envelope.id(), existing.id());
+                if (existing == envelope) stockCount++;
+                continue;
+            }
+            var translation = translation(envelope, gate, false);
             var bytes = trimHold(translation.bytes());
             var notes = new ArrayList<>(translation.reasons());
             if (bytes.equals(List.of(0, 0x80))) {

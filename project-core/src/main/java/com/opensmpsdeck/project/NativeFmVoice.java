@@ -40,7 +40,9 @@ public final class NativeFmVoice {
         List<Integer> bytes=new ArrayList<>(voice.bytes());
         bytes.set(at,(bytes.get(at)&~parameter.mask)|(value<<parameter.shift));
         var origin = voice.origin();
-        return new Voice(voice.id(), voice.name(), bytes, origin == null ? null : origin.withPatch(voice.bytes(), bytes));
+        if (origin != null && origin.isStock() && !bytes.equals(voice.bytes()))
+            origin = AssetOrigin.cloneOf(voice.id());
+        return new Voice(voice.id(), voice.name(), bytes, origin);
     }
 
     public static Voice initial(String id,String name) {

@@ -186,7 +186,7 @@ public final class ReconstructionAudition {
         var clips = project.formatVersion() == 6 ? GroupArrangement.flatten(project) : project.clips();
         if (clips.stream().noneMatch(clip -> auditionLane.equals(clip.lane()) && overlaps(clip, start, end)))
             throw new IllegalArgumentException("No " + lane + " clip overlaps the audition range");
-        var catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+        var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var matches = variants.stream().map(catalogue::match).toList();
         var outputs = new ArrayList<Path>();
         for (int i = 0; i < matches.size(); i++) {

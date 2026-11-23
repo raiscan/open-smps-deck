@@ -238,7 +238,7 @@ class SunoImportTest {
         for (int i = 0; i < bytes.length; i++) bytes[i] = patch.bytes().get(i).byteValue();
         var builder = new InstrumentCatalogue.Builder();
         String asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, patch.name(), bytes);
-        builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), null);
+        builder.variant(asset, patch.name(), InstrumentCatalogue.Recipe.plain(), ReconstructionCatalogueFixture.stock());
         Path catalogue = root.resolve("instruments.json");
         builder.build().save(catalogue);
         Path work = root.resolve("work");

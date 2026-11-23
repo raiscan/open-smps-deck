@@ -475,7 +475,7 @@ public final class ReconstructionVoicePlan {
         require(!score.inputs().fmOnly() || type != ReconstructionLaneType.PSG && type != ReconstructionLaneType.NOISE,
                 "assignment", "PSG and NOISE require the PSG chip");
         if (type != ReconstructionLaneType.NOISE && catalogue == null)
-            catalogue = InstrumentCatalogue.open(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+            catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         assignment.validate(catalogue, "assignment.instrument");
     }
 

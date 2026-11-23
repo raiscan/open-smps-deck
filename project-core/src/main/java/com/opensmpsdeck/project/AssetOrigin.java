@@ -7,10 +7,24 @@ import java.util.Objects;
 
 /** Provenance of the asset payload, independent of its project ID or playback settings. */
 public record AssetOrigin(String type, StockRef ref, List<Transform> transforms,
-                          String license, String attribution) {
+                          String license, String attribution, String clonedFrom) {
+    public AssetOrigin(String type, StockRef ref, List<Transform> transforms, String license, String attribution) {
+        this(type, ref, transforms, license, attribution, null);
+    }
+
+    public static AssetOrigin cloneOf(String stockId) {
+        return new AssetOrigin("custom", null, null, null, null, stockId);
+    }
+
+    public boolean isStock() {
+        return type.equals("stock");
+    }
+
     public AssetOrigin {
-        if (!List.of("original", "source-audio", "stock", "third-party").contains(type))
+        if (!List.of("original", "source-audio", "stock", "third-party", "custom").contains(type))
             throw new IllegalArgumentException("Unknown asset origin: " + type);
+        if (type.equals("custom") ? clonedFrom == null || clonedFrom.isBlank() : clonedFrom != null)
+            throw new IllegalArgumentException("Custom instrument origin requires its source stock ID");
         if (transforms != null) transforms = List.copyOf(transforms);
         if ((!type.equals("stock") && ref != null) || (ref == null && transforms != null))
             throw new IllegalArgumentException("Stock transforms require a stock reference");
@@ -65,6 +79,8 @@ public record AssetOrigin(String type, StockRef ref, List<Transform> transforms,
     }
 
     public void validateKind(String kind) {
+        if (clonedFrom != null && kind.equals("DAC_SAMPLE"))
+            throw new IllegalArgumentException("Clone provenance is for FM voices and envelopes");
         if (ref != null && !kind.equals(ref.kind()))
             throw new IllegalArgumentException("Stock reference for " + kind + " uses " + ref.table());
         if (transforms == null) return;

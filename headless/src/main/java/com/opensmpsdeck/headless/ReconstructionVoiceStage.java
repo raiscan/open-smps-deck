@@ -14,6 +14,7 @@ import static com.opensmpsdeck.headless.InstrumentCatalogue.Kind;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static com.opensmpsdeck.headless.ReconstructionVoicing.*;
 import com.opensmpsdeck.headless.VoicePatchShortlist.RankedPatch;
+import com.opensmpsdeck.project.TargetGame;
 
 final class ReconstructionVoiceStage {
     private static final double ARTICULATION_MARGIN = .004;
@@ -131,11 +132,11 @@ final class ReconstructionVoiceStage {
                     sustainExamples.put(lane, examples);
                     patches = ReconstructionHeldNotes.fittingPatches(catalogue, score.profile(), patches, examples);
                 }
-                if (instrument) {
+                if (instrument && options.target() == TargetGame.S3K) {
                     int part = entry.getValue().getFirst().note().part();
                     var stem = options.stems().get(part);
-                    if (guitarParts.contains(part) && !mix.equals(stem))
-                        patches = screening.fittingAttacks(patches, entry.getValue(), stem, windows);
+                    if (stem != null && !mix.equals(stem))
+                        patches = screening.fittingAttacks(patches, entry.getValue(), stem, windows, guitarParts.contains(part));
                 }
             }
             incumbents.add(incumbent == null ? null : incumbent.id());
@@ -238,7 +239,6 @@ final class ReconstructionVoiceStage {
                 articulations.put(WRITTEN.preset(), WRITTEN);
                 if (!sustainExamples.containsKey(model.id()))
                     articulations.put("short", new Articulation("short", .72, 0));
-                if (patch != null) articulations.put("fast-release", new Articulation("fast-release", art.gate(), 9));
                 boolean changed = choose(windows, references, source, catalogue, model, fit, i, articulations,
                         (name, setting) -> settings(role, patch, setting, DRY, model.instruments())
                                 .withDrumGains(drumGains), ARTICULATION_MARGIN);
@@ -314,8 +314,7 @@ final class ReconstructionVoiceStage {
             lane.shortlist().stream().filter(patch -> !patch.variantId().equals(choice.id()))
                     .limit(lane.shortlist().size() - 1L).forEach(evidence::add);
             result.put(model.id(), new Lane(lane.role(), choice.id(), List.copyOf(evidence), lane.gain(),
-                    selected.articulation(), lane.effects(), "low-register stem harmonics",
-                    selected.changedArticulation() ? "low-register stem harmonics" : lane.articulationReason(),
+                    lane.articulation(), lane.effects(), "low-register stem harmonics", lane.articulationReason(),
                     lane.effectReason(), lane.instruments()));
         }
         if (shared) {

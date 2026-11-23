@@ -94,10 +94,10 @@ final class EnvelopeEditorPane extends BorderPane {
         Envelope expected=baseline;
         try {
             var values = CommandEditorPane.parseHexArguments(bytes.getText());
-            var origin = expected.origin();
-            Envelope replacement = new Envelope(expected.id(), name.getText(), expected.type(), values,
-                    origin == null ? null : origin.withPatch(expected.bytes(), values));
-            submit(p->ProjectEdits.updateEnvelope(guardEnvelope(p,expected),replacement));
+            Envelope replacement = new Envelope(expected.id(), name.getText(), expected.type(), values, expected.origin());
+            String cloneId = "envelope-" + UUID.randomUUID();
+            submit(p -> ProjectEdits.updateEnvelope(guardEnvelope(p, expected), replacement, cloneId));
+            if (find(cloneId) != null) selectEnvelope(cloneId);
             if(replacement.equals(find(expected.id())))selectEnvelope(expected.id());
         }catch(IllegalArgumentException failure){error.accept(failure.getMessage());}
     }
@@ -120,7 +120,8 @@ final class EnvelopeEditorPane extends BorderPane {
     private void refreshNotice(){
         Envelope current=find(selectedId);
         Envelope displayed=current==null?baseline:current;
-        description.setText(displayed==null?"Choose or create an envelope":displayed.name()+(current==null?" · removed":""));
+        description.setText(displayed==null?"Choose or create an envelope":displayed.name() + (displayed.origin() != null && displayed.origin().clonedFrom() != null
+                ? " · clone of " + displayed.origin().clonedFrom() : "")+(current==null?" · removed":""));
         description.setTooltip(selectedId==null?null:new Tooltip("Asset ID "+selectedId));
         description.setAccessibleHelp(selectedId==null?null:"Asset ID "+selectedId);
         long count=uses(selectedId);

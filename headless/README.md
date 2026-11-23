@@ -571,6 +571,11 @@ changing playback timing. To check a render from an edited project, use
 
 ### Refine and audition voicing
 
+Automatic fitting chooses exact FM patches and compatible PSG envelopes from
+the target stock catalogue. Intentional operator changes through a scoped
+`minimumReleaseRate` or a `chordInstrument` edit export as custom clones
+with their source asset ID in `origin.clonedFrom`.
+
 Fresh staged reconstructions fit one shared sound per source instrument in
 `voicing.json.sourceInstruments`. Line and chord function voices share this
 sound unless assigned explicitly. Lane overrides and scoped edits remain
