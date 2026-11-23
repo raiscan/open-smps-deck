@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.TargetGame;
 
 import java.io.IOException;
@@ -152,6 +153,11 @@ public final class ReconstructionLivePreview {
 
     static Prepared rebuilt(TargetPlayback playback, ReconstructionAllocation.Result allocation) {
         return new Prepared(null, null, playback, Map.of(), allocation, false);
+    }
+
+    /** Prepare an isolated, already built arrangement for the live comparison transport. */
+    public static Prepared forComparison(StudioProject project) {
+        return rebuilt(TargetPlayback.prepare(project), null);
     }
 
     public static final class Prepared {

@@ -6,6 +6,25 @@ The skill starts with local stem separation and audio-only reconstruction,
 then covers time-coded review, edits and S3K export. Suno MIDI and stems
 or other aligned MIDI and audio can also seed a build.
 
+
+## Collaborate on edit branches
+
+Use a shared reconstruction work directory and give each contributor a
+branch. Pass `--branch NAME` to `reconstruct edit WORK add` to write
+journal intents to that branch and to `reconstruct run WORK` to get its
+isolated build. An edit can carry a `group` ID. Pass
+`--groups-file GROUPS.json` on branch edit add to supply an array of
+`{id, label, rationale}` objects for review. The same operation in MCP is
+`reconstruct_branch` with `action: "edit"`, `workDir`, `name`, `entries`
+and optional `groupMetadata`.
+
+Review note and voicing changes with `reconstruct branch diff WORK NAME`.
+Run a dry-run merge before stitching changes into a review branch or main.
+Filter by part, source time, group or edit ID. Use `branch rebase WORK NAME`
+to replay and inspect outcomes after main changes. Use
+`branch import WORK NAME COPY` to bring in a journal from an existing copy.
+[Branch commands and conflict rules](../architecture/edit-branches.md)
+
 ## Build the JAR and install the skill
 
 From the OpenSMPSDeck checkout:
