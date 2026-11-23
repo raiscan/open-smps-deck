@@ -78,7 +78,10 @@ xvfb-run -a -s '-screen 0 1600x1000x24' mvn -B -pl studio -am test -Dstudio.ui.t
 python3 tools/verify_studio_dpi.py --scratch /path/to/disk/scratch
 ```
 
-Ordinary runs explicitly skip the display-only smoke class. Under Xvfb it drives
+The [S3K playback foundation workflow](../.github/workflows/playback-foundation.yml)
+runs the UI suite with `-Dstudio.ui.test=true` under Xvfb on pushes and pull
+requests. The property is opt-in for local runs because these tests need an
+isolated display. Under Xvfb the suite drives
 actual scene mouse events and controls, saves notes/clips, replaces the file,
 checks invalid-write recovery and dirty conflicts, preserves selection/viewport,
 and exercises huge virtual timelines without allocating huge canvas buffers.
