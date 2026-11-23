@@ -1337,9 +1337,9 @@ steal most of a stem-supported hold from another source part, allocation
 first tries moving the whole hold to a free inner FM lane. It can also route
 the new attack around the hold when another compatible lane is free.
 
-For isolated S3K source parts, the stem label or instrument role adds a
-bounded preference to the stock FM shortlist and joint training and
-held-out loss. To enter the joint fit, a candidate's chip probes must stay
+For isolated S3K source parts, the stem label or instrument role gives a
+preference that settles acoustic ties in the stock FM shortlist and the
+joint fit. It never outweighs a better training and held-out loss. To enter the joint fit, a candidate's chip probes must stay
 audible through every stem-supported hold that survives FM allocation,
 using the allocated pitch and project-time gate. A steady probe can satisfy
 a growing source note. If the acoustic shortlist has no sustaining patch,
@@ -1347,11 +1347,11 @@ the fitter searches the whole stock catalogue. If every candidate fails,
 it keeps the patch with the smallest total sustain shortfall and records a
 `held-note fallback` in its selection reason.
 
-A name match adds up to 0.025 and a known mismatch subtracts
-0.0125. A retail register and role match adjusts the score by at most 0.015
-in either direction. The loss uses the same adjustments proportionally.
-The priors are fixed across songs. The acoustic fit can overcome them.
-The name categories are:
+Among tied candidates, a name match counts 0.025 and a known mismatch
+−0.0125. A retail register and role match counts at most 0.015 in either
+direction. On six held-out Suno songs, scoring these as additive
+preferences chose voices with a worse spectral balance against the stem
+than the acoustic fit alone. The name categories are:
 
 | Source class | Compatible community name terms |
 | --- | --- |
@@ -1394,7 +1394,9 @@ and takes the median distance within each MIDI drum class. A window cut
 while the hit is still audible provides a lower bound on its decay. It compares spectrum, attack, decay, and low resonance
 for kicks and toms. For hats, cymbals, sticks and claps it analyzes the same
 upper bands in the stem and candidate, and charges for excess low body in
-the DAC playback. It tests native DAC rate bytes around each catalogue
+the DAC playback. Hats and cymbals also compare air: the share of the energy
+above about 580 Hz that lies above about 4.6 kHz. Without it, a mid-band
+noise burst can match the hat's noisiness and pass the 950 Hz projection. It tests native DAC rate bytes around each catalogue
 recipe within a six-semitone search. Without a mapped drum stem it uses the
 mix fit and a smaller rate search.
 
@@ -1410,9 +1412,23 @@ kit a small bonus. Reusing the same PCM across classes costs more.
 
 The `drumSelection` evidence records the requested drum class, acoustic
 profile version, representative excluded rates and reasons, and the
-spectral fit and preferred kit for eligible candidates. When no DAC
-candidate qualifies, the catalogue fit uses the PSG3 noise envelope where
-the lane can accommodate the attack. Existing PSG3 notes have priority.
+spectral fit and preferred kit for eligible candidates.
+
+For S3K hats and cymbals with a drum stem, the native PSG3 voicings compete
+with the DAC candidates on the same stem distance. The fit renders three
+voicings through the pinned chips: the short closed hat and the longer open
+hat, both with the dual noise clock described below, and the 7 kHz cymbal.
+It keeps the closest in `evidence.noise`, and assembly plays that voicing. The PSG output is unipolar, so its mean
+steps with the volume envelope at frame boundaries. The probe removes each
+frame's mean to compare the noise rather than those steps. When the PSG3
+voicing is closer than the best DAC score, including its class penalty, the
+slot routes to PSG3 with that voicing. The reason is `PSG3 noise closer than
+DAC`. In `auto` source mode a stem slice is considered only when both the
+DAC and PSG3 candidates exceed the slice threshold. Explicit `sliced` mode
+and S1/S2 targets keep the DAC fit.
+
+When no DAC candidate qualifies, the catalogue fit uses the PSG3 noise
+envelope where the lane can accommodate the attack. Existing PSG3 notes have priority.
 Assembly records the actual PSG3 gate or a collision in the report. The
 FM-only option disables the fallback. In `auto` source mode, a candidate
 stem slice must pass the same eligibility check. The explicit `sliced` mode
