@@ -533,7 +533,7 @@ final class ReconstructionTransport implements AutoCloseable {
 
     private StudioProject editableProject() {
         var project = model.project();
-        return project != null && project.nativeProgram() == null && project.target() == com.opensmpsdeck.project.TargetGame.S3K
+        return project != null && project.nativeProgram() == null
                 && !project.detachedFromReconstruction() ? project : null;
     }
 

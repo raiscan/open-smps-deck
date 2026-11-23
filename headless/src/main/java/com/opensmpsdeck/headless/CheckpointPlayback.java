@@ -6,14 +6,14 @@ import com.openggf.audio.rewind.SmpsTrackSnapshot;
 import com.openggf.audio.session.PreparedSmpsMusicActivation;
 import com.openggf.audio.session.SmpsDriverSession;
 import com.openggf.audio.session.SmpsDriverSessionSnapshot;
-import com.openggf.audio.synth.ChipWriteObserver;
+import com.opensmpsdeck.project.TargetGame;
 
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeMap;
 
-/** In-memory S3K checkpoints at NTSC presentation boundaries. Readers are thread-confined. */
+/** In-memory driver checkpoints at NTSC presentation boundaries. Readers are thread-confined. */
 public final class CheckpointPlayback {
     public static final int INTERVAL = S3kRenderer.PRESENTATIONS_PER_SECOND;
     private final TargetPlayback playback;
@@ -24,7 +24,7 @@ public final class CheckpointPlayback {
 
     CheckpointPlayback(TargetPlayback playback) {
         this.playback = playback;
-        activation = S3kRenderer.preparePlayback(playback.compiled());
+        activation = playback.prepareCheckpointPlayback();
     }
 
     public Reader reader() { return new Reader(); }
@@ -88,6 +88,8 @@ public final class CheckpointPlayback {
      */
     public CheckpointPlayback revise(TargetPlayback replacement, int cutoff) throws InterruptedIOException {
         var next = replacement.checkpoints();
+        // A changed classic bank starts a new grid. The relocation proof covers S3K packing.
+        if (playback.target() != TargetGame.S3K || replacement.target() != TargetGame.S3K) return next;
         var prefix = S3kProgramPrefix.between(playback.compiled(), replacement.compiled());
         if (prefix == null) return next;
         for (var entry : before(cutoff)) {
@@ -139,7 +141,7 @@ public final class CheckpointPlayback {
 
     private static void checkPosition(int presentation) {
         if (presentation < 0 || presentation > S3kRenderer.MAX_PRESENTATIONS)
-            throw new IllegalArgumentException("Checkpoint presentation outside the S3K render limit");
+            throw new IllegalArgumentException("Checkpoint presentation outside the render limit");
     }
 
     private static void checkInterrupted() throws InterruptedIOException {
@@ -189,7 +191,7 @@ public final class CheckpointPlayback {
         }
 
         private void open() {
-            session = S3kRenderer.openPlayback(activation, S3kRenderer.ChannelMask.NONE, ChipWriteObserver.NONE);
+            session = playback.openCheckpointPlayback(activation);
         }
 
         private void restore(int position, State state) {

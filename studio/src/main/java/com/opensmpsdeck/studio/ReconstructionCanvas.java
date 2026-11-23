@@ -197,7 +197,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private String laneSelection;
     private AudioSource source;
     private Map<String, List<BendPoint>> assembledBends = Map.of();
-    private int dbRange = 55;
+    private ReconstructionTiles.Contrast contrast = new ReconstructionTiles.Contrast(ReconstructionTiles.CEILING_DB, 55);
+    private boolean autoContrast = true;
+    private Object autoSignature;
+    private java.util.function.Consumer<ReconstructionTiles.Contrast> contrastChanged = ignored -> {};
+    private boolean reassigned;
     private boolean ridges;
     private boolean projectRuler;
     private boolean ready;
@@ -1007,7 +1011,23 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         assembledBends = curves;
         draw();
     }
-    void dbRange(int range) { dbRange = range; draw(); }
+    /** Sets a manual contrast, which turns automatic contrast off. */
+    void contrast(int ceiling, int range) {
+        autoContrast = false;
+        contrast = new ReconstructionTiles.Contrast(ceiling, range);
+        draw();
+    }
+
+    void autoContrast(boolean auto) {
+        autoContrast = auto;
+        autoSignature = null;
+        draw();
+    }
+
+    ReconstructionTiles.Contrast contrast() { return contrast; }
+    void onContrastChanged(java.util.function.Consumer<ReconstructionTiles.Contrast> listener) { contrastChanged = listener; }
+    /** Draws a frequency-reassigned spectrogram, where steady partials become thin lines. */
+    void reassigned(boolean sharp) { reassigned = sharp; draw(); }
     void ridges(boolean show) { ridges = show; draw(); }
     void projectRuler(boolean show) { projectRuler = show; draw(); }
 
@@ -1133,10 +1153,14 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             high = high == null ? note.pitch() : Math.max(high, note.pitch());
         }
         return new com.opensmpsdeck.headless.NoteHandoff.ViewRange(seconds(box.getMinX()), seconds(box.getMaxX()), low, high,
-                Map.of("audio", source == null ? "none" : source.label(), "ruler", projectRuler ? "project" : "source",
-                        "pixelsPerSecond", pixelsPerSecond, "visibleRoles", List.copyOf(roles),
-                        "visibleLanes", visibleLanes.stream().sorted().toList(), "showDrums", showDrums, "ridges", ridges,
-                        "dbRange", dbRange, "pitchTop", pitchTop, "pitchSpan", pitchSpan));
+                Map.ofEntries(Map.entry("audio", source == null ? "none" : source.label()),
+                        Map.entry("ruler", projectRuler ? "project" : "source"),
+                        Map.entry("pixelsPerSecond", pixelsPerSecond), Map.entry("visibleRoles", List.copyOf(roles)),
+                        Map.entry("visibleLanes", visibleLanes.stream().sorted().toList()),
+                        Map.entry("showDrums", showDrums), Map.entry("ridges", ridges),
+                        Map.entry("dbRange", contrast.range()), Map.entry("ceilingDb", contrast.ceiling()),
+                        Map.entry("autoContrast", autoContrast), Map.entry("reassigned", reassigned),
+                        Map.entry("pitchTop", pitchTop), Map.entry("pitchSpan", pitchSpan)));
     }
 
     List<Overlay> selectedNotes() {
@@ -1309,61 +1333,114 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
         // Measure against device pixels, so HiDPI displays get a sharper spectrogram.
         var window = getScene() == null ? null : getScene().getWindow();
-        int level = ReconstructionTiles.level(pixelsPerSecond * (window == null ? 1 : window.getRenderScaleX()));
+        double scaleX = window == null ? 1 : window.getRenderScaleX(), scaleY = window == null ? 1 : window.getRenderScaleY();
+        int level = ReconstructionTiles.level(pixelsPerSecond * scaleX);
+        int rows = ReconstructionTiles.rows(rowHeight() * scaleY);
         double tileSpan = ReconstructionTiles.span(level);
         double from = seconds(axis()), end = seconds(width);
         int firstBlock = ReconstructionTiles.block(lowestPitch() - 1);
         int lastBlock = ReconstructionTiles.block(highestPitch() + 1);
         int firstIndex = (int) (from / tileSpan), lastIndex = (int) Math.ceil(end / tileSpan) - 1;
+        var keys = new ArrayList<ReconstructionTiles.Key>();
+        for (int index = firstIndex; index <= Math.max(firstIndex, lastIndex); index++)
+            for (int block = firstBlock; block <= lastBlock; block++)
+                keys.add(ReconstructionTiles.key(source, level, index, block, rows, reassigned));
+        if (autoContrast) updateAutoContrast(keys);
         var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
         int drawn = 0, visible = 0;
-        if (ridges) g.setFill(RIDGE);
-        for (int index = firstIndex; index <= Math.max(firstIndex, lastIndex); index++) {
-            for (int block = firstBlock; block <= lastBlock; block++) {
-                var key = ReconstructionTiles.key(source, level, index, block);
-                var imageKey = new ReconstructionTiles.ImageKey(key, dbRange);
-                needed.add(imageKey);
-                visible++;
-                var tile = tiles.get(imageKey);
-                if (tile == null) {
-                    drawFallbackTile(g, key);
-                    continue;
-                }
-                drawTile(g, key, tile.image(), key.start(), key.end());
-                drawn++;
-                if (ridges) {
-                    g.setFill(RIDGE);
-                    for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
-                        g.fillRect(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
-                }
+        // Tiles hold about one row per device pixel, so nearest-neighbour scaling stays crisp.
+        g.setImageSmoothing(false);
+        for (var key : keys) {
+            var imageKey = new ReconstructionTiles.ImageKey(key, contrast);
+            needed.add(imageKey);
+            visible++;
+            var tile = tiles.get(imageKey);
+            if (tile == null) {
+                drawFallbackTile(g, key);
+                continue;
+            }
+            drawTile(g, key, tile.image(), key.start(), key.end());
+            drawn++;
+            if (ridges) {
+                g.setFill(RIDGE);
+                for (var ridge : tile.ridges()) if (ridge.dbfs() >= contrast.floor())
+                    g.fillRect(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
             }
         }
+        g.setImageSmoothing(true);
         // Prefetch the neighbouring columns, so scrolling reveals finished tiles.
         double limit = model.duration();
         for (int index : new int[]{lastIndex + 1, firstIndex - 1}) {
             if (index < 0 || index * tileSpan >= limit) continue;
             for (int block = firstBlock; block <= lastBlock; block++)
-                needed.add(new ReconstructionTiles.ImageKey(ReconstructionTiles.key(source, level, index, block), dbRange));
+                needed.add(new ReconstructionTiles.ImageKey(
+                        ReconstructionTiles.key(source, level, index, block, rows, reassigned), contrast));
         }
         spectrumReady = drawn > 0 && drawn == visible;
         tiles.request(needed);
     }
 
-    /** Stands in a cached coarser or finer tile while the right resolution is measured. */
+    /**
+     * Fits the contrast to the measured visible tiles. It recomputes only when the measured set
+     * changes, and ignores shifts under 3 dB, so scrolling does not make the plot flicker.
+     */
+    private void updateAutoContrast(List<ReconstructionTiles.Key> keys) {
+        var levels = new ArrayList<float[]>();
+        var measuredKeys = new ArrayList<ReconstructionTiles.Key>();
+        for (var key : keys) {
+            var data = tiles.levels(key);
+            if (data == null) continue;
+            levels.add(data);
+            measuredKeys.add(key);
+        }
+        if (measuredKeys.equals(autoSignature)) return;
+        autoSignature = measuredKeys;
+        var next = ReconstructionTiles.autoContrast(levels);
+        if (next == null || Math.abs(next.ceiling() - contrast.ceiling()) < 3
+                && Math.abs(next.floor() - contrast.floor()) < 3) return;
+        contrast = next;
+        contrastChanged.accept(next);
+    }
+
+    /** Stands in a cached tile of another resolution or row density while the right one is measured. */
     private void drawFallbackTile(GraphicsContext g, ReconstructionTiles.Key key) {
+        var densities = new LinkedHashSet<Integer>();
+        densities.add(key.rows());
+        for (int rows = ReconstructionTiles.MAX_ROWS; rows >= ReconstructionTiles.MIN_ROWS; rows /= 2) densities.add(rows);
+        for (int rows : densities) {
+            var dense = ReconstructionTiles.key(key.source(), key.level(), key.index(), key.block(), rows, key.reassigned());
+            if (rows != key.rows()) {
+                var same = tiles.get(new ReconstructionTiles.ImageKey(dense, contrast));
+                if (same != null) {
+                    drawTile(g, dense, same.image(), key.start(), key.end());
+                    return;
+                }
+            }
+            if (drawFallbackLevels(g, dense, key)) return;
+        }
+    }
+
+    private boolean drawFallbackLevels(GraphicsContext g, ReconstructionTiles.Key dense, ReconstructionTiles.Key key) {
         for (int level = key.level() + 1; level <= ReconstructionTiles.MAX_LEVEL; level++) {
-            var parent = ReconstructionTiles.key(key.source(), level, key.index() >> (level - key.level()), key.block());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, dbRange));
+            var parent = ReconstructionTiles.key(key.source(), level, key.index() >> (level - key.level()), key.block(),
+                    dense.rows(), key.reassigned());
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, contrast));
             if (cached == null) continue;
             drawTile(g, parent, cached.image(), key.start(), key.end());
-            return;
+            return true;
         }
-        if (key.level() <= ReconstructionTiles.MIN_LEVEL) return;
+        if (key.level() <= ReconstructionTiles.MIN_LEVEL) return false;
+        boolean any = false;
         for (int child = 0; child < 2; child++) {
-            var finer = ReconstructionTiles.key(key.source(), key.level() - 1, key.index() * 2 + child, key.block());
-            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, dbRange));
-            if (cached != null) drawTile(g, finer, cached.image(), finer.start(), finer.end());
+            var finer = ReconstructionTiles.key(key.source(), key.level() - 1, key.index() * 2 + child, key.block(),
+                    dense.rows(), key.reassigned());
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, contrast));
+            if (cached != null) {
+                drawTile(g, finer, cached.image(), finer.start(), finer.end());
+                any = true;
+            }
         }
+        return any;
     }
 
     /** Draws the part of a tile between two source times, without a canvas clip. */

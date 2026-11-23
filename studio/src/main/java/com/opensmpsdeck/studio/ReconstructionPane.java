@@ -156,8 +156,9 @@ final class ReconstructionPane implements AutoCloseable {
         editor.initializeInspectors();
         var footer = listen.bar();
         var viewBar = displayControls();
-        var viewToggle = new ToggleButton("View");
-        viewToggle.setTooltip(new Tooltip("Show zoom, spectrogram and display settings"));
+        var viewToggle = new ToggleButton("Display ▾");
+        viewToggle.setTooltip(new Tooltip(
+                "Display settings: time and pitch zoom, spectrum contrast, Sharp, ridges, spectrum source and lanes"));
         viewToggle.setId("reconstruction-view-settings");
         viewBar.visibleProperty().bind(viewToggle.selectedProperty());
         viewBar.managedProperty().bind(viewBar.visibleProperty());
@@ -251,7 +252,12 @@ final class ReconstructionPane implements AutoCloseable {
             var open = openProject.get();
             var snapshot = open != null && arrangement.equals(open.path()) ? open.project() : null;
             var fallback = model.project() == null ? TargetGame.S3K : model.project().target();
-            ExportDialog.show(stage, snapshot, arrangement, work, fallback, RomLibrary.userLibrary(), loader, status::setText);
+            try {
+                ExportDialog.showReconstruction(stage, snapshot, arrangement, work, fallback, RomLibrary.userLibrary(),
+                        loader, status::setText, editor.exportJournal(snapshot));
+            } catch (IllegalStateException failure) {
+                status.setText(failure.getMessage());
+            }
         });
         var card = new VBox(10, heading, new Label("Save audio or export a package for your target game."), output);
         if (openArrangement != null) {
@@ -260,10 +266,6 @@ final class ReconstructionPane implements AutoCloseable {
             edit.setOnAction(event -> openArrangement.run());
             card.getChildren().addAll(new Label("Continue editing chip sequences and instruments in Studio."), edit);
         }
-        editor.nextStep().textProperty().addListener((ignored, old, next) -> {
-            if (next.startsWith("Apply & rebuild")) heading.setText("Export the last build");
-            else heading.setText("Use your reconstruction");
-        });
         card.getStyleClass().add("reconstruction-export");
         card.setMaxSize(470, Region.USE_PREF_SIZE);
         return card;
@@ -313,21 +315,53 @@ final class ReconstructionPane implements AutoCloseable {
         fitPitch.setOnAction(event -> view.fitPitch());
         var pitch = new HBox(4, new Label("Pitch zoom"), pitchOut, pitchIn, fitPitch);
         pitch.setAlignment(Pos.CENTER_LEFT);
-        var db = new Slider(20, 85, 55);
-        db.setPrefWidth(120);
+        var initial = view.contrast();
+        var ceiling = new Slider(-60, 0, initial.ceiling());
+        ceiling.setId("reconstruction-spectrum-ceiling");
+        ceiling.setPrefWidth(90);
+        ceiling.setTooltip(new Tooltip("Level that draws brightest"));
+        var range = new Slider(20, 85, initial.range());
+        range.setId("reconstruction-spectrum-range");
+        range.setPrefWidth(90);
+        range.setTooltip(new Tooltip("Decibels between darkest and brightest"));
         var dbLabel = new Label();
-        Consumer<Number> setDb = value -> {
-            int range = value.intValue();
-            dbLabel.setText((ReconstructionTiles.CEILING_DB - range) + " to " + ReconstructionTiles.CEILING_DB + " dBFS");
-            view.dbRange(range);
+        var auto = new CheckBox("Auto");
+        auto.setId("reconstruction-spectrum-auto");
+        auto.setSelected(true);
+        auto.setTooltip(new Tooltip("Fit the contrast to the visible audio. Moving a slider turns this off."));
+        boolean[] updating = {false};
+        Consumer<ReconstructionTiles.Contrast> showContrast = contrast -> {
+            updating[0] = true;
+            ceiling.setValue(contrast.ceiling());
+            range.setValue(contrast.range());
+            updating[0] = false;
+            dbLabel.setText(contrast.floor() + " to " + contrast.ceiling() + " dBFS");
         };
-        setDb.accept(db.getValue());
-        db.valueProperty().addListener((ignored, previous, next) -> {
-            if (!db.isValueChanging()) setDb.accept(next);
+        showContrast.accept(initial);
+        view.onContrastChanged(showContrast);
+        javafx.beans.value.ChangeListener<Number> manual = (ignored, previous, next) -> {
+            if (updating[0]) return;
+            int top = (int) Math.round(ceiling.getValue()), span = (int) Math.round(range.getValue());
+            // Untick Auto without letting its listener reset the slider being dragged.
+            updating[0] = true;
+            auto.setSelected(false);
+            updating[0] = false;
+            view.contrast(top, span);
+            showContrast.accept(view.contrast());
+        };
+        ceiling.valueProperty().addListener(manual);
+        range.valueProperty().addListener(manual);
+        auto.selectedProperty().addListener((ignored, previous, selected) -> {
+            if (updating[0]) return;
+            view.autoContrast(selected);
+            showContrast.accept(view.contrast());
         });
-        db.valueChangingProperty().addListener((ignored, previous, changing) -> {
-            if (!changing) setDb.accept(db.getValue());
-        });
+        var sharp = new CheckBox("Sharp");
+        sharp.setId("reconstruction-spectrum-sharp");
+        sharp.setTooltip(new Tooltip("Reassigned spectrogram: moves energy to its measured frequency, so steady notes draw as thin lines"));
+        sharp.selectedProperty().addListener((ignored, previous, selected) -> view.reassigned(selected));
+        var contrast = new HBox(4, new Label("Spectrum"), auto, new Label("Top"), ceiling, new Label("Range"), range, dbLabel);
+        contrast.setAlignment(Pos.CENTER_LEFT);
         var ridges = new CheckBox("Ridges");
         ridges.setTooltip(new Tooltip("Show the three strongest pitch peaks per column"));
         ridges.selectedProperty().addListener((ignored, previous, selected) -> view.ridges(selected));
@@ -337,8 +371,8 @@ final class ReconstructionPane implements AutoCloseable {
         laneFilters = new MenuButton("Show lanes");
         refreshLaneFilters();
         var row = new FlowPane(9, 6,
-                new Label("Time zoom"), zoom, fit, pitch, new Label("Spectrum range"), db, dbLabel,
-                new Label("Spectrum source"), sources, ridges, project, laneFilters, editor.visibility());
+                new Label("Time zoom"), zoom, fit, pitch, contrast,
+                new Label("Spectrum source"), sources, sharp, ridges, project, laneFilters, editor.visibility());
         row.getStyleClass().addAll("panelbar", "reconstruction-controls");
         row.setAlignment(Pos.CENTER_LEFT);
         return row;

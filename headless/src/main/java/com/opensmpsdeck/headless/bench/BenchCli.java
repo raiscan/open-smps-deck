@@ -8,6 +8,7 @@ import com.opensmpsdeck.project.CompiledProject;
 import com.opensmpsdeck.project.TargetGame;
 import com.opensmpsdeck.project.ProjectFiles;
 import com.opensmpsdeck.headless.LeadGap;
+import com.opensmpsdeck.headless.LiveEditBenchmark;
 import com.opensmpsdeck.headless.BenchCartridge;
 
 import java.io.IOException;
@@ -44,6 +45,7 @@ public final class BenchCli {
         out.println("           [--torture] [--transcriber NAME [--transcriber-config FILE] [--transcriber-device DEVICE]]");
         out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
+        out.println("       bench live-edit WORK_DIR JOURNAL.json [--target s1|s2|s3k] [--at SECONDS] [--samples N]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
         out.println("       bench ladder-report OUT_DIRS... [--out REPORT_DIR]");
         out.println("       bench compare OLD.json NEW.json [--tolerance N] [--cross-target] [--alternate-midi OLD_MANIFEST NEW_MANIFEST]");
@@ -54,10 +56,11 @@ public final class BenchCli {
             usage(out);
             return 0;
         }
-        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, lead-gap, compare or ladder-report");
+        if (args.length < 2) throw new IllegalArgumentException("Expected bench build-corpus, run, live-edit, lead-gap, compare or ladder-report");
         return switch (args[1]) {
             case "build-corpus" -> build(args, out, hooks);
             case "run" -> runCases(args, out, hooks);
+            case "live-edit" -> LiveEditBenchmark.run(args, out);
             case "lead-gap" -> leadGap(args, out, hooks);
             case "compare" -> compare(args, out);
             case "ladder-report" -> ladderReport(args, out);

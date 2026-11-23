@@ -92,6 +92,34 @@ class ReconstructionInspectionTest {
         assertEquals(20 * Math.log10(.8), strongest.dbfs(), 1);
         assertEquals(strongest.dbfs(), java.util.stream.IntStream.range(0, tile.dbfs().length)
                 .mapToDouble(i -> tile.dbfs()[i]).max().orElseThrow(), 1);
+
+        var fine = inspection.spectrum(chip, 1.0, 1.2, 8, 60, 77, 8, false);
+        assertEquals(8 * 18, fine.rows());
+        assertEquals(69, strongestRidge(fine).pitch(), .1);
+
+        var sharp = inspection.spectrum(chip, 1.0, 1.2, 8, 60, 77, 8, true);
+        var sharpRidge = strongestRidge(sharp);
+        assertEquals(69, sharpRidge.pitch(), .1);
+        assertEquals(20 * Math.log10(.8), sharpRidge.dbfs(), 1.5);
+        // Reassignment pulls the main lobe into a line: a semitone away is far quieter than plain Hann.
+        assertTrue(rowDb(sharp, 70) < rowDb(sharp, 69) - 25, "reassigned lobe stays narrow");
+        assertTrue(rowDb(sharp, 70) < rowDb(fine, 70) - 10, "reassigned is sharper than plain");
+    }
+
+    private static ReconstructionInspection.Ridge strongestRidge(ReconstructionInspection.SpectrumTile tile) {
+        return tile.ridges().stream().max(java.util.Comparator.comparingDouble(
+                ReconstructionInspection.Ridge::dbfs)).orElseThrow();
+    }
+
+    /** The loudest level in one column within a quarter semitone of a pitch, for a 60-77 tile. */
+    private static double rowDb(ReconstructionInspection.SpectrumTile tile, double pitch) {
+        double best = -200;
+        int perPitch = tile.rows() / 18;
+        for (int row = 0; row < tile.rows(); row++) {
+            double center = 77.5 - (row + .5) / perPitch;
+            if (Math.abs(center - pitch) <= .25) best = Math.max(best, tile.dbfs()[row * tile.columns() + 4]);
+        }
+        return best;
     }
 
     private static ReconstructionTrace.Row row(ReconstructionTrace.Status fate, String lane, String competitor,

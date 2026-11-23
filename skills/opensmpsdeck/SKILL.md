@@ -25,6 +25,11 @@ If the S3K layering preset adds an incompatible envelope on a classic
 target, use `--lane-policy-preset off` on the fresh reconstruction.
 Portable and mod exports default to the saved project target.
 
+Check live audition latency and full-rebuild parity with
+`java -jar "$jar" bench live-edit "$work" "$journal" --target s2 --at 12`.
+Use a complete edit journal and the saved reconstruction target. This probe
+renders PCM in memory and opens no audio line.
+
 ## Notes pasted from Studio
 
 Read `opensmpsdeck-notes v1` as line-oriented text with JSON objects on
@@ -174,7 +179,8 @@ java -jar "$jar" reconstruct view "$work" --start 12 --end 14 --sections \
   note's partials and `--ridges` for numerical trajectories. MCP
   `reconstruct_view` returns a PNG and legend using fields such as `stem`,
   `harmonics`, `ridges`, `sections` and `colorBy`. Studio Analysis has
-  a source picker, **Ridges**, section bands, and role and lane filters.
+  a source picker, **Ridges**, **Auto** contrast, **Sharp** (reassigned)
+  display, section bands, and role and lane filters.
   In **Detail** and **Roles**, scroll to zoom time at the pointer or
   **Shift**-scroll to zoom pitch. Middle-drag or hold **Space** and
   left-drag on the focused plot to pan. Tap **Space** to toggle playback
