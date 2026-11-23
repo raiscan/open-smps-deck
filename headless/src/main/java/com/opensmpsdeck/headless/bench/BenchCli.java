@@ -43,7 +43,8 @@ public final class BenchCli {
         out.println("       bench build-corpus ROM INDEX.json OUT_DIR [--songs IDS | --quick] [--seconds N] [--stems] [--profile suno-like [--drift N]]");
         out.println("           --ladder [--game s1|s2|s3k] [--effects room|lofi] [--full-length [--loops N]]");
         out.println("           [--torture] [--transcriber NAME [--transcriber-config FILE] [--transcriber-device DEVICE]]");
-        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N]");
+        out.println("           [--separator NAME [--separator-config FILE] [--separator-device DEVICE]]");
+        out.println("       bench run MANIFEST.json INDEX.json OUT_DIR [--target s1|s2|s3k] [--quick] [--holdout] [--audio-refine] [--jobs N] [--keep-work]");
         out.println("           [--gold GOLD.json [--gold-only]] [--role-plan oracle|oracle-section] [--steady-tempo off|auto]");
         out.println("       bench live-edit WORK_DIR JOURNAL.json [--target s1|s2|s3k] [--at SECONDS] [--samples N]");
         out.println("       bench lead-gap WORK_DIR (--stem LEAD.wav | --gold GOLD.json)");
@@ -80,6 +81,9 @@ public final class BenchCli {
         String transcriber = null;
         Path config = null;
         String device = "auto";
+        String separator = null;
+        Path separatorConfig = null;
+        String separatorDevice = "auto";
         int loops = 1;
         var seen = new HashSet<String>();
         for (int i = 5; i < args.length; i++) {
@@ -100,6 +104,9 @@ public final class BenchCli {
                 case "--transcriber" -> transcriber = value(args, ++i, flag);
                 case "--transcriber-config" -> config = Path.of(value(args, ++i, flag));
                 case "--transcriber-device" -> device = value(args, ++i, flag);
+                case "--separator" -> separator = value(args, ++i, flag);
+                case "--separator-config" -> separatorConfig = Path.of(value(args, ++i, flag));
+                case "--separator-device" -> separatorDevice = value(args, ++i, flag);
                 case "--profile" -> {
                     if (!value(args, ++i, flag).equals("suno-like"))
                         throw new IllegalArgumentException("The separate corpus profile is suno-like");
@@ -140,6 +147,10 @@ public final class BenchCli {
                 throw new IllegalArgumentException("--torture runs to completion or the first loop");
             if (!allRungs && transcriber != null)
                 throw new IllegalArgumentException("Add --ladder to --torture to enable transcription");
+            if (separator == null && (separatorConfig != null || seen.contains("--separator-device")))
+                throw new IllegalArgumentException("Separator configuration and device require --separator");
+            if (!allRungs && separator != null)
+                throw new IllegalArgumentException("Add --ladder to --torture to enable separation");
             if (!seen.contains("--songs")) {
                 if (torture) songs = switch (game) {
                     case s1 -> List.of(0x91);
@@ -153,11 +164,12 @@ public final class BenchCli {
             if (frames < 2) throw new IllegalArgumentException("A ladder requires at least two presentations");
             BenchLadder.build(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]).toAbsolutePath().normalize(),
                     songs, frames, out, new BenchLadder.Options(game, effects, torture, allRungs, full ? loops : 0,
-                            transcriber, config, device));
+                            transcriber, config, device, separator, separatorConfig, separatorDevice));
             return 0;
         }
         for (String flag : List.of("--game", "--full-length", "--loops", "--effects", "--transcriber",
-                "--transcriber-config", "--transcriber-device")) {
+                "--transcriber-config", "--transcriber-device", "--separator", "--separator-config",
+                "--separator-device")) {
             if (seen.contains(flag)) throw new IllegalArgumentException(flag + " requires --ladder");
         }
         songs.forEach(id -> songId(Integer.toString(id)));
@@ -180,7 +192,7 @@ public final class BenchCli {
         for (int i = 5; i < args.length; i++) {
             String flag = unique(seen, args[i]);
             switch (flag) {
-                case "--quick", "--holdout", "--audio-refine", "--gold-only" -> { }
+                case "--quick", "--holdout", "--audio-refine", "--gold-only", "--keep-work" -> { }
                 case "--target" -> target = TargetGame.parse(value(args, ++i, flag));
                 case "--steady-tempo" -> {
                     steadyTempo = value(args, ++i, flag);
@@ -208,7 +220,8 @@ public final class BenchCli {
             throw new IllegalArgumentException("--role-plan requires native corpus cases");
         return BenchRun.run(Path.of(args[2]), Path.of(args[3]), Path.of(args[4]),
                 new BenchRun.Options(seen.contains("--quick"), seen.contains("--holdout"),
-                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo, target), out, hooks);
+                        seen.contains("--audio-refine"), jobs, gold, seen.contains("--gold-only"), rolePlan, steadyTempo, target,
+                        seen.contains("--keep-work")), out, hooks);
     }
 
     private static int ladderReport(String[] args, PrintStream out) throws IOException {

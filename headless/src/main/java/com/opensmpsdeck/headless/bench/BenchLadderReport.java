@@ -98,8 +98,10 @@ final class BenchLadderReport {
             Drop worst = null;
             var rungs = BenchLadder.Rung.values();
             // R3 and R4 share the same degraded audio and are alternative MIDI sources.
+            // R6 starts from the dry mix alone, so compare it with exact input.
             var comparisons = List.of(List.of(rungs[0], rungs[1]), List.of(rungs[1], rungs[2]),
-                    List.of(rungs[2], rungs[3]), List.of(rungs[2], rungs[4]), List.of(rungs[4], rungs[5]));
+                    List.of(rungs[2], rungs[3]), List.of(rungs[2], rungs[4]), List.of(rungs[4], rungs[5]),
+                    List.of(rungs[0], rungs[6]));
             for (var pair : comparisons) {
                 var from = pair.getFirst();
                 var to = pair.getLast();

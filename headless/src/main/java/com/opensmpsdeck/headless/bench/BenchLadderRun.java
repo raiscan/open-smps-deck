@@ -18,8 +18,14 @@ final class BenchLadderRun {
                String lastCompletedStage, Long projectBytes, Map<String, Double> metrics,
                BenchLadderTrace.Detail trace, Map<String, Long> reasonCounts, String error, String listeningError) {}
 
-    record Inputs(Map<Integer, Path> stems, Integer leadPart, DoubleUnaryOperator toTruth,
-                  DoubleUnaryOperator toInput) {
+    record Inputs(Map<Integer, Path> stems, Map<String, Path> audioStems, Integer leadPart,
+                  DoubleUnaryOperator toTruth, DoubleUnaryOperator toInput) {
+        Inputs(Map<Integer, Path> stems, Integer leadPart, DoubleUnaryOperator toTruth, DoubleUnaryOperator toInput) {
+            this(stems, Map.of(), leadPart, toTruth, toInput);
+        }
+
+        boolean audioOnly() { return !audioStems.isEmpty(); }
+
         DoubleUnaryOperator projectToTruth(BenchClock clock) {
             return project -> toTruth.applyAsDouble(clock.toSource().applyAsDouble(project));
         }
@@ -29,6 +35,13 @@ final class BenchLadderRun {
 
     static Inputs inputs(BenchCorpus.Case c, Path root, BenchCli.Hooks hooks) throws IOException {
         var input = c.ladder();
+        if (input.rung() == BenchLadder.Rung.LOCAL) {
+            var labelled = new TreeMap<String, Path>();
+            input.stems().forEach((label, file) -> labelled.put(label, file.resolve(root)));
+            if (c.midi() != null || labelled.isEmpty())
+                throw new IllegalArgumentException("Local ladder case needs separated stems and no MIDI: " + c.id());
+            return new Inputs(Map.of(), labelled, null, DoubleUnaryOperator.identity(), DoubleUnaryOperator.identity());
+        }
         var midi = BenchFiles.JSON.fromJson(hooks.midi().read(c.midi().resolve(root)), BenchReconstruction.Midi.class);
         var stems = new TreeMap<Integer, Path>();
         Integer lead = null;
@@ -60,7 +73,7 @@ final class BenchLadderRun {
             if (input.rung() == BenchLadder.Rung.EXACT)
                 encode(c.reference().resolve(root), dir.resolve("original.mp3"), seconds);
             boolean listen = switch (input.rung()) {
-                case EXACT, TRANSCRIBED, SUNO_LIKE -> true;
+                case EXACT, TRANSCRIBED, SUNO_LIKE, LOCAL -> true;
                 case GROUPED -> input.torture();
                 default -> false;
             };

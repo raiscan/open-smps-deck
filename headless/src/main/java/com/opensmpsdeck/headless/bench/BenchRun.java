@@ -30,7 +30,12 @@ import java.util.logging.Logger;
 
 final class BenchRun {
     record Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly,
-                   BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target) {
+                   BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target, boolean keepWork) {
+        Options(boolean quick, boolean holdout, boolean audioRefine, int jobs, Path gold, boolean goldOnly,
+                BenchRolePlan.Mode rolePlan, String steadyTempo, TargetGame target) {
+            this(quick, holdout, audioRefine, jobs, gold, goldOnly, rolePlan, steadyTempo, target, false);
+        }
+
         boolean classic() { return target != TargetGame.S3K; }
     }
     private record Song(Path truthFile, List<BenchMetrics.Event> truth, float[] reference, Path index,
@@ -61,7 +66,10 @@ final class BenchRun {
         for (var c : cases) {
             if (!seen.add(c.id()) || c.profile() == null || c.variant() == null)
                 throw new IllegalArgumentException("Duplicate or invalid case: " + c.id());
-            var files = new ArrayList<>(List.of(c.truth(), c.reference(), c.audio(), c.midi()));
+            var files = new ArrayList<>(List.of(c.truth(), c.reference(), c.audio()));
+            if (c.midi() != null) files.add(c.midi());
+            else if (c.ladder() == null || c.ladder().rung() != BenchLadder.Rung.LOCAL)
+                throw new IllegalArgumentException("Case has no MIDI: " + c.id());
             if (c.ladder() != null) {
                 var input = c.ladder();
                 if (input.game() == null || input.rung() == null || input.frames() < 1 || input.frames() > manifest.frames()
@@ -183,7 +191,10 @@ final class BenchRun {
         try {
             var truth = song.truth.stream().filter(note -> note.drum() == null).toList();
             var input = ladder ? BenchLadderRun.inputs(c, root, hooks) : null;
-            var reconstruction = BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
+            var reconstruction = ladder && input.audioOnly()
+                    ? BenchReconstruction.runAudioOnly(c.audio().resolve(root), song.index, output, options.audioRefine,
+                    input.audioStems(), drums, hooks, options.rolePlan, truth, options.steadyTempo, options.target)
+                    : BenchReconstruction.run(c.midi().resolve(root), c.audio().resolve(root), song.index,
                     output, options.audioRefine, null, ladder ? input.stems() : Map.of(),
                     drums, hooks, options.rolePlan, truth, options.steadyTempo, ladder ? input.leadPart() : null, ladder, options.target);
             warps.put(c.id(), reconstruction.warped());
@@ -255,7 +266,21 @@ final class BenchRun {
             }
             throw failure;
         } finally {
+            if (ladder && options.keepWork() && Files.exists(output)) keep(output, results.resolve("cases")
+                    .resolve(c.ladder().game().name()).resolve("%02x".formatted(c.song()))
+                    .resolve(c.ladder().rung().label).resolve("work"));
             if (Files.exists(output)) BenchFiles.deleteScratch(output);
+        }
+    }
+
+    // Diagnostic copy of a case's reconstruction work directory.
+    private static void keep(Path work, Path destination) throws IOException {
+        try (var files = Files.walk(work)) {
+            for (var path : files.toList()) {
+                Path target = destination.resolve(work.relativize(path).toString());
+                if (Files.isDirectory(path)) Files.createDirectories(target);
+                else Files.copy(path, target);
+            }
         }
     }
 

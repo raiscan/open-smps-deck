@@ -420,6 +420,7 @@ S3K includes Angel Island Act 1 (`0x01`) with its short FM2/FM3 alternating atta
 | R3 transcribed | External notes on the melodic stems and existing Suno-like drums | R2 |
 | R4 suno-like | Existing Suno-like perturbation and grouped parts on the native start clock | R2 |
 | R5 suno-like+drift | R4 with 7% accelerando | R2 mix and stems warped with the same WSOLA alignment |
+| R6 local | None. Audio-only reconstruction transcribes the separated stems | Dry mix and the configured separator's stems |
 
 The lead reference is the native channel with the most time in the existing
 predominant-melody heuristic. Bass is the lowest weighted register among the
@@ -440,6 +441,21 @@ pass `--transcriber NAME --transcriber-config FILE --transcriber-device DEVICE`.
 The R3 manifest hashes the generated MIDI and transcriber provenance.
 If there is no configured MuScriptor, the builder prints a skip message
 and omits R3 cases.
+
+R3 transcribes oracle stems rendered from the cartridge and keeps the
+simulated drums. R6 measures the shipped local route instead. It starts from
+the dry mix alone. Pass `--separator NAME`, optionally with
+`--separator-config FILE` and `--separator-device DEVICE`. The builder then
+runs the separator once per song and hashes its stems and `separation.json`.
+`bench run` passes the labelled stems to `reconstruct run --audio-only`, so
+the configured transcribers, vocal lead, drum detector and beat grid run at
+scoring time. The run reads them from the usual `transcribers.json` or
+`OPENSMPSDECK_TRANSCRIBERS`. R6 has no lead part. `ladder-report` compares
+R6 with R0. Without `--separator`, the builder omits R6.
+
+Add `--keep-work` to `bench run` to keep each ladder case's reconstruction
+work directory under `cases/GAME/SONG/RUNG/work` for diagnosis. It contains
+the score, allocation, voicing and report files.
 
 The ladder retains the 30-second default and accepts `--seconds N`.
 `--full-length` follows playback to completion or a detected loop, with a
@@ -476,7 +492,7 @@ usual project byte, bank, frame and group-depth limits apply.
 `ladder-report.md`, `ladder-report.json`, and `listening.html` under
 `--out` or the first run directory. It groups metrics by rung and game and
 calculates single-step changes over songs with both measurements. The
-listening page embeds original and R0, R3, and R4 MP3s, with credits R0 and R1
+listening page embeds original and R0, R3, R4 and R6 MP3s, with credits R0 and R1
 where a render exists. The page works from one private file. `ffmpeg` with
 `libmp3lame` must be on the path to encode listening assets during `bench run`.
 
