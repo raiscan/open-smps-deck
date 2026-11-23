@@ -10,6 +10,13 @@ import run
 
 
 class AdapterTest(unittest.TestCase):
+    def test_relabel_preserves_times_and_requires_unambiguous_mix_hat(self):
+        stem = {35: [1.0], 42: [3.0], 47: [1., 2., 3., 4.]}
+        mix = {42: [1.035, 2., 3., 4.036], 47: [2.01]}
+        peaks, count = run.relabel_toms(stem, mix)
+        self.assertEqual(1, count)
+        self.assertEqual({35: [1.0], 42: [1., 3.], 47: [2., 3., 4.]}, peaks)
+
     def test_normalization_gain(self):
         for peak in (0.1, 1.0):
             gain = run.normalization_gain_db(peak)
@@ -40,7 +47,7 @@ class AdapterTest(unittest.TestCase):
         pattern = np.tile(np.concatenate((kick, snare)), 8)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "pattern.wav"
-            args = argparse.Namespace(input=path, weights=None, device="cpu")
+            args = argparse.Namespace(input=path, weights=None, device="cpu", mix=None)
             results = []
             for gain in (0.8, 0.05):
                 sf.write(path, gain * pattern, rate, subtype="FLOAT")

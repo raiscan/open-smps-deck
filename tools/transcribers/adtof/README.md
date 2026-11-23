@@ -24,3 +24,5 @@ can use `--device auto` or a Torch device such as `cuda:0`.
 
 See the [local extraction configuration](../../../headless/README.md#audio-only-reconstruction).
 Run the weight-free test with `python3 -m unittest discover -s tools/transcribers/adtof`.
+
+Pass an aligned full mix with `--mix` to resolve ambiguous stem toms. Reconstruction supplies the mix through `OPENSMPSDECK_DRUM_REFERENCE`. A mix hi-hat within 35 ms confirms a relabel when neither a mix tom nor an existing stem hi-hat is nearby. The original attack time and velocity are preserved. The sidecar records the mix hash, gain and relabel count when the mix pass runs.

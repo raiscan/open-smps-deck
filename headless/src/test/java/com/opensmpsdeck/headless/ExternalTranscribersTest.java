@@ -417,6 +417,7 @@ class ExternalTranscribersTest {
         assertEquals("vocal-candidates.json", manifest.externalNotes().get(1).file().basename());
         assertEquals("keys", score.inputs().externalNotes().get(2).provenance().tool());
         var detector = score.inputs().audioOnly().drumDetector();
+        assertEquals(wav.toAbsolutePath(), Path.of(Files.readString(drum.resolveSibling("detector-mix.txt"))));
         assertEquals("drum-model", detector.name());
         assertEquals("example", detector.metadata().get("model"));
         assertEquals(List.of(35, 38), pitches(score, 0));
@@ -488,6 +489,10 @@ class ExternalTranscribersTest {
         public static void main(String[] args) throws Exception {
             if (!Files.isRegularFile(Path.of(args[0])) || !List.of("lead", "keyboard", "vocals", "guitar", "drums").contains(args[2]) || !args[3].equals("cuda:0"))
                 throw new IllegalArgumentException("Invalid substituted arguments");
+            if (args[2].equals("drums")) {
+                Files.writeString(Path.of(args[0]).resolveSibling("detector-mix.txt"),
+                        System.getenv("OPENSMPSDECK_DRUM_REFERENCE"));
+            }
             String notes = switch (args[2]) {
                 case "drums" -> "[[0.12, 35, 99], [0.4, 38, 85], [1.2, 42, 89]]";
                 case "keyboard" -> "[[0.01, 0.38, 72], [0.2, 0.8, 82]]";
