@@ -277,7 +277,8 @@ public final class ReconstructionReview {
         var catalogue = stockCatalogue(score);
         var allocation = ReconstructionAllocation.sourcePlacement(current.allocation(), score.frames(), ReconstructionTimeMap.of(score));
         var previous = voicing.sourceInstruments() == null ? null : voicing;
-        var fitted = ReconstructionVoiceStage.fit(score, catalogue, allocation, previous, java.util.Set.of(), null);
+        var fitted = ReconstructionVoiceStage.fit(score, catalogue, allocation, current.allocation(),
+                previous, java.util.Set.<String>of(), null);
         var instruments = fitted.sourceInstruments();
         var sound = instruments == null ? null : instruments.get(ReconstructionVoicePlan.SourceInstrument.id(part));
         if (sound == null || sound.fm().variantId() == null)
