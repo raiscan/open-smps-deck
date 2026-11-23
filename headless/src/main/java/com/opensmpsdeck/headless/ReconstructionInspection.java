@@ -313,14 +313,23 @@ public final class ReconstructionInspection {
 
     public SpectrumTile spectrum(AudioSource source, double start, double end, int columns, int low, int high)
             throws IOException {
+        return spectrum(source, start, end, columns, low, high, 2, false);
+    }
+
+    /**
+     * Measures a display tile with {@code rowsPerSemitone} rows per pitch.
+     * With {@code reassigned}, energy moves to each bin's instantaneous frequency.
+     */
+    public SpectrumTile spectrum(AudioSource source, double start, double end, int columns, int low, int high,
+                                 int rowsPerSemitone, boolean reassigned) throws IOException {
         var span = new ReconstructionView.Span(start, end, TimeBase.source, clock);
         var base = source.projectClock ? TimeBase.project : TimeBase.source;
         var audio = ReferenceAudio.evidenceRange(source.path, span.seconds(start, base) - EvidenceSpectrum.CONTEXT,
                 span.seconds(end, base) + EvidenceSpectrum.CONTEXT);
         double[] times = new double[columns];
         for (int x = 0; x < columns; x++) times[x] = span.seconds(start + (end - start) * (x + .5) / columns, base);
-        int rows = 2 * (high - low + 1);
-        var spectrum = EvidenceSpectrum.measure(audio, times, low, high, rows, end - start, false);
+        int rows = Math.max(1, rowsPerSemitone) * (high - low + 1);
+        var spectrum = EvidenceSpectrum.measure(audio, times, low, high, rows, end - start, false, reassigned);
         var ridges = new ArrayList<Ridge>();
         for (int column = 0; column < columns; column++) {
             double sourceTime = start + (end - start) * (column + .5) / columns;
