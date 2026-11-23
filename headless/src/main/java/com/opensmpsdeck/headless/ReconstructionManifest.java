@@ -342,7 +342,7 @@ final class ReconstructionManifest {
         return lower.endsWith(".mid") || lower.endsWith(".midi") ? Encoding.midi : Encoding.json;
     }
 
-    private static Tool tool() throws IOException {
+    static Tool tool() throws IOException {
         var build = new Properties();
         try (var resource = ReconstructionManifest.class.getResourceAsStream("/opensmpsdeck-build.properties")) {
             if (resource != null) build.load(resource);

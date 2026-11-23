@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.opensmpsdeck.headless.ReconstructionAudition;
+import com.opensmpsdeck.headless.ReconstructionBranches;
 import com.opensmpsdeck.headless.ReconstructionDescribe;
 import com.opensmpsdeck.headless.ReconstructionEditCommand;
 import com.opensmpsdeck.headless.ReconstructionProposals;
@@ -23,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.HashSet;
+import java.util.Set;
 
 import static com.opensmpsdeck.headless.mcp.McpArguments.*;
 import static com.opensmpsdeck.headless.mcp.McpJson.object;
@@ -118,8 +120,76 @@ final class McpReconstruction {
     }
 
 
+    static JsonObject branch(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
+        Path work = McpPaths.directory(string(args, "workDir"));
+        requireManaged(work);
+        String action = string(args, "action");
+        String name = action.equals("list") || action.equals("merge") ? null : string(args, "name");
+        String author = args.has("author") ? string(args, "author") : "human";
+        return switch (action) {
+            case "create" -> object(ReconstructionBranches.create(work, name, author));
+            case "import" -> {
+                Path copy = McpPaths.directory(string(args, "copy"));
+                McpPaths.managed(copy, ReconstructionEditCommand.FILE);
+                yield object(ReconstructionBranches.importJournal(work, name, author, copy));
+            }
+            case "list" -> object(Map.of("branches", ReconstructionBranches.list(work)));
+            case "show" -> object(ReconstructionBranches.show(work, name));
+            case "diff" -> ReconstructionBranches.diff(work, name, progress);
+            case "rebase" -> ReconstructionBranches.rebase(work, name, progress);
+            case "delete" -> {
+                ReconstructionBranches.delete(work, name);
+                yield object(Map.of("deleted", name));
+            }
+            case "edit" -> {
+                var groups = new ArrayList<ReconstructionBranches.Group>();
+                if (args.has("groupMetadata")) for (var element : args.getAsJsonArray("groupMetadata")) {
+                    var group = element.getAsJsonObject();
+                    groups.add(new ReconstructionBranches.Group(string(group, "id"), string(group, "label"),
+                            string(group, "rationale")));
+                }
+                yield object(ReconstructionBranches.edit(work, name,
+                        args.has("entries") ? args.getAsJsonArray("entries") : new JsonArray(),
+                        groups, Set.copyOf(strings(args, "remove"))));
+            }
+            case "merge" -> {
+                var parts = new HashSet<Integer>();
+                if (args.has("parts")) for (var element : args.getAsJsonArray("parts"))
+                    parts.add(element.getAsBigDecimal().intValueExact());
+                var selection = new ReconstructionBranches.Selection(parts,
+                        args.has("start") ? args.get("start").getAsDouble() : null,
+                        args.has("end") ? args.get("end").getAsDouble() : null,
+                        Set.copyOf(strings(args, "groups")), Set.copyOf(strings(args, "editIds")));
+                yield ReconstructionBranches.merge(work, strings(args, "sources"), string(args, "into"), selection,
+                        enabled(args, "dryRun"), enabled(args, "allowIndirect"), progress);
+            }
+            case "render" -> {
+                Path output = McpPaths.output(work, string(args, "output"));
+                ReconstructionBranches.requireExport(work, output);
+                Files.copy(ReconstructionBranches.build(work, name, progress).resolve("render.wav"), output);
+                yield object(Map.of("path", output.toString()));
+            }
+            default -> throw new IllegalArgumentException("Unknown branch action: " + action);
+        };
+    }
+
+    private static List<String> strings(JsonObject args, String key) {
+        return args.has(key) ? args.getAsJsonArray(key).asList().stream().map(JsonElement::getAsString).toList() : List.of();
+    }
+
+    private static boolean enabled(JsonObject args, String key) {
+        return args.has(key) && args.get(key).getAsBoolean();
+    }
+
     static JsonObject run(JsonObject args, boolean single, ReconstructionStages.Progress progress) throws IOException {
         String command = single ? string(args, "stage") : "run";
+        if (args.has("branch")) {
+            if ((!command.equals("run") && !command.equals("assemble"))
+                    || args.keySet().stream().anyMatch(key -> !Set.of("workDir", "branch", "stage").contains(key)))
+                throw new IllegalArgumentException("Branch build takes only workDir and branch");
+            var build = branchWork(args, McpPaths.directory(string(args, "workDir")), progress);
+            return object(Map.of("workDir", build.toString(), "branch", string(args, "branch")));
+        }
         boolean initial = args.has("inputs");
         boolean resume = args.has("from");
         if (args.has("withProposals") && args.get("withProposals").getAsBoolean()) {
@@ -343,11 +413,17 @@ final class McpReconstruction {
         return work;
     }
 
-    static JsonObject trace(JsonObject args) throws IOException {
+    private static Path branchWork(JsonObject args, Path work, ReconstructionStages.Progress progress) throws IOException {
+        if (!args.has("branch")) return work;
+        requireManaged(work);
+        return ReconstructionBranches.build(work, string(args, "branch"), progress);
+    }
+
+    static JsonObject trace(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
         var cli = new ArrayList<String>();
         options(cli, args, "start", "end", "part", "pitch", "pitchMin", "pitchMax", "lane", "status", "time");
         if (args.has("byOnset") && args.get("byOnset").getAsBoolean()) cli.add("--by-onset");
-        return ReconstructionTrace.trace(traceDirectory(args, "workDir"), cli.toArray(String[]::new));
+        return ReconstructionTrace.trace(branchWork(args, traceDirectory(args, "workDir"), progress), cli.toArray(String[]::new));
     }
 
     static JsonObject traceDiff(JsonObject args) throws IOException {
@@ -361,7 +437,7 @@ final class McpReconstruction {
         return work;
     }
 
-    static JsonObject describe(JsonObject args) throws IOException {
+    static JsonObject describe(JsonObject args, ReconstructionStages.Progress progress) throws IOException {
         if (args.has("fromPng")) {
             if (args.keySet().stream().anyMatch(key -> !key.equals("fromPng") && !key.equals("json")))
                 throw new IllegalArgumentException("Use only fromPng and optional json to decode a lasso");
@@ -374,12 +450,13 @@ final class McpReconstruction {
                 ReconstructionSections.FILE, "edit-results.json", "edits.json", "voice-edits.json")) McpPaths.managed(work, file);
         if (args.has("notes")) for (String file : ReconstructionDescribe.NOTE_FILES) McpPaths.managed(work, file);
         boolean json = args.has("json") && args.get("json").getAsBoolean();
-        String description = ReconstructionDescribe.describe(work, json, optional(args, "section"),
+        String description = ReconstructionDescribe.describe(branchWork(args, work, progress), json, optional(args, "section"),
                 optional(args, "parts"), optional(args, "bars"),
                 args.has("roles") && args.get("roles").getAsBoolean(),
                 optional(args, "notes"), optional(args, "context"), optional(args, "revision"));
         if (args.has("output")) {
             Path output = McpPaths.output(work, string(args, "output"));
+            if (args.has("branch")) ReconstructionBranches.requireExport(work, output);
             Files.writeString(output, description, java.nio.file.StandardOpenOption.CREATE_NEW);
             return object(Map.of("path", output.toString()));
         }
