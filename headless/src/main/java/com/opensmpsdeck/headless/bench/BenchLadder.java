@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless.bench;
 
 import com.opensmpsdeck.headless.BenchCartridge;
 import com.opensmpsdeck.headless.BenchTranscriber;
+import com.opensmpsdeck.headless.ExternalSeparators;
 import com.opensmpsdeck.headless.ExternalTranscribers;
 import com.opensmpsdeck.headless.InstrumentCatalogue;
 import com.opensmpsdeck.headless.ReferenceStretch;
@@ -21,7 +22,7 @@ final class BenchLadder {
     enum Rung {
         EXACT("R0", "exact"), GROUPED("R1", "grouped"), MIX_EFFECTS("R2", "mix-effects"),
         TRANSCRIBED("R3", "transcribed"), SUNO_LIKE("R4", "suno-like"),
-        DRIFT("R5", "suno-like+drift");
+        DRIFT("R5", "suno-like+drift"), LOCAL("R6", "local");
 
         final String number;
         final String label;
@@ -37,7 +38,13 @@ final class BenchLadder {
                  BenchCorpus.File transcription) {}
 
     record Options(BenchCartridge.Game game, BenchAudio.Variant effects, boolean torture, boolean allRungs, int loops,
-                   String transcriber, Path config, String device) {}
+                   String transcriber, Path config, String device, String separator, Path separatorConfig,
+                   String separatorDevice) {
+        Options(BenchCartridge.Game game, BenchAudio.Variant effects, boolean torture, boolean allRungs, int loops,
+                String transcriber, Path config, String device) {
+            this(game, effects, torture, allRungs, loops, transcriber, config, device, null, null, "auto");
+        }
+    }
 
     private BenchLadder() {}
 
@@ -155,7 +162,25 @@ final class BenchLadder {
         Path driftMidi = dir.resolve("suno-like-drift.mid");
         BenchMidi.writeGrouped(BenchCorpus.inputClock(simulated, null, drift), BenchMidi.Profile.sunoLike, driftMidi);
         cases.add(Rung.DRIFT, BenchMidi.Profile.sunoLike, variant, driftMidi, driftMix, lead, "lead", warped, null);
+        if (cases.options.separator != null) addLocal(cases, dir, lead, out);
     }
+
+    // R6 is the shipped local route: separate the dry native render, then let
+    // audio-only reconstruction transcribe the stems. No MIDI or oracle stems.
+    private static void addLocal(SongCases cases, Path dir, String lead, PrintStream out) throws IOException {
+        var options = cases.options;
+        out.printf("Separating %s with %s%n", cases.key, options.separator);
+        Path folder = ExternalSeparators.separate(cases.reference.resolve(cases.root), dir.resolve("separated"),
+                options.separator, options.separatorDevice, options.separatorConfig, (done, total, message) -> { });
+        Path provenance = folder.resolve("separation.json");
+        var order = BenchFiles.JSON.fromJson(Files.readString(provenance), Separation.class).stemOrder();
+        var stems = new LinkedHashMap<String, Path>();
+        for (String name : order) stems.put(name, folder.resolve("stems").resolve(name + ".wav"));
+        cases.add(Rung.LOCAL, BenchMidi.Profile.clean, BenchAudio.Variant.dry, null, folder.resolve("mix.wav"),
+                lead, null, stems, provenance);
+    }
+
+    private record Separation(List<String> stemOrder) {}
 
     private static Map<String, Path> renderStems(BenchCartridge.Song song, Path dir, String prefix, int frames,
                                                   Map<String, List<String>> groups) throws IOException {
@@ -183,7 +208,7 @@ final class BenchLadder {
             var input = new Input(options.game, rung, options.torture, frames, end(), playback.loopStart(), lead,
                     leadTrack, files, transcription == null ? null : BenchCorpus.File.at(root, transcription));
             cases.add(new BenchCorpus.Case(key + "/" + rung.label, id, title, profile, variant, truth,
-                    BenchCorpus.File.at(root, midi), BenchCorpus.File.at(root, audio), reference, null,
+                    midi == null ? null : BenchCorpus.File.at(root, midi), BenchCorpus.File.at(root, audio), reference, null,
                     rung == Rung.DRIFT ? .07 : null, input));
         }
     }

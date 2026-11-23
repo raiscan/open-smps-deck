@@ -267,6 +267,44 @@ class BenchCliTest {
         assertEquals(0, cli("compare", legacy.toString(), classic.toString(), "--cross-target", "--tolerance", "0"));
     }
 
+    @Test void separatorOptionsRequireTheLadderAndASeparatorName() {
+        for (var args : List.of(
+                List.of("--separator", "bs-roformer"),
+                List.of("--ladder", "--separator-device", "cpu"),
+                List.of("--torture", "--separator", "bs-roformer"))) {
+            var command = new java.util.ArrayList<>(List.of("bench", "build-corpus", "rom.gen", "catalogue.json",
+                    directory.resolve("corpus").toString()));
+            command.addAll(args);
+            var captured = new ByteArrayOutputStream();
+            try (var output = new PrintStream(captured)) {
+                assertEquals(2, Main.run(command.toArray(String[]::new), output, output), captured.toString());
+            }
+            assertTrue(captured.toString().contains("separat"), captured.toString());
+            assertFalse(Files.exists(directory.resolve("corpus")));
+        }
+    }
+
+    @Test void localRungUsesLabelledSeparatorStemsWithoutMidi() throws Exception {
+        Path stem = Files.writeString(directory.resolve("bass.wav"), "stem");
+        Path other = Files.writeString(directory.resolve("other.wav"), "stem");
+        var stems = new java.util.TreeMap<String, BenchCorpus.File>(Map.of(
+                "bass", BenchCorpus.File.at(directory, stem), "other", BenchCorpus.File.at(directory, other)));
+        var file = BenchCorpus.File.at(directory, stem);
+        var input = new BenchLadder.Input(com.opensmpsdeck.headless.BenchCartridge.Game.s3k, BenchLadder.Rung.LOCAL,
+                false, 60, "duration", null, "FM1", null, stems, file);
+        var local = new BenchCorpus.Case("s3k/01/local", 1, "Song", BenchMidi.Profile.clean, BenchAudio.Variant.dry,
+                file, null, file, file, null, null, input);
+        var inputs = BenchLadderRun.inputs(local, directory, null);
+        assertTrue(inputs.audioOnly());
+        assertTrue(inputs.stems().isEmpty());
+        assertNull(inputs.leadPart());
+        assertEquals(Map.of("bass", stem, "other", other), inputs.audioStems());
+
+        var withMidi = new BenchCorpus.Case("s3k/01/local", 1, "Song", BenchMidi.Profile.clean, BenchAudio.Variant.dry,
+                file, file, file, file, null, null, input);
+        assertThrows(IllegalArgumentException.class, () -> BenchLadderRun.inputs(withMidi, directory, null));
+    }
+
     @Test void compareUsesTheSameDrumClassDefinitionOnBothSides() {
         var legacy = scorecard(Map.of("drumClassAccuracy", .7));
         var old = new BenchScorecard.Card(1, legacy.manifestSha256(), legacy.catalogueSha256(),

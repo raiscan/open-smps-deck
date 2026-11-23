@@ -82,6 +82,35 @@ final class BenchReconstruction {
                       Integer leadPart, boolean captureVoices, TargetGame target) throws IOException {
         var args = new ArrayList<>(List.of("reconstruct", rolePlan == null ? "run" : "transcribe", midi.toString(), audio.toString(), catalogue.toString(),
                 output.toString(), "--name", "Benchmark"));
+        stems.forEach((part, file) -> {
+            args.add("--stem");
+            args.add(part + "=" + file);
+        });
+        return execute(args, midi, audio, output, refine, seconds, drums, hooks, rolePlan, truthNotes, steadyTempo,
+                leadPart, captureVoices, target);
+    }
+
+    // The shipped local route: labelled separator stems, no MIDI. Transcription,
+    // drum detection and the beat grid all run inside reconstruction.
+    static Result runAudioOnly(Path audio, Path catalogue, Path output, boolean refine, Map<String, Path> stems,
+                               BenchDrums drums, BenchCli.Hooks hooks, BenchRolePlan.Mode rolePlan,
+                               List<BenchMetrics.Event> truthNotes, String steadyTempo, TargetGame target)
+            throws IOException {
+        var args = new ArrayList<>(List.of("reconstruct", rolePlan == null ? "run" : "transcribe", "--audio-only",
+                audio.toString(), catalogue.toString(), output.toString(), "--name", "Benchmark"));
+        stems.forEach((label, file) -> {
+            args.add("--stem");
+            args.add(label + "=" + file);
+        });
+        return execute(args, null, audio, output, refine, null, drums, hooks, rolePlan, truthNotes, steadyTempo,
+                null, true, target);
+    }
+
+    private static Result execute(List<String> args, Path midi, Path audio, Path output, boolean refine,
+                                  Double seconds, BenchDrums drums, BenchCli.Hooks hooks,
+                                  BenchRolePlan.Mode rolePlan, List<BenchMetrics.Event> truthNotes,
+                                  String steadyTempo, Integer leadPart, boolean captureVoices, TargetGame target)
+            throws IOException {
         if (target != TargetGame.S3K) {
             args.add("--target");
             args.add(target.id());
@@ -99,10 +128,6 @@ final class BenchReconstruction {
             args.add("--seconds");
             args.add(seconds.toString());
         }
-        stems.forEach((part, file) -> {
-            args.add("--stem");
-            args.add(part + "=" + file);
-        });
         hooks.reconstruction().run(args.toArray(String[]::new), QUIET);
         if (rolePlan != null) {
             hooks.reconstruction().run(new String[]{"reconstruct", "structure", output.toString()}, QUIET);
@@ -121,7 +146,10 @@ final class BenchReconstruction {
         }
         var events = excludeEffectCopies(BenchMetrics.events(truth, drums, false, noiseClasses,
                 drums.gainAliases(project.samples())), report.effectCopyLanes());
-        JsonElement source = hooks.midi().read(midi);
+        // Audio-only runs have no MIDI; their score records the transcribed source.
+        JsonElement source = midi != null ? hooks.midi().read(midi)
+                : BenchFiles.JSON.fromJson(java.nio.file.Files.readString(output.resolve("score.json")),
+                com.google.gson.JsonObject.class).get("source");
         var reductions = new java.util.TreeMap<String, Long>();
         if (report.reductions() != null) {
             for (var change : report.reductions())
