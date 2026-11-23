@@ -114,12 +114,9 @@ final class ReconstructionVoiceStage {
         var sustained = new java.util.HashSet<String>();
         var screening = new VoicePatchShortlist(catalogue, options.target());
         var leadPatches = new HashMap<String, VoicePatchShortlist.Ranking>();
-        // Only an S3K source part with its own stem has attacks to settle a challenge.
-        java.util.function.Predicate<String> challenged = id -> {
-            if (!shared || !id.startsWith("part-") || id.equals(vocalGroup) || options.target() != TargetGame.S3K) return false;
-            var stem = options.stems().get(fitGroups.get(id).getFirst().note().part());
-            return stem != null && !mix.equals(stem);
-        };
+        // Only an S3K source part with a stem of its own has attacks to settle a challenge.
+        java.util.function.Predicate<String> challenged = id -> shared && options.target() == TargetGame.S3K
+                && challengeable(id, vocalGroup, fitGroups.get(id).getFirst().note().part(), options.stems(), mix);
         var unsupported = new ArrayList<String>();
         for (var focus : foreground.entrySet()) {
             var candidates = screening.rank(focus.getValue(), context, mix, options.stems(), windows,
@@ -204,10 +201,13 @@ final class ReconstructionVoiceStage {
                     var stem = options.stems().get(part);
                     if (stem != null && !mix.equals(stem)) {
                         var fitting = screening.fittingAttacks(patches, entry.getValue(), stem, windows, guitarParts.contains(part));
-                        // Full-volume attacks can misjudge a quiet part, so the rejected patches may challenge.
-                        patches.stream().filter(patch -> !fitting.contains(patch)).limit(CHALLENGER_LIMIT).forEach(pool::add);
+                        // Full-volume attacks can misjudge a quiet part, so the rejected patches may
+                        // challenge. The sung lead and a shared stem keep the screen and raise no one.
+                        if (challenged.test(lane)) {
+                            patches.stream().filter(patch -> !fitting.contains(patch)).limit(CHALLENGER_LIMIT).forEach(pool::add);
+                            challengeStem = stem;
+                        }
                         patches = fitting;
-                        challengeStem = stem;
                     }
                 }
                 var sustain = stockSustain.get(lane);
@@ -281,27 +281,37 @@ final class ReconstructionVoiceStage {
         }
         fit.patches(comparisons, incumbents);
         if (chosen == null) {
-            // The decision above stands unless a challenger's attacks are closer to
-            // the stem and it then improves the joint fit by the incumbent margin.
-            var holders = new ArrayList<>(incumbents);
-            boolean admitted = false;
+            // The decision above stands, on every lane. A challenger whose attacks are closer to
+            // the stem meets the patch that decision selected, in that same arrangement, and
+            // must improve both losses by the incumbent margin. No other lane moves.
+            var replaced = new LinkedHashMap<Integer, VoiceFit.Selection>();
             for (int i = 0; i < models.size(); i++) {
                 var model = models.get(i);
                 if (model.challengers().isEmpty()) continue;
-                String held = fit.selection(i).candidate().id();
+                var selection = fit.selection(i);
+                String held = selection.candidate().id();
                 var holder = model.patches().stream().filter(patch -> patch.id().equals(held)).findFirst().orElse(null);
                 if (holder == null) continue;
                 var winner = screening.attackWinner(model.challengers(), holder, fitGroups.get(model.id()),
                         model.challengeStem(), windows);
                 if (winner == null) continue;
-                candidates.get(i).add(patchTrial(windows, references, source, catalogue, model, winner,
-                        priors.get(model.id()), stockSustain.get(model.id())));
+                var trial = patchTrial(windows, references, source, catalogue, model, winner,
+                        priors.get(model.id()), stockSustain.get(model.id()));
+                candidates.get(i).add(trial);
                 models.set(i, model.withPatch(winner));
-                holders.set(i, held);
-                admitted = true;
+                if (fit.challenge(i, trial, VoiceFit.INCUMBENT_MARGIN)) replaced.put(i, selection);
             }
-            if (admitted) fit.patches(previous == null ? candidates : candidates.stream().map(trials -> trials.stream()
-                    .sorted(Comparator.comparing(VoiceFit.Candidate::id)).toList()).toList(), holders);
+            // With several replacements, each must still earn its place beside the others.
+            boolean restored = true;
+            while (restored && replaced.size() > 1) {
+                restored = false;
+                for (var entry : List.copyOf(replaced.entrySet())) {
+                    if (fit.beats(entry.getKey(), entry.getValue().candidate(), VoiceFit.INCUMBENT_MARGIN)) continue;
+                    fit.replace(entry.getKey(), fit.trial(entry.getKey(), entry.getValue().candidate()).selection());
+                    replaced.remove(entry.getKey());
+                    restored = true;
+                }
+            }
         }
         var patchIds = new ArrayList<String>();
         var patchScores = new ArrayList<List<ScoredPatch>>();
@@ -458,6 +468,31 @@ final class ReconstructionVoiceStage {
         if (!noise.isEmpty() && fitPsg3.isEmpty())
             result.put("PSG3", settings(Role.drums, null, WRITTEN, DRY, List.of()).withDrumGains(cymbalGains));
         return new Result(ReconstructionStages.VERSION, result, windows.fitWindows());
+    }
+
+    /**
+     * Whether a fit group may raise challengers: a source part that is not the sung lead
+     * and whose stem is a real file no other part and not the mix points at. An
+     * unreadable path counts as shared.
+     */
+    static boolean challengeable(String id, String vocalGroup, int part, Map<Integer, Path> stems, Path mix) {
+        if (!id.startsWith("part-") || id.equals(vocalGroup)) return false;
+        var stem = stems.get(part);
+        if (stem == null) return false;
+        try {
+            if (sameFile(stem, mix)) return false;
+            for (var other : stems.entrySet())
+                if (other.getKey() != part && sameFile(stem, other.getValue())) return false;
+        } catch (IOException unreadable) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean sameFile(Path first, Path second) throws IOException {
+        if (first.equals(second)) return true;
+        return java.nio.file.Files.exists(first) && java.nio.file.Files.exists(second)
+                && java.nio.file.Files.isSameFile(first, second);
     }
 
     private static VoiceFit.Candidate patchTrial(VoiceWindows windows, List<VoiceWindows.Reference> references,

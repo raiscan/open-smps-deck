@@ -117,6 +117,50 @@ class ReconstructionVoiceFitTest {
         assertEquals(ReconstructionVoicing.DRY, ReconstructionVoicing.idiom(ReconstructionRoles.Role.bass, "FM5"));
     }
 
+    @Test void aChallengerMeetsItsHolderDirectlyAndMovesNoOtherPart() {
+        var target = probe("target", 1, 1, 0).spectrum();
+        var holder = probe("holder", 1, 0, .02f);
+        var slight = probe("slight", 1, 0, .0199f);
+        var clear = probe("clear", 1, 0, 0);
+        var other = probe("other", 0, 1, .3f);
+        var betterOther = probe("better-other", 0, 1, 0);
+
+        // A joint pass over every part lets the other part move while this one is tried.
+        var joint = new VoiceFit(target, 3, List.of(holder, other), java.util.Set.of());
+        joint.patches(List.of(List.of(holder, slight), List.of(other, betterOther)), java.util.Arrays.asList("holder", "other"));
+        assertEquals("better-other", joint.selection(1).candidate().id());
+
+        var fit = new VoiceFit(target, 3, List.of(holder, other), java.util.Set.of());
+        assertFalse(fit.challenge(0, slight, VoiceFit.INCUMBENT_MARGIN));
+        assertEquals("holder", fit.selection(0).candidate().id());
+        assertEquals("other", fit.selection(1).candidate().id());
+
+        assertTrue(fit.challenge(0, clear, VoiceFit.INCUMBENT_MARGIN));
+        assertEquals("clear", fit.selection(0).candidate().id());
+        assertEquals("other", fit.selection(1).candidate().id());
+        assertTrue(fit.beats(0, holder, VoiceFit.INCUMBENT_MARGIN));
+        assertFalse(fit.beats(0, clear, VoiceFit.INCUMBENT_MARGIN));
+    }
+
+    @Test void aSlightGainOverAnIntermediatePatchIsNotAGainOverTheHolder() {
+        var target = probe("target", 1, 0, 0).spectrum();
+        var holder = probe("holder", 1, .1f, 0);
+        var legacy = probe("legacy", 1, .08f, 0);
+        var challenger = probe("challenger", 1, .0799f, 0);
+
+        // Once a legacy patch has replaced the holder, the new-patch margin lets the challenger through.
+        var chained = new VoiceFit(target, 3, List.of(legacy), java.util.Set.of());
+        chained.patches(List.of(List.of(legacy, challenger)), java.util.Arrays.asList("holder"));
+        assertEquals("challenger", chained.selection(0).candidate().id());
+
+        // Against the patch the decision selected, with the incumbent margin, it must clear 0.5%.
+        var direct = new VoiceFit(target, 3, List.of(legacy), java.util.Set.of());
+        assertFalse(direct.challenge(0, challenger, VoiceFit.INCUMBENT_MARGIN));
+        assertEquals("legacy", direct.selection(0).candidate().id());
+        var original = new VoiceFit(target, 3, List.of(holder), java.util.Set.of());
+        assertTrue(original.challenge(0, challenger, VoiceFit.INCUMBENT_MARGIN));
+    }
+
     private static VoiceFit.Candidate probe(String id, float a, float b, float c) {
         return new VoiceFit.Candidate(id, new float[]{a, b, c, a, b, c});
     }

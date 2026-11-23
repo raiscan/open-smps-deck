@@ -12,6 +12,7 @@ import java.util.List;
 
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VoicePatchShortlistTest {
@@ -112,6 +113,23 @@ class VoicePatchShortlistTest {
         assertEquals(before.clearestMatch(), ranking.clearestMatch());
         var challenger = ranking.typical().stream().filter(patch -> patch.id().equals(left)).findFirst().orElseThrow();
         assertTrue(ranking.clearest().stream().allMatch(patch -> patch.score() >= challenger.score()));
+    }
+
+    @Test void theSungLeadAndASharedStemRaiseNoChallengers(@TempDir Path directory) throws Exception {
+        var mix = java.nio.file.Files.writeString(directory.resolve("mix.wav"), "mix");
+        var lead = java.nio.file.Files.writeString(directory.resolve("lead.wav"), "lead");
+        var bass = java.nio.file.Files.writeString(directory.resolve("bass.wav"), "bass");
+        var alias = java.nio.file.Files.createSymbolicLink(directory.resolve("alias.wav"), lead);
+        var stems = Map.of(1, lead, 2, bass);
+
+        assertTrue(ReconstructionVoiceStage.challengeable("part-1", null, 1, stems, mix));
+        // The sung lead keeps its attack screen but neither probe set nor rejects may challenge it.
+        assertFalse(ReconstructionVoiceStage.challengeable("part-1", "part-1", 1, stems, mix));
+        assertFalse(ReconstructionVoiceStage.challengeable("FM2", null, 1, stems, mix));
+        // Another spelling of one file is still one stem, and the mix is no stem at all.
+        assertFalse(ReconstructionVoiceStage.challengeable("part-1", null, 1, Map.of(1, lead, 2, alias), mix));
+        assertFalse(ReconstructionVoiceStage.challengeable("part-2", null, 2, Map.of(1, lead, 2, directory.resolve("./mix.wav")), mix));
+        assertFalse(ReconstructionVoiceStage.challengeable("part-3", null, 3, stems, mix));
     }
 
     private static void write(Path file, short[] audio, int frames) throws Exception {

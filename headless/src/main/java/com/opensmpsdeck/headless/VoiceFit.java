@@ -10,7 +10,7 @@ final class VoiceFit {
     private static final double MAX_GAIN = 4;
     private static final double NEW_PATCH_MARGIN = .0001;
     // A near-tie that flipped the selected voice moved the fit error by about 0.18%.
-    private static final double INCUMBENT_MARGIN = .005;
+    static final double INCUMBENT_MARGIN = .005;
 
     record Candidate(String id, float[] spectrum, double preference) {
         Candidate(String id, float[] spectrum) { this(id, spectrum, 0); }
@@ -93,6 +93,30 @@ final class VoiceFit {
         if (best == original) return false;
         replace(lane, best.selection());
         return true;
+    }
+
+    /**
+     * Whether the challenger beats the lane's current selection on the training and
+     * the held-out loss by the margin, with every other lane exactly as it is. It
+     * replaces the selection only then, and moves nothing else.
+     */
+    boolean challenge(int lane, Candidate challenger, double relativeMargin) {
+        var holder = selection(lane).candidate();
+        var held = current();
+        var trial = trial(lane, challenger);
+        if (!improves(holder.adjusted(held.fit()), challenger.adjusted(trial.fit()), relativeMargin)
+                || !improves(holder.adjusted(held.check()), challenger.adjusted(trial.check()), relativeMargin)) return false;
+        replace(lane, trial.selection());
+        return true;
+    }
+
+    /** Whether the lane's current selection still beats another candidate by the margin on both losses. */
+    boolean beats(int lane, Candidate other, double relativeMargin) {
+        var selected = selection(lane).candidate();
+        var now = current();
+        var trial = trial(lane, other);
+        return improves(other.adjusted(trial.fit()), selected.adjusted(now.fit()), relativeMargin)
+                && improves(other.adjusted(trial.check()), selected.adjusted(now.check()), relativeMargin);
     }
 
     private static boolean improves(double from, double to, double relativeMargin) {
