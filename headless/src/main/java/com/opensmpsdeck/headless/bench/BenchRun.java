@@ -319,10 +319,12 @@ final class BenchRun {
         if (voices.distance() != null) metrics.put("voiceSpectralDistance" + suffix, voices.distance());
         if (voices.compared() != null && voices.matched() > 0)
             metrics.put("voiceSpectralCoverage" + suffix, (double) voices.compared() / voices.matched());
-        if (voices.top1() != null && voices.matched() > 0) {
+        if (voices.top1() != null && voices.matched() > 0)
             metrics.put("voiceTop1" + suffix, (double) voices.top1() / voices.matched());
+        if (voices.top3() != null && voices.matched() > 0)
             metrics.put("voiceTop3" + suffix, (double) voices.top3() / voices.matched());
-        }
+        if (voices.algorithm() != null && voices.matched() > 0)
+            metrics.put("voiceAlgorithm" + suffix, (double) voices.algorithm() / voices.matched());
     }
 
     private static BenchGold.Score scoreLadderLead(Map<String, Double> metrics, String suffix, Path output,

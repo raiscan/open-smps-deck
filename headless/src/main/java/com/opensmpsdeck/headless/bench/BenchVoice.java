@@ -14,8 +14,11 @@ import java.util.TreeMap;
 import java.util.function.DoubleUnaryOperator;
 
 final class BenchVoice {
-    record Channel(int matched, Integer top1, Integer top3, Integer spectralCompared, Double spectralDistance) {}
-    record Score(Map<String, Channel> channels, int matched, Integer top1, Integer top3, Integer compared, Double distance) {}
+    record Channel(int matched, Integer top1, Integer top3, Integer spectralCompared, Double spectralDistance,
+                   Integer algorithm) {}
+    /** {@code algorithm} counts matched notes whose emitted patch uses the native patch's FM algorithm. */
+    record Score(Map<String, Channel> channels, int matched, Integer top1, Integer top3, Integer compared, Double distance,
+                 Integer algorithm) {}
 
     private record Probe(String hash, int pitch) {}
     private static final int GATE = 12;
@@ -47,14 +50,25 @@ final class BenchVoice {
             boolean top3 = !holdout && attribution.shortlist(b).stream().limit(3)
                     .anyMatch(candidate -> candidate.assetId().equals("fm-voice-" + a.hash()));
             Double distance = holdout ? distance(a, b) : null;
-            totals.add(top1, top3, distance);
-            channels.get(a.lane()).add(top1, top3, distance);
+            Boolean algorithm = holdout ? null : sameAlgorithm(bytes(a.hash()), bytes(b.hash()));
+            totals.add(top1, top3, distance, algorithm);
+            channels.get(a.lane()).add(top1, top3, distance, algorithm);
         }
         var output = new TreeMap<String, Channel>();
         channels.forEach((lane, count) -> output.put(lane, new Channel(count.matched, holdout ? null : count.top1, holdout ? null : count.top3,
-                holdout ? count.compared : null, count.mean())));
+                holdout ? count.compared : null, count.mean(), count.algorithm())));
         return new Score(output, totals.matched, holdout ? null : totals.top1, holdout ? null : totals.top3,
-                holdout ? totals.compared : null, totals.mean());
+                holdout ? totals.compared : null, totals.mean(), totals.algorithm());
+    }
+
+    private byte[] bytes(String hash) {
+        return hash == null || !variants.containsKey(hash) ? null : catalogue.asset("fm-voice-" + hash).bytes();
+    }
+
+    /** The low three bits of a voice's first byte select the operator algorithm in every supported dialect. */
+    static Boolean sameAlgorithm(byte[] original, byte[] emitted) {
+        return original == null || emitted == null || original.length == 0 || emitted.length == 0 ? null
+                : (original[0] & 7) == (emitted[0] & 7);
     }
 
     private Double distance(BenchMetrics.Event a, BenchMetrics.Event b) throws IOException {
@@ -82,18 +96,19 @@ final class BenchVoice {
                 var second = ladderProbe(probes, "emitted:" + b.hash(), emitted.get(b.hash()), a.pitch());
                 spectral = first.distance(second).spectral();
             }
-            boolean top1 = attribution != null && a.hash().equals(b.hash());
+            boolean top1 = a.hash().equals(b.hash());
             boolean top3 = attribution != null && attribution.shortlist(BenchLadderTrace.map(b, truthToInput))
                     .stream().limit(3).anyMatch(candidate -> candidate.assetId().equals("fm-voice-" + a.hash()));
-            total.add(top1, top3, spectral);
-            counts.computeIfAbsent(a.lane(), ignored -> new Count()).add(top1, top3, spectral);
+            Boolean algorithm = sameAlgorithm(originals.get(a.hash()), b.hash() == null ? null : emitted.get(b.hash()));
+            total.add(top1, top3, spectral, algorithm);
+            counts.computeIfAbsent(a.lane(), ignored -> new Count()).add(top1, top3, spectral, algorithm);
         }
         var output = new TreeMap<String, Channel>();
         counts.forEach((lane, count) -> output.put(lane,
-                new Channel(count.matched, attribution == null ? null : count.top1,
-                        attribution == null ? null : count.top3, count.compared, count.mean())));
-        return new Score(output, total.matched, attribution == null ? null : total.top1,
-                attribution == null ? null : total.top3, total.compared, total.mean());
+                new Channel(count.matched, count.top1,
+                        attribution == null ? null : count.top3, count.compared, count.mean(), count.algorithm())));
+        return new Score(output, total.matched, total.top1,
+                attribution == null ? null : total.top3, total.compared, total.mean(), total.algorithm());
     }
 
     private static AudioFingerprint ladderProbe(Map<Probe, AudioFingerprint> probes, String key, byte[] bytes,
@@ -132,11 +147,17 @@ final class BenchVoice {
     }
 
     private static final class Count {
-        int matched, top1, top3, compared;
+        int matched, top1, top3, compared, sameAlgorithm, algorithmKnown;
         double sum;
 
-        void add(boolean first, boolean shortlist, Double distance) {
+        Integer algorithm() { return algorithmKnown == 0 ? null : sameAlgorithm; }
+
+        void add(boolean first, boolean shortlist, Double distance, Boolean algorithm) {
             matched++;
+            if (algorithm != null) {
+                algorithmKnown++;
+                if (algorithm) sameAlgorithm++;
+            }
             if (first) top1++;
             if (shortlist) top3++;
             if (distance != null) {
