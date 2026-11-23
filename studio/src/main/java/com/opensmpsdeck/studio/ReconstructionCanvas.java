@@ -59,6 +59,20 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private static final Color SUBTLE = Color.web("#98aeca");
     private static final Color CURSOR = Color.web("#faf0a9");
     private static final Color GRID = Color.web("#a5badd").deriveColor(0, 1, 1, .16);
+    private static final Color FAINT_GRID = Color.web("#a5badd", .07);
+    private static final Color RANGE = Color.web("#83abff", .17);
+    private static final Color RIDGE = Color.web("#9cf4fb", .75);
+    private static final Color SECTION_FILL = Color.web("#2b4767");
+    private static final Color PERIOD_FILL = Color.web("#304058");
+    private static final Color PHRASE_FILL = Color.web("#243147");
+    private static final Color LISTENING = Color.web("#6de1cc");
+    private static final Color SELECTED_LANE = Color.web("#304666");
+    private static final Color TAG_BACKGROUND = BACKGROUND.deriveColor(0, 1, 1, .91);
+    private static final Color LABEL_BACKGROUND = BACKGROUND.deriveColor(0, 1, 1, .83);
+    private static final Color BOX_FILL = Color.web("#83abff", .20);
+    private static final Color BOX_LINE = Color.web("#83abff");
+    private static final Color PROPOSAL = Color.web("#ef8aff");
+    private static final Font FONT = Font.font("Monospaced", 11);
     private static final String[] PITCHES = {"C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"};
 
 
@@ -358,6 +372,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         cancelGesture();
         pitchRange(top, span);
         draw();
+    }
+
+    // The pitch fit is view state that callers read back at once, so it is not deferred with the paint.
+    @Override void settle() {
+        if (ready) fitVisiblePitch(canvas.getWidth());
     }
 
     private void fitVisiblePitch(double width) {
@@ -674,6 +693,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             return;
         }
         if (box != null && (dragged || box.add() || box.toggle())) {
+            flush();
             var area = new Box(box.x(), box.y(), Math.clamp(event.getX(), axis(), canvas.getWidth()),
                     Math.clamp(event.getY(), sectionBottom(), pitchBottom()), box.add(), box.toggle());
             var found = hits.stream().filter(hit -> area.intersects(hit) && hit.top() < pitchBottom())
@@ -1095,6 +1115,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     List<Overlay> lassoNotes(javafx.geometry.Rectangle2D box) {
+        flush();
         var notes = new java.util.LinkedHashMap<String, Overlay>();
         for (var hit : hits) if (box.intersects(hit.left(), hit.top(), hit.width(), hit.height()))
             notes.putIfAbsent(hit.note().eventId(), hit.note());
@@ -1167,6 +1188,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     java.util.Optional<javafx.geometry.Point2D> noteContextPoint(String id) {
+        flush();
         double right = canvas.getWidth();
         return hits.stream().filter(hit -> hit.note().id().equals(id) && hit.left() < right
                         && hit.left() + hit.width() > axis() && hit.top() < pitchBottom())
@@ -1176,6 +1198,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private Hit hit(double x, double y) {
+        flush();
         if (x < axis()) return null;
         for (int i = hits.size() - 1; i >= 0; i--) if (hits.get(i).contains(x, y)) return hits.get(i);
         return null;
@@ -1198,7 +1221,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private int lowestPitch() { return (int) Math.ceil(pitchTop - pitchSpan); }
     private int highestPitch() { return (int) Math.floor(pitchTop); }
 
-    @Override void draw() {
+    @Override void paint() {
         if (!ready) return;
         var g = canvas.getGraphicsContext2D();
         double width = canvas.getWidth();
@@ -1206,49 +1229,75 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         hits.clear();
         proposalHits.clear();
         layerSkips.clear();
+        // JavaFX canvas clips are rendered through masks, which makes every clipped
+        // operation expensive. Paint the plot first, then paint the gutter, header
+        // and lane strip over anything that spilled out of it.
         g.setFill(BACKGROUND);
         g.fillRect(0, 0, width, contentHeight);
-        if (rolesView && showDrums && !drumRows.isEmpty()) {
-            g.setFill(PANEL);
-            g.fillRect(0, pitchBottom(), width, stripHeight());
-        }
-        g.setFont(Font.font("Monospaced", 11));
+        g.setFont(FONT);
         g.setTextBaseline(VPos.CENTER);
+        g.setGlobalAlpha(1);
+        g.setLineWidth(1);
+        g.setLineDashes();
+        double plotTop = sectionBottom(), plotBottom = pitchBottom();
         drawSpectrum(g, width);
-        drawPitchGrid(g, width);
-        drawBands(g, width);
-        if (!rolesView) drawLanes(g, width);
-        else if (showDrums && !drumRows.isEmpty()) {
-            g.setFill(SUBTLE);
-            g.fillText("Drums", 12, pitchBottom() + LANE_HEADER / 2.0);
-        }
-        drawRuler(g, width);
-        g.save();
-        clip(g, axis(), 0, width - axis(), contentHeight);
-        if (range != null) {
-            g.setFill(Color.web("#83abff", .17));
-            g.fillRect(x(range.start()), 0, x(range.end()) - x(range.start()), contentHeight);
-        }
+        drawPitchLines(g, width);
+        var ticks = rulerTicks(width);
+        drawTickLines(g, ticks, plotTop, plotBottom);
+        drawRange(g, plotTop, plotBottom);
+        var visible = visibleNotes(width);
+        List<ReconstructionInspection.LayerOverlay> layers = List.of();
         if (rolesView) {
-            var visible = visibleNotes(width);
             drawVoiceNotes(g, width, visible);
-            if (showDrums) drawDrums(g, visible);
             drawBox(g);
-        } else drawNotes(g, width);
-        if (boundaryPreview != null) {
-            g.setStroke(Color.GOLD);
-            g.strokeLine(x(boundaryPreview), rulerHeight(), x(boundaryPreview), sectionBottom());
+        } else {
+            layers = visibleLayers(width);
+            drawNotes(g, width, visible, layers);
         }
         if (preview != null) {
             g.setStroke(Color.GOLD);
             double left = x(preview.start());
             g.strokeRect(left, y(preview.pitch()) - 3, Math.max(2, x(preview.end()) - left), 6);
         }
-        g.setStroke(CURSOR);
-        g.strokeLine(x(playhead), 0, x(playhead), contentHeight);
-        g.restore();
+        drawPitchLabels(g);
+        // The lane strip below the plot.
+        if (rolesView) {
+            if (showDrums && !drumRows.isEmpty()) {
+                g.setFill(PANEL);
+                g.fillRect(0, plotBottom, width, stripHeight());
+                g.setFill(SUBTLE);
+                g.fillText("Drums", 12, plotBottom + LANE_HEADER / 2.0);
+            }
+        } else drawLanes(g, width);
+        drawTickLines(g, ticks, plotBottom, contentHeight);
+        drawRange(g, plotBottom, contentHeight);
+        if (rolesView) {
+            if (showDrums) drawDrums(g, visible);
+        } else drawLaneNotes(g, width, visible, layers);
+        // The header above the plot.
+        drawBands(g, width);
+        drawRuler(g, width, ticks);
+        drawRange(g, 0, plotTop);
+        if (boundaryPreview != null) plotLine(g, Color.GOLD, x(boundaryPreview), rulerHeight(), sectionBottom());
+        plotLine(g, CURSOR, x(playhead), 0, contentHeight);
         g.setStroke(GRID);
         g.strokeLine(axis() - .5, 0, axis() - .5, contentHeight);
+    }
+
+    /** A one-pixel vertical line, cut at the gutter edge as the old plot clip did. */
+    private void plotLine(GraphicsContext g, Color color, double x, double top, double bottom) {
+        double left = Math.max(axis(), x - .5), right = Math.min(canvas.getWidth(), x + .5);
+        if (right <= left) return;
+        g.setFill(color);
+        g.fillRect(left, top, right - left, bottom - top);
+    }
+
+    private void drawRange(GraphicsContext g, double top, double bottom) {
+        if (range == null || bottom <= top) return;
+        double left = Math.max(axis(), x(range.start())), right = Math.min(canvas.getWidth(), x(range.end()));
+        if (right <= left) return;
+        g.setFill(RANGE);
+        g.fillRect(left, top, right - left, bottom - top);
     }
 
     private void drawSpectrum(GraphicsContext g, double width) {
@@ -1258,102 +1307,126 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             g.fillText("No source audio available", axis() + 16, sectionBottom() + 22);
             return;
         }
-        int level = (int) Math.clamp(Math.floor(Math.log(ReconstructionTiles.WIDTH / (1.5 * pixelsPerSecond))
-                / Math.log(2)), 0, 7);
-        double tileSpan = Math.scalb(1.5, level);
-        double end = seconds(width);
+        // Measure against device pixels, so HiDPI displays get a sharper spectrogram.
+        var window = getScene() == null ? null : getScene().getWindow();
+        int level = ReconstructionTiles.level(pixelsPerSecond * (window == null ? 1 : window.getRenderScaleX()));
+        double tileSpan = ReconstructionTiles.span(level);
+        double from = seconds(axis()), end = seconds(width);
+        int firstBlock = ReconstructionTiles.block(lowestPitch() - 1);
+        int lastBlock = ReconstructionTiles.block(highestPitch() + 1);
+        int firstIndex = (int) (from / tileSpan), lastIndex = (int) Math.ceil(end / tileSpan) - 1;
         var needed = new LinkedHashSet<ReconstructionTiles.ImageKey>();
-        int drawn = 0;
-        int low = (int) Math.floor(pitchTop - pitchSpan + .5);
-        int high = (int) Math.ceil(pitchTop - .5);
-        g.save();
-        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
-        for (int index = (int) (seconds(axis()) / tileSpan); index * tileSpan < end; index++) {
-            var key = new ReconstructionTiles.Key(source, level, index, low, high);
-            var imageKey = new ReconstructionTiles.ImageKey(key, dbRange);
-            needed.add(imageKey);
-            var tile = tiles.get(imageKey);
-            if (tile == null) {
-                drawCoarserTile(g, key);
-                continue;
-            }
-            drawTile(g, key, tile.image());
-            drawn++;
-            if (ridges) {
-                g.setFill(Color.web("#9cf4fb", .75));
-                for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
-                    g.fillOval(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
+        int drawn = 0, visible = 0;
+        if (ridges) g.setFill(RIDGE);
+        for (int index = firstIndex; index <= Math.max(firstIndex, lastIndex); index++) {
+            for (int block = firstBlock; block <= lastBlock; block++) {
+                var key = ReconstructionTiles.key(source, level, index, block);
+                var imageKey = new ReconstructionTiles.ImageKey(key, dbRange);
+                needed.add(imageKey);
+                visible++;
+                var tile = tiles.get(imageKey);
+                if (tile == null) {
+                    drawFallbackTile(g, key);
+                    continue;
+                }
+                drawTile(g, key, tile.image(), key.start(), key.end());
+                drawn++;
+                if (ridges) {
+                    g.setFill(RIDGE);
+                    for (var ridge : tile.ridges()) if (ridge.dbfs() >= ReconstructionTiles.CEILING_DB - dbRange)
+                        g.fillRect(x(ridge.sourceSeconds()) - 1, y(ridge.pitch()) - 1, 2, 2);
+                }
             }
         }
-        g.restore();
-        spectrumReady = drawn > 0 && drawn == needed.size();
+        // Prefetch the neighbouring columns, so scrolling reveals finished tiles.
+        double limit = model.duration();
+        for (int index : new int[]{lastIndex + 1, firstIndex - 1}) {
+            if (index < 0 || index * tileSpan >= limit) continue;
+            for (int block = firstBlock; block <= lastBlock; block++)
+                needed.add(new ReconstructionTiles.ImageKey(ReconstructionTiles.key(source, level, index, block), dbRange));
+        }
+        spectrumReady = drawn > 0 && drawn == visible;
         tiles.request(needed);
     }
 
-    private void drawCoarserTile(GraphicsContext g, ReconstructionTiles.Key key) {
-        for (int level = key.level() + 1; level <= 7; level++) {
-            var parent = new ReconstructionTiles.Key(key.source(), level,
-                    key.index() >> (level - key.level()), key.low(), key.high());
+    /** Stands in a cached coarser or finer tile while the right resolution is measured. */
+    private void drawFallbackTile(GraphicsContext g, ReconstructionTiles.Key key) {
+        for (int level = key.level() + 1; level <= ReconstructionTiles.MAX_LEVEL; level++) {
+            var parent = ReconstructionTiles.key(key.source(), level, key.index() >> (level - key.level()), key.block());
             var cached = tiles.get(new ReconstructionTiles.ImageKey(parent, dbRange));
             if (cached == null) continue;
-            g.save();
-            clip(g, x(key.start()), sectionBottom(), key.span() * pixelsPerSecond, pitchBottom() - sectionBottom());
-            drawTile(g, parent, cached.image());
-            g.restore();
+            drawTile(g, parent, cached.image(), key.start(), key.end());
             return;
         }
-    }
-
-    private void drawTile(GraphicsContext g, ReconstructionTiles.Key key, javafx.scene.image.Image image) {
-        g.drawImage(image, x(key.start()), y(key.high() + .5), key.span() * pixelsPerSecond,
-                (key.high() - key.low() + 1) * rowHeight());
-    }
-
-    private void drawPitchGrid(GraphicsContext g, double width) {
-        g.setFill(PANEL);
-        g.fillRect(0, sectionBottom(), axis(), pitchBottom() - sectionBottom());
-        int minimumSpacing = Math.max(1, (int) Math.ceil(12 / rowHeight()));
-        g.save();
-        clip(g, 0, sectionBottom(), width, pitchBottom() - sectionBottom());
-        for (int pitch = lowestPitch(); pitch <= highestPitch(); pitch++) {
-            g.setStroke(pitch % 12 == 0 ? GRID : Color.web("#a5badd", .07));
-            g.strokeLine(axis(), y(pitch - .5), width, y(pitch - .5));
-            if (minimumSpacing > 1 && pitch % 12 % minimumSpacing != 0) continue;
-            g.setFill(pitch % 12 == 0 ? TEXT : SUBTLE);
-            g.fillText(pitchName(pitch), 12, y(pitch));
+        if (key.level() <= ReconstructionTiles.MIN_LEVEL) return;
+        for (int child = 0; child < 2; child++) {
+            var finer = ReconstructionTiles.key(key.source(), key.level() - 1, key.index() * 2 + child, key.block());
+            var cached = tiles.get(new ReconstructionTiles.ImageKey(finer, dbRange));
+            if (cached != null) drawTile(g, finer, cached.image(), finer.start(), finer.end());
         }
-        g.restore();
+    }
+
+    /** Draws the part of a tile between two source times, without a canvas clip. */
+    private void drawTile(GraphicsContext g, ReconstructionTiles.Key key, javafx.scene.image.Image image,
+                          double from, double to) {
+        double start = Math.max(from, key.start()), end = Math.min(to, key.end());
+        if (end <= start) return;
+        double columns = image.getWidth();
+        double sx = (start - key.start()) / key.span() * columns;
+        double sw = (end - start) / key.span() * columns;
+        double top = y(key.high() + .5);
+        g.drawImage(image, sx, 0, sw, image.getHeight(), x(start), top,
+                (end - start) * pixelsPerSecond, (key.high() - key.low() + 1) * rowHeight());
+    }
+
+    private void drawPitchLines(GraphicsContext g, double width) {
+        for (int pitch = lowestPitch(); pitch <= highestPitch(); pitch++) {
+            g.setStroke(pitch % 12 == 0 ? GRID : FAINT_GRID);
+            g.strokeLine(axis(), y(pitch - .5), width, y(pitch - .5));
+        }
+    }
+
+    private void drawPitchLabels(GraphicsContext g) {
+        double top = sectionBottom(), bottom = pitchBottom();
+        g.setFill(PANEL);
+        g.fillRect(0, top, axis(), bottom - top);
+        int minimumSpacing = Math.max(1, (int) Math.ceil(12 / rowHeight()));
+        for (int pitch = lowestPitch(); pitch <= highestPitch(); pitch++) {
+            if (minimumSpacing > 1 && pitch % 12 % minimumSpacing != 0) continue;
+            double y = y(pitch);
+            // A label at the edge of the plot would spill into the header or lane strip.
+            if (y < top + 5 || y > bottom - 5) continue;
+            g.setFill(pitch % 12 == 0 ? TEXT : SUBTLE);
+            g.fillText(pitchName(pitch), 12, y);
+        }
     }
 
     private void drawBands(GraphicsContext g, double width) {
         g.setFill(PANEL);
         g.fillRect(0, rulerHeight(), width, sectionBottom() - rulerHeight());
-        g.setFill(SUBTLE);
-        for (int i = 0; i < SECTION_LABELS.size(); i++)
-            g.fillText(SECTION_LABELS.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
-        g.save();
-        clip(g, axis(), rulerHeight(), width - axis(), sectionBottom() - rulerHeight());
         for (var band : sections) {
             double left = x(band.sourceStart()), right = x(band.sourceEnd());
             if (right < axis() || left > width) continue;
             double top = rulerHeight() + band.level().ordinal() * SECTION_HEIGHT;
             g.setFill(switch (band.level()) {
-                case section -> Color.web("#2b4767");
-                case period -> Color.web("#304058");
-                case phrase -> Color.web("#243147");
+                case section -> SECTION_FILL;
+                case period -> PERIOD_FILL;
+                case phrase -> PHRASE_FILL;
             });
             g.fillRect(left, top, Math.max(1, right - left - 1), SECTION_HEIGHT - 1);
             if (band.equals(listeningSection)) {
-                g.setStroke(Color.web("#6de1cc"));
+                g.setStroke(LISTENING);
                 g.strokeRect(left + .5, top + .5, Math.max(1, right - left - 2), SECTION_HEIGHT - 2);
             }
             g.setFill(TEXT);
             double labelStart = Math.max(axis(), left) + 5;
-            String label = band.label();
-            double space = right - labelStart - 3;
-            drawLabel(g, label, labelStart, top + SECTION_HEIGHT / 2.0, space);
+            drawLabel(g, band.label(), labelStart, top + SECTION_HEIGHT / 2.0, right - labelStart - 3);
         }
-        g.restore();
+        g.setFill(PANEL);
+        g.fillRect(0, rulerHeight(), axis(), sectionBottom() - rulerHeight());
+        g.setFill(SUBTLE);
+        for (int i = 0; i < SECTION_LABELS.size(); i++)
+            g.fillText(SECTION_LABELS.get(i), 8, rulerHeight() + (i + .5) * SECTION_HEIGHT);
     }
 
     private void drawLanes(GraphicsContext g, double width) {
@@ -1365,20 +1438,17 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (int i = 0; i < lanes.size(); i++) {
             String lane = lanes.get(i);
             double top = laneTop() + i * LANE_HEIGHT;
-            g.setFill(lane.equals(laneSelection) ? Color.web("#304666") : i % 2 == 0 ? BACKGROUND : PANEL);
+            g.setFill(lane.equals(laneSelection) ? SELECTED_LANE : i % 2 == 0 ? BACKGROUND : PANEL);
             g.fillRect(0, top, width, LANE_HEIGHT);
             g.setFill(visibleLanes.contains(lane) ? TEXT : SUBTLE);
             g.fillText(lane, 12, top + LANE_HEIGHT / 2.0);
         }
     }
 
-    private void drawRuler(GraphicsContext g, double width) {
-        g.setFill(PANEL);
-        g.fillRect(0, 0, width, rulerHeight());
-        g.setFill(TEXT);
-        g.fillText(projectRuler ? "Project s" : "Source s", 8, rulerHeight() / 2.0);
-        g.save();
-        clip(g, axis(), 0, width - axis(), contentHeight);
+    /** Ruler ticks as source-time x positions and labels. */
+    private record Ticks(double[] x, String[] labels) {}
+
+    private Ticks rulerTicks(double width) {
         double metric = 82 / pixelsPerSecond;
         double magnitude = Math.pow(10, Math.floor(Math.log10(metric)));
         double step = (metric / magnitude < 2 ? 2 : metric / magnitude < 5 ? 5 : 10) * magnitude;
@@ -1387,15 +1457,36 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             start = model.toProject(start);
             end = model.toProject(end);
         }
-        for (double tick = Math.ceil(start / step) * step; tick <= end; tick += step) {
-            double left = x(projectRuler ? model.toSource(tick) : tick);
-            g.setStroke(GRID);
-            g.strokeLine(left + .5, rulerHeight() - 8, left + .5, contentHeight);
-            g.setFill(SUBTLE);
-            g.fillText(String.format(Locale.ROOT, step >= 1 ? "%.0f" : step >= .1 ? "%.1f" : "%.2f", tick),
-                    left + 5, rulerHeight() / 2.0);
+        String format = step >= 1 ? "%.0f" : step >= .1 ? "%.1f" : "%.2f";
+        double first = Math.ceil(start / step) * step;
+        int count = Math.max(0, (int) Math.floor((end - first) / step + 1e-9) + 1);
+        var xs = new double[count];
+        var labels = new String[count];
+        for (int i = 0; i < count; i++) {
+            double tick = first + i * step;
+            xs[i] = x(projectRuler ? model.toSource(tick) : tick);
+            labels[i] = String.format(Locale.ROOT, format, tick);
         }
-        g.restore();
+        return new Ticks(xs, labels);
+    }
+
+    private void drawTickLines(GraphicsContext g, Ticks ticks, double top, double bottom) {
+        if (bottom <= top) return;
+        g.setStroke(GRID);
+        for (double left : ticks.x()) if (left >= axis()) g.strokeLine(left + .5, top, left + .5, bottom);
+    }
+
+    private void drawRuler(GraphicsContext g, double width, Ticks ticks) {
+        g.setFill(PANEL);
+        g.fillRect(0, 0, width, rulerHeight());
+        drawTickLines(g, ticks, rulerHeight() - 8, sectionBottom());
+        g.setFill(SUBTLE);
+        for (int i = 0; i < ticks.x().length; i++)
+            if (ticks.x()[i] >= axis()) g.fillText(ticks.labels()[i], ticks.x()[i] + 5, rulerHeight() / 2.0);
+        g.setFill(PANEL);
+        g.fillRect(0, 0, axis(), rulerHeight());
+        g.setFill(TEXT);
+        g.fillText(projectRuler ? "Project s" : "Source s", 8, rulerHeight() / 2.0);
     }
 
     private static boolean isDrum(Overlay note, ReconstructionVoices.Entry voice) {
@@ -1424,8 +1515,6 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void drawVoiceNotes(GraphicsContext g, double width, List<Overlay> visible) {
-        g.save();
-        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
         var tags = new ArrayList<VoiceTag>();
         for (var note : visible) {
             var voice = voices.byNote().get(note.id());
@@ -1458,7 +1547,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 double baseline = height >= 12 ? top + height / 2 : top - 7;
                 if (labelLeft + labelWidth + 2 <= Math.min(left + length, width) && baseline >= sectionBottom() + 7) {
                     var tag = new LabelBounds(labelLeft, baseline - 6, labelWidth + 4, 12);
-                    if (tags.stream().noneMatch(other -> tag.intersects(other.bounds()))) tags.add(new VoiceTag(tag, label));
+                    if (!overlapsAny(tags, tag)) tags.add(new VoiceTag(tag, label));
                 }
             }
             hits.add(bounds);
@@ -1466,12 +1555,11 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         g.setGlobalAlpha(1);
         for (var tag : tags) {
             var bounds = tag.bounds();
-            g.setFill(BACKGROUND.deriveColor(0, 1, 1, .91));
+            g.setFill(TAG_BACKGROUND);
             g.fillRoundRect(bounds.x - 2, bounds.y, bounds.width, bounds.height, 3, 3);
             g.setFill(TEXT);
             g.fillText(tag.text(), bounds.x, bounds.y + bounds.height / 2);
         }
-        g.restore();
     }
 
     private record VoiceTag(LabelBounds bounds, String text) {}
@@ -1489,16 +1577,25 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
 
     private void drawBox(GraphicsContext g) {
         if (box == null || !dragged) return;
-        g.setFill(Color.web("#83abff", .20));
+        g.setFill(BOX_FILL);
         g.fillRect(box.left(), box.top(), box.width(), box.height());
-        g.setStroke(Color.web("#83abff"));
+        g.setStroke(BOX_LINE);
         g.strokeRect(box.left(), box.top(), box.width(), box.height());
     }
 
-    private void drawNotes(GraphicsContext g, double width) {
-        g.save();
-        clip(g, axis(), sectionBottom(), width - axis(), pitchBottom() - sectionBottom());
-        var visible = visibleNotes(width);
+    private List<ReconstructionInspection.LayerOverlay> visibleLayers(double width) {
+        double from = seconds(axis()), to = seconds(width);
+        var visible = new ArrayList<ReconstructionInspection.LayerOverlay>();
+        for (var layer : model.layers()) {
+            if (layer.interval().sourceEnd() >= from && layer.interval().sourceStart() <= to
+                    && roles.contains(layer.role())
+                    && (layer.layer().lane() == null || visibleLanes.contains(layer.layer().lane()))) visible.add(layer);
+        }
+        return visible;
+    }
+
+    private void drawNotes(GraphicsContext g, double width, List<Overlay> visible,
+                           List<ReconstructionInspection.LayerOverlay> layers) {
         var labels = new ArrayList<LabelBounds>();
         for (var note : visible) {
             if (!inPitchRange(note)) continue;
@@ -1510,16 +1607,17 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             boolean deleted = draft && note.fate().equals("Pending deletion");
             boolean dashed = note.style() == ReconstructionInspection.Style.DASHED;
             if (!outline && !deleted) {
-                g.setFill(color.deriveColor(0, 1, 1, dashed ? opacity * .4 : opacity));
+                g.setFill(alpha(color, dashed ? opacity * .4 : opacity));
                 g.fillRect(left, top, barWidth, height);
             }
-            g.setStroke(draft ? Color.GOLD : selection.contains(note) ? Color.WHITE : color);
-            g.setLineWidth(draft || selection.contains(note) ? 1.6 : 1);
-            if (dashed && !draft) g.setLineDashes(3, 2);
-            g.strokeRect(left + .5, top + .5, barWidth - 1, height - 1);
+            var edge = draft ? Color.GOLD : selection.contains(note) ? Color.WHITE : color;
+            double lineWidth = draft || selection.contains(note) ? 1.6 : 1;
+            g.setStroke(edge);
+            g.setLineWidth(lineWidth);
+            if (dashed && !draft) dashedRect(g, edge, left + .5, top + .5, barWidth - 1, height - 1, lineWidth, 3, 2);
+            else g.strokeRect(left + .5, top + .5, barWidth - 1, height - 1);
             if (deleted) g.strokeLine(left, top + height / 2, left + barWidth, top + height / 2);
             g.setLineWidth(1);
-            g.setLineDashes();
             drawVibrato(g, note, top, height, left + barWidth);
             if (!draft || !note.bend().isEmpty()) drawBend(g, note, left, barWidth, draft ? Color.GOLD : color);
             if (!reviewing && mode == Mode.BEND && selection.contains(note) && effect == null) {
@@ -1533,9 +1631,9 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 double baseline = top - 7;
                 if (!text.isEmpty() && baseline >= sectionBottom() + 7) {
                     var label = new LabelBounds(labelLeft, baseline - 7, text.length() * 6.7, 14);
-                    if (labels.stream().noneMatch(label::intersects)) {
+                    if (!overlaps(labels, label)) {
                         labels.add(label);
-                        g.setFill(BACKGROUND.deriveColor(0, 1, 1, .83));
+                        g.setFill(LABEL_BACKGROUND);
                         g.fillRoundRect(label.x - 2, label.y, label.width + 4, label.height, 3, 3);
                         g.setFill(TEXT);
                         g.fillText(text, labelLeft, baseline);
@@ -1545,10 +1643,6 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             hits.add(bounds);
         }
         g.setGlobalAlpha(1);
-        var layers = model.layers().stream().filter(layer ->
-                layer.interval().sourceEnd() >= seconds(axis()) && layer.interval().sourceStart() <= seconds(width)
-                        && roles.contains(layer.role())
-                        && (layer.layer().lane() == null || visibleLanes.contains(layer.layer().lane()))).toList();
         for (var ghost : layers) {
             double left = x(ghost.interval().sourceStart());
             double barWidth = Math.max(3, x(ghost.interval().sourceEnd()) - left);
@@ -1583,8 +1677,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 g.fillText(effectReadout, left + 5, baseline);
             }
         }
-        g.restore();
+    }
 
+    private void drawLaneNotes(GraphicsContext g, double width, List<Overlay> visible,
+                               List<ReconstructionInspection.LayerOverlay> layers) {
         for (var note : visible) {
             if (!note.sounds()) continue;
             int lane = lanes.indexOf(note.lane());
@@ -1594,7 +1690,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             double top = laneTop() + lane * LANE_HEIGHT + 2;
             g.setGlobalAlpha(voiceDimmed(note) ? .24 : 1);
             var color = noteColor(note);
-            g.setFill(color.deriveColor(0, 1, 1, .45));
+            g.setFill(alpha(color, .45));
             g.fillRect(left, top, barWidth, LANE_HEIGHT - 4);
             if (selection.contains(note) || pendingByNote.get(note.id()) == note) {
                 g.setStroke(pendingByNote.get(note.id()) == note ? Color.GOLD : Color.WHITE);
@@ -1620,9 +1716,13 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         }
     }
 
+    private static final Map<String, Color> LANE_COLORS = new HashMap<>();
     private static Color layerColor(String lane, double alpha) {
-        int rgb = ReconstructionInspection.laneRgb(lane);
-        return Color.rgb(rgb >> 16, rgb >> 8 & 255, rgb & 255, alpha);
+        var base = LANE_COLORS.computeIfAbsent(lane == null ? "" : lane, value -> {
+            int rgb = ReconstructionInspection.laneRgb(lane);
+            return Color.rgb(rgb >> 16, rgb >> 8 & 255, rgb & 255);
+        });
+        return alpha(base, alpha);
     }
 
     private void drawVibrato(GraphicsContext g, Overlay note, double top, double height, double right) {
@@ -1648,25 +1748,67 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         var bend = pendingByNote.containsKey(note.id()) ? note.bend()
                 : assembledBends.getOrDefault(note.eventId(), note.bend());
         if (bend.isEmpty()) return;
-        g.save();
-        clip(g, left, sectionBottom(), width, pitchBottom() - sectionBottom());
-        drawCurve(g, bend, color.brighter(), false);
-        g.restore();
+        g.setStroke(brighter(color));
+        g.setLineWidth(1.6);
+        strokeCurveBetween(g, bend, left, left + width);
+        g.setLineWidth(1);
+    }
+
+    /**
+     * Strokes the part of a curve between two x positions. It uses one line per
+     * segment: a canvas path would be rasterized into a mask on the CPU.
+     */
+    private void strokeCurveBetween(GraphicsContext g, List<BendPoint> bend, double from, double to) {
+        from = Math.max(from, 0);
+        to = Math.min(to, canvas.getWidth());
+        double px = x(bend.getFirst().sourceSeconds()), py = y(bend.getFirst().pitch());
+        for (int i = 1; i < bend.size(); i++) {
+            double nx = x(bend.get(i).sourceSeconds()), ny = y(bend.get(i).pitch());
+            double dx = nx - px, t0 = 0, t1 = 1;
+            if (dx == 0) {
+                if (px < from || px > to) t0 = 2;
+            } else {
+                double ta = (from - px) / dx, tb = (to - px) / dx;
+                t0 = Math.max(0, Math.min(ta, tb));
+                t1 = Math.min(1, Math.max(ta, tb));
+            }
+            if (t0 <= t1) g.strokeLine(px + dx * t0, py + (ny - py) * t0, px + dx * t1, py + (ny - py) * t1);
+            px = nx;
+            py = ny;
+        }
     }
 
     private void drawCurve(GraphicsContext g, List<BendPoint> bend, Color color, boolean handles) {
         if (bend.isEmpty()) return;
         g.setStroke(color);
         g.setLineWidth(1.6);
-        g.beginPath();
-        var first = bend.getFirst();
-        g.moveTo(x(first.sourceSeconds()), y(first.pitch()));
-        for (var point : bend) g.lineTo(x(point.sourceSeconds()), y(point.pitch()));
-        g.stroke();
+        strokeCurveBetween(g, bend, 0, canvas.getWidth());
         g.setLineWidth(1);
         if (handles) {
             g.setFill(color);
             for (var point : bend) g.fillOval(x(point.sourceSeconds()) - 3, y(point.pitch()) - 3, 6, 6);
+        }
+    }
+
+    /**
+     * A dashed rectangle outline drawn as filled dashes. Canvas line dashes are
+     * rasterized into a mask on the CPU, while rectangles are drawn directly.
+     */
+    private void dashedRect(GraphicsContext g, Color color, double x, double y, double width, double height,
+                            double lineWidth, double dash, double gap) {
+        g.setFill(color);
+        double half = lineWidth / 2, right = x + width, bottom = y + height;
+        double from = Math.max(x, -dash), to = Math.min(right, canvas.getWidth() + dash);
+        double first = x + Math.max(0, Math.floor((from - x) / (dash + gap))) * (dash + gap);
+        for (double at = first; at < to; at += dash + gap) {
+            double length = Math.min(dash, right - at);
+            g.fillRect(at, y - half, length, lineWidth);
+            g.fillRect(at, bottom - half, length, lineWidth);
+        }
+        for (double at = y; at < bottom; at += dash + gap) {
+            double length = Math.min(dash, bottom - at);
+            if (x >= -half && x <= canvas.getWidth() + half) g.fillRect(x - half, at, lineWidth, length);
+            if (right >= -half && right <= canvas.getWidth() + half) g.fillRect(right - half, at, lineWidth, length);
         }
     }
 
@@ -1697,10 +1839,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     }
 
     private void drawProposalMarks(GraphicsContext g, double width) {
-        var proposalColor = Color.web("#ef8aff");
-        g.setStroke(proposalColor);
-        g.setLineWidth(1.6);
-        g.setLineDashes(4, 2);
+        var proposalColor = PROPOSAL;
         for (var proposal : proposals) {
             var mark = proposal.note();
             if (mark.pitch() < lowestPitch() || mark.pitch() > highestPitch()
@@ -1710,12 +1849,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             double barWidth = Math.max(5, x(mark.end()) - left);
             double height = Math.max(6, Math.min(17, rowHeight() + 2));
             double top = y(mark.pitch()) - height / 2;
-            g.strokeRect(left, top, barWidth, height);
+            dashedRect(g, proposalColor, left, top, barWidth, height, 1.6, 4, 2);
             if (!mark.bend().isEmpty()) drawCurve(g, mark.bend(), proposalColor, false);
             proposalHits.add(new ProposalHit(proposal, left, top, barWidth, height));
         }
-        g.setLineDashes();
-        g.setLineWidth(1);
     }
 
     private boolean voiceShown(Overlay note) {
@@ -1752,7 +1889,10 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         String name = role.name().toLowerCase(Locale.ROOT);
         return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
-    static Color color(Role role) { return Color.rgb(role.rgb() >> 16, role.rgb() >> 8 & 255, role.rgb() & 255); }
+    private static final Map<Role, Color> ROLE_COLORS = new java.util.EnumMap<>(Role.class);
+    static Color color(Role role) {
+        return ROLE_COLORS.computeIfAbsent(role, value -> Color.rgb(value.rgb() >> 16, value.rgb() >> 8 & 255, value.rgb() & 255));
+    }
 
     static String shortLabel(Overlay note) {
         return pitchName(note.pitch()) + " · " + (note.lane() == null ? UNASSIGNED : note.lane())
@@ -1788,10 +1928,27 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
                 + (note.competitors().isEmpty() ? "" : "\nCompeting note: " + String.join(", ", note.competitors()));
     }
 
-    private static void clip(GraphicsContext g, double x, double y, double width, double height) {
-        g.beginPath();
-        g.rect(x, y, Math.max(0, width), Math.max(0, height));
-        g.clip();
+    private static boolean overlaps(List<LabelBounds> placed, LabelBounds label) {
+        for (var other : placed) if (label.intersects(other)) return true;
+        return false;
+    }
+
+    private static boolean overlapsAny(List<VoiceTag> placed, LabelBounds label) {
+        for (var other : placed) if (label.intersects(other.bounds())) return true;
+        return false;
+    }
+
+    private static final Map<Color, Map<Double, Color>> ALPHAS = new HashMap<>();
+    private static final Map<Color, Color> BRIGHTER = new HashMap<>();
+
+    /** Cached translucent copies, since each paint would otherwise allocate one per note. */
+    private static Color alpha(Color color, double opacity) {
+        return ALPHAS.computeIfAbsent(color, ignored -> new HashMap<>())
+                .computeIfAbsent(opacity, value -> color.deriveColor(0, 1, 1, value));
+    }
+
+    private static Color brighter(Color color) {
+        return BRIGHTER.computeIfAbsent(color, Color::brighter);
     }
 
     @Override public void close() {

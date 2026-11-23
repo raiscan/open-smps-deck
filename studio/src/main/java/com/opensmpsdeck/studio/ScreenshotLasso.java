@@ -176,6 +176,7 @@ final class ScreenshotLasso {
         double sx = window.getRenderScaleX(), sy = window.getRenderScaleY();
         var parameters = new SnapshotParameters();
         parameters.setTransform(Transform.scale(sx, sy));
+        view.flush();
         var image = view.canvas.snapshot(parameters, null);
         int left = Math.clamp((int) Math.floor(bounds.getMinX() * sx), 0, (int) image.getWidth() - 1);
         int top = Math.clamp((int) Math.floor(bounds.getMinY() * sy), 0, (int) image.getHeight() - 1);
