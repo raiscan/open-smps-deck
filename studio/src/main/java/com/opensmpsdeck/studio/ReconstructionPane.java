@@ -398,6 +398,8 @@ final class ReconstructionPane implements AutoCloseable {
         return spacer;
     }
 
+    boolean branchBuildsStopped() { return branches == null || branches.buildsStopped(); }
+
     @Override public void close() {
         if (closed) return;
         closed = true;

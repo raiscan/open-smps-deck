@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 import static java.nio.file.StandardCopyOption.ATOMIC_MOVE;
@@ -27,6 +28,7 @@ final class ReconstructionBranchBuild {
 
     static Path build(Path work, ReconstructionReview.Revision expected, JsonArray journal,
                       ReconstructionStages.Progress progress) throws IOException {
+        checkCancelled();
         ReconstructionReview.requireRevision(work, expected);
         ReconstructionArtifacts.require(Files.isRegularFile(work.resolve("score.json"), NOFOLLOW_LINKS),
                 "branch", "build the main reconstruction before evaluating branches");
@@ -40,11 +42,14 @@ final class ReconstructionBranchBuild {
         var target = cache.resolve(key);
         if (complete(target, key)) {
             check(work, expected, inputs, sources);
+            checkCancelled();
             return target;
         }
+        checkCancelled();
         var stage = Files.createTempDirectory(cache, ".build-");
         try {
             for (var entry : inputs.entrySet()) {
+                checkCancelled();
                 var relative = entry.getKey();
                 var output = stage.resolve(relative);
                 Files.createDirectories(output.getParent());
@@ -60,20 +65,34 @@ final class ReconstructionBranchBuild {
             var roles = ReconstructionTrace.optional(stage, "roles.json", ReconstructionRoles.Result.class);
             if (roles != null) args.addAll(List.of("--harmony-max-hz", Double.toString(roles.harmonyMaxHz())));
             ReconstructionStages.runForBranch(args.toArray(String[]::new), (done, total, message) -> {
-                if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+                checkCancelled();
                 progress.report(done, total, message);
+                checkCancelled();
             });
+            checkCancelled();
             check(work, expected, inputs, sources);
+            checkCancelled();
             Files.writeString(stage.resolve(".branch-build"), key);
             try {
+                checkCancelled();
                 Files.move(stage, target, ATOMIC_MOVE);
             } catch (IOException raced) {
                 if (!complete(target, key)) throw raced;
             }
             return target;
         } finally {
-            if (Files.exists(stage, NOFOLLOW_LINKS)) ReconstructionReview.removeTree(stage);
+            // Keep interrupted I/O from aborting cleanup of this worker's private directory.
+            boolean interrupted = Thread.interrupted();
+            try {
+                if (Files.exists(stage, NOFOLLOW_LINKS)) ReconstructionReview.removeTree(stage);
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
+    }
+
+    private static void checkCancelled() {
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException();
     }
 
     private static boolean complete(Path path, String key) throws IOException {

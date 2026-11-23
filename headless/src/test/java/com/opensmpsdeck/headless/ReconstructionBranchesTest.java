@@ -159,6 +159,33 @@ class ReconstructionBranchesTest {
         assertNull(deleted.effectiveTiming());
     }
 
+    @Test void cancelledAuditionBuildDiscardsItsStageAndCanBeRetried(@TempDir Path dir) throws Exception {
+        var work = fixture(dir);
+        create(work, "candidate", "agent fixture");
+        edit(work, "candidate", array(List.of(velocity("level", FIRST, 45, "phrase"))), List.of(), Set.of());
+        var cache = work.resolve("edits/builds");
+        try {
+            assertThrows(java.util.concurrent.CancellationException.class, () ->
+                    build(work, "candidate", (done, total, message) -> {
+                        // Interrupt after the branch has written artifacts, before it can publish.
+                        if (done == total) Thread.currentThread().interrupt();
+                    }));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        try (var entries = Files.list(cache)) {
+            assertEquals(List.of(), entries.toList());
+        }
+        var rebuilt = build(work, "candidate");
+        assertTrue(Files.isRegularFile(rebuilt.resolve("render.wav")));
+        assertEquals(45, ReconstructionTrace.read(rebuilt).get(FIRST).score().note().velocity());
+        assertEquals(rebuilt, build(work, "candidate"));
+        try (var entries = Files.list(cache)) {
+            assertEquals(List.of(rebuilt), entries.toList());
+        }
+    }
+
     private static JsonObject withSource(JsonObject edit, String group) {
         edit.add("provenance", json("""
                 {"branch":"left","author":"agent left","group":"%s"}

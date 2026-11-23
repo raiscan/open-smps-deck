@@ -2559,6 +2559,8 @@ class StudioWindowTest {
             awaitBranch(scene, () -> !pane.canvas().branchLayers().isEmpty());
             fx(() -> {
                 reconstructionWorkspace(scene, "roles");
+                assertTrue(pane.branchBuildsStopped());
+                assertNoBranchStaging(work);
                 assertEquals(1, pane.canvas().branchLayers().size());
                 reconstructionWorkspace(scene, "detail");
                 assertEquals(1, pane.canvas().branchLayers().size());
@@ -2680,6 +2682,16 @@ class StudioWindowTest {
             assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
         } finally {
             fx(() -> { pane.close(); return null; });
+            await(pane::branchBuildsStopped);
+            assertNoBranchStaging(work);
+        }
+    }
+
+    private static void assertNoBranchStaging(Path work) throws IOException {
+        var cache = work.resolve("edits/builds");
+        if (Files.isDirectory(cache)) try (var builds = Files.list(cache)) {
+            assertFalse(builds.anyMatch(path -> path.getFileName().toString().startsWith(".build-")),
+                    "A branch build left a staging directory");
         }
     }
 

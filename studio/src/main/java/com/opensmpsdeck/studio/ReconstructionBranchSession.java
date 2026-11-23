@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static com.opensmpsdeck.studio.ReconstructionBranchReview.Branch;
@@ -67,8 +68,7 @@ final class ReconstructionBranchSession implements AutoCloseable {
     private final ScreenshotLasso region;
     private final ComboBox<Variant> versions = new ComboBox<>();
     private final HBox versionControl = new HBox(6, new Label("Chip version"), versions);
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(
-            task -> Thread.ofPlatform().daemon().name("reconstruction-branches").unstarted(task));
+    private ExecutorService worker;
     private final PauseTransition debounce = new PauseTransition(Duration.millis(180));
     private final Map<String, State> branches = new LinkedHashMap<>();
     private final Map<String, LoadedBranch> loaded = new LinkedHashMap<>();
@@ -142,12 +142,19 @@ final class ReconstructionBranchSession implements AutoCloseable {
     Node versionControl() { return versionControl; }
 
     void reviewing(boolean active) {
+        if (reviewing == active) return;
         reviewing = active;
         if (active) reload();
-        else region.cancel();
+        else {
+            region.cancel();
+            stopWorker();
+            view.feedback("");
+            if (!takes.isEmpty()) updateMergeView();
+        }
     }
 
     private void reload() {
+        if (closed) return;
         long request = ++catalogRequest;
         var inspection = canvas.inspection();
         run(() -> {
@@ -160,6 +167,7 @@ final class ReconstructionBranchSession implements AutoCloseable {
             boolean firstBranches = branches.isEmpty() && !states.isEmpty();
             boolean changed = !states.equals(branches) || inspection != parentInspection;
             if (!changed) {
+                if (reviewing && merge == null && !takes.isEmpty() && planJob == null) plan();
                 checkNext();
                 return;
             }
@@ -182,10 +190,15 @@ final class ReconstructionBranchSession implements AutoCloseable {
                 tabs.getSelectionModel().select(view.tab);
             editor.branchCount(states.size());
             view.feedback("");
-            for (String branch : overlays) load(branch);
+            if (reviewing) {
+                for (String branch : overlays) load(branch);
+                if (!takes.isEmpty() && !applying) plan();
+            } else if (!takes.isEmpty()) {
+                merge = null;
+                updateMergeView();
+            }
             drawOverlays();
             updateVersions(PARENT);
-            if (!takes.isEmpty() && !applying) plan();
             checkNext();
         }, message -> {
             if (request == catalogRequest) status.accept("Could not load edit branches · " + message);
@@ -216,7 +229,7 @@ final class ReconstructionBranchSession implements AutoCloseable {
         }
         var result = loaded.get(selected);
         if (result != null) view.summary(ReconstructionBranchOverlay.summary(result.changes()));
-        else load(selected);
+        else if (reviewing) load(selected);
     }
 
     private void checkNext() {
@@ -604,21 +617,48 @@ final class ReconstructionBranchSession implements AutoCloseable {
     private interface Work<T> { T run() throws Exception; }
 
     private <T> Future<?> run(Work<T> task, Consumer<T> success, Consumer<String> failure) {
-        return worker.submit(() -> {
+        if (worker == null) worker = Executors.newSingleThreadExecutor(
+                job -> Thread.ofPlatform().daemon().name("reconstruction-branches").unstarted(job));
+        var current = worker;
+        return current.submit(() -> {
             try {
                 T result = task.run();
-                Platform.runLater(() -> { if (!closed) success.accept(result); });
+                Platform.runLater(() -> { if (!closed && worker == current) success.accept(result); });
             } catch (Exception error) {
                 if (Thread.currentThread().isInterrupted() || error instanceof java.util.concurrent.CancellationException) return;
                 String message = ReconstructionEditor.describe(error);
-                Platform.runLater(() -> { if (!closed) failure.accept(message); });
+                Platform.runLater(() -> { if (!closed && worker == current) failure.accept(message); });
             }
         });
     }
 
+    boolean buildsStopped() { return worker == null || worker.isTerminated(); }
+
+    private void stopWorker() {
+        debounce.stop();
+        planJob = null;
+        loading.clear();
+        applying = false;
+        if (worker == null) return;
+        worker.shutdownNow();
+        // Cancellation must finish the build's staging cleanup before the workspace can close.
+        boolean interrupted = false;
+        try {
+            while (!worker.isTerminated()) {
+                try {
+                    worker.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+                } catch (InterruptedException waitInterrupted) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            worker = null;
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
     @Override public void close() {
         closed = true;
-        debounce.stop();
-        worker.shutdownNow();
+        stopWorker();
     }
 }
