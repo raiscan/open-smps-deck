@@ -1300,9 +1300,9 @@ steal most of a stem-supported hold from another source part, allocation
 first tries moving the whole hold to a free inner FM lane. It can also route
 the new attack around the hold when another compatible lane is free.
 
-For isolated S3K source parts, the stem label or instrument role adds a
-bounded preference to the stock FM shortlist and joint training and
-held-out loss. To enter the joint fit, a candidate's chip probes must stay
+For isolated S3K source parts, the stem label or instrument role gives a
+preference that settles acoustic ties in the stock FM shortlist and the
+joint fit. It never outweighs a better training and held-out loss. To enter the joint fit, a candidate's chip probes must stay
 audible through every stem-supported hold that survives FM allocation,
 using the allocated pitch and project-time gate. A steady probe can satisfy
 a growing source note. If the acoustic shortlist has no sustaining patch,
@@ -1310,11 +1310,11 @@ the fitter searches the whole stock catalogue. If every candidate fails,
 it keeps the patch with the smallest total sustain shortfall and records a
 `held-note fallback` in its selection reason.
 
-A name match adds up to 0.025 and a known mismatch subtracts
-0.0125. A retail register and role match adjusts the score by at most 0.015
-in either direction. The loss uses the same adjustments proportionally.
-The priors are fixed across songs. The acoustic fit can overcome them.
-The name categories are:
+Among tied candidates, a name match counts 0.025 and a known mismatch
+−0.0125. A retail register and role match counts at most 0.015 in either
+direction. On six held-out Suno songs, scoring these as additive
+preferences chose voices with a worse spectral balance against the stem
+than the acoustic fit alone. The name categories are:
 
 | Source class | Compatible community name terms |
 | --- | --- |
