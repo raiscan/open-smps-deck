@@ -248,9 +248,10 @@ that reaches roles but drops in allocation has a separate fate and reason.
    `--phrase ID` (MCP `phrase`). The review includes decoded syllables,
    kept FM1 gates, and per-note contour, harmonic and repeat evidence.
    Read `pitchDecisions` for automatic retunes, merges and suppressed
-   attacks in the stem register before the configured shift.
-   Subharmonic support can expose an RMVPE octave error. Loud, stable
-   notes or notes consistent across repeats can be valid register leaps.
+   attacks in the stem register before the configured shift. Check
+   `pitchEvidence` for retunes supported by the stem spectrum, learned
+   register and pitch set, or aligned repeats. Strong local evidence
+   preserves genuine register leaps.
 2. Use `reconstruct vocal-render "$work" --phrase ID OUT.wav` or MCP
    `reconstruct_vocal_render` for a built FM1 excerpt and metrics against
    the vocal stem. Check onset alignment and voiced gaps. Pitch agreement
