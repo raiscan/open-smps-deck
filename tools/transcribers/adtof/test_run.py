@@ -17,6 +17,32 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(1, count)
         self.assertEqual({35: [1.0], 42: [1., 3.], 47: [2., 3., 4.]}, peaks)
 
+    def test_raw_tom_veto_and_single_mix_vote(self):
+        stem = {47: [1.0, 1.04, 2.0]}
+        mix = {42: [1.02, 2.01]}
+        raw = [0.] * 205
+        raw[198] = .25
+        peaks, count = run.relabel_toms(stem, mix, raw, threshold=.20)
+        self.assertEqual(1, count)
+        self.assertEqual([1.0], peaks[42])
+        self.assertEqual([1.04, 2.0], peaks[47])
+        hat = [0.] * 205
+        hat[201] = .90
+        peaks, count = run.relabel_toms(stem, mix, raw, .20, hat, 1.0)
+        self.assertEqual(2, count)
+        self.assertEqual([1.0, 2.0], peaks[42])
+
+    def test_skipped_mix_reasons(self):
+        with tempfile.TemporaryDirectory() as folder:
+            stem = Path(folder) / "drums.wav"
+            stem.touch()
+            mix = Path(folder) / "mix.wav"
+            self.assertEqual("no-mix", run.mix_skip_reason(stem, None, {}))
+            self.assertEqual("mix-unavailable", run.mix_skip_reason(stem, mix, {}))
+            self.assertEqual("same-input", run.mix_skip_reason(stem, stem, {}))
+            mix.touch()
+            self.assertEqual("no-stem-toms", run.mix_skip_reason(stem, mix, {}))
+
     def test_normalization_gain(self):
         for peak in (0.1, 1.0):
             gain = run.normalization_gain_db(peak)
@@ -56,6 +82,9 @@ class AdapterTest(unittest.TestCase):
                 self.assertEqual("mono-peak", metadata["inputNormalization"])
                 self.assertEqual(-4.0, metadata["peakTargetDbfs"])
                 self.assertGreater(metadata["inputMonoPeak"], 0)
+                self.assertEqual("no-mix", metadata["mixPassStatus"])
+                self.assertEqual(0, metadata["tomToHatCount"])
+                self.assertEqual([], metadata["tomToHatOnsets"])
             self.assertTrue(any(results[0].values()))
             self.assertEqual(*results)
 

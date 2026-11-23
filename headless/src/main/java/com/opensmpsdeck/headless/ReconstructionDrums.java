@@ -119,9 +119,21 @@ final class ReconstructionDrums {
             if (hits != null) hits.add(note);
         }
 
+        var mixHatFits = new HashSet<ReconstructionVoices.Key>();
+        var recovered = recoveredHatStarts(score, timeline);
+        if (!recovered.isEmpty()) {
+            var key = new ReconstructionVoices.Key(ReconstructionAudioOnly.DRUM_PART, 42);
+            var hats = classes.get(key);
+            if (hats != null && stems.containsKey(key.partId())) {
+                var authentic = hats.stream().filter(note -> !recovered.contains(note.startUs())).toList();
+                if (authentic.isEmpty()) mixHatFits.add(key);
+                else classes.put(key, authentic);
+            }
+        }
+
         var matched = new LinkedHashMap<ReconstructionVoices.Key, Fit>();
         boolean hasStem = classes.keySet().stream().anyMatch(key -> stems.containsKey(key.partId()));
-        boolean needsMix = classes.keySet().stream().anyMatch(key -> !stems.containsKey(key.partId()));
+        boolean needsMix = !mixHatFits.isEmpty() || classes.keySet().stream().anyMatch(key -> !stems.containsKey(key.partId()));
         var profile = options.profile();
         var stock = options.stockDrums() ? ReconstructionStockDrums.load(profile.game()) : Map.<String, DacSample>of();
         var acoustics = stock.isEmpty() ? new DacAcoustics(catalogue, profile) : new DacAcoustics(profile);
@@ -151,7 +163,7 @@ final class ReconstructionDrums {
             labels = nativeLabels;
         }
         if (!timeline.warped()) {
-            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums());
+            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), mixHatFits);
         } else {
             Path scratch = Files.createTempDirectory("drum-reference-");
             var files = new ArrayList<Path>();
@@ -171,7 +183,7 @@ final class ReconstructionDrums {
                     }
                     warpedStems.put(part, warped);
                 }
-                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums());
+                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), mixHatFits);
             } finally {
                 for (Path file : files) Files.deleteIfExists(file);
                 Files.deleteIfExists(scratch);
@@ -183,13 +195,27 @@ final class ReconstructionDrums {
                 timeline.timeBase(), mode, !options.fmOnly(), profile);
     }
 
+    private static Set<Long> recoveredHatStarts(ReconstructionStages.Score score, ReconstructionTimeMap timeline) {
+        var audio = score.inputs().audioOnly();
+        if (audio == null || audio.drumDetector().metadata() == null) return Set.of();
+        String json = audio.drumDetector().metadata().get("tomToHatOnsets");
+        if (json == null) return Set.of();
+        var times = new HashSet<Long>();
+        for (var element : com.google.gson.JsonParser.parseString(json).getAsJsonArray()) {
+            double onset = Math.round(element.getAsDouble() * 1e6) / 1e6;
+            times.add(Math.round(timeline.project(onset) * 1e6));
+        }
+        return times;
+    }
+
     private static void analyze(Map<ReconstructionVoices.Key, List<MidiScore.Note>> classes,
             List<MidiScore.Note> notes, List<Integer> drumParts, Path mix, Map<Integer, Path> stems,
             List<Rated> mixProbes, List<Rated> stemProbes, Map<String, DacFamily> families,
-            Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched, TargetProfile profile, boolean stock) throws IOException {
+            Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched, TargetProfile profile, boolean stock,
+            Set<ReconstructionVoices.Key> mixHatFits) throws IOException {
         for (var entry : classes.entrySet()) {
             var key = entry.getKey();
-            Path stem = stems.get(key.partId());
+            Path stem = mixHatFits.contains(key) ? null : stems.get(key.partId());
             var context = notes.stream().filter(note -> stem == null || drumParts.contains(note.partId())).toList();
             var hits = cleanHits(stem == null ? mix : stem, entry.getValue(), context, key.drumPitch(), stem != null);
             var isolated = hits.stream().filter(clip -> clip.hit().overlaps() == 0).toList();
@@ -211,7 +237,7 @@ final class ReconstructionDrums {
     private static void preserveUnisolatedMixChoices(ReconstructionStages.Score score, InstrumentCatalogue catalogue,
             Path mix, Map<Integer, Path> stems, List<Rated> probes, Map<ReconstructionVoices.Key, Fit> fitted)
             throws IOException {
-        var uncertain = fitted.entrySet().stream().filter(entry -> !entry.getValue().stem()
+        var uncertain = fitted.entrySet().stream().filter(entry -> !stems.containsKey(entry.getKey().partId()) && !entry.getValue().stem()
                 && entry.getValue().clips().stream().filter(clip -> clip.hit().overlaps() == 0).limit(2).count() < 2)
                 .map(Map.Entry::getKey).toList();
         if (uncertain.isEmpty()) return;
