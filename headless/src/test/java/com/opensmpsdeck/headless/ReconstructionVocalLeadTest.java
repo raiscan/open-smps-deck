@@ -63,6 +63,48 @@ class ReconstructionVocalLeadTest {
         assertEquals(ReconstructionBends.Kind.UP, selection.notes().getLast().bend().kind());
     }
 
+    @Test void holdsTheVocalThroughAnOctaveExcursionButKeepsARealLeap() {
+        int rate = 12_000;
+        var samples = new float[rate * 2];
+        var contour = java.nio.ByteBuffer.allocate(200 * Short.BYTES).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < 200; i++) {
+            int observed = i < 10 ? 0 : i < 45 ? 48 : i < 63 ? 60 : i < 100 ? 48 : i < 155 ? 63 : 0;
+            contour.putShort((short) (observed * 100));
+        }
+        for (int i = rate / 10; i < rate * 1.55; i++) {
+            double t = i / (double) rate;
+            double phase = Math.TAU * ReconstructionLeadAudio.hz(t < 1 ? 48 : 63) * t;
+            samples[i] = (float) (.18 * Math.sin(phase) + .10 * Math.sin(2 * phase));
+        }
+        var track = new ReconstructionLeadAudio.Track(new ReferenceAudio(samples, rate));
+        var metadata = new java.util.TreeMap<String, String>();
+        metadata.put("f0Cents10ms", java.util.Base64.getEncoder().encodeToString(contour.array()));
+        metadata.put("vocalMode", "syllable");
+        metadata.put("vocalBoundaries10ms", """
+                {"syllable":[10,100],"voicing":[10],"pitchChange":[45,63,100]}
+                """);
+        var notes = List.of(new ExternalTranscribers.RawNote(.10, .45, 48, 96),
+                new ExternalTranscribers.RawNote(.45, .63, 60, 96),
+                new ExternalTranscribers.RawNote(.63, .91, 48, 96),
+                new ExternalTranscribers.RawNote(.91, 1, 48, 96),
+                new ExternalTranscribers.RawNote(1, 1.55, 63, 96));
+        var evidence = new ExternalTranscribers.Evidence("rmvpe", "vocals", "cpu", null,
+                "fixture", null, metadata, notes.size(), true);
+        var selection = ReconstructionVocalLead.select(1, new ExternalTranscribers.PartNotes(evidence, notes), track, 2);
+
+        assertEquals(List.of(48, 63), selection.notes().stream().map(Note::pitch).toList());
+        assertEquals(1, selection.notes().getFirst().end(), 1e-9);
+        assertTrue(metadata.get("vocalPitchDecisions").contains("\"observedPitch\":60,\"selectedPitch\":48"));
+
+        var replayMetadata = new java.util.LinkedHashMap<>(metadata);
+        var replayEvidence = new ExternalTranscribers.Evidence("rmvpe", "vocals", "cpu", null,
+                "fixture", null, replayMetadata, notes.size(), true);
+        var replay = ReconstructionVocalLead.select(1,
+                new ExternalTranscribers.PartNotes(replayEvidence, notes), track, 2);
+        assertEquals(selection, replay);
+        assertEquals(List.copyOf(metadata.entrySet()), List.copyOf(replayMetadata.entrySet()));
+    }
+
     private static Note note(String id, int pitch, double start, double end) {
         return new Note(id, 1, start, end, pitch, 96, "audio-transcribed", 1);
     }
