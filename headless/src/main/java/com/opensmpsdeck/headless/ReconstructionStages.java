@@ -2,6 +2,7 @@ package com.opensmpsdeck.headless;
 
 import com.google.gson.JsonElement;
 import com.opensmpsdeck.project.TargetGame;
+import com.opensmpsdeck.project.LoadedProject;
 import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.project.TargetClock;
 
@@ -234,7 +235,7 @@ public final class ReconstructionStages {
     }
 
     static void run(String command, String[] args, PrintStream out, PrintStream err) throws IOException {
-        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {});
+        run(command, args, out, err, false, (completed, total, message) -> {}, ignored -> {}, null);
     }
 
     @FunctionalInterface
@@ -246,13 +247,27 @@ public final class ReconstructionStages {
     public static List<String> runForReview(String command, String[] args, Progress progress) throws IOException {
         var changes = new java.util.ArrayList<String>();
         try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
-            run(command, args, out, out, true, progress, changes::add);
+            run(command, args, out, out, true, progress, changes::add, null);
         }
         return List.copyOf(changes);
     }
 
+    record LiveCompilation(TargetPlayback playback, ReconstructionAllocation.Result allocation) {}
+
+    private record LiveRun(LoadedProject existing, java.util.function.Consumer<LiveCompilation> result) {}
+
+    static LiveCompilation runForLive(String[] args, Progress progress, LoadedProject existing) throws IOException {
+        var result = new LiveCompilation[1];
+        try (var out = new PrintStream(java.io.OutputStream.nullOutputStream())) {
+            run("run", args, out, out, true, progress, ignored -> {}, new LiveRun(existing, playback -> result[0] = playback));
+        }
+        if (result[0] == null) throw new IOException("The reconstruction did not assemble");
+        return result[0];
+    }
+
     private static void run(String command, String[] args, PrintStream out, PrintStream err,
-                            boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange)
+                            boolean preserveReview, Progress progress, java.util.function.Consumer<String> refitChange,
+                            LiveRun live)
             throws IOException {
         try (var capture = new ReconstructionManifest.Capture()) {
             Request request = request(command, args, progress, err, capture);
@@ -266,7 +281,7 @@ public final class ReconstructionStages {
                             request.overwriteDetached, request.lanePolicyPreset, request.policyDecisions);
                 }
             }
-            if (request.chain || request.from == Stage.ASSEMBLE)
+            if (live == null && (request.chain || request.from == Stage.ASSEMBLE))
                 ReconstructionReview.requireAttached(request.work, request.overwriteDetached);
             var run = new ReconstructionManifest.Run(stageName(request.from), request.harmonyHz);
             if (request.initial != null) {
@@ -276,7 +291,8 @@ public final class ReconstructionStages {
             } else if (request.chain && !Files.exists(request.work.resolve(ReconstructionManifest.FILE))) {
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             }
-            execute(request, request.work, out, preserveReview, progress, refitChange, capture);
+            execute(request, request.work, out, preserveReview, progress, refitChange, capture, live);
+            if (live != null) return;
             if (request.chain && request.initial == null)
                 ReconstructionManifest.resumed(request.work, readScore(request.work.resolve("score.json")), run, capture);
             if (request.chain || request.from == Stage.ASSEMBLE)
@@ -323,7 +339,7 @@ public final class ReconstructionStages {
         var transcription = transcribeWithSavedNotes(inputs, replay.manifest().durationUs());
         execute(new Request(work, Stage.TRANSCRIBE, true, transcription, replay.manifest().lastRun().harmonyMaxHz(),
                         java.util.Set.of(), false, keepVoicing, null, false, null, false), oldWork, out, false,
-                (completed, total, message) -> {}, ignored -> {}, null);
+                (completed, total, message) -> {}, ignored -> {}, null, null);
         ProjectProvenance.printWarnings(packageWarnings(work), err);
         summarizeEdits(work, err);
     }
@@ -363,7 +379,7 @@ public final class ReconstructionStages {
     private static void execute(Request request, Path previousWork, PrintStream out, boolean preserveReview,
                                 Progress progress,
                                 java.util.function.Consumer<String> refitChange,
-                                ReconstructionManifest.Capture capture) throws IOException {
+                                ReconstructionManifest.Capture capture, LiveRun live) throws IOException {
         int total = request.chain ? Stage.values().length - request.from.ordinal() : 1;
         Path work = request.work;
         Path scoreFile = work.resolve("score.json");
@@ -388,6 +404,11 @@ public final class ReconstructionStages {
             if (preserveReview) checkInputFiles(readScore(scoreFile).inputs);
         }
         ReconstructionVoicePlan.Result voicePlan = null;
+        Score replayScore = null;
+        ReconstructionStructure.Result replayStructure = null;
+        ReconstructionRoles.Result replayRoles = null;
+        ReconstructionAllocation.Result replayAllocation = null;
+        ReconstructionVoicing.Result replayVoicing = null;
         for (var stage : Stage.values()) {
             if (stage.ordinal() < request.from.ordinal()) continue;
             var outcomes = new ArrayList<ReconstructionEdits.Outcome>();
@@ -399,15 +420,20 @@ public final class ReconstructionStages {
                 score = ReconstructionBendRecovery.apply(work, score, bound, journal, transcription.approaches(), outcomes);
                 trackEdits |= !outcomes.isEmpty();
                 ReconstructionArtifacts.write(scoreFile, score);
+                if (live != null) replayScore = score;
                 journal = ReconstructionStemTemplates.publish(work, journal, transcription.candidates());
                 journal = ReconstructionBendRecovery.publish(work, journal, transcription.approaches(), outcomes);
             } else {
-                var score = readScore(scoreFile);
+                var score = replayScore == null ? readScore(scoreFile) : replayScore;
+                if (live != null) replayScore = score;
                 switch (stage) {
-                    case STRUCTURE -> ReconstructionArtifacts.write(structureFile, structure(score,
-                            editJournal.stages().getOrDefault("transcribe", List.of())));
+                    case STRUCTURE -> {
+                        var detected = structure(score, editJournal.stages().getOrDefault("transcribe", List.of()));
+                        ReconstructionArtifacts.write(structureFile, detected);
+                        if (live != null) replayStructure = detected;
+                    }
                     case ROLES -> {
-                        var structure = readStructure(structureFile, score);
+                        var structure = replayStructure == null ? readStructure(structureFile, score) : replayStructure;
                         double rate = request.harmonyHz == null ? score.inputs.harmonyMaxHz : request.harmonyHz;
                         var plan = readRolePlan(work, structure, score);
                         if (plan != null) {
@@ -424,20 +450,26 @@ public final class ReconstructionStages {
                         var scoreEdits = editJournal.stages().getOrDefault("transcribe", List.of());
                         var boundEdits = edits.bindSections(work, score, structure, Stage.ROLES, outcomes);
                         var roles = boundEdits.assignRoles(score, structure, rate, plan, continuity, scoreEdits, outcomes);
-                        ReconstructionArtifacts.write(rolesFile, roles);
-                        ReconstructionManifest.recordRolePlan(work, rate);
+                        if (live == null) {
+                            ReconstructionArtifacts.write(rolesFile, roles);
+                            ReconstructionManifest.recordRolePlan(work, rate);
+                        } else {
+                            replayRoles = roles;
+                            replayStructure = structure;
+                        }
                     }
                     case VOICES -> {
-                        var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+                        var roles = replayRoles == null ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : replayRoles;
                         ReconstructionChecks.roles(roles, score);
+                        if (live != null) replayRoles = roles;
                         voicePlan = ReconstructionVoicePlan.generate(work, score, roles);
                         ReconstructionVoicePlan.reviewOutcomes(edits, voicePlan, outcomes);
                         for (var issue : voicePlan.issues())
                             out.printf("voice-edit:%s %s %s%n", issue.id(), issue.status(), issue.detail());
                     }
                     case ALLOCATE -> {
-                        var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
-                        ReconstructionChecks.roles(roles, score);
+                        var roles = replayRoles == null ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : replayRoles;
+                        if (live == null || voicePlan == null) ReconstructionChecks.roles(roles, score);
                         if (voicePlan == null) voicePlan = ReconstructionVoicePlan.generate(work, score, roles);
                         var laneTypes = voicePlan.laneTypes();
                         var savedAffinity = previousWork.equals(work) ? null : ReconstructionAllocation.Affinity.read(previousWork);
@@ -455,19 +487,24 @@ public final class ReconstructionStages {
                         var allocation = ReconstructionAllocation.allocateWithAffinity(roles, score.source.parts(),
                                 frames, score.inputs.fmOnly, stems, seed, cymbalLevels, laneTypes, chords, outcomes, salience,
                                 chordReduction, score.profile(), rules, holds, score.inputs.audioOnly != null);
-                        var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
-                                score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
-                                chordReduction, score.profile(), rules, holds, score.inputs.audioOnly != null);
-                        ReconstructionArtifacts.write(allocationFile, allocation);
-                        ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
-                                ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
+                        if (live == null) {
+                            ReconstructionArtifacts.write(allocationFile, allocation);
+                            var fresh = seed.isEmpty() ? allocation : ReconstructionAllocation.allocateWithAffinity(roles,
+                                    score.source.parts(), frames, score.inputs.fmOnly, stems, Map.of(), cymbalLevels, laneTypes, chords, null, salience,
+                                    chordReduction, score.profile(), rules, holds, score.inputs.audioOnly != null);
+                            ReconstructionArtifacts.write(work.resolve(ReconstructionAllocation.Affinity.FILE),
+                                    ReconstructionAllocation.Affinity.compare(seed, allocation, fresh));
+                        } else {
+                            replayAllocation = allocation;
+                            replayRoles = roles;
+                        }
                         outcomes.addAll(edits.allocationOutcomes(allocation, roles.lanePins()));
                     }
                     case VOICE -> {
                         // A resume at voice normally assembles the saved settings directly.
                         if (request.chain && request.from == Stage.VOICE && request.lanes.isEmpty()
                                 && !request.refitLevels && !request.keepVoicing && Files.exists(voicingFile)) break;
-                        var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
+                        var allocation = replayAllocation == null ? ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class) : replayAllocation;
                         ReconstructionChecks.allocation(allocation, score);
                         var previous = Files.notExists(oldVoicingFile, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? null
                                 : ReconstructionArtifacts.read(oldVoicingFile, ReconstructionVoicing.Result.class);
@@ -483,26 +520,34 @@ public final class ReconstructionStages {
                         fitted = ReconstructionVoicing.withPercussionEvidence(fitted.withLanePolicies(policy), allocation);
                         if (voicePlan == null) voicePlan = ReconstructionVoicePlan.saved(work);
                         if (voicePlan != null && !voicePlan.laneTypes().isEmpty()) {
-                            var roles = ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class);
+                            var roles = replayRoles == null ? ReconstructionArtifacts.read(rolesFile, ReconstructionRoles.Result.class) : replayRoles;
                             fitted = fitted.withAssignments(voicePlan.assignments(allocation, roles.lanePins()));
                         }
-                        ReconstructionArtifacts.write(voicingFile, fitted.withArrangement(arrangement));
+                        if (live == null) ReconstructionArtifacts.write(voicingFile, fitted.withArrangement(arrangement));
+                        else {
+                            replayVoicing = fitted.withArrangement(arrangement);
+                            replayAllocation = allocation;
+                        }
                         if (fitted.sustainWarning() != null) out.println("Warning: " + fitted.sustainWarning());
                         if (fitted.leadProminenceWarning() != null) out.println("Warning: " + fitted.leadProminenceWarning());
                         if (previous != null)
                             ReconstructionVoicing.changes(previous, fitted).forEach(change -> report.accept(change.describe()));
                     }
                     case ASSEMBLE -> {
-                        var structure = readStructure(structureFile, score);
-                        var allocation = ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class);
-                        ReconstructionChecks.allocation(allocation, score);
-                        var voicing = ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class);
+                        var structure = replayStructure == null ? readStructure(structureFile, score) : replayStructure;
+                        var allocation = replayAllocation == null ? ReconstructionArtifacts.read(allocationFile, ReconstructionAllocation.Result.class) : replayAllocation;
+                        if (live == null || replayVoicing == null) ReconstructionChecks.allocation(allocation, score);
+                        var voicing = replayVoicing == null ? ReconstructionArtifacts.read(voicingFile, ReconstructionVoicing.Result.class) : replayVoicing;
                         if (request.lanePolicyPreset != null) {
                             var preset = request.lanePolicyPreset.equals("off") ? null
                                     : ReconstructionLanePolicies.Configuration.preset(request.lanePolicyPreset);
                             voicing = voicing.withLanePolicies(preset);
                         }
-                        ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions);
+                        if (live == null)
+                            ReconstructionCli.assembleAllocated(work, score, structure, allocation, voicing, out, preserveReview, request.overwriteDetached, edits, outcomes, request.policyDecisions);
+                        else live.result().accept(new LiveCompilation(
+                                ReconstructionCli.compileLive(work, score, structure, allocation, voicing, edits, outcomes,
+                                        live.existing()), allocation));
                         if (request.lanePolicyPreset != null) ReconstructionArtifacts.write(voicingFile, voicing);
                     }
                     default -> throw new AssertionError(stage);
@@ -518,7 +563,7 @@ public final class ReconstructionStages {
             progress.report(stage.ordinal() - request.from.ordinal() + 1, total, "Finished " + stageName(stage));
             if (!request.chain) break;
         }
-        if (journal != edits) ReconstructionProposals.refresh(work, ReconstructionEdits.read(work));
+        if (live == null && journal != edits) ReconstructionProposals.refresh(work, ReconstructionEdits.read(work));
         if (!preserveReview) for (var issue : ReconstructionSections.anchorIssues(work))
             out.println("section:" + issue.id() + " " + issue.detail());
     }
@@ -1187,7 +1232,25 @@ public final class ReconstructionStages {
     }
 
     private static Transcription retranscribe(Score saved) throws IOException {
-        return transcribeWithSavedNotes(saved.inputs, saved.durationUs);
+        var inputs = saved.inputs();
+        for (String path : inputs.stems().values()) ReconstructionLiveEvidence.track(Path.of(path));
+        ReconstructionLiveEvidence.track(Path.of(inputs.wav()));
+        if (inputs.midi() != null) ReconstructionLiveEvidence.track(Path.of(inputs.midi()));
+        if (inputs.candidates() != null) ReconstructionLiveEvidence.track(Path.of(inputs.candidates()));
+        return ReconstructionLiveEvidence.transcription(saved.durationUs(), inputs,
+                () -> transcribeWithSavedNotes(inputs, saved.durationUs));
+    }
+
+    static void warmLive(Path work) throws IOException {
+        var score = readScore(work.resolve("score.json"));
+        if (score.inputs().stems().isEmpty()) return;
+        var transcription = retranscribe(score);
+        if (Thread.currentThread().isInterrupted()) return;
+        var timeline = ReconstructionTimeMap.of(transcription.score());
+        for (String path : transcription.score().inputs().stems().values()) {
+            if (Thread.currentThread().isInterrupted()) return;
+            ReconstructionLeadAudio.Track.read(Path.of(path), timeline.sourceDuration());
+        }
     }
 
     private static Transcription transcribeWithSavedNotes(Inputs inputs, long durationUs) throws IOException {

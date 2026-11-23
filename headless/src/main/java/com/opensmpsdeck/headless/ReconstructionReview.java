@@ -201,28 +201,136 @@ public final class ReconstructionReview {
      */
     public static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
                                    ReconstructionStages.Progress progress) throws IOException {
-        return apply(work, expected, entries, detachedRevision, null, progress);
+        return apply(work, expected, entries, detachedRevision, null, progress, null, null);
     }
 
     public static JsonObject applyLanePolicyPreset(Path work, Revision expected, String preset, String detachedRevision,
                                                    ReconstructionStages.Progress progress) throws IOException {
-        return apply(work, expected, expected.entries(), detachedRevision, preset, progress);
+        return apply(work, expected, expected.entries(), detachedRevision, preset, progress, null, null);
+    }
+
+    private static final class LiveBuild {
+        final boolean save;
+        LiveUpdate update;
+
+        LiveBuild(boolean save) { this.save = save; }
+    }
+
+    /**
+     * Replay against the built allocation in a private directory. The disk revision guards
+     * the inputs, while the built journal identifies the stages that need to be replayed.
+     */
+    public static ReconstructionLivePreview.Prepared liveRebuild(Path work, Revision expected, JsonArray built,
+                                                                  JsonArray entries, ReconstructionStages.Progress progress)
+            throws IOException {
+        return liveRebuild(work, expected, built, entries, false, progress).playback();
+    }
+
+    /** Keep source-dependent evidence across journal revisions on a single replay worker. */
+    public static final class LiveReplay {
+        private final ReconstructionLiveEvidence evidence = new ReconstructionLiveEvidence();
+
+        public void warm(Path work) throws IOException {
+            evidence.run(() -> {
+                ReconstructionStages.warmLive(work);
+                return null;
+            });
+        }
+
+        public LiveUpdate rebuild(Path work, Revision expected, JsonArray built, JsonArray entries,
+                                  boolean save, ReconstructionStages.Progress progress) throws IOException {
+            return evidence.run(() -> liveRebuild(work, expected, built, entries, save, progress));
+        }
+    }
+
+    public record LiveUpdate(ReconstructionLivePreview.Prepared playback, Revision revision) {}
+
+    public static LiveUpdate liveRebuild(Path work, Revision expected, JsonArray built, JsonArray entries,
+                                         boolean save, ReconstructionStages.Progress progress) throws IOException {
+        var result = new LiveBuild(save);
+        apply(work, expected, entries, null, null, progress, built, result);
+        return result.update;
+    }
+
+    public record StockVoice(String id, String name) {
+        @Override public String toString() { return name; }
+    }
+
+    public static List<StockVoice> stockVoices(Path work) throws IOException {
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var catalogue = stockCatalogue(score);
+        return catalogue.variants().stream()
+                .filter(variant -> catalogue.asset(variant.assetId()).kind() == InstrumentCatalogue.Kind.FM_VOICE)
+                .map(variant -> new StockVoice(variant.id(), variant.name()))
+                .sorted(Comparator.comparing(StockVoice::name).thenComparing(StockVoice::id))
+                .toList();
+    }
+
+    private static InstrumentCatalogue stockCatalogue(ReconstructionStages.Score score) throws IOException {
+        return InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
+    }
+
+    public static String refitStockVoice(Path work, ReconstructionLivePreview.Prepared current, int part)
+            throws IOException {
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var voicing = ReconstructionArtifacts.read(work.resolve("voicing.json"), ReconstructionVoicing.Result.class);
+        var catalogue = stockCatalogue(score);
+        var allocation = ReconstructionAllocation.sourcePlacement(current.allocation(), score.frames(), ReconstructionTimeMap.of(score));
+        var previous = voicing.sourceInstruments() == null ? null : voicing;
+        var fitted = ReconstructionVoiceStage.fit(score, catalogue, allocation, current.allocation(),
+                previous, java.util.Set.<String>of(), null);
+        var instruments = fitted.sourceInstruments();
+        var sound = instruments == null ? null : instruments.get(ReconstructionVoicePlan.SourceInstrument.id(part));
+        if (sound == null || sound.fm().variantId() == null)
+            throw new IOException("The stock fit produced no FM voice for this part");
+        return sound.fm().variantId();
+    }
+
+    /** Reuse the per-note voicing operation. Preview callers keep this intent in memory. */
+    public static JsonObject stockVoiceEdit(Path work, ReconstructionLivePreview.Prepared current, int part,
+                                            String variant) throws IOException {
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var catalogue = stockCatalogue(score);
+        var match = catalogue.match(variant);
+        if (match.asset().kind() != InstrumentCatalogue.Kind.FM_VOICE)
+            throw new IllegalArgumentException("Choose a stock FM voice");
+        var notes = new JsonArray();
+        current.allocation().notes().stream().filter(row -> row.note().part() == part
+                        && row.lane() != null && row.lane().startsWith("FM"))
+                .forEach(row -> notes.add(row.note().id()));
+        if (notes.isEmpty()) throw new IllegalArgumentException("This part has no allocated FM notes");
+        var edit = new JsonObject();
+        edit.addProperty("id", "stock-voice-" + java.util.UUID.randomUUID());
+        edit.addProperty("op", "noteVoicing");
+        edit.addProperty("reason", "Choose stock voice " + match.variant().name());
+        edit.addProperty("author", "human");
+        edit.addProperty("laneType", "FM");
+        edit.addProperty("instrument", match.variant().id());
+        edit.add("noteIds", notes);
+        return edit;
+    }
+
+    public static JsonObject applySaved(Path work, Revision expected, JsonArray built, JsonArray entries,
+                                        String detachedRevision, ReconstructionStages.Progress progress) throws IOException {
+        return apply(work, expected, entries, detachedRevision, null, progress, built, null);
     }
 
     private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
-                                    String lanePolicyPreset, ReconstructionStages.Progress progress) throws IOException {
+                                    String lanePolicyPreset, ReconstructionStages.Progress progress,
+                                    JsonArray built, LiveBuild live) throws IOException {
         requireRevision(work, expected);
         var arrangement = requireAttached(work, detachedRevision != null);
         if (detachedRevision != null && (arrangement == null || !detachedRevision.equals(arrangement.revision())))
             throw new Changed();
         var updated = parse(entries);
-        var changed = changes(expected.entries(), entries);
+        var changed = changes(built == null ? expected.entries() : built, entries);
         Path scratch = Files.createTempDirectory("reconstruction-review-");
         try {
             var before = Files.createDirectory(scratch.resolve("before"));
             var after = Files.createDirectory(scratch.resolve("after"));
             var inputs = List.of(ReconstructionSections.FILE, "roleplan.json", ReconstructionVoicePlan.JOURNAL);
             var paths = new ArrayList<>(OUTPUTS);
+            if (live != null) paths.removeAll(List.of("render.wav", "arrangement.smps.zip", ReconstructionCli.STEADY_REFERENCE));
             paths.addAll(inputs);
             for (String file : paths) {
                 var source = work.resolve(file);
@@ -233,10 +341,17 @@ public final class ReconstructionReview {
                 checkCancelled();
             }
             requireRevision(before, expected);
-            var copied = arrangement(before);
-            if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
-                    copied == null ? null : copied.revision())) throw new Changed();
+            if (live == null) {
+                var copied = arrangement(before);
+                if (!Objects.equals(arrangement == null ? null : arrangement.revision(),
+                        copied == null ? null : copied.revision())) throw new Changed();
+            } else {
+                var copied = before.resolve(ARRANGEMENT);
+                var revision = Files.exists(copied) ? ProjectFiles.fileRevision(copied) : null;
+                if (!Objects.equals(arrangement == null ? null : arrangement.revision(), revision)) throw new Changed();
+            }
             String from = lanePolicyPreset == null ? stage(before, changed, updated) : "assemble";
+            if (built != null && changed.isEmpty() && from.equals("roles")) from = "assemble";
             if (expected.voices() != null && ReconstructionStages.Stage.parse(from).ordinal()
                     > ReconstructionStages.Stage.VOICES.ordinal()) {
                 var voices = ReconstructionVoicePlan.saved(before);
@@ -253,10 +368,35 @@ public final class ReconstructionReview {
                 args.add("--harmony-max-hz");
                 args.add(Double.toString(roles.harmonyMaxHz()));
             }
-            ReconstructionStages.runForReview("run", args.toArray(String[]::new), (completed, total, message) -> {
+            ReconstructionStages.Progress checkedProgress = (completed, total, message) -> {
                 if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
                 progress.report(completed, total + 1, message);
-            });
+            };
+            if (live != null) {
+                var compiled = ReconstructionStages.runForLive(args.toArray(String[]::new), checkedProgress, arrangement);
+                for (String file : paths)
+                    if (!same(work.resolve(file), before.resolve(file))) throw new Changed();
+                requireRevision(work, expected);
+                ReconstructionLiveEvidence.requireCurrent();
+                checkCancelled();
+                var prepared = ReconstructionLivePreview.rebuilt(compiled.playback(), compiled.allocation());
+                var revision = expected;
+                if (live.save) {
+                    var outcomes = ReconstructionEdits.Journal.read(after).all();
+                    var changedIds = changed.stream().map(ReconstructionEdits.Intent::id).collect(java.util.stream.Collectors.toSet());
+                    for (var outcome : outcomes)
+                        if (changedIds.contains(outcome.id()) && (outcome.status() == ReconstructionEdits.Status.invalid
+                                || outcome.status() == ReconstructionEdits.Status.conflict))
+                            throw new IOException(outcome.tag() + " · " + outcome.detail());
+                    updated.write(after);
+                    revision = revision(after);
+                    publish(work, before, after, expected, paths, List.of(ReconstructionEdits.FILE),
+                            (done, total, message) -> {}, 1);
+                }
+                live.update = new LiveUpdate(prepared, revision);
+                return null;
+            }
+            ReconstructionStages.runForReview("run", args.toArray(String[]::new), checkedProgress);
             checkCancelled();
             if (ReconstructionEdits.read(after).intents().stream().noneMatch(ReconstructionEdits.Intent::proposed))
                 Files.deleteIfExists(after.resolve(ReconstructionProposals.RESULTS));

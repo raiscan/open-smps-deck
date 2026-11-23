@@ -252,14 +252,20 @@ final class ReconstructionLanePolicies {
     static final class Levels {
         private final TargetProfile profile;
         private final Set<String> classicEnvelopes;
+        private final int maxProbes;
 
         Levels(TargetProfile profile) {
             this(profile, Set.of());
         }
 
         Levels(TargetProfile profile, Set<String> classicEnvelopes) {
+            this(profile, classicEnvelopes, Integer.MAX_VALUE);
+        }
+
+        Levels(TargetProfile profile, Set<String> classicEnvelopes, int maxProbes) {
             this.profile = profile;
             this.classicEnvelopes = classicEnvelopes;
+            this.maxProbes = maxProbes;
         }
 
         private record Probe(Voice fm, Envelope psg, int pitch, int ticks, int volume) {}
@@ -280,7 +286,7 @@ final class ReconstructionLanePolicies {
             return 127 - 8 * Math.clamp(step, 0, Math.max(0, 14 - envelopePeak));
         }
 
-        private double power(Probe probe) throws IOException {
+        private synchronized double power(Probe probe) throws IOException {
             var saved = cache.get(probe);
             if (saved != null) return saved;
             boolean fm = probe.fm() != null;
@@ -300,7 +306,7 @@ final class ReconstructionLanePolicies {
                 for (int i = 0; i < pcm.length; i += 2) loudness.add(pcm[i] / 32768.0, pcm[i + 1] / 32768.0);
             });
             double power = loudness.probePower();
-            cache.put(probe, power);
+            if (cache.size() < maxProbes) cache.put(probe, power);
             return power;
         }
     }

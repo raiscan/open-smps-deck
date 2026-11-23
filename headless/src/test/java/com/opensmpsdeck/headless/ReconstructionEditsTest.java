@@ -73,12 +73,122 @@ class ReconstructionEditsTest {
         assertTrue(undo.save(built).entries().isEmpty());
     }
 
+    @Test void stemBackedPitchEditHasAnUnsavedProvisionalPreview(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 60, 90), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 60, 0), 420));
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav);
+        var work = dir.resolve("live");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(),
+                "--seconds", "2", "--stem", "0=" + wav);
+        var revision = ReconstructionReview.revision(work);
+        var entries = revision.entries();
+        entries.add(json("""
+                {"id":"pitch","op":"transpose","reason":"fixture","noteIds":["n-0-0-60"],"semitones":1}
+                """));
+        var live = ReconstructionLivePreview.open(work, revision);
+        var fallback = assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(entries, 0, 2, 0));
+        assertTrue(fallback.getMessage().contains("Source evidence"));
+        var provisional = live.prepareProvisional(entries, 0, 2, 0);
+        assertEquals(61, provisional.allocation().notes().stream()
+                .filter(row -> row.note().id().equals("n-0-0-60")).findFirst().orElseThrow().note().pitch());
+        assertFalse(provisional.changedGates(null).isEmpty());
+        assertThrows(IllegalStateException.class, () -> provisional.save(revision));
+        assertEquals(revision, ReconstructionReview.revision(work));
+        var score = ReconstructionStages.readScore(work.resolve("score.json"));
+        var structure = ReconstructionStages.readStructure(work.resolve("structure.json"), score);
+        var clock = ReconstructionTimeMap.of(score);
+        var backing = clock.projectNote(score.notes().getFirst());
+        var blocker = new ReconstructionAllocation.Entry(backing, ReconstructionRoles.Role.harmony, "FM4",
+                clock.startTick(backing), clock.endTick(backing), ReconstructionAllocation.Outcome.kept, null, null);
+        var inserted = new ReconstructionStages.Note("edit-insert", backing.part(), .15, .25, 64, 96, "edit", 1);
+        var attack = new ReconstructionRoles.Decision(inserted, ReconstructionRoles.Role.counter, null, null);
+        var roles = new ReconstructionRoles.Result(1, 7.5, List.of(attack), clock.timeBase(), null,
+                java.util.Map.of(inserted.id(), new ReconstructionEdits.Pin("FM4", "insert", 1)));
+        var changed = new java.util.HashSet<>(java.util.Set.of(inserted.id()));
+        var local = ReconstructionLiveAllocation.project(score, structure,
+                new ReconstructionAllocation.Result(1, List.of(blocker), clock.timeBase()),
+                roles, changed, java.util.Set.of(inserted.id()), clock);
+        assertEquals(List.of(backing.id(), inserted.id()), local.notes().stream().map(row -> row.note().id()).toList());
+        assertEquals(local.notes().getFirst().endTick(), local.notes().getLast().startTick());
+        assertTrue(changed.contains(backing.id()));
+
+        var replay = new ReconstructionReview.LiveReplay();
+        replay.warm(work);
+        var canonical = replay.rebuild(work, revision, revision.entries(), entries, false, (a, b, c) -> {}).playback();
+        var undo = live.prepareProvisional(revision.entries(), 0, 2, 0);
+        assertTrue(undo.isBuilt());
+        assertFalse(undo.changedGates(provisional).isEmpty());
+        assertEquals(revision, ReconstructionReview.revision(work));
+
+        ReconstructionReview.apply(work, revision, entries, (a, b, c) -> {});
+        assertEquals(ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class),
+                canonical.allocation());
+        assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()),
+                canonical.playback(), "stem-backed transpose");
+    }
+
+    @Test void liveDeletionMatchesCanonicalAllocationAndPcm(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        writeMidi(midi, true);
+        writeAudio(catalogue, wav, true);
+        var work = dir.resolve("live");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        var revision = ReconstructionReview.revision(work);
+        var edits = new com.google.gson.JsonArray();
+        edits.add(json("""
+                {"id":"delete","op":"deleteNote","reason":"fixture","noteId":"n-0-0-60"}
+                """));
+        var preview = ReconstructionReview.liveRebuild(work, revision, revision.entries(), edits, (a, b, c) -> {});
+        assertEquals(revision, ReconstructionReview.revision(work));
+        assertTrue(preview.allocation().notes().stream().noneMatch(row -> row.note().id().equals("n-0-0-60")));
+        ReconstructionReview.apply(work, revision, edits, (a, b, c) -> {});
+        assertEquals(ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class),
+                preview.allocation());
+        assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()),
+                preview.playback(), "delete");
+    }
+
+    @Test void independentBarRoleEditMatchesCanonicalAllocationAndPcm(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        for (int beat : List.of(0, 2, 5, 7)) {
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 69, 90), beat * 480L));
+            track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 69, 0), beat * 480L + 160));
+        }
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav, false, 240);
+        var work = dir.resolve("live");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "4");
+        var built = ReconstructionReview.revision(work);
+        var edits = new com.google.gson.JsonArray();
+        edits.add(json("""
+                {"id":"drop","op":"setRole","reason":"fixture","noteIds":["n-0-0-69"],"role":"drop"}
+                """));
+        var preview = ReconstructionLivePreview.open(work, built).prepare(edits, 0, 4, 0);
+        var original = ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class);
+        assertEquals(original.notes().getLast(), preview.allocation().notes().getLast());
+        ReconstructionReview.apply(work, built, edits, (a, b, c) -> {});
+        assertEquals(ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class),
+                preview.allocation());
+        assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()), preview.playback(), "role", 240);
+    }
+
     private static void assertPcmEqual(TargetPlayback expected, TargetPlayback actual, String operation) throws Exception {
-        var pcm = new ArrayList<short[]>();
-        expected.render(120, block -> pcm.add(block.clone()));
+        assertPcmEqual(expected, actual, operation, 120);
+    }
+
+    private static void assertPcmEqual(TargetPlayback expected, TargetPlayback actual, String operation, int frames)
+            throws Exception {
+        var pcm = new ArrayList<short[]>(frames);
+        expected.render(frames, block -> pcm.add(block.clone()));
         int[] index = {0};
-        actual.render(120, block -> assertArrayEquals(pcm.get(index[0]++), block, operation + " block " + (index[0] - 1)));
-        assertEquals(120, index[0]);
+        actual.render(frames, block -> assertArrayEquals(pcm.get(index[0]++), block, operation + " block " + (index[0] - 1)));
+        assertEquals(frames, index[0]);
     }
 
     @Test void detailEditReportsDropAndRecoversOnRoleRebuild(@TempDir Path dir) throws Exception {
@@ -160,7 +270,13 @@ class ReconstructionEditsTest {
               {"id":"swap","op":"swapRoles","reason":"Move earlier line to counter","part":0,"span":[2.45,2.9],"from":"melody","to":"counter"}
             ]
             """).getAsJsonArray();
-        ReconstructionReview.apply(work, ReconstructionReview.revision(work), edits, (a, b, c) -> {});
+        var base = ReconstructionReview.revision(work);
+        var preview = ReconstructionReview.liveRebuild(work, base, base.entries(), edits, (a, b, c) -> {});
+        ReconstructionReview.apply(work, base, edits, (a, b, c) -> {});
+        assertEquals(ReconstructionArtifacts.read(work.resolve("allocation.json"), ReconstructionAllocation.Result.class),
+                preview.allocation());
+        assertPcmEqual(TargetPlayback.prepare(ReconstructionReview.arrangement(work).project()), preview.playback(),
+                "mixed live journal", 480);
         assertEquals(java.util.EnumSet.allOf(ReconstructionEdits.Kind.class),
                 ReconstructionEdits.read(work).intents().stream().map(ReconstructionEdits.Intent::kind)
                     .collect(java.util.stream.Collectors.toSet()));

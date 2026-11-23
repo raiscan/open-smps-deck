@@ -138,7 +138,7 @@ final class ReconstructionPane implements AutoCloseable {
         }
         view = new ReconstructionCanvas(model, status::setText);
         editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh,
-                position -> listen.cuePreview(position), openProject);
+                position -> listen.cuePreview(position), openProject, audioLines);
         listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition, audioLines);
         editor.liveTransport(listen);
         editor.playFrom = listen::playFrom;

@@ -64,7 +64,8 @@ public final class StudioWindow implements AutoCloseable {
     private VBox assetBody;
     private Button songSettings, romImport;
     private VBox noteBody;
-    private final StudioPlayback playback=new StudioPlayback();
+    private final StudioPlayback.LineFactory audioLines;
+    private final StudioPlayback playback;
     private final ReviewTransport transport = new ReviewTransport();
     private final ReviewPane review = new ReviewPane();
     private final ReviewTransport.Lanes monitor = new ReviewTransport.Lanes();
@@ -84,7 +85,13 @@ public final class StudioWindow implements AutoCloseable {
     private ReconstructionPane reconstruction;
 
     public StudioWindow(Stage stage,Path file) throws IOException {
+        this(stage, file, javax.sound.sampled.AudioSystem::getSourceDataLine);
+    }
+
+    StudioWindow(Stage stage, Path file, StudioPlayback.LineFactory audioLines) throws IOException {
         this.stage=stage;
+        this.audioLines = audioLines;
+        playback = new StudioPlayback(audioLines);
         build();
         var area=Screen.getPrimary().getVisualBounds();
         Scene scene=new Scene(root,Math.min(1440,area.getWidth()*.94),Math.min(900,area.getHeight()*.90));
@@ -1023,7 +1030,7 @@ public final class StudioWindow implements AutoCloseable {
             reconstruction.stage().close();
             if (reconstruction != null) return;
         }
-        var pane = new ReconstructionPane(stage, work, () -> openArrangement(work), () -> document);
+        var pane = new ReconstructionPane(stage, work, () -> openArrangement(work), () -> document, audioLines);
         reconstruction = pane;
         pane.stage().addEventHandler(WindowEvent.WINDOW_HIDDEN, event -> {
             if (reconstruction == pane) reconstruction = null;
@@ -1252,10 +1259,10 @@ public final class StudioWindow implements AutoCloseable {
         }
     }
 
-    private static void openSavedProject(Path destination, String message) throws IOException {
+    private void openSavedProject(Path destination, String message) throws IOException {
         // Pending editor drafts belong to the source window, even when its document is clean.
         Stage newStage = new Stage();
-        StudioWindow opened = new StudioWindow(newStage, destination);
+        StudioWindow opened = new StudioWindow(newStage, destination, audioLines);
         opened.status.setText(message);
         newStage.show();
     }

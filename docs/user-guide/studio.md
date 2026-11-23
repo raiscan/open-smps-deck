@@ -381,20 +381,33 @@ In an attached S3K reconstruction, open **Notes** and choose **Chip** or
 switch A/B to the Chip side. Play or seek to any part of the song with
 the **Song**, **Section** or **Selection** range.
 
-Drag pitch or length, transpose, or draw a supported bend. The note menu
-can also transpose or add a bend or glide. **Live preview · Saved edits**
-means Studio saved the edit to `edits.json` and is auditioning it with the
-fitted patches. **Changes → Undo** and **Redo** update playback and the
-journal. An edit ahead of the playhead is heard when playback reaches it.
-A loop plays a passed note on the next pass. If an unlooped short note passes
-while its edit is preparing, Studio can briefly re-cue it so you can hear
-the change.
+Drag pitch or length, transpose, draw a supported bend, or change a note's
+velocity, role, lane or voicing. You can also insert, delete, split, merge
+or retrigger attacks and audition chord and layer edits. **Live preview ·
+Provisional** means Studio is playing the local edit with saved sounds while
+it checks the canonical arrangement. When that result is ready, Chip
+continues at the playhead. **Live preview · Saved edits** means Studio saved
+the checked changes to `edits.json`. **Changes → Undo** and **Redo** use the
+same playback and journal workflow.
 
-Studio prepares playback checkpoints in the background. A late seek or
-edit can take longer on the first pass. Deletions, splits, merges, and changes
-that need new roles, lanes or instruments display **Rebuild needed**.
-Use **Apply & rebuild** to hear those changes and include all saved edits
-in the built arrangement and exports.
+An edit ahead of the playhead is heard when playback reaches it. A loop
+plays a passed note on the next pass. If an unlooped short note passes
+while its edit is preparing, Studio can briefly re-cue a pitch, gate or bend
+edit. Studio builds playback checkpoints in the background. Cold seeks
+and edits that invalidate earlier checkpoints can take longer.
+
+**Rebuild needed · Rebuilding in background** means Studio needs a canonical
+replay to produce the first preview. Chip continues playing and switches to
+the compiled result when ready. A saved edit from disk is labelled with its author.
+Use **Apply & rebuild** to update the arrangement, trace and export files.
+
+While Chip is playing, open **A/B → Compare before last N edits…** to
+compare with an earlier journal. To compare patches, select notes from a
+single part and choose two stock voices through **A/B → Compare stock
+voices for selected part…**. **Refit voice for this part** runs the stock
+fitter and offers the result as B. **Hear A** and **Hear B** switch at the
+playhead. **Apply B** stages the proposal or stock choice, and **End A/B**
+returns to the current arrangement.
 
 ### Adjust the view
 
@@ -426,10 +439,10 @@ otherwise.
 Agent proposals appear as magenta dashed outlines on the pitch plot. Hover
 to read the reason. Open **Review → Proposals** to decide on individual
 edits or a batch. Expand **Details** to see the proposal ID and source evidence. **Preview A/B**
-builds a sibling preview
-and plays the same span twice, built first and proposal second. The playhead
-returns to the start of the span for the second pass. **Accept** stages an
-edit for **Apply & rebuild**. Undo can bring the proposal back while it is staged.
+compares the current journal with the accepted proposal at the playhead during
+Chip playback. With the transport stopped it builds a sibling preview and
+plays the same span twice, built first and proposal second. **Accept** stages
+an edit for live audition or **Apply & rebuild**. Undo can bring the proposal back while it is staged.
 **Reject** removes it from the shared journal immediately. Studio picks up
 new proposals from agents while the reconstruction window is open.
 

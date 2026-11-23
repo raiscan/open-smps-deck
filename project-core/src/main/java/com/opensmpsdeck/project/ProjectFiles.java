@@ -176,7 +176,8 @@ public final class ProjectFiles {
         if (attributes.size() > limit) throw new IOException(sourceLimitMessage(limit) + ": " + file);
     }
 
-    static String fileRevision(Path file) throws IOException {
+    /** Hash the current project source without parsing or compiling it. */
+    public static String fileRevision(Path file) throws IOException {
         int limit = maxSourceBytes();
         checkFile(file, limit);
         MessageDigest digest = sha256();
