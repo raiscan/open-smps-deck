@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -131,7 +132,8 @@ final class StudioPlayback implements AutoCloseable {
         private CachedRevision built;
         private CachedRevision active;
         private Future<Handoff> pending;
-        private CachedRevision otherComparison;
+        private final LinkedHashMap<ReconstructionLivePreview.Prepared, CachedRevision> comparisons =
+                new LinkedHashMap<>(4, .75f, true);
         private Runnable deferredSettlement;
         private boolean preparing;
         private boolean reset;
@@ -185,8 +187,11 @@ final class StudioPlayback implements AutoCloseable {
         private void replace(ReconstructionLivePreview.Prepared edit, long eventNanos, double gesture,
                              boolean looped, boolean comparing, Runnable settled) {
             if (!ready()) return;
-            var alternate = comparing ? otherComparison : null;
-            otherComparison = comparing ? active : null;
+            if (comparing && active.edit() != null) {
+                comparisons.put(active.edit(), active);
+                if (comparisons.size() > 4) comparisons.pollFirstEntry();
+            } else if (!comparing) comparisons.clear();
+            var alternate = comparing ? comparisons.get(edit) : null;
             cancelPending();
             preparing = false;
             reset = false;

@@ -82,10 +82,16 @@ final class ReconstructionTransport implements AutoCloseable {
     private final ToggleButton abSide = new ToggleButton("A · Original");
     private final Label scopeHint = new Label();
     private final Label loopLabel = new Label();
+    Runnable onLiveReady = () -> {};
+    private StudioPlayback.LiveStream notifiedStream;
     private final AnimationTimer playheadTimer = new AnimationTimer() {
         @Override public void handle(long now) {
             if (playing && Double.isFinite(devicePosition) && devicePosition != projectPosition)
                 updatePosition(devicePosition, true);
+            if (notifiedStream != liveStream && liveEdit() != null) {
+                notifiedStream = liveStream;
+                onLiveReady.run();
+            }
         }
     };
 
@@ -230,7 +236,7 @@ final class ReconstructionTransport implements AutoCloseable {
         return sources;
     }
 
-    VBox bar() {
+    VBox bar(javafx.scene.Node branchVariant) {
         play.setId("reconstruction-play");
         play.setTooltip(new Tooltip("Play or stop · Space"));
         play.setOnAction(event -> togglePlayback());
@@ -293,7 +299,7 @@ final class ReconstructionTransport implements AutoCloseable {
         clock.setMinWidth(78);
         clock.getStyleClass().add("reconstruction-clock");
         var controls = new FlowPane(8, 6, play, new Label("Play range"), scopes, voices, lanes,
-                new Label("Hear"), hearing, abSide, setLoop, loopLabel, clearRange);
+                new Label("Hear"), hearing, abSide, branchVariant, setLoop, loopLabel, clearRange);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(controls, Priority.ALWAYS);
         var transportRow = new HBox(12, controls, clock);
@@ -706,6 +712,25 @@ final class ReconstructionTransport implements AutoCloseable {
                 ? new LiveEdit(liveStream, liveWindow, seconds) : null;
     }
 
+    void restoreBranchParent() {
+        var edit = liveEdit();
+        if (edit != null) {
+            if (preview != null) liveStream.compare(preview, edit.playhead());
+            else liveStream.reset();
+        }
+        liveMessage(previewJournal ? "Live preview · Saved edits" : "");
+    }
+
+    boolean activateBranchMonitor() {
+        if (editableProject() == null || liveChip()) return false;
+        if (hearing.getValue() == Hearing.ORIGINAL) hearing.setValue(Hearing.CHIP);
+        if (hearing.getValue() == Hearing.AB) {
+            abSide.setSelected(true);
+            updateMonitor();
+        }
+        return true;
+    }
+
     boolean chipPlaying() { return (playing || playWhenLoaded) && hearing.getValue() != Hearing.ORIGINAL; }
     boolean hasSavedPreview() { return previewJournal; }
 
@@ -821,6 +846,7 @@ final class ReconstructionTransport implements AutoCloseable {
 
     private void playbackStopped() {
         liveStream = null;
+        notifiedStream = null;
         playing = false;
         playWhenLoaded = false;
         play.setText("Play");

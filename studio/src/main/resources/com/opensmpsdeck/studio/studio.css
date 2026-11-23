@@ -95,7 +95,8 @@
 .reconstruction-workspaces .toggle-button:selected,
 .reconstruction-transport .primary-action,
 .reconstruction-header .primary-action,
-.reconstruction-export .primary-action {
+.reconstruction-export .primary-action,
+.reconstruction-branch-review .primary-action {
     -fx-background-color: #245f58;
     -fx-text-fill: #f0fffa;
 }

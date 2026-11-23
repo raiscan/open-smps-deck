@@ -41,7 +41,6 @@ final class ScreenshotLasso {
     private final ToggleButton toggle = new ToggleButton("Screenshot lasso");
     private final Button save = new Button("Save lasso PNG…");
     private final HBox controls = new HBox(5, toggle, save);
-    private final Function<Rectangle2D, NoteHandoff.Capture> payload;
     private final Consumer<String> status;
     private double x, y;
     private boolean dragging;
@@ -50,8 +49,17 @@ final class ScreenshotLasso {
 
     ScreenshotLasso(ViewportCanvas view, Function<Rectangle2D, NoteHandoff.Capture> payload, Consumer<String> status,
                     BooleanSupplier panning) {
+        this(view, payload, status, panning, null);
+    }
+
+    static ScreenshotLasso region(ViewportCanvas view, Consumer<Rectangle2D> select, Consumer<String> status,
+                                  BooleanSupplier panning) {
+        return new ScreenshotLasso(view, null, status, panning, select);
+    }
+
+    private ScreenshotLasso(ViewportCanvas view, Function<Rectangle2D, NoteHandoff.Capture> payload,
+                           Consumer<String> status, BooleanSupplier panning, Consumer<Rectangle2D> select) {
         this.view = view;
-        this.payload = payload;
         this.status = status;
         outline.setManaged(false);
         outline.setMouseTransparent(true);
@@ -61,8 +69,14 @@ final class ScreenshotLasso {
         outline.getStrokeDashArray().setAll(5.0, 3.0);
         outline.translateXProperty().bind(view.canvas.translateXProperty());
         view.overlay(outline);
-        toggle.setId("screenshot-lasso");
-        toggle.setTooltip(new Tooltip("Drag a screenshot region (Ctrl/Cmd+Shift+L)"));
+        if (select == null) {
+            toggle.setId("screenshot-lasso");
+            toggle.setTooltip(new Tooltip("Drag a screenshot region (Ctrl/Cmd+Shift+L)"));
+        } else {
+            toggle.setId("reconstruction-branch-region");
+            toggle.setText("Pick region");
+            toggle.setTooltip(new Tooltip("Drag a rectangle to choose its time span. Esc cancels."));
+        }
         save.setId("save-lasso-png");
         save.setVisible(false);
         save.managedProperty().bind(save.visibleProperty());
@@ -76,8 +90,11 @@ final class ScreenshotLasso {
             if (!visible) toggle.setSelected(false);
         });
         view.canvas.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (controls.isVisible() && event.getCode() == KeyCode.L && event.isShortcutDown()
-                    && event.isShiftDown() && !event.isAltDown()) {
+            if (select != null && event.getCode() == KeyCode.ESCAPE && toggle.isSelected()) {
+                toggle.setSelected(false);
+                event.consume();
+            } else if (select == null && controls.isVisible() && event.getCode() == KeyCode.L
+                    && event.isShortcutDown() && event.isShiftDown() && !event.isAltDown()) {
                 toggle();
                 event.consume();
             }
@@ -119,7 +136,13 @@ final class ScreenshotLasso {
             }
             var box = bounds(event.getX(), event.getY());
             clearGesture();
-            if (box.getWidth() >= 2 && box.getHeight() >= 2) capture(box);
+            if (box.getWidth() >= 2 && box.getHeight() >= 2) {
+                if (select == null) capture(box, payload);
+                else {
+                    toggle.setSelected(false);
+                    select.accept(box);
+                }
+            }
             event.consume();
         });
     }
@@ -129,6 +152,8 @@ final class ScreenshotLasso {
     void toggle() {
         toggle.setSelected(!toggle.isSelected());
     }
+
+    void cancel() { toggle.setSelected(false); }
 
     static void addTo(StudioContextMenu menu, Runnable action) {
         menu.add("Screenshot lasso", StudioContextMenu.shortcut("Shift+L"), null, action);
@@ -152,7 +177,7 @@ final class ScreenshotLasso {
                 Math.clamp(Math.max(y, endY), top, bottom) - startY);
     }
 
-    private void capture(Rectangle2D bounds) {
+    private void capture(Rectangle2D bounds, Function<Rectangle2D, NoteHandoff.Capture> payload) {
         try {
             var capture = payload.apply(bounds);
             if (capture == null) return;

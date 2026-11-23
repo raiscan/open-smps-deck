@@ -110,6 +110,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     Consumer<List<Overlay>> onDetailJump = notes -> {};
 
     private ReconstructionInspection model;
+    private List<ReconstructionBranchOverlay.Layer> branchLayers = List.of();
     private ReconstructionTiles tiles;
     private boolean spectrumReady;
 
@@ -190,6 +191,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
     private double playhead;
 
     double playhead() { return playhead; }
+    ReconstructionInspection inspection() { return model; }
     private Double anchor;
     private ReviewTransport.Range range;
     private Role soloRole;
@@ -393,6 +395,13 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         for (var note : visibleNotes(width)) {
             if (!roles.contains(note.role()) || isDrum(note, voices.byNote().get(note.id()))
                     || !selectableDraft(note)) continue;
+            bottom = Math.min(bottom, noteLow(note));
+            top = Math.max(top, noteHigh(note));
+        }
+        for (var layer : branchLayers) for (var delta : layer.changes()) {
+            var note = delta.note();
+            if (note.interval().sourceEnd() < from || note.interval().sourceStart() > to
+                    || !roles.contains(note.role()) || note.role() == Role.DRUMS) continue;
             bottom = Math.min(bottom, noteLow(note));
             top = Math.max(top, noteHigh(note));
         }
@@ -1134,6 +1143,19 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         draw();
     }
 
+    void branchLayers(List<ReconstructionBranchOverlay.Layer> layers) {
+        branchLayers = List.copyOf(layers);
+        pitchFitDirty = true;
+        draw();
+    }
+
+    List<ReconstructionBranchOverlay.Layer> branchLayers() { return branchLayers; }
+
+    ReviewTransport.Range branchRegion(javafx.geometry.Rectangle2D box) {
+        double start = seconds(box.getMinX()), end = seconds(box.getMaxX());
+        return end > start ? new ReviewTransport.Range(start, end) : null;
+    }
+
     List<Overlay> lassoNotes(javafx.geometry.Rectangle2D box) {
         flush();
         var notes = new java.util.LinkedHashMap<String, Overlay>();
@@ -1278,6 +1300,7 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
             layers = visibleLayers(width);
             drawNotes(g, width, visible, layers);
         }
+        drawBranchLayers(g, width, plotTop, plotBottom);
         if (preview != null) {
             g.setStroke(Color.GOLD);
             double left = x(preview.start());
@@ -1306,6 +1329,44 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
         plotLine(g, CURSOR, x(playhead), 0, contentHeight);
         g.setStroke(GRID);
         g.strokeLine(axis() - .5, 0, axis() - .5, contentHeight);
+    }
+
+    private void drawBranchLayers(GraphicsContext g, double width, double top, double bottom) {
+        for (var layer : branchLayers) {
+            for (var delta : layer.changes()) {
+                if (delta.before() != null && (delta.after() == null
+                        || !delta.before().interval().equals(delta.after().interval())
+                        || delta.before().pitch() != delta.after().pitch())) {
+                    drawBranchNote(g, width, top, bottom, delta.before(), layer.style(), true, "−");
+                }
+                if (delta.after() != null) {
+                    drawBranchNote(g, width, top, bottom, delta.after(), layer.style(), false,
+                            delta.kind() == ReconstructionBranchOverlay.Kind.ADDED ? "+" : "~");
+                }
+            }
+        }
+    }
+
+    private void drawBranchNote(GraphicsContext g, double width, double top, double bottom, Overlay note,
+                                ReconstructionVoices.Style style, boolean removed, String symbol) {
+        if (!roles.contains(note.role())) return;
+        double y = y(note.pitch()) - 5;
+        if (y < top || y + 10 > bottom) return;
+        double left = Math.max(axis(), x(note.interval().sourceStart()));
+        double right = Math.min(width, x(note.interval().sourceEnd()));
+        if (right <= left) return;
+        g.save();
+        g.setLineWidth(1.4);
+        style.draw(g, left, y, right - left, 10, removed ? .15 : .75);
+        g.setStroke(style.color());
+        if (removed) g.strokeLine(left, y + 5, right, y + 5);
+        if (right - left >= 15) {
+            g.setFill(BACKGROUND);
+            g.fillRect(left + 1, y + 1, 11, 8);
+            g.setFill(style.color());
+            g.fillText(symbol, left + 3, y + 5);
+        }
+        g.restore();
     }
 
     /** A one-pixel vertical line, cut at the gutter edge as the old plot clip did. */
