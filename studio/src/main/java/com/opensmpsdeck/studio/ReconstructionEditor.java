@@ -15,6 +15,9 @@ import com.opensmpsdeck.headless.S3kRenderer;
 import com.opensmpsdeck.headless.ReconstructionInspection.Overlay;
 import com.opensmpsdeck.headless.ReconstructionInspection.Role;
 import com.opensmpsdeck.headless.ReconstructionReview;
+import com.opensmpsdeck.headless.ReconstructionRepeatPolicy;
+import com.opensmpsdeck.headless.ReconstructionRepeatPolicy.Fill;
+import com.opensmpsdeck.headless.ReconstructionRepeatPolicy.Lanes;
 import com.opensmpsdeck.headless.ReconstructionReview.EditResult;
 import com.opensmpsdeck.headless.ReconstructionReview.Revision;
 import com.opensmpsdeck.headless.ReconstructionLivePreview;
@@ -198,6 +201,7 @@ final class ReconstructionEditor implements AutoCloseable {
     private final ReconstructionBulk bulk;
     private Map<String, List<JsonObject>> draftPitchEdits = Map.of();
     private final ReconstructionVoiceLegend voiceLegend;
+    private final MenuButton repeatSettings = new MenuButton("Part repeats");
     private final ReconstructionVoices.Palette voicePalette;
     private final StudioPlayback audition;
 
@@ -487,7 +491,11 @@ final class ReconstructionEditor implements AutoCloseable {
         roleChooser = new FlowPane(6, 5, role, setRole);
         roleChooser.managedProperty().bind(roleChooser.visibleProperty());
         assignment.getChildren().addAll(assignmentHint, roleChooser);
-        roleInspector.getChildren().addAll(assignment, voiceLegend);
+        repeatSettings.setId("reconstruction-repeat-settings");
+        repeatSettings.setTooltip(new Tooltip("Set repeat fill sensitivity and lane preference by part"));
+        repeatSettings.managedProperty().bind(repeatSettings.visibleProperty());
+        repeatSettings.setOnShowing(event -> populateRepeatSettings());
+        roleInspector.getChildren().addAll(assignment, repeatSettings, voiceLegend);
         VBox.setVgrow(voiceLegend, Priority.ALWAYS);
         voiceLegend.rolesView(true);
         journal.setId("reconstruction-edit-list");
@@ -543,6 +551,49 @@ final class ReconstructionEditor implements AutoCloseable {
         return pane;
     }
 
+    private void populateRepeatSettings() {
+        var entries = draft.entries();
+        repeatSettings.getItems().clear();
+        for (var part : snapshot.inspection().repeatParts()) {
+            var value = ReconstructionRepeatPolicy.forPart(entries, part.id());
+            var menu = new Menu(part.toString());
+            menu.setId("reconstruction-repeat-part-" + part.id());
+            var fill = new Menu("Repeats");
+            var fillChoices = new ToggleGroup();
+            for (var sensitivity : Fill.values()) {
+                var item = repeatChoice(sensitivity.name(), fillChoices, sensitivity == value.fill());
+                item.setOnAction(event -> changeRepeatSettings(part, sensitivity, value.lanes()));
+                fill.getItems().add(item);
+            }
+            var lanes = new Menu("Keep pattern lanes");
+            var laneChoices = new ToggleGroup();
+            for (var priority : Lanes.values()) {
+                var item = repeatChoice(priority.name(), laneChoices, priority == value.lanes());
+                item.setOnAction(event -> changeRepeatSettings(part, value.fill(), priority));
+                lanes.getItems().add(item);
+            }
+            menu.getItems().addAll(fill, lanes);
+            repeatSettings.getItems().add(menu);
+        }
+    }
+
+    private static RadioMenuItem repeatChoice(String name, ToggleGroup choices, boolean selected) {
+        var item = new RadioMenuItem(name.substring(0, 1).toUpperCase(Locale.ROOT) + name.substring(1));
+        item.setToggleGroup(choices);
+        item.setSelected(selected);
+        return item;
+    }
+
+    private void changeRepeatSettings(ReconstructionInspection.Part part, Fill fill, Lanes lanes) {
+        var prior = ReconstructionRepeatPolicy.forPart(draft.entries(), part.id());
+        if (prior.fill() == fill && prior.lanes() == lanes) return;
+        var edit = ReconstructionDraft.human("repeatPolicy", "Set repeat policy for " + part);
+        edit.addProperty("part", part.id());
+        edit.addProperty("fill", fill.name());
+        edit.addProperty("lanes", lanes.name());
+        add(edit);
+    }
+
     void show(Overlay note) {
         selected = note;
         var inspection = snapshot.inspection();
@@ -564,6 +615,8 @@ final class ReconstructionEditor implements AutoCloseable {
                 note.fate(), note.reason() == null ? "" : "\n" + note.reason(), ReconstructionCanvas.roleName(note.role()),
                 orDash(note.lane()), orDash(note.patch()), time.sourceStart(), time.sourceEnd(),
                 time.projectStart(), time.projectEnd(), names(note.competitors()), names(detail.edits()));
+        String repeatReason = inspection.repeatFillReason(note.id());
+        if (repeatReason != null) body += "\n\nRepeat fill\n" + repeatReason;
         String stockReason = inspection.stockVoiceReason(note);
         if (stockReason != null) body += "\n\nAutomatic FM fit\n" + stockReason;
         var vibration = vibrato(note);
@@ -1743,6 +1796,7 @@ final class ReconstructionEditor implements AutoCloseable {
             case "setRole" -> "Assign musical role";
             case "noteVoicing" -> "Change note sound";
             case "layer" -> "Change note layers";
+            case "repeatPolicy" -> "Set part repeat policy";
             default -> readableKey(operation);
         };
     }
@@ -2395,6 +2449,8 @@ final class ReconstructionEditor implements AutoCloseable {
         boolean editing = editable();
         view.editing(editing);
         bulk.setDisable(!editing);
+        repeatSettings.setVisible(!snapshot.inspection().repeatParts().isEmpty());
+        repeatSettings.setDisable(!editing);
         voiceLegend.controls(editing, view.selectedNotes().stream().anyMatch(ReconstructionEditor::classifiable));
         proposalList.setDisable(!editing);
         stopPreview.setDisable(!previewPlaying);

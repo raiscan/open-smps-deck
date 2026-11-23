@@ -975,28 +975,40 @@ candidates stay in `score.json` as evidence.
 
 ### Stem-backed repeat consensus
 
-Audio-only tonal stems are compared part by part on the tracked bar grid, with
-small differences in bar phase allowed. They use this stem-backed check in
-place of the MIDI-only consensus corrections. Matching transcribed attacks can vote for
-a missing attack. An upper line with repeated attacks can also use an aligned
-bar as a reference when the target shares the surrounding notes and register.
-The local stem must show a pitch ridge and energy rise at the expected attack.
-A ridge that tracks a stronger lower partial does not qualify on its own.
-Conflicting written gates and accepted score edits take precedence.
+The `repeatPolicy` journal operation controls each audio-only pitched part
+with a mapped non-vocal stem. It applies to the whole part and replays from
+`structure`. The most recent accepted operation for the part wins. Removing
+it restores the previous policy, and an explicit `off` resets that setting.
 
-The structure contains effective notes with source `repeat-consensus` and
-`repeatNotes` entries that record the slot, reference notes, and local pitch
-level. In Studio Analysis or `reconstruct trace`, inspect
-`structure.repeatConsensus` on a recovered note. The raw transcription
-remains in `score.json`. Resume from `structure` to evaluate an existing score.
+```json
+{"id":"bass-repeats","reason":"Recover the repeating bass groove","op":"repeatPolicy","part":1,"fill":"high","lanes":"on"}
+```
 
-Recurring low notes on a bass stem can retain their bass role across section
-boundaries. The allocator prefers a compatible lane already used by the same
-slot and gives core notes priority over octave doubles. When a repeated octave
-double loses its lane and the lower note is kept throughout, the allocator
-omits the double consistently. Automatic lane-policy copies use a common free
-lane for aligned occurrences or yield to the dry notes. Explicit lane and role
-assignments take precedence.
+Both fields default to `off` for parts without an operation. Fill sensitivity
+`low` requires 4 dB more local pitch support than `medium`, and `high` permits
+3 dB less. Enabled fill replaces the existing score-consensus pass for that part.
+Matching transcribed attacks vote on the tracked bar grid. A recurrent upper
+line can also use an aligned bar when the target shares the surrounding
+contour. All three sensitivities require a local pitch ridge, onset and
+sustained support. Stronger lower harmonics, conflicting written gates and
+accepted score edits can veto the fill.
+
+Lane policy `on` prefers reusing a compatible free lane for a repeated slot
+and groups its automatic lane-policy copies on a common free lane. Recurring
+low notes on a bass stem can retain the bass role across section boundaries.
+`strict` also lets core pattern attacks reclaim their preferred lane from
+an unpinned octave double with its lower note covered, and can omit a
+repeated optional double consistently when some occurrences are already
+lost to capacity. Explicit role edits, lane pins and chord anchors keep
+their precedence.
+
+The recovered notes have source `repeat-consensus`. Notes in Studio shows
+the fill reason, and `reconstruct trace` exposes the aligned reference notes
+and local stem level under `structure.repeatConsensus`. The raw transcription
+remains in `score.json`. Rebuild older work from `structure` to apply the
+current defaults. During Chip playback, Studio recomputes structure
+and downstream allocation through live replay because the affected repeat
+windows can span several sections.
 
 ### Stem-backed fast figures
 

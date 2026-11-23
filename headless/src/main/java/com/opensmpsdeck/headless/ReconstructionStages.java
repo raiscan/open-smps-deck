@@ -436,7 +436,7 @@ public final class ReconstructionStages {
                 if (live != null) replayScore = score;
                 switch (stage) {
                     case STRUCTURE -> {
-                        var detected = structure(score, editJournal.stages().getOrDefault("transcribe", List.of()));
+                        var detected = structure(score, editJournal.stages().getOrDefault("transcribe", List.of()), edits, outcomes);
                         ReconstructionArtifacts.write(structureFile, detected);
                         if (live != null) replayStructure = detected;
                     }
@@ -683,8 +683,8 @@ public final class ReconstructionStages {
         } else {
             scoreEdits = prior.stages().getOrDefault("transcribe", List.of());
         }
-        var structure = from == Stage.TRANSCRIBE || Files.notExists(structureFile)
-                ? structure(score, scoreEdits) : readStructure(structureFile, score);
+        var structure = from.ordinal() <= Stage.STRUCTURE.ordinal() || Files.notExists(structureFile)
+                ? structure(score, scoreEdits, edits, outcomes) : readStructure(structureFile, score);
         var timeline = ReconstructionTimeMap.of(score);
         var plan = readRolePlan(work, structure, score);
         if (plan != null) plan = plan.projectBounds(timeline);
@@ -1201,11 +1201,12 @@ public final class ReconstructionStages {
     }
 
     static ReconstructionStructure.Result structure(Score score) throws IOException {
-        return structure(score, List.of());
+        return structure(score, List.of(), new ReconstructionEdits(List.of()), new ArrayList<>());
     }
 
-    private static ReconstructionStructure.Result structure(Score score, List<ReconstructionEdits.Outcome> edits)
-            throws IOException {
+    static ReconstructionStructure.Result structure(Score score, List<ReconstructionEdits.Outcome> scoreEdits,
+            ReconstructionEdits edits, List<ReconstructionEdits.Outcome> outcomes) throws IOException {
+        var policies = ReconstructionRepeatPolicy.resolve(score, edits, outcomes);
         boolean inferred = score.tempo != null && !score.tempo.source().equals("midi");
         boolean tracker = score.usesBeatGrid();
         double seconds = score.durationUs / 1e6;
@@ -1224,21 +1225,24 @@ public final class ReconstructionStages {
         }
         var authoredIds = new java.util.HashSet<String>();
         var suppressed = new ArrayList<Note>();
-        for (var edit : edits) {
+        for (var edit : scoreEdits) {
             if (!edit.authorsGate()) continue;
             authoredIds.addAll(edit.noteIds());
             if (edit.original() != null) suppressed.add(timeline.projectNote(edit.original()));
             if (edit.removedNotes() != null)
                 edit.removedNotes().forEach(note -> suppressed.add(timeline.projectNote(note)));
         }
+        var fillParts = policies.entrySet().stream()
+                .filter(entry -> entry.getValue().fill() != ReconstructionRepeatPolicy.Fill.off)
+                .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet());
         var detected = ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
                 inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,
-                roleBars, timeline, authoredIds, suppressed, score.inputs.audioOnly == null);
-        if (score.inputs.audioOnly == null) return detected;
+                roleBars, timeline, authoredIds, suppressed, fillParts);
+        if (policies.isEmpty()) return detected;
         var effective = new LinkedHashMap<String, Note>();
         detected.notes().forEach(note -> effective.put(note.id(), note));
         var repeatNotes = ReconstructionRepeatConsensus.apply(score, detected.bars(), timeline, authoredIds,
-                suppressed, effective);
+                suppressed, effective, policies);
         if (repeatNotes.isEmpty()) return detected;
         return new ReconstructionStructure.Result(detected.version(), detected.bars(), detected.sections(),
                 detected.repeats(), detected.corrections(), effective.values().stream().sorted(NOTE_ORDER).toList(),

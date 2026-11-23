@@ -315,6 +315,26 @@ changes. `render_clip` remains available for an excerpt of an existing
 project, with project-time `start` and `end` and optional `solo` or `mute`
 lanes. Use `render_compare` for a reconstruction against its aligned source.
 
+### Set repeat sensitivity by stem
+
+Use the part IDs from `reconstruct view` or Studio **Roles → Part repeats**.
+For a track with Brains-like bass and backing synth gaps, propose the settings
+as one edit batch. In Brains the bass is part 1 and the backing synth is part 3.
+
+```json
+[
+  {"id":"bass-repeats","reason":"Recover the repeating bass groove","op":"repeatPolicy","part":1,"fill":"high","lanes":"on"},
+  {"id":"synth-repeats","reason":"Recover repeating synth attacks","op":"repeatPolicy","part":3,"fill":"medium","lanes":"off"}
+]
+```
+
+Save the array to a file and pass it to `reconstruct edit "$work" propose --file FILE` or as `edits`
+to MCP `reconstruct_edit` with `action: "add"` and `propose: true`. Use
+`branch edit` to compare a separate journal. Both settings are Off for
+untouched parts. Increase the synth to High if the trace supports a missed
+attack. Check `structure.repeatConsensus` in the recovered note's trace and
+compare dry drops and shortened gates before accepting the settings.
+
 For Test in game, set the clean ROM with `rom_set` or pass a one-off
 absolute `rom` path to `rom_patch`. Supply an absolute `project` path and
 at least one absolute `out` (personal-use ROM) or `bps` (shareable patch)

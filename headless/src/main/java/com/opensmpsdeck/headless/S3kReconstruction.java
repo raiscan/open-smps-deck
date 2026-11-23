@@ -1064,7 +1064,7 @@ final class S3kReconstruction {
                     var dry = source.placed();
                     var repeat = repeatNotes.get(source.origin());
                     var mask = layers.get(source.origin());
-                    if (repeat == null || moved.contains(dry) || mask != null && mask.settings().masks(kind)
+                    if (repeat == null || !repeat.keepsLanes() || moved.contains(dry) || mask != null && mask.settings().masks(kind)
                             || !scoped.selects(source.entry(), source.origin(),
                                     overlappingTone[dry.event.start()] == overlappingTone[dry.end])) continue;
                     repeatGroups.computeIfAbsent(repeat.slot(), ignored -> new ArrayList<>()).add(source);
