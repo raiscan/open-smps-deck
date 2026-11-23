@@ -1398,9 +1398,23 @@ kit a small bonus. Reusing the same PCM across classes costs more.
 
 The `drumSelection` evidence records the requested drum class, acoustic
 profile version, representative excluded rates and reasons, and the
-spectral fit and preferred kit for eligible candidates. When no DAC
-candidate qualifies, the catalogue fit uses the PSG3 noise envelope where
-the lane can accommodate the attack. Existing PSG3 notes have priority.
+spectral fit and preferred kit for eligible candidates.
+
+For S3K hats and cymbals with a drum stem, the native PSG3 voicings compete
+with the DAC candidates on the same stem distance. The fit renders three
+voicings through the pinned chips: the short closed hat and the longer open
+hat, both with the dual noise clock described below, and the 7 kHz cymbal.
+It keeps the closest in `evidence.noise`, and assembly plays that voicing. The PSG output is unipolar, so its mean
+steps with the volume envelope at frame boundaries. The probe removes each
+frame's mean to compare the noise rather than those steps. When the PSG3
+voicing is closer than the best DAC score, including its class penalty, the
+slot routes to PSG3 with that voicing. The reason is `PSG3 noise closer than
+DAC`. In `auto` source mode a stem slice is considered only when both the
+DAC and PSG3 candidates exceed the slice threshold. Explicit `sliced` mode
+and S1/S2 targets keep the DAC fit.
+
+When no DAC candidate qualifies, the catalogue fit uses the PSG3 noise
+envelope where the lane can accommodate the attack. Existing PSG3 notes have priority.
 Assembly records the actual PSG3 gate or a collision in the report. The
 FM-only option disables the fallback. In `auto` source mode, a candidate
 stem slice must pass the same eligibility check. The explicit `sliced` mode

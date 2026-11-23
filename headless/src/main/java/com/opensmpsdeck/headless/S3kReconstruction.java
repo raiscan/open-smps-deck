@@ -444,6 +444,7 @@ final class S3kReconstruction {
         var psg = ReconstructionAllocation.PSG.stream().map(lane -> new ArrayList<Placement>()).toList();
         var dac = new ArrayList<Event>();
         var noiseFallbacks = new ArrayList<ReconstructionAllocation.Entry>();
+        var fallbackVoicings = new HashMap<String, ReconstructionDrums.NoiseFit>();
         Map<String, Voice> voices = new LinkedHashMap<>();
         Map<String, DacSample> samples = new LinkedHashMap<>();
         Map<String, Envelope> envelopes = new LinkedHashMap<>();
@@ -471,7 +472,7 @@ final class S3kReconstruction {
                         : !assignment.instrument().equals("fixed");
                 boolean closedHat = assignment == null ? ReconstructionCymbals.closedHat(note.pitch())
                         : assignment.instrument().equals("closed-hat");
-                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, profile, catalogue,
+                var placed = psgDrum(entry, part, end, voice, envelopes, hatClock, decaying, closedHat, closedHat, profile, catalogue,
                         scopedDrumGains.get(entry.note().id()));
                 placed.assignedInstrument = assignment != null;
                 psg.get(2).add(placed);
@@ -490,6 +491,8 @@ final class S3kReconstruction {
             if (!fmOnly && lane.equals("DAC") && choice != null && choice.drums() != null
                     && "PSG3".equals(choice.drums().fallbackLane())) {
                 noiseFallbacks.add(entry);
+                var noise = choice.drums().noise();
+                if (noise != null) fallbackVoicings.put(entry.note().id(), noise);
                 continue;
             }
             if (choice == null || choice.assetId() == null) {
@@ -655,7 +658,7 @@ final class S3kReconstruction {
         boolean classicNoise = profile.envelopeGrammar() == TargetProfile.EnvelopeGrammar.HOLD_80
                 && (!noiseFallbacks.isEmpty() || psg.get(2).stream().anyMatch(p -> noiseKind(p) != PsgMode.TONE));
         if (classicNoise) reserveNoiseLane(psg.get(2), candidates, gates, reductions);
-        placeDacNoiseFallbacks(noiseFallbacks, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames, profile, catalogue);
+        placeDacNoiseFallbacks(noiseFallbacks, fallbackVoicings, psg.get(2), parts, psg3, envelopes, hatClock, gates, reductions, frames, profile, catalogue);
         var tonePsg = classicNoise ? psg.subList(0, 2) : psg;
         int fmNotes = fm.stream().mapToInt(List::size).sum();
         int psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -1383,13 +1386,14 @@ final class S3kReconstruction {
 
     private static Placement psgDrum(ReconstructionAllocation.Entry entry, MidiScore.Part part, int end,
                                      ReconstructionVoicing.Lane voice, Map<String, Envelope> envelopes,
-                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat,
+                                     ReconstructionVoicing.PsgPercussion hatClock, boolean decaying, boolean closedHat, boolean dualClock,
                                      TargetProfile profile, InstrumentCatalogue catalogue, Double gain) {
         var note = entry.note().midi();
         closedHat &= decaying;
+        dualClock &= decaying;
         int pitch = decaying ? ReconstructionCymbals.pitch(profile) : 81;
         var pitched = new MidiScore.Note(note.partId(), pitch, note.velocity(), note.startUs(), note.endUs());
-        int level = closedHat ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
+        int level = dualClock ? ReconstructionCymbals.HAT_LEVEL : ReconstructionCymbals.NATIVE_LEVEL;
         int volume = decaying ? level << 3 : volume(part, note);
         var envelope = decaying ? catalogue.stockContour(profile.game(), ReconstructionCymbals.envelope(closedHat ? 42 : 46)) : null;
         String asset = envelope == null ? NOISE : envelope.id();
@@ -1400,15 +1404,15 @@ final class S3kReconstruction {
         placed.noteId = entry.note().id();
         placed.cymbalNoise = decaying && envelope != null;
         if (decaying) placed.detune = ReconstructionCymbals.detune(
-                closedHat ? hatClock.hatAttackPeriod() : ReconstructionCymbals.TONE_PERIOD, profile);
-        if (closedHat) {
+                dualClock ? hatClock.hatAttackPeriod() : ReconstructionCymbals.TONE_PERIOD, profile);
+        if (dualClock) {
             placed.hatClock = hatClock;
         }
         return placed;
     }
 
     private static void placeDacNoiseFallbacks(List<ReconstructionAllocation.Entry> fallbacks,
-            List<Placement> lane, Map<Integer, MidiScore.Part> parts, ReconstructionVoicing.Lane voice,
+            Map<String, ReconstructionDrums.NoiseFit> voicings, List<Placement> lane, Map<Integer, MidiScore.Part> parts, ReconstructionVoicing.Lane voice,
             Map<String, Envelope> envelopes, ReconstructionVoicing.PsgPercussion hatClock,
             List<VoicedGate> gates, List<Reduction> reductions, int frames, TargetProfile profile, InstrumentCatalogue catalogue) {
         if (fallbacks.isEmpty()) return;
@@ -1428,9 +1432,13 @@ final class S3kReconstruction {
                 continue;
             }
             int busy = occupied.nextSetBit(start);
-            int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(note.pitch()));
+            // The drum fit may choose either native voicing for this hat or cymbal.
+            var fitted = voicings.get(entry.note().id());
+            boolean closed = fitted == null ? ReconstructionCymbals.closedHat(note.pitch()) : fitted.closed();
+            boolean dual = fitted == null ? closed : fitted.dualClock();
+            int end = Math.min(busy < 0 ? frames : busy, start + ReconstructionCymbals.gate(closed ? 42 : 46));
             var placed = psgDrum(entry, parts.get(note.partId()), end, voice, envelopes, hatClock,
-                    true, ReconstructionCymbals.closedHat(note.pitch()), profile, catalogue, null);
+                    true, closed, dual, profile, catalogue, null);
             lane.add(placed);
             gates.add(new VoicedGate(entry.note().id(), "PSG3", placed.event.note().pitch(), start, end, DAC_NOISE_FALLBACK));
             occupied.set(start, end);
