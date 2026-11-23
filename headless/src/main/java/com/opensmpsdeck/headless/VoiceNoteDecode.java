@@ -36,6 +36,7 @@ final class VoiceNoteDecode {
     // A recurring figure lends half its own evidence, so local evidence can overrule it.
     private static final double FIGURE_WEIGHT = .5;
     private static final int CACHE_LIMIT = 60_000;
+    private static final int LEVEL_VOLUME = 127 - 24;
     private static final double[] HANN = new double[FFT];
     private static final float[][] MEL = mel();
     private static final Map<Key, float[][]> TEMPLATES = new ConcurrentHashMap<>();
@@ -234,12 +235,16 @@ final class VoiceNoteDecode {
         return labels;
     }
 
-    /** A patch's overall level at a pitch and full track volume, for matching one patch's loudness to another's. */
+    /**
+     * A patch's overall level at a pitch, 18 dB below full track volume. Several
+     * carriers at full volume clip the channel, so levels are compared lower down.
+     */
     double loudness(String variant, int pitch) throws IOException {
+        var rendered = VoiceWindows.renderMono(CataloguePlayback.leveledProbe(catalogue, variant,
+                TargetProfile.of(target).fm().clamp(pitch), TEMPLATE_TICKS, target, LEVEL_VOLUME), TEMPLATE_TICKS);
         double total = 0;
-        for (var frame : template(catalogue.match(variant, target).variant(), TargetProfile.of(target).fm().clamp(pitch)))
-            for (float value : frame) total += Math.pow(value, 4); // Features are square roots of magnitudes.
-        return Math.sqrt(total);
+        for (float sample : rendered) total += sample * (double) sample;
+        return Math.sqrt(total / rendered.length);
     }
 
     private float[][] template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {

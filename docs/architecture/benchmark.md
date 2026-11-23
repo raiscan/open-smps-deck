@@ -129,7 +129,9 @@ Every ladder run reports `voiceTop1`, the share of matched FM notes whose
 emitted patch has the native patch's hash, and `voiceAlgorithm`, the share
 whose emitted patch uses the same FM operator algorithm. A wrong algorithm
 is a structurally different instrument. A right algorithm with the wrong
-hash is usually a near relative. Corpus runs report `voiceAlgorithm` when
+hash is usually a near relative. The share is over the notes where both
+patches' bytes are known, and `voiceAlgorithmCoverage` gives that share of
+the matched notes. Corpus runs report `voiceAlgorithm` when
 holdout mode is off.
 
 Build the classic quick corpora from user-supplied REV01 ROMs. Set `bench`

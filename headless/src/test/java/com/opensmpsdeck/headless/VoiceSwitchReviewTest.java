@@ -85,6 +85,85 @@ class VoiceSwitchReviewTest {
         assertTrue(shared.passages().getFirst().guards().stream().anyMatch(guard -> guard.name().equals("own stem") && !guard.pass()));
     }
 
+    @Test void aPassageOverANoteSomeoneVoicedIsLeftAlone() {
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] bytes = new byte[25];
+        bytes[21] = (byte) 0x80;
+        String home = builder.variant(builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Home", bytes), "Home",
+                InstrumentCatalogue.Recipe.plain(), null);
+        bytes[1] = 2;
+        String other = builder.variant(builder.asset(InstrumentCatalogue.Kind.FM_VOICE, "Other", bytes), "Other",
+                InstrumentCatalogue.Recipe.plain(), null);
+        var sound = new ReconstructionVoicing.SourceSound(new ReconstructionVoicing.Lane(Role.melody, home, List.of(), 1,
+                ReconstructionVoicing.WRITTEN, ReconstructionVoicing.DRY, "", "", "", List.of()), null, 0);
+        var notes = new ArrayList<VoiceNoteDecode.Scored>();
+        var labels = new int[120];
+        var lanes = new HashMap<String, String>();
+        for (int i = 0; i < 120; i++) {
+            boolean away = i >= 40 && i < 70;
+            notes.add(scored(i, i * .5, away ? .6f : .9f, away ? .9f : .6f));
+            labels[i] = away ? 1 : 0;
+            lanes.put("n" + i, "FM2");
+        }
+        var decoded = new VoiceNoteDecode.Result(List.of(home, other), notes, labels);
+
+        var report = VoiceSwitchReview.report(1, "Lead", "lead.wav", true, 120, decoded, sound, builder.build(), lanes,
+                Set.of(), 4, false, Set.of("n55"));
+
+        var passage = report.passages().getFirst();
+        assertEquals("rejected", passage.confidence());
+        assertTrue(passage.guards().stream().anyMatch(guard -> guard.name().equals("no user choice") && !guard.pass()));
+    }
+
+    @Test void everyKindOfUserVoiceChoiceLocksItsNotes() {
+        var lane = new ReconstructionVoicing.Lane(Role.melody, null, List.of(), 1, ReconstructionVoicing.WRITTEN,
+                ReconstructionVoicing.DRY, "", "", "", List.of(), null,
+                List.of(new ReconstructionOverrides.Settings(null, null, null, null, List.of("scoped"), null, 1.2, null, null, null, null)),
+                null, null, null);
+        var voicing = new ReconstructionVoicing.Result(1, java.util.Map.of("FM2", lane), null);
+        var plan = new ReconstructionVoicePlan.Result(1, List.of(new ReconstructionVoicePlan.Voice("part-1", "Lead",
+                ReconstructionVoicePlan.Kind.tonal, null, 1, List.of("assigned"),
+                new ReconstructionVoicePlan.Assignment(ReconstructionLaneType.FM, "variant-x"), null)), List.of(), null);
+        var journal = new ReconstructionEdits(List.of(ReconstructionEdits.parse(JsonParser.parseString("""
+                {"id":"mine","op":"noteVoicing","reason":"chosen","status":"rejected","author":"agent",
+                 "noteIds":["edited"],"laneType":"FM","instrument":"variant-y"}
+                """).getAsJsonObject(), "edit")));
+        var allocation = new ReconstructionAllocation.Result(ReconstructionStages.VERSION, List.of());
+
+        assertEquals(Set.of("scoped", "assigned", "edited"), VoiceSwitchReview.userChoices(voicing, plan, journal, allocation));
+    }
+
+    @Test void aRebuildThatFitsByLosingMusicDoesNotPass() {
+        var before = JsonParser.parseString("""
+                {"bankBytes":900,"fmNotes":4,"psgNotes":1,"dacHits":0,"reductions":[],
+                 "voicedGates":[{"id":"a","lane":"FM1"},{"id":"b","lane":"FM2"}],
+                 "editResults":[{"id":"earlier","status":"applied"}]}
+                """).getAsJsonObject();
+        var added = JsonParser.parseString("[{\"id\":\"switch\"}]").getAsJsonArray();
+        var good = before.deepCopy();
+        good.addProperty("bankBytes", 925);
+        good.getAsJsonArray("editResults").add(JsonParser.parseString("{\"id\":\"switch\",\"status\":\"applied\"}"));
+        assertEquals(null, VoiceSwitchReview.verify(before, good, added, 1000));
+        assertEquals("compiled bank exceeds 920 bytes", VoiceSwitchReview.verify(before, good, added, 920));
+
+        var dropped = good.deepCopy();
+        dropped.getAsJsonArray("voicedGates").remove(1);
+        assertEquals("the rebuild changed voicedGates", VoiceSwitchReview.verify(before, dropped, added, 1000));
+        var reduced = good.deepCopy();
+        reduced.getAsJsonArray("reductions").add(JsonParser.parseString("{\"noteId\":\"b\",\"reason\":\"bank\"}"));
+        assertEquals("the rebuild changed reductions", VoiceSwitchReview.verify(before, reduced, added, 1000));
+        var fewer = good.deepCopy();
+        fewer.addProperty("fmNotes", 3);
+        assertEquals("the rebuild changed fmNotes", VoiceSwitchReview.verify(before, fewer, added, 1000));
+        var orphaned = before.deepCopy();
+        orphaned.getAsJsonArray("editResults").add(JsonParser.parseString("{\"id\":\"switch\",\"status\":\"orphaned\"}"));
+        assertEquals("switch was orphaned", VoiceSwitchReview.verify(before, orphaned, added, 1000));
+        var disturbed = good.deepCopy();
+        disturbed.getAsJsonArray("editResults").get(0).getAsJsonObject().addProperty("status", "orphaned");
+        assertEquals("the rebuild changed the outcome of edit earlier", VoiceSwitchReview.verify(before, disturbed, added, 1000));
+        assertEquals("an added edit has no outcome", VoiceSwitchReview.verify(before, before, added, 1000));
+    }
+
     @Test void aNoteInstrumentEditCanCarryALaneGain() {
         var edit = JsonParser.parseString("{\"instrument\":\"variant-x\",\"gain\":1.5}").getAsJsonObject();
         ReconstructionNoteVoicing.validate(edit, ReconstructionLaneType.FM, "edit");

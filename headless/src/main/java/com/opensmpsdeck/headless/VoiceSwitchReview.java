@@ -33,6 +33,10 @@ public final class VoiceSwitchReview {
     // Below this share of notes won by one patch, the stock bank does not explain the stem
     // and the decode only says what is admissible. Native parts read 0.5 to 1, real stems 0.1 to 0.4.
     static final double EXPLAINED_SHARE = .5;
+    /** Alternate patches one part may take, counting accepted switches already in the journal. */
+    static final int MAX_ALTERNATES = 2;
+    // A passage is shorter than a part, so its attack comparison uses shorter blocks.
+    private static final double PASSAGE_BLOCK_SECONDS = 2;
     private static final int NULL_SHUFFLES = 200;
     private static final double NULL_LEVEL = .02;
     private static final com.google.gson.Gson JSON =
@@ -47,6 +51,15 @@ public final class VoiceSwitchReview {
                    double meanGain, List<Guard> guards, String confidence, int bankBytes, int switchBytes,
                    Double gain, List<String> noteIds) {
         boolean high() { return confidence.equals("high"); }
+
+        /** The same passage with one more guard result. A failed guard keeps it out of automatic application. */
+        Passage with(Guard guard, String fallback) {
+            var all = new ArrayList<>(guards);
+            all.add(guard);
+            return new Passage(part, variantId, voice, start, end, onsets, voicedSeconds, meanGain, List.copyOf(all),
+                    guard.pass() ? confidence : high() ? fallback : confidence.equals("review") && fallback.equals("rejected")
+                            ? "rejected" : confidence, bankBytes, switchBytes, gain, noteIds);
+        }
     }
 
     /** The decoded patch and the note's own best patch, for measurement. */
@@ -56,6 +69,11 @@ public final class VoiceSwitchReview {
                       String homeVoice, int homeRank, String majority, String majorityVoice, double modeShare,
                       int switches, List<Passage> passages, List<NoteLabel> labels, List<String> candidates,
                       Boolean majorityWinsAttacks) {
+        PartReport withPassages(List<Passage> revised) {
+            return new PartReport(part, name, stem, isolated, notes, scored, home, homeVoice, homeRank, majority,
+                    majorityVoice, modeShare, switches, revised, labels, candidates, majorityWinsAttacks);
+        }
+
         PartReport withAttacks(Boolean wins) {
             return new PartReport(part, name, stem, isolated, notes, scored, home, homeVoice, homeRank, majority,
                     majorityVoice, modeShare, switches, passages, labels, candidates, wins);
@@ -70,17 +88,17 @@ public final class VoiceSwitchReview {
 
     static void cli(String[] args, PrintStream out) throws IOException {
         if (args.length == 0) throw new IllegalArgumentException(
-                "reconstruct voice-switches expects WORK_DIR [--part ID] [--min-run SECONDS] [--no-figures] [--labels] [--propose | --apply]");
+                "reconstruct voice-switches expects WORK_DIR [--part ID] [--min-run SECONDS] [--figures] [--labels] [--propose | --apply]");
         Integer part = null;
         boolean labels = false;
         double minSeconds = DEFAULT_MIN_SECONDS;
-        boolean figures = true;
+        boolean figures = false;
         Mode mode = Mode.off;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--part" -> part = Integer.parseInt(args[++i]);
                 case "--min-run" -> minSeconds = Double.parseDouble(args[++i]);
-                case "--no-figures" -> figures = false;
+                case "--figures" -> figures = true;
                 case "--labels" -> labels = true;
                 case "--propose" -> mode = Mode.propose;
                 case "--apply" -> mode = Mode.auto;
@@ -105,12 +123,12 @@ public final class VoiceSwitchReview {
         var catalogue = InstrumentCatalogue.openReconstruction(Path.of(score.inputs().catalogue()), score.inputs().targetGame());
         var time = ReconstructionTimeMap.of(score);
         var journal = ReconstructionEdits.read(work);
+        var revision = ReconstructionReview.revision(work);
         var known = new HashSet<String>();
-        var assigned = new HashSet<String>();
-        for (var edit : journal.intents()) {
-            known.add(edit.id());
-            if (edit.kind() == ReconstructionEdits.Kind.noteVoicing && edit.json().has("instrument")) assigned.addAll(edit.noteIds());
-        }
+        for (var edit : journal.intents()) known.add(edit.id());
+        var locked = userChoices(voicing, ReconstructionVoicePlan.saved(work), journal, allocation);
+        var stems = new java.util.HashMap<Integer, Path>();
+        score.inputs().stems().forEach((id, file) -> stems.put(id, Path.of(file)));
         var decoder = new VoiceNoteDecode(catalogue, score.inputs().targetGame());
         // The stage's level-matched attack comparison is an independent check of the decode's preferred patch.
         var placement = ReconstructionAllocation.sourcePlacement(allocation, score.frames(), time);
@@ -128,9 +146,12 @@ public final class VoiceSwitchReview {
             var sound = voicing.sourceInstruments().get(ReconstructionVoicePlan.SourceInstrument.id(part.id()));
             String stem = score.inputs().stems().get(part.id());
             if (sound == null || sound.fm().variantId() == null || stem == null || stem.equals(score.inputs().wav())) continue;
-            // Two parts on one stem, or the mix itself, cannot say which part changed.
-            boolean isolated = score.inputs().stems().values().stream().filter(stem::equals).count() == 1
-                    && !ReconstructionVocalLead.isVocal(score.inputs(), part.id()) && !score.inputs().wholePartVoices();
+            // Two parts on one file, or the mix itself, cannot say which part changed. Files are
+            // compared by identity, so another spelling of the same stem does not pass.
+            String id = ReconstructionVoicePlan.SourceInstrument.id(part.id());
+            boolean isolated = !score.inputs().wholePartVoices() && ReconstructionVoiceStage.challengeable(id,
+                    ReconstructionVocalLead.isVocal(score.inputs(), part.id()) ? id : null, part.id(), stems,
+                    Path.of(score.inputs().wav()));
             var lanes = new java.util.HashMap<String, String>();
             var notes = new ArrayList<VoiceNoteDecode.Note>();
             for (var entry : allocation.notes()) {
@@ -146,18 +167,20 @@ public final class VoiceSwitchReview {
             notes.sort(Comparator.comparingDouble(VoiceNoteDecode.Note::start).thenComparing(VoiceNoteDecode.Note::id));
             var decoded = decoder.decode(notes, Path.of(stem), List.of(sound.fm().variantId()), options.figures());
             var report = report(part.id(), part.name(), stem, isolated, notes.size(), decoded, sound, catalogue, lanes,
-                    homes, options.minSeconds(), options.labels());
+                    homes, options.minSeconds(), options.labels(), locked);
+            var entries = placement.notes().stream().filter(entry -> entry.note().part() == part.id()
+                    && entry.lane() != null && entry.lane().startsWith("FM") && entry.mergedInto() == null).toList();
+            report = confirmed(report, entries, Path.of(stem), windows, screening, journal, catalogue);
             if (report.majority() != null && !report.majority().equals(report.home())) {
-                var entries = placement.notes().stream().filter(entry -> entry.note().part() == part.id()
-                        && entry.lane() != null && entry.lane().startsWith("FM") && entry.mergedInto() == null).toList();
                 report = report.withAttacks(!entries.isEmpty() && screening.attackWinner(
                         List.of(new VoicePatchShortlist.RankedPatch(report.majority(), 0)),
                         new VoicePatchShortlist.RankedPatch(report.home(), 0), entries, Path.of(stem), windows) != null);
             }
             reports.add(report);
             for (var passage : report.passages()) {
-                if (passage.confidence().equals("rejected") || passage.noteIds().stream().anyMatch(assigned::contains)) continue;
-                // Keep the passage as loud as the part's own patch would have played it.
+                if (passage.confidence().equals("rejected")) continue;
+                // Keep the passage as loud as the part's own patch would have played it. Levels are
+                // compared well below full volume, where several carriers would clip the channel.
                 int pitch = decoded.notes().stream().filter(note -> passage.noteIds().contains(note.note().id()))
                         .mapToInt(note -> note.note().pitch()).sorted().skip(passage.noteIds().size() / 2).findFirst().orElse(60);
                 double gain = sound.fm().gain() * Math.clamp(decoder.loudness(sound.fm().variantId(), pitch)
@@ -172,63 +195,236 @@ public final class VoiceSwitchReview {
         result.add("parts", JSON.toJsonTree(reports));
         if (!applied.isEmpty() || !proposed.isEmpty())
             java.nio.file.Files.writeString(work.resolve(FILE), JSON.toJson(result));
-        if (!applied.isEmpty()) result.add("applied", apply(work, applied, score.profile().bankLimitBytes()));
+        if (!applied.isEmpty()) {
+            // Another writer since the scan may have decided these notes. Offer the edits instead of applying them.
+            if (!revision.equals(ReconstructionReview.revision(work))) {
+                result.addProperty("notApplied", "the edit journal changed during the review");
+                proposed.addAll(applied);
+            } else {
+                var outcome = apply(work, applied, score.profile().bankLimitBytes());
+                result.add("applied", outcome);
+                // An edit the build could not carry stays on offer with the reason.
+                if (outcome.has("dropped")) for (var dropped : outcome.getAsJsonArray("dropped")) {
+                    var offer = dropped.getAsJsonObject().deepCopy();
+                    String reason = offer.remove("dropped").getAsString();
+                    offer.addProperty("reason", offer.get("reason").getAsString() + ". Not applied: " + reason);
+                    proposed.add(offer);
+                }
+            }
+        }
         if (!proposed.isEmpty())
             result.add("proposals", ReconstructionEditCommand.run(work, "propose", proposed, null, false, (done, total, message) -> {}));
         return result;
     }
 
     /**
-     * Adds the edits, rebuilds, and checks the compiled bank. A build that fails or
-     * overflows drops the last edit and tries again, so notes are never the price.
+     * Adds the edits and rebuilds as one step. The rebuild must keep every emitted note,
+     * every reduction and effect, and every other edit's outcome exactly as they were, and
+     * the bank must fit. Otherwise the journal goes back to its bytes from before, the least
+     * supported edit is dropped, and the rest are tried again. Any failure, including an I/O
+     * failure, leaves the journal as it was found.
+     *
+     * @param edits in order of support, strongest first
      */
-    private static JsonObject apply(Path work, JsonArray edits, int bankLimit) throws IOException {
-        var before = sizes(work);
+    static JsonObject apply(Path work, JsonArray edits, int bankLimit) throws IOException {
+        Path file = work.resolve(ReconstructionEdits.FILE);
+        byte[] journal = java.nio.file.Files.exists(file) ? java.nio.file.Files.readAllBytes(file) : null;
+        var before = facts(work);
         var result = new JsonObject();
         var dropped = new JsonArray();
         var kept = edits.deepCopy();
         while (!kept.isEmpty()) {
-            String failure = null;
+            String failure;
+            ReconstructionReview.Revision written = null;
             try {
-                ReconstructionEditCommand.run(work, "add", kept, null, true, (done, total, message) -> {});
-                var after = sizes(work);
-                if (after.get("bankBytes").getAsInt() > bankLimit) failure = "compiled bank exceeds " + bankLimit + " bytes";
-                else {
-                    result.add("before", before);
-                    result.add("after", after);
+                ReconstructionEditCommand.run(work, "add", kept, null, false, (done, total, message) -> {});
+                written = ReconstructionReview.revision(work);
+                rebuild(work);
+                var after = facts(work);
+                failure = verify(before, after, kept, bankLimit);
+                if (failure == null) {
+                    result.add("before", sizes(before));
+                    result.add("after", sizes(after));
                     break;
                 }
-            } catch (IllegalArgumentException | IllegalStateException error) {
-                failure = String.valueOf(error.getMessage());
+            } catch (IOException | RuntimeException error) {
+                failure = error.getMessage() == null ? error.toString() : error.getMessage();
             }
-            for (var edit : kept) {
-                String id = edit.getAsJsonObject().get("id").getAsString();
-                if (ReconstructionEdits.read(work).intents().stream().anyMatch(intent -> intent.id().equals(id)))
-                    ReconstructionEditCommand.run(work, "remove", null, id, false, (done, total, message) -> {});
-            }
+            restore(work, file, journal, written, kept);
             var last = kept.remove(kept.size() - 1).getAsJsonObject();
             last.addProperty("dropped", failure);
             dropped.add(last);
-            if (kept.isEmpty())
-                ReconstructionStages.run("run", new String[]{"--from", "assemble", work.toString()}, new PrintStream(java.io.OutputStream.nullOutputStream()), new PrintStream(java.io.OutputStream.nullOutputStream()));
         }
         result.add("edits", kept);
         if (!dropped.isEmpty()) result.add("dropped", dropped);
         return result;
     }
 
-    private static JsonObject sizes(Path work) throws IOException {
+    /** Puts the journal back and rebuilds. Only this review's own edits are undone if someone else has written since. */
+    private static void restore(Path work, Path file, byte[] journal, ReconstructionReview.Revision written, JsonArray added)
+            throws IOException {
+        if (written == null || written.equals(ReconstructionReview.revision(work))) {
+            if (journal == null) java.nio.file.Files.deleteIfExists(file);
+            else java.nio.file.Files.write(file, journal);
+        } else {
+            for (var edit : added) {
+                String id = edit.getAsJsonObject().get("id").getAsString();
+                if (ReconstructionEdits.read(work).intents().stream().anyMatch(intent -> intent.id().equals(id)))
+                    ReconstructionEditCommand.run(work, "remove", null, id, false, (done, total, message) -> {});
+            }
+        }
+        rebuild(work);
+    }
+
+    private static void rebuild(Path work) throws IOException {
+        var silent = new PrintStream(java.io.OutputStream.nullOutputStream());
+        ReconstructionStages.run("run", new String[]{"--from", "assemble", work.toString()}, silent, silent);
+    }
+
+    /** What a rebuild must not change, read from the assembly report. */
+    private static JsonObject facts(Path work) throws IOException {
         var report = ReconstructionArtifacts.readTree(work.resolve("report.json")).getAsJsonObject();
+        var facts = new JsonObject();
+        for (String key : List.of("bankBytes", "fmPatchBankBytes", "fmPatchSwitchBytes", "fmNotes", "psgNotes", "dacHits",
+                "reductions", "voicedGates", "echoBankLimit", "echoNotes", "effectCopyLanes", "lanePolicyCopies", "editResults"))
+            if (report.has(key)) facts.add(key, report.get(key));
+        return facts;
+    }
+
+    private static JsonObject sizes(JsonObject facts) {
         var sizes = new JsonObject();
         for (String key : List.of("bankBytes", "fmPatchBankBytes", "fmPatchSwitchBytes"))
-            if (report.has(key)) sizes.add(key, report.get(key));
+            if (facts.has(key)) sizes.add(key, facts.get(key));
         return sizes;
+    }
+
+    /** The first way the rebuild fell short, or null. A bank that fits by losing music does not pass. */
+    static String verify(JsonObject before, JsonObject after, JsonArray added, int bankLimit) {
+        if (!after.has("bankBytes") || after.get("bankBytes").getAsInt() > bankLimit)
+            return "compiled bank exceeds " + bankLimit + " bytes";
+        for (String key : List.of("fmNotes", "psgNotes", "dacHits", "echoBankLimit", "echoNotes", "effectCopyLanes",
+                "lanePolicyCopies"))
+            if (!java.util.Objects.equals(before.get(key), after.get(key))) return "the rebuild changed " + key;
+        for (String key : List.of("reductions", "voicedGates"))
+            if (!elements(before, key).equals(elements(after, key))) return "the rebuild changed " + key;
+        var mine = new HashSet<String>();
+        for (var edit : added) mine.add(edit.getAsJsonObject().get("id").getAsString());
+        var earlier = outcomes(before);
+        for (var outcome : outcomes(after).entrySet()) {
+            if (mine.contains(outcome.getKey())) {
+                if (!outcome.getValue().equals("applied")) return outcome.getKey() + " was " + outcome.getValue();
+            } else if (!outcome.getValue().equals(earlier.get(outcome.getKey())))
+                return "the rebuild changed the outcome of edit " + outcome.getKey();
+        }
+        if (!outcomes(after).keySet().containsAll(mine)) return "an added edit has no outcome";
+        if (!outcomes(after).keySet().containsAll(earlier.keySet())) return "the rebuild lost an edit outcome";
+        return null;
+    }
+
+    private static java.util.Set<com.google.gson.JsonElement> elements(JsonObject facts, String key) {
+        var set = new HashSet<com.google.gson.JsonElement>();
+        if (facts.has(key)) facts.getAsJsonArray(key).forEach(set::add);
+        return set;
+    }
+
+    /** Edit ID to its statuses, joined, since one edit can report hits and misses separately. */
+    private static java.util.Map<String, String> outcomes(JsonObject facts) {
+        var result = new java.util.TreeMap<String, String>();
+        if (facts.has("editResults")) for (var row : facts.getAsJsonArray("editResults")) {
+            var outcome = row.getAsJsonObject();
+            result.merge(outcome.get("id").getAsString(), outcome.get("status").getAsString(), (a, b) -> a + "+" + b);
+        }
+        return result;
+    }
+
+    /**
+     * Notes whose voice someone chose: an assigned source voice, a note instrument edit in
+     * any state, or a lane override that sets a patch or gain. A switch never touches them.
+     */
+    static java.util.Set<String> userChoices(ReconstructionVoicing.Result voicing, ReconstructionVoicePlan.Result plan,
+                                             ReconstructionEdits journal, ReconstructionAllocation.Result allocation) {
+        var locked = new HashSet<String>();
+        if (voicing.voiceAssignments() != null) locked.addAll(voicing.voiceAssignments().keySet());
+        if (plan != null) for (var voice : plan.voices()) if (voice.assignment() != null) locked.addAll(voice.noteIds());
+        for (var edit : journal.intents())
+            if (edit.kind() == ReconstructionEdits.Kind.noteVoicing && edit.json().has("instrument")) locked.addAll(edit.noteIds());
+        var scoped = new ArrayList<java.util.Map.Entry<String, ReconstructionVoicing.Lane>>(voicing.lanes().entrySet());
+        for (var lane : scoped) {
+            if (lane.getValue().overrides() == null) continue;
+            for (var scope : lane.getValue().overrides()) {
+                if (scope.variantId() == null && scope.gain() == null) continue;
+                // A time range is resolved at assembly. Here every note on the lane is treated as covered.
+                if (scope.noteIds() != null) locked.addAll(scope.noteIds());
+                else allocation.notes().stream().filter(entry -> lane.getKey().equals(entry.lane()))
+                        .forEach(entry -> locked.add(entry.note().id()));
+            }
+        }
+        return locked;
+    }
+
+    /**
+     * Confirms the passages the decode would apply against the stem at playback level,
+     * and keeps a part to two alternate patches, counting switches already in the journal.
+     */
+    private static PartReport confirmed(PartReport report, List<ReconstructionAllocation.Entry> entries, Path stem,
+                                        VoiceWindows windows, VoicePatchShortlist screening, ReconstructionEdits journal,
+                                        InstrumentCatalogue catalogue) throws IOException {
+        var ids = new HashSet<String>();
+        for (var entry : entries) ids.add(entry.note().id());
+        var alternates = new java.util.LinkedHashSet<String>();
+        for (var edit : journal.intents())
+            if (edit.kind() == ReconstructionEdits.Kind.noteVoicing && edit.json().has("instrument") && !edit.inactive()
+                    && edit.noteIds().stream().anyMatch(ids::contains))
+                alternates.add(catalogue.match(edit.json().get("instrument").getAsString()).variant().assetId());
+        var passages = new ArrayList<Passage>();
+        var ranked = report.passages().stream().filter(passage -> !passage.confidence().equals("rejected"))
+                .sorted(Comparator.comparingDouble((Passage passage) -> -passage.meanGain() * passage.onsets())).toList();
+        var allowed = new HashSet<Passage>();
+        for (var passage : ranked) {
+            String asset = catalogue.match(passage.variantId()).variant().assetId();
+            if (alternates.contains(asset) || alternates.size() < MAX_ALTERNATES) {
+                alternates.add(asset);
+                allowed.add(passage);
+            }
+        }
+        for (var passage : report.passages()) {
+            if (passage.confidence().equals("rejected")) {
+                passages.add(passage);
+                continue;
+            }
+            if (!allowed.contains(passage)) {
+                passages.add(passage.with(new Guard("two alternates", false,
+                        "the part already has " + MAX_ALTERNATES + " better supported alternate patches"), "rejected"));
+                continue;
+            }
+            if (!passage.high()) {
+                passages.add(passage);
+                continue;
+            }
+            // The decode's scores come from full-volume templates. Before a passage applies, the two
+            // patches meet on the passage's own exposed attacks at the level the stem plays them.
+            var own = entries.stream().filter(entry -> passage.noteIds().contains(entry.note().id())).toList();
+            boolean wins = screening.attackWinner(List.of(new VoicePatchShortlist.RankedPatch(passage.variantId(), 0)),
+                    new VoicePatchShortlist.RankedPatch(report.home(), 0), own, stem, windows, PASSAGE_BLOCK_SECONDS) != null;
+            passages.add(passage.with(new Guard("stem attacks at playback level", wins, wins
+                    ? "closer than the part's own patch in most " + (int) PASSAGE_BLOCK_SECONDS + " s blocks"
+                    : "too few exposed attacks, or no consistent win"), "review"));
+        }
+        return report.withPassages(List.copyOf(passages));
     }
 
     static PartReport report(int part, String name, String stem, boolean isolated, int notes, VoiceNoteDecode.Result decoded,
                              ReconstructionVoicing.SourceSound sound, InstrumentCatalogue catalogue,
                              java.util.Map<String, String> lanes, java.util.Set<String> homes, double minSeconds,
                              boolean withLabels) {
+        return report(part, name, stem, isolated, notes, decoded, sound, catalogue, lanes, homes, minSeconds, withLabels,
+                java.util.Set.of());
+    }
+
+    static PartReport report(int part, String name, String stem, boolean isolated, int notes, VoiceNoteDecode.Result decoded,
+                             ReconstructionVoicing.SourceSound sound, InstrumentCatalogue catalogue,
+                             java.util.Map<String, String> lanes, java.util.Set<String> homes, double minSeconds,
+                             boolean withLabels, java.util.Set<String> locked) {
         var scored = decoded.notes();
         int candidates = decoded.candidates().size();
         if (scored.isEmpty()) return new PartReport(part, name, stem, isolated, notes, 0, sound.fm().variantId(),
@@ -265,7 +461,7 @@ public final class VoiceSwitchReview {
             while (to < labels.length && labels[to] == labels[from]) to++;
             if (labels[from] != home)
                 passages.add(passage(part, decoded, from, to, home, isolated, catalogue, lanes, homes, minSeconds,
-                        wins[mode] / (double) scored.size()));
+                        wins[mode] / (double) scored.size(), locked));
             from = to;
         }
         return new PartReport(part, name, stem, isolated, notes, scored.size(), sound.fm().variantId(),
@@ -276,7 +472,8 @@ public final class VoiceSwitchReview {
 
     private static Passage passage(int part, VoiceNoteDecode.Result decoded, int from, int to, int home, boolean isolated,
                                    InstrumentCatalogue catalogue, java.util.Map<String, String> lanes,
-                                   java.util.Set<String> homes, double minSeconds, double modeShare) {
+                                   java.util.Set<String> homes, double minSeconds, double modeShare,
+                                   java.util.Set<String> locked) {
         var notes = decoded.notes();
         int label = decoded.labels()[from];
         var guards = new ArrayList<Guard>();
@@ -284,10 +481,13 @@ public final class VoiceSwitchReview {
         double voiced = 0, reach = Double.NEGATIVE_INFINITY, gain = 0, weight = 0;
         for (int i = from; i < to; i++) {
             var note = notes.get(i).note();
-            onsets.add(Math.round(note.start() * 1000 / 30)); // A chord is one key-on.
-            double begin = Math.max(note.start(), reach);
-            if (note.end() > begin) voiced += note.end() - begin;
-            reach = Math.max(reach, note.end());
+            // Only notes on an FM lane can take the patch, so only they count toward the dwell.
+            if (lanes.containsKey(note.id())) {
+                onsets.add(Math.round(note.start() * 1000 / 30)); // A chord is one key-on.
+                double begin = Math.max(note.start(), reach);
+                if (note.end() > begin) voiced += note.end() - begin;
+                reach = Math.max(reach, note.end());
+            }
             gain += notes.get(i).weight() * (notes.get(i).scores()[label] - notes.get(i).scores()[home]);
             weight += notes.get(i).weight();
         }
@@ -331,6 +531,10 @@ public final class VoiceSwitchReview {
         boolean explained = modeShare >= EXPLAINED_SHARE;
         guards.add(new Guard("bank explains stem", explained, format("one patch is the best match for %.0f%% of notes (needs %.0f%%)",
                 100 * modeShare, 100 * EXPLAINED_SHARE)));
+        boolean free = true;
+        for (int i = from; i < to; i++) if (locked.contains(notes.get(i).note().id())) free = false;
+        guards.add(new Guard("no user choice", free, free ? "no note here has an assigned voice, instrument edit or scoped patch"
+                : "a note here already has a voice someone chose"));
         guards.add(new Guard("own stem", isolated, isolated ? "the part has its own stem"
                 : "shared stem, sung lead or whole-part voices"));
 
@@ -342,7 +546,7 @@ public final class VoiceSwitchReview {
         int commands = 2 * used.size() * (to == notes.size() ? 1 : 2);
         boolean all = guards.stream().allMatch(Guard::pass);
         // Review needs the evidence itself to stand: long enough, in both halves, and beyond chance.
-        String confidence = all ? "high" : dwell && phrases && chance <= NULL_LEVEL && explained ? "review" : "rejected";
+        String confidence = all ? "high" : dwell && phrases && chance <= NULL_LEVEL && explained && free ? "review" : "rejected";
         var ids = new ArrayList<String>();
         for (int i = from; i < to; i++) if (lanes.containsKey(notes.get(i).note().id())) ids.add(notes.get(i).note().id());
         if (ids.isEmpty()) confidence = "rejected";
@@ -351,11 +555,19 @@ public final class VoiceSwitchReview {
                 bank, commands, null, List.copyOf(ids));
     }
 
+    /** Sounding time of the part's own patch next to a passage. Chord members count once. */
     private static double dwell(VoiceNoteDecode.Result decoded, int at, int step, int home) {
-        double seconds = 0;
+        var spans = new ArrayList<double[]>();
         for (int i = at; i >= 0 && i < decoded.notes().size() && decoded.labels()[i] == home; i += step) {
             var note = decoded.notes().get(i).note();
-            seconds += note.end() - note.start();
+            spans.add(new double[]{note.start(), note.end()});
+        }
+        spans.sort(Comparator.comparingDouble(span -> span[0]));
+        double seconds = 0, reach = Double.NEGATIVE_INFINITY;
+        for (var span : spans) {
+            double begin = Math.max(span[0], reach);
+            if (span[1] > begin) seconds += span[1] - begin;
+            reach = Math.max(reach, span[1]);
         }
         return seconds;
     }
@@ -379,39 +591,48 @@ public final class VoiceSwitchReview {
     }
 
     /**
-     * How often a part with the same notes in shuffled order holds a run this strong.
-     * One-second blocks keep the local correlation of real playing. A patch that is
-     * simply better everywhere scores high here, and that is not a switch.
+     * How often a part with the same notes in shuffled order holds a run this strong for
+     * any candidate patch. One-second blocks keep the local correlation of real playing,
+     * and taking the best patch in each shuffle pays for having chosen one. A patch that
+     * is simply better everywhere scores high here, and that is not a switch.
      */
     private static double chance(List<VoiceNoteDecode.Scored> notes, int from, int to, int label, int home, int part) {
-        var gains = new double[notes.size()];
+        int candidates = notes.getFirst().scores().length;
         var blocks = new ArrayList<List<Integer>>();
         long current = Long.MIN_VALUE;
         for (int i = 0; i < notes.size(); i++) {
-            gains[i] = notes.get(i).weight() * (notes.get(i).scores()[label] - notes.get(i).scores()[home]);
             long block = (long) Math.floor(notes.get(i).note().start());
             if (block != current) blocks.add(new ArrayList<>());
             current = block;
             blocks.getLast().add(i);
         }
         double observed = 0;
-        for (int i = from; i < to; i++) observed += gains[i];
+        for (int i = from; i < to; i++)
+            observed += notes.get(i).weight() * (notes.get(i).scores()[label] - notes.get(i).scores()[home]);
         int length = to - from, reached = 0;
         var random = new Random(31L * part + from);
-        var shuffled = new double[notes.size()];
+        var order = new int[notes.size()];
         for (int trial = 0; trial < NULL_SHUFFLES; trial++) {
             java.util.Collections.shuffle(blocks, random);
             int at = 0;
-            for (var block : blocks) for (int i : block) shuffled[at++] = gains[i];
-            double window = 0, best = Double.NEGATIVE_INFINITY;
-            for (int i = 0; i < shuffled.length; i++) {
-                window += shuffled[i];
-                if (i >= length) window -= shuffled[i - length];
-                if (i >= length - 1) best = Math.max(best, window);
+            for (var block : blocks) for (int i : block) order[at++] = i;
+            double best = Double.NEGATIVE_INFINITY;
+            for (int k = 0; k < candidates && best < observed; k++) {
+                if (k == home) continue;
+                double window = 0;
+                for (int i = 0; i < order.length && best < observed; i++) {
+                    window += gain(notes.get(order[i]), k, home);
+                    if (i >= length) window -= gain(notes.get(order[i - length]), k, home);
+                    if (i >= length - 1) best = Math.max(best, window);
+                }
             }
             if (best >= observed) reached++;
         }
         return (reached + 1.0) / (NULL_SHUFFLES + 1);
+    }
+
+    private static double gain(VoiceNoteDecode.Scored note, int candidate, int home) {
+        return note.weight() * (note.scores()[candidate] - note.scores()[home]);
     }
 
     private static JsonObject edit(Passage passage, double gain) {

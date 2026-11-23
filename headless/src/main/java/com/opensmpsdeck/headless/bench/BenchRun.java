@@ -323,8 +323,11 @@ final class BenchRun {
             metrics.put("voiceTop1" + suffix, (double) voices.top1() / voices.matched());
         if (voices.top3() != null && voices.matched() > 0)
             metrics.put("voiceTop3" + suffix, (double) voices.top3() / voices.matched());
-        if (voices.algorithm() != null && voices.matched() > 0)
-            metrics.put("voiceAlgorithm" + suffix, (double) voices.algorithm() / voices.matched());
+        if (voices.algorithm() != null) {
+            // A note whose patch bytes are unknown on either side is left out, and the coverage says how many were in.
+            metrics.put("voiceAlgorithm" + suffix, (double) voices.algorithm() / voices.algorithmCompared());
+            metrics.put("voiceAlgorithmCoverage" + suffix, (double) voices.algorithmCompared() / voices.matched());
+        }
     }
 
     private static BenchGold.Score scoreLadderLead(Map<String, Double> metrics, String suffix, Path output,

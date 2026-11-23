@@ -1739,7 +1739,7 @@ run this review or change its output.
 #### Patch changes within a part
 
 `reconstruct voice-switches WORK_DIR [--part ID] [--min-run SECONDS]
-[--no-figures] [--labels] [--propose | --apply]` looks for passages where a
+[--figures] [--labels] [--propose | --apply]` looks for passages where a
 stem-backed source part is better explained by a second stock FM patch. The
 default reconstruction does not run it. Without `--propose` or `--apply` it
 only reports.
@@ -1753,24 +1753,27 @@ The evidence is a decode over every note of the part:
   from the whole catalogue. The part's own patch is always a candidate.
 - One patch is chosen per note with a fixed cost for each change. A note
   shorter than one 43 ms frame counts in proportion to its length.
-- Notes that repeat a figure (register, length and the step into them) lend
-  each other half their evidence. `--no-figures` turns this off.
+- With `--figures`, notes that repeat a figure (register, length and the
+  step into them) lend each other half their evidence. It is off by default.
 
 A passage is a run of notes given to a patch other than the part's own. It
 is applied without review only if it passes every guard:
 
 | Guard | Rule |
 | --- | --- |
-| Dwell | At least `--min-run` seconds sounding (default 4) over at least 8 key-ons. |
+| Dwell | At least `--min-run` seconds sounding (default 4) over at least 8 key-ons, counting only notes on FM lanes. |
 | Home dwell | The part's own patch sounds that long on each side, unless the part starts or ends there. |
 | Separate phrases | Each half of the passage prefers the patch on its own, by 0.01 per note. |
-| No-switch null | At most 2% of 200 shuffles of the part, in one-second blocks, hold a run this strong. A patch that is better everywhere fails here. |
+| No-switch null | At most 2% of 200 shuffles of the part, in one-second blocks, hold a run this strong for any candidate patch. A patch that is better everywhere fails here. |
 | Attack and sustain | The first 85 ms match better by 0.01, and held notes match no worse after that. |
 | Bank explains stem | One patch is the best match for at least half the part's notes. Below that the stock bank does not explain the stem, as on most real instruments. |
-| Own stem | The part has a stem of its own. Shared stems, the sung lead and `--whole-part-voices` runs never apply. |
+| No user choice | No note in the passage has an assigned source voice, an instrument edit in any state, or a lane override that sets a patch or gain. |
+| Two alternates | The part keeps at most two alternate patches, counting switches already accepted. |
+| Own stem | The part has a stem file no other part and not the mix points at. Shared stems, the sung lead and `--whole-part-voices` runs never apply. |
+| Stem attacks at playback level | The patch is closer than the part's own on the passage's exposed attacks, at the level the stem plays them, in most 2-second blocks. Checked only when every other guard passes. |
 
-`--propose` saves the passages that pass the dwell, separate-phrases, null
-and bank guards as `noteVoicing` proposals in the `voice-switch` group, with
+`--propose` saves the passages that pass the dwell, separate-phrases, null,
+bank, user-choice and two-alternates guards as `noteVoicing` proposals in the `voice-switch` group, with
 every guard result as evidence. The rest are only reported. A review that
 proposes or applies also saves its report as `voice-switches.json`. `--apply`
 adds the passages that pass every guard as accepted agent edits and proposes
@@ -1785,10 +1788,15 @@ differs from the part's own patch, `majorityWinsAttacks` says whether the
 voice stage's level-matched comparison of exposed stem attacks agrees. The
 review never changes a part's own patch.
 
-`--apply` rebuilds assembly and compares the compiled bank. The result lists
-`bankBytes`, `fmPatchBankBytes` and `fmPatchSwitchBytes` before and after.
-If the build fails or the bank exceeds the target's limit, the last applied
-edit is removed and the build repeats. Remove an applied edit with
+`--apply` adds the edits and rebuilds assembly as one step. The rebuild must
+keep every emitted note, every reduction and effect copy, and every other
+edit's outcome as they were, and the bank must fit. Otherwise the journal
+returns to its earlier bytes, the least supported edit is dropped, and the
+rest are tried again. A dropped edit stays as a proposal with the reason.
+A failure of any kind leaves the journal as it was found. If the journal
+changed while the review ran, nothing is applied and the passages are
+proposed instead. The result lists `bankBytes`, `fmPatchBankBytes` and
+`fmPatchSwitchBytes` before and after. Remove an applied edit with
 `reconstruct edit WORK_DIR remove ID`, or reject a proposal, to undo it.
 
 Run `reconstruct run --from assemble WORK_DIR` after editing voicing.
