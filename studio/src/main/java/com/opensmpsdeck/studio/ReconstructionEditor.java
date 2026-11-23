@@ -21,6 +21,7 @@ import com.opensmpsdeck.headless.ReconstructionLivePreview;
 import com.opensmpsdeck.headless.ReconstructionSections;
 import com.opensmpsdeck.project.ProjectWatcher;
 import com.opensmpsdeck.project.ProjectDocument;
+import com.opensmpsdeck.project.StudioProject;
 import com.opensmpsdeck.project.TargetProfile;
 import com.opensmpsdeck.studio.ReconstructionTools.Mode;
 import com.opensmpsdeck.studio.ReconstructionTools.Placement;
@@ -107,6 +108,10 @@ final class ReconstructionEditor implements AutoCloseable {
             task -> Thread.ofPlatform().daemon().name("reconstruction-editor").unstarted(task));
     private final ExecutorService canonicalWorker = Executors.newSingleThreadExecutor(
             task -> Thread.ofPlatform().daemon().name("reconstruction-replay").unstarted(task));
+    private final ExecutorService refitWorker = Executors.newSingleThreadExecutor(
+            task -> Thread.ofPlatform().daemon().name("reconstruction-refit").unstarted(task));
+    private java.util.concurrent.Future<?> refitJob;
+    private long comparisonGeneration;
     private final ReconstructionReview.LiveReplay canonicalReplay = new ReconstructionReview.LiveReplay();
     private volatile Thread canonicalThread;
     private final List<ProjectWatcher> watchers = new ArrayList<>();
@@ -1858,7 +1863,7 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         int part = selected.getFirst();
         if (refit) {
-            compareLive("stock refit", (expected, built, playback, current) -> {
+            compareLive("stock refit", refitWorker, (expected, built, playback, current) -> {
                 var variant = ReconstructionReview.refitStockVoice(work, current, part);
                 var choice = ReconstructionReview.stockVoiceEdit(work, current, part, variant);
                 var next = previewLive(expected, built, draftWith(expected, choice), playback);
@@ -1918,20 +1923,26 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void compareLive(String label, BuildComparison builder) {
+        compareLive(label, worker, builder);
+    }
+
+    private void compareLive(String label, ExecutorService executor, BuildComparison builder) {
         var edit = comparisonPlayhead();
         if (edit == null) return;
         endComparison(true);
         var expected = snapshot.revision();
         var built = liveBase;
-        var reconstruction = Objects.equals(liveVoiceJournal, expected.voices()) ? live : null;
-        long generation = ++liveGeneration;
+        var reconstruction = executor == worker && Objects.equals(liveVoiceJournal, expected.voices()) ? live : null;
+        long generation = liveGeneration;
+        long comparison = comparisonGeneration;
         status.accept("Preparing A/B · " + label);
-        worker.execute(() -> {
+        var job = executor.submit(() -> {
             try {
                 var current = previewLive(expected, built, expected.entries(), edit, reconstruction);
                 var result = builder.build(expected, built, edit, current);
                 Platform.runLater(() -> {
-                    if (closed || generation != liveGeneration || !snapshot.revision().equals(expected)) return;
+                    if (closed || generation != liveGeneration || comparison != comparisonGeneration
+                            || !snapshot.revision().equals(expected)) return;
                     if (!liveTransport.compareLive(edit, result.a(), "A/B · A")) return;
                     liveComparison = result;
                     switchAB.setText("Hear B");
@@ -1941,11 +1952,12 @@ final class ReconstructionEditor implements AutoCloseable {
                 });
             } catch (IOException | IllegalArgumentException failure) {
                 Platform.runLater(() -> {
-                    if (!closed && generation == liveGeneration)
+                    if (!closed && generation == liveGeneration && comparison == comparisonGeneration)
                         status.accept("A/B unavailable · " + describe(failure));
                 });
             }
         });
+        if (executor == refitWorker) refitJob = job;
     }
 
     private ReconstructionLivePreview.Prepared previewLive(Revision expected, JsonArray built, JsonArray entries,
@@ -1981,6 +1993,8 @@ final class ReconstructionEditor implements AutoCloseable {
     }
 
     private void endComparison(boolean restore) {
+        comparisonGeneration++;
+        cancelRefit();
         if (liveComparison == null) return;
         var edit = restore ? liveTransport.liveEdit() : null;
         if (edit != null) liveTransport.compareLive(edit, liveComparison.current(),
@@ -2076,7 +2090,7 @@ final class ReconstructionEditor implements AutoCloseable {
         accepted(current.revision().entries()).forEach(entry -> {
             if (current.outcomes().containsKey(text(entry, "id", ""))) liveBase.add(entry);
         });
-        if (current.inspection().project() == null || current.inspection().target() != com.opensmpsdeck.project.TargetGame.S3K)
+        if (current.inspection().project() == null)
             return;
         canonicalWorker.execute(() -> {
             try {
@@ -2139,10 +2153,17 @@ final class ReconstructionEditor implements AutoCloseable {
         queueLive(supersedeLive(), System.nanoTime(), after, edit, author.isEmpty() ? "external" : author);
     }
 
+    private void cancelRefit() {
+        if (refitJob == null) return;
+        refitJob.cancel(true);
+        refitJob = null;
+    }
+
     private long supersedeLive() {
         long generation = ++liveGeneration;
         queuedLiveEdit = null;
         queuedCanonical = null;
+        cancelRefit();
         var replay = canonicalThread;
         if (replay != null) replay.interrupt();
         return generation;
@@ -2385,6 +2406,17 @@ final class ReconstructionEditor implements AutoCloseable {
             view.outline(outline.isSelected());
         } else return false;
         return true;
+    }
+
+    java.util.concurrent.Callable<com.opensmpsdeck.headless.ProjectExport.Source> exportJournal(StudioProject open) {
+        if (open != null && open.detachedFromReconstruction()) return null;
+        if (busy || liveSaving || external != null || externalError)
+            throw new IllegalStateException("Finish the current reconstruction update before exporting");
+        var expected = snapshot.revision();
+        var entries = forApply(expected.entries(), draft.entries());
+        var built = liveBase;
+        if (built.equals(accepted(entries)) && !externalUnbuilt) return null;
+        return () -> ReconstructionReview.exportSource(work, expected, built, entries, (done, total, message) -> {});
     }
 
     private void apply(String lanePolicyPreset) {
@@ -2724,6 +2756,7 @@ final class ReconstructionEditor implements AutoCloseable {
         }
         supersedeLive();
         canonicalWorker.shutdownNow();
+        refitWorker.shutdownNow();
         worker.shutdown();
     }
 }

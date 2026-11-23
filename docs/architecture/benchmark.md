@@ -166,6 +166,22 @@ to its own target's baseline using `bench compare --tolerance 0` for
 no headline regression, and review case failures and measurement counts.
 Keep the corpora, catalogues, scorecards and listening outputs private.
 
+### Live-edit latency and parity
+
+Run once per built target and edit journal. Use a complete journal as the
+variant, including any accepted prefix you want to retain.
+
+```sh
+java -jar "$jar" bench live-edit "$work" "$journal" --target s2 --at 12 --samples 6
+```
+
+Omit `--target` to use the saved target. `--at` defaults to the song start.
+The benchmark reports nearest-rank p95 for preparing provisional PCM and
+settling at that presentation on a warmed checkpoint grid. It counts
+unavailable previews and different provisional banks. It opens no audio line.
+The command exits unsuccessfully if the canonical live bank or full-song PCM
+differs from a full rebuild of the same journal.
+
 ### Measure a ground-truth role plan
 
 ```sh

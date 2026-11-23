@@ -315,9 +315,27 @@ public final class ReconstructionReview {
         return apply(work, expected, entries, detachedRevision, null, progress, built, null);
     }
 
+    private static final class ExportBuild {
+        ProjectExport.Source source;
+    }
+
+    /** Build the journal exactly as Apply would, then export from the private result. */
+    public static ProjectExport.Source exportSource(Path work, Revision expected, JsonArray built, JsonArray entries,
+                                                    ReconstructionStages.Progress progress) throws IOException {
+        var build = new ExportBuild();
+        apply(work, expected, entries, null, null, progress, built, null, build);
+        return build.source;
+    }
+
     private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
                                     String lanePolicyPreset, ReconstructionStages.Progress progress,
                                     JsonArray built, LiveBuild live) throws IOException {
+        return apply(work, expected, entries, detachedRevision, lanePolicyPreset, progress, built, live, null);
+    }
+
+    private static JsonObject apply(Path work, Revision expected, JsonArray entries, String detachedRevision,
+                                    String lanePolicyPreset, ReconstructionStages.Progress progress,
+                                    JsonArray built, LiveBuild live, ExportBuild export) throws IOException {
         requireRevision(work, expected);
         var arrangement = requireAttached(work, detachedRevision != null);
         if (detachedRevision != null && (arrangement == null || !detachedRevision.equals(arrangement.revision())))
@@ -397,6 +415,15 @@ public final class ReconstructionReview {
             }
             ReconstructionStages.runForReview("run", args.toArray(String[]::new), checkedProgress);
             checkCancelled();
+            if (export != null) {
+                for (String file : paths)
+                    if (!same(work.resolve(file), before.resolve(file))) throw new Changed();
+                requireRevision(work, expected);
+                var project = arrangement(after).project();
+                var frames = ReconstructionTimeMap.of(ReconstructionStages.readScore(after.resolve("score.json"))).frames();
+                export.source = new ProjectExport.Source(project, work, frames);
+                return null;
+            }
             if (ReconstructionEdits.read(after).intents().stream().noneMatch(ReconstructionEdits.Intent::proposed))
                 Files.deleteIfExists(after.resolve(ReconstructionProposals.RESULTS));
             int total = ReconstructionStages.Stage.values().length
