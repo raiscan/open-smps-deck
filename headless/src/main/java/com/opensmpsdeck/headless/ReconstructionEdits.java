@@ -1276,7 +1276,7 @@ final class ReconstructionEdits {
         }
         return new ReconstructionRoles.Result(roles.version(), roles.harmonyMaxHz(), decisions.values().stream()
                 .sorted(java.util.Comparator.comparing(ReconstructionRoles.Decision::note, NOTE_ORDER)).toList(),
-                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins);
+                roles.timeBase(), roles.structureNoteHashes(), pins.isEmpty() ? null : pins, roles.repeatNotes());
     }
 
     private static boolean matchesRole(Intent edit, Role incoming, Role target) {

@@ -149,13 +149,16 @@ final class ReconstructionAllocation {
     private final java.util.Set<String> fmChordAnchors = new java.util.HashSet<>();
     private final Map<String, String> continuations = new HashMap<>();
     private final java.util.PriorityQueue<Attack> pending;
+    private final Map<String, ReconstructionRepeatConsensus.Member> repeatNotes;
+    private final Map<String, String> repeatLanes = new HashMap<>();
     private Map<String, ReconstructionArrangement.PartChip> partPins = Map.of();
     private ReconstructionArrangement.Hats hats;
     private final Map<String, NavigableMap<Integer, String>> previousAttacks = new HashMap<>();
 
     private ReconstructionAllocation(boolean fmOnly, Map<String, String> previousLanes, List<Attack> attacks,
                                      Map<String, ReconstructionChordReduction.Tone> tones, Map<String, Double> salience,
-                                     java.util.Set<Integer> leadAttacks, TargetProfile profile, Map<String, ReconstructionHeldNotes.Hold> stemHolds) {
+                                     java.util.Set<Integer> leadAttacks, TargetProfile profile, Map<String, ReconstructionHeldNotes.Hold> stemHolds,
+                                     Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) {
         this.fmOnly = fmOnly;
         this.profile = profile;
         this.previousLanes = previousLanes;
@@ -164,11 +167,12 @@ final class ReconstructionAllocation {
                 .collect(java.util.stream.Collectors.toSet());
         this.salience = salience;
         this.stemHolds = stemHolds;
+        this.repeatNotes = repeatNotes;
         var ordinal = new HashMap<String, Integer>();
         for (int i = 0; i < attacks.size(); i++) ordinal.put(attacks.get(i).note().id(), i);
         pending = new java.util.PriorityQueue<>(Comparator.comparingInt(Attack::start)
                 .thenComparing(a -> continuations.containsKey(a.note().id()))
-                .thenComparing(attackOrder(profile, tones, leadAttacks))
+                .thenComparing(attackOrder(profile, tones, leadAttacks, repeatNotes))
                 .thenComparingInt(a -> ordinal.getOrDefault(a.note().id(), Integer.MAX_VALUE))
                 .thenComparing(a -> a.note().id()));
         for (var attack : attacks) {
@@ -295,7 +299,29 @@ final class ReconstructionAllocation {
                                        boolean chordReduction, TargetProfile profile,
                                        ReconstructionArrangement.Allocation arrangement,
                                        Map<String, ReconstructionHeldNotes.Hold> stemHolds, boolean recoverGates) {
+        int initialOutcomes = outcomes == null ? 0 : outcomes.size();
+        var first = allocatePass(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels, voiceTypes, chords,
+                outcomes, salience, chordReduction, profile, arrangement, stemHolds, recoverGates, java.util.Set.of());
+        var optionalDrops = repeatedCapacityDrops(first, roles.repeatNotes(), chords, arrangement);
+        if (optionalDrops.isEmpty()) return first;
+        if (outcomes != null) outcomes.subList(initialOutcomes, outcomes.size()).clear();
+        return allocatePass(roles, parts, frames, fmOnly, hasStems, seed, cymbalLevels, voiceTypes, chords,
+                outcomes, salience, chordReduction, profile, arrangement, stemHolds, recoverGates, optionalDrops);
+    }
+
+    private static Result allocatePass(ReconstructionRoles.Result roles, List<MidiScore.Part> parts, int frames,
+                                       boolean fmOnly, boolean hasStems, Map<String, String> seed,
+                                       Map<ReconstructionVoices.Key, Double> cymbalLevels,
+                                       Map<String, ReconstructionLaneType> voiceTypes,
+                                       Map<String, ReconstructionChords.Group> chords,
+                                       List<ReconstructionEdits.Outcome> outcomes, Map<String, Double> salience,
+                                       boolean chordReduction, TargetProfile profile,
+                                       ReconstructionArrangement.Allocation arrangement,
+                                       Map<String, ReconstructionHeldNotes.Hold> stemHolds, boolean recoverGates,
+                                       java.util.Set<String> optionalDrops) {
         var usableChords = usableChords(chords, arrangement, outcomes);
+        var repeatNotes = roles.repeatNotes() == null
+                ? Map.<String, ReconstructionRepeatConsensus.Member>of() : roles.repeatNotes();
         var names = new HashMap<Integer, String>();
         for (var part : parts) names.put(part.id(), part.name());
         var attacks = roles.notes().stream().map(decision -> {
@@ -340,7 +366,7 @@ final class ReconstructionAllocation {
                 .map(a -> new ReconstructionChordReduction.Voice(a.note(), a.role())).toList(),
                 note -> leadAttacks.contains(note.startTick(frames, profile.clock())))
                 : Map.<String, ReconstructionChordReduction.Tone>of();
-        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, leadAttacks, profile, stemHolds);
+        var allocator = new ReconstructionAllocation(fmOnly, seed, scheduled, tones, salience, leadAttacks, profile, stemHolds, repeatNotes);
         allocator.partPins = arrangement.pins();
         allocator.hats = arrangement.hats();
         var louderParts = new java.util.HashSet<Integer>();
@@ -355,6 +381,10 @@ final class ReconstructionAllocation {
             var authoredDrop = arrangement.drops().get(attack.note().id());
             if (authoredDrop != null) {
                 allocator.drop(attack, authoredDrop.reason(), authoredDrop.blockers());
+                continue;
+            }
+            if (optionalDrops.contains(attack.note().id())) {
+                allocator.drop(attack, "repeat-consensus-optional-octave");
                 continue;
             }
             var partPin = arrangement.pins().get(attack.note().id());
@@ -465,6 +495,33 @@ final class ReconstructionAllocation {
                 placedChords.isEmpty() ? null : placedChords);
     }
 
+    private static java.util.Set<String> repeatedCapacityDrops(Result first,
+            Map<String, ReconstructionRepeatConsensus.Member> repeats, Map<String, ReconstructionChords.Group> chords,
+            ReconstructionArrangement.Allocation arrangement) {
+        if (repeats == null) return java.util.Set.of();
+        var groups = new HashMap<String, List<Entry>>();
+        for (var entry : first.notes()) {
+            var member = repeats.get(entry.note().id());
+            if (member != null) groups.computeIfAbsent(member.slot(), ignored -> new ArrayList<>()).add(entry);
+        }
+        var drops = new java.util.HashSet<String>();
+        for (var group : groups.values()) {
+            if (group.size() < 2 || group.stream().noneMatch(entry ->
+                    entry.outcome == Outcome.dropped && capacityDrop(entry.reason))) continue;
+            if (!group.stream().allMatch(entry -> {
+                var note = entry.note();
+                return !repeats.get(note.id()).core() && backing(entry.role()) && entry.pinnedLane() == null
+                        && !chords.containsKey(note.id()) && !arrangement.pins().containsKey(note.id())
+                        && !arrangement.drops().containsKey(note.id()) && first.notes().stream().anyMatch(root ->
+                            root.lane() != null && root.note().part() == note.part() && root.note().pitch() == note.pitch() - 12
+                            && Math.abs(root.note().start() - note.start()) <= .035
+                            && root.outcome() == Outcome.kept);
+            })) continue;
+            group.forEach(entry -> drops.add(entry.note().id()));
+        }
+        return drops;
+    }
+
     private static Map<String, ReconstructionChords.Group> usableChords(
             Map<String, ReconstructionChords.Group> chords, ReconstructionArrangement.Allocation arrangement,
             List<ReconstructionEdits.Outcome> outcomes) {
@@ -486,15 +543,17 @@ final class ReconstructionAllocation {
     }
 
     private static Comparator<Attack> attackOrder(TargetProfile profile) {
-        return attackOrder(profile, Map.of(), java.util.Set.of());
+        return attackOrder(profile, Map.of(), java.util.Set.of(), Map.of());
     }
 
     private static Comparator<Attack> attackOrder(TargetProfile profile,
                                                   Map<String, ReconstructionChordReduction.Tone> tones,
-                                                  java.util.Set<Integer> leadAttacks) {
+                                                  java.util.Set<Integer> leadAttacks,
+                                                  Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) {
         return Comparator.comparingInt(Attack::start)
                 .thenComparingInt(a -> a.pin == null ? Integer.MAX_VALUE : a.pin.order())
                 .thenComparing(Comparator.comparingInt(ReconstructionAllocation::priority).reversed())
+                .thenComparingInt(a -> -repeatPriority(repeatNotes.get(a.note().id())))
                 .thenComparingInt(a -> a.role() == Role.harmony && a.note().pitch() < profile.psg().low() ? 0 : 1)
                 .thenComparingInt(a -> !backing(a.role()) || !leadAttacks.contains(a.start) ? 0 : -tones.getOrDefault(a.note().id(),
                         ReconstructionChordReduction.Tone.extension).priority)
@@ -559,6 +618,19 @@ final class ReconstructionAllocation {
         return role == Role.harmony || role == Role.counter;
     }
 
+    private static int repeatPriority(ReconstructionRepeatConsensus.Member member) {
+        return member == null || member.core() ? 1 : 0;
+    }
+
+    private int repeatPriority(Note note) {
+        return repeatPriority(repeatNotes.get(origin(note)));
+    }
+
+    private String repeatLane(Attack attack) {
+        var member = repeatNotes.get(attack.note().id());
+        return member == null ? null : repeatLanes.get(member.slot());
+    }
+
     private String origin(Note note) {
         return continuations.getOrDefault(note.id(), note.id());
     }
@@ -602,7 +674,9 @@ final class ReconstructionAllocation {
         }
         List<String> primary = expectedLanes(attack.role(), attack.noise);
         List<String> secondary = spillLanes(attack);
-        String lane = free(primary, attack);
+        String preferred = repeatLane(attack);
+        String lane = preferred != null && (primary.contains(preferred) || secondary.contains(preferred)) && available(preferred, attack)
+                ? preferred : free(primary, attack);
         if (lane == null) lane = free(secondary, attack);
         if (lane == null && (attack.role() == Role.bass || attack.role() == Role.melody))
             lane = protectHold(primary.getFirst(), attack);
@@ -632,6 +706,8 @@ final class ReconstructionAllocation {
                     : !backing(attack.role()) && !primary.contains(lane) ? HOLD_OVERFLOW
                     : PSG.contains(lane) && !attack.noise ? "psg-spill" : null;
             keep(attack, lane, reason);
+            var repeat = repeatNotes.get(attack.note().id());
+            if (repeat != null) repeatLanes.putIfAbsent(repeat.slot(), lane);
         }
     }
 
@@ -1051,7 +1127,8 @@ final class ReconstructionAllocation {
 
     private String shorten(List<String> lanes, Attack attack) {
         String lane = lanes.stream().filter(l -> canShorten(tail.get(l), attack))
-                .min(Comparator.comparingInt((String l) -> backing(attack.role()) ? tonePriority(tail.get(l).note()) : 0)
+                .min(Comparator.comparingInt((String l) -> repeatPriority(tail.get(l).note()))
+                        .thenComparingInt(l -> backing(attack.role()) ? tonePriority(tail.get(l).note()) : 0)
                         .thenComparingDouble(l -> backing(attack.role()) ? salience(tail.get(l).note()) : 0)
                         .thenComparingInt(l -> tail.get(l).endTick - attack.start)
                         .thenComparing(l -> !l.equals(previousLanes.get(attack.note().id())))).orElse(null);
@@ -1090,6 +1167,8 @@ final class ReconstructionAllocation {
         if (backing(next.role()) && backing(last.role) && !chordAnchors.contains(last.note.id())) {
             boolean priorLead = upperLine.contains(last.note.id());
             if (priorLead != next.upperLine()) return next.upperLine();
+            int byRepeat = Integer.compare(repeatPriority(next.note()), repeatPriority(last.note()));
+            if (byRepeat != 0) return byRepeat > 0;
         }
         if (last.startTick < next.start && (last.endTick - next.start <= RELEASE_TICKS
                 || next.role() == Role.melody || next.role() == Role.bass || next.role() == Role.drums)) return true;

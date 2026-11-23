@@ -670,7 +670,7 @@ final class S3kReconstruction {
         var decisions = policyDecisions ? new ArrayList<ReconstructionLanePolicies.Decision>() : null;
         var coverage = applyLanePolicies(policies, levels, frames, fm, tonePsg, candidates, voices, envelopes, gates,
                 catalogue, sourceInstruments, parts, overlappingTone, layers, lanePolicyCopies, decisions, profile,
-                performance.gains());
+                performance.gains(), structure == null ? null : structure.repeatNotes());
         if (!coverage.isEmpty() || !layerResults.isEmpty()) {
             fmNotes = fm.stream().mapToInt(List::size).sum() - echoNotes;
             psgNotes = psg.stream().mapToInt(List::size).sum();
@@ -1029,7 +1029,7 @@ final class S3kReconstruction {
             InstrumentCatalogue catalogue, Map<String, ReconstructionVoicing.SourceSound> instruments,
             Map<Integer, MidiScore.Part> parts, int[] overlappingTone, Map<String, ReconstructionLayers.Request> layers,
             List<CopyWindow> copies, List<ReconstructionLanePolicies.Decision> decisions, TargetProfile profile,
-            Map<String, Double> gains) throws java.io.IOException {
+            Map<String, Double> gains, Map<String, ReconstructionRepeatConsensus.Member> repeatNotes) throws java.io.IOException {
         if (policies.isEmpty()) return List.of();
         var coverage = new ArrayList<ReconstructionLanePolicies.Coverage>();
         var claimed = new HashMap<PolicyKey, Set<String>>();
@@ -1055,7 +1055,36 @@ final class S3kReconstruction {
             var targetLanes = fmDouble ? fm : psg;
             var targetNames = fmDouble ? ReconstructionAllocation.FM : ReconstructionAllocation.PSG;
             int eligible = 0, count = 0, busy = 0, incompatible = 0, movedFromFm = 0;
-            for (var source : sources) {
+            var repeatGroups = new LinkedHashMap<String, List<PolicySource>>();
+            if (repeatNotes != null && !pads && scoped.notes() == null) {
+                for (var source : sources) {
+                    var dry = source.placed();
+                    var repeat = repeatNotes.get(source.origin());
+                    var mask = layers.get(source.origin());
+                    if (repeat == null || moved.contains(dry) || mask != null && mask.settings().masks(kind)
+                            || !scoped.selects(source.entry(), source.origin(),
+                                    overlappingTone[dry.event.start()] == overlappingTone[dry.end])) continue;
+                    repeatGroups.computeIfAbsent(repeat.slot(), ignored -> new ArrayList<>()).add(source);
+                }
+            }
+            var groupBySource = new HashMap<PolicySource, List<PolicySource>>();
+            repeatGroups.values().stream().filter(group -> group.size() > 1).forEach(group ->
+                    group.forEach(source -> groupBySource.put(source, group)));
+            var ordered = sources;
+            if (!groupBySource.isEmpty()) {
+                ordered = new ArrayList<>();
+                var emitted = new HashSet<PolicySource>();
+                for (var source : sources) if (emitted.add(source)) {
+                    var group = groupBySource.get(source);
+                    if (group == null) ordered.add(source);
+                    else {
+                        ordered.addAll(group);
+                        emitted.addAll(group);
+                    }
+                }
+            }
+            var groupLanes = new HashMap<List<PolicySource>, Integer>();
+            for (var source : ordered) {
                 var entry = source.entry();
                 var dry = source.placed();
                 String id = entry.note().id();
@@ -1098,7 +1127,15 @@ final class S3kReconstruction {
                     // the same timbre as pads transferred from FM.
                     slot = new FreeSlot(original, entry.lane(), original.indexOf(dry));
                 } else {
-                    slot = freeSlot(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
+                    var group = groupBySource.get(source);
+                    if (group == null) {
+                        slot = freeSlot(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
+                    } else {
+                        int index = groupLanes.computeIfAbsent(group, occurrences ->
+                                commonLayerLane(occurrences, targetLanes, targetNames, rule.delay(), frames, fmDouble));
+                        int insertion = index < 0 ? -1 : insertion(targetLanes.get(index), start, end);
+                        slot = insertion < 0 ? null : new FreeSlot(targetLanes.get(index), targetNames.get(index), insertion);
+                    }
                 }
                 if (slot == null) {
                     busy++;
@@ -1107,7 +1144,8 @@ final class S3kReconstruction {
                     if (decisions != null) {
                         var blocked = blockers(targetLanes, targetNames, fmDouble ? entry.lane() : null, start, end);
                         policyDecision(decisions, scoped, source, blocked.isEmpty() ? null : blocked.getFirst().lane(),
-                                pitch, start, end, "No free lane for the full layer gate", blocked);
+                                pitch, start, end, groupBySource.containsKey(source)
+                                        ? "No common free lane for the repeat layer" : "No free lane for the full layer gate", blocked);
                     }
                     continue;
                 }
@@ -1277,6 +1315,27 @@ final class S3kReconstruction {
             }
         }
         return promoted;
+    }
+
+    private static int commonLayerLane(List<PolicySource> group, List<ArrayList<Placement>> lanes,
+                                       List<String> names, int delay, int frames, boolean fmDouble) {
+        var ordered = group.stream().sorted(Comparator.comparingInt(s -> s.placed().event.start())).toList();
+        for (int i = 0; i < lanes.size(); i++) {
+            int previousEnd = 0;
+            boolean fits = true;
+            for (var source : ordered) {
+                int start = source.placed().event.start() + delay;
+                int end = Math.min(frames, source.placed().end + delay);
+                if (start < previousEnd || end <= start || fmDouble && names.get(i).equals(source.entry().lane())
+                        || insertion(lanes.get(i), start, end) < 0) {
+                    fits = false;
+                    break;
+                }
+                previousEnd = end;
+            }
+            if (fits) return i;
+        }
+        return -1;
     }
 
     private static FreeSlot freeSlot(List<ArrayList<Placement>> lanes, List<String> names, String exclude, int start, int end) {

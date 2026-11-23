@@ -13,7 +13,7 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static com.opensmpsdeck.headless.ReconstructionRoles.Role;
 
 final class ReconstructionChecks {
-    private static final Set<String> SOURCES = Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "external", "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON);
+    private static final Set<String> SOURCES = Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "external", "consensus", ReconstructionRepeatConsensus.SOURCE, "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON);
 
     private ReconstructionChecks() {}
 
@@ -249,7 +249,7 @@ final class ReconstructionChecks {
                 require(external != null && external.source().equals("external"), where, "unknown external candidate");
             }
         }
-        checkNotes(at, result.notes(), score, duration, Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+        checkNotes(at, result.notes(), score, duration, Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", ReconstructionRepeatConsensus.SOURCE, ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
     }
 
     private static Map<String, Set<String>> validateLayout(String at, List<ReconstructionStructure.Section> sections,
@@ -317,7 +317,7 @@ final class ReconstructionChecks {
         checkTimeBase(at, roles.timeBase(), timeline, "roles");
         rate(roles.harmonyMaxHz());
         checkNotes(at, roles.notes().stream().map(ReconstructionRoles.Decision::note).toList(),
-                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", ReconstructionRepeatConsensus.SOURCE, "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var parts = partIndex(score);
         var notes = new HashMap<String, ReconstructionRoles.Decision>();
         for (var decision : roles.notes()) notes.put(decision.note().id(), decision);
@@ -356,7 +356,7 @@ final class ReconstructionChecks {
         String at = "allocation.json";
         checkTimeBase(at, allocation.timeBase(), timeline, "allocate");
         checkNotes(at, allocation.notes().stream().map(ReconstructionAllocation.Entry::note).toList(),
-                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
+                score, timeline.projectDuration(), Set.of("edit", "midi", "audio-refine", "transcriber", "audio-transcribed", ReconstructionAudioOnly.DRUM_SOURCE, ReconstructionStemTemplates.SOURCE, "consensus", ReconstructionRepeatConsensus.SOURCE, "audio", ReconstructionFastRuns.REASON, ReconstructionRetriggers.REASON));
         var continuity = allocation.leadContinuity();
         if (continuity != null)
             require(continuity.split() >= 0 && continuity.added() >= 0 && continuity.extended() >= 0

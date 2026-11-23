@@ -1197,7 +1197,7 @@ public final class ReconstructionStages {
         ReconstructionChecks.structure(structure, score);
         return new ReconstructionStructure.Result(structure.version(), structure.bars(), structure.sections(),
                 structure.repeats(), structure.corrections(), structure.notes().stream().sorted(NOTE_ORDER).toList(),
-                structure.phrases(), structure.roleLayout(), structure.timeBase(), structure.scoreNoteHashes());
+                structure.phrases(), structure.roleLayout(), structure.timeBase(), structure.scoreNoteHashes(), structure.repeatNotes());
     }
 
     static ReconstructionStructure.Result structure(Score score) throws IOException {
@@ -1231,9 +1231,18 @@ public final class ReconstructionStages {
             if (edit.removedNotes() != null)
                 edit.removedNotes().forEach(note -> suppressed.add(timeline.projectNote(note)));
         }
-        return ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
+        var detected = ReconstructionStructure.analyze(timeline.projectBars(bars), notes, score.source.parts(), audio,
                 inferred, tracker ? score.beatMap.beatsPerBar() : inferred ? score.tempo.selected().beatsPerBar() : 4,
-                roleBars, timeline, authoredIds, suppressed);
+                roleBars, timeline, authoredIds, suppressed, score.inputs.audioOnly == null);
+        if (score.inputs.audioOnly == null) return detected;
+        var effective = new LinkedHashMap<String, Note>();
+        detected.notes().forEach(note -> effective.put(note.id(), note));
+        var repeatNotes = ReconstructionRepeatConsensus.apply(score, detected.bars(), timeline, authoredIds,
+                suppressed, effective);
+        if (repeatNotes.isEmpty()) return detected;
+        return new ReconstructionStructure.Result(detected.version(), detected.bars(), detected.sections(),
+                detected.repeats(), detected.corrections(), effective.values().stream().sorted(NOTE_ORDER).toList(),
+                detected.phrases(), detected.roleLayout(), detected.timeBase(), detected.scoreNoteHashes(), repeatNotes);
     }
 
     private record RhythmKey(Path path, double seconds) {}
