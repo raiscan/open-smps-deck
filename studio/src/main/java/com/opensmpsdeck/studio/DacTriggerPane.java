@@ -267,7 +267,7 @@ final class DacTriggerPane extends BorderPane {
             updateViewport();
         }
 
-        @Override void draw() {
+        @Override void paint() {
             GraphicsContext g = canvas.getGraphicsContext2D();
             double width = canvas.getWidth();
             double height = canvas.getHeight();

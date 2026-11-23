@@ -22,6 +22,11 @@ import java.util.function.DoubleConsumer;
 final class ReferenceLane extends Region implements AutoCloseable {
     private static final int HEIGHT = 74;
     private static final Color WAVE = Color.web("#7daefb");
+    private static final Color BACKGROUND = Color.web("#101722"), LOOP = Color.web("#ffcb77", 0.10),
+            LOADING = Color.web("#94a6bc"), FAILED = Color.web("#ffcb77"), AUDIO = Color.web("#203451"),
+            LABEL = Color.web("#d3e5ff"), PLAYHEAD = Color.web("#ffcb77"), GUTTER = Color.web("#172130"),
+            DETAIL = Color.web("#94a6bc"), EDGE = Color.web("#344257");
+    private static final Font FONT = Font.font("System", 12);
     private final Canvas canvas = new Canvas(100, HEIGHT);
     private final ExecutorService worker = Executors.newSingleThreadExecutor(task ->
             Thread.ofPlatform().name("studio-reference").daemon().unstarted(task));
@@ -116,7 +121,7 @@ final class ReferenceLane extends Region implements AutoCloseable {
         this.pixelsPerSecond = pixelsPerSecond;
         this.playhead = playhead;
         this.loop = loop;
-        canvas.setWidth(width);
+        if (canvas.getWidth() != width) canvas.setWidth(width);
         draw();
     }
 
@@ -175,20 +180,20 @@ final class ReferenceLane extends Region implements AutoCloseable {
         requestOverview();
         var graphics = canvas.getGraphicsContext2D();
         double width = canvas.getWidth();
-        graphics.setFill(Color.web("#101722"));
+        graphics.setFill(BACKGROUND);
         graphics.fillRect(0, 0, width, HEIGHT);
         double start = dragging == null ? reference.offsetSeconds() : dragging;
         double origin = x(start);
         if (loop != null) {
-            graphics.setFill(Color.web("#ffcb77", 0.10));
+            graphics.setFill(LOOP);
             graphics.fillRect(x(loop.start()), 0, (loop.end() - loop.start()) * pixelsPerSecond, HEIGHT);
         }
         if (overview == null) {
-            graphics.setFill(Color.web(error == null ? "#94a6bc" : "#ffcb77"));
+            graphics.setFill(error == null ? LOADING : FAILED);
             graphics.fillText(error == null ? "Loading waveform…" : error, TimelineView.GUTTER + 10, 44);
         } else {
             double end = x(start + wave.duration());
-            graphics.setFill(Color.web("#203451"));
+            graphics.setFill(AUDIO);
             graphics.fillRect(Math.max(TimelineView.GUTTER, origin), 0,
                     Math.max(0, Math.min(width, end) - Math.max(TimelineView.GUTTER, origin)), HEIGHT);
             graphics.setStroke(WAVE);
@@ -202,19 +207,19 @@ final class ReferenceLane extends Region implements AutoCloseable {
                         column, 45 - overview.minimum()[i] * 22);
             }
             graphics.setLineWidth(1);
-            graphics.setFill(Color.web("#d3e5ff"));
+            graphics.setFill(LABEL);
             graphics.fillText(reference.label(), Math.max(TimelineView.GUTTER, origin) + 8, 17);
         }
-        graphics.setStroke(Color.web("#ffcb77"));
+        graphics.setStroke(PLAYHEAD);
         if (playhead >= 0) graphics.strokeLine(x(playhead), 0, x(playhead), HEIGHT);
-        graphics.setFill(Color.web("#172130"));
+        graphics.setFill(GUTTER);
         graphics.fillRect(0, 0, TimelineView.GUTTER, HEIGHT);
-        graphics.setFont(Font.font("System", 12));
+        graphics.setFont(FONT);
         graphics.setFill(WAVE);
         graphics.fillText("REFERENCE", 14, 28);
-        graphics.setFill(Color.web("#94a6bc"));
+        graphics.setFill(DETAIL);
         graphics.fillText(String.format(java.util.Locale.ROOT, "%+.3f s", start), 14, 48);
-        graphics.setStroke(Color.web("#344257"));
+        graphics.setStroke(EDGE);
         graphics.strokeLine(0, .5, width, .5);
     }
 

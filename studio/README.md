@@ -89,6 +89,30 @@ Use `-Dstudio.snapshot=/path/to/editor.png` with the isolated UI test to capture
 scene snapshot for visual QA. No browser, server or physical audio device is
 needed by these tests; audible preview requires an available audio output device.
 
+## Rendering performance
+
+The editors paint at most once per frame. `draw()` only marks a view dirty, and
+code that reads painted geometry, such as hit testing, calls `flush()` first.
+Avoid canvas `clip()` and dashed or path strokes in paint code: JavaFX renders
+them through CPU masks. Paint the plot, then paint the gutters over it.
+
+`StudioPerformanceProbe` replays wheel zoom, scroll, pitch scroll, playhead
+follow and window resize on a reconstruction and an arrangement. It reports
+frame times and CPU per frame for the process, FX thread, render thread and
+spectrum workers. Pass scratch copies, since the probe writes journals:
+
+```sh
+xvfb-run -a -s '-screen 0 1920x1080x24' java -Dprism.forceGPU=true \
+  -Djavafx.animation.fullspeed=true \
+  -cp studio/target/opensmpsdeck-studio-0.1.0-SNAPSHOT.jar:studio/target/test-classes \
+  com.opensmpsdeck.studio.StudioPerformanceProbe "$scratch/reconstruction" \
+  "$scratch/reconstruction/arrangement.smps.json" "$scratch/report.tsv"
+```
+
+Under Xvfb, `prism.forceGPU` selects llvmpipe, so rasterizing costs CPU. Compare
+FX-thread and render-thread CPU across builds, not absolute frame rates. Add
+`-Dprobe.capture=<folder>` to save PNGs of each view for visual comparison.
+
 ## Design captures
 
 From the repository root, build with Java 25 and run the capture suite on Linux.

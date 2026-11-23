@@ -30,17 +30,28 @@ record ReconstructionVoices(List<Entry> entries, Map<String, Entry> byNote) {
     private static final double COLLISION_DISTANCE = .18;
 
     enum Pattern { SOLID, STRIPES, DOTS, HOLLOW }
+    private static final Color PATTERN_INK = Color.web("#101522");
 
     record Style(Color color, Pattern pattern) {
+        private static final java.util.Map<Color, java.util.Map<Double, Color>> FILLS = new java.util.concurrent.ConcurrentHashMap<>();
+
+        private Color translucent(double fill) {
+            return FILLS.computeIfAbsent(color, ignored -> new java.util.concurrent.ConcurrentHashMap<>())
+                    .computeIfAbsent(fill, value -> color.deriveColor(0, 1, 1, value));
+        }
+
         void draw(GraphicsContext g, double x, double y, double width, double height, double fill) {
             g.setStroke(color);
-            g.setFill(color.deriveColor(0, 1, 1, pattern == Pattern.HOLLOW ? 0 : fill));
+            g.setFill(pattern == Pattern.HOLLOW ? Color.TRANSPARENT : translucent(fill));
             g.fillRect(x, y, width, height);
             g.strokeRect(x + .5, y + .5, width - 1, height - 1);
             if (pattern == Pattern.STRIPES || pattern == Pattern.DOTS) {
-                g.setFill(Color.web("#101522"));
-                g.setStroke(Color.web("#101522"));
-                for (double at = x + 1.5; at < x + width - 1; at += 5) {
+                g.setFill(PATTERN_INK);
+                g.setStroke(PATTERN_INK);
+                // Only the visible part of a long note needs its pattern.
+                double first = x + 1.5, limit = Math.min(x + width - 1, g.getCanvas().getWidth() + 5);
+                if (first < -5) first += Math.floor((-5 - first) / 5) * 5;
+                for (double at = first; at < limit; at += 5) {
                     if (pattern == Pattern.DOTS) g.fillRect(at, y + height / 2 - 1, 2, 2);
                     else g.strokeLine(at, y + height - 1, Math.min(at + 2, x + width - 1), y + 1);
                 }

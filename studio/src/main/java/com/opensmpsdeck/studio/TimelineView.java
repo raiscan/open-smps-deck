@@ -14,6 +14,20 @@ import java.util.function.*;
 final class TimelineView extends ViewportCanvas {
     static final int GUTTER=104, RULER=40, ROW=52;
     static final List<String> LANES=List.of("FM1","FM2","FM3","FM4","FM5","PSG1","PSG2","PSG3","DAC");
+    private static final Font FONT=Font.font("System",13);
+    private static final Color BACKGROUND=Color.web("#101722"), EVEN_ROW=Color.web("#141d2a"), ODD_ROW=Color.web("#111a26"),
+            ROW_LINE=Color.web("#243043"), BAR_LINE=Color.web("#344257"), BEAT_LINE=Color.web("#233043"),
+            BAR_LABEL=Color.web("#d1dbe8"), BEAT_LABEL=Color.web("#6f8198"), GROUP_SHADE=Color.web("#171426",.94),
+            GROUP_EDGE=Color.web("#9476ca"), LOOP=Color.web("#ffcb77", .12), PLAYHEAD=Color.web("#ffcb77"),
+            GUTTER_FILL=Color.web("#172130"), GUTTER_LABEL=Color.web("#74869d"), LANE_ACTIVE=Color.web("#d8f7ee"),
+            LANE_LABEL=Color.web("#94a6bc"), SOLO=Color.web("#5cddbc"), MUTE=Color.web("#ffcb77"),
+            GROUP_LINE_ACTIVE=Color.web("#e1d6ff"), GROUP_LINE=Color.web("#9c80dc"), GROUP_CHILD=Color.web("#8060b9", .38),
+            GROUP_CHILD_LINE=Color.web("#bda1f5", .78), GROUP_HEADER_ACTIVE=Color.web("#654695"), GROUP_HEADER=Color.web("#493769"),
+            GROUP_REPEAT=Color.web("#bda1f5",.60), GROUP_TITLE=Color.web("#f1eaff"), AGENT_NOTE=Color.web("#b4a1ff"),
+            HUMAN_NOTE=Color.web("#ffcb77"), DAC_FILL=Color.web("#634731"), FM_FILL=Color.web("#245f58"), PSG_FILL=Color.web("#284d79"),
+            ACTIVE_EDGE=Color.web("#d9fff0"), DAC_EDGE=Color.web("#e7ab69"), FM_EDGE=Color.web("#48bca1"), PSG_EDGE=Color.web("#6399db"),
+            REPEAT_LINE=Color.web("#89d7cf",0.4), TRIGGER=Color.web("#ffcf95"), FM_NOTE=Color.web("#9ef0d7",0.65),
+            PSG_NOTE=Color.web("#b5d4ff",0.65), CLIP_TITLE=Color.web("#e5f8f4"), HANDLE=Color.web("#d4f3ef",0.7);
     StudioProject project;
     String selected;
     String selectedLane="FM1";
@@ -326,44 +340,43 @@ final class TimelineView extends ViewportCanvas {
         double top = block.top(), bottom = RULER+(block.lastRow+1)*ROW-5;
         double header = 22;
         boolean active = selectedIds.contains(item.id());
-        Color line = Color.web(active ? "#e1d6ff" : "#9c80dc");
-        g.save();
-        g.beginPath(); g.rect(left,top,right-left,bottom-top); g.clip();
+        Color line = active ? GROUP_LINE_ACTIVE : GROUP_LINE;
+        g.setFill(GROUP_CHILD);
+        g.setStroke(GROUP_CHILD_LINE);
         for (Clip child : block.content) {
-            double a = tickX((long)child.startTick()+item.startTick()-block.item.startTick());
-            double b = Math.min(end,a+child.lengthTicks()*scale);
-            if (b <= left || a >= right) continue;
+            double a = Math.max(left, tickX((long)child.startTick()+item.startTick()-block.item.startTick()));
+            double b = Math.min(Math.min(end, right), tickX((long)child.startTick()+item.startTick()-block.item.startTick())+child.lengthTicks()*scale);
+            if (b <= a) continue;
             double y = RULER+LANES.indexOf(child.lane())*ROW;
-            g.setFill(Color.web("#8060b9", .38));
             g.fillRect(a,y+8,b-a,ROW-16);
-            g.setStroke(Color.web("#bda1f5", .78));
             g.strokeLine(a,y+ROW-11,b,y+ROW-11);
         }
-        g.setFill(Color.web(active ? "#654695" : "#493769"));
+        g.setFill(active ? GROUP_HEADER_ACTIVE : GROUP_HEADER);
         g.fillRect(left,top,right-left,header);
         g.setStroke(line);
         g.strokeRect(x+.5,top+.5,end-x-1,bottom-top-1);
         double period = block.source.lengthTicks()*scale;
         double first = Math.max(1,Math.ceil((left-x)/period));
-        g.setStroke(Color.web("#bda1f5",.60));
+        g.setStroke(GROUP_REPEAT);
         for (double boundary=x+first*period; boundary<right; boundary+=period)
             g.strokeLine(boundary,top,boundary,bottom);
-        g.setFill(Color.web("#f1eaff"));
-        g.fillText(block.source.name(),left+8,top+15,Math.max(1,right-left-17));
-        g.setFill(line);
-        g.fillRoundRect(end-6,top+5,2,12,2,2);
-        g.restore();
+        g.setFill(GROUP_TITLE);
+        g.fillText(CanvasText.fit(block.source.name(),FONT,right-left-17),left+8,top+15);
+        if (end-6 < right) {
+            g.setFill(line);
+            g.fillRoundRect(end-6,top+5,2,12,2,2);
+        }
     }
-    @Override void draw() {
+    @Override void paint() {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
-        g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
+        g.setFill(BACKGROUND); g.fillRect(0,0,w,canvas.getHeight());
         var shownLoop = loopDrag == null ? loop : loopDrag;
         referenceLane.viewport(w, offset, scale * ticksPerSecond(), ReviewTransport.secondsAt(readOnly ? null : project, playhead), shownLoop);
         if(project==null) return;
-        g.setFont(Font.font("System",13));
+        g.setFont(FONT);
         for(int row=0;row<LANES.size();row++) {
-            g.setFill(Color.web(row%2==0?"#141d2a":"#111a26")); g.fillRect(0,RULER+row*ROW,w,ROW);
-            g.setStroke(Color.web("#243043")); g.strokeLine(0,RULER+(row+1)*ROW,w,RULER+(row+1)*ROW);
+            g.setFill(row%2==0?EVEN_ROW:ODD_ROW); g.fillRect(0,RULER+row*ROW,w,ROW);
+            g.setStroke(ROW_LINE); g.strokeLine(0,RULER+(row+1)*ROW,w,RULER+(row+1)*ROW);
         }
         int beat=project.ticksPerBeat(); long first=Math.max(0,(long)Math.floor(offset/(beat*scale)));
         long last=(long)Math.ceil((offset+w)/(beat*scale));
@@ -371,8 +384,8 @@ final class TimelineView extends ViewportCanvas {
             double x=GUTTER+(double)b*beat*scale-offset;
             if(x<GUTTER) continue;
             boolean bar=readOnly||b%4==0;
-            g.setStroke(Color.web(bar?"#344257":"#233043")); g.strokeLine(x,RULER,x,canvas.getHeight());
-            g.setFill(Color.web(bar?"#d1dbe8":"#6f8198"));
+            g.setStroke(bar?BAR_LINE:BEAT_LINE); g.strokeLine(x,RULER,x,canvas.getHeight());
+            g.setFill(bar?BAR_LABEL:BEAT_LABEL);
             g.fillText(readOnly?b+" s":bar?String.valueOf(b/4+1):"·",x+6,24);
         }
         if (parentId != null) {
@@ -382,38 +395,38 @@ final class TimelineView extends ViewportCanvas {
             double x = Math.max(GUTTER,tickX(0));
             double end = Math.min(w,tickX(GroupArrangement.source(project,parentId).lengthTicks()));
             if (end > x) {
-                g.setFill(Color.web("#171426",.94)); g.fillRect(x,RULER,end-x,canvas.getHeight()-RULER);
-                g.setStroke(Color.web("#9476ca")); g.strokeLine(x,RULER,x,canvas.getHeight());
+                g.setFill(GROUP_SHADE); g.fillRect(x,RULER,end-x,canvas.getHeight()-RULER);
+                g.setStroke(GROUP_EDGE); g.strokeLine(x,RULER,x,canvas.getHeight());
                 g.strokeLine(end,RULER,end,canvas.getHeight());
             }
         }
         for (Clip clip : clips) drawClip(g,ghost instanceof Clip moved && clip.id().equals(moved.id()) ? moved : clip,origin,true);
         for (var block : blocks.values()) drawGroup(g,block);
         if (shownLoop != null) {
-            g.setFill(Color.web("#ffcb77", .12));
+            g.setFill(LOOP);
             g.fillRect(reviewX(shownLoop.start()), 0, reviewX(shownLoop.end()) - reviewX(shownLoop.start()), canvas.getHeight());
         }
         for (var note : reviewNotes) drawReviewMarker(g, note);
         if(playhead>=0) {
             double x=GUTTER+playhead*scale-offset;
-            if(x>=GUTTER) { g.setStroke(Color.web("#ffcb77")); g.strokeLine(x,RULER,x,canvas.getHeight()); }
+            if(x>=GUTTER) { g.setStroke(PLAYHEAD); g.strokeLine(x,RULER,x,canvas.getHeight()); }
         }
-        g.setFill(Color.web("#172130")); g.fillRect(0,0,GUTTER,canvas.getHeight());
-        g.setFill(Color.web("#74869d")); g.fillText("CHANNEL",14,24);
+        g.setFill(GUTTER_FILL); g.fillRect(0,0,GUTTER,canvas.getHeight());
+        g.setFill(GUTTER_LABEL); g.fillText("CHANNEL",14,24);
         for(int row=0;row<LANES.size();row++) {
-            g.setFill(Color.web(LANES.get(row).equals(selectedLane)?"#d8f7ee":"#94a6bc"));
+            g.setFill(LANES.get(row).equals(selectedLane)?LANE_ACTIVE:LANE_LABEL);
             g.fillText(LANES.get(row),16,RULER+row*ROW+29);
             String lane = LANES.get(row);
-            g.setFill(Color.web(monitor.soloed(lane) ? "#5cddbc" : "#74869d"));
+            g.setFill(monitor.soloed(lane) ? SOLO : GUTTER_LABEL);
             g.fillText("S", 59, RULER + row * ROW + 29);
-            g.setFill(Color.web(monitor.muted(lane) ? "#ffcb77" : "#74869d"));
+            g.setFill(monitor.muted(lane) ? MUTE : GUTTER_LABEL);
             g.fillText("M", 82, RULER + row * ROW + 29);
         }
     }
     private void drawReviewMarker(GraphicsContext g, ReviewNote note) {
         double x = reviewX(note.startSeconds());
         if (x < GUTTER || x > canvas.getWidth()) return;
-        Color color = Color.web("agent".equalsIgnoreCase(note.author()) ? "#b4a1ff" : "#ffcb77");
+        Color color = "agent".equalsIgnoreCase(note.author()) ? AGENT_NOTE : HUMAN_NOTE;
         g.setFill(color);
         g.fillPolygon(new double[]{x - 5, x + 5, x}, new double[]{29, 29, 39}, 3);
         int row = LANES.indexOf(note.laneId() == null ? "" : note.laneId());
@@ -429,38 +442,47 @@ final class TimelineView extends ViewportCanvas {
 
     private void drawClip(GraphicsContext g,Clip c,long base,boolean interactive) {
         Sequence source=sequence(c.sequenceId()); if(source==null) return;
+        double w=canvas.getWidth();
         double x=GUTTER+(base+c.startTick())*scale-offset, width=c.lengthTicks()*scale;
         double y=RULER+LANES.indexOf(c.lane())*ROW+6;
-        if(x+width<GUTTER || x>canvas.getWidth()) return;
+        if(x+width<GUTTER || x>w) return;
         boolean dac=source.type().equals("DAC");
         boolean fm=source.type().equals("FM");
-        Color fill=Color.web(dac?"#634731":fm?"#245f58":"#284d79");
-        g.setFill(fill); g.fillRoundRect(x,y,width,ROW-12,7,7);
+        g.setFill(dac?DAC_FILL:fm?FM_FILL:PSG_FILL); g.fillRoundRect(x,y,width,ROW-12,7,7);
         boolean active=interactive && (selectedIds.contains(c.id()) || c.id().equals(selected));
-        g.setStroke(Color.web(active?"#d9fff0":dac?"#e7ab69":fm?"#48bca1":"#6399db"));
+        g.setStroke(active?ACTIVE_EDGE:dac?DAC_EDGE:fm?FM_EDGE:PSG_EDGE);
         g.setLineWidth(active?2:1); g.strokeRoundRect(x+1,y+1,width-2,ROW-14,6,6); g.setLineWidth(1);
-        g.save(); g.beginPath(); g.rect(Math.max(GUTTER,x)+3,y+2,Math.max(0,Math.min(x+width,canvas.getWidth())-Math.max(GUTTER,x)-6),ROW-16); g.clip();
-        int firstRepeat=Math.max(0,(int)((offset-GUTTER-(base+c.startTick())*scale)/(source.lengthTicks()*scale)));
-        for(int repeat=firstRepeat;(long)repeat*source.lengthTicks()<c.lengthTicks();repeat++) {
-            double origin=x+(double)repeat*source.lengthTicks()*scale; if(origin>canvas.getWidth()) break;
-            if(repeat>0) { g.setStroke(Color.web("#89d7cf",0.4)); g.strokeLine(origin,y+4,origin,y+ROW-16); }
-            if(dac){
-                g.setStroke(Color.web("#ffcf95"));
-                for(SampleTrigger trigger:source.triggers()){
-                    double hitX=origin+trigger.tick()*scale;
-                    if(hitX>=GUTTER&&hitX<x+width&&hitX<=canvas.getWidth()) g.strokeLine(hitX,y+23,hitX,y+33);
+        // The clip's inner area. Contents are clamped to it rather than clipped.
+        double innerLeft=Math.max(GUTTER,x)+3, innerRight=Math.min(x+width,w)-3;
+        if (innerRight > innerLeft) {
+            long period=Math.max(1,source.lengthTicks());
+            int firstRepeat=Math.max(0,(int)((offset-GUTTER-(base+c.startTick())*scale)/(period*scale)));
+            g.setStroke(fm?FM_NOTE:PSG_NOTE);
+            for(int repeat=firstRepeat;(long)repeat*period<c.lengthTicks();repeat++) {
+                double origin=x+(double)repeat*period*scale; if(origin>innerRight) break;
+                if(repeat>0 && origin>=innerLeft) { g.setStroke(REPEAT_LINE); g.strokeLine(origin,y+4,origin,y+ROW-16); }
+                if(dac){
+                    g.setStroke(TRIGGER);
+                    for(SampleTrigger trigger:source.triggers()){
+                        double hitX=origin+trigger.tick()*scale;
+                        if(hitX>=innerLeft&&hitX<=innerRight) g.strokeLine(hitX,y+23,hitX,y+33);
+                    }
+                }
+                g.setStroke(fm?FM_NOTE:PSG_NOTE);
+                double repeatEnd=Math.min(innerRight,x+width-3);
+                for(NoteEvent note:source.notes()) {
+                    double noteX=origin+note.tick()*scale;
+                    if(noteX>=x+width || noteX>innerRight) continue;
+                    double start=Math.max(noteX,innerLeft), end=Math.min(repeatEnd,noteX+note.duration()*scale-2);
+                    if(end<start) continue;
+                    double noteY=y+31-(note.pitch()%24)*0.6;
+                    g.strokeLine(start,noteY,end,noteY);
                 }
             }
-            for(NoteEvent note:source.notes()) {
-                double noteX=origin+note.tick()*scale;
-                if(noteX>=x+width) continue;
-                g.setStroke(Color.web(source.type().equals("FM")?"#9ef0d7":"#b5d4ff",0.65));
-                double noteY=y+31-(note.pitch()%24)*0.6;
-                g.strokeLine(noteX,noteY,Math.min(x+width-3,noteX+note.duration()*scale-2),noteY);
-            }
+            double titleX=Math.max(x+8,GUTTER+8);
+            g.setFill(CLIP_TITLE); g.setFont(FONT);
+            g.fillText(CanvasText.fit(source.name(),FONT,innerRight-titleX),titleX,y+15);
         }
-        g.setFill(Color.web("#e5f8f4")); g.setFont(Font.font("System",13)); g.fillText(source.name(),Math.max(x+8,GUTTER+8),y+15);
-        g.restore();
-        if(interactive && !readOnly){g.setFill(Color.web("#d4f3ef",0.7)); g.fillRoundRect(x+width-6,y+12,2,16,2,2);}
+        if(interactive && !readOnly && x+width-6<w){g.setFill(HANDLE); g.fillRoundRect(x+width-6,y+12,2,16,2,2);}
     }
 }

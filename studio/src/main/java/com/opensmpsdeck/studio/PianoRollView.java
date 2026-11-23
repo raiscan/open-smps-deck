@@ -210,40 +210,50 @@ final class PianoRollView extends ViewportCanvas {
         double tick=(x-KEYBOARD+offset)/scale; int pitch=pitchAt(y);
         return sequence.notes().stream().filter(n->n.pitch()==pitch&&tick>=n.tick()&&tick<n.tick()+n.duration()).findFirst().orElse(null);
     }
-    @Override void draw() {
+    private static final Font FONT=Font.font("System",12);
+    private static final Color BACKGROUND=Color.web("#101722"), BLACK_KEY=Color.web("#121b28"), WHITE_KEY=Color.web("#1a2534"),
+            OCTAVE_LINE=Color.web("#344356"), ROW_LINE=Color.web("#202c3b"), BAR_LINE=Color.web("#415169"),
+            BEAT_LINE=Color.web("#2a374a"), BEAT_LABEL=Color.web("#8fa2bb"), SELECTED=Color.web("#b7f7df"),
+            NOTE=Color.web("#57bfa6"), COMMAND_LINE=Color.web("#ffcb77",.25), COMMAND=Color.web("#ffcb77"),
+            KEYBOARD_FILL=Color.web("#172130"), OCTAVE_LABEL=Color.web("#aabbd0"), PITCH_LABEL=Color.web("#8396ad");
+    private static final String[] NAMES={"C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"};
+
+    @Override void paint() {
         GraphicsContext g=canvas.getGraphicsContext2D(); double w=canvas.getWidth();
-        g.setFill(Color.web("#101722")); g.fillRect(0,0,w,canvas.getHeight());
-        g.setFont(Font.font("System",12));
+        g.setFill(BACKGROUND); g.fillRect(0,0,w,canvas.getHeight());
+        g.setFont(FONT);
         for(int pitch=topPitch;pitch>=bottomPitch;pitch--) {
             double y=HEADER+(topPitch-pitch)*NOTE_ROW; boolean black=switch(pitch%12){case 1,3,6,8,10->true;default->false;};
-            g.setFill(Color.web(black?"#121b28":"#1a2534")); g.fillRect(0,y,w,NOTE_ROW);
-            g.setStroke(Color.web(pitch%12==0?"#344356":"#202c3b")); g.strokeLine(0,y,w,y);
+            g.setFill(black?BLACK_KEY:WHITE_KEY); g.fillRect(0,y,w,NOTE_ROW);
+            g.setStroke(pitch%12==0?OCTAVE_LINE:ROW_LINE); g.strokeLine(0,y,w,y);
         }
         if(sequence!=null) {
             long first=Math.max(0,(long)(offset/(ticksPerBeat*scale)));
             long last=Math.min((long)sequence.lengthTicks()/ticksPerBeat,(long)Math.ceil((offset+w)/(ticksPerBeat*scale)));
             for(long b=first;b<=last;b++) {
                 double x=KEYBOARD+(double)b*ticksPerBeat*scale-offset; if(x>w)break; if(x<KEYBOARD)continue;
-                g.setStroke(Color.web(b%4==0?"#415169":"#2a374a")); g.strokeLine(x,HEADER,x,canvas.getHeight());
-                g.setFill(Color.web("#8fa2bb")); g.fillText(readOnly?b+" s":String.valueOf(b+1),x+5,17);
+                g.setStroke(b%4==0?BAR_LINE:BEAT_LINE); g.strokeLine(x,HEADER,x,canvas.getHeight());
+                g.setFill(BEAT_LABEL); g.fillText(readOnly?b+" s":String.valueOf(b+1),x+5,17);
             }
             for(NoteEvent n:sequence.notes()) {
                 NoteEvent note=ghost!=null&&ghost.id().equals(n.id())?ghost:n;
                 var shape = noteBounds(note);
-                g.setFill(Color.web(selected(note.id())?"#b7f7df":"#57bfa6"));
+                if (shape.getMaxX() < KEYBOARD || shape.getMinX() > w) continue;
+                g.setFill(selected(note.id())?SELECTED:NOTE);
                 g.fillRoundRect(shape.getMinX(), shape.getMinY(), shape.getWidth(), shape.getHeight(), 3, 3);
             }
         }
         if(sequence!=null)for(var command:sequence.commands()){
             double x=KEYBOARD+command.tick()*scale-offset;if(x<KEYBOARD||x>w)continue;
-            g.setStroke(Color.web("#ffcb77",.25));g.strokeLine(x,HEADER,x,canvas.getHeight());
-            g.setFill(Color.web("#ffcb77"));g.fillOval(x-3,HEADER+1,6,6);
+            g.setStroke(COMMAND_LINE);g.strokeLine(x,HEADER,x,canvas.getHeight());
+            g.setFill(COMMAND);g.fillOval(x-3,HEADER+1,6,6);
         }
-        g.setFill(Color.web("#172130")); g.fillRect(0,0,KEYBOARD,canvas.getHeight());
+        g.setFill(KEYBOARD_FILL); g.fillRect(0,0,KEYBOARD,canvas.getHeight());
+        g.setFill(OCTAVE_LABEL);
         for(int pitch=topPitch;pitch>=bottomPitch;pitch--) {
-            if(pitch%12==0) {g.setFill(Color.web("#aabbd0"));g.fillText(noteName(pitch),10,HEADER+(topPitch-pitch)*NOTE_ROW+10);}
+            if(pitch%12==0) g.fillText(noteName(pitch),10,HEADER+(topPitch-pitch)*NOTE_ROW+10);
         }
-        g.setFill(Color.web("#8396ad"));g.fillText("PITCH",8,17);
+        g.setFill(PITCH_LABEL);g.fillText("PITCH",8,17);
     }
-    static String noteName(int midi) {return new String[]{"C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","B"}[midi%12]+(midi/12-1);}
+    static String noteName(int midi) {return NAMES[midi%12]+(midi/12-1);}
 }
