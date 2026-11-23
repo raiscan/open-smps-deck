@@ -22,10 +22,15 @@ final class VoicePatchShortlist {
     private static final int ATTACK_TICKS = 7;
     private static final int PROBE_LIMIT = 5;
     private static final int SHORTLIST_LIMIT = 18;
+    private static final int TYPICAL_LIMIT = 9;
     private static final int CACHE_LIMIT = 24_000;
+    private static final double VOLUME_STEP_DB = .75;
+    // Compare in 3 dB steps down to -36 dB so equal-level probes share templates.
+    private static final int LEVEL_STEPS = 4;
+    private static final int MAX_LEVEL_STEPS = 12;
 
     record RankedPatch(String id, double score) {}
-    private record Key(String asset, int pitch, TargetGame target) {}
+    private record Key(String asset, int pitch, TargetGame target, int volume) {}
     private record Audibility(double peak, double tailRms) {}
     private record LowProbe(int pitch, LowRegisterSpectrum.Profile profile) {}
     private record Probe(int pitch, float[] target, float[] weights, double exposure) {}
@@ -111,23 +116,12 @@ final class VoicePatchShortlist {
         }).thenComparing(Comparator.comparingInt((ReconstructionAllocation.Entry n) ->
                 Math.min(foreground ? 18 : ATTACK_TICKS, n.endTick() - n.startTick())).reversed())
                 .thenComparingInt(n -> foreground ? -n.note().velocity() : 0));
+        var durations = new java.util.HashMap<Path, Long>();
         var chosen = new ArrayList<ReconstructionAllocation.Entry>();
         var probes = new ArrayList<Probe>();
-        var durations = new java.util.HashMap<Path, Long>();
         for (var note : available) {
-            if (chosen.stream().anyMatch(n -> Math.abs(n.startTick() - note.startTick()) < 25)) continue;
-            if (chosen.stream().filter(n -> n.note().pitch() == note.note().pitch()).count() >= 2) continue;
-            Path path = stems.getOrDefault(note.note().part(), mix);
-            Long end = durations.get(path);
-            if (end == null) {
-                end = ReferenceAudio.durationMicros(path);
-                durations.put(path, end);
-            }
-            var probe = probe(path, end, note, foreground);
-            if (probe == null) continue;
-            chosen.add(note);
-            probes.add(probe);
             if (probes.size() == PROBE_LIMIT) break;
+            addProbe(note, chosen, probes, durations, mix, stems, foreground);
         }
         var ranked = new ArrayList<RankedPatch>();
         var availableVariants = probes.isEmpty() && prior == null && sustain == null
@@ -137,6 +131,21 @@ final class VoicePatchShortlist {
         if (sustain != null && incumbent != null && !variants.contains(incumbent))
             ranked.add(rank(incumbent, probes));
         var shortlist = shortlist(ranked, prior, SHORTLIST_LIMIT, sustain);
+        // The clearest attacks favour long notes and can all come from one
+        // passage. Also admit the patches that best explain an attack from
+        // each stretch of the part, and let the contextual fit decide.
+        var typical = new ArrayList<ReconstructionAllocation.Entry>();
+        var typicalProbes = new ArrayList<Probe>();
+        for (var stretch : stretches(available, PROBE_LIMIT)) {
+            for (var note : stretch)
+                if (addProbe(note, typical, typicalProbes, durations, mix, stems, foreground)) break;
+        }
+        if (!probes.isEmpty() && !typicalProbes.isEmpty() && !new HashSet<>(typical).equals(new HashSet<>(chosen))) {
+            var spread = new ArrayList<RankedPatch>();
+            for (var variant : variants) spread.add(rank(variant, typicalProbes));
+            for (var patch : shortlist(spread, prior, TYPICAL_LIMIT, sustain))
+                if (shortlist.stream().noneMatch(kept -> kept.id().equals(patch.id()))) shortlist.add(patch);
+        }
         if (incumbent != null && (prior == null || eligible(incumbent, prior))
                 && (sustain == null || sustain.loss(incumbent.id()) == 0)
                 && shortlist.stream().noneMatch(patch -> patch.id().equals(incumbent.id()))) {
@@ -144,6 +153,38 @@ final class VoicePatchShortlist {
             shortlist.add(rank(incumbent, probes));
         }
         return List.copyOf(shortlist);
+    }
+
+    /** Splits quality-ordered notes into equal runs of the timeline, each kept in quality order. */
+    static <T extends ReconstructionAllocation.Entry> List<List<T>> stretches(List<T> ordered, int count) {
+        var byTime = ordered.stream().sorted(Comparator.comparingInt(ReconstructionAllocation.Entry::startTick)).toList();
+        var rank = new java.util.IdentityHashMap<T, Integer>();
+        for (int i = 0; i < ordered.size(); i++) rank.put(ordered.get(i), i);
+        var result = new ArrayList<List<T>>();
+        for (int i = 0; i < count; i++) {
+            var stretch = new ArrayList<>(byTime.subList(i * byTime.size() / count, (i + 1) * byTime.size() / count));
+            stretch.sort(Comparator.comparingInt(rank::get));
+            if (!stretch.isEmpty()) result.add(stretch);
+        }
+        return result;
+    }
+
+    private boolean addProbe(ReconstructionAllocation.Entry note, List<ReconstructionAllocation.Entry> chosen,
+                             List<Probe> probes, Map<Path, Long> durations, Path mix, Map<Integer, Path> stems,
+                             boolean foreground) throws IOException {
+        if (chosen.stream().anyMatch(n -> Math.abs(n.startTick() - note.startTick()) < 25)) return false;
+        if (chosen.stream().filter(n -> n.note().pitch() == note.note().pitch()).count() >= 2) return false;
+        Path path = stems.getOrDefault(note.note().part(), mix);
+        Long end = durations.get(path);
+        if (end == null) {
+            end = ReferenceAudio.durationMicros(path);
+            durations.put(path, end);
+        }
+        var probe = probe(path, end, note, foreground);
+        if (probe == null) return false;
+        chosen.add(note);
+        probes.add(probe);
+        return true;
     }
 
     /**
@@ -199,12 +240,13 @@ final class VoicePatchShortlist {
             var variant = catalogue.match(candidates.get(i).id(), target).variant();
             var profiles = new java.util.HashMap<Integer, VoiceSpectralBalance.Profile>();
             for (var probe : probes) {
-                double loss = probe.shape().distance(template(variant, probe.pitch()).attack());
+                int volume = writtenVolume(variant, probe.pitch(), probe.shape().peak());
+                double loss = probe.shape().distance(template(variant, probe.pitch(), volume).attack());
                 if (probe.spectrum() != null) {
-                    var stock = profiles.get(probe.pitch());
+                    var stock = profiles.get(probe.pitch() << 8 | volume);
                     if (stock == null) {
-                        stock = spectralProbe(variant, probe.pitch());
-                        profiles.put(probe.pitch(), stock);
+                        stock = spectralProbe(variant, probe.pitch(), volume);
+                        profiles.put(probe.pitch() << 8 | volume, stock);
                     }
                     loss += .012 * probe.spectrum().distance(stock) + .025 * probe.spectrum().excess(stock);
                 }
@@ -219,8 +261,27 @@ final class VoicePatchShortlist {
         return List.copyOf(result);
     }
 
-    private VoiceSpectralBalance.Profile spectralProbe(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
-        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, 3, true, target);
+    /**
+     * The track volume at which this patch reaches the level of the stem's
+     * attack. Several carriers at full volume clip the channel, so a quiet
+     * part must be compared with the patch as it will be written.
+     */
+    int writtenVolume(InstrumentCatalogue.Variant variant, int pitch, double stemPeak) throws IOException {
+        int volume = 127;
+        // Clipping hides the true level difference, so measure again from the lower volume.
+        for (int pass = 0; pass < 3; pass++) {
+            double peak = template(variant, pitch, volume).attack().peak();
+            if (peak <= 0 || stemPeak <= 0) break;
+            int steps = (int) Math.round(-20 * Math.log10(stemPeak / peak) / VOLUME_STEP_DB / LEVEL_STEPS);
+            int next = Math.clamp(volume - LEVEL_STEPS * steps, 127 - LEVEL_STEPS * MAX_LEVEL_STEPS, 127);
+            if (next == volume) break;
+            volume = next;
+        }
+        return volume;
+    }
+
+    private VoiceSpectralBalance.Profile spectralProbe(InstrumentCatalogue.Variant variant, int pitch, int volume) throws IOException {
+        var project = CataloguePlayback.leveledProbe(catalogue, variant.id(), pitch, 3, target, volume);
         var mono = new float[3 * S3kRenderer.STEREO_FRAMES_PER_PRESENTATION];
         int[] offset = {0};
         TargetPlayback.prepare(project).render(3, pcm -> {
@@ -302,7 +363,7 @@ final class VoicePatchShortlist {
         var labels = InstrumentCatalogue.labels(catalogue.asset(variant.assetId()));
         if (labels.stream().anyMatch(label -> label.text().equals("Silent Bass")
                 || prior.sustained && label.text().equals("Wood Block"))) return false;
-        var key = new Key(variant.assetId(), prior.pitch, target);
+        var key = new Key(variant.assetId(), prior.pitch, target, 127);
         var probe = audibility.get(key);
         if (probe == null) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("patch screening cancelled");
@@ -385,10 +446,14 @@ final class VoicePatchShortlist {
     }
 
     private Template template(InstrumentCatalogue.Variant variant, int pitch) throws IOException {
-        var key = new Key(variant.assetId(), pitch, target);
+        return template(variant, pitch, 127);
+    }
+
+    private Template template(InstrumentCatalogue.Variant variant, int pitch, int volume) throws IOException {
+        var key = new Key(variant.assetId(), pitch, target, volume);
         var cached = TEMPLATES.get(key);
         if (cached != null) return cached;
-        var project = CataloguePlayback.matchProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, true, target);
+        var project = CataloguePlayback.leveledProbe(catalogue, variant.id(), pitch, ATTACK_TICKS, target, volume);
         var rendered = VoiceWindows.renderMono(project, ATTACK_TICKS);
         var features = new Template(spectra.average(rendered),
                 pitch <= LowRegisterSpectrum.MAX_PITCH ? lowSpectrum.profile(rendered, pitch) : null,

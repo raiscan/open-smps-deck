@@ -58,19 +58,25 @@ public final class CataloguePlayback {
 
     static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
                                     boolean rawAsset, TargetGame target) {
-        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, target, 180);
+        return matchProbe(catalogue, id, midi, gateTicks, rawAsset, target, 180, 127);
+    }
+
+    /** A raw-asset probe written at a track volume below full, as a quiet part would play it. */
+    static StudioProject leveledProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
+                                      TargetGame target, int volume) {
+        return matchProbe(catalogue, id, midi, gateTicks, true, target, 180, volume);
     }
 
     static StudioProject heldFmProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks) {
-        return matchProbe(catalogue, id, midi, gateTicks, true, TargetGame.S3K, S3kRenderer.MAX_PRESENTATIONS);
+        return matchProbe(catalogue, id, midi, gateTicks, true, TargetGame.S3K, S3kRenderer.MAX_PRESENTATIONS, 127);
     }
 
     private static StudioProject matchProbe(InstrumentCatalogue catalogue, String id, int midi, int gateTicks,
-                                            boolean rawAsset, TargetGame target, int maxTicks) {
+                                            boolean rawAsset, TargetGame target, int maxTicks, int volume) {
         Match match = catalogue.match(id, target);
         if (target == null) target = match.variant().target();
         Recipe source = recipe(match);
-        if (rawAsset) source = new Recipe(source.rate(), null, 127, source.durationTicks(),
+        if (rawAsset) source = new Recipe(source.rate(), null, volume, source.durationTicks(),
                 null, null, List.of(), List.of());
         requirePlayable(match, source, rawAsset, target);
         if (match.asset().kind() == Kind.DAC_SAMPLE || match.asset().kind() == Kind.PSG_NOISE)
