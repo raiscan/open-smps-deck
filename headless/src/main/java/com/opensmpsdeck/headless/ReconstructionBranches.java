@@ -352,9 +352,8 @@ public final class ReconstructionBranches {
             write(main.work, updated);
             return null;
         });
-        return JSON.toJsonTree(Map.of("rebased", conflicts.isEmpty(), "branch", conflicts.isEmpty() ? updated : branch,
-                "directConflicts", conflicts, "indirectConflicts", indirect,
-                "outcomes", ReconstructionBranchDiff.outcomes(after, branch))).getAsJsonObject();
+        return report(Map.of("rebased", conflicts.isEmpty(), "branch", conflicts.isEmpty() ? updated : branch,
+                "directConflicts", conflicts, "outcomes", ReconstructionBranchDiff.outcomes(after, branch)), indirect);
     }
 
     private record Candidate(StitchPlan plan, Branch branch, Branch destination, List<Branch> originals) {}
@@ -496,9 +495,20 @@ public final class ReconstructionBranches {
             }
             return null;
         });
-        return JSON.toJsonTree(Map.of("merged", merged, "target", target, "selectedEdits", plan.selectedEdits,
-                "directConflicts", plan.directConflicts, "indirectConflicts", plan.indirectConflicts, "groups", plan.groups,
-                "outcomes", plan.outcomes, "workDir", plan.build.toString())).getAsJsonObject();
+        return report(Map.of("merged", merged, "target", target, "selectedEdits", plan.selectedEdits,
+                "directConflicts", plan.directConflicts, "groups", plan.groups,
+                "outcomes", plan.outcomes, "workDir", plan.build.toString()), plan.indirectConflicts);
+    }
+
+    private record DownstreamChange(String noteId, Range span, boolean allocation, boolean pcm) {}
+
+    private static JsonObject report(Map<String, ?> fields, List<IndirectConflict> indirect) {
+        var result = JSON.toJsonTree(fields).getAsJsonObject();
+        // Allocation and mixed PCM establish affected notes. The same candidate list applies to every note.
+        result.add("indirectCandidates", JSON.toJsonTree(indirect.isEmpty() ? List.of() : indirect.getFirst().edits()));
+        result.add("indirectConflicts", JSON.toJsonTree(indirect.stream().map(conflict -> new DownstreamChange(
+                conflict.noteId(), conflict.span(), conflict.allocation(), conflict.pcm())).toList()));
+        return result;
     }
 
     private static void checkBranch(Path work, Branch branch) throws IOException {

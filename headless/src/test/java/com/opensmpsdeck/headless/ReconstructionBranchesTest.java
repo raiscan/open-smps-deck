@@ -134,6 +134,12 @@ class ReconstructionBranchesTest {
         assertTrue(plan.directConflicts().isEmpty(), plan.directConflicts().toString());
         assertTrue(plan.indirectConflicts().stream().anyMatch(change -> change.noteId().equals(CHORD)
                 && change.allocation()), plan.indirectConflicts().toString());
+        var report = json(cli("reconstruct", "branch", "merge", work.toString(), "left", "right", "--into", "main",
+                "--dry-run"));
+        assertEquals(2, report.getAsJsonArray("indirectCandidates").size());
+        assertTrue(report.getAsJsonArray("indirectConflicts").asList().stream().map(element -> element.getAsJsonObject())
+                .anyMatch(change -> change.get("noteId").getAsString().equals(CHORD)
+                        && change.get("allocation").getAsBoolean() && !change.has("edits")));
     }
 
     private static JsonObject withSource(JsonObject edit, String group) {

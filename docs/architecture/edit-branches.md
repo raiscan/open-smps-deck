@@ -42,6 +42,8 @@ Dry runs return JSON with direct conflicts and downstream allocation or PCM
 changes. Direct conflicts block publication. Use `--allow-indirect` to
 publish after reviewing downstream changes. PCM comparison masks the gates
 of touched notes before testing for changes during untouched notes.
+CLI and MCP reports list affected notes in `indirectConflicts` and the shared
+candidate edit references once in `indirectCandidates`.
 Rebase reports per-edit outcomes and retains the old parent if main and
 the branch conflict.
 
