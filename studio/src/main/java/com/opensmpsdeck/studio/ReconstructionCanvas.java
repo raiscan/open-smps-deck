@@ -1497,18 +1497,18 @@ final class ReconstructionCanvas extends ViewportCanvas implements AutoCloseable
      * changes, and ignores shifts under 3 dB, so scrolling does not make the plot flicker.
      */
     private void fitContrast(List<ReconstructionTiles.Key> keys, boolean backdrop) {
-        var levels = new ArrayList<float[]>();
+        var histograms = new ArrayList<int[]>();
         var measuredKeys = new ArrayList<ReconstructionTiles.Key>();
         for (var key : keys) {
-            var data = tiles.levels(key);
-            if (data == null) continue;
-            levels.add(data);
+            var histogram = tiles.histogram(key);
+            if (histogram == null) continue;
+            histograms.add(histogram);
             measuredKeys.add(key);
         }
         if (measuredKeys.equals(backdrop ? backdropSignature : autoSignature)) return;
         if (backdrop) backdropSignature = measuredKeys;
         else autoSignature = measuredKeys;
-        var next = ReconstructionTiles.autoContrast(levels);
+        var next = ReconstructionTiles.autoContrastFromHistograms(histograms);
         var previous = backdrop ? backdropContrast : contrast;
         if (next == null || previous != null && Math.abs(next.ceiling() - previous.ceiling()) < 3
                 && Math.abs(next.floor() - previous.floor()) < 3) return;
