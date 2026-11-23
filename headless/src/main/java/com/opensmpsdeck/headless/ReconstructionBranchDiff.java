@@ -275,7 +275,8 @@ final class ReconstructionBranchDiff {
     }
 
     private static Range range(Row row) {
-        var gate = row.effectiveTiming();
+        // A deleted source note has an original span but no playback gate.
+        var gate = row.effectiveTiming() == null ? row.timing() : row.effectiveTiming();
         return new Range(gate.sourceStart(), Math.max(gate.sourceEnd(), gate.sourceStart() + 1e-6));
     }
 

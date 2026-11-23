@@ -316,8 +316,8 @@ with the song or work-folder name and a suggested next step. The **Workspace** s
   or **Assign** beside a voice to move the notes to that voice.
 - **Notes** is for editing notes on the spectrogram. The inspector follows
   the selection and includes **Note evidence** for a single note.
-- **Review** is for deciding on agent proposals, checking edit history and
-  reading the latest **Trace diff**.
+- **Review** is for comparing and stitching edit branches, deciding on agent
+  proposals, checking edit history and reading the latest **Trace diff**.
 - **Export** opens the built song in the arrangement editor or saves it as
   audio, native data or a game package.
 
@@ -458,6 +458,43 @@ plays the same span twice, built first and proposal second. **Accept** stages
 an edit for live audition or **Apply & rebuild**. Undo can bring the proposal back while it is staged.
 **Reject** removes it from the shared journal immediately. Studio picks up
 new proposals from agents while the reconstruction window is open.
+
+### Compare and stitch edit branches
+
+Open **Review → Branches** after a human or agent saves an edit branch in the
+reconstruction work directory. **Refresh** picks up new work. Select a branch
+to see its base revision, edit count and note changes by part and source time.
+Expand **Edit groups and rationale** for the author's notes. **Needs rebase**
+means main has changed since the branch was created. **Rebase branch** checks
+the branch against main and reports conflicts before updating its base.
+
+Turn on **Overlay** for any branch to mark its changes in Review, Notes and
+Roles. The branch's swatch identifies it by colour and pattern. A plus marks an
+added note, a strike-through and minus mark a removed note, and a tilde marks a
+changed note. If a pitch or gate moves, the overlay shows both positions.
+
+For an attached editable arrangement, choose **Hear branch** and use the persistent
+transport's **Chip version** selector to switch between **A · Parent**, each
+branch and a checked **Merge draft**. Start playback if it is stopped. The
+selector uses the same song, section or selection range and switches at the
+current playhead. In Original/Chip A/B, it changes the Chip side. The voice
+and lane audition modes use the built arrangement.
+
+To stitch a merge, select a branch and choose **Whole branch**, **By part**,
+**By region** or **By edit group**. For a region, click **Pick region** and
+drag a rectangle on the plot. Its horizontal span selects edits in source
+time. Each selection contributes complete journal edits. Repeat for other
+branches or groups, and remove any selection from **Merge draft**.
+
+Conflicts show the two edits side by side. Use **Hear A** and **Hear B** to
+compare the draft with one conflicting edit excluded, then **Keep A** or
+**Keep B** to retain that side. Inspect and audition any reported changes
+outside your selections before accepting them. **Apply to main** stages the
+checked merge as one Studio journal action, then saves through live Chip
+playback or rebuilds if playback is stopped. Use **Changes → Undo** or
+Ctrl/Cmd+Z to reverse the merge. With playback stopped, use **Apply &
+rebuild** to publish the undo. Keep the window open while reviewing a merge
+draft. [Branch commands for agents](../architecture/edit-branches.md)
 
 ## Review a reconstruction
 

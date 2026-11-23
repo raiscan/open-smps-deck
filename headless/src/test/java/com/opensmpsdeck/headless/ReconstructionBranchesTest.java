@@ -142,6 +142,50 @@ class ReconstructionBranchesTest {
                         && change.get("allocation").getAsBoolean() && !change.has("edits")));
     }
 
+    @Test void selectsDeletionOfSourceNoteByItsOriginalSpan(@TempDir Path dir) throws Exception {
+        var work = fixture(dir);
+        create(work, "cut", "agent fixture");
+        var deletion = json("""
+                {"id":"cut-opening","op":"deleteNote","reason":"remove the opening attack","noteId":"%s"}
+                """.formatted(FIRST));
+        edit(work, "cut", array(List.of(deletion)), List.of(), Set.of());
+
+        var selection = new Selection(Set.of(0), 0.0, 0.25, Set.of(), Set.of());
+        var plan = planStitch(work, List.of(new SourceSelection("cut", selection, Set.of())), QUIET);
+        assertEquals(1, plan.selectedEdits());
+        assertTrue(plan.directConflicts().isEmpty());
+        var deleted = ReconstructionTrace.read(plan.build()).get(FIRST);
+        assertNotNull(deleted, "The source note remains in the trace after deletion");
+        assertNull(deleted.effectiveTiming());
+    }
+
+    @Test void cancelledAuditionBuildDiscardsItsStageAndCanBeRetried(@TempDir Path dir) throws Exception {
+        var work = fixture(dir);
+        create(work, "candidate", "agent fixture");
+        edit(work, "candidate", array(List.of(velocity("level", FIRST, 45, "phrase"))), List.of(), Set.of());
+        var cache = work.resolve("edits/builds");
+        try {
+            assertThrows(java.util.concurrent.CancellationException.class, () ->
+                    build(work, "candidate", (done, total, message) -> {
+                        // Interrupt after the branch has written artifacts, before it can publish.
+                        if (done == total) Thread.currentThread().interrupt();
+                    }));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        try (var entries = Files.list(cache)) {
+            assertEquals(List.of(), entries.toList());
+        }
+        var rebuilt = build(work, "candidate");
+        assertTrue(Files.isRegularFile(rebuilt.resolve("render.wav")));
+        assertEquals(45, ReconstructionTrace.read(rebuilt).get(FIRST).score().note().velocity());
+        assertEquals(rebuilt, build(work, "candidate"));
+        try (var entries = Files.list(cache)) {
+            assertEquals(List.of(rebuilt), entries.toList());
+        }
+    }
+
     private static JsonObject withSource(JsonObject edit, String group) {
         edit.add("provenance", json("""
                 {"branch":"left","author":"agent left","group":"%s"}
