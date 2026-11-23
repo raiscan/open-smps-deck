@@ -52,6 +52,11 @@ final class ReconstructionDrums {
     private static final int[] LEGACY_TUNING = {0, -2, 2, -4, 4};
     private static final int[] STEM_TUNING = {0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6};
     private static final double AUTO_THRESHOLD = .30;
+    // Fingerprint bands are spaced a third of an octave apart from 36 Hz.
+    private static final int AIR_FROM_BAND = 12; // about 580 Hz
+    private static final int AIR_BAND = 21;      // about 4.6 kHz
+    private static final double AIR_FLOOR = .03;
+    private static final double AIR_WEIGHT = .10;
     private static final Comparator<ReconstructionVoices.Key> CLASS_ORDER =
             Comparator.comparingInt(ReconstructionVoices.Key::partId)
                     .thenComparingInt(ReconstructionVoices.Key::drumPitch);
@@ -602,10 +607,15 @@ final class ReconstructionDrums {
             for (int i = 0; i < bands.size() && 36 * Math.pow(2, i / 3.0) < cutoff / 2.0; i++)
                 lowBody += bands.get(i);
         }
+        boolean airy = stem && ReconstructionCymbals.eligible(pitch);
+        double candidateAir = airy ? air(probe.fingerprint().bands()) : 0;
         double[] distances = new double[clips.size()];
         for (int i = 0; i < distances.length; i++) {
             var clip = clips.get(i);
             var shape = clip.fingerprint().distance(comparable);
+            // Hats and cymbals: compare the air above about 4.6 kHz. The 950 Hz
+            // projection alone lets a mid-band noise burst pass as a bright hat.
+            double airError = airy ? relative(air(clip.fingerprint().bands()), candidateAir, AIR_FLOOR) : 0;
             var source = clip.features();
             var target = comparable.summary();
             double length = relative(source.sound().effectiveDurationSeconds(), target.effectiveDurationSeconds(), .02);
@@ -627,13 +637,24 @@ final class ReconstructionDrums {
                     envelope = .70 * prefixEnvelopeDistance(clip.fingerprint(), comparable) + .15 * (attack + decay);
                 }
                 distances[i] = .37 * shape.spectral() + .20 * envelope + .08 * length + .06 * centroid
-                        + .07 * noise + .16 * pitchError + .08 * attack + .14 * decay + .23 * lowBody;
+                        + .07 * noise + .16 * pitchError + .08 * attack + .14 * decay + .23 * lowBody
+                        + AIR_WEIGHT * airError;
             } else {
                 distances[i] = .48 * shape.spectral() + .25 * shape.envelope() + .1 * length + .07 * centroid
                         + .10 * noise + .15 * pitchError;
             }
         }
         return median(distances);
+    }
+
+    /** Share of the energy above about 600 Hz that lies in the top bands, from about 4.6 kHz. */
+    static double air(List<Double> bands) {
+        double high = 0, upper = 0;
+        for (int i = AIR_FROM_BAND; i < bands.size(); i++) {
+            upper += bands.get(i);
+            if (i >= AIR_BAND) high += bands.get(i);
+        }
+        return upper > 0 ? high / upper : 0;
     }
 
     private static double prefixEnvelopeDistance(AudioFingerprint source, AudioFingerprint candidate) {

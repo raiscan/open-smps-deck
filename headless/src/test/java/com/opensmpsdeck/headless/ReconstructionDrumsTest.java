@@ -600,6 +600,17 @@ class ReconstructionDrumsTest {
         assertEquals("catalogue fit", ownEvidence.get("reason").getAsString());
     }
 
+    @Test void airMeasuresTheTopBandsAgainstTheUpperSpectrum() {
+        var bands = new java.util.ArrayList<Double>(java.util.Collections.nCopies(25, 0.0));
+        for (int i = 12; i < 21; i++) bands.set(i, .1);
+        assertEquals(0, ReconstructionDrums.air(bands), 1e-12);
+        for (int i = 21; i < 25; i++) bands.set(i, .1);
+        assertEquals(4 / 13.0, ReconstructionDrums.air(bands), 1e-12);
+        // Energy below about 580 Hz does not dilute the measure.
+        bands.set(0, 5.0);
+        assertEquals(4 / 13.0, ReconstructionDrums.air(bands), 1e-12);
+    }
+
     private static void writeHits(Path wav, double[] onsets, java.util.function.DoubleFunction<Float> hit,
                                   boolean highPass) throws Exception {
         int frames = 240;
