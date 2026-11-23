@@ -14,13 +14,19 @@ final class ReconstructionDraft {
     private final EditHistory<JsonArray> history = new EditHistory<>();
     private JsonArray saved;
     private JsonArray entries;
+    private JsonArray built;
 
     ReconstructionDraft(JsonArray saved) { discard(saved); }
 
     JsonArray entries() { return entries.deepCopy(); }
     boolean pending() { return !saved.equals(entries); }
-    boolean changed(JsonElement entry) { return !saved.contains(entry); }
-    List<JsonElement> removed() { return saved.asList().stream().filter(e -> !entries.contains(e)).toList(); }
+    boolean changed(JsonElement entry) { return !built.contains(entry); }
+    boolean saved(JsonElement entry) { return saved.contains(entry); }
+    long unsavedChanges() {
+        return entries.asList().stream().filter(entry -> !saved.contains(entry)).count()
+                + saved.asList().stream().filter(entry -> !entries.contains(entry)).count();
+    }
+    List<JsonElement> removed() { return built.asList().stream().filter(e -> !entries.contains(e)).toList(); }
     boolean canUndo(boolean forward) { return history.canStep(forward); }
 
     void undo(boolean forward) { entries = history.step(entries, forward); }
@@ -36,7 +42,9 @@ final class ReconstructionDraft {
         }
     }
 
-    void applied(JsonArray published) { saved = entries = published.deepCopy(); }
+    void saved(JsonArray published) { saved = published.deepCopy(); }
+
+    void applied(JsonArray published) { built = saved = entries = published.deepCopy(); }
 
     boolean adopt(JsonArray incoming, boolean sectionsChanged) {
         if (saved.equals(incoming) && !sectionsChanged) return true;
@@ -46,8 +54,7 @@ final class ReconstructionDraft {
     }
 
     void discard(JsonArray incoming) {
-        saved = incoming.deepCopy();
-        entries = saved;
+        built = saved = entries = incoming.deepCopy();
         history.clear();
     }
 

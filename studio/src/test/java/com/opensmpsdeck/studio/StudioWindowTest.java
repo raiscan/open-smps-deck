@@ -1245,6 +1245,206 @@ class StudioWindowTest {
         return work;
     }
 
+    @Test void reconstructionMenuTransposeAndDeleteDuringLatePlaybackKeepTheAudioLine() throws Exception {
+        var work = assembledLiveFixture(4800, 6100, 7);
+        var loop = new ReviewTransport.Range(5, 7);
+        int blockInLoop = 20;
+        int projectBlock = (int) Math.round(loop.start() * 60) + blockInLoop;
+        var original = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
+        var prepared = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
+                com.opensmpsdeck.headless.ReconstructionReview.revision(work));
+        var sink = new CapturedAudio();
+        var pane = fx(() -> new ReconstructionPane(stage, work, null, () -> null, sink::open));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            var view = fx(() -> {
+                reconstructionWorkspace(scene, "detail");
+                var canvas = pane.canvas();
+                @SuppressWarnings("unchecked")
+                var hearing = (ComboBox<ReconstructionTransport.Hearing>) scene.lookup("#reconstruction-hearing");
+                hearing.setValue(ReconstructionTransport.Hearing.CHIP);
+                var note = pane.inspection().overlays().stream().filter(n -> n.sounds() && n.lane().equals("FM1"))
+                        .findFirst().orElseThrow();
+                canvas.select(note, note.lane());
+                assertTrue(note.interval().projectStart() > 2.5);
+                canvas.onRange.accept(loop);
+                canvas.canvas.requestFocus();
+                return canvas;
+            });
+            await(() -> !scene.lookup("#reconstruction-play").isDisabled());
+            fx(() -> { ((Button) scene.lookup("#reconstruction-play")).fire(); return null; });
+            await(() -> sink.blocks.size() > blockInLoop);
+            var playedBefore = sink.blocks.get(blockInLoop);
+            fx(() -> {
+                var menu = contextNote(view, view.selectedNotes().getFirst().id());
+                var transpose = (javafx.scene.control.Menu) menuItem(menu, "Transpose");
+                var up = transpose.getItems().getFirst();
+                assertEquals("+1", up.getText());
+                assertFalse(up.isDisable());
+                up.fire();
+                menu.hide();
+                view.canvas.requestFocus();
+                return null;
+            });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            var journal = com.opensmpsdeck.headless.ReconstructionReview.revision(work);
+            assertEquals("transpose", journal.entries().get(0).getAsJsonObject().get("op").getAsString());
+            var changed = prepared.prepare(journal.entries(), loop.start(), loop.end(), 5.5).playback();
+            var expected = new ArrayList<byte[]>();
+            changed.render(projectBlock + 1, samples -> expected.add(pcmBytes(samples)));
+            assertFalse(Arrays.equals(expected.get(projectBlock), playedBefore));
+            await(() -> sink.blocks.stream().anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
+            await(() -> liveStatus(scene).isEmpty());
+            assertTrue(com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().isEmpty());
+            int beforeUndo = sink.blocks.size();
+            await(() -> sink.blocks.stream().skip(beforeUndo).anyMatch(block -> Arrays.equals(block, playedBefore)));
+            int beforeRedo = sink.blocks.size();
+            fx(() -> { key(view.canvas, KeyCode.Y, true); return null; });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            await(() -> sink.blocks.stream().skip(beforeRedo).anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            fx(() -> { key(view.canvas, KeyCode.DELETE, false); return null; });
+            await(() -> liveStatus(scene).equals("Rebuild needed · This change needs a full rebuild"));
+            assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            fx(() -> {
+                assertEquals("Pending deletion", view.selectedNotes().getFirst().fate());
+                assertEquals("Stop", ((Button) scene.lookup("#reconstruction-play")).getText());
+                assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
+                return null;
+            });
+            assertEquals(1, sink.opens.get());
+            assertEquals(original, com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project());
+
+            int beforeDeleteUndo = sink.blocks.size();
+            fx(() -> { key(view.canvas, KeyCode.Z, true); return null; });
+            await(() -> liveStatus(scene).contains("Saved edits"));
+            await(() -> sink.blocks.stream().skip(beforeDeleteUndo)
+                    .anyMatch(block -> Arrays.equals(block, expected.get(projectBlock))));
+            assertEquals(journal.entries(), com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+            var external = journal.entries();
+            var entry = external.get(0).getAsJsonObject().deepCopy();
+            entry.addProperty("id", "agent-edit");
+            entry.addProperty("author", "agent");
+            external.add(entry);
+            var incoming = new JsonObject();
+            incoming.addProperty("version", 1);
+            incoming.add("edits", external);
+            var replacement = Files.writeString(work.resolve("incoming-edits.json"), incoming.toString());
+            Files.move(replacement, work.resolve("edits.json"), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            await(() -> liveStatus(scene).contains("Saved changes from disk"));
+            fx(() -> {
+                assertEquals("Play", ((Button) scene.lookup("#reconstruction-play")).getText());
+                assertFalse(scene.lookup("#reconstruction-apply").isDisabled());
+                return null;
+            });
+            assertEquals(external, com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries());
+        } finally {
+            fx(() -> { pane.stage().close(); pane.close(); return null; });
+        }
+    }
+
+    @Test void unloopedLateShortEditCanBeHeardAfterItsGateHasPassed() throws Exception {
+        var work = assembledLiveFixture(4800, 4970, 6);
+        var project = com.opensmpsdeck.headless.ReconstructionReview.arrangement(work).project();
+        var edits = new com.google.gson.JsonArray();
+        var entries = com.google.gson.JsonParser.parseString("""
+                {"id":"late","op":"transpose","reason":"fixture","noteIds":["n-0-5000000-69"],"semitones":2}
+                """);
+        edits.add(entries);
+        var preview = com.opensmpsdeck.headless.ReconstructionLivePreview.open(work,
+                com.opensmpsdeck.headless.ReconstructionReview.revision(work));
+        var prepared = preview.prepare(edits, 0, 6, 5.01);
+        var gate = prepared.changedGates(null).getFirst();
+        assertTrue(gate.start() > 2.5);
+        var expected = new ArrayList<byte[]>();
+        prepared.playback().render(360, pcm -> expected.add(pcmBytes(pcm)));
+        var block = expected.get((int) Math.round(gate.start() * 60) + 2);
+
+        var sink = new CapturedAudio();
+        try (var player = new StudioPlayback(sink::open)) {
+            var cursor = new java.util.concurrent.atomic.AtomicReference<>(0.0);
+            var transport = new ReviewTransport();
+            var stream = player.new LiveStream(() -> fail("Could not render the late edit"));
+            player.playEditable(project, transport, () -> null, message -> {}, cursor::set,
+                    new ReviewTransport.Range(0, 6), stream, null);
+            await(stream::ready);
+            assertTrue(stream.seek(gate.start()));
+            await(() -> cursor.get() >= gate.start());
+            stream.beginEdit();
+            // The renderer is deliberately late. The old note has already passed.
+            await(() -> cursor.get() >= gate.end());
+            int firstNewBlock = sink.blocks.size();
+            stream.replace(prepared, System.nanoTime(), gate.start() + .01, false);
+            await(() -> sink.blocks.stream().skip(firstNewBlock).anyMatch(bytes -> Arrays.equals(bytes, block)));
+            assertEquals(1, sink.opens.get());
+        }
+    }
+
+    private static String liveStatus(javafx.scene.Scene scene) {
+        return ((Label) scene.lookup("#reconstruction-live-status")).getText();
+    }
+
+    private Path assembledLiveFixture(int start, int end, int seconds) throws Exception {
+        var inputs = reconstructionFixture();
+        if (seconds > 2) {
+            int rate = 12_000;
+            int[] pcm = new int[seconds * rate];
+            for (int i = 0; i < pcm.length; i++) pcm[i] = (int) (22000 * Math.sin(i * 440 * Math.TAU / rate));
+            ReferenceWaveTest.wav(inputs.resolve("mix.wav"), 16, 1, rate, pcm);
+        }
+        var midi = inputs.resolve("tone.mid");
+        var sequence = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = sequence.createTrack();
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 90), start));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), end));
+        javax.sound.midi.MidiSystem.write(sequence, 0, midi.toFile());
+        var catalogue = inputs.resolve("index.json");
+        var voice = DemoProject.create().voices().getFirst();
+        var builder = new InstrumentCatalogue.Builder();
+        byte[] bytes = new byte[voice.bytes().size()];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = voice.bytes().get(i).byteValue();
+        var asset = builder.asset(InstrumentCatalogue.Kind.FM_VOICE, voice.name(), bytes);
+        builder.variant(asset, voice.name(), InstrumentCatalogue.Recipe.plain(), null);
+        builder.build().save(catalogue);
+        var work = folder.resolve("live-assembly");
+        com.opensmpsdeck.headless.ReconstructionStages.runForReview("run", new String[]{
+                midi.toString(), inputs.resolve("mix.wav").toString(), catalogue.toString(), work.toString(),
+                "--seconds", Integer.toString(seconds)}, (done, total, message) -> {});
+        return work;
+    }
+
+    private static byte[] pcmBytes(short[] samples) {
+        var out = java.nio.ByteBuffer.allocate(samples.length * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        for (short sample : samples) out.putShort(sample);
+        return out.array();
+    }
+
+    private static final class CapturedAudio {
+        final java.util.concurrent.atomic.AtomicInteger opens = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.CopyOnWriteArrayList<byte[]> blocks = new java.util.concurrent.CopyOnWriteArrayList<>();
+        long frames;
+
+        javax.sound.sampled.SourceDataLine open(javax.sound.sampled.AudioFormat format) {
+            opens.incrementAndGet();
+            return (javax.sound.sampled.SourceDataLine) java.lang.reflect.Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{javax.sound.sampled.SourceDataLine.class},
+                    (line, method, args) -> switch (method.getName()) {
+                        case "write" -> {
+                            int count = (Integer) args[2];
+                            frames += count / 4;
+                            blocks.add(Arrays.copyOf((byte[]) args[0], count));
+                            java.util.concurrent.locks.LockSupport.parkNanos(4_000_000);
+                            yield count;
+                        }
+                        case "getLongFramePosition" -> frames;
+                        default -> null;
+                    });
+        }
+    }
+
     @Test void reconstructionGesturesDraftNotesAndWatchBothJournals() throws Exception {
         Path work = reconstructionFixture();
         com.opensmpsdeck.headless.ReconstructionSections.run(work, "set", com.google.gson.JsonParser.parseString("""
@@ -1441,6 +1641,81 @@ class StudioWindowTest {
         });
     }
 
+    @Test void pianoRollCopyForAgentIncludesTheProjectAndSelectedNotes() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var note = piano.sequence.notes().getFirst();
+            var second = piano.sequence.notes().get(1);
+            for (var picked : List.of(note, second)) {
+                double x = PianoRollView.KEYBOARD + picked.tick() * piano.scale - piano.offset + 3;
+                double y = PianoRollView.HEADER + (piano.topPitch - picked.pitch()) * PianoRollView.NOTE_ROW + 5;
+                modifierClick(piano.canvas, x, y, picked.equals(second), false, false);
+            }
+            key(piano.canvas, KeyCode.C, true);
+            var clipboard = Clipboard.getSystemClipboard();
+            var text = clipboard.getString();
+            assertNotNull(text);
+            assertTrue(text.startsWith("opensmpsdeck-notes v1\n"), text);
+            assertTrue(text.contains(file.toString()), text);
+            for (var picked : List.of(note, second)) assertTrue(text.contains(picked.id()), text);
+
+            var cleared = new ClipboardContent();
+            cleared.putString("before context menu");
+            clipboard.setContent(cleared);
+            double x = PianoRollView.KEYBOARD + note.tick() * piano.scale - piano.offset + 3;
+            double y = PianoRollView.HEADER + (piano.topPitch - note.pitch()) * PianoRollView.NOTE_ROW + 5;
+            var menu = context(piano.canvas, x, y);
+            try {
+                var action = menuItem(menu, "Copy for agent");
+                assertEquals(StudioContextMenu.shortcut("C"), ((Label) action.getGraphic()).getText());
+                action.fire();
+                assertEquals(text, clipboard.getString());
+            } finally {
+                menu.hide();
+            }
+            return null;
+        });
+    }
+
+    @Test void screenshotLassoCopiesPngAndTextForOnlyTheNotesItIntersects() throws Exception {
+        fx(() -> {
+            window.showNotes();
+            window.scene().getRoot().applyCss();
+            window.scene().getRoot().layout();
+            var piano = window.piano;
+            var first = piano.sequence.notes().getFirst();
+            double x = PianoRollView.KEYBOARD + first.tick() * piano.scale - piano.offset + 2;
+            double y = PianoRollView.HEADER + (piano.topPitch - first.pitch()) * PianoRollView.NOTE_ROW + 2;
+            var box = new javafx.geometry.Rectangle2D(x, y, 10, 7);
+            assertEquals(List.of(first), piano.lassoNotes(box));
+            var toggle = (ToggleButton) window.scene().lookup("#screenshot-lasso");
+            var menu = context(piano.canvas, x, y - PianoRollView.NOTE_ROW);
+            menuItem(menu, "Screenshot lasso").fire();
+            menu.hide();
+            assertTrue(toggle.isSelected());
+            Event.fireEvent(piano.canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.L, true, true, false, false));
+            assertFalse(toggle.isSelected());
+            Event.fireEvent(piano.canvas, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.L, true, true, false, false));
+            assertTrue(toggle.isSelected());
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_PRESSED, x, y, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_DRAGGED, x + 10, y + 7, true, false, false, false);
+            modifiedMouse(piano.canvas, MouseEvent.MOUSE_RELEASED, x + 10, y + 7, false, false, false, false);
+            var clipboard = Clipboard.getSystemClipboard();
+            assertTrue(window.scene().lookup("#save-lasso-png").isVisible());
+            assertTrue(clipboard.hasImage(), clipboard.getContentTypes()::toString);
+            assertTrue(clipboard.hasString());
+            assertTrue(clipboard.hasContent(DataFormat.lookupMimeType("image/png")), clipboard.getContentTypes()::toString);
+            var text = clipboard.getString();
+            assertTrue(text.contains("lasso: "), text);
+            assertTrue(text.contains(first.id()), text);
+            assertEquals(1, text.lines().filter(line -> line.startsWith("note: ")).count());
+            return null;
+        });
+    }
+
     @Test void pianoRollTransposesWithUndoOnlyWhenTheCanvasHasFocus() throws Exception {
         fx(() -> {
             ((ListView<?>) window.scene().lookup("#sequence-browser")).getSelectionModel().select(0);
@@ -1508,6 +1783,10 @@ class StudioWindowTest {
                 var melody = (Button) scene.lookup("#reconstruction-role-melody");
                 melody.fire();
                 assertEquals(plot, scene.getFocusOwner());
+                key(plot, KeyCode.C, true);
+                var copied = javafx.scene.input.Clipboard.getSystemClipboard().getString();
+                assertTrue(copied.startsWith("opensmpsdeck-notes v1\n"), copied);
+                assertTrue(copied.contains("test-note"), copied);
                 key(plot, KeyCode.EQUALS, false);
                 var title = (Label) scene.lookup("#reconstruction-note-title");
                 assertTrue(title.getText().startsWith("A♯4"), title::getText);
@@ -1524,6 +1803,10 @@ class StudioWindowTest {
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-role-selection")).getText());
                 reconstructionWorkspace(scene, "detail");
                 assertEquals("2 notes selected", ((Label) scene.lookup("#reconstruction-selection-count")).getText());
+                key(plot, KeyCode.C, true);
+                var detailCopy = Clipboard.getSystemClipboard().getString();
+                assertTrue(detailCopy.contains("reconstruction/detail"), detailCopy);
+                assertEquals(2, detailCopy.lines().filter(line -> line.startsWith("note: ")).count());
                 key(plot, KeyCode.SUBTRACT, false);
                 var status = (Label) scene.lookup("#reconstruction-status");
                 assertTrue(status.getText().contains("skipped drums or noise (1)"), status::getText);
@@ -1964,6 +2247,260 @@ class StudioWindowTest {
     private static void middleMouse(Node plot, javafx.event.EventType<MouseEvent> type, double x, double y, boolean down) {
         Event.fireEvent(plot, new MouseEvent(type, x, y, x, y, MouseButton.MIDDLE, 1, false, false, false, false,
                 false, down, false, false, false, true, new PickResult(plot, new javafx.geometry.Point3D(x, y, 0), 0)));
+    }
+
+    @Test void deleteAndBackspaceUseTheFocusedReconstructionWorkspace() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            for (String workspace : List.of("detail", "roles")) {
+                reconstructionWorkspace(scene, workspace);
+                var plot = view.canvas;
+                double x = (plot.getWidth() + 76) / 2;
+                double y = fixtureNoteY(view);
+                for (var code : List.of(KeyCode.DELETE, KeyCode.BACK_SPACE)) {
+                    mouse(plot, MouseEvent.MOUSE_PRESSED, x, y, true);
+                    mouse(plot, MouseEvent.MOUSE_RELEASED, x, y, false);
+                    assertEquals(plot, scene.getFocusOwner());
+                    assertEquals(List.of("test-note"), view.selectedNotes().stream().map(note -> note.id()).toList(), workspace);
+                    key(plot, code, false);
+                    assertEquals("Pending deletion", view.selectedNotes().getFirst().fate());
+                    assertEquals("Deleted 1 note · Undo", ((Label) scene.lookup("#reconstruction-status")).getText());
+                    key(plot, KeyCode.Z, true);
+                    assertNotEquals("Pending deletion", view.selectedNotes().getFirst().fate());
+                }
+            }
+        });
+    }
+
+    @Test void reconstructionDeleteLeavesTextEditingAlone() throws Exception {
+        withReconstructionPlot((scene, view) -> {
+            var plot = view.canvas;
+            click(plot, (plot.getWidth() + 76) / 2, fixtureNoteY(view));
+            assertEquals("test-note", view.selectedNotes().getFirst().id());
+            var spinner = (Spinner<?>) scene.lookup("#reconstruction-velocity");
+            var text = spinner.getEditor();
+            text.requestFocus();
+            assertEquals(spinner, scene.getFocusOwner()); // JavaFX forwards spinner focus to the editor.
+            text.selectAll();
+            key(text, KeyCode.DELETE, false);
+            key(text, KeyCode.BACK_SPACE, false);
+            key(spinner, KeyCode.DELETE, false);
+            assertTrue(((Button) scene.lookup("#reconstruction-apply")).isDisabled());
+            var velocityPanel = scene.getRoot().lookupAll(".titled-pane").stream().filter(TitledPane.class::isInstance)
+                    .map(TitledPane.class::cast).filter(panel -> panel.getText().equals("Velocity")).findFirst().orElseThrow();
+            velocityPanel.setExpanded(true);
+            scene.getRoot().layout();
+            var field = (TextField) velocityPanel.lookup(".text-field");
+            field.requestFocus();
+            assertEquals(field, scene.getFocusOwner());
+            key(field, KeyCode.DELETE, false);
+            key(field, KeyCode.BACK_SPACE, false);
+            assertTrue(((Button) scene.lookup("#reconstruction-apply")).isDisabled());
+            // The tool bar is part of the note editor even when the canvas loses focus.
+            var tool = scene.lookup("#reconstruction-tool-select");
+            tool.requestFocus();
+            key(tool, KeyCode.DELETE, false);
+            assertEquals("Pending deletion", view.selectedNotes().getFirst().fate());
+        });
+    }
+
+    @Test void reconstructionMenusFollowWorkspaceAndPreserveMultiSelectionForDelete() throws Exception {
+        Path work = reconstructionFixture();
+        addFixtureDrum(work);
+        withReconstructionPlot(work, false, (scene, view) -> {
+            var plot = view.canvas;
+            var note = contextNote(view, "test-note");
+            assertEquals(List.of("Delete", "Transpose", "Split at cursor", "Merge selected", "Set velocity…",
+                    "Add bend/glide…", "Vibrato…", "Pin to lane", "Set role", "Select all in part",
+                    "Select all in bar", "Play from here", "Copy notes", "Copy for agent"), labels(note));
+            assertTrue(menuItem(note, "Merge selected").isDisable());
+            assertFalse(menuItem(note, "Split at cursor").isDisable());
+            assertAgentCopy(note, "reconstruction/detail", 1);
+            note.hide();
+
+            var empty = context(plot, 96, 98);
+            assertEquals(List.of("Insert note here", "Paste", "Play from here", "Zoom to fit", "Select all",
+                    "Screenshot lasso"), labels(empty));
+            assertTrue(menuItem(empty, "Paste").isDisable());
+            menuItem(empty, "Screenshot lasso").fire();
+            empty.hide();
+            var lasso = (ToggleButton) scene.lookup("#screenshot-lasso");
+            assertTrue(lasso.isSelected());
+            // Space-drag should pan even while the lasso is armed.
+            key(plot, KeyCode.SPACE, false);
+            mouse(plot, MouseEvent.MOUSE_PRESSED, 96, 98, true);
+            mouse(plot, MouseEvent.MOUSE_DRAGGED, 150, 125, true);
+            assertFalse(view.releaseSpace(), "Space-drag should be recorded as a pan");
+            mouse(plot, MouseEvent.MOUSE_RELEASED, 150, 125, false);
+            assertFalse(scene.lookup("#save-lasso-png").isVisible());
+            assertTrue(lasso.isSelected());
+            lasso.fire();
+
+            key(plot, KeyCode.C, true);
+            empty = context(plot, 96, 98);
+            assertFalse(menuItem(empty, "Paste").isDisable());
+            menuItem(empty, "Select all").fire();
+            empty.hide();
+            assertEquals(2, view.selectedNotes().size());
+
+            reconstructionWorkspace(scene, "roles");
+            var roles = contextNote(view, "test-note");
+            assertEquals(List.of("Set role", "Delete", "Select all with this role", "Play from here", "Copy for agent"),
+                    labels(roles));
+            assertAgentCopy(roles, "reconstruction/roles", 2);
+            menuItem(roles, "Delete").fire();
+            roles.hide();
+            assertEquals(2, view.selectedNotes().stream().filter(noteHit -> noteHit.fate().equals("Pending deletion")).count());
+            assertEquals("Deleted 2 notes · Undo", ((Label) scene.lookup("#reconstruction-status")).getText());
+            key(plot, KeyCode.Z, true);
+            assertTrue(view.selectedNotes().stream().noneMatch(noteHit -> noteHit.fate().equals("Pending deletion")));
+            key(plot, KeyCode.Y, true);
+            assertTrue(view.selectedNotes().stream().allMatch(noteHit -> noteHit.fate().equals("Pending deletion")));
+            key(plot, KeyCode.Z, true);
+
+            var voice = scene.lookup("#reconstruction-voice-select-");
+            var legend = context(voice, 8, 8);
+            assertEquals(List.of("Rename tag…", "Select all", "Solo voice", "Mute voice"), labels(legend));
+            menuItem(legend, "Mute voice").fire();
+            legend.hide();
+            assertTrue(view.voiceMonitorActive());
+            assertFalse(view.voiceAudible(view.selectedNotes().getFirst()));
+        });
+    }
+
+    @Test void noteMenuPublishesTheSameDeleteAndInsertOpsAsTheReconstructionJournal() throws Exception {
+        var input = reconstructionFixture();
+        var midi = new javax.sound.midi.Sequence(javax.sound.midi.Sequence.PPQ, 480);
+        var track = midi.createTrack();
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x90, 0, 69, 96), 480));
+        track.add(new javax.sound.midi.MidiEvent(new javax.sound.midi.ShortMessage(0x80, 0, 69, 0), 1440));
+        var midiFile = input.resolve("fixture.mid");
+        javax.sound.midi.MidiSystem.write(midi, 0, midiFile.toFile());
+        var catalogue = Path.of("src/test/fixtures/design-capture/catalogue.json").toAbsolutePath();
+        var work = folder.resolve("built");
+        var log = new java.io.ByteArrayOutputStream();
+        try (var output = new java.io.PrintStream(log)) {
+            assertEquals(0, com.opensmpsdeck.headless.Main.run(new String[]{"reconstruct", "run", midiFile.toString(),
+                    input.resolve("mix.wav").toString(), catalogue.toString(), work.toString(), "--seconds", "2"},
+                    output, output), log::toString);
+        }
+
+        var pane = fx(() -> new ReconstructionPane(stage, work));
+        var scene = pane.stage().getScene();
+        try {
+            await(() -> scene.lookup("#reconstruction-canvas") != null);
+            fx(() -> {
+                reconstructionWorkspace(scene, "roles");
+                var plot = (javafx.scene.canvas.Canvas) scene.lookup("#reconstruction-canvas");
+                var view = (ReconstructionCanvas) plot.getParent();
+                var roles = contextNote(view, "n-0-500000-69");
+                assertTrue(labels(roles).contains("Assign to voice"), () -> labels(roles).toString());
+                menuItem(roles, "Delete").fire();
+                roles.hide();
+                reconstructionWorkspace(scene, "detail");
+                var insert = context(plot, 96, 98);
+                menuItem(insert, "Insert note here").fire();
+                insert.hide();
+                ((Button) scene.lookup("#reconstruction-apply")).fire();
+                return null;
+            });
+            await(() -> Files.isRegularFile(work.resolve("edits.json")));
+            var edits = com.opensmpsdeck.headless.ReconstructionReview.revision(work).entries().asList().stream()
+                    .map(com.google.gson.JsonElement::getAsJsonObject).toList();
+            assertEquals(List.of("deleteNote", "insertNote"), edits.stream().map(edit -> edit.get("op").getAsString()).toList());
+            assertEquals("n-0-500000-69", edits.getFirst().get("noteId").getAsString());
+            assertEquals(0, edits.getLast().get("part").getAsInt());
+            var outcomes = com.opensmpsdeck.headless.ReconstructionReview.outcomes(work);
+            for (var edit : edits) assertEquals("applied", outcomes.get(edit.get("id").getAsString()).getFirst().status());
+        } finally {
+            fx(() -> { pane.close(); return null; });
+        }
+    }
+
+    @Test void reviewContextMenuOpensTheProposalTargetInDetail() throws Exception {
+        Path fixture = Path.of("src/test/fixtures/design-capture/reconstruction");
+        Path work = Files.createDirectory(folder.resolve("proposals"));
+        try (var files = Files.list(fixture)) {
+            for (var path : files.toList()) Files.copy(path, work.resolve(path.getFileName()));
+        }
+        withReconstructionPlot(work, false, (scene, view) -> {
+            reconstructionWorkspace(scene, "review");
+            var card = scene.lookup(".reconstruction-proposal");
+            var menu = context(card, 8, 8);
+            assertEquals(List.of("Accept", "Reject", "Show in Detail"), labels(menu));
+            menuItem(menu, "Show in Detail").fire();
+            menu.hide();
+            assertFalse(view.reviewing());
+            assertTrue(((ToggleButton) scene.lookup("#reconstruction-detail-view")).isSelected());
+        });
+    }
+
+    @Test void arrangementContextMenusAndPianoDeleteUseExistingEdits() throws Exception {
+        fx(() -> {
+            var timeline = context(window.timeline.canvas, TimelineView.GUTTER + 20, TimelineView.RULER + 20);
+            assertTrue(labels(timeline).containsAll(List.of("Edit notes", "Duplicate clip", "Delete", "Play from here")));
+            menuItem(timeline, "Edit notes").fire();
+            timeline.hide();
+            layout();
+            var note = window.piano.sequence.notes().getFirst();
+            double x = PianoRollView.KEYBOARD + note.tick() * window.piano.scale + 12;
+            double y = PianoRollView.HEADER + (window.piano.topPitch - note.pitch()) * PianoRollView.NOTE_ROW + 5;
+            var piano = context(window.piano.canvas, x, y);
+            assertEquals(List.of("Delete", "Transpose", "Copy for agent"), labels(piano));
+            var transpose = (Menu) menuItem(piano, "Transpose");
+            transpose.getItems().getFirst().fire();
+            piano.hide();
+            assertEquals(note.pitch() + 1, window.piano.sequence.notes().getFirst().pitch());
+            key(window.piano.canvas, KeyCode.Z, true);
+            click(window.piano.canvas, x, y);
+            assertEquals(window.piano.canvas, window.scene().getFocusOwner());
+            key(window.piano.canvas, KeyCode.BACK_SPACE, false);
+            assertTrue(window.piano.sequence.notes().stream().noneMatch(current -> current.id().equals(note.id())));
+            return null;
+        });
+    }
+
+    private static double fixtureNoteY(ReconstructionCanvas view) {
+        return 85 + (view.canvas.getHeight() - (view.rolesView() ? 85 : 105)) * 4.5 / 8;
+    }
+
+    private static void click(Node node, double x, double y) {
+        mouse(node, MouseEvent.MOUSE_PRESSED, x, y, true);
+        mouse(node, MouseEvent.MOUSE_RELEASED, x, y, false);
+    }
+
+    private static ContextMenu contextNote(ReconstructionCanvas view, String id) {
+        var point = view.noteContextPoint(id).orElseThrow(() -> new AssertionError("Note is outside the view: " + id));
+        return context(view.canvas, point.getX(), point.getY());
+    }
+
+    private static ContextMenu context(Node node, double x, double y) {
+        var scene = node.localToScene(x, y);
+        var screen = node.localToScreen(x, y);
+        Event.fireEvent(node, new ContextMenuEvent(ContextMenuEvent.CONTEXT_MENU_REQUESTED, scene.getX(), scene.getY(),
+                screen.getX(), screen.getY(), false, new PickResult(node, new javafx.geometry.Point3D(x, y, 0), 0)));
+        return Window.getWindows().stream().filter(ContextMenu.class::isInstance).map(ContextMenu.class::cast)
+                .filter(Window::isShowing).findFirst().orElseThrow(() -> new AssertionError("No context menu for " + node));
+    }
+
+    private static List<String> labels(ContextMenu menu) {
+        return menu.getItems().stream().map(MenuItem::getText).toList();
+    }
+
+    private static void assertAgentCopy(ContextMenu menu, String workspace, long noteCount) {
+        var clipboard = Clipboard.getSystemClipboard();
+        var marker = new ClipboardContent();
+        marker.putString("before agent copy");
+        assertTrue(clipboard.setContent(marker));
+        var copy = menuItem(menu, "Copy for agent");
+        assertEquals(StudioContextMenu.shortcut("C"), ((Label) copy.getGraphic()).getText());
+        copy.fire();
+        var text = clipboard.getString();
+        assertTrue(text.contains(workspace), text);
+        assertEquals(noteCount, text.lines().filter(line -> line.startsWith("note: ")).count());
+    }
+
+    private static MenuItem menuItem(ContextMenu menu, String text) {
+        return menu.getItems().stream().filter(item -> item.getText().equals(text)).findFirst().orElseThrow();
     }
 
     @Test void reconstructionSnapshotShowsSpectrumAndSelection() throws Exception {

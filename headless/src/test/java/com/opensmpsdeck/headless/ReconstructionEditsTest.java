@@ -24,6 +24,63 @@ import static com.opensmpsdeck.headless.ReconstructionStages.Note;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReconstructionEditsTest {
+    @Test void livePreviewAndUndoMatchCanonicalPcm(@TempDir Path dir) throws Exception {
+        Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
+        var source = new Sequence(Sequence.PPQ, 480);
+        var track = source.createTrack();
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_ON, 0, 60, 90), 0));
+        track.add(new MidiEvent(new ShortMessage(ShortMessage.NOTE_OFF, 0, 60, 0), 1300));
+        MidiSystem.write(source, 0, midi.toFile());
+        writeAudio(catalogue, wav);
+        var work = dir.resolve("live");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), work.toString(), "--seconds", "2");
+        var built = ReconstructionReview.revision(work);
+        var original = TargetPlayback.prepare(ReconstructionReview.arrangement(work).project());
+        var live = ReconstructionLivePreview.open(work, built);
+        var entries = new com.google.gson.JsonArray();
+        var canonical = dir.resolve("canonical");
+        cli("reconstruct", "run", midi.toString(), wav.toString(), catalogue.toString(), canonical.toString(), "--seconds", "2");
+        for (var edit : List.of(
+                json("""
+                    {"id":"pitch","op":"transpose","reason":"fixture","noteIds":["n-0-0-60"],"semitones":3}
+                    """),
+                json("""
+                    {"id":"gate","op":"setNote","reason":"fixture","noteId":"n-0-0-60","end":0.2}
+                    """),
+                json("""
+                    {"id":"bend","op":"bend","reason":"fixture","noteId":"n-0-0-60","points":[[0,0],[0.15,2]]}
+                    """))) {
+            entries.add(edit);
+            var preview = live.prepare(entries, 0, 2, 0);
+            built = preview.save(built);
+            assertEquals(entries, built.entries());
+            assertThrows(ReconstructionReview.Changed.class, () ->
+                    preview.save(new ReconstructionReview.Revision(null, null, null)));
+            ReconstructionReview.apply(canonical, ReconstructionReview.revision(canonical), entries, (a, b, c) -> {});
+            var reference = TargetPlayback.prepare(ReconstructionReview.arrangement(canonical).project());
+            assertPcmEqual(reference, preview.playback(), edit.get("op").getAsString());
+        }
+        var outside = new com.google.gson.JsonArray();
+        outside.add(entries.get(0));
+        assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(outside, 3, 4, 0));
+        outside.add(json("""
+                {"id":"route","op":"setRole","reason":"fixture","noteIds":["n-0-0-60"],"role":"bass"}
+                """));
+        assertThrows(ReconstructionLivePreview.RebuildNeeded.class, () -> live.prepare(outside, 0, 2, 0));
+        var empty = new com.google.gson.JsonArray();
+        var undo = live.prepare(empty, 0, 2, 0);
+        assertPcmEqual(original, undo.playback(), "undo");
+        assertTrue(undo.save(built).entries().isEmpty());
+    }
+
+    private static void assertPcmEqual(TargetPlayback expected, TargetPlayback actual, String operation) throws Exception {
+        var pcm = new ArrayList<short[]>();
+        expected.render(120, block -> pcm.add(block.clone()));
+        int[] index = {0};
+        actual.render(120, block -> assertArrayEquals(pcm.get(index[0]++), block, operation + " block " + (index[0] - 1)));
+        assertEquals(120, index[0]);
+    }
+
     @Test void detailEditReportsDropAndRecoversOnRoleRebuild(@TempDir Path dir) throws Exception {
         Path midi = dir.resolve("fixture.mid"), wav = dir.resolve("mix.wav"), catalogue = dir.resolve("catalogue.json");
         writeMidi(midi, true);

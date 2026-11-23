@@ -43,6 +43,7 @@ final class TimelineView extends ViewportCanvas {
     private Double rangeStart;
     private AudioReference reference;
     private final boolean readOnly;
+    java.util.function.BiConsumer<javafx.scene.input.ContextMenuEvent, Double> onContext = (event, time) -> {};
     private Placement dragging, ghost;
     private double pressX;
     private boolean resizing;
@@ -116,6 +117,8 @@ final class TimelineView extends ViewportCanvas {
             draw();
         });
         canvas.setOnMouseReleased(e -> {
+            if (e.getButton() != MouseButton.PRIMARY) return;
+            canvas.requestFocus();
             if (rangeStart != null) {
                 var range = range(secondsAt(e.getX()));
                 rangeStart = null;
@@ -131,11 +134,25 @@ final class TimelineView extends ViewportCanvas {
             draw();
         });
         canvas.setOnMouseClicked(e->{
-            if (e.getClickCount()==2 && e.isStillSincePress() && selected!=null) {
+            if (e.getButton() == MouseButton.PRIMARY && e.getClickCount()==2 && e.isStillSincePress() && selected!=null) {
                 if (blocks.containsKey(selected)) openGroup.run(); else openNotes.run();
             }
         });
         if(readOnly)return;
+        canvas.setOnContextMenuRequested(event -> {
+            if (event.isKeyboardTrigger()) return;
+            var point = canvas.sceneToLocal(event.getSceneX(), event.getSceneY());
+            if (point.getX() < GUTTER) return;
+            canvas.requestFocus();
+            var item = hit(point.getX(), point.getY());
+            String id = item == null ? null : item.id();
+            if (!java.util.Objects.equals(selected, id)) {
+                if (selectedIds.contains(id)) selected = id;
+                else selectOnly(id);
+                selection.accept(selected);
+            }
+            onContext.accept(event, secondsAt(point.getX()));
+        });
         canvas.setOnDragOver(e -> {
             if(e.getDragboard().hasString() && validDropPosition(e.getX(), e.getY())) {
                 String value=e.getDragboard().getString();

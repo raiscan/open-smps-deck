@@ -49,6 +49,23 @@ Choose **Open reconstruction…** and select the generated
 `import-work/reconstruction` directory to inspect the aligned stems,
 audition the result and make or review edits.
 
+### Copy notes into chat
+
+Select notes in Analysis **Roles** or **Notes**, or in the arrangement
+piano roll. Press Ctrl+C (Cmd+C on macOS) or right-click and choose
+**Copy for agent**. The clipboard text gives the project, note IDs,
+timing, playback evidence and a command an agent can use to inspect the
+following bar. In the piano roll, Ctrl/Cmd-click or Shift-click adds or
+removes a note from the selection. [Clipboard format](agents.md#investigate-notes-pasted-from-studio)
+
+Turn on **Screenshot lasso** in the toolbar or the empty-space menu, or press
+Ctrl/Cmd+Shift+L with the plot focused. Drag to select an image region and
+release to copy the crop and a plain-text handoff for the visible notes inside
+it. In Analysis, hold Space while dragging to pan with the lasso armed. The
+image includes a short reference in its footer. **Save lasso PNG…** saves
+the most recent capture for attachment.
+[Decode a lasso attachment](agents.md#decode-a-screenshot-lasso)
+
 ## Import a Suno folder
 
 Choose **Import Suno folder…**, select the download, then select a separate
@@ -85,8 +102,11 @@ compatible lane. The snap is a quarter of the current beat, at least one tick.
 Drag its right edge to repeat or trim it; a partial final repeat is allowed.
 The inspector provides exact start/length and lane fields; press **Apply clip
 changes** to commit those fields. Duplicate creates another linked instance.
-Delete/Backspace with the arrangement focused removes the selected clip. Use Ctrl+Z/Ctrl+Shift+Z (Cmd on macOS)
-for project undo/redo, outside text fields.
+Delete or Backspace with the timeline focused removes the selected clip.
+Right-click a clip to edit its source, duplicate it or delete it. Group
+placements offer **Edit inside** and **Ungroup**. Use **Play from here** on the
+timeline to start at the clicked position. Use Ctrl+Z or Ctrl+Shift+Z (Cmd on
+macOS) for project undo and redo outside text fields.
 
 ## Group clips into a sequence
 
@@ -129,8 +149,10 @@ Selecting a clip opens its source in the piano roll below. Notes are bars:
 horizontal position is time, vertical position is pitch, width is duration.
 Double-click empty space to add a note. Drag a note to change time/pitch; drag its
 right edge for duration. Select a note to edit exact tick, duration and MIDI pitch
-in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete with
-the piano roll focused removes a selected note. Press **+** or **=** (or
+in the fields, then press **Apply note**. Pitch 60 is C4 on both chips. Delete
+or Backspace with the piano roll focused removes a selected note. Right-click
+a note for **Delete**, **Transpose**, or **Copy for agent**, or right-click
+empty space to insert a note at that pitch and time. Press **+** or **=** (or
 **Numpad Add**) to raise its pitch one semitone, or **−** (or **Numpad
 Subtract**) to lower it. Hold **Shift** with any of those keys to move by an
 octave. Each move is undoable. The status line reports any move outside the
@@ -303,6 +325,37 @@ Selection, zoom, scrolling and playback survive a workspace change. The header
 counts unsaved changes. **Apply & rebuild** saves the edits and rebuilds the chip
 result. Use **Changes** to undo or redo drafts.
 
+### Reconstruction context menus
+
+- **Notes (Detail)**. Right-click a note to edit the selection. The menu offers
+  deletion, transposition, a split at the clicked time, merging, velocity,
+  pitch bend or glide, vibrato, lane pinning, and musical roles. It also offers
+  selection by part or bar, **Copy notes** for pasting in Studio, **Copy for
+  agent**, and **Play from here**. Right-click empty pitch space to insert or
+  paste at that time, play, fit the view, select all, or turn on **Screenshot
+  lasso**.
+- **Roles**. Right-click a note to set its role, assign its voice, delete the
+  selection, select all notes with that role, use **Copy for agent**, or play
+  from that time. Right-click empty plot space for **Screenshot lasso**.
+  Right-click a voice row to rename its tag, select its notes, or solo or mute
+  it in Chip playback. Solo highlights its notes. Mute hides them from the
+  plot. The Original reference remains available as recorded.
+- **Review → Proposals**. Right-click a proposal card or a proposed note outline
+  to accept or reject it, or use **Show in Detail** to jump to the affected
+  notes or the proposed insertion.
+
+Menus show available keyboard shortcuts and explain unavailable actions on
+hover. A right-click on an already selected note keeps the selection. A
+right-click on another note selects that note. **Play from here** uses the
+current listening range when it contains that time, and otherwise selects
+**Song**.
+
+With the **Notes** plot focused, use Ctrl+A to select all and Ctrl+V to paste
+at the playhead (Cmd on macOS). Ctrl+C also prepares the selected scored
+notes for pasting in Studio when it copies the agent handoff. Paste uses the
+selected **Insert voice** and preserves relative onset, duration, pitch and
+velocity. Right-click empty space to paste at the clicked position.
+
 ### Listen to the reconstruction
 
 In the bottom transport, choose **Play range** then click **Play**, or tap
@@ -321,6 +374,27 @@ voices. For Lane, the Original side uses the chosen reference for comparison.
 **Set loop…** lets you enter a start and end in source seconds. You can also
 Shift-drag on the ruler. The transport shows the active loop; use **Clear loop**
 or press **Esc** to remove it.
+
+### Audition note edits while playing
+
+In an attached S3K reconstruction, open **Notes** and choose **Chip** or
+switch A/B to the Chip side. Play or seek to any part of the song with
+the **Song**, **Section** or **Selection** range.
+
+Drag pitch or length, transpose, or draw a supported bend. The note menu
+can also transpose or add a bend or glide. **Live preview · Saved edits**
+means Studio saved the edit to `edits.json` and is auditioning it with the
+fitted patches. **Changes → Undo** and **Redo** update playback and the
+journal. An edit ahead of the playhead is heard when playback reaches it.
+A loop plays a passed note on the next pass. If an unlooped short note passes
+while its edit is preparing, Studio can briefly re-cue it so you can hear
+the change.
+
+Studio prepares playback checkpoints in the background. A late seek or
+edit can take longer on the first pass. Deletions, splits, merges, and changes
+that need new roles, lanes or instruments display **Rebuild needed**.
+Use **Apply & rebuild** to hear those changes and include all saved edits
+in the built arrangement and exports.
 
 ### Adjust the view
 
@@ -447,9 +521,12 @@ composer stays available across a refresh. The
   **Alt-click** a marker to remove it. Drag down to zero depth to stop the
   vibrato from that point. **Note evidence** lists the stages in ticks, Hz, and
   cents.
-- Select a scored note to set its velocity or delete it with **Delete**.
-  Use **Set role** in Roles or **Pin lane** in Notes. Delete on a note generated
-  during role assignment records a drop. The trace shows the fate and reason,
+- Press **Delete** or **Backspace** in **Notes** or **Roles** to delete the
+  selected notes as one edit step. Click a note to focus the plot. These keys
+  keep their normal behavior in text fields and spinners. Use **Ctrl+Z** to
+  restore the selection's notes and **Ctrl+Y** or **Ctrl+Shift+Z** to redo
+  (Cmd on macOS). Deletions are staged in the draft and saved as `deleteNote`
+  edits when you choose **Apply & rebuild**. The trace shows the fate and reason,
   role, lane, instrument, both clocks, competing note IDs, and applied edits.
   Expand **Raw trace JSON** for detailed evidence.
 - Gold outlines mark pending edits. **Changes → Undo** and **Redo** change
@@ -551,7 +628,8 @@ snare and hat shapes in a separate strip. Drum hits are also available in the
 Notes chip lanes.
 
 Use the pointer icon to select a voice or role. The eye icon shows or hides
-it, and the target icon highlights it on the plot. Drag selected notes onto
+it, and the target icon highlights it on the plot. The voice controls also
+mute or solo that voice in Chip playback. Drag selected notes onto
 a voice row or click **Assign** to move them to that voice. Double-click a note
 to focus the selection in **Notes**.
 

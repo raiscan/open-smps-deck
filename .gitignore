@@ -45,3 +45,6 @@ docs/Xm4smps-4.1.src.tar.gz
 # Python verification tools
 __pycache__/
 *.py[cod]
+
+# Studio lasso captures can contain private project data.
+.clips/

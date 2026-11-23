@@ -25,6 +25,31 @@ If the S3K layering preset adds an incompatible envelope on a classic
 target, use `--lane-policy-preset off` on the fresh reconstruction.
 Portable and mod exports default to the saved project target.
 
+## Notes pasted from Studio
+
+Read `opensmpsdeck-notes v1` as line-oriented text with JSON objects on
+`project:`, `context:`, and `note:` lines. The absolute path points to the
+user's machine. Use the `fetch:` command (prefix with `java -jar "$jar"`
+in place of `opensmpsdeck` when needed). For a reconstruction, append
+`--json` or call `reconstruct_describe` with `workDir`, `notes` (ID list
+as a comma-separated string), `context: "1bar"`, `revision`, and
+`json: true`. Compare the selected notes with the following bar in
+`neighbors`, including their role, allocation reason, previous lane and
+competing notes. Check `stale`, `missingIds`, and the clipboard's
+`draft` flag before proposing edits. For arrangement notes, the
+`describe-notes` command resolves their sequence and optional clip path.
+[Clipboard format and clocks](../../docs/user-guide/agents.md#investigate-notes-pasted-from-studio)
+
+
+For a screenshot lasso attachment, run `reconstruct describe --from-png
+IMAGE --json` or call `reconstruct_describe` with absolute `fromPng` and
+`json: true`. Read `method` (metadata, lsb or registry), `lasso` (range and
+view state), `reference` and the note IDs before using the live query.
+Registry fallback needs the originating machine's local state and work
+directory. Ask for an original file attachment or the text payload when
+the image has been re-encoded and its local reference is unavailable.
+[Attachment decode and registry](../../docs/user-guide/agents.md#decode-a-screenshot-lasso)
+
 ## 1. Separate and check a local mix
 
 Start with a WAV or MP3. For FLAC, decode to WAV first

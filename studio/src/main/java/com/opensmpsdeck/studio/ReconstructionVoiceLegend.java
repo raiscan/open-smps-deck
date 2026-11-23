@@ -143,6 +143,14 @@ final class ReconstructionVoiceLegend extends TitledPane {
         });
         var row = new HBox(5, label, visible, focus, select);
         row.setAlignment(Pos.CENTER_LEFT);
+        row.setOnContextMenuRequested(event -> {
+            if (!view.rolesView()) return;
+            new StudioContextMenu()
+                    .add("Select all", () -> select.fire())
+                    .add(focus.isSelected() ? "Clear solo" : "Solo role", focus::fire)
+                    .add(visible.isSelected() ? "Mute role" : "Unmute role", visible::fire)
+                    .show(row, event);
+        });
         return row;
     }
 
@@ -187,13 +195,13 @@ final class ReconstructionVoiceLegend extends TitledPane {
 
         var visible = visibilityButton();
         visible.setAccessibleText("Show " + entry.name());
-        visible.setTooltip(new Tooltip("Show or hide " + entry.shortName()));
+        visible.setTooltip(new Tooltip("Show or hide and mute " + entry.shortName() + " in Chip playback"));
         visible.setSelected(view.voiceVisible(entry.id()));
         visible.selectedProperty().addListener((ignored, old, show) -> view.voiceVisible(entry.id(), show));
 
         var focus = new ToggleButton("◎");
         focus.setAccessibleText("Solo highlight " + entry.name());
-        focus.setTooltip(new Tooltip("Solo highlight " + entry.shortName()));
+        focus.setTooltip(new Tooltip("Solo " + entry.shortName() + " in Chip playback and highlight it on the plot"));
         focus.setUserData(entry.id());
         focus.setToggleGroup(solos);
         focus.setSelected(Objects.equals(solo, entry.id()));
@@ -201,6 +209,15 @@ final class ReconstructionVoiceLegend extends TitledPane {
         var row = new HBox(5, select, visible, focus);
         row.setAlignment(Pos.CENTER_LEFT);
         row.getStyleClass().add("voice-legend-row");
+        row.setOnContextMenuRequested(event -> {
+            if (!view.rolesView()) return;
+            new StudioContextMenu()
+                    .add("Rename tag…", () -> editTag.accept(entry))
+                    .add("Select all", null, count == 0 ? "This voice has no notes." : null, select::fire)
+                    .add(focus.isSelected() ? "Clear solo" : "Solo voice", focus::fire)
+                    .add(visible.isSelected() ? "Mute voice" : "Unmute voice", visible::fire)
+                    .show(row, event);
+        });
         if (entry.voice() == null) return row;
 
         var move = new Button("Assign");
@@ -228,10 +245,6 @@ final class ReconstructionVoiceLegend extends TitledPane {
             if (!editing.get() || event.getGestureSource() != view.canvas) return;
             event.setDropCompleted(assign.apply(entry.voice()));
             row.pseudoClassStateChanged(DROP_TARGET, false);
-            event.consume();
-        });
-        row.setOnContextMenuRequested(event -> {
-            menu(entry).show(row, event.getScreenX(), event.getScreenY());
             event.consume();
         });
         return row;

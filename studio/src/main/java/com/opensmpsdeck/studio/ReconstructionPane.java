@@ -14,7 +14,6 @@ import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuButton;
 import javafx.scene.control.Slider;
-import javafx.scene.control.TextInputControl;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
@@ -54,6 +53,7 @@ final class ReconstructionPane implements AutoCloseable {
     private final Path work;
     private final Runnable openArrangement;
     private final Supplier<ProjectDocument> openProject;
+    private final StudioPlayback.LineFactory audioLines;
     private final Slider zoom = new Slider(0, ReconstructionCanvas.MAX_TIME_ZOOM, 0);
     private ReconstructionInspection model;
     private ReconstructionCanvas view;
@@ -67,6 +67,12 @@ final class ReconstructionPane implements AutoCloseable {
     }
 
     ReconstructionPane(Window owner, Path work, Runnable openArrangement, Supplier<ProjectDocument> openProject) {
+        this(owner, work, openArrangement, openProject, javax.sound.sampled.AudioSystem::getSourceDataLine);
+    }
+
+    ReconstructionPane(Window owner, Path work, Runnable openArrangement, Supplier<ProjectDocument> openProject,
+                       StudioPlayback.LineFactory audioLines) {
+        this.audioLines = audioLines;
         this.work = work;
         this.openArrangement = openArrangement;
         this.openProject = openProject;
@@ -133,8 +139,14 @@ final class ReconstructionPane implements AutoCloseable {
         view = new ReconstructionCanvas(model, status::setText);
         editor = new ReconstructionEditor(work, stage, view, snapshot, status::setText, this::refresh,
                 position -> listen.cuePreview(position), openProject);
-        listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition);
+        listen = new ReconstructionTransport(stage, work, view, model, status, editor::stopAudition, audioLines);
+        editor.liveTransport(listen);
+        editor.playFrom = listen::playFrom;
         view.onNote = editor::show;
+        var screenshotLasso = new ScreenshotLasso(view, editor::lasso, status::setText, view::panning);
+        editor.screenshotLasso = screenshotLasso::toggle;
+        var lasso = screenshotLasso.controls();
+        lasso.managedProperty().bind(lasso.visibleProperty());
         editor.onSelectionChanged = listen::selectionChanged;
         editor.onVoicesChanged = listen::refreshTargets;
         stage.setOnCloseRequest(event -> { if (!editor.allowClose()) event.consume(); });
@@ -174,7 +186,7 @@ final class ReconstructionPane implements AutoCloseable {
             buttons.put(item, button);
             switcher.getChildren().add(button);
         }
-        switcher.getChildren().addAll(spacer(), viewToggle);
+        switcher.getChildren().addAll(spacer(), lasso, viewToggle);
         for (var node : List.of(tools, side, workspace, export, editor.rolesInspector(),
                 editor.notesInspector(), editor.reviewInspector(), viewToggle))
             node.managedProperty().bind(node.visibleProperty());
@@ -191,6 +203,7 @@ final class ReconstructionPane implements AutoCloseable {
             view.rolesView(showRoles);
             view.reviewing(showReview);
             tools.setVisible(showNotes);
+            lasso.setVisible(showRoles || showNotes);
             workspace.setVisible(page != Workspace.Export);
             editor.rolesInspector().setVisible(showRoles);
             editor.notesInspector().setVisible(showNotes);
@@ -217,8 +230,11 @@ final class ReconstructionPane implements AutoCloseable {
         };
 
         stage.getScene().addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (stage.getScene().getFocusOwner() instanceof TextInputControl || event.isAltDown()) return;
-            if (editor.key(event) || listen.key(event)) event.consume();
+            var focus = stage.getScene().getFocusOwner();
+            if (StudioContextMenu.editingText(focus) || StudioContextMenu.editingText(event.getTarget()) || event.isAltDown()) return;
+            boolean editorFocused = workspace.isVisible() && (StudioContextMenu.within(focus, workspace)
+                    || StudioContextMenu.within(focus, tools));
+            if (editor.key(event, editorFocused) || listen.key(event)) event.consume();
         });
         listen.initialize();
         loadBends(model);

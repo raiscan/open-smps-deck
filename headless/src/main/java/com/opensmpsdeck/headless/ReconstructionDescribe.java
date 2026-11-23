@@ -61,9 +61,15 @@ public final class ReconstructionDescribe {
 
     static void run(String[] args, PrintStream out) throws IOException {
         if (args.length == 0) throw new IllegalArgumentException("reconstruct describe expects WORK_DIR");
+        if ("--from-png".equals(args[0])) {
+            if (args.length < 2 || args.length > 3 || args.length == 3 && !"--json".equals(args[2]))
+                throw new IllegalArgumentException("reconstruct describe --from-png IMAGE [--json]");
+            out.print(NoteScreenshot.describe(Path.of(args[1]), args.length == 3));
+            return;
+        }
         var seen = new HashSet<String>();
         boolean json = false, roles = false;
-        String section = null, parts = null, bars = null;
+        String section = null, parts = null, bars = null, notes = null, context = null, revision = null;
         Path output = null;
         for (int i = 1; i < args.length; i++) {
             String flag = args[i];
@@ -82,13 +88,33 @@ public final class ReconstructionDescribe {
                 case "--section" -> section = value;
                 case "--parts" -> parts = value;
                 case "--bars" -> bars = value;
+                case "--notes" -> notes = value;
+                case "--context" -> context = value;
+                case "--revision" -> revision = value;
                 case "--out" -> output = Path.of(value);
                 default -> throw new IllegalArgumentException("Unknown describe option " + flag);
             }
         }
-        String description = describe(Path.of(args[0]), json, section, parts, bars, roles);
+        String description = describe(Path.of(args[0]), json, section, parts, bars, roles, notes, context, revision);
         if (output == null) out.print(description);
         else Files.writeString(output, description, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+    }
+
+    public static final List<String> NOTE_FILES = java.util.stream.Stream.concat(
+            ReconstructionNoteContext.FILES.stream(), java.util.stream.Stream.of(
+                    ReconstructionEdits.FILE, ReconstructionSections.FILE, ReconstructionVoicePlan.JOURNAL,
+                    ReconstructionProposals.RESULTS, ReconstructionStemTemplates.FILE,
+                    ReconstructionClipLinks.LAYOUT, ReconstructionManifest.FILE, "roleplan.json", ReconstructionAllocation.Affinity.FILE)).distinct().toList();
+
+    public static String describe(Path work, boolean json, String section, String parts, String bars,
+                                  boolean grouped, String notes, String context, String revision) throws IOException {
+        if (notes == null) {
+            if (context != null || revision != null) throw new IllegalArgumentException("--context and --revision require --notes");
+            return describe(work, json, section, parts, bars, grouped);
+        }
+        if (section != null || parts != null || bars != null || grouped)
+            throw new IllegalArgumentException("--notes cannot be combined with --roles, --section, --parts or --bars");
+        return ReconstructionNoteContext.describe(work, NoteHandoff.ids(notes), NoteHandoff.contextBars(context), revision, json);
     }
 
     public static String describe(Path work, boolean json, String section, String parts, String bars) throws IOException {
