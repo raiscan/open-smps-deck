@@ -28,7 +28,7 @@ import static java.nio.file.StandardOpenOption.WRITE;
 
 /** Revision-aware journal operations for interactive reconstruction review. */
 public final class ReconstructionReview {
-    private static final List<String> OUTPUTS = List.of("score.json", ReconstructionStemTemplates.FILE, "structure.json", "roles.json",
+    static final List<String> OUTPUTS = List.of("score.json", ReconstructionStemTemplates.FILE, "structure.json", "roles.json",
             "allocation.json", "voicing.json", ReconstructionEdits.RESULTS, ReconstructionProposals.RESULTS,
             ReconstructionAllocation.Affinity.FILE, ReconstructionClipLinks.LAYOUT, ReconstructionManifest.FILE,
             "arrangement.smps.json", "arrangement.smps.zip", "render.wav", ReconstructionCli.STEADY_REFERENCE,
@@ -151,6 +151,9 @@ public final class ReconstructionReview {
                 if (!pair.getLast().contains(entry) && validationIssue(entry) == null) changed.add(parse(entry));
             }
         }
+        var commonBefore = before.asList().stream().filter(after::contains).toList();
+        var commonAfter = after.asList().stream().filter(before::contains).toList();
+        if (!commonBefore.equals(commonAfter)) commonAfter.stream().map(ReconstructionReview::parse).forEach(changed::add);
         return changed;
     }
 
@@ -646,7 +649,7 @@ public final class ReconstructionReview {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Reconstruction cancelled");
     }
 
-    private static void removeTree(Path directory) {
+    static void removeTree(Path directory) {
         try (var paths = Files.walk(directory)) {
             for (var path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
         } catch (IOException failure) {

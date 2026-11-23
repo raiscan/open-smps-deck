@@ -47,3 +47,21 @@ Studio can use the public headless `ReconstructionBranches` API and
 treat a returned build directory as an ordinary reconstruction work
 directory for inspection. The MCP `reconstruct_branch` tool supports
 the branch operations using an `action` field.
+
+## Java review API
+
+`ReconstructionBranches.state(work, name)` returns the branch, current
+main parent, and journal staleness. `mainParent(work)` returns the current
+parent without loading a branch. `buildMain(work, progress)` evaluates the
+saved main journal in the same cache, including pending edits.
+
+`planStitch(work, List<SourceSelection>, progress)` plans a stitch into main.
+Each source selection supplies the branch name, a `Selection`, and a set of
+excluded edit IDs. Repeated selections of one branch are allowed. Each
+source edit is included at most once, at its first matching selection.
+Only build cache files are written. The returned `StitchPlan` exposes the
+candidate `journal()`, `build()`, `mainBuild()`, expected `mainRevision()`,
+groups, outcomes and typed conflicts. Direct conflicts identify both
+source edits. Indirect conflicts identify the affected note and candidate
+edits, since a mixed render does not identify a unique cause. To resolve a
+conflict, adjust the exclusions and plan again.

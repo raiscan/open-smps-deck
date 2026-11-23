@@ -70,6 +70,10 @@ final class ReconstructionNoteContext {
         }
     }
 
+    static String revision(String builtRevision, ReconstructionReview.Revision journal) {
+        return ReconstructionArtifacts.fingerprint(List.of(builtRevision, journal));
+    }
+
     NoteHandoff.Block block(List<Overlay> selection, boolean roles, boolean draft, ReconstructionReview.Revision revision,
                             Map<String, String> draftVoices, Map<String, Integer> draftVelocities,
                             Map<String, List<JsonObject>> intents, NoteHandoff.ViewRange range) {
@@ -150,7 +154,7 @@ final class ReconstructionNoteContext {
 
     private NoteHandoff.Project project(String view, boolean draft, ReconstructionReview.Revision revision) {
         return new NoteHandoff.Project(work.toString(), song, view,
-                ReconstructionArtifacts.fingerprint(List.of(builtRevision, revision)), draft, null, null);
+                revision(builtRevision, revision), draft, null, null);
     }
 
     private static String text(Description result) {
