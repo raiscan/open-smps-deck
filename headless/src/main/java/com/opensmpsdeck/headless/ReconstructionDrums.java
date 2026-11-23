@@ -52,6 +52,11 @@ final class ReconstructionDrums {
     private static final int[] LEGACY_TUNING = {0, -2, 2, -4, 4};
     private static final int[] STEM_TUNING = {0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6};
     private static final double AUTO_THRESHOLD = .30;
+    // Fingerprint bands are spaced a third of an octave apart from 36 Hz.
+    private static final int AIR_FROM_BAND = 12; // about 580 Hz
+    private static final int AIR_BAND = 21;      // about 4.6 kHz
+    private static final double AIR_FLOOR = .03;
+    private static final double AIR_WEIGHT = .10;
     private static final Comparator<ReconstructionVoices.Key> CLASS_ORDER =
             Comparator.comparingInt(ReconstructionVoices.Key::partId)
                     .thenComparingInt(ReconstructionVoices.Key::drumPitch);
@@ -69,7 +74,14 @@ final class ReconstructionDrums {
                     @Nullable Kit preferredKit, @Nullable Boolean inPreferredKit,
                     @Nullable DrumClass drumClass, @Nullable Integer acousticProfileVersion,
                     @Nullable List<Exclusion> exclusions,
-                    @Nullable String fallbackLane) {}
+                    @Nullable String fallbackLane, @Nullable NoiseFit noise) {}
+    /** The native PSG3 cymbal voicing scored with the DAC stem distance. */
+    record NoiseFit(String voicing, double distance, Features features) {
+        /** The short closed-hat envelope, rather than the longer open envelope. */
+        boolean closed() { return "closed-hat".equals(voicing); }
+        /** The hat's dual noise clock: a 14 kHz attack before the 7 kHz decay. */
+        boolean dualClock() { return !"cymbal".equals(voicing); }
+    }
     record Selection(@Nullable String variantId, int rate, @Nullable DacSample slice, Evidence evidence) {}
 
     private record Clip(Hit hit, float[] samples, Features features, AudioFingerprint fingerprint, double isolation) {}
@@ -77,7 +89,7 @@ final class ReconstructionDrums {
                          AudioFingerprint fingerprint, Map<Integer, AudioFingerprint> filtered,
                          DacAcoustics.Profile acoustics, DacAcoustics.AssetProfile asset) {}
     private record Fit(List<Clip> clips, List<Candidate> candidates, DacSample slice, boolean stem,
-                       Candidate mixFallback, List<Exclusion> exclusions, boolean eligible) {}
+                       Candidate mixFallback, List<Exclusion> exclusions, boolean eligible, @Nullable NoiseFit noise) {}
     private record AssetRate(String id, int rate) {}
 
     private ReconstructionDrums() {}
@@ -163,7 +175,7 @@ final class ReconstructionDrums {
             labels = nativeLabels;
         }
         if (!timeline.warped()) {
-            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), mixHatFits);
+            analyze(classes, clockNotes, drumParts, mix, stems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits);
         } else {
             Path scratch = Files.createTempDirectory("drum-reference-");
             var files = new ArrayList<Path>();
@@ -183,7 +195,7 @@ final class ReconstructionDrums {
                     }
                     warpedStems.put(part, warped);
                 }
-                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), mixHatFits);
+                analyze(classes, clockNotes, drumParts, warpedMix, warpedStems, mixProbes, stemProbes, families, labels, matched, profile, options.stockDrums(), !options.fmOnly(), mixHatFits);
             } finally {
                 for (Path file : files) Files.deleteIfExists(file);
                 Files.deleteIfExists(scratch);
@@ -212,7 +224,7 @@ final class ReconstructionDrums {
             List<MidiScore.Note> notes, List<Integer> drumParts, Path mix, Map<Integer, Path> stems,
             List<Rated> mixProbes, List<Rated> stemProbes, Map<String, DacFamily> families,
             Map<String, DrumClass> labels, Map<ReconstructionVoices.Key, Fit> matched, TargetProfile profile, boolean stock,
-            Set<ReconstructionVoices.Key> mixHatFits) throws IOException {
+            boolean allowNoise, Set<ReconstructionVoices.Key> mixHatFits) throws IOException {
         for (var entry : classes.entrySet()) {
             var key = entry.getKey();
             Path stem = mixHatFits.contains(key) ? null : stems.get(key.partId());
@@ -230,7 +242,10 @@ final class ReconstructionDrums {
             }
             var ranked = rank(hits, allowed, families, labels, pitch, stem != null);
             DacSample sample = stem == null || hits.isEmpty() || stock ? null : slice(hits.getFirst().samples(), key, profile);
-            matched.put(key, new Fit(hits, ranked, sample, stem != null, null, List.copyOf(exclusions.values()), !allowed.isEmpty()));
+            NoiseFit noise = allowNoise && stem != null && !hits.isEmpty() && ReconstructionCymbals.eligible(pitch)
+                    ? noiseCandidate(hits, pitch, profile) : null;
+            matched.put(key, new Fit(hits, ranked, sample, stem != null, null, List.copyOf(exclusions.values()),
+                    !allowed.isEmpty(), noise));
         }
     }
 
@@ -258,7 +273,8 @@ final class ReconstructionDrums {
             var fallback = new Candidate(previous.assetId(), previous.variantId(), previous.name(),
                     previous.sampleRate(), distance(fit.clips(), nativeProbe, key.drumPitch(), false),
                     nativeProbe.features(), null, nativeProbe.acoustics());
-            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback, fit.exclusions(), fit.eligible()));
+            fitted.put(key, new Fit(fit.clips(), fit.candidates(), fit.slice(), fit.stem(), fallback, fit.exclusions(),
+                    fit.eligible(), fit.noise()));
         }
     }
 
@@ -398,6 +414,38 @@ final class ReconstructionDrums {
             }
         }
         return result;
+    }
+
+    /**
+     * The closest native PSG3 voicing, scored against the stem hits like a DAC
+     * candidate: the short dual-clock closed hat, the longer dual-clock open
+     * hat, or the 7 kHz cymbal. Any voicing may serve any hat or cymbal.
+     */
+    private static NoiseFit noiseCandidate(List<Clip> clips, int pitch, TargetProfile target) {
+        NoiseFit best = null;
+        for (var voicing : List.of("closed-hat", "open-hat", "cymbal")) {
+            boolean closed = voicing.equals("closed-hat");
+            float[] rendered = ReconstructionCymbals.renderHit(closed, !voicing.equals("cymbal"), target);
+            if (rendered == null) return null;
+            float[] audio = resample(rendered, 48_000, ANALYSIS_RATE);
+            try {
+                var fingerprint = AudioFingerprint.extract(audio, ANALYSIS_RATE);
+                var filtered = new HashMap<Integer, AudioFingerprint>();
+                int cutoff = cutoff(pitch);
+                if (cutoff > 0) {
+                    float[] band = audio.clone();
+                    highPass(band, cutoff);
+                    filtered.put(cutoff, AudioFingerprint.extract(band, ANALYSIS_RATE));
+                }
+                var probe = new Rated("psg3-" + voicing, null, voicing, 0, features(fingerprint, audio), fingerprint,
+                        filtered, null, null);
+                var fit = new NoiseFit(voicing, distance(clips, probe, pitch, true), probe.features());
+                if (best == null || fit.distance() < best.distance()) best = fit;
+            } catch (IllegalArgumentException invalid) {
+                if (!"Fingerprint audio is silent".equals(invalid.getMessage())) throw invalid;
+            }
+        }
+        return best;
     }
 
     private static Rated probe(String id, String variant, String name, int rate, float[] pcm, Set<Integer> filters,
@@ -584,10 +632,15 @@ final class ReconstructionDrums {
             for (int i = 0; i < bands.size() && 36 * Math.pow(2, i / 3.0) < cutoff / 2.0; i++)
                 lowBody += bands.get(i);
         }
+        boolean airy = stem && ReconstructionCymbals.eligible(pitch);
+        double candidateAir = airy ? air(probe.fingerprint().bands()) : 0;
         double[] distances = new double[clips.size()];
         for (int i = 0; i < distances.length; i++) {
             var clip = clips.get(i);
             var shape = clip.fingerprint().distance(comparable);
+            // Hats and cymbals: compare the air above about 4.6 kHz. The 950 Hz
+            // projection alone lets a mid-band noise burst pass as a bright hat.
+            double airError = airy ? relative(air(clip.fingerprint().bands()), candidateAir, AIR_FLOOR) : 0;
             var source = clip.features();
             var target = comparable.summary();
             double length = relative(source.sound().effectiveDurationSeconds(), target.effectiveDurationSeconds(), .02);
@@ -609,13 +662,24 @@ final class ReconstructionDrums {
                     envelope = .70 * prefixEnvelopeDistance(clip.fingerprint(), comparable) + .15 * (attack + decay);
                 }
                 distances[i] = .37 * shape.spectral() + .20 * envelope + .08 * length + .06 * centroid
-                        + .07 * noise + .16 * pitchError + .08 * attack + .14 * decay + .23 * lowBody;
+                        + .07 * noise + .16 * pitchError + .08 * attack + .14 * decay + .23 * lowBody
+                        + AIR_WEIGHT * airError;
             } else {
                 distances[i] = .48 * shape.spectral() + .25 * shape.envelope() + .1 * length + .07 * centroid
                         + .10 * noise + .15 * pitchError;
             }
         }
         return median(distances);
+    }
+
+    /** Share of the energy above about 600 Hz that lies in the top bands, from about 4.6 kHz. */
+    static double air(List<Double> bands) {
+        double high = 0, upper = 0;
+        for (int i = AIR_FROM_BAND; i < bands.size(); i++) {
+            upper += bands.get(i);
+            if (i >= AIR_BAND) high += bands.get(i);
+        }
+        return upper > 0 ? high / upper : 0;
     }
 
     private static double prefixEnvelopeDistance(AudioFingerprint source, AudioFingerprint candidate) {
@@ -692,8 +756,10 @@ final class ReconstructionDrums {
                             + REUSE_PENALTY * usage.getOrDefault(c.assetId(), 0)))
                     .orElse(null);
             var sliced = fit.slice();
+            var noise = allowNoise && mode != Source.sliced && fit.mixFallback() == null ? fit.noise() : null;
             boolean useSlice = sliced != null && (mode == Source.sliced || mode == Source.auto
-                    && (chosen == null || chosen.distance() > AUTO_THRESHOLD));
+                    && (chosen == null || chosen.distance() > AUTO_THRESHOLD)
+                    && (noise == null || noise.distance() > AUTO_THRESHOLD));
             var exclusions = fit.exclusions();
             if (useSlice && mode == Source.auto) {
                 var sampleClass = DacAcoustics.profile(sliced, profile).sampleClass();
@@ -705,6 +771,10 @@ final class ReconstructionDrums {
                     exclusions = List.copyOf(rejected);
                 }
             }
+            // The native PSG3 voicing competes on the same stem distance as the DAC candidates.
+            boolean noiseRoute = !useSlice && noise != null && (chosen == null || noise.distance() < chosen.score());
+            var catalogueChoice = chosen;
+            if (noiseRoute) chosen = null;
             AssetRate key = useSlice ? new AssetRate(sliced.id(), sliced.rate()) : chosen == null ? null : key(chosen);
             var nativeSample = chosen == null ? null : stock.get(chosen.assetId());
             int size = useSlice ? sliced.pcm().length : chosen == null ? 0
@@ -720,19 +790,20 @@ final class ReconstructionDrums {
                 bytes += size;
             }
             if (!useSlice && chosen != null) usage.merge(chosen.assetId(), 1, Integer::sum);
-            boolean noEligibleDac = !useSlice && chosen == null && !fit.eligible();
-            String fallbackLane = noEligibleDac && allowNoise ? "PSG3" : null;
-            String reason = noEligibleDac ? "no acoustically eligible DAC sample"
+            boolean noEligibleDac = !useSlice && !noiseRoute && chosen == null && !fit.eligible();
+            String fallbackLane = noiseRoute || noEligibleDac && allowNoise ? "PSG3" : null;
+            String reason = noiseRoute ? catalogueChoice == null ? "PSG3 noise; no eligible DAC sample" : "PSG3 noise closer than DAC"
+                    : noEligibleDac ? "no acoustically eligible DAC sample"
                     : useSlice ? mode == Source.auto ? "catalogue distance above threshold" : "requested"
                     : !fit.stem() && mode != Source.catalogue ? "no drum stem supplied"
                     : chosen == null ? "no eligible fit"
                     : chosen == fit.mixFallback() ? "legacy vote: fewer than two isolated hits in the mix" : "catalogue fit";
             if (mode == Source.stock && chosen != null) reason = "stock kit fit";
             var evidence = new Evidence(fit.stem() ? "stem" : "mix", clock, fit.clips().stream().map(Clip::hit).toList(),
-                    summarize(fit.clips()), fit.candidates().stream().limit(5).toList(), chosen,
+                    summarize(fit.clips()), fit.candidates().stream().limit(5).toList(), noiseRoute ? catalogueChoice : chosen,
                     useSlice ? Source.sliced : mode == Source.stock ? Source.stock : Source.catalogue, reason, fit.stem() ? preferred : null,
                     !fit.stem() || preferred == null || chosen == null ? null : kitAssets.contains(chosen.assetId()),
-                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane);
+                    drumClass(entry.getKey().drumPitch()), DacAcoustics.VERSION, exclusions, fallbackLane, fit.noise());
             var selectedSample = useSlice ? sliced : chosen == null ? null : stock.get(chosen.assetId());
             result.put(entry.getKey(), new Selection(chosen == null || mode == Source.stock ? null : chosen.variantId(),
                     useSlice ? sliced.rate() : chosen == null ? 0 : chosen.rate(), selectedSample, evidence));

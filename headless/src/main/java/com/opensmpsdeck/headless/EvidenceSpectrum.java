@@ -164,72 +164,138 @@ final class EvidenceSpectrum {
      */
     static Spectrum measure(Audio audio, double[] times, int minPitch, int maxPitch,
                             int height, double span, boolean emphasize, boolean reassigned) {
-        double[] frequencies = new double[height];
-        for (int y = 0; y < height; y++)
-            frequencies[y] = hz(pitch(minPitch, maxPitch, y, height));
-        var bands = new ArrayList<Band>();
-        // Longer bass windows separate neighboring low notes. Treble uses shorter
-        // windows so the same plot can show several closely spaced attacks.
-        var levelAudio = new Level(audio.samples, audio.rate);
-        for (int from = 0; from < height;) {
-            int end = from + 1;
-            while (end < height && frequencies[from] < frequencies[end] * 2) end++;
-            double minimumWindow = span <= 3 ? .025 : .040;
-            double seconds = Math.clamp(22 / frequencies[end - 1], minimumWindow, 2 * CONTEXT);
-            double oversampling = emphasize ? 24 : 10;
-            while (levelAudio.rate / 2 >= oversampling * frequencies[from])
-                levelAudio = levelAudio.halfRate();
-            int length = Math.max(3, (int) Math.round(seconds * levelAudio.rate) | 1);
-            var window = new double[length];
-            for (int i = 0; i < length; i++)
-                window[i] = (1 - Math.cos(Math.TAU * i / (length - 1))) / (length - 1);
-            int bins = Integer.highestOneBit(length) << 2;
-            double[] slope = null;
-            double normal = 1;
-            if (reassigned) {
-                // The window's derivative gives each bin's frequency offset from its centre.
-                slope = new double[length];
-                double sum = 0, squares = 0;
-                for (int i = 0; i < length; i++) {
-                    slope[i] = Math.TAU / (length - 1) * Math.sin(Math.TAU * i / (length - 1)) / (length - 1);
-                    sum += window[i];
-                    squares += window[i] * window[i];
-                }
-                // A sine's bins sum to bins * sum(w^2) times its amplitude; its peak bin holds sum(w)^2.
-                normal = bins * squares / (sum * sum);
-            }
-            bands.add(new Band(from, end, levelAudio, window, new LeadEffectMatcher.Spectrum(bins),
-                    slope, reassigned ? new LeadEffectMatcher.Spectrum(bins) : null, normal));
-            from = end;
+        return new Source(audio).measure(times, minPitch, maxPitch, height, span, emphasize, reassigned);
+    }
+
+    /**
+     * One audio range and its decimated copies. Measuring several pitch ranges of the
+     * same audio reuses the decimation, and each result equals a separate {@link #measure}.
+     */
+    static final class Source {
+        private final Audio audio;
+        private final List<Level> levels = new ArrayList<>();
+
+        Source(Audio audio) {
+            this.audio = audio;
+            levels.add(new Level(audio.samples, audio.rate));
         }
-        float[] power = new float[times.length * height];
-        double peak = 0;
-        for (int x = 0; x < times.length; x++) {
-            if (times[x] < 0 || times[x] >= audio.duration) continue;
-            for (var band : bands) {
-                int center = (int) Math.round((times[x] - audio.offset) * band.audio.rate);
-                band.fft.transform(band.audio.samples, center - band.window.length / 2, band.window);
-                double binsPerHz = band.fft.real.length / band.audio.rate;
-                if (band.slopeFft != null) {
-                    band.slopeFft.transform(band.audio.samples, center - band.window.length / 2, band.slope);
-                    peak = Math.max(peak, reassign(band, binsPerHz, minPitch, maxPitch, height, power, x, times.length));
-                    continue;
-                }
-                for (int y = band.firstRow; y < band.endRow; y++) {
-                    double bin = frequencies[y] * binsPerHz;
-                    double fundamental = power(band.fft, bin);
-                    double energy = fundamental;
-                    if (emphasize && fundamental > 0) {
-                        // Weight in partials only where some energy supports the fundamental.
-                        for (int k = 2; k <= 6; k++)
-                            energy += Math.min(power(band.fft, bin * k), fundamental * 4) / k;
+
+        private int halve(int level) {
+            if (level + 1 == levels.size()) levels.add(levels.get(level).halfRate());
+            return level + 1;
+        }
+
+        Spectrum measure(double[] times, int minPitch, int maxPitch, int height, double span,
+                         boolean emphasize, boolean reassigned) {
+            double[] frequencies = new double[height];
+            for (int y = 0; y < height; y++)
+                frequencies[y] = hz(pitch(minPitch, maxPitch, y, height));
+            var bands = new ArrayList<Band>();
+            // Longer bass windows separate neighboring low notes. Treble uses shorter
+            // windows so the same plot can show several closely spaced attacks.
+            int level = 0;
+            for (int from = 0; from < height;) {
+                int end = from + 1;
+                while (end < height && frequencies[from] < frequencies[end] * 2) end++;
+                double minimumWindow = span <= 3 ? .025 : .040;
+                double seconds = Math.clamp(22 / frequencies[end - 1], minimumWindow, 2 * CONTEXT);
+                double oversampling = emphasize ? 24 : 10;
+                while (levels.get(level).rate / 2 >= oversampling * frequencies[from]) level = halve(level);
+                var levelAudio = levels.get(level);
+                int length = Math.max(3, (int) Math.round(seconds * levelAudio.rate) | 1);
+                var window = new double[length];
+                for (int i = 0; i < length; i++)
+                    window[i] = (1 - Math.cos(Math.TAU * i / (length - 1))) / (length - 1);
+                int bins = Integer.highestOneBit(length) << 2;
+                double[] slope = null;
+                double normal = 1;
+                if (reassigned) {
+                    // The window's derivative gives each bin's frequency offset from its centre.
+                    slope = new double[length];
+                    double sum = 0, squares = 0;
+                    for (int i = 0; i < length; i++) {
+                        slope[i] = Math.TAU / (length - 1) * Math.sin(Math.TAU * i / (length - 1)) / (length - 1);
+                        sum += window[i];
+                        squares += window[i] * window[i];
                     }
-                    power[y * times.length + x] = (float) energy;
-                    peak = Math.max(peak, energy);
+                    // A sine's bins sum to bins * sum(w^2) times its amplitude; its peak bin holds sum(w)^2.
+                    normal = bins * squares / (sum * sum);
+                }
+                bands.add(new Band(from, end, levelAudio, window, new LeadEffectMatcher.Spectrum(bins),
+                        slope, reassigned ? new LeadEffectMatcher.Spectrum(bins) : null, normal));
+                from = end;
+            }
+            float[] power = new float[times.length * height];
+            double peak = 0;
+            // Windows are real, so one complex transform carries two of them: one in the
+            // real part, one in the imaginary part. Reassignment pairs a column's window
+            // with its derivative; plain power pairs neighbouring columns.
+            for (var band : bands) {
+                double binsPerHz = band.fft.real.length / band.audio.rate;
+                for (int x = 0; x < times.length; x++) {
+                    if (!inside(times[x])) continue;
+                    int start = start(band, times[x]);
+                    if (band.slopeFft != null) {
+                        band.fft.transformPair(band.audio.samples, start, band.window, start, band.slope);
+                        split(band.fft, band.slopeFft);
+                        peak = Math.max(peak, reassign(band, binsPerHz, minPitch, maxPitch, height, power, x,
+                                times.length));
+                    } else if (x + 1 < times.length && inside(times[x + 1])) {
+                        band.fft.transformPair(band.audio.samples, start, band.window, start(band, times[x + 1]),
+                                band.window);
+                        peak = Math.max(peak, column(band, frequencies, power, times.length, x, 1, emphasize));
+                        peak = Math.max(peak, column(band, frequencies, power, times.length, ++x, 2, emphasize));
+                    } else {
+                        band.fft.transform(band.audio.samples, start, band.window);
+                        peak = Math.max(peak, column(band, frequencies, power, times.length, x, 0, emphasize));
+                    }
                 }
             }
+            return new Spectrum(power, times.length, height, minPitch, maxPitch, peak, reassigned);
         }
-        return new Spectrum(power, times.length, height, minPitch, maxPitch, peak, reassigned);
+
+        /** Writes one column of a band from the current transform and returns its peak. */
+        private static double column(Band band, double[] frequencies, float[] power, int columns, int column,
+                                     int part, boolean emphasize) {
+            double binsPerHz = band.fft.real.length / band.audio.rate;
+            double peak = 0;
+            for (int y = band.firstRow; y < band.endRow; y++) {
+                double bin = frequencies[y] * binsPerHz;
+                double fundamental = power(band.fft, bin, part);
+                double energy = fundamental;
+                if (emphasize && fundamental > 0) {
+                    // Weight in partials only where some energy supports the fundamental.
+                    for (int k = 2; k <= 6; k++)
+                        energy += Math.min(power(band.fft, bin * k, part), fundamental * 4) / k;
+                }
+                power[y * columns + column] = (float) energy;
+                peak = Math.max(peak, energy);
+            }
+            return peak;
+        }
+
+        private boolean inside(double time) { return time >= 0 && time < audio.duration; }
+
+        private int start(Band band, double time) {
+            return (int) Math.round((time - audio.offset) * band.audio.rate) - band.window.length / 2;
+        }
+    }
+
+    /**
+     * Splits a paired transform into the transforms of its real input (left in {@code packed})
+     * and its imaginary input (written to {@code second}), for bins up to half the size.
+     */
+    static void split(LeadEffectMatcher.Spectrum packed, LeadEffectMatcher.Spectrum second) {
+        int size = packed.real.length;
+        for (int bin = 0; bin <= size / 2; bin++) {
+            int mirror = (size - bin) & (size - 1);
+            double re = packed.real[bin], im = packed.imag[bin];
+            double mirrorRe = packed.real[mirror], mirrorIm = packed.imag[mirror];
+            packed.real[bin] = (re + mirrorRe) / 2;
+            packed.imag[bin] = (im - mirrorIm) / 2;
+            second.real[bin] = (im + mirrorIm) / 2;
+            second.imag[bin] = (mirrorRe - re) / 2;
+        }
     }
 
     /** Moves each bin in a band to its instantaneous frequency and returns the band's strongest row. */
@@ -270,10 +336,25 @@ final class EvidenceSpectrum {
         return strongest;
     }
 
-    private static double power(LeadEffectMatcher.Spectrum fft, double bin) {
+    /** Power at a fractional bin. Part 0 is a plain transform; parts 1 and 2 are the real and imaginary inputs of a pair. */
+    private static double power(LeadEffectMatcher.Spectrum fft, double bin, int part) {
         int lower = (int) bin;
         if (lower >= fft.real.length / 2) return 0;
         double fraction = bin - lower;
-        return fft.power(lower) * (1 - fraction) + fft.power(lower + 1) * fraction;
+        return power(fft, lower, part) * (1 - fraction) + power(fft, lower + 1, part) * fraction;
+    }
+
+    private static double power(LeadEffectMatcher.Spectrum fft, int bin, int part) {
+        if (part == 0) return fft.power(bin);
+        int size = fft.real.length, mirror = (size - bin) & (size - 1);
+        double re, im;
+        if (part == 1) {
+            re = fft.real[bin] + fft.real[mirror];
+            im = fft.imag[bin] - fft.imag[mirror];
+        } else {
+            re = fft.imag[bin] + fft.imag[mirror];
+            im = fft.real[bin] - fft.real[mirror];
+        }
+        return (re * re + im * im) / 4;
     }
 }

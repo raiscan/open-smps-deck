@@ -316,8 +316,8 @@ with the song or work-folder name and a suggested next step. The **Workspace** s
   or **Assign** beside a voice to move the notes to that voice.
 - **Notes** is for editing notes on the spectrogram. The inspector follows
   the selection and includes **Note evidence** for a single note.
-- **Review** is for deciding on agent proposals, checking edit history and
-  reading the latest **Trace diff**.
+- **Review** is for comparing and stitching edit branches, deciding on agent
+  proposals, checking edit history and reading the latest **Trace diff**.
 - **Export** opens the built song in the arrangement editor or saves it as
   audio, native data or a game package.
 
@@ -359,7 +359,7 @@ velocity. Right-click empty space to paste at the clicked position.
 ### Listen to the reconstruction
 
 In the bottom transport, choose **Play range** then click **Play**, or tap
-**Space** outside a text field. **Song** plays from the current playhead. For
+**Space** with the plot focused. **Song** plays from the current playhead. For
 **Section**, click a section, period or phrase band above the plot to choose a
 range. **Selection** plays the time spanned by the selected notes. **Voice**
 auditions the chosen voice's built notes. **Lane** solos the chosen chip lane.
@@ -367,13 +367,36 @@ Click a note or lane to bring its voice or lane into the corresponding picker.
 
 Choose **Original** for the reference audio, **Chip** for the built result, or
 **A/B** to switch between them at the current playhead. Press **R** to flip the
-A/B side, or to switch between Original and Chip outside A/B. For Voice, Studio
-uses the source stem when one is mapped to that voice. A stem can contain other
-voices. For Lane, the Original side uses the chosen reference for comparison.
+A/B side, or to switch between Original and Chip outside A/B. When **Stems**
+is available, its selection applies to every play range. In other reconstructions,
+**Voice** uses its mapped source stem when available and **Lane** uses the chosen
+reference.
 
 **Set loop…** lets you enter a start and end in source seconds. You can also
 Shift-drag on the ruler. The transport shows the active loop; use **Clear loop**
 or press **Esc** to remove it.
+
+#### Listen to separated stems
+
+In Analysis **Roles**, **Notes** or **Review**, open **Stems** beside **Hear**
+when the reconstruction uses a separator folder. The buttons follow the
+separator's stem list. Toggle any combination, or Alt/Ctrl-click a stem to
+solo it. With a stem focused, Space toggles it and Alt+Space solos it.
+Soloing the same stem again restores **All**. With every stem enabled,
+**Original** plays the original mix. A subset plays the aligned stem sum at
+its source levels, with a shared gain reduction if needed to avoid clipping.
+Turning every stem off silences **Original**.
+
+Changes fade in at the current playhead once the selected audio is ready.
+The play range and loop still apply. In **A/B**, switch between the selected
+source audio and **Chip**. Studio remembers the selection for this work
+directory on this machine.
+
+The source spectrogram dims the full mix and draws the selected stems in
+their channel colours. A single stem uses the standard colour map at full
+strength. **Display** controls the **Mix backdrop**, spectrum contrast and
+**Sharp** for these layers. In **Auto**, the backdrop keeps its own mix contrast. You can still choose **Chip render** under
+**Spectrum source** to inspect the chip spectrogram while auditioning stems.
 
 ### Audition note edits while playing
 
@@ -416,8 +439,9 @@ returns to the current arrangement.
 ### Adjust the view
 
 Open **Display ▾** for time and pitch zoom, spectrum contrast, ridges, note opacity,
-outlines, lane visibility and the spectrum source. Choosing a mix or stem also
-sets the **Original** reference. Choosing the chip spectrum keeps the current
+outlines, lane visibility and the spectrum source. When **Stems** is available,
+**Spectrum source** controls the display. Otherwise, choosing a mix or stem
+also sets the **Original** reference. The chip spectrum keeps the current
 reference.
 
 The spectrogram measures more rows per semitone as you zoom pitch, so it stays
@@ -458,6 +482,43 @@ plays the same span twice, built first and proposal second. **Accept** stages
 an edit for live audition or **Apply & rebuild**. Undo can bring the proposal back while it is staged.
 **Reject** removes it from the shared journal immediately. Studio picks up
 new proposals from agents while the reconstruction window is open.
+
+### Compare and stitch edit branches
+
+Open **Review → Branches** after a human or agent saves an edit branch in the
+reconstruction work directory. **Refresh** picks up new work. Select a branch
+to see its base revision, edit count and note changes by part and source time.
+Expand **Edit groups and rationale** for the author's notes. **Needs rebase**
+means main has changed since the branch was created. **Rebase branch** checks
+the branch against main and reports conflicts before updating its base.
+
+Turn on **Overlay** for any branch to mark its changes in Review, Notes and
+Roles. The branch's swatch identifies it by colour and pattern. A plus marks an
+added note, a strike-through and minus mark a removed note, and a tilde marks a
+changed note. If a pitch or gate moves, the overlay shows both positions.
+
+For an attached editable arrangement, choose **Hear branch** and use the persistent
+transport's **Chip version** selector to switch between **A · Parent**, each
+branch and a checked **Merge draft**. Start playback if it is stopped. The
+selector uses the same song, section or selection range and switches at the
+current playhead. In Original/Chip A/B, it changes the Chip side. The voice
+and lane audition modes use the built arrangement.
+
+To stitch a merge, select a branch and choose **Whole branch**, **By part**,
+**By region** or **By edit group**. For a region, click **Pick region** and
+drag a rectangle on the plot. Its horizontal span selects edits in source
+time. Each selection contributes complete journal edits. Repeat for other
+branches or groups, and remove any selection from **Merge draft**.
+
+Conflicts show the two edits side by side. Use **Hear A** and **Hear B** to
+compare the draft with one conflicting edit excluded, then **Keep A** or
+**Keep B** to retain that side. Inspect and audition any reported changes
+outside your selections before accepting them. **Apply to main** stages the
+checked merge as one Studio journal action, then saves through live Chip
+playback or rebuilds if playback is stopped. Use **Changes → Undo** or
+Ctrl/Cmd+Z to reverse the merge. With playback stopped, use **Apply &
+rebuild** to publish the undo. Keep the window open while reviewing a merge
+draft. [Branch commands for agents](../architecture/edit-branches.md)
 
 ## Review a reconstruction
 
